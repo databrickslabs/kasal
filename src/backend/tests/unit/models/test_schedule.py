@@ -759,3 +759,209 @@ class TestScheduleUsagePatterns:
         assert planning_schedule.model == "gpt-4-turbo"
         assert planning_schedule.inputs["planning_horizon"] == "1_week"
         assert "budget" in planning_schedule.inputs["constraints"]
+
+
+class TestScheduleFlowExecution:
+    """Test cases for Schedule flow execution support."""
+
+    def test_schedule_default_execution_type(self):
+        """Test Schedule default execution type is 'crew'."""
+        schedule = Schedule(
+            name="Default Execution Type",
+            cron_expression="0 9 * * *",
+            agents_yaml=[{"name": "agent1"}],
+            tasks_yaml=[{"name": "task1"}]
+        )
+
+        assert schedule.execution_type == "crew"
+
+    def test_schedule_crew_execution_type(self):
+        """Test Schedule with explicit crew execution type."""
+        schedule = Schedule(
+            name="Crew Execution Schedule",
+            cron_expression="0 10 * * *",
+            agents_yaml=[{"name": "agent1", "role": "analyst"}],
+            tasks_yaml=[{"name": "task1", "description": "analyze"}],
+            execution_type="crew"
+        )
+
+        assert schedule.execution_type == "crew"
+        assert schedule.agents_yaml is not None
+        assert schedule.tasks_yaml is not None
+
+    def test_schedule_flow_execution_type(self):
+        """Test Schedule with flow execution type."""
+        from uuid import uuid4
+        flow_uuid = uuid4()
+
+        schedule = Schedule(
+            name="Flow Execution Schedule",
+            cron_expression="0 11 * * *",
+            execution_type="flow",
+            flow_id=flow_uuid,
+            nodes=[{"id": "node1", "type": "crew"}],
+            edges=[{"source": "node1", "target": "node2"}]
+        )
+
+        assert schedule.execution_type == "flow"
+        assert schedule.flow_id == flow_uuid
+        assert schedule.nodes is not None
+        assert schedule.edges is not None
+
+    def test_schedule_flow_with_nodes_and_edges(self):
+        """Test Schedule flow with complete nodes and edges configuration."""
+        nodes = [
+            {"id": "crew1", "type": "crew", "data": {"name": "Research Crew"}},
+            {"id": "crew2", "type": "crew", "data": {"name": "Analysis Crew"}},
+            {"id": "router", "type": "router", "data": {"conditions": []}}
+        ]
+        edges = [
+            {"id": "e1", "source": "crew1", "target": "router"},
+            {"id": "e2", "source": "router", "target": "crew2"}
+        ]
+
+        schedule = Schedule(
+            name="Complex Flow Schedule",
+            cron_expression="0 12 * * *",
+            execution_type="flow",
+            nodes=nodes,
+            edges=edges
+        )
+
+        assert schedule.execution_type == "flow"
+        assert len(schedule.nodes) == 3
+        assert len(schedule.edges) == 2
+        assert schedule.nodes[0]["id"] == "crew1"
+        assert schedule.edges[0]["source"] == "crew1"
+
+    def test_schedule_flow_with_flow_config(self):
+        """Test Schedule flow with flow-specific configuration."""
+        flow_config = {
+            "start_method": "kickoff",
+            "max_concurrency": 5,
+            "checkpoint_enabled": True,
+            "error_handling": "retry"
+        }
+
+        schedule = Schedule(
+            name="Flow Config Schedule",
+            cron_expression="0 13 * * *",
+            execution_type="flow",
+            nodes=[{"id": "node1"}],
+            edges=[],
+            flow_config=flow_config
+        )
+
+        assert schedule.flow_config == flow_config
+        assert schedule.flow_config["start_method"] == "kickoff"
+        assert schedule.flow_config["max_concurrency"] == 5
+        assert schedule.flow_config["checkpoint_enabled"] is True
+
+    def test_schedule_flow_with_saved_flow_id(self):
+        """Test Schedule flow referencing a saved flow by ID."""
+        from uuid import uuid4
+        saved_flow_id = uuid4()
+
+        schedule = Schedule(
+            name="Saved Flow Schedule",
+            cron_expression="0 14 * * *",
+            execution_type="flow",
+            flow_id=saved_flow_id
+        )
+
+        assert schedule.execution_type == "flow"
+        assert schedule.flow_id == saved_flow_id
+        # nodes and edges can be None when using saved flow
+        assert schedule.nodes is None
+        assert schedule.edges is None
+
+    def test_schedule_flow_nullable_fields(self):
+        """Test Schedule flow fields are nullable for crew executions."""
+        schedule = Schedule(
+            name="Crew Schedule No Flow Fields",
+            cron_expression="0 15 * * *",
+            execution_type="crew",
+            agents_yaml=[{"name": "agent"}],
+            tasks_yaml=[{"name": "task"}]
+        )
+
+        assert schedule.flow_id is None
+        assert schedule.nodes is None
+        assert schedule.edges is None
+        assert schedule.flow_config is None
+
+    def test_schedule_crew_nullable_yaml_for_flow(self):
+        """Test Schedule crew YAML fields are nullable for flow executions."""
+        schedule = Schedule(
+            name="Flow Schedule No Crew Fields",
+            cron_expression="0 16 * * *",
+            execution_type="flow",
+            nodes=[{"id": "node1"}],
+            edges=[]
+        )
+
+        assert schedule.agents_yaml is None
+        assert schedule.tasks_yaml is None
+
+    def test_schedule_flow_field_existence(self):
+        """Test that flow-related fields exist on Schedule model."""
+        schedule = Schedule(
+            name="Flow Fields Test",
+            cron_expression="0 17 * * *",
+            agents_yaml=[],
+            tasks_yaml=[]
+        )
+
+        assert hasattr(schedule, 'execution_type')
+        assert hasattr(schedule, 'flow_id')
+        assert hasattr(schedule, 'nodes')
+        assert hasattr(schedule, 'edges')
+        assert hasattr(schedule, 'flow_config')
+
+    def test_schedule_flow_with_inputs(self):
+        """Test Schedule flow execution with inputs."""
+        schedule = Schedule(
+            name="Flow With Inputs",
+            cron_expression="0 18 * * *",
+            execution_type="flow",
+            nodes=[{"id": "node1"}],
+            edges=[],
+            inputs={"topic": "AI trends", "depth": "detailed"}
+        )
+
+        assert schedule.execution_type == "flow"
+        assert schedule.inputs["topic"] == "AI trends"
+        assert schedule.inputs["depth"] == "detailed"
+
+    def test_schedule_flow_with_planning(self):
+        """Test Schedule flow execution with planning enabled."""
+        schedule = Schedule(
+            name="Flow With Planning",
+            cron_expression="0 19 * * *",
+            execution_type="flow",
+            nodes=[{"id": "node1"}],
+            edges=[],
+            planning=True,
+            model="gpt-4"
+        )
+
+        assert schedule.execution_type == "flow"
+        assert schedule.planning is True
+        assert schedule.model == "gpt-4"
+
+
+class TestScheduleFlowIndexes:
+    """Test cases for Schedule flow-related indexes."""
+
+    def test_schedule_flow_indexes_exist(self):
+        """Test that flow-related indexes are defined."""
+        table_args = Schedule.__table_args__
+
+        index_names = []
+        for arg in table_args:
+            if hasattr(arg, 'name'):
+                index_names.append(arg.name)
+
+        # Check flow-related indexes
+        assert 'ix_schedule_execution_type' in index_names
+        assert 'ix_schedule_flow_id' in index_names

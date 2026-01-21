@@ -357,9 +357,10 @@ class TaskGenerationService:
             description=setup["description"],
             expected_output=setup["expected_output"],
             tools=setup.get("tools", []),
-            advanced_config=setup.get("advanced_config", {})
+            advanced_config=setup.get("advanced_config", {}),
+            llm_guardrail=setup.get("llm_guardrail")
         )
-        
+
         return response
     
     async def generate_and_save_task(self, request: TaskGenerationRequest, group_context: GroupContext, fast_planning: bool = False) -> dict:

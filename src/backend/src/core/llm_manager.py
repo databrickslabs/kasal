@@ -21,7 +21,7 @@ import pathlib
 
 # CRITICAL: Import and apply model handlers BEFORE importing litellm
 # This ensures the monkey patches are applied to handle model-specific responses
-from src.core.llm_handlers.databricks_gpt_oss_handler import DatabricksGPTOSSHandler, DatabricksGPTOSSLLM
+from src.core.llm_handlers.databricks_gpt_oss_handler import DatabricksGPTOSSHandler, DatabricksGPTOSSLLM, DatabricksRetryLLM
 
 # Now import litellm after the monkey patch has been applied
 import litellm
@@ -48,6 +48,30 @@ embedding_logger = LoggerManager.get_instance().documentation_embedding
 # Note: With litellm 1.75.8+, GPT-5 is natively supported
 litellm.drop_params = True
 logger.info("Set litellm.drop_params=True to handle unsupported parameters gracefully")
+
+# Register Databricks model context windows with CrewAI
+# This is CRITICAL for CrewAI's respect_context_window to work correctly.
+# CrewAI has a hardcoded LLM_CONTEXT_WINDOW_SIZES dictionary that it uses to determine
+# when to trigger automatic summarization. Without entries for Databricks models,
+# it falls back to DEFAULT_CONTEXT_WINDOW_SIZE (8192 tokens) which is incorrect.
+# This causes CrewAI to not summarize when needed, leading to empty responses from
+# models like Qwen that silently fail when context is too large.
+try:
+    from crewai.llm import LLM_CONTEXT_WINDOW_SIZES
+    from src.seeds.model_configs import MODEL_CONFIGS
+
+    registered_count = 0
+    for model_name, config in MODEL_CONFIGS.items():
+        if config.get('provider') == 'databricks':
+            full_model_name = f"databricks/{model_name}"
+            context_window = config.get('context_window', 128000)
+            LLM_CONTEXT_WINDOW_SIZES[full_model_name] = context_window
+            registered_count += 1
+            logger.debug(f"Registered {full_model_name} with context_window={context_window} in CrewAI")
+
+    logger.info(f"Registered {registered_count} Databricks models with CrewAI for context window management")
+except Exception as reg_err:
+    logger.warning(f"Could not register Databricks models with CrewAI: {reg_err}")
 # Check if handlers already exist to avoid duplicates
 if not logger.handlers:
     file_handler = logging.FileHandler(log_file_path)
@@ -799,12 +823,15 @@ class LLMManager:
                 
             logger.info(f"Creating CrewAI LLM with model: {prefixed_model}, has_api_key: {bool(api_key)}, api_base: {api_base}")
             
-            # Use custom wrapper for GPT-OSS models
+            # Use custom wrapper for GPT-OSS models (special response format handling)
             if DatabricksGPTOSSHandler.is_gpt_oss_model(model_name_value):
                 logger.info(f"Using DatabricksGPTOSSLLM wrapper for GPT-OSS model: {model_name_value}")
                 return DatabricksGPTOSSLLM(**llm_params)
             else:
-                return LLM(**llm_params)
+                # Use DatabricksRetryLLM for all other Databricks models (Llama 4, etc.)
+                # This provides retry logic for intermittent empty responses
+                logger.info(f"Using DatabricksRetryLLM wrapper for Databricks model: {model_name_value}")
+                return DatabricksRetryLLM(**llm_params)
         elif provider == ModelProvider.GEMINI:
             # SECURITY: Use group_id parameter for multi-tenant isolation
             api_key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
@@ -877,17 +904,22 @@ class LLMManager:
         Create a CrewAI LLM instance for the specified model.
         If MLflow is enabled for the current workspace (group), wrap with MLflow tracking.
         """
-        # Get standard LLM configuration
-        llm = await LLMManager.configure_crewai_llm(model_name, temperature)
+        # CRITICAL: Get group_id from UserContext FIRST for multi-tenant isolation
+        from src.utils.user_context import UserContext
+        group_ctx = UserContext.get_group_context()
+        group_id = getattr(group_ctx, "primary_group_id", None) if group_ctx else None
+
+        if not group_id:
+            logger.error("No group_id found in UserContext for LLM creation")
+            raise ValueError("group_id is REQUIRED for get_llm (multi-tenant isolation)")
+
+        # Get standard LLM configuration with group_id
+        llm = await LLMManager.configure_crewai_llm(model_name, group_id, temperature)
 
         # Determine if MLflow is enabled for this group
         try:
-            from src.utils.user_context import UserContext
             from src.db.session import async_session_factory
             from src.services.mlflow_service import MLflowService
-
-            group_ctx = UserContext.get_group_context()
-            group_id = getattr(group_ctx, "primary_group_id", None) if group_ctx else None
 
             enabled = False
             async with async_session_factory() as db:

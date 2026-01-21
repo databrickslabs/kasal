@@ -40,6 +40,7 @@ class FakeSession:
         class R:
             def __init__(self, count):
                 self.count = count
+                self.rowcount = count  # Add rowcount for SQLAlchemy result compatibility
             def scalar_one(self):
                 return self.count
             def first(self):
@@ -88,7 +89,7 @@ async def test_update_flow_not_found_raises_404(monkeypatch):
     fake_repo = FakeRepo(None)
     fake_repo._get = None
     monkeypatch.setattr('src.services.flow_service.FlowRepository', lambda session: fake_repo)
-    upd = SimpleNamespace(name="NewFlow", flow_config={'actions': []})
+    upd = SimpleNamespace(name="NewFlow", flow_config={'actions': []}, nodes=None, edges=None)
     with pytest.raises(HTTPException) as exc:
         await svc.update_flow(uuid.uuid4(), upd)
     assert exc.value.status_code == 404
@@ -98,10 +99,11 @@ async def test_update_flow_not_found_raises_404(monkeypatch):
 async def test_update_flow_adds_empty_actions(monkeypatch):
     svc = Svc(FakeSession())
     fake_repo = FakeRepo(None)
-    flow = SimpleNamespace(id=uuid.uuid4())
+    flow = SimpleNamespace(id=uuid.uuid4(), nodes=[], edges=[], flow_config={})
     fake_repo._get = flow
     monkeypatch.setattr('src.services.flow_service.FlowRepository', lambda session: fake_repo)
-    upd = SimpleNamespace(name="NewFlow", flow_config={})
+    # Create update object with all required attributes
+    upd = SimpleNamespace(name="NewFlow", flow_config={}, nodes=None, edges=None)
     out = await svc.update_flow(flow.id, upd)
     assert upd.flow_config['actions'] == []
 

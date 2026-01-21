@@ -24,6 +24,9 @@ import {
   IconButton,
   InputAdornment,
   Tooltip,
+  Switch,
+  FormControlLabel,
+  CircularProgress,
 } from '@mui/material';
 import { type Task } from '../../api/TaskService';
 import { type Agent } from '../../types/agent';
@@ -38,10 +41,16 @@ import { TaskService } from '../../api/TaskService';
 import { DatabricksService } from '../../api/DatabricksService';
 import useStableResize from '../../hooks/global/useStableResize';
 import { GenieSpaceSelector } from '../Common/GenieSpaceSelector';
+import { AgentBricksEndpointSelector } from '../Common/AgentBricksEndpointSelector';
 import { PerplexityConfigSelector } from '../Common/PerplexityConfigSelector';
 import { SerperConfigSelector } from '../Common/SerperConfigSelector';
 import { MCPServerSelector } from '../Common/MCPServerSelector';
+import { MeasureConverterConfigSelector, MeasureConverterConfig } from '../Common/MeasureConverterConfigSelector';
+import { PowerBIConfigSelector, PowerBIConfig } from '../Common/PowerBIConfigSelector';
 import { PerplexityConfig, SerperConfig } from '../../types/config';
+import { type LLMGuardrailConfig } from '../../types/task';
+import { ModelService } from '../../api/ModelService';
+import { type ModelConfig } from '../../types/models';
 import TaskBestPractices from '../BestPractices/TaskBestPractices';
 
 interface TaskFormProps {
@@ -94,6 +103,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       callback_config: null,
       human_input: false,
       guardrail: null,
+      llm_guardrail: null,
       markdown: false
     } : {
       cache_response: initialData.config.cache_response ?? false,
@@ -111,18 +121,35 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       human_input: initialData.config.human_input ?? false,
       condition: initialData.config.condition,
       guardrail: initialData.config.guardrail ?? null,
+      llm_guardrail: initialData.config?.llm_guardrail ?? null,
       markdown: initialData.config.markdown ?? false
     }
   });
   const [error, setError] = useState<string | null>(null);
   const [availableTasks, setAvailableTasks] = useState<Task[]>([]);
   const [selectedGenieSpace, setSelectedGenieSpace] = useState<{ id: string; name: string } | null>(null);
+  const [selectedAgentBricksEndpoint, setSelectedAgentBricksEndpoint] = useState<{ id: string; name: string } | null>(null);
   const [perplexityConfig, setPerplexityConfig] = useState<PerplexityConfig>({});
   const [serperConfig, setSerperConfig] = useState<SerperConfig>({});
+  const [measureConverterConfig, setMeasureConverterConfig] = useState<MeasureConverterConfig>({});
+  const [powerBIConfig, setPowerBIConfig] = useState<PowerBIConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
   const [showBestPractices, setShowBestPractices] = useState(false);
   const [workspaceUrlFromBackend, setWorkspaceUrlFromBackend] = useState<string>('');
+
+  // LLM Guardrail state
+  const [llmModels, setLlmModels] = useState<Array<{ name: string; config: ModelConfig }>>([]);
+  const [llmModelsLoading, setLlmModelsLoading] = useState(false);
+
+  // Store the LLM-suggested guardrail (from dispatcher) to use when enabling the toggle
+  const [suggestedGuardrail] = useState<LLMGuardrailConfig | null>(() => {
+    // Check multiple possible locations for the LLM-generated guardrail
+    const guardrail = (initialData as unknown as { llm_guardrail?: LLMGuardrailConfig })?.llm_guardrail
+      || initialData?.config?.llm_guardrail
+      || null;
+    return guardrail;
+  });
 
   useEffect(() => {
     if (initialData?.tools) {
@@ -148,12 +175,33 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
         }
       }
 
+      // Check for AgentBricksTool config - try both endpointName and endpoint_name for compatibility
+      const agentBricksConfig = initialData.tool_configs.AgentBricksTool as Record<string, unknown>;
+      if (agentBricksConfig) {
+        const endpointName = agentBricksConfig.endpointName || agentBricksConfig.endpoint_name;
+        if (endpointName && typeof endpointName === 'string') {
+          setSelectedAgentBricksEndpoint({
+            id: endpointName as string,
+            name: endpointName as string
+          });
+        }
+      }
+
       if (initialData.tool_configs.PerplexityTool) {
         setPerplexityConfig(initialData.tool_configs.PerplexityTool as PerplexityConfig);
       }
 
       if (initialData.tool_configs.SerperDevTool) {
         setSerperConfig(initialData.tool_configs.SerperDevTool as SerperConfig);
+      }
+
+      if (initialData.tool_configs['Measure Conversion Pipeline']) {
+        setMeasureConverterConfig(initialData.tool_configs['Measure Conversion Pipeline'] as MeasureConverterConfig);
+      }
+
+      // Check for PowerBIAnalysisTool config
+      if (initialData.tool_configs.PowerBIAnalysisTool) {
+        setPowerBIConfig(initialData.tool_configs.PowerBIAnalysisTool as PowerBIConfig);
       }
 
       // Check for MCP_SERVERS config
@@ -201,6 +249,72 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
     void fetchWorkspaceUrl();
   }, []);
 
+  // Fetch LLM models for guardrail validation
+  useEffect(() => {
+    const fetchLlmModels = async () => {
+      setLlmModelsLoading(true);
+      try {
+        const modelService = ModelService.getInstance();
+        const modelsDict = await modelService.getModels();
+        const modelsArray = Object.entries(modelsDict).map(([name, config]) => ({
+          name,
+          config
+        }));
+        setLlmModels(modelsArray);
+      } catch (error) {
+        console.error('Error fetching LLM models:', error);
+      } finally {
+        setLlmModelsLoading(false);
+      }
+    };
+
+    void fetchLlmModels();
+  }, []);
+
+  // Handle LLM guardrail toggle
+  const handleLlmGuardrailToggle = (enabled: boolean) => {
+    if (enabled) {
+      // Use the LLM-suggested guardrail if available, otherwise use default
+      const guardrailConfig: LLMGuardrailConfig = suggestedGuardrail || {
+        description: 'Validate the task output for accuracy and completeness',
+        llm_model: 'databricks-claude-sonnet-4-5'
+      };
+      setFormData(prev => ({
+        ...prev,
+        config: {
+          ...prev.config,
+          llm_guardrail: guardrailConfig
+        }
+      }));
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        config: {
+          ...prev.config,
+          llm_guardrail: null
+        }
+      }));
+    }
+  };
+
+  // Handle LLM guardrail field changes
+  const handleLlmGuardrailChange = (field: keyof LLMGuardrailConfig, value: string) => {
+    const currentConfig = formData.config?.llm_guardrail || suggestedGuardrail || {
+      description: 'Validate the task output for accuracy and completeness',
+      llm_model: 'databricks-claude-sonnet-4-5'
+    };
+    const updatedConfig = {
+      ...currentConfig,
+      [field]: value
+    };
+    setFormData(prev => ({
+      ...prev,
+      config: {
+        ...prev.config,
+        llm_guardrail: updatedConfig
+      }
+    }));
+  };
 
   const handleInputChange = (field: keyof Task, value: string) => {
     setFormData((prev: Task) => ({
@@ -277,6 +391,20 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           return;
         }
 
+        // If AgentBricksTool is selected, ensure an endpoint is specified
+        const isAgentBricksSelected = formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'AgentBricksTool';
+        });
+        if (isAgentBricksSelected && !selectedAgentBricksEndpoint) {
+          setError('Please select an AgentBricks Endpoint when AgentBricksTool is selected');
+          return;
+        }
+
         // Build tool_configs for tools that need configuration
         let updatedToolConfigs = { ...toolConfigs };
 
@@ -299,6 +427,26 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
         } else if (!selectedGenieSpace) {
           // Remove GenieTool config if no space selected
           delete updatedToolConfigs.GenieTool;
+        }
+
+        // Handle AgentBricksTool config
+        if (selectedAgentBricksEndpoint && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'AgentBricksTool';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            AgentBricksTool: {
+              endpointName: selectedAgentBricksEndpoint.name
+            }
+          };
+        } else if (!selectedAgentBricksEndpoint) {
+          // Remove AgentBricksTool config if no endpoint selected
+          delete updatedToolConfigs.AgentBricksTool;
         }
 
         // Handle PerplexityTool config
@@ -351,6 +499,56 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           delete updatedToolConfigs.SerperDevTool;
         }
 
+        // Handle Measure Conversion Pipeline config
+        if (measureConverterConfig && Object.keys(measureConverterConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Measure Conversion Pipeline';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            'Measure Conversion Pipeline': measureConverterConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Measure Conversion Pipeline';
+        })) {
+          // Remove Measure Conversion Pipeline config if tool not selected
+          delete updatedToolConfigs['Measure Conversion Pipeline'];
+        }
+
+        // Handle PowerBIAnalysisTool config
+        if (powerBIConfig && Object.keys(powerBIConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'PowerBIAnalysisTool';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            PowerBIAnalysisTool: powerBIConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'PowerBIAnalysisTool';
+        })) {
+          // Remove PowerBIAnalysisTool config if tool not selected
+          delete updatedToolConfigs.PowerBIAnalysisTool;
+        }
+
         // Handle MCP_SERVERS config - use dict format to match schema
         if (selectedMcpServers && selectedMcpServers.length > 0) {
           updatedToolConfigs = {
@@ -371,6 +569,8 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           tool_configs: Object.keys(updatedToolConfigs).length > 0 ? updatedToolConfigs : undefined,
           // Ensure top-level markdown is synchronized with config.markdown
           markdown: formData.config.markdown ?? formData.markdown,
+          // Sync llm_guardrail to top-level for database persistence
+          llm_guardrail: formData.config.llm_guardrail ?? null,
           config: {
             ...formData.config,
             condition: formData.config.condition === 'is_data_missing' ? 'is_data_missing' : undefined,
@@ -379,7 +579,9 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
             // Ensure output_pydantic is properly set in config
             output_pydantic: formData.config.output_pydantic,
             // Ensure config.markdown is synchronized with top-level markdown
-            markdown: formData.config.markdown ?? formData.markdown
+            markdown: formData.config.markdown ?? formData.markdown,
+            // Ensure llm_guardrail is properly set in config
+            llm_guardrail: formData.config.llm_guardrail ?? null
           }
         };
 
@@ -506,6 +708,16 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   });
   const isGenieSpaceMissing = isGenieToolSelected && !selectedGenieSpace;
 
+  const isAgentBricksToolSelected = formData.tools.some(toolId => {
+    const tool = tools.find(t =>
+      String(t.id) === String(toolId) ||
+      t.id === Number(toolId) ||
+      t.title === toolId
+    );
+    return tool?.title === 'AgentBricksTool';
+  });
+  const isAgentBricksEndpointMissing = isAgentBricksToolSelected && !selectedAgentBricksEndpoint;
+
   return (
     <>
       <Card sx={{
@@ -625,6 +837,69 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                 )
               }}
             />
+
+            {/* LLM Guardrail - Prominent placement for visibility */}
+            <Box sx={{
+              mt: 2,
+              p: 2,
+              backgroundColor: 'rgba(156, 39, 176, 0.04)',
+              borderRadius: 1,
+              border: '1px solid rgba(156, 39, 176, 0.2)'
+            }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 600, color: 'secondary.main' }}>
+                  LLM Guardrail
+                </Typography>
+                <Tooltip title="Uses an LLM agent to validate task output against criteria you define. This provides flexible, AI-powered validation.">
+                  <IconButton size="small" sx={{ ml: 0.5 }}>
+                    <HelpOutlineIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={Boolean(formData.config?.llm_guardrail)}
+                    onChange={(e) => handleLlmGuardrailToggle(e.target.checked)}
+                    color="secondary"
+                  />
+                }
+                label="Enable LLM Guardrail"
+              />
+
+              {formData.config?.llm_guardrail && (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
+                  <TextField
+                    label="Validation Criteria"
+                    value={formData.config.llm_guardrail.description || ''}
+                    onChange={(e) => handleLlmGuardrailChange('description', e.target.value)}
+                    fullWidth
+                    multiline
+                    rows={2}
+                    placeholder="Describe how the LLM should validate the task output..."
+                    helperText="Describe the criteria the LLM will use to validate the task output"
+                  />
+                  <FormControl fullWidth>
+                    <InputLabel>Validation LLM Model</InputLabel>
+                    <Select
+                      value={formData.config.llm_guardrail.llm_model || 'databricks-claude-sonnet-4-5'}
+                      onChange={(e) => handleLlmGuardrailChange('llm_model', e.target.value)}
+                      label="Validation LLM Model"
+                      disabled={llmModelsLoading}
+                      startAdornment={llmModelsLoading ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
+                    >
+                      {llmModels.map((model) => (
+                        <MenuItem key={model.name} value={model.name}>
+                          {model.name}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Box>
+              )}
+            </Box>
+
             <FormControl fullWidth>
               <InputLabel id="tools-label">Tools</InputLabel>
               <Select
@@ -796,6 +1071,65 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
               </Box>
             )}
 
+            {/* AgentBricks Endpoint Display - Show only when AgentBricksTool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'AgentBricksTool';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>AgentBricks Endpoint</Typography>
+                {selectedAgentBricksEndpoint ? (
+                  <Chip
+                    label={selectedAgentBricksEndpoint.name}
+                    size="medium"
+                    color="primary"
+                    variant="outlined"
+                    onDelete={() => {
+                      setSelectedAgentBricksEndpoint(null);
+                      // Remove AgentBricksTool config when endpoint is removed
+                      setToolConfigs(prev => {
+                        const newConfigs = { ...prev };
+                        delete newConfigs.AgentBricksTool;
+                        return newConfigs;
+                      });
+                    }}
+                    deleteIcon={<DeleteIcon fontSize="small" />}
+                  />
+                ) : (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <AgentBricksEndpointSelector
+                      value=""
+                      onChange={(value, endpointName) => {
+                        if (value) {
+                          setSelectedAgentBricksEndpoint({
+                            id: value as string,
+                            name: endpointName || (value as string)
+                          });
+                          // Update tool configs when endpoint is selected
+                          setToolConfigs(prev => ({
+                            ...prev,
+                            AgentBricksTool: {
+                              endpointName: value as string
+                            }
+                          }));
+                        }
+                      }}
+                      label=""
+                      placeholder="Select an AgentBricks endpoint..."
+                      required
+                      error={isAgentBricksEndpointMissing}
+                      helperText={isAgentBricksEndpointMissing ? 'AgentBricks Endpoint is required when AgentBricksTool is selected' : ''}
+                      fullWidth
+                    />
+                  </Box>
+                )}
+              </Box>
+            )}
+
             {/* Perplexity Configuration - Show only when PerplexityTool is selected */}
             {formData.tools.some(toolId => {
               const tool = tools.find(t =>
@@ -850,6 +1184,60 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
               </Box>
             )}
 
+            {/* Measure Conversion Pipeline Configuration - Show only when Measure Conversion Pipeline is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'Measure Conversion Pipeline';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600 }}>
+                  Measure Conversion Pipeline Configuration
+                </Typography>
+                <MeasureConverterConfigSelector
+                  value={measureConverterConfig}
+                  onChange={(config) => {
+                    setMeasureConverterConfig(config);
+                    // Update tool configs when configuration changes
+                    setToolConfigs(prev => ({
+                      ...prev,
+                      'Measure Conversion Pipeline': config
+                    }));
+                  }}
+                />
+              </Box>
+            )}
+
+            {/* Power BI Configuration - Show only when PowerBIAnalysisTool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'PowerBIAnalysisTool';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <PowerBIConfigSelector
+                  value={powerBIConfig}
+                  onChange={(config) => {
+                    setPowerBIConfig(config);
+                    // Update tool configs when configuration changes
+                    setToolConfigs(prev => ({
+                      ...prev,
+                      PowerBIAnalysisTool: config
+                    }));
+                  }}
+                  label="Power BI Configuration"
+                  helperText="Configure Power BI authentication and semantic model for this task"
+                  fullWidth
+                />
+              </Box>
+            )}
+
             {/* MCP Server Configuration - Always show as it's independent of regular tools */}
             <Box sx={{ mt: 2 }}>
               {/* Show selected MCP servers visually */}
@@ -889,7 +1277,9 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                           setSelectedMcpServers(newServers);
                           setToolConfigs(prev => ({
                             ...prev,
-                            MCP_SERVERS: newServers
+                            MCP_SERVERS: {
+                              servers: newServers
+                            }
                           }));
                         }}
                         sx={{
@@ -912,10 +1302,12 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                 onChange={(servers) => {
                   const serverArray = Array.isArray(servers) ? servers : (servers ? [servers] : []);
                   setSelectedMcpServers(serverArray);
-                  // Update tool configs when MCP servers change
+                  // Update tool configs when MCP servers change - use consistent format
                   setToolConfigs(prev => ({
                     ...prev,
-                    MCP_SERVERS: serverArray
+                    MCP_SERVERS: {
+                      servers: serverArray
+                    }
                   }));
                 }}
                 label="MCP Servers"
@@ -965,6 +1357,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                     timeout: formData.config?.timeout || null,
                     condition: formData.config?.condition,
                     guardrail: formData.config?.guardrail || null,
+                    llm_guardrail: formData.config?.llm_guardrail || null,
                     markdown: formData.config?.markdown || false
                   }}
                   onConfigChange={handleAdvancedConfigChange}
@@ -989,7 +1382,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           }}
         >
           <Button onClick={onCancel}>Cancel</Button>
-          <Button onClick={() => void handleSave()} variant="contained" color="primary" disabled={isGenieSpaceMissing}>
+          <Button onClick={() => void handleSave()} variant="contained" color="primary" disabled={isGenieSpaceMissing || isAgentBricksEndpointMissing}>
             Save
           </Button>
         </Box>

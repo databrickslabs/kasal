@@ -85,7 +85,10 @@ class TestFlowExecutionRouter:
         mock_service.run_flow.assert_called_once_with(
             flow_id=flow_id,
             job_id="job-123",
-            config={"param1": "value1"}
+            run_name=None,
+            config={"param1": "value1"},
+            resume_from_flow_uuid=None,
+            resume_from_execution_id=None
         )
 
     @patch('src.api.flow_execution_router.CrewAIFlowService')

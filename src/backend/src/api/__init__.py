@@ -3,8 +3,10 @@ from fastapi import APIRouter
 # Note: Memory management and database management routers removed per SDR request
 from src.api.agents_router import router as agents_router
 from src.api.crews_router import router as crews_router
+from src.api.crews_export_router import router as crews_export_router
 from src.api.databricks_router import router as databricks_router
 from src.api.databricks_knowledge_router import router as databricks_knowledge_router
+from src.api.powerbi_router import router as powerbi_router
 from src.api.flows_router import router as flows_router
 from src.api.healthcheck_router import router as healthcheck_router
 from src.api.logs_router import router as logs_router
@@ -45,6 +47,9 @@ from src.api.memory_backend_router import router as memory_backend_router
 from src.api.documentation_embeddings_router import router as documentation_embeddings_router
 from src.api.database_management_router import router as database_management_router
 from src.api.genie_router import router as genie_router
+from src.api.kpi_conversion_router import router as kpi_conversion_router
+from src.api.converter_router import router as converter_router
+from src.api.agentbricks_router import router as agentbricks_router
 
 # Create the main API router
 api_router = APIRouter()
@@ -52,8 +57,10 @@ api_router = APIRouter()
 # Include all the sub-routers
 api_router.include_router(agents_router)
 api_router.include_router(crews_router)
+api_router.include_router(crews_export_router)
 api_router.include_router(databricks_router)
 api_router.include_router(databricks_knowledge_router)
+api_router.include_router(powerbi_router)
 api_router.include_router(flows_router)
 api_router.include_router(healthcheck_router)
 api_router.include_router(logs_router)
@@ -95,13 +102,18 @@ api_router.include_router(memory_backend_router)
 api_router.include_router(documentation_embeddings_router)
 api_router.include_router(database_management_router)
 api_router.include_router(genie_router)
+api_router.include_router(kpi_conversion_router)
+api_router.include_router(converter_router)
+api_router.include_router(agentbricks_router)
 
 __all__ = [
     "api_router",
     "agents_router",
     "crews_router",
+    "crews_export_router",
     "databricks_router",
     "databricks_knowledge_router",
+    "powerbi_router",
     "flows_router",
     "healthcheck_router",
     "logs_router",
@@ -137,5 +149,8 @@ __all__ = [
     "documentation_embeddings_router",
     "database_management_router",
     "genie_router",
+    "kpi_conversion_router",
+    "converter_router",
+    "agentbricks_router",
     "mlflow_router",
 ]

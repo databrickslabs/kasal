@@ -3,6 +3,7 @@ Execution-scoped callback system for CrewAI.
 
 This module provides callback functions that are scoped to specific executions,
 replacing global event listeners to prevent cross-contamination between concurrent crews.
+Sensitive data (credentials, secrets, tokens) is automatically masked in logs.
 """
 
 import logging
@@ -15,6 +16,9 @@ from src.services.trace_queue import get_trace_queue
 
 # Import group context
 from src.utils.user_context import GroupContext, UserContext
+
+# Import sensitive data masking
+from src.utils.sensitive_data_utils import mask_sensitive_fields
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +45,12 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
     # Store crew reference for use in callbacks
     crew_ref = crew
     
+    # Get crew name for trace metadata
+    crew_name = None
+    if crew_ref and hasattr(crew_ref, 'name'):
+        crew_name = crew_ref.name
+        logger.info(f"{log_prefix} Crew name for traces: {crew_name}")
+
     # Enhanced context tracking
     execution_context = {
         "current_agent": None,
@@ -52,7 +62,8 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
         "agent_tools": {},  # agent role -> list of tool names
         "tool_to_agent": {},  # tool name -> agent role
         "last_task_id": None,  # Track the last task to detect changes
-        "task_started_logged": set()  # Track which tasks have had their start logged
+        "task_started_logged": set(),  # Track which tasks have had their start logged
+        "crew_name": crew_name  # Crew name for flow execution tracking
     }
     
     # Build agent lookup from crew if available
@@ -359,9 +370,13 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
                         "agent_role": agent_name,
                         "task_description": task_description
                     }
-                    
+
                     if task_id:
                         task_started_data["task_id"] = task_id
+
+                    # Add crew_name for flow execution tracking
+                    if execution_context.get("crew_name"):
+                        task_started_data["crew_name"] = execution_context["crew_name"]
                     
                     trace_data = {
                         "job_id": job_id,
@@ -629,10 +644,14 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
                 "agent_role": agent_name,
                 "task_description": task_description
             }
-            
+
             # Add task_id if we found one
             if task_id:
                 extra_data["task_id"] = task_id
+
+            # Add crew_name for flow execution tracking
+            if execution_context.get("crew_name"):
+                extra_data["crew_name"] = execution_context["crew_name"]
             
             trace_data = {
                 "job_id": job_id,
@@ -804,15 +823,10 @@ def log_crew_initialization(job_id: str, config: Dict[str, Any] = None, group_co
     """
     try:
         timestamp = datetime.now(timezone.utc)
-        
-        # Create sanitized config for logging
-        sanitized_config = {}
-        if config:
-            # Extract safe configuration elements
-            for key, value in config.items():
-                if key not in ['api_keys', 'tokens', 'passwords']:
-                    sanitized_config[key] = value
-        
+
+        # Create sanitized config for logging - mask all sensitive fields
+        sanitized_config = mask_sensitive_fields(config) if config else {}
+
         log_message = f"[CREW INITIALIZED] Job {job_id} - Config: {sanitized_config}"
         
         enqueue_log(

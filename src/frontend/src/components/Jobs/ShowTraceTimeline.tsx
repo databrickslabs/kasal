@@ -28,6 +28,8 @@ import TimelineIcon from '@mui/icons-material/Timeline';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import { ShowTraceProps, Trace } from '../../types/trace';
 
 import apiClient from '../../config/api/ApiConfig';
@@ -37,8 +39,7 @@ import { useTranslation } from 'react-i18next';
 import ShowLogs from './ShowLogs';
 import { executionLogService, LogEntry } from '../../api/ExecutionLogs';
 import { useRunResult } from '../../hooks/global/useExecutionResult';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { PaginatedOutput } from '../Common';
 
 interface GroupedTrace {
   agent: string;
@@ -78,8 +79,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
   runId,
   run,
   onViewResult,
-  onShowLogs,
-
+  onShowLogs: _onShowLogs,
 }) => {
   const { t } = useTranslation();
   const { useNewExecutionUI } = useUserPreferencesStore();
@@ -102,6 +102,12 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [evaluationEnabled, setEvaluationEnabled] = useState<boolean>(false);
   const [isEvaluationRunning, setIsEvaluationRunning] = useState(false);
+  const [selectedTaskDescription, setSelectedTaskDescription] = useState<{
+    taskName: string;
+    taskId?: string;
+    fullDescription?: string;
+    isLoading: boolean;
+  } | null>(null);
 
   // Handle opening logs dialog
   const handleOpenLogs = async () => {
@@ -299,15 +305,15 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
     const globalEnd = new Date(sorted[sorted.length - 1].created_at);
     const totalDuration = globalEnd.getTime() - globalStart.getTime();
 
-    // Separate global events
+    // Separate global events - support both crew and flow events
     const globalEvents = {
       start: sorted.filter(t =>
-        t.event_source === 'crew' &&
-        (t.event_type === 'crew_started' || t.event_type === 'execution_started')
+        ((t.event_source === 'crew' && (t.event_type === 'crew_started' || t.event_type === 'execution_started')) ||
+         (t.event_source === 'flow' && t.event_type === 'flow_started'))
       ),
       end: sorted.filter(t =>
-        t.event_source === 'crew' &&
-        (t.event_type === 'crew_completed' || t.event_type === 'execution_completed')
+        ((t.event_source === 'crew' && (t.event_type === 'crew_completed' || t.event_type === 'execution_completed')) ||
+         (t.event_source === 'flow' && t.event_type === 'flow_completed'))
       )
     };
 
@@ -345,10 +351,69 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
       }
     });
 
+    // Helper function to extract task_id from trace (could be direct field or in metadata)
+    const getTaskId = (trace: Trace): string | null => {
+      // First check direct field
+      if (trace.task_id) return trace.task_id;
+      // Then check trace_metadata
+      if (trace.trace_metadata && typeof trace.trace_metadata === 'object') {
+        const metadata = trace.trace_metadata as Record<string, unknown>;
+        if (metadata.task_id) return metadata.task_id as string;
+      }
+      // Finally check extra_data
+      if (trace.extra_data && typeof trace.extra_data === 'object') {
+        const extraData = trace.extra_data as Record<string, unknown>;
+        if (extraData.task_id) return extraData.task_id as string;
+      }
+      return null;
+    };
+
+    // Build task_id -> task_name mapping for parallel task support
+    const taskIdToName = new Map<string, string>();
+    // Also build task time ranges for temporal matching (task_id -> {start, end})
+    const taskTimeRanges = new Map<string, { start: number; end: number; name: string }>();
+
+    sorted.forEach(trace => {
+      const taskId = getTaskId(trace);
+      if (trace.event_type === 'task_started' && taskId) {
+        let taskName: string | null = null;
+        // Extract task name from trace_metadata first
+        if (trace.trace_metadata && typeof trace.trace_metadata === 'object') {
+          const metadata = trace.trace_metadata as Record<string, unknown>;
+          if (metadata.task_name) {
+            taskName = metadata.task_name as string;
+          }
+        }
+        // Fallback to extra_data
+        if (!taskName && trace.extra_data && typeof trace.extra_data === 'object') {
+          const extraData = trace.extra_data as Record<string, unknown>;
+          if (extraData.task_name) {
+            taskName = extraData.task_name as string;
+          }
+        }
+        if (taskName) {
+          taskIdToName.set(taskId, taskName);
+          // Initialize time range with start time
+          taskTimeRanges.set(taskId, {
+            start: new Date(trace.created_at).getTime(),
+            end: Infinity, // Will be set when task_completed is found
+            name: taskName
+          });
+        }
+      } else if (trace.event_type === 'task_completed' && taskId) {
+        // Update end time for task time range
+        const range = taskTimeRanges.get(taskId);
+        if (range) {
+          range.end = new Date(trace.created_at).getTime();
+        }
+      }
+    });
+
     // Second pass: group traces by agent
     sorted.forEach(trace => {
-      // Skip global events, task orchestration events, and task events for agent grouping
+      // Skip global events (crew/flow), task orchestration events, and task events for agent grouping
       if (trace.event_source === 'crew' ||
+          trace.event_source === 'flow' ||
           trace.event_source === 'task' ||
           trace.event_source === 'Task Orchestrator' ||
           trace.event_context === 'task_management') {
@@ -392,18 +457,36 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
       const agentStart = new Date(agentTraces[0].created_at);
       const agentEnd = new Date(agentTraces[agentTraces.length - 1].created_at);
 
-      // Group agent traces by task - using task_started events to determine task boundaries
+      // Group agent traces by task - using task_id for parallel task support
       const taskMap = new Map<string, Trace[]>();
-      let currentTask: string | null = null;
+      const taskIdToUniqueKey = new Map<string, string>(); // Map task_id to unique task key
       let taskCounter = 0;
 
       agentTraces.forEach(trace => {
-        // Check if this is a task_started event - if so, start a new task section
-        if (trace.event_type === 'task_started') {
-          // Extract task name from the task_started event
+        let taskKey = 'Processing Task'; // Default fallback
+        const traceTaskId = getTaskId(trace);
+
+        // Primary method: Use task_id to determine which task this trace belongs to
+        if (traceTaskId && taskIdToName.has(traceTaskId)) {
+          // Check if we already have a unique key for this task_id
+          if (taskIdToUniqueKey.has(traceTaskId)) {
+            taskKey = taskIdToUniqueKey.get(traceTaskId)!;
+          } else {
+            // Create a unique key for this task
+            const baseName = taskIdToName.get(traceTaskId)!;
+            // Check if this base name already exists (same task name running in parallel)
+            if (taskMap.has(baseName)) {
+              taskCounter++;
+              taskKey = `${baseName} (${taskCounter})`;
+            } else {
+              taskKey = baseName;
+            }
+            taskIdToUniqueKey.set(traceTaskId, taskKey);
+          }
+        } else if (trace.event_type === 'task_started') {
+          // For task_started events without task_id in the map, extract name and create entry
           let newTaskName: string | null = null;
 
-          // First try trace_metadata (where task_name is typically stored)
           if (trace.trace_metadata) {
             const metadata = trace.trace_metadata as Record<string, unknown>;
             const taskName = metadata.task_name as string;
@@ -412,7 +495,6 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
             }
           }
 
-          // Fallback to extra_data if trace_metadata doesn't have task_name
           if (!newTaskName && trace.extra_data) {
             const extraData = trace.extra_data as Record<string, unknown>;
             const taskName = extraData.task_name as string;
@@ -421,55 +503,100 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
             }
           }
 
-          // If we found a task name, use it as the new current task
           if (newTaskName) {
-            // Make task name unique if it already exists
-            let uniqueTaskName = newTaskName;
             if (taskMap.has(newTaskName)) {
               taskCounter++;
-              uniqueTaskName = `${newTaskName} (${taskCounter})`;
+              taskKey = `${newTaskName} (${taskCounter})`;
+            } else {
+              taskKey = newTaskName;
             }
-            currentTask = uniqueTaskName;
+            if (traceTaskId) {
+              taskIdToUniqueKey.set(traceTaskId, taskKey);
+            }
+          } else {
+            taskKey = 'Processing Task';
           }
-        }
-
-        // If we still don't have a current task, try to find it from task descriptions
-        if (!currentTask) {
+        } else {
+          // Fallback: try to find task using temporal matching with task time ranges
           const traceTime = new Date(trace.created_at).getTime();
 
-          // Find matching task by checking task completions
-          const taskEntries = Array.from(taskDescriptions.entries());
-          for (const [taskContext, taskDesc] of taskEntries) {
-            // Find task completion trace
-            const taskCompletion = sorted.find(t =>
-              t.event_source === 'task' &&
-              t.event_type === 'task_completed' &&
-              t.event_context === taskContext
-            );
+          // First, try matching using taskTimeRanges (most accurate)
+          let foundMatch = false;
+          for (const [taskId, range] of taskTimeRanges.entries()) {
+            // Check if trace time falls within this task's time range (with 1s buffer)
+            if (traceTime >= range.start - 1000 && traceTime <= range.end + 1000) {
+              // Check if we already have a unique key for this task_id
+              if (taskIdToUniqueKey.has(taskId)) {
+                taskKey = taskIdToUniqueKey.get(taskId)!;
+              } else {
+                // Create a unique key for this task
+                const baseName = range.name;
+                if (taskMap.has(baseName)) {
+                  taskCounter++;
+                  taskKey = `${baseName} (${taskCounter})`;
+                } else {
+                  taskKey = baseName;
+                }
+                taskIdToUniqueKey.set(taskId, taskKey);
+              }
+              foundMatch = true;
+              break;
+            }
+          }
 
-            if (taskCompletion) {
-              const taskEndTime = new Date(taskCompletion.created_at).getTime();
-              // If trace is before task completion and agent matches, it belongs to this task
-              if (traceTime <= taskEndTime + 1000) { // Within 1 second after task completion
-                const taskAgent = agentTaskMap.get(taskContext);
-                if (!taskAgent || taskAgent === agentName) {
-                  currentTask = taskDesc;
-                  break;
+          // If no match from time ranges, try using taskDescriptions as fallback
+          if (!foundMatch) {
+            const taskEntries = Array.from(taskDescriptions.entries());
+            for (const [taskContext, taskDesc] of taskEntries) {
+              const taskCompletion = sorted.find(t =>
+                t.event_source === 'task' &&
+                t.event_type === 'task_completed' &&
+                t.event_context === taskContext
+              );
+
+              if (taskCompletion) {
+                const taskEndTime = new Date(taskCompletion.created_at).getTime();
+                if (traceTime <= taskEndTime + 1000) {
+                  const taskAgent = agentTaskMap.get(taskContext);
+                  if (!taskAgent || taskAgent === agentName) {
+                    taskKey = taskDesc;
+                    foundMatch = true;
+                    break;
+                  }
                 }
               }
             }
           }
+
+          // If still no match but we have a most recent task, use it as fallback
+          // This handles events that occur just after a task starts
+          if (!foundMatch && taskTimeRanges.size > 0) {
+            // Find the most recent task that started before this trace
+            let mostRecentTask: { taskId: string; range: { start: number; end: number; name: string } } | null = null;
+            for (const [taskId, range] of taskTimeRanges.entries()) {
+              if (range.start <= traceTime) {
+                if (!mostRecentTask || range.start > mostRecentTask.range.start) {
+                  mostRecentTask = { taskId, range };
+                }
+              }
+            }
+            if (mostRecentTask) {
+              // Use the most recent task
+              if (taskIdToUniqueKey.has(mostRecentTask.taskId)) {
+                taskKey = taskIdToUniqueKey.get(mostRecentTask.taskId)!;
+              } else {
+                taskKey = mostRecentTask.range.name;
+                taskIdToUniqueKey.set(mostRecentTask.taskId, taskKey);
+              }
+            }
+          }
+          // If no match found after all attempts, taskKey remains 'Processing Task' (default)
         }
 
-        // Fallback to a generic task name if no match found
-        if (!currentTask) {
-          currentTask = 'Processing Task';
+        if (!taskMap.has(taskKey)) {
+          taskMap.set(taskKey, []);
         }
-
-        if (!taskMap.has(currentTask)) {
-          taskMap.set(currentTask, []);
-        }
-        const taskTraces = taskMap.get(currentTask);
+        const taskTraces = taskMap.get(taskKey);
         if (taskTraces) {
           taskTraces.push(trace);
         }
@@ -647,6 +774,42 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                 description = 'Guardrail Failed';
               }
             }
+          } else if (trace.event_type === 'rate_limit') {
+            eventType = 'rate_limit';
+            // Extract rate limit details from trace_metadata or extra_data
+            let model = '';
+            let attempt = '';
+            if (trace.trace_metadata && typeof trace.trace_metadata === 'object') {
+              const metadata = trace.trace_metadata as Record<string, unknown>;
+              model = (metadata.model as string) || '';
+              attempt = metadata.attempt ? `(attempt ${metadata.attempt})` : '';
+            }
+            description = model
+              ? `Rate Limit: ${model} ${attempt}`.trim()
+              : `Rate Limit ${attempt}`.trim();
+          } else if (trace.event_type === 'task_failed') {
+            eventType = 'task_failed';
+            // Extract error details from extra_data or output - show full message, no truncation
+            let errorMsg = 'Task Failed';
+            if (trace.extra_data && typeof trace.extra_data === 'object') {
+              const extraData = trace.extra_data as Record<string, unknown>;
+              const error = extraData.error as string;
+              if (error) {
+                errorMsg = error;
+              }
+            } else if (trace.output) {
+              // Try to extract from output content
+              const outputStr = typeof trace.output === 'string'
+                ? trace.output
+                : (trace.output as Record<string, unknown>).content as string || '';
+              if (outputStr && outputStr.includes('failed:')) {
+                const failedPart = outputStr.split('failed:')[1]?.trim();
+                if (failedPart) {
+                  errorMsg = failedPart;
+                }
+              }
+            }
+            description = `❌ ${errorMsg}`;
           } else {
             eventType = trace.event_type;
             // Make the description more readable
@@ -677,7 +840,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
 
         return {
           taskName,
-          taskId: taskTraces[0].task_id,
+          taskId: getTaskId(taskTraces[0]) || undefined,
           startTime: taskStart,
           endTime: taskEnd,
           duration: taskEnd.getTime() - taskStart.getTime(),
@@ -919,60 +1082,91 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
     setExpandedTasks(newExpanded);
   };
 
-  const getEventIcon = (type: string) => {
+  // Truncate task name for display
+  const truncateTaskName = (name: string, maxLength = 80): string => {
+    if (name.length <= maxLength) return name;
+    return name.substring(0, maxLength) + '...';
+  };
+
+  // Handle clicking on a task name to show full description
+  const handleTaskDescriptionClick = async (taskName: string, taskId?: string, e?: React.MouseEvent) => {
+    // Stop propagation to prevent toggling the task expansion
+    if (e) {
+      e.stopPropagation();
+    }
+
+    // Set initial state with task name
+    setSelectedTaskDescription({
+      taskName,
+      taskId,
+      fullDescription: undefined,
+      isLoading: !!taskId
+    });
+
+    // If we have a taskId, fetch the full task details
+    if (taskId) {
+      try {
+        const taskDetails = await TraceService.getTaskDetails(taskId);
+        setSelectedTaskDescription(prev => prev ? {
+          ...prev,
+          fullDescription: taskDetails.description || taskName,
+          isLoading: false
+        } : null);
+      } catch (error) {
+        console.error('Failed to fetch task details:', error);
+        // Use the task name as fallback
+        setSelectedTaskDescription(prev => prev ? {
+          ...prev,
+          fullDescription: taskName,
+          isLoading: false
+        } : null);
+      }
+    }
+  };
+
+  const getEventIcon = (type: string): JSX.Element => {
+    const iconProps = { fontSize: 'small' as const, sx: { fontSize: 16 } };
+
     switch (type) {
       case 'tool':
       case 'tool_result':
       case 'tool_usage':
-        return '🔧';
+        return <TerminalIcon {...iconProps} color="action" />;
       case 'llm':
-        return '🤖';
+        return <PlayCircleIcon {...iconProps} color="primary" />;
       case 'agent_start':
       case 'task_start':
       case 'started':
-        return '▶️';
+        return <PlayArrowIcon {...iconProps} color="primary" />;
       case 'agent_complete':
       case 'task_complete':
       case 'completed':
-        return '✅';
+        return <CheckCircleIcon {...iconProps} color="success" />;
       case 'agent_output':
       case 'agent_execution':
-        return '📝';
+        return <PreviewIcon {...iconProps} color="action" />;
       case 'agent_processing':
-        return '⚙️';
+        return <RefreshIcon {...iconProps} color="action" />;
       case 'memory_operation':
-        return '💾';
+        return <AccessTimeIcon {...iconProps} color="action" />;
       case 'knowledge_operation':
-        return '📚';
+        return <TimelineIcon {...iconProps} color="action" />;
       case 'crew_started':
-        return '🚀';
+        return <PlayCircleIcon {...iconProps} color="primary" />;
       case 'crew_completed':
-        return '🏁';
+        return <CheckCircleIcon {...iconProps} color="success" />;
+      case 'flow_started':
+        return <PlayCircleIcon {...iconProps} color="primary" />;
+      case 'flow_completed':
+        return <CheckCircleIcon {...iconProps} color="success" />;
+      case 'rate_limit':
+        return <WarningAmberIcon {...iconProps} color="warning" />;
+      case 'task_failed':
+      case 'error':
+        return <ErrorOutlineIcon {...iconProps} color="error" />;
       default:
-        return '•';
+        return <span style={{ fontSize: 16 }}>•</span>;
     }
-  };
-
-  const formatOutput = (output: string | Record<string, unknown> | undefined): string => {
-    if (!output) return 'No output available';
-
-    if (typeof output === 'string') {
-      // Clean up tool results and other formatted strings
-      if (output.includes('ToolResult')) {
-        const match = output.match(/result="([^"]+)"/);
-        if (match) {
-          try {
-            const parsed = JSON.parse(match[1].replace(/'/g, '"'));
-            return JSON.stringify(parsed, null, 2);
-          } catch {
-            return output;
-          }
-        }
-      }
-      return output;
-    }
-
-    return JSON.stringify(output, null, 2);
   };
 
   const handleEventClick = (event: { type: string; description: string; output?: string | Record<string, unknown> }) => {
@@ -1200,9 +1394,30 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                             <IconButton size="small">
                               {expandedTasks.has(taskKey) ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                             </IconButton>
-                            <Typography variant="body2" fontWeight="medium">
-                              {task.taskName}
-                            </Typography>
+                            <Tooltip
+                              title={task.taskName.length > 80 ? "Click to view full description" : ""}
+                              arrow
+                              placement="top"
+                            >
+                              <Typography
+                                variant="body2"
+                                fontWeight="medium"
+                                onClick={(e) => handleTaskDescriptionClick(task.taskName, task.taskId, e)}
+                                sx={{
+                                  maxWidth: '500px',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                  cursor: 'pointer',
+                                  '&:hover': {
+                                    color: 'primary.main',
+                                    textDecoration: 'underline'
+                                  }
+                                }}
+                              >
+                                {truncateTaskName(task.taskName)}
+                              </Typography>
+                            </Tooltip>
                             <Chip
                               size="small"
                               label={formatDuration(task.duration)}
@@ -1261,9 +1476,9 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                                       {processedTraces.globalStart &&
                                         formatTimeDelta(processedTraces.globalStart, event.timestamp)}
                                     </Typography>
-                                    <Typography variant="body2" sx={{ minWidth: 20 }}>
+                                    <Box sx={{ minWidth: 20, display: 'flex', alignItems: 'center' }}>
                                       {getEventIcon(event.type)}
-                                    </Typography>
+                                    </Box>
                                     <Typography
                                       variant="body2"
                                       sx={{
@@ -1376,6 +1591,81 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
         )}
       </DialogContent>
 
+      {/* Task Description Dialog */}
+      <Dialog
+        open={!!selectedTaskDescription}
+        onClose={() => setSelectedTaskDescription(null)}
+        maxWidth="md"
+        fullWidth
+      >
+        {selectedTaskDescription && (
+          <>
+            <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Box>
+                <Typography variant="h6">Task Description</Typography>
+                {selectedTaskDescription.taskId && (
+                  <Typography variant="caption" color="text.secondary">
+                    Task ID: {selectedTaskDescription.taskId}
+                  </Typography>
+                )}
+              </Box>
+              <IconButton
+                onClick={() => setSelectedTaskDescription(null)}
+                size="small"
+              >
+                <CloseIcon />
+              </IconButton>
+            </DialogTitle>
+            <DialogContent dividers>
+              {selectedTaskDescription.isLoading ? (
+                <Box display="flex" justifyContent="center" alignItems="center" minHeight="100px">
+                  <CircularProgress size={24} />
+                  <Typography sx={{ ml: 2 }} color="text.secondary">
+                    Loading task details...
+                  </Typography>
+                </Box>
+              ) : (
+                <Paper
+                  sx={{
+                    p: 2,
+                    backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.50',
+                    maxHeight: '60vh',
+                    overflow: 'auto',
+                  }}
+                >
+                  <Typography
+                    variant="body1"
+                    sx={{
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      lineHeight: 1.6
+                    }}
+                  >
+                    {selectedTaskDescription.fullDescription || selectedTaskDescription.taskName}
+                  </Typography>
+                </Paper>
+              )}
+            </DialogContent>
+            <DialogActions>
+              <Button
+                onClick={() => {
+                  navigator.clipboard.writeText(
+                    selectedTaskDescription.fullDescription || selectedTaskDescription.taskName
+                  );
+                }}
+                startIcon={<ContentCopyIcon />}
+                size="small"
+              >
+                Copy Description
+              </Button>
+              <Button onClick={() => setSelectedTaskDescription(null)} size="small">
+                Close
+              </Button>
+            </DialogActions>
+          </>
+        )}
+      </Dialog>
+
       {/* Output Details Dialog */}
       <Dialog
         open={!!selectedEvent}
@@ -1451,110 +1741,17 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                   </Box>
                 ) : null}
 
-                <Paper
-                  sx={{
-                    p: 2,
-                    mt: 1,
-                    backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.50',
-                    maxHeight: '60vh',
-                    overflow: 'auto',
-                    '& pre': {
-                      overflowX: 'auto',
-                      padding: 1,
-                      borderRadius: 1,
-                      backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.100',
-                      fontFamily: 'monospace',
-                      fontSize: '0.875rem',
-                    },
-                    '& code': {
-                      fontFamily: 'monospace',
-                      fontSize: '0.875rem',
-                      backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.200',
-                      padding: '2px 4px',
-                      borderRadius: '3px',
-                    },
-                    '& p': {
-                      marginTop: 1,
-                      marginBottom: 1,
-                    },
-                    '& ul, & ol': {
-                      paddingLeft: 3,
-                      marginTop: 1,
-                      marginBottom: 1,
-                    },
-                    '& li': {
-                      marginTop: 0.5,
-                      marginBottom: 0.5,
-                    },
-                    '& blockquote': {
-                      borderLeft: '4px solid',
-                      borderColor: 'primary.main',
-                      paddingLeft: 2,
-                      marginLeft: 0,
-                      marginTop: 1,
-                      marginBottom: 1,
-                      fontStyle: 'italic',
-                      color: 'text.secondary',
-                    },
-                    '& h1, & h2, & h3, & h4, & h5, & h6': {
-                      marginTop: 2,
-                      marginBottom: 1,
-                      fontWeight: 'bold',
-                    },
-                    '& h1': { fontSize: '1.5rem' },
-                    '& h2': { fontSize: '1.3rem' },
-                    '& h3': { fontSize: '1.1rem' },
-                    '& h4': { fontSize: '1rem' },
-                    '& h5': { fontSize: '0.9rem' },
-                    '& h6': { fontSize: '0.85rem' },
-                    '& table': {
-                      width: '100%',
-                      borderCollapse: 'collapse',
-                      marginTop: 1,
-                      marginBottom: 1,
-                    },
-                    '& th, & td': {
-                      border: '1px solid',
-                      borderColor: 'divider',
-                      padding: 1,
-                      textAlign: 'left',
-                    },
-                    '& th': {
-                      backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.200',
-                      fontWeight: 'bold',
-                    },
-                    '& hr': {
-                      marginTop: 2,
-                      marginBottom: 2,
-                      border: 'none',
-                      borderTop: '1px solid',
-                      borderColor: 'divider',
-                    },
-                    '& a': {
-                      color: 'primary.main',
-                      textDecoration: 'none',
-                      '&:hover': {
-                        textDecoration: 'underline',
-                      },
-                    },
-                  }}
-                >
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {formatOutput(selectedEvent.output)}
-                  </ReactMarkdown>
-                </Paper>
+                {/* Paginated output display - prevents browser crash on large content */}
+                <PaginatedOutput
+                  content={selectedEvent.output}
+                  pageSize={10000}
+                  enableMarkdown={true}
+                  showCopyButton={true}
+                  maxHeight="55vh"
+                />
               </Box>
             </DialogContent>
             <DialogActions>
-              <Button
-                onClick={() => {
-                  navigator.clipboard.writeText(formatOutput(selectedEvent.output));
-                }}
-                startIcon={<ContentCopyIcon />}
-                size="small"
-              >
-                Copy Output
-              </Button>
               <Button onClick={() => setSelectedEvent(null)} size="small">
                 Close
               </Button>

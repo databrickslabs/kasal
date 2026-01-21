@@ -21,8 +21,6 @@ import { AgentService } from '../../api/AgentService';
 import { TaskService } from '../../api/TaskService';
 import { AgentYaml, TaskYaml } from '../../types/crew';
 import { createEdge, edgeExists } from '../../utils/edgeUtils';
-import { CanvasLayoutManager } from '../../utils/CanvasLayoutManager';
-import { useUILayoutStore } from '../../store/uiLayout';
 
 // Style for JSON formatting
 const jsonStyles = {

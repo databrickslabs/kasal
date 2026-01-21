@@ -23,8 +23,6 @@ import {
   Tooltip,
   AlertColor,
   CircularProgress,
-  Tabs,
-  Tab,
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import KeyIcon from '@mui/icons-material/Key';
@@ -69,34 +67,21 @@ function APIKeys(): JSX.Element {
     value: '',
     description: ''
   });
-  const [activeTab, setActiveTab] = useState<number>(0);
 
-  // Deep-link listener: allow other components to switch tab/open a specific key
+  // Deep-link listener: allow other components to open a specific key
   useEffect(() => {
-    const setTabHandler = (evt: Event) => {
-      try {
-        const custom = evt as CustomEvent<{ tab?: string }>;
-        if (custom.detail?.tab === 'local') setActiveTab(1);
-        if (custom.detail?.tab === 'models') setActiveTab(0);
-      } catch (e) { /* no-op */ }
-    };
     const focusKeyHandler = (evt: Event) => {
       try {
         const custom = evt as CustomEvent<{ name?: string }>;
         const name = custom.detail?.name;
         if (!name) return;
-        // Decide which tab based on predefined model keys vs local keystore
-        const isModel = modelApiKeys.includes(name);
-        setActiveTab(isModel ? 0 : 1);
         // Prefill create dialog for convenience
         setNewApiKey({ name, value: '', description: `API Key for ${name}` });
         setCreateDialog(true);
       } catch (e) { /* no-op */ }
     };
-    window.addEventListener('kasal:api-keys:set-tab', setTabHandler as EventListener);
     window.addEventListener('kasal:api-keys:focus-key', focusKeyHandler as EventListener);
     return () => {
-      window.removeEventListener('kasal:api-keys:set-tab', setTabHandler as EventListener);
       window.removeEventListener('kasal:api-keys:focus-key', focusKeyHandler as EventListener);
     };
   }, []);
@@ -109,7 +94,10 @@ function APIKeys(): JSX.Element {
     'QWEN_API_KEY',
     'DEEPSEEK_API_KEY',
     'GROK_API_KEY',
-    'GEMINI_API_KEY'
+    'GEMINI_API_KEY',
+    'POWERBI_USERNAME',
+    'POWERBI_PASSWORD',
+    'POWERBI_CLIENT_SECRET'
   ];
 
   // Map provider names to API key names with proper typing
@@ -140,9 +128,6 @@ function APIKeys(): JSX.Element {
           // Auto-open the edit dialog for this key
           setEditingApiKey(apiKey);
           setEditDialog(true);
-
-          // Set active tab to model API keys (tab 0)
-          setActiveTab(0);
 
           // Reset the store state
           closeApiKeyEditor();
@@ -175,12 +160,8 @@ function APIKeys(): JSX.Element {
 
 
 
-  const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
-    setActiveTab(newValue);
-  };
-
-  // Filter out model API keys from local keys
-  const localApiKeys = apiKeys.filter(key => !modelApiKeys.includes(key.name));
+  // Filter out model API keys from local keys (for placeholder generation)
+  const _localApiKeys = apiKeys.filter(key => !modelApiKeys.includes(key.name));
 
   if (loading) {
     return (
@@ -196,7 +177,7 @@ function APIKeys(): JSX.Element {
         <CardContent>
           <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
             <KeyIcon sx={{ mr: 1, color: 'error.main' }} />
-            <Typography variant="h5">API Keys & Secrets</Typography>
+            <Typography variant="h5">API Keys</Typography>
           </Box>
           <Alert severity="error" sx={{ mb: 2 }}>
             {error}
@@ -393,12 +374,57 @@ function APIKeys(): JSX.Element {
 
 
 
+  // Build combined keys list: model keys + local keystore keys with placeholders
+  const allKeys = (() => {
+    // Add placeholder entries for specific keys if they don't exist
+    const placeholderKeys = ['SERPER_API_KEY', 'PERPLEXITY_API_KEY', 'FIRECRAWL_API_KEY', 'EXA_API_KEY', 'LINKUP_API_KEY', 'COMPOSIO_API_KEY'];
+    const existingKeyNames = apiKeys.map(k => k.name);
+
+    // Create placeholder entries for model API keys that don't exist
+    const modelPlaceholders: ApiKey[] = modelApiKeys
+      .filter(keyName => !existingKeyNames.includes(keyName))
+      .map((keyName, index) => ({
+        id: -100 - index,
+        name: keyName,
+        value: 'Not set',
+        description: `API Key for ${keyName.replace(/_/g, ' ').toLowerCase()}`,
+        created_at: '',
+        updated_at: ''
+      }));
+
+    // Create placeholder entries for local keystore keys that don't exist
+    const localPlaceholders: ApiKey[] = placeholderKeys
+      .filter(keyName => !existingKeyNames.includes(keyName))
+      .map((keyName, index) => ({
+        id: -1000 - index,
+        name: keyName,
+        value: 'Not set',
+        description: `API Key for ${keyName.replace(/_/g, ' ').toLowerCase()}`,
+        created_at: '',
+        updated_at: ''
+      }));
+
+    return [...apiKeys, ...modelPlaceholders, ...localPlaceholders];
+  })();
+
   return (
     <Card sx={{ mt: 8 }}>
       <CardContent>
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-          <KeyIcon sx={{ mr: 1 }} />
-          <Typography variant="h5">API Keys & Secrets</Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <KeyIcon sx={{ mr: 1 }} />
+            <Typography variant="h5">API Keys</Typography>
+          </Box>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => {
+              setNewApiKey({ name: '', value: '', description: '' });
+              setCreateDialog(true);
+            }}
+          >
+            Add New Key
+          </Button>
         </Box>
 
         {/* Shared Workspace Warning */}
@@ -422,121 +448,14 @@ function APIKeys(): JSX.Element {
           return null;
         })()}
 
-        <Tabs value={activeTab} onChange={handleTabChange} sx={{ mb: 2 }}>
-          <Tab label="Model API Keys" />
-          <Tab label="Local Keystore" />
-
-        </Tabs>
-
-        {activeTab === 0 && (
-          <>
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-              <KeyIcon sx={{ mr: 1 }} />
-              <Typography variant="subtitle1">Model API Keys</Typography>
-            </Box>
-            <TableContainer component={Paper}>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Key Name</TableCell>
-                    <TableCell>Value</TableCell>
-                    <TableCell>Description</TableCell>
-                    <TableCell>Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {modelApiKeys.map((keyName) => {
-                    const apiKey = apiKeys.find(k => k.name === keyName);
-                    return (
-                      <TableRow key={keyName}>
-                        <TableCell>{keyName}</TableCell>
-                        <TableCell>
-                          {apiKey ? (
-                            formatSecretValue(apiKey.value)
-                          ) : (
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <ErrorIcon sx={{ color: 'warning.main', fontSize: 20 }} />
-                              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                                Not configured
-                              </Typography>
-                            </Box>
-                          )}
-                        </TableCell>
-                        <TableCell>{apiKey?.description || ''}</TableCell>
-                        <TableCell>
-                          <Tooltip title={apiKey ? 'Edit' : 'Set Key'}>
-                            <IconButton
-                              onClick={() => {
-                                if (apiKey) {
-                                  handleEditApiKey(apiKey);
-                                } else {
-                                  setNewApiKey({
-                                    name: keyName,
-                                    value: '',
-                                    description: `API Key for ${keyName}`
-                                  });
-                                  setCreateDialog(true);
-                                }
-                              }}
-                            >
-                              <EditIcon />
-                            </IconButton>
-                          </Tooltip>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </>
-        )}
-
-        {activeTab === 1 && (
-          <>
-            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
-              <Button
-                variant="contained"
-                startIcon={<AddIcon />}
-                onClick={() => {
-                  setNewApiKey({ name: '', value: '', description: '' });
-                  setCreateDialog(true);
-                }}
-              >
-                Add New Key
-              </Button>
-            </Box>
-            {(() => {
-              // Add placeholder entries for specific keys if they don't exist
-              const placeholderKeys = ['SERPER_API_KEY', 'PERPLEXITY_API_KEY', 'FIRECRAWL_API_KEY', 'EXA_API_KEY', 'LINKUP_API_KEY', 'COMPOSIO_API_KEY'];
-              const existingKeyNames = localApiKeys.map(k => k.name);
-
-              const placeholderApiKeys: ApiKey[] = placeholderKeys
-                .filter(keyName => !existingKeyNames.includes(keyName))
-                .map((keyName, index) => ({
-                  id: -1000 - index, // Use negative IDs for placeholders
-                  name: keyName,
-                  value: 'Not set',
-                  description: `API Key for ${keyName.replace(/_/g, ' ').toLowerCase()}`,
-                  created_at: '',
-                  updated_at: ''
-                }));
-
-              const combinedKeys = [...localApiKeys, ...placeholderApiKeys];
-              return renderApiKeysTable(combinedKeys);
-            })()}
-          </>
-        )}
+        {renderApiKeysTable(allKeys)}
 
 
 
         {/* Create Dialog */}
         <Dialog open={createDialog} onClose={() => setCreateDialog(false)} maxWidth="sm" fullWidth>
           <DialogTitle>
-            {modelApiKeys.includes(newApiKey.name) 
-              ? 'Set Model API Key' 
-              : 'Create New API Key'
-            }
+            {newApiKey.name ? 'Set API Key' : 'Create New API Key'}
           </DialogTitle>
           <DialogContent>
             <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -544,7 +463,7 @@ function APIKeys(): JSX.Element {
                 label="Name"
                 value={newApiKey.name}
                 onChange={(e) => setNewApiKey({ ...newApiKey, name: e.target.value })}
-                disabled={modelApiKeys.includes(newApiKey.name)}
+                disabled={!!newApiKey.name && (modelApiKeys.includes(newApiKey.name) || newApiKey.name.includes('_API_KEY'))}
                 fullWidth
               />
               <TextField
@@ -565,11 +484,11 @@ function APIKeys(): JSX.Element {
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setCreateDialog(false)}>Cancel</Button>
-            <Button 
-              onClick={handleCreate} 
+            <Button
+              onClick={handleCreate}
               variant="contained"
             >
-              {modelApiKeys.includes(newApiKey.name) ? 'Set Key' : 'Create'}
+              {newApiKey.name ? 'Set Key' : 'Create'}
             </Button>
           </DialogActions>
         </Dialog>

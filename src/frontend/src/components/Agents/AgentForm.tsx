@@ -102,7 +102,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
       tools: initialData?.tools ? initialData.tools.map(id => String(id)) : [],
       function_calling_llm: initialData?.function_calling_llm || undefined,
       max_iter: initialData?.max_iter || 25,
-      max_rpm: initialData?.max_rpm || 1,
+      max_rpm: initialData?.max_rpm ?? 10,
       max_execution_time: initialData?.max_execution_time || 300,
       memory: initialData?.memory ?? true,
       verbose: initialData?.verbose ?? false,
@@ -1100,8 +1100,9 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                       fullWidth
                       type="number"
                       label="Max RPM"
-                      value={formData.max_rpm || ''}
-                      onChange={(e) => handleInputChange('max_rpm', e.target.value ? parseInt(e.target.value) : undefined)}
+                      value={formData.max_rpm ?? 10}
+                      onChange={(e) => handleInputChange('max_rpm', e.target.value ? parseInt(e.target.value) : 10)}
+                      helperText="Maximum requests per minute (default: 10)"
                     />
                   </Grid>
                   <Grid item xs={12} md={4}>

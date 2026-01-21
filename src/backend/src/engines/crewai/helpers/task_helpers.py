@@ -307,18 +307,46 @@ async def create_task(
                         # Get task-specific tool config overrides
                         task_tool_configs = task_config.get('tool_configs', {})
                         tool_override = task_tool_configs.get(tool_name, {})
-                        
+
+                        # Enhanced logging for task-level tool config overrides
+                        if tool_override:
+                            logger.info(f"Task {task_key} - {tool_name} HAS task-level overrides")
+                            logger.info(f"Task {task_key} - {tool_name} override keys: {list(tool_override.keys())}")
+                            # Log important config values for Measure Conversion Pipeline
+                            if tool_name == "Measure Conversion Pipeline":
+                                logger.info(f"Task {task_key} - {tool_name} inbound_connector: {tool_override.get('inbound_connector', 'NOT SET')}")
+                                logger.info(f"Task {task_key} - {tool_name} outbound_format: {tool_override.get('outbound_format', 'NOT SET')}")
+                                logger.info(f"Task {task_key} - {tool_name} powerbi_semantic_model_id: {tool_override.get('powerbi_semantic_model_id', 'NOT SET')[:20]}...")
+                                logger.info(f"Task {task_key} - {tool_name} powerbi_group_id: {tool_override.get('powerbi_group_id', 'NOT SET')[:20]}...")
+                        else:
+                            logger.info(f"Task {task_key} - {tool_name} using default/agent-level config (no task overrides)")
+
                         # Debug logging for tool configs
-                        if tool_name in ["GenieTool", "SerperDevTool", "DatabricksKnowledgeSearchTool"]:
+                        if tool_name in ["GenieTool", "SerperDevTool", "DatabricksKnowledgeSearchTool", "Measure Conversion Pipeline", "PowerBIAnalysisTool"]:
                             logger.info(f"Task {task_key} - {tool_name} task_tool_configs: {task_tool_configs}")
                             logger.info(f"Task {task_key} - {tool_name} tool_override: {tool_override}")
-                        
-                        # Create the tool instance with overrides
+
+                        # IMPORTANT: Create a TASK-SPECIFIC tool instance with overrides
+                        # This ensures task-level configurations (like Power BI credentials) are used
+                        # instead of agent-level default configs
+                        logger.info(f"Task {task_key} - Creating task-specific instance of {tool_name}")
                         tool_instance = tool_factory.create_tool(
-                            tool_name, 
+                            tool_name,
                             result_as_answer=tool_config.get('result_as_answer', False),
                             tool_config_override=tool_override
                         )
+
+                        # Verify the tool was created with correct config
+                        if tool_instance and tool_name == "Measure Conversion Pipeline" and tool_override:
+                            # Check if the tool has the expected config
+                            if hasattr(tool_instance, '_default_config'):
+                                actual_config = tool_instance._default_config
+                                logger.info(f"Task {task_key} - {tool_name} ACTUAL tool config after creation:")
+                                logger.info(f"  - inbound_connector: {actual_config.get('inbound_connector', 'NOT SET')}")
+                                logger.info(f"  - powerbi_semantic_model_id: {actual_config.get('powerbi_semantic_model_id', 'NOT SET')[:20]}...")
+                                logger.info(f"  - powerbi_group_id: {actual_config.get('powerbi_group_id', 'NOT SET')[:20]}...")
+                            else:
+                                logger.warning(f"Task {task_key} - {tool_name} does not have _default_config attribute")
                         if tool_instance:
                             # Check if this is a special MCP tool that returns a tuple with (is_mcp, tools_list)
                             if isinstance(tool_instance, tuple) and len(tool_instance) == 2 and tool_instance[0] is True:
@@ -373,9 +401,45 @@ async def create_task(
     else:
         logger.info(f"Task {task_key} will use agent's default tools")
     
+    # ===== DYNAMIC TASK DESCRIPTION FIX =====
+    # For Measure Conversion Pipeline tasks, generate description dynamically from tool_configs
+    # This ensures the description matches the actual conversion being performed
+    task_description = task_config["description"]
+    task_tool_configs = task_config.get('tool_configs', {})
+
+    if "Measure Conversion Pipeline" in task_tool_configs:
+        mcp_config = task_tool_configs["Measure Conversion Pipeline"]
+        inbound_connector = mcp_config.get('inbound_connector', 'YAML')
+        outbound_format = mcp_config.get('outbound_format', 'DAX')
+
+        # Map format codes to display names
+        format_display_names = {
+            'powerbi': 'Power BI',
+            'yaml': 'YAML',
+            'dax': 'DAX',
+            'sql': 'SQL',
+            'uc_metrics': 'UC Metrics',
+            'tableau': 'Tableau',
+            'excel': 'Excel'
+        }
+
+        inbound_display = format_display_names.get(inbound_connector, inbound_connector.upper())
+        outbound_display = format_display_names.get(outbound_format, outbound_format.upper())
+
+        # Generate dynamic description
+        task_description = f"""Use the Measure Conversion Pipeline tool to convert the provided {inbound_display} measure definition to {outbound_display} format.
+The tool configuration has been pre-configured with:
+  - Inbound format: {inbound_display}
+  - Outbound format: {outbound_display}
+  - Configuration: [provided in tool_configs]
+
+Call the Measure Conversion Pipeline tool to perform the conversion and return the generated {outbound_display} measures."""
+
+        logger.info(f"Task {task_key} - Generated dynamic description for {inbound_display} → {outbound_display} conversion")
+
     # Prepare task arguments
     task_args = {
-        "description": task_config["description"],
+        "description": task_description,
         "expected_output": task_config["expected_output"],
         "tools": task_tools,
         "agent": agent,
@@ -608,6 +672,71 @@ async def create_task(
         else:
             # Callback is already a function
             task_args['callback'] = existing_callback
+
+    # Handle LLM guardrail if present (takes priority over code-based guardrail if both exist)
+    # This uses CrewAI's OSS LLMGuardrail which validates task output using an LLM agent
+    if 'llm_guardrail' in task_config and task_config['llm_guardrail']:
+        llm_guardrail_config = task_config['llm_guardrail']
+        guardrail_logger.info(f"Task {task_key} has LLM guardrail configuration: {llm_guardrail_config}")
+
+        try:
+            from crewai.tasks.llm_guardrail import LLMGuardrail
+            from crewai import LLM
+
+            # Extract configuration - handle both dict and object
+            if isinstance(llm_guardrail_config, dict):
+                description = llm_guardrail_config.get('description', 'Validate the task output')
+                llm_model = llm_guardrail_config.get('llm_model', 'databricks-claude-sonnet-4-5')
+            else:
+                description = getattr(llm_guardrail_config, 'description', 'Validate the task output')
+                llm_model = getattr(llm_guardrail_config, 'llm_model', 'databricks-claude-sonnet-4-5')
+
+            # PROACTIVE GUARDRAIL AUGMENTATION: Inject validation criteria into task description
+            # This ensures the agent knows the requirements BEFORE execution, reducing unnecessary retries
+            # CrewAI's native guardrail is reactive (agent only learns after failing validation)
+            # By augmenting the description, the agent can align with requirements on the first attempt
+            if description and description != 'Validate the task output':
+                validation_augmentation = (
+                    f"\n\n=== VALIDATION REQUIREMENTS ===\n"
+                    f"Your output will be validated against these criteria: {description}\n"
+                    f"Ensure your response meets these requirements to pass validation."
+                )
+                task_args['description'] = task_args['description'] + validation_augmentation
+                guardrail_logger.info(f"Augmented task {task_key} description with guardrail criteria for proactive alignment")
+
+            # Ensure model has provider prefix for LiteLLM
+            # Databricks models need 'databricks/' prefix
+            if llm_model and not llm_model.startswith('databricks/'):
+                if llm_model.startswith('databricks-'):
+                    llm_model = f"databricks/{llm_model}"
+                    guardrail_logger.info(f"Added databricks/ prefix to model: {llm_model}")
+
+            # Create LLM instance for the guardrail
+            guardrail_llm = LLM(model=llm_model)
+
+            # Create LLMGuardrail (OSS-compatible, NOT HallucinationGuardrail)
+            llm_guardrail = LLMGuardrail(
+                description=description,
+                llm=guardrail_llm
+            )
+
+            # Set the LLM guardrail in task args
+            # This overrides any code-based guardrail if both are present
+            task_args['guardrail'] = llm_guardrail
+            guardrail_logger.info(f"Configured LLM guardrail for task {task_key} using model {llm_model}")
+            guardrail_logger.info(f"LLM guardrail description: {description}")
+
+            # Ensure retry_on_fail is enabled for guardrails
+            if not task_args.get('retry_on_fail'):
+                task_args['retry_on_fail'] = True
+                guardrail_logger.info(f"Enabled retry_on_fail for task {task_key} with LLM guardrail")
+
+        except ImportError as e:
+            guardrail_logger.error(f"Could not import LLMGuardrail for task {task_key}: {str(e)}")
+            guardrail_logger.error("Make sure crewai is installed with guardrail support")
+        except Exception as e:
+            guardrail_logger.error(f"Error configuring LLM guardrail for task {task_key}: {str(e)}")
+            guardrail_logger.error(f"Stack trace: {traceback.format_exc()}")
 
     # Add output file for tasks that need it
     if output_dir and task_config.get('output_file_enabled', False):

@@ -17,6 +17,8 @@ import { useTabDirtyState } from '../../hooks/workflow/useTabDirtyState';
 import { useTaskExecutionStore } from '../../store/taskExecutionStore';
 import { useUILayoutStore } from '../../store/uiLayout';
 
+import { type LLMGuardrailConfig } from '../../types/task';
+
 export interface TaskNodeData {
   label?: string;
   name?: string;
@@ -40,6 +42,7 @@ export interface TaskNodeData {
     human_input?: boolean;
     condition?: string;
     guardrail?: string;
+    llm_guardrail?: LLMGuardrailConfig | null;
     markdown?: boolean;
   };
   description?: string;
@@ -74,6 +77,7 @@ interface TaskNodeProps {
       human_input?: boolean;
       condition?: string;
       guardrail?: string | null;
+      llm_guardrail?: LLMGuardrailConfig | null;
       markdown?: boolean;
     };
   };
@@ -416,6 +420,12 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
   };
 
   const handlePrepareTaskData = () => {
+    // Get llm_guardrail from top-level data first, then fallback to config
+    // The dispatcher stores it at top-level, but user edits may store it in config
+    const llmGuardrail = (data as unknown as { llm_guardrail?: LLMGuardrailConfig }).llm_guardrail
+      || data.config?.llm_guardrail
+      || null;
+
     // Convert the node data to the format expected by TaskForm
     const taskData = {
       id: data.taskId,
@@ -428,6 +438,8 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
       async_execution: data.async_execution || false,
       context: data.context || [],
       markdown: data.config?.markdown || false,
+      // Include llm_guardrail at top level for TaskForm's suggestedGuardrail state
+      llm_guardrail: llmGuardrail,
       config: {
         cache_response: data.config?.cache_response || false,
         cache_ttl: data.config?.cache_ttl || 3600,
@@ -446,6 +458,9 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         condition: data.config?.condition,
         // Use undefined instead of null for guardrail if it's not present
         guardrail: data.config?.guardrail || undefined,
+        // Only include llm_guardrail in config if user explicitly enabled it (saved in config)
+        // Top-level llm_guardrail is for the suggestion - config.llm_guardrail is user's choice
+        llm_guardrail: data.config?.llm_guardrail ?? null,
         markdown: data.config?.markdown || false
       }
     };
@@ -707,6 +722,8 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
                           output_file: savedTask.config?.output_file || null,
                           callback: savedTask.config?.callback || null,
                           guardrail: savedTask.config?.guardrail || undefined,
+                          // Include llm_guardrail for LLM-based validation
+                          llm_guardrail: savedTask.config?.llm_guardrail || null,
                           // Force markdown to be included in config - use the same value as top-level
                           markdown: savedTask.markdown !== undefined ? savedTask.markdown : (savedTask.config?.markdown || false)
                         }

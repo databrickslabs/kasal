@@ -8,6 +8,11 @@ from src.models.crew import Crew
 from src.repositories.crew_repository import CrewRepository
 from src.schemas.crew import CrewCreate, CrewUpdate
 from src.utils.user_context import GroupContext
+from src.utils.sensitive_data_utils import (
+    encrypt_sensitive_fields,
+    decrypt_sensitive_fields,
+    safe_log_tool_configs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -15,91 +20,147 @@ logger = logging.getLogger(__name__)
 class CrewService:
     """
     Service for Crew model with business logic.
+
+    Security: This service handles encryption/decryption of sensitive fields
+    in tool_configs to protect credentials stored in the database.
     """
-    
+
     def __init__(self, session: AsyncSession):
         """
         Initialize the service with database session.
-        
+
         Args:
             session: Database session for operations
         """
         self.session = session
         self.repository = CrewRepository(session)
+
+    def _decrypt_crew_tool_configs(self, crew: Optional[Crew]) -> Optional[Crew]:
+        """
+        Decrypt sensitive fields in crew's tool_configs after retrieval.
+
+        Args:
+            crew: Crew with potentially encrypted tool_configs
+
+        Returns:
+            Crew with decrypted tool_configs (in-memory only)
+        """
+        if crew and crew.tool_configs:
+            try:
+                crew.tool_configs = decrypt_sensitive_fields(crew.tool_configs)
+            except Exception as e:
+                logger.error(f"Failed to decrypt tool_configs for crew {crew.id}: {e}")
+        return crew
+
+    def _encrypt_tool_configs_in_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Encrypt sensitive fields in tool_configs before storage.
+
+        Args:
+            data: Dictionary containing crew data with tool_configs
+
+        Returns:
+            Dictionary with encrypted tool_configs
+        """
+        if 'tool_configs' in data and data['tool_configs']:
+            try:
+                data['tool_configs'] = encrypt_sensitive_fields(data['tool_configs'])
+                logger.debug(safe_log_tool_configs(data['tool_configs'], "Encrypted "))
+            except Exception as e:
+                logger.error(f"Failed to encrypt tool_configs: {e}")
+                raise
+        return data
     
     async def get(self, id: UUID) -> Optional[Crew]:
         """
-        Get a crew by ID.
-        
+        Get a crew by ID with decrypted tool_configs.
+
         Args:
             id: ID of the crew to get
-            
+
         Returns:
-            Crew if found, else None
+            Crew if found, else None (with decrypted tool_configs)
         """
-        return await self.repository.get(id)
-        
+        crew = await self.repository.get(id)
+        return self._decrypt_crew_tool_configs(crew)
+
     async def create(self, obj_in: CrewCreate) -> Crew:
         """
-        Create a new crew.
-        
+        Create a new crew with encrypted tool_configs.
+
         Args:
             obj_in: Crew data for creation
-            
+
         Returns:
-            Created crew
+            Created crew (with decrypted tool_configs for response)
         """
-        return await self.repository.create(obj_in.model_dump())
-    
+        data = obj_in.model_dump()
+        data = self._encrypt_tool_configs_in_data(data)
+        crew = await self.repository.create(data)
+        self._decrypt_crew_tool_configs(crew)
+        return crew
+
     async def find_by_name(self, name: str) -> Optional[Crew]:
         """
-        Find a crew by name.
-        
+        Find a crew by name with decrypted tool_configs.
+
         Args:
             name: Name to search for
-            
+
         Returns:
-            Crew if found, else None
+            Crew if found, else None (with decrypted tool_configs)
         """
-        return await self.repository.find_by_name(name)
-    
+        crew = await self.repository.find_by_name(name)
+        return self._decrypt_crew_tool_configs(crew)
+
     async def find_all(self) -> List[Crew]:
         """
-        Find all crews.
-        
+        Find all crews with decrypted tool_configs.
+
         Returns:
-            List of all crews
+            List of all crews (with decrypted tool_configs)
         """
-        return await self.repository.find_all()
-    
+        crews = await self.repository.find_all()
+        for crew in crews:
+            self._decrypt_crew_tool_configs(crew)
+        return crews
+
     async def update_with_partial_data(self, id: UUID, obj_in: CrewUpdate) -> Optional[Crew]:
         """
         Update a crew with partial data, only updating fields that are set.
-        
+        Encrypts sensitive fields in tool_configs before storage.
+
         Args:
             id: ID of the crew to update
             obj_in: Schema with fields to update
-            
+
         Returns:
-            Updated crew if found, else None
+            Updated crew if found, else None (with decrypted tool_configs)
         """
         # Exclude unset fields (None) from update
         update_data = obj_in.model_dump(exclude_none=True)
         if not update_data:
             # No fields to update
             return await self.get(id)
-        
-        return await self.repository.update(id, update_data)
+
+        # Encrypt sensitive fields in tool_configs before storage
+        if 'tool_configs' in update_data:
+            logger.debug(f"CrewService: encrypting tool_configs for crew {id}")
+            update_data = self._encrypt_tool_configs_in_data(update_data)
+
+        crew = await self.repository.update(id, update_data)
+        return self._decrypt_crew_tool_configs(crew)
     
     async def create_crew(self, obj_in: CrewCreate) -> Optional[Crew]:
         """
         Create a new crew with properly serialized data.
-        
+        Encrypts sensitive fields in tool_configs before storage.
+
         Args:
             obj_in: Crew data for creation
-            
+
         Returns:
-            Created crew
+            Created crew (with decrypted tool_configs for response)
         """
         try:
             # Log details for debugging
@@ -108,10 +169,10 @@ class CrewService:
             logger.info(f"Task IDs: {obj_in.task_ids}")
             logger.info(f"Number of nodes: {len(obj_in.nodes) if obj_in.nodes else 0}")
             logger.info(f"Number of edges: {len(obj_in.edges) if obj_in.edges else 0}")
-            
+
             # Properly serialize the complex JSON data
             crew_dict = obj_in.model_dump()
-            
+
             # Ensure all lists are properly initialized
             if crew_dict.get('agent_ids') is None:
                 crew_dict['agent_ids'] = []
@@ -121,13 +182,18 @@ class CrewService:
                 crew_dict['nodes'] = []
             if crew_dict.get('edges') is None:
                 crew_dict['edges'] = []
-                
+
             # Ensure agent_ids and task_ids are strings
             crew_dict['agent_ids'] = [str(agent_id) for agent_id in crew_dict['agent_ids']] if crew_dict['agent_ids'] else []
             crew_dict['task_ids'] = [str(task_id) for task_id in crew_dict['task_ids']] if crew_dict['task_ids'] else []
-                
+
+            # Encrypt sensitive fields in tool_configs before storage
+            crew_dict = self._encrypt_tool_configs_in_data(crew_dict)
+
             # Create the model using the serialized data
-            return await self.repository.create(crew_dict)
+            crew = await self.repository.create(crew_dict)
+            self._decrypt_crew_tool_configs(crew)
+            return crew
         except Exception as e:
             logger.error(f"Error creating crew: {str(e)}")
             raise
@@ -157,13 +223,14 @@ class CrewService:
     async def create_with_group(self, obj_in: CrewCreate, group_context: GroupContext) -> Crew:
         """
         Create a new crew with group context.
-        
+        Encrypts sensitive fields in tool_configs before storage.
+
         Args:
             obj_in: Crew data for creation
             group_context: Group context from headers
-            
+
         Returns:
-            Created crew
+            Created crew (with decrypted tool_configs for response)
         """
         try:
             # Log details for debugging
@@ -172,12 +239,12 @@ class CrewService:
             logger.info(f"Task IDs: {obj_in.task_ids}")
             logger.info(f"Number of nodes: {len(obj_in.nodes)}")
             logger.info(f"Number of edges: {len(obj_in.edges)}")
-            
+
             # Convert schema to dict and add group fields
             crew_data = obj_in.model_dump()
             crew_data['group_id'] = group_context.primary_group_id
             crew_data['created_by_email'] = group_context.group_email
-            
+
             # Ensure all lists are properly initialized
             if crew_data.get('agent_ids') is None:
                 crew_data['agent_ids'] = []
@@ -187,13 +254,18 @@ class CrewService:
                 crew_data['nodes'] = []
             if crew_data.get('edges') is None:
                 crew_data['edges'] = []
-                
+
             # Ensure agent_ids and task_ids are strings
             crew_data['agent_ids'] = [str(agent_id) for agent_id in crew_data['agent_ids']]
             crew_data['task_ids'] = [str(task_id) for task_id in crew_data['task_ids']]
-                
+
+            # Encrypt sensitive fields in tool_configs before storage
+            crew_data = self._encrypt_tool_configs_in_data(crew_data)
+
             # Create the model using the serialized data
-            return await self.repository.create(crew_data)
+            crew = await self.repository.create(crew_data)
+            self._decrypt_crew_tool_configs(crew)
+            return crew
         except Exception as e:
             logger.error(f"Error creating crew with group: {str(e)}")
             raise
@@ -201,40 +273,47 @@ class CrewService:
     async def find_by_group(self, group_context: GroupContext) -> List[Crew]:
         """
         Find all crews for the CURRENT workspace (primary group only).
+        Returns crews with decrypted tool_configs.
 
         Args:
             group_context: Group context from headers
 
         Returns:
-            List of crews for the selected workspace
+            List of crews for the selected workspace (with decrypted tool_configs)
         """
         primary_group_id = getattr(group_context, "primary_group_id", None)
         if not primary_group_id:
             # If no current workspace, return empty list for security
             return []
 
-        return await self.repository.find_by_group([primary_group_id])
+        crews = await self.repository.find_by_group([primary_group_id])
+        for crew in crews:
+            self._decrypt_crew_tool_configs(crew)
+        return crews
 
     async def get_by_group(self, id: UUID, group_context: GroupContext) -> Optional[Crew]:
         """
         Get a crew by ID, ensuring it belongs to the CURRENT workspace (primary group).
+        Returns crew with decrypted tool_configs.
 
         Args:
             id: ID of the crew to get
             group_context: Group context from headers
 
         Returns:
-            Crew if found and belongs to current workspace, else None
+            Crew if found and belongs to current workspace, else None (with decrypted tool_configs)
         """
         primary_group_id = getattr(group_context, "primary_group_id", None)
         if not primary_group_id:
             return None
 
-        return await self.repository.get_by_group(id, [primary_group_id])
+        crew = await self.repository.get_by_group(id, [primary_group_id])
+        return self._decrypt_crew_tool_configs(crew)
 
     async def update_with_partial_data_by_group(self, id: UUID, obj_in: CrewUpdate, group_context: GroupContext) -> Optional[Crew]:
         """
         Update a crew with partial data, ensuring it belongs to the CURRENT workspace (primary group).
+        Encrypts sensitive fields in tool_configs before storage.
 
         Args:
             id: ID of the crew to update
@@ -242,7 +321,7 @@ class CrewService:
             group_context: Group context from headers
 
         Returns:
-            Updated crew if found and belongs to current workspace, else None
+            Updated crew if found and belongs to current workspace, else None (with decrypted tool_configs)
         """
         primary_group_id = getattr(group_context, "primary_group_id", None)
         if not primary_group_id:
@@ -257,9 +336,16 @@ class CrewService:
         update_data = obj_in.model_dump(exclude_none=True)
         if not update_data:
             # No fields to update
+            self._decrypt_crew_tool_configs(existing_crew)
             return existing_crew
 
-        return await self.repository.update(id, update_data)
+        # Encrypt sensitive fields in tool_configs before storage
+        if 'tool_configs' in update_data:
+            logger.debug(f"CrewService: encrypting tool_configs for crew {id}")
+            update_data = self._encrypt_tool_configs_in_data(update_data)
+
+        crew = await self.repository.update(id, update_data)
+        return self._decrypt_crew_tool_configs(crew)
 
     async def delete_by_group(self, id: UUID, group_context: GroupContext) -> bool:
         """

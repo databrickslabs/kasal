@@ -5,19 +5,15 @@ This module provides functions for retrieving and managing execution history
 from the database.
 """
 
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import logging
+import copy
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.repositories.execution_history_repository import ExecutionHistoryRepository
 from src.repositories.execution_logs_repository import ExecutionLogsRepository
-# Services should call other services, not repositories directly
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from src.services.execution_trace_service import ExecutionTraceService
-    from src.services.execution_logs_service import ExecutionLogsService
 from src.schemas.execution_history import (
-    ExecutionHistoryItem, 
+    ExecutionHistoryItem,
     ExecutionHistoryList,
     ExecutionOutput,
     ExecutionOutputList,
@@ -25,6 +21,7 @@ from src.schemas.execution_history import (
     ExecutionOutputDebugList,
     DeleteResponse
 )
+from src.utils.sensitive_data_utils import mask_sensitive_fields
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +45,41 @@ class ExecutionHistoryService:
         self.session = session
         self.history_repo = execution_history_repository or ExecutionHistoryRepository(session)
         self.logs_repo = execution_logs_repository or ExecutionLogsRepository(session)
-    
+
+    def _mask_inputs_sensitive_data(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Mask sensitive fields in execution inputs before returning to API.
+
+        This method processes the inputs dictionary which may contain:
+        - agents_yaml: Dict of agent configs with tool_configs containing secrets
+        - tasks_yaml: Dict of task configs with tool_configs containing secrets
+
+        Args:
+            inputs: The raw inputs dictionary from execution history
+
+        Returns:
+            A copy of inputs with sensitive fields masked
+        """
+        if not inputs:
+            return inputs
+
+        # Create a deep copy to avoid modifying the original
+        masked_inputs = copy.deepcopy(inputs)
+
+        # Mask tool_configs in agents_yaml
+        if 'agents_yaml' in masked_inputs and isinstance(masked_inputs['agents_yaml'], dict):
+            for agent_key, agent_config in masked_inputs['agents_yaml'].items():
+                if isinstance(agent_config, dict) and 'tool_configs' in agent_config:
+                    agent_config['tool_configs'] = mask_sensitive_fields(agent_config['tool_configs'])
+
+        # Mask tool_configs in tasks_yaml
+        if 'tasks_yaml' in masked_inputs and isinstance(masked_inputs['tasks_yaml'], dict):
+            for task_key, task_config in masked_inputs['tasks_yaml'].items():
+                if isinstance(task_config, dict) and 'tool_configs' in task_config:
+                    task_config['tool_configs'] = mask_sensitive_fields(task_config['tool_configs'])
+
+        return masked_inputs
+
     async def get_execution_history(self, limit: int = 50, offset: int = 0, group_ids: List[str] = None) -> ExecutionHistoryList:
         """
         Get paginated execution history with group-based filtering.
@@ -81,15 +112,18 @@ class ExecutionHistoryService:
                 
                 # Extract agents_yaml and tasks_yaml from inputs if available
                 if hasattr(run, 'inputs') and run.inputs:
+                    # Mask sensitive data in inputs before returning
+                    masked_inputs = self._mask_inputs_sensitive_data(run.inputs)
+
                     # Convert agents_yaml and tasks_yaml to JSON strings for the schema
-                    if 'agents_yaml' in run.inputs:
-                        run_dict['agents_yaml'] = json.dumps(run.inputs['agents_yaml']) if isinstance(run.inputs['agents_yaml'], dict) else run.inputs.get('agents_yaml', '')
-                    if 'tasks_yaml' in run.inputs:
-                        run_dict['tasks_yaml'] = json.dumps(run.inputs['tasks_yaml']) if isinstance(run.inputs['tasks_yaml'], dict) else run.inputs.get('tasks_yaml', '')
-                    
-                    # Keep the full inputs for the input field
-                    run_dict['input'] = run.inputs
-                
+                    if 'agents_yaml' in masked_inputs:
+                        run_dict['agents_yaml'] = json.dumps(masked_inputs['agents_yaml']) if isinstance(masked_inputs['agents_yaml'], dict) else masked_inputs.get('agents_yaml', '')
+                    if 'tasks_yaml' in masked_inputs:
+                        run_dict['tasks_yaml'] = json.dumps(masked_inputs['tasks_yaml']) if isinstance(masked_inputs['tasks_yaml'], dict) else masked_inputs.get('tasks_yaml', '')
+
+                    # Keep the full masked inputs for the input field
+                    run_dict['input'] = masked_inputs
+
                 # Create a model-compatible dictionary for validation
                 execution_items.append(ExecutionHistoryItem.model_validate(run_dict))
             
@@ -135,18 +169,21 @@ class ExecutionHistoryService:
             
             # Extract agents_yaml and tasks_yaml from inputs if available
             if hasattr(run, 'inputs') and run.inputs:
+                # Mask sensitive data in inputs before returning
+                masked_inputs = self._mask_inputs_sensitive_data(run.inputs)
+
                 # Convert agents_yaml and tasks_yaml to JSON strings for the schema
-                if 'agents_yaml' in run.inputs:
-                    run_dict['agents_yaml'] = json.dumps(run.inputs['agents_yaml']) if isinstance(run.inputs['agents_yaml'], dict) else run.inputs.get('agents_yaml', '')
-                if 'tasks_yaml' in run.inputs:
-                    run_dict['tasks_yaml'] = json.dumps(run.inputs['tasks_yaml']) if isinstance(run.inputs['tasks_yaml'], dict) else run.inputs.get('tasks_yaml', '')
-                
-                # Keep the full inputs for the input field
-                run_dict['input'] = run.inputs
-            
+                if 'agents_yaml' in masked_inputs:
+                    run_dict['agents_yaml'] = json.dumps(masked_inputs['agents_yaml']) if isinstance(masked_inputs['agents_yaml'], dict) else masked_inputs.get('agents_yaml', '')
+                if 'tasks_yaml' in masked_inputs:
+                    run_dict['tasks_yaml'] = json.dumps(masked_inputs['tasks_yaml']) if isinstance(masked_inputs['tasks_yaml'], dict) else masked_inputs.get('tasks_yaml', '')
+
+                # Keep the full masked inputs for the input field
+                run_dict['input'] = masked_inputs
+
             # Create a model-compatible dictionary for validation
             return ExecutionHistoryItem.model_validate(run_dict)
-            
+
         except SQLAlchemyError as e:
             logger.error(f"Database error retrieving execution {execution_id}: {str(e)}")
             raise
@@ -284,8 +321,10 @@ class ExecutionHistoryService:
                 ))
             
             return ExecutionOutputDebugList(
+                run_id=run.id,
                 execution_id=execution_id,
-                debug_items=debug_items
+                total_outputs=len(debug_items),
+                outputs=debug_items
             )
             
         except SQLAlchemyError as e:
@@ -295,15 +334,22 @@ class ExecutionHistoryService:
             logger.error(f"Error retrieving debug outputs for execution {execution_id}: {str(e)}")
             raise
     
-    async def delete_all_executions(self) -> DeleteResponse:
+    async def delete_all_executions(self, group_ids: List[str] = None) -> DeleteResponse:
         """
-        Delete all executions and their associated data.
+        Delete all executions and their associated data for specified groups.
+
+        Args:
+            group_ids: List of group IDs to filter deletions. If provided, only
+                      executions belonging to these groups will be deleted.
+                      This ensures tenant isolation - users can only delete
+                      executions from their own groups.
 
         Returns:
             DeleteResponse with information about the deleted data
         """
         try:
-            logger.info("Attempting to delete all executions and their associated data")
+            group_filter_msg = f" for groups {group_ids}" if group_ids else " (all groups)"
+            logger.info(f"Attempting to delete all executions and their associated data{group_filter_msg}")
 
             # Import services here to avoid circular imports
             from src.services.execution_trace_service import ExecutionTraceService
@@ -313,37 +359,73 @@ class ExecutionHistoryService:
             trace_service = ExecutionTraceService(self.session)
             logs_service = ExecutionLogsService(self.session)
 
-            # Delete all traces first to avoid foreign key constraint violations
-            # For now we need to access the repository directly since ExecutionTraceService
-            # doesn't have a delete_all method yet. This should be refactored.
-            trace_count = await trace_service.repository.delete_all()
+            # Get job_ids for the group first (needed to delete related data)
+            if group_ids and len(group_ids) > 0:
+                from sqlalchemy import select
+                from src.models.execution_history import ExecutionHistory
+                stmt = select(ExecutionHistory.job_id).where(
+                    ExecutionHistory.group_id.in_(group_ids)
+                )
+                result = await self.session.execute(stmt)
+                job_ids = [row[0] for row in result.fetchall()]
 
-            # Delete all logs
-            log_count = await logs_service.delete_all_logs()
+                if not job_ids:
+                    return DeleteResponse(
+                        success=True,
+                        message="No executions found for the specified groups."
+                    )
 
-            # Delete all executions and associated data last (after dependent records are gone)
-            result = await self.history_repo.delete_all_executions()
-            
+                # Delete traces for these job_ids
+                trace_count = 0
+                for job_id in job_ids:
+                    trace_count += await trace_service.repository.delete_by_job_id(job_id)
+
+                # Delete logs for these job_ids
+                log_count = 0
+                for job_id in job_ids:
+                    log_count += await logs_service.delete_by_execution_id(job_id)
+            else:
+                # Delete all traces (no group filtering)
+                trace_count = await trace_service.repository.delete_all()
+                # Delete all logs
+                log_count = await logs_service.delete_all_logs()
+
+            # Delete executions and associated data (with group filtering)
+            result = await self.history_repo.delete_all_executions(group_ids=group_ids)
+
             # Clear in-memory executions from ExecutionService and CrewAIExecutionService
+            # Note: For group-filtered deletes, we only clear matching job_ids
             from src.services.execution_service import ExecutionService
             from src.services.crewai_execution_service import executions as crewai_executions
-            
-            execution_count_before = len(ExecutionService.executions)
-            crewai_execution_count_before = len(crewai_executions)
-            
-            ExecutionService.executions.clear()
-            crewai_executions.clear()
-            
+
+            if group_ids and len(group_ids) > 0:
+                # Only clear in-memory executions that match the deleted job_ids
+                execution_count_before = 0
+                crewai_execution_count_before = 0
+                for job_id in job_ids:
+                    if job_id in ExecutionService.executions:
+                        del ExecutionService.executions[job_id]
+                        execution_count_before += 1
+                    if job_id in crewai_executions:
+                        del crewai_executions[job_id]
+                        crewai_execution_count_before += 1
+            else:
+                # Clear all in-memory executions
+                execution_count_before = len(ExecutionService.executions)
+                crewai_execution_count_before = len(crewai_executions)
+                ExecutionService.executions.clear()
+                crewai_executions.clear()
+
             logger.info(f"Cleared {execution_count_before} in-memory executions from ExecutionService")
             logger.info(f"Cleared {crewai_execution_count_before} in-memory executions from CrewAIExecutionService")
-            
+
             return DeleteResponse(
                 success=True,
                 message=f"Deleted {result['run_count']} executions, {result['task_status_count']} task statuses, "
                         f"{result['error_trace_count']} error traces, {log_count} logs, {trace_count} traces, "
                         f"and {execution_count_before + crewai_execution_count_before} in-memory executions."
             )
-            
+
         except SQLAlchemyError as e:
             logger.error(f"Database error deleting all executions: {str(e)}")
             raise
@@ -514,24 +596,148 @@ class ExecutionHistoryService:
             
             # Extract agents_yaml and tasks_yaml from inputs if available
             if hasattr(run, 'inputs') and run.inputs:
+                # Mask sensitive data in inputs before returning
+                masked_inputs = self._mask_inputs_sensitive_data(run.inputs)
+
                 # Convert agents_yaml and tasks_yaml to JSON strings for the schema
-                if 'agents_yaml' in run.inputs:
-                    run_dict['agents_yaml'] = json.dumps(run.inputs['agents_yaml']) if isinstance(run.inputs['agents_yaml'], dict) else run.inputs.get('agents_yaml', '')
-                if 'tasks_yaml' in run.inputs:
-                    run_dict['tasks_yaml'] = json.dumps(run.inputs['tasks_yaml']) if isinstance(run.inputs['tasks_yaml'], dict) else run.inputs.get('tasks_yaml', '')
-                
-                # Keep the full inputs for the input field
-                run_dict['input'] = run.inputs
-            
+                if 'agents_yaml' in masked_inputs:
+                    run_dict['agents_yaml'] = json.dumps(masked_inputs['agents_yaml']) if isinstance(masked_inputs['agents_yaml'], dict) else masked_inputs.get('agents_yaml', '')
+                if 'tasks_yaml' in masked_inputs:
+                    run_dict['tasks_yaml'] = json.dumps(masked_inputs['tasks_yaml']) if isinstance(masked_inputs['tasks_yaml'], dict) else masked_inputs.get('tasks_yaml', '')
+
+                # Keep the full masked inputs for the input field
+                run_dict['input'] = masked_inputs
+
             # Create a model-compatible dictionary for validation
             return ExecutionHistoryItem.model_validate(run_dict)
-            
+
         except SQLAlchemyError as e:
             logger.error(f"Database error retrieving execution with job_id {job_id}: {str(e)}")
             raise
         except Exception as e:
             logger.error(f"Error retrieving execution with job_id {job_id}: {str(e)}", exc_info=True)
             raise
+
+    async def get_checkpoints_for_flow(
+        self,
+        flow_id,
+        group_id: Optional[str] = None,
+        status_filter: Optional[str] = "active"
+    ) -> List:
+        """
+        Get available checkpoints for a specific flow.
+
+        Args:
+            flow_id: UUID of the flow
+            group_id: Group ID for tenant filtering
+            status_filter: Filter by checkpoint status (default: 'active')
+
+        Returns:
+            List of ExecutionHistory records with active checkpoints
+        """
+        try:
+            return await self.history_repo.get_checkpoints_for_flow(
+                flow_id=flow_id,
+                group_id=group_id,
+                status_filter=status_filter
+            )
+        except SQLAlchemyError as e:
+            logger.error(f"Database error getting checkpoints for flow {flow_id}: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error getting checkpoints for flow {flow_id}: {str(e)}")
+            raise
+
+    async def expire_checkpoint(
+        self,
+        execution_id: int,
+        group_id: Optional[str] = None
+    ) -> bool:
+        """
+        Mark a checkpoint as expired so it won't appear in resume list.
+
+        Args:
+            execution_id: ID of the execution to expire
+            group_id: Group ID for tenant filtering
+
+        Returns:
+            True if successfully expired
+        """
+        try:
+            return await self.history_repo.update_checkpoint_status(
+                execution_id=execution_id,
+                status="expired",
+                group_id=group_id
+            )
+        except SQLAlchemyError as e:
+            logger.error(f"Database error expiring checkpoint {execution_id}: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error expiring checkpoint {execution_id}: {str(e)}")
+            raise
+
+    async def set_checkpoint_active(
+        self,
+        execution_id: int,
+        flow_uuid: str,
+        checkpoint_method: Optional[str] = None
+    ) -> bool:
+        """
+        Set a checkpoint as active for an execution.
+
+        Called when a flow execution with @persist completes or checkpoints.
+
+        Args:
+            execution_id: ID of the execution
+            flow_uuid: CrewAI's state.id
+            checkpoint_method: Name of the last checkpointed method
+
+        Returns:
+            True if successfully updated
+        """
+        try:
+            result = await self.history_repo.set_checkpoint_info(
+                execution_id=execution_id,
+                flow_uuid=flow_uuid,
+                checkpoint_status="active",
+                checkpoint_method=checkpoint_method
+            )
+            await self.session.commit()
+            return result
+        except SQLAlchemyError as e:
+            logger.error(f"Database error setting checkpoint for execution {execution_id}: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error setting checkpoint for execution {execution_id}: {str(e)}")
+            raise
+
+    async def mark_checkpoint_resumed(
+        self,
+        execution_id: int,
+        new_execution_id: int
+    ) -> bool:
+        """
+        Mark a checkpoint as resumed when a new execution resumes from it.
+
+        Args:
+            execution_id: ID of the original execution being resumed from
+            new_execution_id: ID of the new execution that's resuming
+
+        Returns:
+            True if successfully updated
+        """
+        try:
+            return await self.history_repo.update_checkpoint_status(
+                execution_id=execution_id,
+                status="resumed"
+            )
+        except SQLAlchemyError as e:
+            logger.error(f"Database error marking checkpoint {execution_id} as resumed: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error marking checkpoint {execution_id} as resumed: {str(e)}")
+            raise
+
 
 from src.core.dependencies import SessionDep
 

@@ -7,6 +7,7 @@ including validation, serialization, and field constraints.
 import pytest
 import json
 from datetime import datetime
+from uuid import uuid4, UUID
 from pydantic import ValidationError
 from typing import Dict, Any, List
 
@@ -222,14 +223,17 @@ class TestCrewConfig:
         assert config.execution_type == "crew"
         assert config.schema_detection_enabled is False
     
-    def test_crew_config_missing_required_fields(self):
-        """Test CrewConfig validation with missing required fields."""
-        with pytest.raises(ValidationError) as exc_info:
-            CrewConfig(agents_yaml={}, tasks_yaml={})
-        
-        errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
-        assert "inputs" in missing_fields
+    def test_crew_config_optional_fields_with_defaults(self):
+        """Test CrewConfig optional fields use default_factory for empty dicts."""
+        # agents_yaml, tasks_yaml, and inputs should default to empty dicts
+        config = CrewConfig()
+
+        assert config.agents_yaml == {}
+        assert config.tasks_yaml == {}
+        assert config.inputs == {}
+        assert config.planning is False
+        assert config.reasoning is False
+        assert config.execution_type == "crew"
     
     def test_crew_config_tasks_property(self):
         """Test CrewConfig tasks property with dict values."""
@@ -352,13 +356,13 @@ class TestCrewConfig:
         """Test CrewConfig with various LLM providers."""
         providers = [
             "openai",
-            "anthropic", 
+            "anthropic",
             "databricks",
             "azure_openai",
             "google",
             "local"
         ]
-        
+
         for provider in providers:
             config_data = {
                 "agents_yaml": {"agent1": {"role": "worker"}},
@@ -368,6 +372,203 @@ class TestCrewConfig:
             }
             config = CrewConfig(**config_data)
             assert config.llm_provider == provider
+
+
+class TestCrewConfigFlowFields:
+    """Test cases for CrewConfig flow execution fields."""
+
+    def test_crew_config_flow_execution_type(self):
+        """Test CrewConfig with flow execution type."""
+        flow_id = str(uuid4())
+        config = CrewConfig(
+            execution_type="flow",
+            flow_id=flow_id,
+            nodes=[{"id": "node1", "type": "crew"}],
+            edges=[{"source": "node1", "target": "node2"}]
+        )
+
+        assert config.execution_type == "flow"
+        assert config.flow_id == flow_id
+        assert len(config.nodes) == 1
+        assert len(config.edges) == 1
+
+    def test_crew_config_with_all_flow_fields(self):
+        """Test CrewConfig with all flow-related fields."""
+        flow_id = str(uuid4())
+        nodes = [
+            {"id": "crew1", "type": "crew", "data": {"name": "Research Crew"}},
+            {"id": "crew2", "type": "crew", "data": {"name": "Analysis Crew"}},
+            {"id": "router", "type": "router", "data": {"conditions": []}}
+        ]
+        edges = [
+            {"id": "e1", "source": "crew1", "target": "router"},
+            {"id": "e2", "source": "router", "target": "crew2"}
+        ]
+        flow_config = {
+            "start_method": "kickoff",
+            "max_concurrency": 5,
+            "checkpoint_enabled": True,
+            "error_handling": "retry"
+        }
+
+        config = CrewConfig(
+            execution_type="flow",
+            flow_id=flow_id,
+            nodes=nodes,
+            edges=edges,
+            flow_config=flow_config,
+            inputs={"topic": "AI research"},
+            planning=True,
+            model="gpt-4"
+        )
+
+        assert config.execution_type == "flow"
+        assert config.flow_id == flow_id
+        assert len(config.nodes) == 3
+        assert len(config.edges) == 2
+        assert config.flow_config["checkpoint_enabled"] is True
+        assert config.inputs["topic"] == "AI research"
+        assert config.planning is True
+
+    def test_crew_config_flow_fields_nullable_for_crew(self):
+        """Test CrewConfig flow fields are nullable for crew execution."""
+        config = CrewConfig(
+            execution_type="crew",
+            agents_yaml={"agent": {"role": "test"}},
+            tasks_yaml={"task": {"description": "test"}},
+            inputs={}
+        )
+
+        assert config.flow_id is None
+        assert config.nodes is None
+        assert config.edges is None
+        assert config.flow_config is None
+
+    def test_crew_config_flow_id_accepts_string(self):
+        """Test CrewConfig accepts string for flow_id (UUID as string)."""
+        flow_id = str(uuid4())
+        config = CrewConfig(
+            execution_type="flow",
+            flow_id=flow_id,
+            nodes=[],
+            edges=[]
+        )
+
+        assert config.flow_id == flow_id
+        assert isinstance(config.flow_id, str)
+
+    def test_crew_config_flow_without_agents_tasks(self):
+        """Test CrewConfig for flow execution without agents/tasks (uses defaults)."""
+        config = CrewConfig(
+            execution_type="flow",
+            flow_id=str(uuid4()),
+            nodes=[{"id": "n1"}],
+            edges=[]
+        )
+
+        # Should use default_factory=dict for agents_yaml and tasks_yaml
+        assert config.agents_yaml == {}
+        assert config.tasks_yaml == {}
+
+    def test_crew_config_flow_with_complex_nodes(self):
+        """Test CrewConfig with complex flow nodes structure."""
+        nodes = [
+            {
+                "id": "start",
+                "type": "start",
+                "position": {"x": 0, "y": 0},
+                "data": {}
+            },
+            {
+                "id": "crew_research",
+                "type": "crew",
+                "position": {"x": 200, "y": 0},
+                "data": {
+                    "name": "Research Crew",
+                    "agents_yaml": {"researcher": {"role": "Researcher"}},
+                    "tasks_yaml": {"research": {"description": "Research topic"}}
+                }
+            },
+            {
+                "id": "router_decision",
+                "type": "router",
+                "position": {"x": 400, "y": 0},
+                "data": {
+                    "conditions": [
+                        {"key": "result", "operator": "contains", "value": "success"}
+                    ]
+                }
+            },
+            {
+                "id": "end",
+                "type": "end",
+                "position": {"x": 600, "y": 0},
+                "data": {}
+            }
+        ]
+        edges = [
+            {"id": "e1", "source": "start", "target": "crew_research", "sourceHandle": "output"},
+            {"id": "e2", "source": "crew_research", "target": "router_decision", "sourceHandle": "output"},
+            {"id": "e3", "source": "router_decision", "target": "end", "sourceHandle": "true"}
+        ]
+
+        config = CrewConfig(
+            execution_type="flow",
+            nodes=nodes,
+            edges=edges
+        )
+
+        assert len(config.nodes) == 4
+        assert len(config.edges) == 3
+        assert config.nodes[1]["data"]["name"] == "Research Crew"
+        assert config.edges[0]["sourceHandle"] == "output"
+
+    def test_crew_config_flow_config_structure(self):
+        """Test CrewConfig with various flow_config structures."""
+        flow_configs = [
+            {"start_method": "kickoff"},
+            {"checkpoint_enabled": True, "max_concurrency": 10},
+            {"error_handling": "retry", "retry_count": 3},
+            {"parallel_execution": True, "timeout": 3600},
+            {}  # Empty config
+        ]
+
+        for fc in flow_configs:
+            config = CrewConfig(
+                execution_type="flow",
+                flow_id=str(uuid4()),
+                flow_config=fc
+            )
+            assert config.flow_config == fc
+
+    def test_crew_config_resume_parameters(self):
+        """Test CrewConfig with checkpoint resume parameters."""
+        config = CrewConfig(
+            execution_type="flow",
+            flow_id=str(uuid4()),
+            nodes=[{"id": "n1"}],
+            edges=[],
+            resume_from_flow_uuid="state-uuid-12345",
+            resume_from_execution_id=123,
+            resume_from_crew_sequence=2
+        )
+
+        assert config.resume_from_flow_uuid == "state-uuid-12345"
+        assert config.resume_from_execution_id == 123
+        assert config.resume_from_crew_sequence == 2
+
+    def test_crew_config_model_config_extra_allow(self):
+        """Test CrewConfig allows extra fields."""
+        config = CrewConfig(
+            execution_type="crew",
+            agents_yaml={},
+            tasks_yaml={},
+            custom_field="custom_value"
+        )
+
+        # The model_config has extra="allow", so this should work
+        assert hasattr(config, 'custom_field')
+        assert config.custom_field == "custom_value"
 
 
 class TestExecutionBase:
@@ -455,7 +656,8 @@ class TestExecutionResponse:
         now = datetime.now()
         started = datetime(2023, 1, 1, 10, 0, 0)
         completed = datetime(2023, 1, 1, 10, 30, 0)
-        
+        flow_id_str = str(uuid4())
+
         response_data = {
             "execution_id": "exec_full_456",
             "status": "completed",
@@ -464,7 +666,7 @@ class TestExecutionResponse:
             "error": None,
             "run_name": "Quarterly Analysis",
             "id": 789,
-            "flow_id": 101,
+            "flow_id": flow_id_str,
             "crew_id": 202,
             "execution_key": "quarterly_2023_q4",
             "started_at": started,
@@ -476,10 +678,10 @@ class TestExecutionResponse:
             "group_email": "analyst@company.com"
         }
         response = ExecutionResponse(**response_data)
-        
+
         assert response.execution_id == "exec_full_456"
         assert response.id == 789
-        assert response.flow_id == 101
+        assert response.flow_id == flow_id_str
         assert response.crew_id == 202
         assert response.execution_key == "quarterly_2023_q4"
         assert response.started_at == started
@@ -774,19 +976,20 @@ class TestSchemaIntegration:
         
         # Execution response
         now = datetime.now()
+        flow_id_str = str(uuid4())
         execution_response = ExecutionResponse(
             execution_id=create_response.execution_id,
             status="running",
             created_at=now,
-            flow_id=456,
+            flow_id=flow_id_str,
             execution_config=flow_config.normalize(),
             started_at=now,
             group_email="analytics@company.com"
         )
-        
+
         # Verify flow workflow
         assert flow_config.execution_type == "flow"
-        assert execution_response.flow_id == 456
+        assert execution_response.flow_id == flow_id_str
         assert execution_response.execution_config["name"] == "Customer Analytics Flow"
         assert execution_response.execution_config["planning"] is True
         assert execution_response.execution_config["reasoning"] is True

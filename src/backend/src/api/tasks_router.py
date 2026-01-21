@@ -9,6 +9,7 @@ from src.models.task import Task
 from src.schemas.task import Task as TaskSchema
 from src.schemas.task import TaskCreate, TaskUpdate
 from src.services.task_service import TaskService
+from src.utils.sensitive_data_utils import safe_log_tool_configs
 
 router = APIRouter(
     prefix="/tasks",
@@ -121,9 +122,9 @@ async def get_task(
                 detail="Task not found",
             )
         
-        # Debug logging for tool_configs
+        # Debug logging for tool_configs (with sensitive data masked)
         if hasattr(task, 'tool_configs'):
-            logger.info(f"GET task {task_id} - tool_configs value: {task.tool_configs}")
+            logger.info(f"GET task {task_id} - {safe_log_tool_configs(task.tool_configs)}")
         else:
             logger.warning(f"GET task {task_id} - no tool_configs attribute found")
         

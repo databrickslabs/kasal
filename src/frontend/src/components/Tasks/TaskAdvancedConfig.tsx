@@ -36,7 +36,7 @@ const TaskAdvancedConfigComponent: React.FC<TaskAdvancedConfigProps> = ({
   
   const [pydanticModels, setPydanticModels] = useState<Array<{ value: string, label: string }>>([]);
   const [databricksConfig, setDatabricksConfig] = useState<DatabricksVolumeConfig | null>(null);
-  
+
   // Fetch Pydantic models from SchemaService
   useEffect(() => {
     const fetchPydanticModels = async () => {
@@ -232,8 +232,8 @@ const TaskAdvancedConfigComponent: React.FC<TaskAdvancedConfigProps> = ({
   // Parse guardrail config from string
   const guardrailConfig = React.useMemo(() => {
     try {
-      return advancedConfig.guardrail ? 
-        JSON.parse(advancedConfig.guardrail as string) : 
+      return advancedConfig.guardrail ?
+        JSON.parse(advancedConfig.guardrail as string) :
         null;
     } catch (error) {
       console.error('Error parsing guardrail config:', error);
@@ -573,6 +573,7 @@ const TaskAdvancedConfigComponent: React.FC<TaskAdvancedConfigProps> = ({
           />
         </Box>
       )}
+
     </Box>
   );
 };

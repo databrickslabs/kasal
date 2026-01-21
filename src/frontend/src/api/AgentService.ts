@@ -41,7 +41,7 @@ export class AgentService {
         memory: true,
         max_tokens: 2000, // Default max output tokens
         max_context_window_size: 8192, // Default context window size
-        max_rpm: 3, // Default RPM to prevent rate limiting with Anthropic models
+        max_rpm: 10, // Default RPM to prevent rate limiting
       };
 
       // If a model is specified, get its configuration
@@ -94,7 +94,7 @@ export class AgentService {
         memory: true,
         max_tokens: 2000, // Default max output tokens
         max_context_window_size: 8192, // Default context window size
-        max_rpm: 3, // Default RPM to prevent rate limiting with Anthropic models
+        max_rpm: 10, // Default RPM to prevent rate limiting
       };
 
       // If a model is specified, get its configuration

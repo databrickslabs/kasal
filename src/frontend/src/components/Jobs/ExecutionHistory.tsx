@@ -136,11 +136,20 @@ const DurationCell: React.FC<{ run: Run }> = ({ run }) => {
 interface ScheduleCreateData {
   name: string;
   cron_expression: string;
-  agents_yaml: Record<string, AgentYaml>;
-  tasks_yaml: Record<string, TaskYaml>;
+  execution_type?: 'crew' | 'flow';
+  // Crew fields
+  agents_yaml?: Record<string, AgentYaml>;
+  tasks_yaml?: Record<string, TaskYaml>;
+  // Flow fields
+  flow_id?: string;
+  nodes?: any[];
+  edges?: any[];
+  flow_config?: Record<string, unknown>;
+  // Common fields
   inputs: Record<string, unknown>;
   is_active: boolean;
   planning: boolean;
+  model?: string;
 }
 
 interface RunHistoryProps {
@@ -486,86 +495,140 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
       return;
     }
 
-    // Extract complete YAML configuration data from execution
-    let agents_yaml = null;
-    let tasks_yaml = null;
-    
-    // First try to get from the inputs object (this is where the complete config is stored)
-    if (selectedRunForSchedule.inputs?.agents_yaml) {
-      agents_yaml = selectedRunForSchedule.inputs.agents_yaml;
-    }
-    if (selectedRunForSchedule.inputs?.tasks_yaml) {
-      tasks_yaml = selectedRunForSchedule.inputs.tasks_yaml;
-    }
-    
-    // Fallback to direct properties (now properly populated from backend)
-    if (!agents_yaml && selectedRunForSchedule.agents_yaml) {
-      try {
-        agents_yaml = typeof selectedRunForSchedule.agents_yaml === 'string' 
-          ? JSON.parse(selectedRunForSchedule.agents_yaml) 
-          : selectedRunForSchedule.agents_yaml;
-      } catch (e) {
-        console.warn('Failed to parse agents_yaml string:', e);
-      }
-    }
-    if (!tasks_yaml && selectedRunForSchedule.tasks_yaml) {
-      try {
-        tasks_yaml = typeof selectedRunForSchedule.tasks_yaml === 'string' 
-          ? JSON.parse(selectedRunForSchedule.tasks_yaml) 
-          : selectedRunForSchedule.tasks_yaml;
-      } catch (e) {
-        console.warn('Failed to parse tasks_yaml string:', e);
-      }
-    }
+    // Determine execution type from the run
+    const executionType = selectedRunForSchedule.execution_type ||
+                         selectedRunForSchedule.inputs?.execution_type ||
+                         'crew';
 
-    let finalAgentsYaml = '';
-    let finalTasksYaml = '';
-    
-    if (agents_yaml && tasks_yaml && Object.keys(agents_yaml).length > 0 && Object.keys(tasks_yaml).length > 0) {
-      // We have complete configuration from the execution
-      finalAgentsYaml = JSON.stringify(agents_yaml);
-      finalTasksYaml = JSON.stringify(tasks_yaml);
+    // Check if this is a flow execution
+    const isFlowExecution = executionType === 'flow';
+
+    if (isFlowExecution) {
+      // Handle flow execution scheduling
+      const flow_id = selectedRunForSchedule.flow_id || selectedRunForSchedule.inputs?.flow_id;
+      const nodes = selectedRunForSchedule.inputs?.nodes;
+      const edges = selectedRunForSchedule.inputs?.edges;
+      const flow_config = selectedRunForSchedule.inputs?.flow_config;
+
+      // Validate flow configuration
+      if (!flow_id && !(nodes && edges && nodes.length > 0 && edges.length >= 0)) {
+        console.error('CRITICAL: Flow execution missing configuration', {
+          executionId: selectedRunForSchedule.id,
+          jobId: selectedRunForSchedule.job_id,
+          runName: selectedRunForSchedule.run_name,
+          hasFlowId: !!flow_id,
+          hasNodes: !!nodes,
+          hasEdges: !!edges,
+          nodesCount: nodes?.length || 0,
+          edgesCount: edges?.length || 0
+        });
+
+        toast.error('❌ Cannot schedule: This flow execution is missing its flow configuration. Please create a new execution with proper configuration instead.', {
+          duration: 10000,
+        });
+        return;
+      }
+
+      try {
+        const scheduleData: ScheduleCreateData = {
+          name: scheduleName,
+          cron_expression: cronExpression,
+          execution_type: 'flow',
+          flow_id: flow_id,
+          nodes: nodes,
+          edges: edges,
+          flow_config: flow_config || {},
+          inputs: selectedRunForSchedule.inputs?.inputs || {},
+          is_active: true,
+          planning: selectedRunForSchedule.inputs?.planning || false,
+          model: selectedRunForSchedule.inputs?.model,
+        };
+
+        await ScheduleService.createSchedule(scheduleData);
+        setScheduleDialogOpen(false);
+        setSelectedRunForSchedule(null);
+        setScheduleName('');
+        setCronExpression('0 0 * * *');
+        toast.success('Flow schedule created successfully');
+      } catch (error) {
+        console.error('Error scheduling flow job:', error);
+        toast.error('Failed to schedule flow job');
+      }
     } else {
-      // This should NEVER happen in production - it means the execution is missing configuration
-      console.error('CRITICAL: Execution missing configuration', {
-        executionId: selectedRunForSchedule.id,
-        jobId: selectedRunForSchedule.job_id,
-        runName: selectedRunForSchedule.run_name,
-        hasInputs: !!selectedRunForSchedule.inputs,
-        hasAgentsYaml: !!agents_yaml,
-        hasTasksYaml: !!tasks_yaml,
-        agentsYamlKeys: agents_yaml ? Object.keys(agents_yaml) : [],
-        tasksYamlKeys: tasks_yaml ? Object.keys(tasks_yaml) : []
-      });
-      
-      // Prevent scheduling without proper configuration
-      toast.error('❌ Cannot schedule: This execution is missing its agent and task configuration. Please create a new execution with proper configuration instead.', {
-        duration: 10000,
-      });
-      
-      // Return early to prevent scheduling with invalid config
-      return;
-    }
+      // Handle crew execution scheduling (existing logic)
+      let agents_yaml = null;
+      let tasks_yaml = null;
 
-    try {
-      const scheduleData: ScheduleCreateData = {
-        name: scheduleName,
-        cron_expression: cronExpression,
-        agents_yaml: JSON.parse(finalAgentsYaml || '{}'),
-        tasks_yaml: JSON.parse(finalTasksYaml || '{}'),
-        inputs: {},
-        is_active: true,
-        planning: false,
-      };
+      // First try to get from the inputs object (this is where the complete config is stored)
+      if (selectedRunForSchedule.inputs?.agents_yaml) {
+        agents_yaml = selectedRunForSchedule.inputs.agents_yaml;
+      }
+      if (selectedRunForSchedule.inputs?.tasks_yaml) {
+        tasks_yaml = selectedRunForSchedule.inputs.tasks_yaml;
+      }
 
-      await ScheduleService.createSchedule(scheduleData);
-      setScheduleDialogOpen(false);
-      setSelectedRunForSchedule(null);
-      setScheduleName('');
-      setCronExpression('0 0 * * *');
-    } catch (error) {
-      console.error('Error scheduling job:', error);
-      toast.error('Failed to schedule job');
+      // Fallback to direct properties (now properly populated from backend)
+      if (!agents_yaml && selectedRunForSchedule.agents_yaml) {
+        try {
+          agents_yaml = typeof selectedRunForSchedule.agents_yaml === 'string'
+            ? JSON.parse(selectedRunForSchedule.agents_yaml)
+            : selectedRunForSchedule.agents_yaml;
+        } catch (e) {
+          console.warn('Failed to parse agents_yaml string:', e);
+        }
+      }
+      if (!tasks_yaml && selectedRunForSchedule.tasks_yaml) {
+        try {
+          tasks_yaml = typeof selectedRunForSchedule.tasks_yaml === 'string'
+            ? JSON.parse(selectedRunForSchedule.tasks_yaml)
+            : selectedRunForSchedule.tasks_yaml;
+        } catch (e) {
+          console.warn('Failed to parse tasks_yaml string:', e);
+        }
+      }
+
+      // Validate crew configuration
+      if (!agents_yaml || !tasks_yaml || Object.keys(agents_yaml).length === 0 || Object.keys(tasks_yaml).length === 0) {
+        console.error('CRITICAL: Crew execution missing configuration', {
+          executionId: selectedRunForSchedule.id,
+          jobId: selectedRunForSchedule.job_id,
+          runName: selectedRunForSchedule.run_name,
+          hasInputs: !!selectedRunForSchedule.inputs,
+          hasAgentsYaml: !!agents_yaml,
+          hasTasksYaml: !!tasks_yaml,
+          agentsYamlKeys: agents_yaml ? Object.keys(agents_yaml) : [],
+          tasksYamlKeys: tasks_yaml ? Object.keys(tasks_yaml) : []
+        });
+
+        toast.error('❌ Cannot schedule: This execution is missing its agent and task configuration. Please create a new execution with proper configuration instead.', {
+          duration: 10000,
+        });
+        return;
+      }
+
+      try {
+        const scheduleData: ScheduleCreateData = {
+          name: scheduleName,
+          cron_expression: cronExpression,
+          execution_type: 'crew',
+          agents_yaml: agents_yaml,
+          tasks_yaml: tasks_yaml,
+          inputs: selectedRunForSchedule.inputs?.inputs || {},
+          is_active: true,
+          planning: selectedRunForSchedule.inputs?.planning || false,
+          model: selectedRunForSchedule.inputs?.model,
+        };
+
+        await ScheduleService.createSchedule(scheduleData);
+        setScheduleDialogOpen(false);
+        setSelectedRunForSchedule(null);
+        setScheduleName('');
+        setCronExpression('0 0 * * *');
+        toast.success('Crew schedule created successfully');
+      } catch (error) {
+        console.error('Error scheduling crew job:', error);
+        toast.error('Failed to schedule crew job');
+      }
     }
   };
 

@@ -72,25 +72,32 @@ interface EdgeStyleConfig {
  */
 export const getEdgeCategory = (source?: string, target?: string): EdgeCategory => {
   if (!source || !target) return EdgeCategory.AGENT_TO_TASK;
-  
+
   const isSourceFlow = source.includes('flow');
   const isTargetFlow = target.includes('flow');
   const isSourceAgent = source.startsWith('agent-');
+  const isSourceManager = source.startsWith('manager') || source === 'manager-node';
   const isSourceTask = source.startsWith('task-');
+  const isTargetAgent = target.startsWith('agent-');
   const isTargetTask = target.startsWith('task-');
-  
+
   if (isSourceFlow && isTargetFlow) {
     return EdgeCategory.FLOW;
   }
-  
+
+  // Manager-to-agent edges should be treated like agent-to-task (no label)
+  if (isSourceManager && isTargetAgent) {
+    return EdgeCategory.AGENT_TO_TASK;
+  }
+
   if (isSourceAgent && isTargetTask) {
     return EdgeCategory.AGENT_TO_TASK;
   }
-  
+
   if (isSourceTask && isTargetTask) {
     return EdgeCategory.TASK_TO_TASK;
   }
-  
+
   return EdgeCategory.CREW_TO_CREW;
 };
 
@@ -169,8 +176,15 @@ export const getEdgeStyle = (
 // ============================================================================
 
 export const getEdgeLabel = (source?: string, target?: string): string => {
+  // Manager-to-agent edges should have no label
+  const isSourceManager = source?.startsWith('manager') || source === 'manager-node';
+  const isTargetAgent = target?.startsWith('agent-');
+  if (isSourceManager && isTargetAgent) {
+    return '';
+  }
+
   const category = getEdgeCategory(source, target);
-  
+
   switch (category) {
     case EdgeCategory.FLOW:
       return 'state';

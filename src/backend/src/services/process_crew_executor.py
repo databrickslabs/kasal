@@ -135,6 +135,9 @@ def run_crew_in_process(
 
     # Mark that we're in subprocess mode for logging purposes
     os.environ['CREW_SUBPROCESS_MODE'] = 'true'
+    # CRITICAL: Store execution_id in environment for orphaned process detection
+    # This allows us to find and terminate this process even after server reloads
+    os.environ['KASAL_EXECUTION_ID'] = execution_id
 
     # Ensure DATABASE_TYPE is set correctly in subprocess
     # The subprocess needs to know which database to use
@@ -263,6 +266,44 @@ def run_crew_in_process(
             _kasal_builtins.input = _kasal_noinput
         except Exception:
             pass
+
+        # CRITICAL: Patch CrewAI's LLM_CONTEXT_WINDOW_SIZES BEFORE importing Crew
+        # This is necessary because CrewAI has hardcoded context window sizes and
+        # doesn't know about Databricks models. Without this patch, it falls back to
+        # DEFAULT_CONTEXT_WINDOW_SIZE (8192 tokens), causing respect_context_window
+        # to not trigger summarization when needed. This leads to empty responses from
+        # models like Qwen that silently fail when context is too large.
+        try:
+            from crewai.llm import LLM_CONTEXT_WINDOW_SIZES
+            from src.seeds.model_configs import MODEL_CONFIGS
+
+            for model_name, config in MODEL_CONFIGS.items():
+                if config.get('provider') == 'databricks':
+                    full_model_name = f"databricks/{model_name}"
+                    context_window = config.get('context_window', 128000)
+                    LLM_CONTEXT_WINDOW_SIZES[full_model_name] = context_window
+            print(f"[SUBPROCESS] Registered Databricks models with CrewAI context window sizes", file=sys.stderr)
+        except Exception as reg_err:
+            print(f"[SUBPROCESS] Warning: Could not register Databricks models: {reg_err}", file=sys.stderr)
+
+        # CRITICAL: Patch CrewAI's CONTEXT_LIMIT_ERRORS to recognize Databricks error messages
+        # Databricks returns "exceeds maximum allowed content length" which is not in CrewAI's
+        # default error patterns. Without this patch, CrewAI won't trigger summarization
+        # when Databricks returns a context length error.
+        try:
+            from crewai.utilities.exceptions import context_window_exceeding_exception
+            databricks_error_patterns = [
+                "exceeds maximum allowed content length",  # Databricks specific
+                "maximum allowed content length",  # Alternative pattern
+                "requestsize",  # Part of Databricks error format
+            ]
+            for pattern in databricks_error_patterns:
+                if pattern not in context_window_exceeding_exception.CONTEXT_LIMIT_ERRORS:
+                    context_window_exceeding_exception.CONTEXT_LIMIT_ERRORS.append(pattern)
+            print(f"[SUBPROCESS] Registered Databricks error patterns for context limit detection", file=sys.stderr)
+        except Exception as err_reg:
+            print(f"[SUBPROCESS] Warning: Could not register Databricks error patterns: {err_reg}", file=sys.stderr)
+
         from crewai import Crew
 
         # Configure subprocess logging with execution ID
@@ -630,9 +671,13 @@ def run_crew_in_process(
 
                             @wraps(original_completion)
                             def tracked_completion(*args, **kwargs):
-                                # Log before LLM call
+                                import time as _llm_time
+
+                                # Log before LLM call with timestamp
                                 model = kwargs.get('model', 'unknown')
-                                async_logger.info(f"[SUBPROCESS] 🤖 LiteLLM call intercepted - Model: {model}")
+                                llm_start_time = _llm_time.time()
+                                async_logger.info(f"[SUBPROCESS] 🤖 LiteLLM call START - Model: {model}")
+
                                 # Best-effort: log last active trace id before call
                                 try:
                                     import mlflow as _ml_pre
@@ -643,19 +688,38 @@ def run_crew_in_process(
                                     async_logger.info(f"[SUBPROCESS] - Could not get last active trace id (pre-call): {_e_pre}")
 
                                 # Manual nested span as a fallback in case autologging misses it
+                                result = None
+                                llm_error = None
                                 try:
-                                    import mlflow as _ml
-                                    span_name = f"litellm.completion:{model}"
-                                    with _ml.start_span(name=span_name) as _span:
-                                        try:
-                                            _span.set_attribute("model", model)
-                                            _span.set_attribute("mlflow_span_fallback", True)
-                                        except Exception:
-                                            pass
-                                        result = original_completion(*args, **kwargs)
-                                except Exception as _span_err:
-                                    async_logger.warning(f"[SUBPROCESS] Fallback MLflow span failed: {_span_err}")
-                                    result = original_completion(*args, **kwargs)
+                                    try:
+                                        import mlflow as _ml
+                                        span_name = f"litellm.completion:{model}"
+                                        with _ml.start_span(name=span_name) as _span:
+                                            try:
+                                                _span.set_attribute("model", model)
+                                                _span.set_attribute("mlflow_span_fallback", True)
+                                            except Exception:
+                                                pass
+                                            result = original_completion(*args, **kwargs)
+                                    except Exception as _span_err:
+                                        # MLflow span failed, try without span
+                                        if "mlflow" in str(_span_err).lower() or "span" in str(_span_err).lower():
+                                            async_logger.warning(f"[SUBPROCESS] Fallback MLflow span failed: {_span_err}")
+                                            result = original_completion(*args, **kwargs)
+                                        else:
+                                            # This is an actual LLM error, re-raise
+                                            raise
+                                except Exception as _llm_err:
+                                    # Capture LLM error for logging
+                                    llm_error = _llm_err
+                                    # Calculate duration even for errors
+                                    llm_duration = _llm_time.time() - llm_start_time
+                                    async_logger.error(f"[SUBPROCESS] ❌ LiteLLM call FAILED - Model: {model}, Duration: {llm_duration:.2f}s, Error: {str(_llm_err)[:500]}")
+                                    # Re-raise so CrewAI can handle it
+                                    raise
+
+                                # Calculate LLM call duration (for successful calls)
+                                llm_duration = _llm_time.time() - llm_start_time
 
                                 # Best-effort: log last active trace id after call
                                 try:
@@ -666,8 +730,39 @@ def run_crew_in_process(
                                 except Exception as _e_post:
                                     async_logger.info(f"[SUBPROCESS] - Could not get last active trace id (post-call): {_e_post}")
 
-                                # Log after LLM call
-                                async_logger.info(f"[SUBPROCESS] ✅ LiteLLM call completed - Model: {model}")
+                                # Log detailed response information for debugging
+                                try:
+                                    if result is None:
+                                        async_logger.error(f"[SUBPROCESS] ⚠️ LLM Response is None - Model: {model}, Duration: {llm_duration:.2f}s")
+                                    else:
+                                        # Check if result has choices
+                                        choices = getattr(result, 'choices', None)
+                                        if choices is None:
+                                            async_logger.error(f"[SUBPROCESS] ⚠️ LLM Response has no 'choices' - Model: {model}, Duration: {llm_duration:.2f}s, Response type: {type(result)}, Response: {str(result)[:500]}")
+                                        elif len(choices) == 0:
+                                            async_logger.error(f"[SUBPROCESS] ⚠️ LLM Response 'choices' is empty - Model: {model}, Duration: {llm_duration:.2f}s, Response: {str(result)[:500]}")
+                                        else:
+                                            # Check the actual content
+                                            first_choice = choices[0]
+                                            message = getattr(first_choice, 'message', None)
+                                            if message is None:
+                                                async_logger.error(f"[SUBPROCESS] ⚠️ LLM Response choice has no 'message' - Model: {model}, Duration: {llm_duration:.2f}s, Choice: {str(first_choice)[:500]}")
+                                            else:
+                                                content = getattr(message, 'content', None)
+                                                if content is None or content == '':
+                                                    # Log the full message for debugging
+                                                    async_logger.error(f"[SUBPROCESS] ⚠️ LLM Response content is None/empty - Model: {model}, Duration: {llm_duration:.2f}s, Message: {str(message)[:500]}")
+                                                    # Check for reasoning content (some models use this)
+                                                    reasoning = getattr(message, 'reasoning_content', None)
+                                                    if reasoning:
+                                                        async_logger.info(f"[SUBPROCESS] 💡 LLM has reasoning_content: {str(reasoning)[:200]}...")
+                                                else:
+                                                    async_logger.info(f"[SUBPROCESS] ✅ LLM Response OK - Model: {model}, Content length: {len(content)}, Duration: {llm_duration:.2f}s")
+                                except Exception as log_err:
+                                    async_logger.warning(f"[SUBPROCESS] Could not log response details: {log_err}")
+
+                                # Log after LLM call with duration
+                                async_logger.info(f"[SUBPROCESS] ✅ LiteLLM call COMPLETED - Model: {model}, Duration: {llm_duration:.2f}s")
                                 return result
 
                             # Replace litellm.completion with our tracked version
@@ -1095,7 +1190,20 @@ def run_crew_in_process(
 
                             # Execute crew within the active root trace context
                             if inputs:
-                                result = crew.kickoff(inputs=inputs)
+                                # CASE-INSENSITIVE INPUTS: Create both lowercase and uppercase versions
+                                # This allows task descriptions to use {target} or {TARGET}, {dataset_id} or {DATASET_ID}, etc.
+                                case_insensitive_inputs = dict(inputs)  # Start with original inputs
+                                for key, value in inputs.items():
+                                    # Add uppercase version if key is lowercase
+                                    if key.islower() and key.upper() not in inputs:
+                                        case_insensitive_inputs[key.upper()] = value
+                                        async_logger.info(f"[INPUT ALIAS] Added uppercase alias: {key} → {key.upper()}")
+                                    # Add lowercase version if key is uppercase
+                                    elif key.isupper() and key.lower() not in inputs:
+                                        case_insensitive_inputs[key.lower()] = value
+                                        async_logger.info(f"[INPUT ALIAS] Added lowercase alias: {key} → {key.lower()}")
+
+                                result = crew.kickoff(inputs=case_insensitive_inputs)
                             else:
                                 result = crew.kickoff()
 
@@ -1149,9 +1257,22 @@ def run_crew_in_process(
                             async_logger.warning(f"[SUBPROCESS] Could not disable LiteLLM autolog: {autolog_err}")
 
                     if inputs:
-                        async_logger.info(f"Inputs provided: {list(inputs.keys())}")
+                        # CASE-INSENSITIVE INPUTS: Create both lowercase and uppercase versions
+                        # This allows task descriptions to use {target} or {TARGET}, {dataset_id} or {DATASET_ID}, etc.
+                        case_insensitive_inputs = dict(inputs)  # Start with original inputs
+                        for key, value in inputs.items():
+                            # Add uppercase version if key is lowercase
+                            if key.islower() and key.upper() not in inputs:
+                                case_insensitive_inputs[key.upper()] = value
+                                async_logger.info(f"[INPUT ALIAS] Added uppercase alias: {key} → {key.upper()}")
+                            # Add lowercase version if key is uppercase
+                            elif key.isupper() and key.lower() not in inputs:
+                                case_insensitive_inputs[key.lower()] = value
+                                async_logger.info(f"[INPUT ALIAS] Added lowercase alias: {key} → {key.lower()}")
+
+                        async_logger.info(f"Inputs provided: {list(case_insensitive_inputs.keys())}")
                         async_logger.info(f"[SUBPROCESS] ABOUT TO CALL crew.kickoff() - if hang occurs, it's in CrewAI kickoff")
-                        result = crew.kickoff(inputs=inputs)
+                        result = crew.kickoff(inputs=case_insensitive_inputs)
                         async_logger.info(f"[SUBPROCESS] crew.kickoff() COMPLETED successfully")
                     else:
                         async_logger.info("No inputs provided")
@@ -1602,19 +1723,32 @@ class ProcessCrewExecutor:
         else:
             logger.error("[ProcessCrewExecutor] SECURITY: No group_context provided - multi-tenant isolation will fail")
 
-        # Create a direct Process instead of using ProcessPoolExecutor
-        # This gives us full control over the process lifecycle
-        process = self._ctx.Process(
-            target=self._run_crew_wrapper,
-            args=(execution_id, crew_config, inputs, group_context, result_queue, log_queue)
-        )
+        # CRITICAL: Set KASAL_EXECUTION_ID in parent BEFORE spawning
+        # This ensures the child process inherits it and psutil can see it
+        old_kasal_exec_id = os.environ.get('KASAL_EXECUTION_ID')
+        os.environ['KASAL_EXECUTION_ID'] = execution_id
+        logger.info(f"[ProcessCrewExecutor] Set KASAL_EXECUTION_ID={execution_id} for subprocess inheritance")
 
-        # Store the process for tracking and termination
-        self._running_processes[execution_id] = process
+        try:
+            # Create a direct Process instead of using ProcessPoolExecutor
+            # This gives us full control over the process lifecycle
+            process = self._ctx.Process(
+                target=self._run_crew_wrapper,
+                args=(execution_id, crew_config, inputs, group_context, result_queue, log_queue)
+            )
 
-        # Start the process
-        process.start()
-        logger.info(f"Started process {process.pid} for execution {execution_id}")
+            # Store the process for tracking and termination
+            self._running_processes[execution_id] = process
+
+            # Start the process
+            process.start()
+            logger.info(f"Started process {process.pid} for execution {execution_id}")
+        finally:
+            # Restore parent's environment
+            if old_kasal_exec_id is not None:
+                os.environ['KASAL_EXECUTION_ID'] = old_kasal_exec_id
+            else:
+                os.environ.pop('KASAL_EXECUTION_ID', None)
 
         try:
             # Wait for the process to complete with optional timeout
@@ -1978,11 +2112,110 @@ class ProcessCrewExecutor:
             # Remove from tracking
             del self._running_processes[execution_id]
 
+        # If not found in tracking (e.g., server reloaded), search ALL processes
+        if not terminated:
+            logger.info(f"[ProcessCrewExecutor] Process not in tracking, searching all processes for {execution_id}...")
+            terminated = self._terminate_orphaned_process(execution_id)
+
         if terminated:
             self._metrics['terminated_executions'] += 1
 
         return terminated
 
+    def _terminate_orphaned_process(self, execution_id: str) -> bool:
+        """
+        Find and terminate orphaned crew processes by searching all running processes.
+
+        This handles the case where the server was reloaded and we lost the process reference.
+        It searches for processes that have the KASAL_EXECUTION_ID environment variable.
+
+        Args:
+            execution_id: The execution ID to search for
+
+        Returns:
+            True if a matching process was found and terminated
+        """
+        try:
+            import psutil
+
+            # Use short execution_id for matching (first 8 chars is common in logs)
+            exec_id_short = execution_id[:8]
+            killed_count = 0
+
+            logger.info(f"[ProcessCrewExecutor] Searching for orphaned processes with execution_id {exec_id_short}...")
+
+            # Search ALL processes, not just children of current process
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    # Skip non-Python processes for efficiency
+                    proc_name = proc.info.get('name', '').lower()
+                    if 'python' not in proc_name:
+                        continue
+
+                    # Check command line for execution_id
+                    cmdline = proc.info.get('cmdline', [])
+                    cmdline_str = ' '.join(cmdline) if cmdline else ''
+
+                    # Check for KASAL_EXECUTION_ID environment variable (most reliable)
+                    kasal_exec_id = None
+                    try:
+                        env = proc.environ()
+                        kasal_exec_id = env.get('KASAL_EXECUTION_ID', '')
+                    except (psutil.AccessDenied, psutil.NoSuchProcess):
+                        pass
+
+                    # Check if this process matches our execution
+                    is_match = False
+                    if kasal_exec_id:
+                        is_match = (kasal_exec_id == execution_id or kasal_exec_id.startswith(exec_id_short))
+                    elif execution_id in cmdline_str or exec_id_short in cmdline_str:
+                        is_match = True
+
+                    if is_match:
+                        pid = proc.info['pid']
+                        logger.info(f"[ProcessCrewExecutor] Found matching process {pid}, terminating...")
+
+                        # Kill the process and all its children
+                        try:
+                            parent = psutil.Process(pid)
+                            children = parent.children(recursive=True)
+
+                            # Terminate children first
+                            for child in children:
+                                try:
+                                    child.kill()
+                                    logger.info(f"[ProcessCrewExecutor] Terminated child process {child.pid}")
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    pass
+
+                            # Give children time to terminate
+                            if children:
+                                psutil.wait_procs(children, timeout=2)
+
+                            # Now kill the parent
+                            parent.kill()
+                            logger.info(f"[ProcessCrewExecutor] Successfully terminated orphaned process {pid}")
+                            killed_count += 1
+
+                        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                            logger.warning(f"[ProcessCrewExecutor] Could not terminate process {pid}: {e}")
+
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+
+            if killed_count > 0:
+                logger.info(f"[ProcessCrewExecutor] Terminated {killed_count} orphaned processes for {execution_id}")
+                return True
+            else:
+                logger.warning(f"[ProcessCrewExecutor] No orphaned processes found for {execution_id}")
+                return False
+
+        except ImportError:
+            logger.error("[ProcessCrewExecutor] psutil not available for orphaned process cleanup")
+            return False
+        except Exception as e:
+            logger.error(f"[ProcessCrewExecutor] Error searching for orphaned processes: {e}")
+            return False
 
     def get_metrics(self) -> Dict[str, Any]:
         """

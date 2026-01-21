@@ -47,6 +47,7 @@ export interface AgentYaml {
   goal: string;
   backstory: string;
   tools?: string[] | number[];
+  tool_configs?: Record<string, any>;  // User-specific tool configuration overrides
   llm?: string;
   function_calling_llm?: string;
   max_iter?: number;
@@ -77,6 +78,7 @@ export interface TaskYaml {
   description: string;
   expected_output: string;
   tools: string[];
+  tool_configs?: Record<string, any>;  // User-specific tool configuration overrides
   context: string[];
   agent: string | null;
   async_execution: boolean;

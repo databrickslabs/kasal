@@ -23,26 +23,33 @@ const ManagerNode: React.FC<{ data: ManagerNodeData; id: string }> = ({ data, id
   };
 
   const getManagerNodeStyles = () => ({
-    padding: '12px',
-    borderRadius: '12px',
-    border: (theme: Theme) => `2px solid ${theme.palette.warning.main}`,
-    background: (theme: Theme) => 
-      `linear-gradient(135deg, ${theme.palette.warning.light}15 0%, ${theme.palette.warning.main}25 100%)`,
-    minWidth: '200px',
-    maxWidth: '200px',
-    minHeight: '150px',
+    width: 160,
+    minHeight: 140,
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: '8px',
-    boxShadow: isSelected 
-      ? '0 0 0 2px rgba(255, 152, 0, 0.5)' 
-      : '0 2px 8px rgba(0,0,0,0.1)',
-    transition: 'all 0.2s ease-in-out',
+    justifyContent: 'space-between',
+    gap: 0.1,
+    position: 'relative',
+    background: (theme: Theme) => isSelected
+      ? `${theme.palette.primary.light}20`
+      : theme.palette.background.paper,
+    borderRadius: '12px',
+    boxShadow: (theme: Theme) => isSelected
+      ? `0 0 0 2px ${theme.palette.primary.main}`
+      : `0 2px 4px ${theme.palette.mode === 'light'
+        ? 'rgba(0, 0, 0, 0.1)'
+        : 'rgba(0, 0, 0, 0.4)'}`,
+    border: (theme: Theme) => `1px solid ${isSelected
+      ? theme.palette.primary.main
+      : theme.palette.primary.light}`,
+    transition: 'all 0.3s ease',
+    padding: '16px 8px',
     '&:hover': {
-      boxShadow: '0 4px 12px rgba(255, 152, 0, 0.3)',
-      transform: 'translateY(-2px)',
+      boxShadow: (theme: Theme) => `0 4px 12px ${theme.palette.mode === 'light'
+        ? 'rgba(0, 0, 0, 0.2)'
+        : 'rgba(0, 0, 0, 0.6)'}`,
+      transform: 'translateY(-1px)',
     },
   });
 
@@ -88,7 +95,7 @@ const ManagerNode: React.FC<{ data: ManagerNodeData; id: string }> = ({ data, id
         position={Position.Bottom}
         id="bottom"
         style={{
-          background: '#ff9800',
+          background: '#2196f3',
           width: '7px',
           height: '7px',
           opacity: layoutOrientation === 'vertical' ? 1 : 0,
@@ -102,7 +109,7 @@ const ManagerNode: React.FC<{ data: ManagerNodeData; id: string }> = ({ data, id
         position={Position.Right}
         id="right"
         style={{
-          background: '#ff9800',
+          background: '#2196f3',
           width: '7px',
           height: '7px',
           opacity: layoutOrientation === 'horizontal' ? 1 : 0,
@@ -112,68 +119,62 @@ const ManagerNode: React.FC<{ data: ManagerNodeData; id: string }> = ({ data, id
 
       {/* Manager Icon */}
       <Box sx={{
-        backgroundColor: (theme: Theme) => `${theme.palette.warning.main}20`,
+        backgroundColor: (theme: Theme) => `${theme.palette.primary.main}20`,
         borderRadius: '50%',
         padding: '8px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        border: (theme: Theme) => `2px solid ${theme.palette.warning.main}`,
+        border: (theme: Theme) => `2px solid ${theme.palette.primary.main}`,
       }}>
-        <SupervisorAccountIcon sx={{ 
-          color: (theme: Theme) => theme.palette.warning.main, 
-          fontSize: '1.5rem' 
+        <SupervisorAccountIcon sx={{
+          color: (theme: Theme) => theme.palette.primary.main,
+          fontSize: '1.5rem'
         }} />
       </Box>
 
-      {/* Manager Badge */}
-      <Box sx={{
-        backgroundColor: (theme: Theme) => theme.palette.warning.main,
-        color: 'white',
-        padding: '2px 8px',
-        borderRadius: '4px',
-        fontSize: '0.65rem',
-        fontWeight: 600,
-        textTransform: 'uppercase',
-        letterSpacing: '0.5px',
-      }}>
-        Manager
-      </Box>
-
       {/* Manager Label */}
-      <Typography 
-        variant="body2" 
-        sx={{ 
-          fontWeight: 600,
+      <Typography
+        variant="body2"
+        sx={{
+          fontWeight: 500,
           textAlign: 'center',
-          color: (theme: Theme) => theme.palette.text.primary,
-          fontSize: '0.875rem',
-          maxWidth: '180px',
+          color: (theme: Theme) => theme.palette.primary.main,
+          maxWidth: '140px',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
         }}
       >
-        {data.label}
+        Manager Agent
       </Typography>
 
       {/* LLM Display */}
       {data.llm && (
         <Box sx={{
+          background: (theme: Theme) => `linear-gradient(135deg, ${theme.palette.primary.main}15, ${theme.palette.primary.main}30)`,
+          borderRadius: '4px',
+          padding: '2px 6px',
           display: 'flex',
           alignItems: 'center',
-          gap: 0.5,
-          backgroundColor: (theme: Theme) => `${theme.palette.warning.main}15`,
-          padding: '2px 6px',
-          borderRadius: '4px',
-          border: (theme: Theme) => `1px solid ${theme.palette.warning.main}40`,
+          justifyContent: 'center',
+          mt: 0.25,
+          mb: 0.25,
+          border: (theme: Theme) => `1px solid ${theme.palette.primary.main}20`,
+          boxShadow: (theme: Theme) => `0 1px 2px ${theme.palette.primary.main}10`,
+          transition: 'all 0.2s ease',
+          maxWidth: '120px',
+          '&:hover': {
+            background: (theme: Theme) => `linear-gradient(135deg, ${theme.palette.primary.main}25, ${theme.palette.primary.main}40)`,
+            boxShadow: (theme: Theme) => `0 2px 4px ${theme.palette.primary.main}15`,
+          }
         }}>
           <Typography variant="caption" sx={{
-            color: (theme: Theme) => theme.palette.warning.dark,
+            color: (theme: Theme) => theme.palette.primary.main,
             fontSize: '0.65rem',
             fontWeight: 500,
             textAlign: 'center',
-            maxWidth: '150px',
+            maxWidth: '100px',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -192,7 +193,7 @@ const ManagerNode: React.FC<{ data: ManagerNodeData; id: string }> = ({ data, id
           width: 8,
           height: 8,
           borderRadius: '50%',
-          backgroundColor: '#4caf50',
+          backgroundColor: (theme: Theme) => theme.palette.primary.main,
           animation: 'pulse 2s infinite',
           '@keyframes pulse': {
             '0%, 100%': { opacity: 1 },
@@ -209,7 +210,7 @@ const ManagerNode: React.FC<{ data: ManagerNodeData; id: string }> = ({ data, id
           width: 8,
           height: 8,
           borderRadius: '50%',
-          backgroundColor: '#2196f3',
+          backgroundColor: (theme: Theme) => theme.palette.success.main,
         }} />
       )}
     </Box>

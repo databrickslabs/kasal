@@ -32,7 +32,7 @@ interface DocSection {
 }
 
 const docSections: DocSection[] = [
- 
+
   {
     label: 'Architecture',
     items: [
@@ -44,10 +44,22 @@ const docSections: DocSection[] = [
     items: [
       { label: 'Developer Guide', file: 'DEVELOPER_GUIDE' },
       { label: 'Code structure', file: 'CODE_STRUCTURE_GUIDE' },
-      { label: 'API Reference', file: 'API_REFERENCE' },
     ],
   },
-  
+  {
+    label: 'API',
+    items: [
+      { label: 'API Endpoints', file: 'api_endpoints' },
+    ],
+  },
+  {
+    label: 'Integrations',
+    items: [
+      { label: 'Power BI Integration', file: 'powerbi_integration' },
+      { label: 'Measure Conversion Pipeline', file: 'measure-conversion-integration' },
+    ],
+  },
+
 ];
 
 const Documentation: React.FC = () => {

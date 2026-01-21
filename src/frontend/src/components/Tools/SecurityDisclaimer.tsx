@@ -608,6 +608,36 @@ export const TOOL_SECURITY_INFO: Record<string, {
       'Query monitoring and resource limits'
     ],
     deploymentContext: 'Single-tenant with API key service'
+  },
+  'PowerBIAnalysisTool': {
+    riskLevel: 'MEDIUM',
+    description: 'Executes complex Power BI analysis via Databricks jobs',
+    risks: [
+      'Heavy computational workloads on Databricks',
+      'Extended execution time for large datasets',
+      'Combined Power BI and Databricks resource usage',
+      'Potential for expensive compute operations'
+    ],
+    mitigations: [
+      'Implement job resource limits and quotas',
+      'Add job approval workflows for large analyses',
+      'Monitor execution time and resource usage',
+      'Validate analysis parameters before execution'
+    ],
+    singleTenantRiskLevel: 'LOW',
+    singleTenantRisks: [
+      'Databricks job execution within workspace limits',
+      'Power BI data access limited by user permissions',
+      'Compute resources consumed per analysis job'
+    ],
+    singleTenantMitigations: [
+      'Databricks OBO ensures jobs run with user\'s permissions',
+      'Power BI access controlled by service principal configuration',
+      'Job execution monitored and logged',
+      'Workspace-level compute resource limits apply',
+      'Analysis results stored securely in user\'s workspace'
+    ],
+    deploymentContext: 'Single-tenant with Databricks OBO and Power BI integration'
   }
 };
 

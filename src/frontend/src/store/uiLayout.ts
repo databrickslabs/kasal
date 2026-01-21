@@ -67,7 +67,7 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
   executionHistoryVisible: persistedState.executionHistoryVisible !== undefined ? persistedState.executionHistoryVisible : false,
   executionHistoryHeight: persistedState.executionHistoryHeight || 60,
   panelPosition: persistedState.panelPosition || 50,
-  areFlowsVisible: persistedState.areFlowsVisible !== undefined ? persistedState.areFlowsVisible : true,
+  areFlowsVisible: persistedState.areFlowsVisible !== undefined ? persistedState.areFlowsVisible : false,
   layoutOrientation: persistedState.layoutOrientation || 'horizontal',
 
   // Actions

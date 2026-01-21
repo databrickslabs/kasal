@@ -4,6 +4,7 @@ Repository for execution history data access.
 This module provides database operations for execution history models.
 """
 
+import logging
 from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -12,6 +13,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from src.models.execution_history import ExecutionHistory, TaskStatus, ErrorTrace
 # Removed async_session_factory import - using injected session only
+
+logger = logging.getLogger(__name__)
 
 
 class ExecutionHistoryRepository:
@@ -333,9 +336,14 @@ class ExecutionHistoryRepository:
             logger.error(f"Error updating MLflow evaluation run ID for job_id {job_id}: {str(e)}", exc_info=True)
             return False
     
-    async def delete_all_executions(self) -> Dict[str, int]:
+    async def delete_all_executions(self, group_ids: List[str] = None) -> Dict[str, int]:
         """
-        Delete all executions and associated data.
+        Delete all executions and associated data for specified groups.
+
+        Args:
+            group_ids: List of group IDs to filter deletions. If provided, only
+                      executions belonging to these groups will be deleted.
+                      If None, deletes ALL executions (admin/system access only).
 
         Returns:
             Dictionary with deletion counts
@@ -343,30 +351,65 @@ class ExecutionHistoryRepository:
         # ALWAYS use the session passed to the repository
         if not self.session:
             raise RuntimeError("ExecutionHistoryRepository requires a session")
-        return await self._delete_all_executions_with_session(self.session, commit=False)
+        return await self._delete_all_executions_with_session(self.session, group_ids=group_ids, commit=False)
 
-    async def _delete_all_executions_with_session(self, session: AsyncSession, commit: bool = False) -> Dict[str, int]:
+    async def _delete_all_executions_with_session(self, session: AsyncSession, group_ids: List[str] = None, commit: bool = False) -> Dict[str, int]:
         """Internal method to handle deletion of all executions with a given session."""
         try:
             result = {}
 
-            # Delete all task statuses
-            task_status_stmt = delete(TaskStatus)
-            task_status_result = await session.execute(task_status_stmt)
-            result['task_status_count'] = task_status_result.rowcount
+            # If group_ids provided, only delete executions for those groups
+            if group_ids and len(group_ids) > 0:
+                # First get all job_ids and execution_ids for the group
+                stmt = select(ExecutionHistory.id, ExecutionHistory.job_id).where(
+                    ExecutionHistory.group_id.in_(group_ids)
+                )
+                exec_result = await session.execute(stmt)
+                executions = exec_result.fetchall()
 
-            # Delete all error traces
-            error_trace_stmt = delete(ErrorTrace)
-            error_trace_result = await session.execute(error_trace_stmt)
-            result['error_trace_count'] = error_trace_result.rowcount
+                execution_ids = [row[0] for row in executions]
+                job_ids = [row[1] for row in executions]
 
-            # Delete all runs and count them
-            count_stmt = select(func.count()).select_from(ExecutionHistory)
-            count_result = await session.execute(count_stmt)
-            run_count = count_result.scalar() or 0
+                if not execution_ids:
+                    return {
+                        'run_count': 0,
+                        'task_status_count': 0,
+                        'error_trace_count': 0
+                    }
 
-            run_stmt = delete(ExecutionHistory)
-            await session.execute(run_stmt)
+                # Delete task statuses for these job_ids
+                task_status_stmt = delete(TaskStatus).where(TaskStatus.job_id.in_(job_ids))
+                task_status_result = await session.execute(task_status_stmt)
+                result['task_status_count'] = task_status_result.rowcount
+
+                # Delete error traces for these execution_ids
+                error_trace_stmt = delete(ErrorTrace).where(ErrorTrace.run_id.in_(execution_ids))
+                error_trace_result = await session.execute(error_trace_stmt)
+                result['error_trace_count'] = error_trace_result.rowcount
+
+                # Delete executions for the group
+                run_count = len(execution_ids)
+                run_stmt = delete(ExecutionHistory).where(ExecutionHistory.group_id.in_(group_ids))
+                await session.execute(run_stmt)
+            else:
+                # No group filtering - delete ALL (admin/system access)
+                # Delete all task statuses
+                task_status_stmt = delete(TaskStatus)
+                task_status_result = await session.execute(task_status_stmt)
+                result['task_status_count'] = task_status_result.rowcount
+
+                # Delete all error traces
+                error_trace_stmt = delete(ErrorTrace)
+                error_trace_result = await session.execute(error_trace_stmt)
+                result['error_trace_count'] = error_trace_result.rowcount
+
+                # Delete all runs and count them
+                count_stmt = select(func.count()).select_from(ExecutionHistory)
+                count_result = await session.execute(count_stmt)
+                run_count = count_result.scalar() or 0
+
+                run_stmt = delete(ExecutionHistory)
+                await session.execute(run_stmt)
 
             # Flush to ensure operations are sent to database
             await session.flush()
@@ -386,5 +429,252 @@ class ExecutionHistoryRepository:
             raise e
 
 
+    async def get_checkpoints_for_flow(
+        self,
+        flow_id,
+        group_id: Optional[str] = None,
+        status_filter: Optional[str] = "active"
+    ) -> List[ExecutionHistory]:
+        """
+        Get available checkpoints for a specific flow.
+
+        Args:
+            flow_id: UUID of the flow to get checkpoints for
+            group_id: Group ID for filtering (multi-tenant isolation)
+            status_filter: Filter by checkpoint status ('active', 'resumed', 'expired', or None for all)
+
+        Returns:
+            List of ExecutionHistory records with checkpoint information
+        """
+        if not self.session:
+            raise RuntimeError("ExecutionHistoryRepository requires a session")
+
+        import logging
+        logger = logging.getLogger(__name__)
+
+        try:
+            # Build filters - must have flow_uuid (checkpoint enabled) and match flow_id
+            filters = [
+                ExecutionHistory.flow_id == flow_id,
+                ExecutionHistory.flow_uuid.isnot(None)  # Only executions with checkpoints
+            ]
+
+            # Add group filtering for multi-tenant isolation
+            if group_id:
+                filters.append(ExecutionHistory.group_id == group_id)
+
+            # Add status filter if provided
+            if status_filter:
+                filters.append(ExecutionHistory.checkpoint_status == status_filter)
+
+            # Query for checkpoints ordered by most recent
+            stmt = (
+                select(ExecutionHistory)
+                .where(*filters)
+                .order_by(ExecutionHistory.created_at.desc())
+            )
+            result = await self.session.execute(stmt)
+            checkpoints = result.scalars().all()
+
+            logger.debug(f"Found {len(checkpoints)} checkpoints for flow {flow_id}")
+            return list(checkpoints)
+
+        except Exception as e:
+            logger.error(f"Error getting checkpoints for flow {flow_id}: {str(e)}", exc_info=True)
+            raise
+
+    async def update_checkpoint_status(
+        self,
+        execution_id: int,
+        status: str,
+        group_id: Optional[str] = None
+    ) -> bool:
+        """
+        Update the checkpoint status for an execution.
+
+        Args:
+            execution_id: ID of the execution to update
+            status: New checkpoint status ('active', 'resumed', 'expired')
+            group_id: Group ID for filtering (multi-tenant isolation)
+
+        Returns:
+            True if successful, False if execution not found
+        """
+        if not self.session:
+            raise RuntimeError("ExecutionHistoryRepository requires a session")
+
+        import logging
+        logger = logging.getLogger(__name__)
+
+        try:
+            # Build filters
+            filters = [ExecutionHistory.id == execution_id]
+            if group_id:
+                filters.append(ExecutionHistory.group_id == group_id)
+
+            # Find the execution
+            stmt = select(ExecutionHistory).where(*filters)
+            result = await self.session.execute(stmt)
+            execution = result.scalar_one_or_none()
+
+            if not execution:
+                logger.warning(f"No execution found with id: {execution_id}")
+                return False
+
+            # Update the checkpoint status
+            execution.checkpoint_status = status
+
+            # Flush changes to database
+            await self.session.flush()
+            logger.info(f"Updated checkpoint status to '{status}' for execution {execution_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error updating checkpoint status for execution {execution_id}: {str(e)}", exc_info=True)
+            return False
+
+    async def set_checkpoint_info(
+        self,
+        execution_id: int,
+        flow_uuid: str,
+        checkpoint_status: str = "active",
+        checkpoint_method: Optional[str] = None
+    ) -> bool:
+        """
+        Set checkpoint information for an execution.
+
+        Called when a flow execution with checkpoint enabled completes or checkpoints.
+
+        Args:
+            execution_id: ID of the execution
+            flow_uuid: CrewAI state.id for resuming the flow
+            checkpoint_status: Initial status (default: 'active')
+            checkpoint_method: Name of the last checkpointed method
+
+        Returns:
+            True if successful, False if execution not found
+        """
+        if not self.session:
+            raise RuntimeError("ExecutionHistoryRepository requires a session")
+
+        import logging
+        logger = logging.getLogger(__name__)
+
+        try:
+            # Find the execution
+            stmt = select(ExecutionHistory).where(ExecutionHistory.id == execution_id)
+            result = await self.session.execute(stmt)
+            execution = result.scalar_one_or_none()
+
+            if not execution:
+                logger.warning(f"No execution found with id: {execution_id}")
+                return False
+
+            # Set checkpoint information
+            execution.flow_uuid = flow_uuid
+            execution.checkpoint_status = checkpoint_status
+            execution.checkpoint_method = checkpoint_method
+
+            # Flush changes to database
+            await self.session.flush()
+            logger.info(f"Set checkpoint info for execution {execution_id}: flow_uuid={flow_uuid}, status={checkpoint_status}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error setting checkpoint info for execution {execution_id}: {str(e)}", exc_info=True)
+            return False
+
+    async def add_crew_checkpoint(
+        self,
+        job_id: str,
+        crew_node_id: str,
+        crew_name: str,
+        sequence: int,
+        status: str,
+        output_preview: str,
+        completed_at: str
+    ) -> bool:
+        """
+        Add a crew checkpoint to the execution's checkpoint_data.
+
+        This allows granular resume functionality - users can choose which crew to resume from.
+
+        Args:
+            job_id: Job ID of the execution
+            crew_node_id: Node ID of the crew in the flow
+            crew_name: Human-readable name of the crew
+            sequence: Order in which the crew executed (1, 2, 3...)
+            status: Status of the crew ('completed' or 'failed')
+            output_preview: First 500 chars of the crew output
+            completed_at: ISO timestamp when the crew completed
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Find the execution
+            result = await self.session.execute(
+                select(ExecutionHistory).where(ExecutionHistory.job_id == job_id)
+            )
+            execution = result.scalar_one_or_none()
+
+            if not execution:
+                logger.warning(f"Execution not found for job_id: {job_id}")
+                return False
+
+            # Get existing checkpoint_data or initialize
+            checkpoint_data = execution.checkpoint_data or {}
+            crew_checkpoints = checkpoint_data.get("crew_checkpoints", [])
+
+            # Add the new crew checkpoint
+            new_checkpoint = {
+                "crew_node_id": crew_node_id,
+                "crew_name": crew_name,
+                "sequence": sequence,
+                "status": status,
+                "output_preview": output_preview[:500] if output_preview else "",
+                "completed_at": completed_at
+            }
+            crew_checkpoints.append(new_checkpoint)
+
+            # Update checkpoint_data
+            checkpoint_data["crew_checkpoints"] = crew_checkpoints
+            execution.checkpoint_data = checkpoint_data
+
+            # Flush changes
+            await self.session.flush()
+            logger.info(f"Added crew checkpoint for job {job_id}: crew={crew_name}, sequence={sequence}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error adding crew checkpoint for job {job_id}: {str(e)}", exc_info=True)
+            return False
+
+    async def get_crew_checkpoints(self, job_id: str) -> list:
+        """
+        Get crew checkpoints for an execution.
+
+        Args:
+            job_id: Job ID of the execution
+
+        Returns:
+            List of crew checkpoint dictionaries
+        """
+        try:
+            result = await self.session.execute(
+                select(ExecutionHistory).where(ExecutionHistory.job_id == job_id)
+            )
+            execution = result.scalar_one_or_none()
+
+            if not execution or not execution.checkpoint_data:
+                return []
+
+            return execution.checkpoint_data.get("crew_checkpoints", [])
+
+        except Exception as e:
+            logger.error(f"Error getting crew checkpoints for job {job_id}: {str(e)}", exc_info=True)
+            return []
+
+
 # Don't create a singleton instance - repositories should be created with sessions
-# execution_history_repository = ExecutionHistoryRepository()  # Removed - causes session issues 
+# execution_history_repository = ExecutionHistoryRepository()  # Removed - causes session issues

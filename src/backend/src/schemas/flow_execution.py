@@ -19,10 +19,12 @@ class FlowExecutionStatus(str, Enum):
 
 class FlowExecutionBase(BaseModel):
     """Base model for flow execution data"""
-    flow_id: Union[UUID, str]
+    flow_id: Optional[Union[UUID, str]] = None  # Optional for ad-hoc executions
     job_id: str
     status: FlowExecutionStatus = FlowExecutionStatus.PENDING
     config: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    run_name: Optional[str] = None  # Descriptive name for the execution
+    group_id: Optional[str] = None  # Multi-tenant isolation
 
 
 class FlowExecutionCreate(FlowExecutionBase):
@@ -35,6 +37,8 @@ class FlowExecutionUpdate(BaseModel):
     status: Optional[FlowExecutionStatus] = None
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    run_name: Optional[str] = None  # Descriptive name for the execution
+    group_id: Optional[str] = None  # Multi-tenant isolation
 
 
 class FlowExecutionResponse(FlowExecutionBase):
@@ -56,6 +60,7 @@ class FlowNodeExecutionBase(BaseModel):
     status: FlowExecutionStatus = FlowExecutionStatus.PENDING
     agent_id: Optional[int] = None
     task_id: Optional[int] = None
+    group_id: Optional[str] = None  # Multi-tenant isolation
 
 
 class FlowNodeExecutionCreate(FlowNodeExecutionBase):
@@ -68,6 +73,7 @@ class FlowNodeExecutionUpdate(BaseModel):
     status: Optional[FlowExecutionStatus] = None
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    group_id: Optional[str] = None  # Multi-tenant isolation
 
 
 class FlowNodeExecutionResponse(FlowNodeExecutionBase):

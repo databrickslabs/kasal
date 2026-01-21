@@ -94,73 +94,106 @@ class SchedulerService:
     async def create_schedule_from_execution(self, schedule_data: ScheduleCreateFromExecution, group_context: GroupContext = None) -> ScheduleResponse:
         """
         Create a new schedule based on an existing execution.
-        
+        Supports both crew and flow executions.
+
         Args:
             schedule_data: Schedule data for creation including execution_id
             group_context: Group context for group isolation
-            
+
         Returns:
             ScheduleResponse of created schedule
-            
+
         Raises:
             HTTPException: If execution not found or schedule creation fails
         """
         try:
-            # Get the execution history to extract the real YAML
+            # Get the execution history to extract the configuration
             execution = await self.execution_history_repository.find_by_id(schedule_data.execution_id)
             if not execution:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Execution with ID {schedule_data.execution_id} not found"
                 )
-            
-            # Parse the inputs from execution to extract agents_yaml and tasks_yaml
+
+            # Parse the inputs from execution
             inputs = execution.inputs if execution.inputs else {}
-            agents_yaml = inputs.get("agents_yaml", {})
-            tasks_yaml = inputs.get("tasks_yaml", {})
             execution_inputs = inputs.get("inputs", {})
             planning = inputs.get("planning", False)
+
+            # Determine execution type from the execution record
+            execution_type = getattr(execution, 'execution_type', None) or inputs.get("execution_type", "crew")
+
             # Try to get model from inputs first, then from agent configs
             model = inputs.get("model")
-            if not model and agents_yaml:
-                # Extract model from first agent's llm configuration
-                for agent_key, agent_config in agents_yaml.items():
-                    if isinstance(agent_config, dict) and agent_config.get("llm"):
-                        model = agent_config["llm"]
-                        break
-            # Fallback to default if no model found
-            if not model:
-                model = "gpt-4o-mini"
-            
-            if not agents_yaml or not tasks_yaml:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Execution {schedule_data.execution_id} does not contain valid agents_yaml or tasks_yaml configuration"
-                )
-            
-            # Calculate next run time
-            next_run = calculate_next_run_from_last(schedule_data.cron_expression)
-            
-            # Create schedule dictionary
+
+            # Create base schedule dictionary
             schedule_dict = {
                 "name": schedule_data.name,
                 "cron_expression": schedule_data.cron_expression,
-                "agents_yaml": agents_yaml,
-                "tasks_yaml": tasks_yaml,
+                "execution_type": execution_type,
                 "inputs": execution_inputs,
                 "is_active": schedule_data.is_active,
                 "planning": planning,
-                "model": model,
-                "next_run_at": next_run
+                "next_run_at": calculate_next_run_from_last(schedule_data.cron_expression)
             }
-            
+
+            if execution_type == "flow":
+                # Flow execution - extract flow-specific fields
+                nodes = inputs.get("nodes", [])
+                edges = inputs.get("edges", [])
+                flow_config = inputs.get("flow_config", {})
+                flow_id = inputs.get("flow_id") or getattr(execution, 'flow_id', None)
+
+                if not flow_id and not (nodes and edges):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Execution {schedule_data.execution_id} is a flow execution but does not contain flow_id or nodes/edges configuration"
+                    )
+
+                schedule_dict["flow_id"] = flow_id
+                schedule_dict["nodes"] = nodes
+                schedule_dict["edges"] = edges
+                schedule_dict["flow_config"] = flow_config
+                # For flows, agents_yaml and tasks_yaml can be empty
+                schedule_dict["agents_yaml"] = inputs.get("agents_yaml", {})
+                schedule_dict["tasks_yaml"] = inputs.get("tasks_yaml", {})
+
+                logger_manager.scheduler.info(f"Creating flow schedule from execution {schedule_data.execution_id} with flow_id={flow_id}, {len(nodes)} nodes, {len(edges)} edges")
+            else:
+                # Crew execution - extract crew-specific fields
+                agents_yaml = inputs.get("agents_yaml", {})
+                tasks_yaml = inputs.get("tasks_yaml", {})
+
+                if not agents_yaml or not tasks_yaml:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Execution {schedule_data.execution_id} does not contain valid agents_yaml or tasks_yaml configuration"
+                    )
+
+                # Extract model from first agent's llm configuration if not in inputs
+                if not model and agents_yaml:
+                    for agent_key, agent_config in agents_yaml.items():
+                        if isinstance(agent_config, dict) and agent_config.get("llm"):
+                            model = agent_config["llm"]
+                            break
+
+                schedule_dict["agents_yaml"] = agents_yaml
+                schedule_dict["tasks_yaml"] = tasks_yaml
+
+                logger_manager.scheduler.info(f"Creating crew schedule from execution {schedule_data.execution_id} with {len(agents_yaml)} agents, {len(tasks_yaml)} tasks")
+
+            # Fallback to default model if no model found
+            if not model:
+                model = "gpt-4o-mini"
+            schedule_dict["model"] = model
+
             # Add group context if provided
             if group_context:
                 schedule_dict["group_id"] = group_context.primary_group_id
                 schedule_dict["created_by_email"] = group_context.group_email
-            
+
             schedule = await self.repository.create(schedule_dict)
-            
+
             return ScheduleResponse.model_validate(schedule)
         except HTTPException:
             raise
@@ -494,18 +527,19 @@ class SchedulerService:
     
     async def run_schedule_job(self, schedule_id: int, config: CrewConfig, execution_time: datetime) -> None:
         """
-        Run a scheduled job.
-        
+        Run a scheduled job. Supports both crew and flow executions.
+
         Args:
             schedule_id: ID of the schedule to run
-            config: Job configuration
+            config: Job configuration (supports both crew and flow)
             execution_time: Time when the job was triggered
         """
         try:
-            # Generate job ID and run name
+            # Generate job ID and determine execution type
             job_id = str(uuid.uuid4())
-            model = config.model or "gpt-3.5-turbo"
-            
+            model = config.model or "gpt-4o-mini"
+            execution_type = getattr(config, 'execution_type', 'crew') or 'crew'
+
             # Setup async session
             async with async_session_factory() as session:
                 # Get the schedule to retrieve group information
@@ -514,32 +548,50 @@ class SchedulerService:
                 if not schedule:
                     logger_manager.scheduler.error(f"Schedule {schedule_id} not found")
                     return
-                
+
+                # Generate run name based on execution type
                 execution_service = ExecutionService()
-                request = ExecutionNameGenerationRequest(
-                    agents_yaml=config.agents_yaml,
-                    tasks_yaml=config.tasks_yaml,
-                    model=model
-                )
-                response = await execution_service.generate_execution_name(request)
-                # Response is a dictionary, not an object with .name attribute
-                run_name = response.get("name", f"Scheduled Run {job_id[:8]}")
-                
-                # Prepare job configuration
+                if execution_type == "flow":
+                    # For flows, generate a name based on flow configuration
+                    run_name = f"Scheduled Flow {job_id[:8]}"
+                    logger_manager.scheduler.info(f"Running scheduled flow job {job_id} for schedule {schedule_id}")
+                else:
+                    # For crews, use the name generation service
+                    request = ExecutionNameGenerationRequest(
+                        agents_yaml=config.agents_yaml or {},
+                        tasks_yaml=config.tasks_yaml or {},
+                        model=model
+                    )
+                    response = await execution_service.generate_execution_name(request)
+                    run_name = response.get("name", f"Scheduled Run {job_id[:8]}")
+                    logger_manager.scheduler.info(f"Running scheduled crew job {job_id} for schedule {schedule_id}")
+
+                # Prepare job configuration based on execution type
                 config_dict = {
-                    "agents_yaml": config.agents_yaml,
-                    "tasks_yaml": config.tasks_yaml,
+                    "agents_yaml": config.agents_yaml or {},
+                    "tasks_yaml": config.tasks_yaml or {},
                     "inputs": config.inputs,
-                    "model": config.model
+                    "model": config.model,
+                    "execution_type": execution_type
                 }
-                
+
+                # Add flow-specific fields if flow execution
+                if execution_type == "flow":
+                    if config.flow_id:
+                        config_dict["flow_id"] = str(config.flow_id)
+                    if config.nodes:
+                        config_dict["nodes"] = config.nodes
+                    if config.edges:
+                        config_dict["edges"] = config.edges
+                    if config.flow_config:
+                        config_dict["flow_config"] = config.flow_config
+
                 # Convert to local time for database consistency with regular jobs
                 if hasattr(execution_time, 'tzinfo') and execution_time.tzinfo is not None:
-                    # Convert UTC to local time, then make naive
                     execution_time_naive = execution_time.astimezone().replace(tzinfo=None)
                 else:
                     execution_time_naive = execution_time
-                
+
                 # Create run record with group information from schedule
                 db_run = Run(
                     job_id=job_id,
@@ -549,20 +601,25 @@ class SchedulerService:
                     trigger_type="scheduled",
                     planning=config.planning,
                     run_name=run_name,
-                    group_id=schedule.group_id,  # Add group_id from schedule
-                    group_email=schedule.created_by_email  # Add email from schedule
+                    group_id=schedule.group_id,
+                    group_email=schedule.created_by_email,
+                    execution_type=execution_type
                 )
+
+                # Add flow_id if it's a flow execution with a saved flow
+                if execution_type == "flow" and config.flow_id:
+                    db_run.flow_id = config.flow_id
+
                 session.add(db_run)
                 await session.commit()
                 await session.refresh(db_run)
-                
+
                 # Ensure Databricks auth is available via unified auth for scheduled jobs
                 import os
                 try:
                     from src.utils.databricks_auth import get_auth_context
                     auth = await get_auth_context()
                     if auth:
-                        # Set env vars for backward compatibility with scheduled jobs
                         if auth.workspace_url:
                             os.environ["DATABRICKS_HOST"] = auth.workspace_url
                             logger_manager.scheduler.info(f"Loaded DATABRICKS_HOST from unified {auth.auth_method} auth for scheduled job")
@@ -574,10 +631,14 @@ class SchedulerService:
                         logger_manager.scheduler.warning("No unified auth available for scheduled job")
                 except Exception as e:
                     logger_manager.scheduler.warning(f"Could not load Databricks auth from unified auth: {e}")
-                
-                # Create an instance of CrewExecutionService
-                crew_execution_service = CrewAIExecutionService()
-                
+
+                # Create group context from schedule information
+                from src.utils.user_context import GroupContext
+                group_context = GroupContext(
+                    group_ids=[schedule.group_id] if schedule.group_id else [],
+                    group_email=schedule.created_by_email
+                )
+
                 # Add execution to memory
                 CrewAIExecutionService.add_execution_to_memory(
                     execution_id=job_id,
@@ -585,29 +646,24 @@ class SchedulerService:
                     run_name=run_name,
                     created_at=execution_time_naive
                 )
-                
-                # Create group context from schedule information
-                from src.utils.user_context import GroupContext
-                group_context = GroupContext(
-                    group_ids=[schedule.group_id] if schedule.group_id else [],
-                    group_email=schedule.created_by_email
-                )
-                
-                # Run the job
-                await crew_execution_service.run_crew_execution(
+
+                # Run the job using ExecutionService which handles both crew and flow
+                await ExecutionService.run_crew_execution(
                     execution_id=job_id,
                     config=config,
-                    group_context=group_context
+                    execution_type=execution_type,
+                    group_context=group_context,
+                    session=session
                 )
-                
+
                 # Update schedule after execution
                 repo = ScheduleRepository(session)
                 await repo.update_after_execution(schedule_id, execution_time)
-                
+
                 logger_manager.scheduler.info(
-                    f"Successfully ran schedule {schedule_id}."
+                    f"Successfully ran {execution_type} schedule {schedule_id}."
                 )
-                
+
         except Exception as job_error:
             logger_manager.scheduler.error(f"Error running job for schedule {schedule_id}: {job_error}")
             try:
@@ -681,18 +737,25 @@ class SchedulerService:
                         logger_manager.scheduler.debug(f"Found {len(due_schedules)} schedules due to run")
                     
                     for schedule in due_schedules:
-                        logger_manager.scheduler.info(f"Starting task for schedule {schedule.id} - {schedule.name}")
-                        logger_manager.scheduler.info(f"Schedule configuration: agents_yaml={schedule.agents_yaml}, tasks_yaml={schedule.tasks_yaml}, inputs={schedule.inputs}, planning={schedule.planning}, model={schedule.model}")
-                        
+                        execution_type = getattr(schedule, 'execution_type', 'crew') or 'crew'
+                        logger_manager.scheduler.info(f"Starting task for schedule {schedule.id} - {schedule.name} (type: {execution_type})")
+                        logger_manager.scheduler.info(f"Schedule configuration: execution_type={execution_type}, agents_yaml={schedule.agents_yaml}, tasks_yaml={schedule.tasks_yaml}, inputs={schedule.inputs}, planning={schedule.planning}, model={schedule.model}")
+
+                        # Build CrewConfig with proper defaults for None values (important for flow schedules)
                         config = CrewConfig(
-                            agents_yaml=schedule.agents_yaml,
-                            tasks_yaml=schedule.tasks_yaml,
-                            inputs=schedule.inputs,
-                            planning=schedule.planning,
+                            agents_yaml=schedule.agents_yaml or {},
+                            tasks_yaml=schedule.tasks_yaml or {},
+                            inputs=schedule.inputs or {},
+                            planning=schedule.planning or False,
                             model=schedule.model,
                             reasoning=False,  # Default value for scheduled jobs
-                            execution_type="crew",  # Scheduled jobs are crew executions
-                            schema_detection_enabled=True  # Default value
+                            execution_type=execution_type,
+                            schema_detection_enabled=True,  # Default value
+                            # Flow-specific fields
+                            flow_id=str(schedule.flow_id) if getattr(schedule, 'flow_id', None) else None,
+                            nodes=getattr(schedule, 'nodes', None),
+                            edges=getattr(schedule, 'edges', None),
+                            flow_config=getattr(schedule, 'flow_config', None),
                         )
                         
                         # Create task for the job

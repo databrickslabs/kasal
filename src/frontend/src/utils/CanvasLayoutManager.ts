@@ -83,7 +83,6 @@ export class CanvasLayoutManager {
     agentNode: { width: 200, height: 150 },
     managerNode: { width: 200, height: 150 },
     taskNode: { width: 220, height: 180 },
-    flowNode: { width: 180, height: 120 },
     crewNode: { width: 240, height: 200 },
     default: { width: 200, height: 150 }
   };
@@ -654,8 +653,9 @@ export class CanvasLayoutManager {
    */
   getFlowNodePosition(existingNodes: Node[], canvasType: 'flow' | 'full' = 'flow'): { x: number; y: number } {
     const availableArea = this.getAvailableCanvasArea(canvasType);
-    const flowNodes = existingNodes.filter(node => node.type === 'flowNode');
-    const nodeDims = CanvasLayoutManager.NODE_DIMENSIONS.flowNode;
+    // Flow canvas uses 'crewNode' type
+    const flowNodes = existingNodes.filter(node => node.type === 'crewNode');
+    const nodeDims = CanvasLayoutManager.NODE_DIMENSIONS.crewNode;
 
     if (flowNodes.length === 0) {
       // First flow node - center in available area
@@ -1088,15 +1088,17 @@ export class CanvasLayoutManager {
     const agentNodes = nodes.filter(n => n.type === 'agentNode');
     const managerNodes = nodes.filter(n => n.type === 'managerNode');
     const taskNodes = nodes.filter(n => n.type === 'taskNode');
-    const flowNodes = nodes.filter(n => n.type === 'flowNode');
-    const otherNodes = nodes.filter(n => !['agentNode', 'managerNode', 'taskNode', 'flowNode'].includes(n.type || ''));
+    // Flow canvas uses 'crewNode' type, not 'flowNode'
+    const flowNodes = nodes.filter(n => n.type === 'crewNode');
+    const otherNodes = nodes.filter(n => !['agentNode', 'managerNode', 'taskNode', 'crewNode'].includes(n.type || ''));
 
     // Keep manager nodes as-is (their position is managed by useManagerNode hook)
     const reorganizedNodes: Node[] = [...otherNodes, ...managerNodes];
 
     const agentDims = CanvasLayoutManager.NODE_DIMENSIONS.agentNode;
     const taskDims = CanvasLayoutManager.NODE_DIMENSIONS.taskNode;
-    const flowDims = CanvasLayoutManager.NODE_DIMENSIONS.flowNode;
+    // Use crewNode dimensions for flow canvas nodes
+    const flowDims = CanvasLayoutManager.NODE_DIMENSIONS.crewNode;
 
     const orientation = this.uiState.layoutOrientation || 'horizontal';
 
@@ -1198,8 +1200,16 @@ export class CanvasLayoutManager {
 
       // Manager node position is handled by useManagerNode hook, not here
 
-      // Flow nodes (if any)
-      flowNodes.forEach((node, index) => {
+      // Flow nodes (if any) - horizontal layout: left to right
+      // Sort by explicit order field first, then fallback to Y position for legacy nodes
+      const sortedFlowNodes = [...flowNodes].sort((a, b) => {
+        const orderA = a.data?.order ?? Number.MAX_SAFE_INTEGER;
+        const orderB = b.data?.order ?? Number.MAX_SAFE_INTEGER;
+        if (orderA !== orderB) return orderA - orderB;
+        // Fallback: sort by current Y position to preserve top-to-bottom order
+        return a.position.y - b.position.y;
+      });
+      sortedFlowNodes.forEach((node, index) => {
         reorganizedNodes.push({
           ...node,
           position: {
@@ -1279,13 +1289,21 @@ export class CanvasLayoutManager {
 
       // Manager node position is handled by useManagerNode hook, not here
 
-      // Flow nodes (if any)
-      flowNodes.forEach((node, index) => {
+      // Flow nodes (if any) - vertical layout: top to bottom
+      // Sort by explicit order field first, then fallback to X position for legacy nodes
+      const sortedFlowNodes = [...flowNodes].sort((a, b) => {
+        const orderA = a.data?.order ?? Number.MAX_SAFE_INTEGER;
+        const orderB = b.data?.order ?? Number.MAX_SAFE_INTEGER;
+        if (orderA !== orderB) return orderA - orderB;
+        // Fallback: sort by current X position to preserve left-to-right order
+        return a.position.x - b.position.x;
+      });
+      sortedFlowNodes.forEach((node, index) => {
         reorganizedNodes.push({
           ...node,
           position: {
-            x: availableArea.x + index * (flowDims.width + this.minNodeSpacing),
-            y: availableArea.y + 50
+            x: availableArea.x + 50,
+            y: availableArea.y + index * (flowDims.height + this.minNodeSpacing)
           }
         });
       });

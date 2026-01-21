@@ -153,6 +153,164 @@
         }
       }
     },
+    "agentbricks_tool": {
+      "name": "Databricks AgentBricks Tool",
+      "description": "Best practices for creating CrewAI tasks that use AgentBricksTool to query Databricks AgentBricks (Mosaic AI Agent Bricks) endpoints. AgentBricks are pre-built, no-code AI agents created in Databricks. The tool is pre-configured with the selected endpoint - you only need to provide questions or prompts.",
+      "important_note": "The AgentBricksTool is configured at the task level with the selected endpoint name. DO NOT include endpoint configuration or technical details in task descriptions - just focus on the questions or prompts to send to the AI agent. The tool handles authentication (OBO, PAT, Service Principal) automatically.",
+      "categories": {
+        "task_descriptions": {
+          "title": "Task Description Best Practices",
+          "key_principle": "Write task descriptions as clear questions or prompts for the AgentBricks AI agent. The tool understands the endpoint's capabilities and handles all technical complexity internally.",
+          "practices": [
+            {
+              "pattern": "Question Task",
+              "template": "Using the AgentBricksTool, ask: {question}. {optional_context}",
+              "example": "Using the AgentBricksTool, ask: What are the current inventory levels for electronics products? Focus on items with low stock.",
+              "guidelines": [
+                "Use natural, conversational language",
+                "Mention 'AgentBricksTool' or 'AgentBricks' explicitly",
+                "Focus on the question, not implementation",
+                "Provide context if needed for clarity"
+              ]
+            },
+            {
+              "pattern": "Analysis Task",
+              "template": "Query the AgentBricks endpoint about {topic} and {analysis_request}.",
+              "example": "Query the AgentBricks endpoint about customer sentiment in recent reviews and identify key themes and concerns.",
+              "guidelines": [
+                "Frame requests as analysis goals",
+                "The agent handles domain-specific logic",
+                "Include desired output format if relevant",
+                "Trust the agent's specialized knowledge"
+              ]
+            },
+            {
+              "pattern": "Recommendation Task",
+              "template": "Ask the AgentBricks agent for {recommendation_type} based on {criteria}.",
+              "example": "Ask the AgentBricks agent for product recommendations based on customer purchase history and current promotions.",
+              "guidelines": [
+                "Clearly state what recommendations are needed",
+                "Provide relevant criteria or constraints",
+                "The agent uses its trained knowledge",
+                "Specify decision-making factors"
+              ]
+            },
+            {
+              "pattern": "Custom Input Task",
+              "template": "Send the following prompt to AgentBricks with custom parameters: {prompt}. Include {custom_inputs_description}.",
+              "example": "Send the following prompt to AgentBricks with custom parameters: Analyze the sales data. Include time_period='Q4 2024' and region='West Coast' as custom inputs.",
+              "guidelines": [
+                "Use when the agent accepts custom inputs",
+                "Clearly specify custom input parameters",
+                "Explain what each parameter controls",
+                "The tool formats inputs correctly"
+              ]
+            }
+          ]
+        },
+        "expected_outputs": {
+          "title": "Expected Output Best Practices",
+          "key_principle": "AgentBricksTool returns AI-generated responses from the configured endpoint. The format depends on the specific agent's configuration and capabilities.",
+          "practices": [
+            {
+              "pattern": "Structured Response",
+              "template": "A response from the AgentBricks agent that includes:\n- Direct answer to the question\n- Supporting information or context\n- Relevant recommendations or insights\n- Any caveats or limitations",
+              "example": "A response from the AgentBricks agent that includes:\n- List of low-stock electronics items\n- Current quantities and reorder thresholds\n- Recommendations for priority restocking\n- Note about seasonal demand patterns",
+              "guidelines": [
+                "AgentBricks formats responses automatically",
+                "Output structure depends on the agent's design",
+                "Responses may include text, data, or recommendations",
+                "Trust the agent's output formatting"
+              ]
+            },
+            {
+              "pattern": "Analytical Insights",
+              "template": "AI-generated analysis with findings, patterns, and actionable insights",
+              "example": "Sentiment analysis showing 75% positive reviews, key themes (product quality, fast shipping), and 3 areas for improvement",
+              "guidelines": [
+                "Agents provide domain-specific insights",
+                "Output reflects the agent's training",
+                "May include confidence scores or metadata",
+                "Format varies by agent type"
+              ]
+            },
+            {
+              "pattern": "Direct Answer",
+              "template": "A concise answer to the question with supporting details",
+              "example": "Top 5 recommended products with reasons, pricing, and availability status",
+              "guidelines": [
+                "Simple questions get focused answers",
+                "Context is provided as needed",
+                "The agent determines response depth",
+                "No need to specify output format"
+              ]
+            }
+          ]
+        },
+        "usage_tips": {
+          "title": "AgentBricksTool Usage Tips",
+          "tips": [
+            {
+              "tip": "Endpoint Selection Matters",
+              "explanation": "Choose the AgentBricks endpoint that matches your task's domain. Different endpoints are specialized for different types of questions.",
+              "good_example": "Select 'customer-insights-agent' for customer-related questions",
+              "bad_example": "Using a general-purpose endpoint for specialized domain questions"
+            },
+            {
+              "tip": "Natural Language Questions",
+              "explanation": "AgentBricks endpoints understand conversational prompts. Write questions as you would ask a domain expert.",
+              "good_example": "What factors are driving customer churn in the enterprise segment?",
+              "bad_example": "Execute churn analysis function with parameters: segment=enterprise, metric=rate"
+            },
+            {
+              "tip": "Configuration is Automatic",
+              "explanation": "The endpoint is configured at the task level. Don't include endpoint names or technical configuration in task descriptions.",
+              "good_example": "Analyze sales trends and provide regional breakdown",
+              "bad_example": "Query endpoint 'sales-analytics-endpoint' with authentication token for sales data"
+            },
+            {
+              "tip": "Trust Agent Capabilities",
+              "explanation": "AgentBricks agents are pre-built with domain expertise. Focus on what you need, not how the agent should work.",
+              "good_example": "Identify opportunities to improve customer retention",
+              "bad_example": "Use ML model X with features Y and Z to predict customer churn probability"
+            },
+            {
+              "tip": "Custom Inputs When Needed",
+              "explanation": "Some AgentBricks endpoints accept custom inputs (parameters). Use these to provide additional context or constraints.",
+              "good_example": "Analyze inventory with custom inputs: category='Electronics', threshold=50",
+              "bad_example": "Manually filter the results after getting all inventory data"
+            },
+            {
+              "tip": "Timeout Awareness",
+              "explanation": "AgentBricks queries have a timeout (default 120s). For complex analyses, the agent may return partial results or summaries.",
+              "good_example": "Request summary or top-N results for large-scale analysis",
+              "bad_example": "Ask for exhaustive analysis of millions of records without time constraints"
+            }
+          ]
+        },
+        "error_handling": {
+          "title": "Error Handling Patterns",
+          "note": "AgentBricksTool handles authentication and endpoint errors automatically, but you can add fallback instructions.",
+          "practices": [
+            {
+              "scenario": "Endpoint Unavailable",
+              "task_description_addon": "If the endpoint is temporarily unavailable, provide a note about the service status.",
+              "expected_output_addon": "The response should indicate when the endpoint will be accessible again if known."
+            },
+            {
+              "scenario": "Timeout on Complex Query",
+              "task_description_addon": "For time-sensitive analyses, prioritize the most critical insights first.",
+              "expected_output_addon": "If the full analysis can't complete, provide partial results with highest-priority findings."
+            },
+            {
+              "scenario": "Invalid Custom Inputs",
+              "task_description_addon": "If custom inputs are rejected, explain which parameters are supported.",
+              "expected_output_addon": "The response should list valid input parameters and their expected formats."
+            }
+          ]
+        }
+      }
+    },
     "reveal_js": {
       "name": "Reveal.js Presentation Tool",
       "description": "Best practices for creating CrewAI tasks that generate SINGLE self-contained HTML files with reveal.js embedded using CDN links",

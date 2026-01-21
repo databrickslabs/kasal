@@ -28,7 +28,7 @@ export const createAgentGenerationHandler = (
         llm: agentData.advanced_config?.llm || selectedModel,
         tools: agentData.tools || [],
         max_iter: (agentData.advanced_config?.max_iter as number) || 25,
-        max_rpm: (agentData.advanced_config?.max_rpm as number) || 3,
+        max_rpm: (agentData.advanced_config?.max_rpm as number) || 10,
         max_execution_time: (agentData.advanced_config?.max_execution_time as number) || undefined,
         verbose: (agentData.advanced_config?.verbose as boolean) || false,
         allow_delegation: (agentData.advanced_config?.allow_delegation as boolean) || false,
@@ -243,15 +243,17 @@ export const createTaskGenerationHandler = (
           priority: 1,
           error_handling: 'default' as const,
           output_file: (taskData.advanced_config?.output_file as string) || null,
-          output_json: taskData.advanced_config?.output_json 
-            ? (typeof taskData.advanced_config.output_json === 'string' 
-                ? taskData.advanced_config.output_json 
-                : JSON.stringify(taskData.advanced_config.output_json)) 
+          output_json: taskData.advanced_config?.output_json
+            ? (typeof taskData.advanced_config.output_json === 'string'
+                ? taskData.advanced_config.output_json
+                : JSON.stringify(taskData.advanced_config.output_json))
             : null,
           output_pydantic: (taskData.advanced_config?.output_pydantic as string) || null,
           callback: (taskData.advanced_config?.callback as string) || null,
           human_input: Boolean(taskData.advanced_config?.human_input) || false,
           markdown: Boolean(taskData.advanced_config?.markdown) || false
+          // Note: llm_guardrail is NOT set in config - it's stored at node level as a suggestion
+          // User must explicitly enable it via the toggle
         }
       };
 
@@ -283,6 +285,8 @@ export const createTaskGenerationHandler = (
             tools: savedTask.tools || [],
             human_input: savedTask.config?.human_input || false,
             async_execution: savedTask.async_execution || false,
+            config: savedTask.config,
+            llm_guardrail: (taskData as unknown as { llm_guardrail?: { description: string; llm_model?: string } }).llm_guardrail || savedTask.config?.llm_guardrail || null,
             task: savedTask,
           },
         };
@@ -469,6 +473,13 @@ export const createCrewGenerationHandler = (
       crewData.tasks.forEach((task: Task, index: number) => {
         const taskNodeId = `task-${task.id || Date.now() + index}`;
         
+        // Get llm_guardrail as a suggestion (at top level), but don't include it in config
+        // This ensures the toggle defaults to disabled, but the suggestion is available when enabled
+        const llmGuardrailSuggestion = (task as unknown as { llm_guardrail?: unknown }).llm_guardrail || task.config?.llm_guardrail || null;
+
+        // Create config without llm_guardrail (user must explicitly enable it)
+        const configWithoutGuardrail = task.config ? { ...task.config, llm_guardrail: undefined } : undefined;
+
         nodes.push({
           id: taskNodeId,
           type: 'taskNode',
@@ -482,6 +493,9 @@ export const createCrewGenerationHandler = (
             human_input: task.config?.human_input || false,
             async_execution: task.async_execution || false,
             context: task.context || [],
+            config: configWithoutGuardrail,
+            // Store llm_guardrail at top level as suggestion (toggle disabled by default)
+            llm_guardrail: llmGuardrailSuggestion,
             task: task,
           },
         });
