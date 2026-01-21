@@ -623,9 +623,12 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
                 full_output = None
                 if trace.output:
                     if isinstance(trace.output, dict):
-                        # Try to get the actual output content
-                        full_output = trace.output.get("output_content") or trace.output.get("raw") or trace.output
+                        # CRITICAL FIX: Try to get the actual output content
+                        # First check for nested "content" key (from logging_callbacks format after trace_management processing)
+                        # Then check for "output_content" or "raw" (legacy formats)
+                        full_output = trace.output.get("content") or trace.output.get("output_content") or trace.output.get("raw") or trace.output
                     else:
+                        # If output is a string (after trace_management processing), use it directly
                         full_output = trace.output
 
                 # Store the output (last task's output for each crew)

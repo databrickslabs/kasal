@@ -47,7 +47,7 @@ import CrewEdge from '../Flow/CrewEdge';
 
 // Node and edge types configuration
 const nodeTypes = {
-  crewNode: CrewNode
+  crewNode: CrewNode,
 };
 
 const edgeTypes = {
@@ -131,7 +131,7 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
   const [flowStateVariables, setFlowStateVariables] = useState<string[]>([]);
 
   // Handle edge click for configuration
-  const handleEdgeClick = useCallback((event: React.MouseEvent, edge: Edge) => {
+  const handleEdgeClick = useCallback((_event: React.MouseEvent, edge: Edge) => {
     console.log('FlowCanvas: handleEdgeClick', {
       edgeId: edge.id,
       edgeDataKeys: Object.keys(edge.data || {}),
@@ -248,6 +248,8 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
       edgeId,
       configLogicType: config.logicType,
       configStateMappings: config.stateMappings,
+      checkpoint: config.checkpoint,
+      hitl: config.hitl,
       configKeys: Object.keys(config)
     });
 
@@ -292,6 +294,8 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
           edgeId: updatedEdge.id,
           updatedDataKeys: Object.keys(updatedEdge.data || {}),
           stateMappings: updatedEdge.data?.stateMappings,
+          checkpoint: updatedEdge.data?.checkpoint,
+          hitl: updatedEdge.data?.hitl,
           routeName: updatedEdge.data?.routeName
         });
 

@@ -432,7 +432,13 @@ class TestCreateDynamicFlow:
 
     @pytest.mark.asyncio
     async def test_create_dynamic_flow_skip_crew_for_resume(self):
-        """Test dynamic flow creation with skipped crews for checkpoint resume."""
+        """Test dynamic flow creation with skipped crews for checkpoint resume.
+
+        When resume_from_crew_sequence=2, crews with sequence < 2 (i.e., sequence 1)
+        should be skipped because they were already completed before the checkpoint.
+        The comparison uses < (not <=) because resume_from is the sequence of the
+        crew TO RUN, not the last completed crew.
+        """
         from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
 
         mock_agent = MagicMock()
@@ -461,7 +467,7 @@ class TestCreateDynamicFlow:
                 flow_config={},
                 callbacks=None,
                 group_context=None,
-                resume_from_crew_sequence=1,
+                resume_from_crew_sequence=2,  # Skip crews with sequence < 2 (i.e., crew 1)
                 checkpoint_outputs=checkpoint_outputs,
             )
 

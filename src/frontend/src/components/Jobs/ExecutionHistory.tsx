@@ -1001,6 +1001,11 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                         <ExecutionStatusBadge
                           status={run.status}
                           size="small"
+                          executionId={run.job_id}
+                          onApprovalComplete={() => {
+                            // Refresh the run list after approval action
+                            fetchRuns();
+                          }}
                         />
                       </TableCell>
                       <TableCell align="center">
@@ -1111,8 +1116,8 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                           onShowLogs={handleShowLogs}
                           onSchedule={handleOpenScheduleDialog}
                           onDelete={openDeleteRunDialog}
-                          onStatusChange={(runId, newStatus) => {
-                            // Update the run status locally
+                          onStatusChange={() => {
+                            // Refresh runs when status changes
                             fetchRuns();
                           }}
                         />

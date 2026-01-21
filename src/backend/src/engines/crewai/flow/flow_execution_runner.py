@@ -127,7 +127,17 @@ async def run_flow_in_process(
         logger.info(f"[run_flow_in_process] Process executor returned result for {execution_id}")
 
         # Check result status
-        if result.get('status') == 'COMPLETED':
+        # IMPORTANT: Check for HITL pause FIRST before checking COMPLETED status
+        # The subprocess may return both status='COMPLETED' AND paused_for_approval=True
+        # because the flow method returns success=True when pausing at HITL gate
+        if result.get('paused_for_approval') or result.get('hitl_paused') or result.get('status') == 'WAITING_FOR_APPROVAL':
+            # Flow paused at HITL gate - don't change status, it was already updated by flow_runner_service
+            logger.info(f"🚦 Flow execution {execution_id} paused for HITL approval")
+            logger.info(f"   Approval ID: {result.get('approval_id')}")
+            logger.info(f"   Gate: {result.get('gate_node_id')}")
+            final_status = None  # Status already set by flow_runner_service
+            final_message = None
+        elif result.get('status') == 'COMPLETED':
             final_status = ExecutionStatus.COMPLETED.value
             final_message = "Flow execution completed successfully"
             logger.info(f"Flow execution COMPLETED for {execution_id}")
@@ -137,9 +147,9 @@ async def run_flow_in_process(
             from src.services.execution_status_service import ExecutionStatusService
             execution_record = await ExecutionStatusService.get_status(execution_id)
             current_status = execution_record.status if execution_record and hasattr(execution_record, 'status') else None
-            if current_status and current_status.upper() in ['STOPPED', 'STOPPING']:
-                logger.info(f"Flow execution {execution_id} was stopped - preserving STOPPED status (current: {current_status})")
-                final_status = None  # Don't update status, it's already STOPPED
+            if current_status and current_status.upper() in ['STOPPED', 'STOPPING', 'WAITING_FOR_APPROVAL']:
+                logger.info(f"Flow execution {execution_id} has status {current_status} - preserving it")
+                final_status = None  # Don't update status
                 final_message = None
             else:
                 final_status = ExecutionStatus.FAILED.value

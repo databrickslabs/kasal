@@ -224,12 +224,15 @@ class TraceManager:
                                         if isinstance(output_data, dict):
                                             output_content = output_data.get("content")
                                             if output_content is None:
-                                                # No 'content' field - serialize the entire dict to JSON for visibility
-                                                try:
-                                                    import json
-                                                    output_content = json.dumps(output_data, ensure_ascii=False)
-                                                except Exception:
-                                                    output_content = str(output_data)
+                                                # CRITICAL FIX: Check for legacy "output_content" field (from execution_callback.py)
+                                                output_content = trace_data.get("output_content")
+                                                if output_content is None:
+                                                    # No 'content' or 'output_content' field - serialize the entire dict to JSON for visibility
+                                                    try:
+                                                        import json
+                                                        output_content = json.dumps(output_data, ensure_ascii=False)
+                                                    except Exception:
+                                                        output_content = str(output_data)
                                         else:
                                             output_content = str(output_data) if output_data else ""
 
