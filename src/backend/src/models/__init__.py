@@ -17,3 +17,4 @@ from src.models.execution_logs import ExecutionLog
 from src.models.engine_config import EngineConfig
 from src.models.user import User, RefreshToken
 from src.models.group import Group, GroupUser
+from src.models.hitl_approval import HITLApproval, HITLWebhook, HITLApprovalStatus, HITLTimeoutAction, HITLRejectionAction

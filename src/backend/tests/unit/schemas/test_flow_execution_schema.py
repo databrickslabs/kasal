@@ -30,19 +30,21 @@ class TestFlowExecutionStatus:
     
     def test_flow_execution_status_all_values(self):
         """Test that all expected FlowExecutionStatus values are present."""
-        expected_values = {"pending", "preparing", "running", "completed", "failed"}
+        # Includes HITL status for waiting_for_approval
+        expected_values = {"pending", "preparing", "running", "completed", "failed", "waiting_for_approval"}
         actual_values = {status.value for status in FlowExecutionStatus}
         assert actual_values == expected_values
-    
+
     def test_flow_execution_status_iteration(self):
         """Test iterating over FlowExecutionStatus."""
         statuses = list(FlowExecutionStatus)
-        assert len(statuses) == 5
+        assert len(statuses) == 6  # 5 original + 1 HITL status
         assert FlowExecutionStatus.PENDING in statuses
         assert FlowExecutionStatus.PREPARING in statuses
         assert FlowExecutionStatus.RUNNING in statuses
         assert FlowExecutionStatus.COMPLETED in statuses
         assert FlowExecutionStatus.FAILED in statuses
+        assert FlowExecutionStatus.WAITING_FOR_APPROVAL in statuses
     
     def test_flow_execution_status_string_inheritance(self):
         """Test that FlowExecutionStatus inherits from str."""

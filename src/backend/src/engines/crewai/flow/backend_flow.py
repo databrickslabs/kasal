@@ -27,6 +27,7 @@ from src.engines.crewai.flow.modules.task_config import TaskConfig
 from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
 from src.engines.crewai.flow.modules.callback_manager import CallbackManager
 from src.engines.crewai.tools.tool_factory import ToolFactory
+from src.engines.crewai.flow.exceptions import FlowPausedForApprovalException
 
 # Initialize logger manager - use flow logger for flow execution
 logger = LoggerManager.get_instance().flow
@@ -253,16 +254,19 @@ class BackendFlow:
             except Exception as e:
                 logger.warning(f"Could not set group context in _init_callbacks: {e}")
 
-        # For flows, we only need minimal callback setup with job_id
+        # For flows, we only need minimal callback setup with job_id and flow_id
         # The actual logging/tracing is handled by:
         # 1. TraceManager + AgentTraceEventListener (initialized in subprocess)
         # 2. Synchronous callbacks set on each Crew instance in flow methods
+        flow_id_for_callbacks = str(self._flow_id) if self._flow_id else None
         self._config['callbacks'] = {
             'handlers': [],  # No async handlers for flows
             'job_id': self._job_id,  # Pass job_id directly for sync callbacks
+            'flow_id': flow_id_for_callbacks,  # Pass flow_id for HITL webhooks
             'start_trace_writer': True  # Signal to start trace writer in subprocess
         }
-        logger.info(f"Initialized flow callbacks with job_id={self._job_id} (using event listeners and sync crew callbacks)")
+        logger.info(f"Initialized flow callbacks with job_id={self._job_id}, flow_id={self._flow_id} (type: {type(self._flow_id).__name__})")
+        logger.info(f"Callbacks dict flow_id: {flow_id_for_callbacks} (type: {type(flow_id_for_callbacks).__name__ if flow_id_for_callbacks else 'None'})")
 
     async def kickoff_async(self) -> Dict[str, Any]:
         """
@@ -438,6 +442,10 @@ class BackendFlow:
                     "flow_id": self._flow_id,
                     "flow_uuid": flow_uuid  # CrewAI state.id for checkpoint resume
                 }
+            except FlowPausedForApprovalException:
+                # Re-raise HITL pause exception so it's handled by flow_runner_service
+                logger.info("Re-raising FlowPausedForApprovalException from inner handler")
+                raise
             except Exception as exec_error:
                 logger.error(f"Error during async flow execution: {exec_error}", exc_info=True)
                 return {
@@ -446,6 +454,10 @@ class BackendFlow:
                     "flow_id": self._flow_id
                 }
 
+        except FlowPausedForApprovalException:
+            # Re-raise HITL pause exception so it's handled by flow_runner_service
+            logger.info("Re-raising FlowPausedForApprovalException from outer handler")
+            raise
         except Exception as e:
             logger.error(f"Error during flow kickoff_async: {e}", exc_info=True)
             return {
@@ -673,6 +685,10 @@ class BackendFlow:
                 "flow_id": self._flow_id,
                 "flow_uuid": flow_uuid  # CrewAI state.id for checkpoint resume
             }
+        except FlowPausedForApprovalException:
+            # Re-raise HITL pause exception so it's handled by flow_runner_service
+            logger.info("Re-raising FlowPausedForApprovalException for proper handling")
+            raise
         except Exception as e:
             logger.error(f"Error during flow kickoff: {e}", exc_info=True)
             return {

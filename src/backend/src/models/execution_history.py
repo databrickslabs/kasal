@@ -126,6 +126,11 @@ class ExecutionHistory(Base):
                                              foreign_keys="ExecutionTrace.job_id",
                                              primaryjoin="ExecutionHistory.job_id == ExecutionTrace.job_id")
 
+    # HITL (Human in the Loop) approval relationships
+    hitl_approvals = relationship("HITLApproval", back_populates="execution",
+                                 foreign_keys="HITLApproval.execution_id",
+                                 primaryjoin="ExecutionHistory.job_id == HITLApproval.execution_id")
+
     def __init__(self, **kwargs):
         super(ExecutionHistory, self).__init__(**kwargs)
         if self.job_id is None:
