@@ -2,12 +2,14 @@ litellm==1.74.9
 asyncpg
 pg8000  # Pure Python PostgreSQL driver for synchronous operations in subprocesses
 aiosqlite
+aiofiles>=23.0.0  # For async file I/O operations
 pydantic-settings
 cryptography
 python-multipart
 databricks
 databricks-sdk>=0.65.0  # Latest version - Lakebase features may require additional setup
 databricks-vectorsearch
+azure-identity  # Required for Power BI Service Principal authentication
 croniter
 crewai[tools]>=0.193.2
 pydantic[email]
@@ -38,6 +40,7 @@ rich>=13.7.0,<14.0.0  # Required by embedchain 0.1.128
 pytest-cov
 psutil  # For process management and cleanup in ProcessCrewExecutor
 mlflow==3.4.0  # For LLM observability and tracking in Databricks
+azure-identity>=1.15.0  # For Power BI authentication (UsernamePasswordCredential)
 protobuf>=5.29.0,<6.0.0  # mem0ai compatibility
 databricks-agents>=1.4.0
 grpcio-status>=1.62.0,<1.71.0  # Compatible with protobuf <6.0.0

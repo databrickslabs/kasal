@@ -32,7 +32,7 @@ ${BLUE}Database Types:${NC}
 
 ${BLUE}Options:${NC}
     -h, --help              Show this help message
-    -q, --quiet             Suppress all debug logging (sets WARNING level globally)
+    -q, --quiet             Suppress debug logging (WARNING globally, but INFO for crew/flow executions)
     -v, --verbose           Enable verbose logging (shows DEBUG for app, but NOT SQL queries)
     -d, --debug             Enable debug mode for all loggers (shows DEBUG + SQL queries)
     --no-console            Disable console output (file logging only)
@@ -49,6 +49,7 @@ ${BLUE}Logging Control Environment Variables:${NC}
 
     ${GREEN}Domain-Specific Controls:${NC}
     KASAL_LOG_CREW          Control crew execution logs
+    KASAL_LOG_FLOW          Control flow execution logs
     KASAL_LOG_SYSTEM        Control system logs
     KASAL_LOG_LLM           Control LLM interaction logs
     KASAL_LOG_API           Control API request/response logs
@@ -97,12 +98,16 @@ ${BLUE}Examples:${NC}
     # Run with specific domain debugging
     KASAL_LOG_CREW=DEBUG KASAL_LOG_LLM=DEBUG ./run.sh
 
+    # Debug flow executions specifically
+    KASAL_LOG_FLOW=DEBUG ./run.sh
+
     # Debug only database operations
     KASAL_LOG_DATABASE=DEBUG KASAL_LOG_SQLALCHEMY=DEBUG ./run.sh
 
 ${BLUE}Log Files:${NC}
     Logs are stored in: ./logs/
     - crew.log              Crew execution logs
+    - flow.log              Flow execution logs
     - system.log            System operations
     - api.log               API requests
     - llm.log               LLM interactions
@@ -129,7 +134,7 @@ print_config() {
     # Check for domain-specific overrides
     echo -e "\n${BLUE}Domain Overrides:${NC}"
     overrides_found=false
-    for var in KASAL_LOG_CREW KASAL_LOG_SYSTEM KASAL_LOG_LLM KASAL_LOG_API \
+    for var in KASAL_LOG_CREW KASAL_LOG_FLOW KASAL_LOG_SYSTEM KASAL_LOG_LLM KASAL_LOG_API \
                KASAL_LOG_DATABASE KASAL_LOG_SCHEDULER KASAL_LOG_GUARDRAILS \
                KASAL_LOG_DATABRICKS_VECTOR KASAL_LOG_DATABRICKS_SHORT \
                KASAL_LOG_DATABRICKS_LONG KASAL_LOG_DATABRICKS_ENTITY; do
@@ -162,7 +167,9 @@ while [[ $# -gt 0 ]]; do
             export KASAL_LOG_LEVEL=WARNING
             export KASAL_LOG_APP=WARNING
             export KASAL_LOG_THIRD_PARTY=ERROR
-            echo -e "${YELLOW}Quiet mode enabled - suppressing debug logs${NC}"
+            export KASAL_LOG_FLOW=INFO
+            export KASAL_LOG_CREW=INFO
+            echo -e "${YELLOW}Quiet mode enabled - suppressing debug logs (preserving execution logs)${NC}"
             shift
             ;;
         -v|--verbose)

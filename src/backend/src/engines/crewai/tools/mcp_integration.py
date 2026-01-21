@@ -15,12 +15,18 @@ Effective servers = Global ∪ Agent-specific ∪ Task-specific (deduplicated)
 """
 
 import logging
+import os
 from typing import List, Dict, Any, Optional, Set
 from src.core.logger import LoggerManager
 from src.engines.crewai.tools.mcp_handler import create_crewai_tool_from_mcp
 
 # Get logger from the centralized logging system
-logger = LoggerManager.get_instance().crew
+# Use flow logger if running in flow subprocess mode, otherwise use crew logger
+logger_manager = LoggerManager.get_instance()
+if os.environ.get('FLOW_SUBPROCESS_MODE', 'false').lower() == 'true':
+    logger = logger_manager.flow
+else:
+    logger = logger_manager.crew
 
 
 class MCPIntegration:

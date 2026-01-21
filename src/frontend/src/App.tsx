@@ -17,6 +17,7 @@ const WorkflowDesigner = lazy(() => import('./components/WorkflowDesigner'));
 const ToolForm = lazy(() => import('./components/Tools/ToolForm'));
 const WorkflowTest = lazy(() => import('./components/WorkflowTest').then(module => ({ default: module.WorkflowTest })));
 const Documentation = lazy(() => import('./components/Documentation').then(module => ({ default: module.Documentation })));
+const ConverterPage = lazy(() => import('./components/Converter/ConverterPage'));
 
 // Cache for Database Management permission to avoid repeated API calls
 let databaseManagementPermissionCache: {
@@ -116,6 +117,7 @@ function App() {
             <Route path="/nemo" element={<Navigate to="/workflow" replace />} />
             <Route path="/runs" element={<RunHistory />} />
             <Route path="/tools" element={<ToolForm />} />
+            <Route path="/converter" element={<ConverterPage />} />
             <Route path="/workflow-test" element={<WorkflowTest />} />
             <Route path="/docs/*" element={<Documentation />} />
           </Routes>

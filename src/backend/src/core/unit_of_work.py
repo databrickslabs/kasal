@@ -15,10 +15,16 @@ from src.repositories.template_repository import TemplateRepository
 from src.repositories.task_tracking_repository import TaskTrackingRepository
 from src.repositories.schema_repository import SchemaRepository
 from src.repositories.databricks_config_repository import DatabricksConfigRepository
+from src.repositories.powerbi_config_repository import PowerBIConfigRepository
 from src.repositories.mcp_repository import MCPServerRepository, MCPSettingsRepository
 from src.repositories.engine_config_repository import EngineConfigRepository
 from src.repositories.memory_backend_repository import MemoryBackendRepository
 from src.repositories.documentation_embedding_repository import DocumentationEmbeddingRepository
+from src.repositories.conversion_repository import (
+    ConversionHistoryRepository,
+    ConversionJobRepository,
+    SavedConverterConfigurationRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +46,15 @@ class UnitOfWork:
         self.task_tracking_repository: Optional[TaskTrackingRepository] = None
         self.schema_repository: Optional[SchemaRepository] = None
         self.databricks_config_repository: Optional[DatabricksConfigRepository] = None
+        self.powerbi_config_repository: Optional[PowerBIConfigRepository] = None
         self.mcp_server_repository: Optional[MCPServerRepository] = None
         self.mcp_settings_repository: Optional[MCPSettingsRepository] = None
         self.engine_config_repository: Optional[EngineConfigRepository] = None
         self.memory_backend_repository: Optional[MemoryBackendRepository] = None
         self.documentation_embedding_repository: Optional[DocumentationEmbeddingRepository] = None
+        self.conversion_history_repository: Optional[ConversionHistoryRepository] = None
+        self.conversion_job_repository: Optional[ConversionJobRepository] = None
+        self.saved_converter_config_repository: Optional[SavedConverterConfigurationRepository] = None
     
     async def __aenter__(self):
         """
@@ -65,12 +75,16 @@ class UnitOfWork:
         self.task_tracking_repository = TaskTrackingRepository(session)
         self.schema_repository = SchemaRepository(session)
         self.databricks_config_repository = DatabricksConfigRepository(session)
+        self.powerbi_config_repository = PowerBIConfigRepository(session)
         self.mcp_server_repository = MCPServerRepository(session)
         self.mcp_settings_repository = MCPSettingsRepository(session)
         self.engine_config_repository = EngineConfigRepository(session)
         self.memory_backend_repository = MemoryBackendRepository(session)
         self.documentation_embedding_repository = DocumentationEmbeddingRepository(session)
-        
+        self.conversion_history_repository = ConversionHistoryRepository(session)
+        self.conversion_job_repository = ConversionJobRepository(session)
+        self.saved_converter_config_repository = SavedConverterConfigurationRepository(session)
+
         logger.debug("UnitOfWork initialized with repositories")
         return self
     
@@ -110,11 +124,15 @@ class UnitOfWork:
             self.task_tracking_repository = None
             self.schema_repository = None
             self.databricks_config_repository = None
+            self.powerbi_config_repository = None
             self.mcp_server_repository = None
             self.mcp_settings_repository = None
             self.engine_config_repository = None
             self.memory_backend_repository = None
             self.documentation_embedding_repository = None
+            self.conversion_history_repository = None
+            self.conversion_job_repository = None
+            self.saved_converter_config_repository = None
     
     async def commit(self):
         """
@@ -159,11 +177,15 @@ class SyncUnitOfWork:
         self.task_tracking_repository = None
         self.schema_repository = None
         self.databricks_config_repository = None
+        self.powerbi_config_repository = None
         self.mcp_server_repository = None
         self.mcp_settings_repository = None
         self.engine_config_repository = None
         self.memory_backend_repository = None
         self.documentation_embedding_repository = None
+        self.conversion_history_repository = None
+        self.conversion_job_repository = None
+        self.saved_converter_config_repository = None
         self._initialized = False
     
     def initialize(self):
@@ -180,12 +202,16 @@ class SyncUnitOfWork:
             self.task_tracking_repository = TaskTrackingRepository(None)
             self.schema_repository = SchemaRepository(self._session)
             self.databricks_config_repository = DatabricksConfigRepository(self._session)
+            self.powerbi_config_repository = PowerBIConfigRepository(self._session)
             self.mcp_server_repository = MCPServerRepository(self._session)
             self.mcp_settings_repository = MCPSettingsRepository(self._session)
             self.engine_config_repository = EngineConfigRepository(self._session)
             self.memory_backend_repository = MemoryBackendRepository(self._session)
             self.documentation_embedding_repository = DocumentationEmbeddingRepository(self._session)
-            
+            self.conversion_history_repository = ConversionHistoryRepository(self._session)
+            self.conversion_job_repository = ConversionJobRepository(self._session)
+            self.saved_converter_config_repository = SavedConverterConfigurationRepository(self._session)
+
             self._initialized = True
             logger.debug("SyncUnitOfWork initialized with repositories")
     

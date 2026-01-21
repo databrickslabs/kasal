@@ -199,11 +199,11 @@ class TestFlowExecutionRepositoryCreate:
                 status=sample_flow_execution_create.status
             )
             mock_flow_execution_class.return_value = created_execution
-            
+
             with patch('src.repositories.flow_execution_repository.datetime') as mock_datetime:
                 mock_now = datetime.now(UTC)
-                mock_datetime.now.return_value = mock_now
-                
+                mock_datetime.utcnow.return_value = mock_now
+
                 result = await flow_execution_repository.create(sample_flow_execution_create)
                 
                 assert result == created_execution

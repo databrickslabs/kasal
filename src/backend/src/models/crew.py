@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, DateTime, JSON
+from sqlalchemy import Column, String, DateTime, JSON, Boolean
 import uuid
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -12,18 +12,30 @@ class Crew(Base):
     Enhanced with group isolation for multi-group deployments.
     """
     __tablename__ = "crews"
-    
+
     id = Column(UUID(as_uuid=True), primary_key=True, index=True, default=uuid.uuid4)
     name = Column(String, index=True)
     agent_ids = Column(JSON, default=lambda: [])
     task_ids = Column(JSON, default=lambda: [])
     nodes = Column(JSON, nullable=True)
     edges = Column(JSON, nullable=True)
-    
+
+    # Crew execution configuration
+    process = Column(String(50), default='sequential')  # sequential or hierarchical
+    planning = Column(Boolean, default=False)  # Enable planning mode
+    planning_llm = Column(String(255), nullable=True)  # LLM for planning
+    reasoning = Column(Boolean, default=False)  # Enable reasoning mode
+    reasoning_llm = Column(String(255), nullable=True)  # LLM for reasoning
+    manager_llm = Column(String(255), nullable=True)  # LLM for hierarchical manager
+    tool_configs = Column(JSON, nullable=True)  # Crew-level tool configurations (MCP servers, etc.)
+    memory = Column(Boolean, default=True)  # Enable memory
+    verbose = Column(Boolean, default=True)  # Verbose output
+    max_rpm = Column(JSON, nullable=True)  # Max requests per minute (can be int or None)
+
     # Multi-group fields
     group_id = Column(String(100), index=True, nullable=True)  # Group isolation
     created_by_email = Column(String(255), nullable=True)  # Creator email for audit
-    
+
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

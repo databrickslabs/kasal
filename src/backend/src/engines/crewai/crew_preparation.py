@@ -515,17 +515,19 @@ class CrewPreparation:
                     task_config.pop("context")
 
                 # Get the async execution setting
+                # Tasks with async_execution=True will run in parallel (if they have no context dependencies)
+                # CrewAI validation requires that a crew ends with at most one async task
+                # We handle this by auto-creating a completion task after the loop if needed
                 is_async = task_config.get('async_execution', False)
 
-                # Store original setting for later adjustment
                 if is_async:
-                    # Save that this task wanted to be async for logging
+                    # Mark that this task wants async execution for later processing
                     task_config['_wanted_async'] = True
-                    if i < total_tasks - 1:
-                        # Only the last task can be async in CrewAI, force others to be sync
-                        logger.warning(f"Task '{task_name}' was set to async but isn't the last task. Only the last task can be async in CrewAI. Setting to synchronous.")
-                        task_config['async_execution'] = False
-                        is_async = False
+                    has_context = '_context_refs' in task_config or task_config.get('context')
+                    if has_context:
+                        logger.info(f"Task '{task_name}' has async_execution=True with context - will wait for dependencies")
+                    else:
+                        logger.info(f"Task '{task_name}' has async_execution=True - will run in parallel")
 
                 logger.info(f"Task '{task_name}' async_execution setting: {is_async}")
 
@@ -574,6 +576,55 @@ class CrewPreparation:
                         task.context = context_tasks
                     else:
                         logger.warning(f"No context tasks could be resolved for task {task_id}")
+
+            # Handle parallel execution for multiple async tasks
+            # CrewAI validation: "A crew must end with at most one async task"
+            # Solution: Keep ALL async tasks as async (they run in parallel), add a minimal
+            # completion task with context=[all_async_tasks] to satisfy CrewAI validation
+            #
+            # IMPORTANT: Tasks with async_execution=True must NOT have context set,
+            # otherwise they will wait for that context and not run in parallel!
+            if self.tasks:
+                async_tasks = [t for t in self.tasks if getattr(t, 'async_execution', False)]
+
+                if len(async_tasks) > 1:
+                    logger.info(f"Found {len(async_tasks)} async tasks - configuring for parallel execution")
+
+                    # Remove any context from async tasks so they can run truly in parallel
+                    for async_task in async_tasks:
+                        if getattr(async_task, 'context', None):
+                            logger.info(f"Removing context from async task to enable parallel execution")
+                            async_task.context = None
+
+                    # Add a minimal completion task that waits for all async tasks
+                    # This satisfies CrewAI's validation while enabling true parallel execution
+                    from crewai import Task as CrewAITask
+
+                    # Use the last async task's agent for the completion task
+                    completion_agent = async_tasks[-1].agent
+
+                    # Create a minimal completion task
+                    completion_task = CrewAITask(
+                        description="Return the combined outputs from the parallel tasks.",
+                        expected_output="The outputs from all parallel tasks.",
+                        agent=completion_agent,
+                        context=async_tasks,  # Wait for ALL async tasks to complete
+                        async_execution=False  # Sync task to satisfy CrewAI validation
+                    )
+
+                    # Add completion task to the crew's task list
+                    self.tasks.append(completion_task)
+
+                    # Log the parallel execution setup
+                    parallel_descriptions = [
+                        getattr(t, 'description', 'unknown')[:40] + '...'
+                        if len(getattr(t, 'description', '')) > 40
+                        else getattr(t, 'description', 'unknown')
+                        for t in async_tasks
+                    ]
+
+                    logger.info(f"  {len(async_tasks)} tasks will run in PARALLEL: {parallel_descriptions}")
+                    logger.info(f"  Added completion task to collect results and satisfy CrewAI validation")
 
             return True
         except Exception as e:

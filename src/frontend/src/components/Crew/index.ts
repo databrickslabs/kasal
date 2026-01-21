@@ -1,9 +1,7 @@
-import CrewDialog from './CrewDialog';
 import SaveCrew from './SaveCrew';
 import LoadCrew from './LoadCrew';
 
 export {
-  CrewDialog,
   SaveCrew,
   LoadCrew
 };

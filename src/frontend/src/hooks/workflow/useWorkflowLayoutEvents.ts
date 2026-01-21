@@ -8,6 +8,11 @@ export function useWorkflowLayoutEvents(params: {
   edges: Edge[];
   setNodes: React.Dispatch<React.SetStateAction<Node[]>>;
   setEdges: React.Dispatch<React.SetStateAction<Edge[]>>;
+  flowNodes: Node[];
+  flowEdges: Edge[];
+  setFlowNodes: React.Dispatch<React.SetStateAction<Node[]>>;
+  setFlowEdges: React.Dispatch<React.SetStateAction<Edge[]>>;
+  areFlowsVisible: boolean;
   crewFlowInstanceRef: React.MutableRefObject<ReactFlowInstance | null>;
   flowFlowInstanceRef: React.MutableRefObject<ReactFlowInstance | null>;
   handleUIAwareFitView: () => void;
@@ -18,8 +23,13 @@ export function useWorkflowLayoutEvents(params: {
     edges: _edges,
     setNodes,
     setEdges,
+    flowNodes,
+    flowEdges,
+    setFlowNodes,
+    setFlowEdges,
+    areFlowsVisible,
     crewFlowInstanceRef,
-    flowFlowInstanceRef: _flowFlowInstanceRef,
+    flowFlowInstanceRef,
     handleUIAwareFitView,
     handleFitViewToNodesInternal,
   } = params;
@@ -75,7 +85,14 @@ export function useWorkflowLayoutEvents(params: {
   // Handle automatic node repositioning when UI layout changes
   const handleRecalculateNodePositions = React.useCallback(
     (event?: Event) => {
-      if (nodes.length === 0) return;
+      // Context-aware: check which canvas is visible and reorganize accordingly
+      const currentNodes = areFlowsVisible ? flowNodes : nodes;
+      const currentEdges = areFlowsVisible ? flowEdges : _edges;
+      const currentSetNodes = areFlowsVisible ? setFlowNodes : setNodes;
+      const currentSetEdges = areFlowsVisible ? setFlowEdges : setEdges;
+      const canvasType = areFlowsVisible ? 'flow' : 'crew';
+
+      if (currentNodes.length === 0) return;
 
       const customEvent = event as CustomEvent | undefined;
       const reason = customEvent?.detail?.reason as string | undefined;
@@ -92,7 +109,31 @@ export function useWorkflowLayoutEvents(params: {
       // For chat panel and execution history resize: just recenter viewport, don't move nodes
       if (reason === 'chat-panel-resize' || reason === 'execution-history-resize') {
         setTimeout(() => {
-          handleUIAwareFitView();
+          if (areFlowsVisible) {
+            // Flow canvas: use UI-aware fitView that accounts for execution history
+            if (flowFlowInstanceRef.current) {
+              const layoutManager = new CanvasLayoutManager();
+              const currentUIState = useUILayoutStore.getState().getUILayoutState();
+              currentUIState.screenWidth = window.innerWidth;
+              currentUIState.screenHeight = window.innerHeight;
+              layoutManager.updateUIState(currentUIState);
+
+              // Calculate padding based on execution history
+              const basePadding = 0.2;
+              const executionHistoryPadding = currentUIState.executionHistoryVisible
+                ? currentUIState.executionHistoryHeight / currentUIState.screenHeight
+                : 0;
+
+              flowFlowInstanceRef.current.fitView({
+                padding: basePadding + executionHistoryPadding * 0.5,
+                includeHiddenNodes: false,
+                duration: 800,
+              });
+            }
+          } else {
+            // Crew canvas: use UI-aware fitView that accounts for chat panel and execution history
+            handleUIAwareFitView();
+          }
         }, 100);
         return;
       }
@@ -107,14 +148,14 @@ export function useWorkflowLayoutEvents(params: {
 
       layoutManager.updateUIState(currentUIState);
 
-      const reorganizedNodes = layoutManager.reorganizeNodes(nodes, 'crew', _edges);
-      setNodes(reorganizedNodes);
+      const reorganizedNodes = layoutManager.reorganizeNodes(currentNodes, canvasType, currentEdges);
+      currentSetNodes(reorganizedNodes);
 
       // Retarget edge handles to match orientation
       if (reason === 'layout-orientation-toggle') {
         const currentLayout = useUILayoutStore.getState().layoutOrientation;
 
-        setEdges(prevEdges => prevEdges.map(e => {
+        currentSetEdges(prevEdges => prevEdges.map(e => {
           const sourceNode = reorganizedNodes.find(n => n.id === e.source);
           const targetNode = reorganizedNodes.find(n => n.id === e.target);
 
@@ -130,16 +171,47 @@ export function useWorkflowLayoutEvents(params: {
             return { ...e, sourceHandle: 'right', targetHandle: 'left' };
           }
 
+          // Flow canvas: crewNode-to-crewNode edges - change based on layout orientation
+          if (sourceNode?.type === 'crewNode' && targetNode?.type === 'crewNode') {
+            const sourceHandle = currentLayout === 'vertical' ? 'bottom' : 'right';
+            const targetHandle = currentLayout === 'vertical' ? 'top' : 'left';
+            return { ...e, sourceHandle, targetHandle };
+          }
+
           return e;
         }));
       }
 
-      // Trigger UI-aware fit view after repositioning
+      // Trigger context-aware fit view after repositioning
+      // Increased delay to ensure DOM updates are complete before fitView
       setTimeout(() => {
-        handleUIAwareFitView();
-      }, 100);
+        if (areFlowsVisible) {
+          // Flow canvas: use UI-aware fitView that accounts for execution history
+          if (flowFlowInstanceRef.current) {
+            const layoutManager = new CanvasLayoutManager();
+            const currentUIState = useUILayoutStore.getState().getUILayoutState();
+            currentUIState.screenWidth = window.innerWidth;
+            currentUIState.screenHeight = window.innerHeight;
+            layoutManager.updateUIState(currentUIState);
+
+            const basePadding = 0.2;
+            const executionHistoryPadding = currentUIState.executionHistoryVisible
+              ? currentUIState.executionHistoryHeight / currentUIState.screenHeight
+              : 0;
+
+            flowFlowInstanceRef.current.fitView({
+              padding: basePadding + executionHistoryPadding * 0.5,
+              includeHiddenNodes: false,
+              duration: 800,
+            });
+          }
+        } else {
+          // Crew canvas: use UI-aware fitView that accounts for chat panel and execution history
+          handleUIAwareFitView();
+        }
+      }, 300);
     },
-    [nodes, setNodes, setEdges, handleUIAwareFitView]
+    [nodes, flowNodes, _edges, flowEdges, setNodes, setFlowNodes, setEdges, setFlowEdges, areFlowsVisible, flowFlowInstanceRef, handleUIAwareFitView]
   );
 
   // Register global event listeners

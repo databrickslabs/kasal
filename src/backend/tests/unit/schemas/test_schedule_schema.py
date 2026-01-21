@@ -6,6 +6,7 @@ including validation, serialization, and field constraints.
 """
 import pytest
 from datetime import datetime
+from uuid import uuid4, UUID
 from pydantic import ValidationError
 from typing import Dict, Any, List
 
@@ -69,24 +70,35 @@ class TestScheduleBase:
         """Test ScheduleBase validation with missing required fields."""
         with pytest.raises(ValidationError) as exc_info:
             ScheduleBase(name="test-schedule")
-        
+
         errors = exc_info.value.errors()
         missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
         assert "cron_expression" in missing_fields
-        assert "agents_yaml" in missing_fields
-        assert "tasks_yaml" in missing_fields
 
-    def test_schedule_base_empty_yaml_fields(self):
-        """Test ScheduleBase with empty YAML dictionaries."""
+    def test_schedule_base_crew_requires_agents_and_tasks(self):
+        """Test ScheduleBase crew execution requires agents_yaml and tasks_yaml."""
+        # Default execution_type is 'crew', which requires agents_yaml and tasks_yaml
         data = {
             "name": "empty-schedule",
             "cron_expression": "0 12 * * *",
-            "agents_yaml": {},
-            "tasks_yaml": {}
+            "execution_type": "crew"
+            # No agents_yaml or tasks_yaml
+        }
+        with pytest.raises(ValidationError) as exc_info:
+            ScheduleBase(**data)
+        assert "agents_yaml and tasks_yaml are required for crew executions" in str(exc_info.value)
+
+    def test_schedule_base_flow_allows_empty_yaml_fields(self):
+        """Test ScheduleBase flow execution allows empty YAML dictionaries."""
+        data = {
+            "name": "flow-schedule",
+            "cron_expression": "0 12 * * *",
+            "execution_type": "flow",
+            "flow_id": uuid4()
         }
         schedule = ScheduleBase(**data)
-        assert schedule.agents_yaml == {}
-        assert schedule.tasks_yaml == {}
+        assert schedule.agents_yaml is None
+        assert schedule.tasks_yaml is None
 
     def test_schedule_base_boolean_conversions(self):
         """Test ScheduleBase boolean field conversions."""
@@ -479,14 +491,15 @@ class TestCrewConfig:
         assert config.planning is True
         assert config.model == "gpt-4"
 
-    def test_crew_config_missing_required_fields(self):
-        """Test CrewConfig validation with missing required fields."""
-        with pytest.raises(ValidationError) as exc_info:
-            CrewConfig(agents_yaml={"agent": {"role": "test"}})
-        
-        errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
-        assert "tasks_yaml" in missing_fields
+    def test_crew_config_optional_fields_with_defaults(self):
+        """Test CrewConfig optional fields use default_factory for empty dicts."""
+        # agents_yaml, tasks_yaml all default to empty dicts
+        config = CrewConfig()
+
+        assert config.agents_yaml == {}
+        assert config.tasks_yaml == {}
+        assert config.inputs == {}
+        assert config.planning is False
 
     def test_crew_config_empty_yaml_fields(self):
         """Test CrewConfig with empty YAML dictionaries."""
@@ -706,3 +719,311 @@ class TestSchemaIntegration:
         assert len(active_schedules) == 2
         assert active_schedules[0].name == "schedule-1"
         assert active_schedules[1].name == "schedule-3"
+
+
+class TestScheduleBaseFlowExecution:
+    """Test cases for ScheduleBase flow execution support."""
+
+    def test_schedule_base_default_execution_type(self):
+        """Test ScheduleBase default execution type is 'crew'."""
+        data = {
+            "name": "crew-schedule",
+            "cron_expression": "0 9 * * *",
+            "agents_yaml": {"agent1": {"role": "analyst"}},
+            "tasks_yaml": {"task1": {"description": "analysis"}}
+        }
+        schedule = ScheduleBase(**data)
+        assert schedule.execution_type == "crew"
+
+    def test_schedule_base_flow_execution_type_with_flow_id(self):
+        """Test ScheduleBase with flow execution type and flow_id."""
+        flow_uuid = uuid4()
+        data = {
+            "name": "flow-schedule",
+            "cron_expression": "0 10 * * *",
+            "execution_type": "flow",
+            "flow_id": flow_uuid
+        }
+        schedule = ScheduleBase(**data)
+        assert schedule.execution_type == "flow"
+        assert schedule.flow_id == flow_uuid
+
+    def test_schedule_base_flow_execution_type_with_nodes_edges(self):
+        """Test ScheduleBase with flow execution type and nodes/edges."""
+        nodes = [{"id": "node1", "type": "crew"}]
+        edges = [{"source": "node1", "target": "node2"}]
+        data = {
+            "name": "flow-schedule-nodes",
+            "cron_expression": "0 11 * * *",
+            "execution_type": "flow",
+            "nodes": nodes,
+            "edges": edges
+        }
+        schedule = ScheduleBase(**data)
+        assert schedule.execution_type == "flow"
+        assert schedule.nodes == nodes
+        assert schedule.edges == edges
+
+    def test_schedule_base_flow_validation_requires_flow_id_or_nodes(self):
+        """Test ScheduleBase flow execution requires flow_id or nodes/edges."""
+        data = {
+            "name": "invalid-flow-schedule",
+            "cron_expression": "0 12 * * *",
+            "execution_type": "flow"
+        }
+        with pytest.raises(ValidationError) as exc_info:
+            ScheduleBase(**data)
+        assert "flow_id or nodes/edges are required for flow executions" in str(exc_info.value)
+
+    def test_schedule_base_crew_validation_requires_agents_tasks(self):
+        """Test ScheduleBase crew execution requires agents_yaml and tasks_yaml."""
+        data = {
+            "name": "invalid-crew-schedule",
+            "cron_expression": "0 13 * * *",
+            "execution_type": "crew"
+        }
+        with pytest.raises(ValidationError) as exc_info:
+            ScheduleBase(**data)
+        assert "agents_yaml and tasks_yaml are required for crew executions" in str(exc_info.value)
+
+    def test_schedule_base_flow_config_field(self):
+        """Test ScheduleBase with flow_config."""
+        flow_config = {"start_method": "kickoff", "checkpoint": True}
+        data = {
+            "name": "flow-config-schedule",
+            "cron_expression": "0 14 * * *",
+            "execution_type": "flow",
+            "flow_id": uuid4(),
+            "flow_config": flow_config
+        }
+        schedule = ScheduleBase(**data)
+        assert schedule.flow_config == flow_config
+
+    def test_schedule_base_flow_fields_optional_for_crew(self):
+        """Test ScheduleBase flow fields are optional for crew execution."""
+        data = {
+            "name": "crew-no-flow-fields",
+            "cron_expression": "0 15 * * *",
+            "execution_type": "crew",
+            "agents_yaml": {"agent": {"role": "test"}},
+            "tasks_yaml": {"task": {"description": "test"}}
+        }
+        schedule = ScheduleBase(**data)
+        assert schedule.flow_id is None
+        assert schedule.nodes is None
+        assert schedule.edges is None
+        assert schedule.flow_config is None
+
+
+class TestScheduleResponseFlowFields:
+    """Test cases for ScheduleResponse flow fields."""
+
+    def test_schedule_response_with_flow_fields(self):
+        """Test ScheduleResponse with flow execution fields."""
+        now = datetime.now()
+        flow_uuid = uuid4()
+        nodes = [{"id": "node1"}]
+        edges = [{"source": "node1", "target": "node2"}]
+
+        data = {
+            "id": 1,
+            "name": "flow-response",
+            "cron_expression": "0 9 * * *",
+            "execution_type": "flow",
+            "flow_id": flow_uuid,
+            "nodes": nodes,
+            "edges": edges,
+            "flow_config": {"checkpoint": True},
+            "created_at": now,
+            "updated_at": now
+        }
+        response = ScheduleResponse(**data)
+
+        assert response.execution_type == "flow"
+        assert response.flow_id == flow_uuid
+        assert response.nodes == nodes
+        assert response.edges == edges
+        assert response.flow_config["checkpoint"] is True
+
+    def test_schedule_response_flow_fields_nullable(self):
+        """Test ScheduleResponse flow fields are nullable."""
+        now = datetime.now()
+        data = {
+            "id": 2,
+            "name": "crew-response",
+            "cron_expression": "0 10 * * *",
+            "execution_type": "crew",
+            "agents_yaml": {"agent": {"role": "test"}},
+            "tasks_yaml": {"task": {"description": "test"}},
+            "created_at": now,
+            "updated_at": now
+        }
+        response = ScheduleResponse(**data)
+
+        assert response.flow_id is None
+        assert response.nodes is None
+        assert response.edges is None
+        assert response.flow_config is None
+
+
+class TestCrewConfigFlowSupport:
+    """Test cases for CrewConfig flow execution support."""
+
+    def test_crew_config_default_execution_type(self):
+        """Test CrewConfig default execution type is 'crew'."""
+        config = CrewConfig(
+            agents_yaml={"agent": {"role": "test"}},
+            tasks_yaml={"task": {"description": "test"}}
+        )
+        assert config.execution_type == "crew"
+
+    def test_crew_config_flow_execution_type(self):
+        """Test CrewConfig with flow execution type."""
+        flow_uuid = uuid4()
+        config = CrewConfig(
+            execution_type="flow",
+            flow_id=flow_uuid,
+            nodes=[{"id": "node1"}],
+            edges=[]
+        )
+        assert config.execution_type == "flow"
+        assert config.flow_id == flow_uuid
+
+    def test_crew_config_with_flow_fields(self):
+        """Test CrewConfig with all flow fields."""
+        flow_uuid = uuid4()
+        nodes = [
+            {"id": "crew1", "type": "crew", "data": {"name": "Research"}},
+            {"id": "crew2", "type": "crew", "data": {"name": "Analysis"}}
+        ]
+        edges = [{"id": "e1", "source": "crew1", "target": "crew2"}]
+        flow_config = {"checkpoint_enabled": True, "max_concurrency": 3}
+
+        config = CrewConfig(
+            execution_type="flow",
+            flow_id=flow_uuid,
+            nodes=nodes,
+            edges=edges,
+            flow_config=flow_config
+        )
+
+        assert config.execution_type == "flow"
+        assert config.flow_id == flow_uuid
+        assert len(config.nodes) == 2
+        assert len(config.edges) == 1
+        assert config.flow_config["checkpoint_enabled"] is True
+
+    def test_crew_config_optional_fields_with_defaults(self):
+        """Test CrewConfig optional fields use default_factory."""
+        # Test that agents_yaml, tasks_yaml, inputs default to empty dicts
+        config = CrewConfig(execution_type="flow", nodes=[{"id": "n1"}], edges=[])
+
+        assert config.agents_yaml == {}
+        assert config.tasks_yaml == {}
+        assert config.inputs == {}
+
+    def test_crew_config_flow_fields_nullable(self):
+        """Test CrewConfig flow fields are nullable for crew execution."""
+        config = CrewConfig(
+            execution_type="crew",
+            agents_yaml={"agent": {"role": "test"}},
+            tasks_yaml={"task": {"description": "test"}}
+        )
+
+        assert config.flow_id is None
+        assert config.nodes is None
+        assert config.edges is None
+        assert config.flow_config is None
+
+    def test_crew_config_with_inputs_and_planning(self):
+        """Test CrewConfig with inputs and planning for flow execution."""
+        config = CrewConfig(
+            execution_type="flow",
+            flow_id=uuid4(),
+            inputs={"topic": "AI", "depth": "detailed"},
+            planning=True,
+            model="gpt-4"
+        )
+
+        assert config.inputs["topic"] == "AI"
+        assert config.planning is True
+        assert config.model == "gpt-4"
+
+    def test_crew_config_uuid_flow_id(self):
+        """Test CrewConfig accepts UUID for flow_id."""
+        flow_uuid = uuid4()
+        config = CrewConfig(
+            execution_type="flow",
+            flow_id=flow_uuid,
+            nodes=[],
+            edges=[]
+        )
+
+        assert config.flow_id == flow_uuid
+        assert isinstance(config.flow_id, UUID)
+
+
+class TestScheduleCreateFlowExecution:
+    """Test cases for ScheduleCreate with flow execution."""
+
+    def test_schedule_create_flow_with_flow_id(self):
+        """Test ScheduleCreate for flow execution with flow_id."""
+        flow_uuid = uuid4()
+        data = {
+            "name": "new-flow-schedule",
+            "cron_expression": "0 9 * * *",
+            "execution_type": "flow",
+            "flow_id": flow_uuid
+        }
+        schedule = ScheduleCreate(**data)
+
+        assert schedule.execution_type == "flow"
+        assert schedule.flow_id == flow_uuid
+
+    def test_schedule_create_flow_with_nodes_edges(self):
+        """Test ScheduleCreate for flow execution with nodes/edges."""
+        data = {
+            "name": "new-flow-schedule",
+            "cron_expression": "0 10 * * *",
+            "execution_type": "flow",
+            "nodes": [{"id": "node1"}],
+            "edges": [{"source": "node1", "target": "node2"}]
+        }
+        schedule = ScheduleCreate(**data)
+
+        assert schedule.execution_type == "flow"
+        assert len(schedule.nodes) == 1
+        assert len(schedule.edges) == 1
+
+
+class TestScheduleUpdateFlowExecution:
+    """Test cases for ScheduleUpdate with flow execution."""
+
+    def test_schedule_update_change_to_flow(self):
+        """Test ScheduleUpdate changing execution type to flow."""
+        data = {
+            "name": "updated-flow-schedule",
+            "cron_expression": "0 9 * * *",
+            "execution_type": "flow",
+            "flow_id": uuid4()
+        }
+        schedule = ScheduleUpdate(**data)
+
+        assert schedule.execution_type == "flow"
+        assert schedule.flow_id is not None
+
+    def test_schedule_update_flow_nodes_edges(self):
+        """Test ScheduleUpdate updating flow nodes and edges."""
+        new_nodes = [{"id": "new_node"}]
+        new_edges = [{"source": "new_node", "target": "other"}]
+        data = {
+            "name": "updated-flow",
+            "cron_expression": "0 10 * * *",
+            "execution_type": "flow",
+            "nodes": new_nodes,
+            "edges": new_edges
+        }
+        schedule = ScheduleUpdate(**data)
+
+        assert schedule.nodes == new_nodes
+        assert schedule.edges == new_edges

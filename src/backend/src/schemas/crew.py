@@ -21,6 +21,12 @@ class Style(BaseModel):
     boxShadow: Optional[str] = None
 
 
+class LLMGuardrailConfig(BaseModel):
+    """Configuration for LLM-based output validation guardrail."""
+    description: str = Field(..., description="Validation criteria for the task output")
+    llm_model: Optional[str] = Field("databricks-claude-sonnet-4-5", description="LLM model to use for validation")
+
+
 class TaskConfig(BaseModel):
     """Configuration specific to tasks."""
     cache_response: Optional[bool] = False
@@ -37,6 +43,7 @@ class TaskConfig(BaseModel):
     callback_function: Optional[str] = None
     human_input: Optional[bool] = False
     markdown: Optional[bool] = False
+    llm_guardrail: Optional[LLMGuardrailConfig] = Field(None, description="LLM-based output validation configuration")
 
 
 class NodeData(BaseModel):
@@ -46,6 +53,7 @@ class NodeData(BaseModel):
     goal: Optional[str] = None
     backstory: Optional[str] = None
     tools: List[Any] = Field(default_factory=list)
+    tool_configs: Optional[Dict[str, Any]] = None  # Tool-specific configuration overrides (e.g., MCP_SERVERS, GenieTool)
     agentId: Optional[str] = None
     taskId: Optional[str] = None
     llm: Optional[str] = None
@@ -77,6 +85,7 @@ class NodeData(BaseModel):
     async_execution: Optional[bool] = False
     knowledge_sources: Optional[List[Dict[str, Any]]] = None
     markdown: Optional[bool] = Field(False, description="Whether to use markdown formatting")
+    llm_guardrail: Optional[LLMGuardrailConfig] = Field(None, description="LLM-based output validation at node level")
 
 
 class Node(BaseModel):
@@ -111,6 +120,18 @@ class CrewBase(BaseModel):
     nodes: List[Node] = Field(default_factory=list)
     edges: List[Edge] = Field(default_factory=list)
 
+    # Crew execution configuration
+    process: Optional[str] = Field("sequential", description="Execution process type: sequential or hierarchical")
+    planning: Optional[bool] = Field(False, description="Enable planning mode for strategic task orchestration")
+    planning_llm: Optional[str] = Field(None, description="LLM model for planning operations")
+    reasoning: Optional[bool] = Field(False, description="Enable reasoning mode for enhanced decision-making")
+    reasoning_llm: Optional[str] = Field(None, description="LLM model for reasoning operations")
+    manager_llm: Optional[str] = Field(None, description="LLM model for hierarchical process manager")
+    tool_configs: Optional[Dict[str, Any]] = Field(None, description="Crew-level tool configurations (MCP servers, etc.)")
+    memory: Optional[bool] = Field(True, description="Enable crew memory")
+    verbose: Optional[bool] = Field(True, description="Enable verbose output")
+    max_rpm: Optional[int] = Field(None, description="Maximum requests per minute")
+
 
 # Properties to receive on crew creation
 class CrewCreate(CrewBase):
@@ -126,6 +147,17 @@ class CrewUpdate(BaseModel):
     task_ids: Optional[List[str]] = None
     nodes: Optional[List[Node]] = None
     edges: Optional[List[Edge]] = None
+    # Crew execution configuration
+    process: Optional[str] = None
+    planning: Optional[bool] = None
+    planning_llm: Optional[str] = None
+    reasoning: Optional[bool] = None
+    reasoning_llm: Optional[str] = None
+    manager_llm: Optional[str] = None
+    tool_configs: Optional[Dict[str, Any]] = None
+    memory: Optional[bool] = None
+    verbose: Optional[bool] = None
+    max_rpm: Optional[int] = None
 
 
 # Properties shared by models stored in DB
@@ -155,6 +187,17 @@ class CrewResponse(BaseModel):
     edges: List[Edge]
     created_at: str
     updated_at: str
+    # Crew execution configuration
+    process: Optional[str] = "sequential"
+    planning: Optional[bool] = False
+    planning_llm: Optional[str] = None
+    reasoning: Optional[bool] = False
+    reasoning_llm: Optional[str] = None
+    manager_llm: Optional[str] = None
+    tool_configs: Optional[Dict[str, Any]] = None
+    memory: Optional[bool] = True
+    verbose: Optional[bool] = True
+    max_rpm: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
 

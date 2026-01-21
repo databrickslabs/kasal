@@ -203,13 +203,6 @@ export class CrewService {
         fullData: node.data
       })));
 
-      // Update the extractIdFromUuid function to follow TypeScript naming conventions
-      // and mark it as unused with underscore prefix
-      const _extractIdFromUuid = (id: string): string | null => {
-        // Just return the full UUID as a string
-        return id;
-      };
-
       // Validate agent IDs
       const agent_ids = agentNodes.map(node => {
         // Check for agentId field first
@@ -348,7 +341,18 @@ export class CrewService {
         agent_ids: agent_ids,
         task_ids: task_ids,
         nodes: cleanedNodes,
-        edges: cleanedEdges
+        edges: cleanedEdges,
+        // Include crew execution configuration if provided
+        ...(crew.process && { process: crew.process }),
+        ...(crew.planning !== undefined && { planning: crew.planning }),
+        ...(crew.planning_llm && { planning_llm: crew.planning_llm }),
+        ...(crew.reasoning !== undefined && { reasoning: crew.reasoning }),
+        ...(crew.reasoning_llm && { reasoning_llm: crew.reasoning_llm }),
+        ...(crew.manager_llm && { manager_llm: crew.manager_llm }),
+        ...(crew.tool_configs && { tool_configs: crew.tool_configs }),
+        ...(crew.memory !== undefined && { memory: crew.memory }),
+        ...(crew.verbose !== undefined && { verbose: crew.verbose }),
+        ...(crew.max_rpm && { max_rpm: crew.max_rpm }),
       };
 
       // Debug logs
@@ -356,7 +360,7 @@ export class CrewService {
 
       const response = await API.post('/crews', crewData);
       const savedCrew: CrewResponse = response.data;
-      
+
       return {
         id: savedCrew.id.toString(),
         name: savedCrew.name,
@@ -366,6 +370,17 @@ export class CrewService {
         edges: savedCrew.edges || cleanedEdges,
         created_at: savedCrew.created_at,
         updated_at: savedCrew.updated_at,
+        // Include execution configuration in response
+        process: savedCrew.process,
+        planning: savedCrew.planning,
+        planning_llm: savedCrew.planning_llm,
+        reasoning: savedCrew.reasoning,
+        reasoning_llm: savedCrew.reasoning_llm,
+        manager_llm: savedCrew.manager_llm,
+        tool_configs: savedCrew.tool_configs,
+        memory: savedCrew.memory,
+        verbose: savedCrew.verbose,
+        max_rpm: savedCrew.max_rpm,
       };
     } catch (error) {
       console.error('Error saving crew:', error);
@@ -572,14 +587,25 @@ export class CrewService {
         agent_ids: agent_ids,
         task_ids: task_ids,
         nodes: cleanedNodes,
-        edges: cleanedEdges
+        edges: cleanedEdges,
+        // Include crew execution configuration if provided
+        ...(crew.process && { process: crew.process }),
+        ...(crew.planning !== undefined && { planning: crew.planning }),
+        ...(crew.planning_llm && { planning_llm: crew.planning_llm }),
+        ...(crew.reasoning !== undefined && { reasoning: crew.reasoning }),
+        ...(crew.reasoning_llm && { reasoning_llm: crew.reasoning_llm }),
+        ...(crew.manager_llm && { manager_llm: crew.manager_llm }),
+        ...(crew.tool_configs && { tool_configs: crew.tool_configs }),
+        ...(crew.memory !== undefined && { memory: crew.memory }),
+        ...(crew.verbose !== undefined && { verbose: crew.verbose }),
+        ...(crew.max_rpm && { max_rpm: crew.max_rpm }),
       };
 
       console.log('Updating crew with data:', JSON.stringify(updateData, null, 2));
 
       const response = await API.put(`/crews/${id}`, updateData);
       const updatedCrew: CrewResponse = response.data;
-      
+
       return {
         id: updatedCrew.id.toString(),
         name: updatedCrew.name,
@@ -589,6 +615,17 @@ export class CrewService {
         edges: updatedCrew.edges || cleanedEdges,
         created_at: updatedCrew.created_at,
         updated_at: updatedCrew.updated_at,
+        // Include execution configuration in response
+        process: updatedCrew.process,
+        planning: updatedCrew.planning,
+        planning_llm: updatedCrew.planning_llm,
+        reasoning: updatedCrew.reasoning,
+        reasoning_llm: updatedCrew.reasoning_llm,
+        manager_llm: updatedCrew.manager_llm,
+        tool_configs: updatedCrew.tool_configs,
+        memory: updatedCrew.memory,
+        verbose: updatedCrew.verbose,
+        max_rpm: updatedCrew.max_rpm,
       };
     } catch (error) {
       console.error('Error updating crew:', error);
@@ -612,16 +649,6 @@ export class CrewService {
     } catch (error) {
       console.error('Error deleting crew:', error);
       return false;
-    }
-  }
-
-  static async deleteAllCrews(): Promise<void> {
-    try {
-      await API.delete('/crews');
-      console.log('All crews deleted successfully');
-    } catch (error) {
-      console.error('Error deleting all crews:', error);
-      throw error;
     }
   }
 }

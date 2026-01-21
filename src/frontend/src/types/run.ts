@@ -20,14 +20,23 @@ export interface Run {
   tasks_yaml: string;
   group_id?: string;
   group_email?: string;
+  // Execution type for distinguishing crew vs flow
+  execution_type?: 'crew' | 'flow' | string;
+  // Flow-specific fields
+  flow_id?: string;
   inputs?: {
-    agents_yaml: Record<string, any>;
-    tasks_yaml: Record<string, any>;
+    agents_yaml?: Record<string, any>;
+    tasks_yaml?: Record<string, any>;
     inputs?: Record<string, any>;
     planning?: boolean;
     model?: string;
     execution_type?: string;
     schema_detection_enabled?: boolean;
+    // Flow-specific input fields
+    flow_id?: string;
+    nodes?: any[];
+    edges?: any[];
+    flow_config?: Record<string, any>;
     [key: string]: any;
   };
   result?: RunResult;

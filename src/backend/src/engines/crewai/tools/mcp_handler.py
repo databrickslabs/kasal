@@ -287,25 +287,33 @@ def create_crewai_tool_from_mcp(mcp_tool_dict):
             try:
                 # Remove dummy field if it exists
                 kwargs.pop('dummy', None)
-                
+
+                # Helper function to run async code in a fresh event loop
+                def run_async_in_new_loop(params):
+                    """Run the async function in a completely isolated event loop."""
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    try:
+                        return new_loop.run_until_complete(self._mcp_tool_wrapper.execute(params))
+                    except Exception as e:
+                        logger.error(f"Error in async execution for {self._mcp_tool_wrapper.name}: {e}")
+                        logger.error(traceback.format_exc())
+                        raise
+                    finally:
+                        new_loop.close()
+
                 # Check if there's already an event loop running
                 try:
                     loop = asyncio.get_running_loop()
-                    # We're in an async context, create a task
-                    future = asyncio.create_task(self._mcp_tool_wrapper.execute(kwargs))
-                    # Use asyncio.run_coroutine_threadsafe to handle it properly
-                    import concurrent.futures
+                    # We're in an async context (CrewAI is running), use thread pool to isolate
+                    logger.debug(f"Detected running event loop, using thread pool for {self._mcp_tool_wrapper.name}")
                     with concurrent.futures.ThreadPoolExecutor() as executor:
-                        result = executor.submit(asyncio.run, self._mcp_tool_wrapper.execute(kwargs)).result()
+                        result = executor.submit(run_async_in_new_loop, kwargs).result()
                 except RuntimeError:
-                    # No event loop running, we can create one
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    try:
-                        result = loop.run_until_complete(self._mcp_tool_wrapper.execute(kwargs))
-                    finally:
-                        loop.close()
-                
+                    # No event loop running, we can execute directly
+                    logger.debug(f"No running event loop, executing directly for {self._mcp_tool_wrapper.name}")
+                    result = run_async_in_new_loop(kwargs)
+
                 # Extract text content if it's an MCP result object
                 if hasattr(result, 'content') and result.content:
                     text_contents = []
@@ -316,6 +324,7 @@ def create_crewai_tool_from_mcp(mcp_tool_dict):
                 return str(result)
             except Exception as e:
                 logger.error(f"Error executing MCP tool {self._mcp_tool_wrapper.name}: {e}")
+                logger.error(traceback.format_exc())
                 return f"Error: {str(e)}"
     
     # Return an instance of the tool

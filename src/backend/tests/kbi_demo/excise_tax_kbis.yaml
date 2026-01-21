@@ -1,0 +1,52 @@
+# Excise Tax KBI Definitions
+# Demonstrates nested KBI dependency resolution
+
+kbi:
+  # ============================================
+  # Leaf Measures (Base Aggregations)
+  # ============================================
+  
+  - description: "Excise Tax Actual"
+    technical_name: "excise_tax_actual"
+    formula: "knval"
+    source_table: "FactTax"
+    aggregation_type: "SUM"
+    target_column: "region, country, fiscal_year, fiscal_period"
+    filter:
+      - "bill_type NOT IN ('F5', 'F8', 'ZF8', 'ZF8S')"
+      - "knart IN ('ZGEQ', 'ZGRQ', 'ZHTQ', 'ZHYQ', 'ZNGQ', 'ZZHY')"
+    display_sign: -1
+
+  - description: "Excise Tax Plan New Method"
+    technical_name: "excise_tax_plan_new_method"
+    formula: "plan_amount"
+    source_table: "FactTaxPlan"
+    aggregation_type: "SUM"
+    target_column: "region, country, fiscal_year, fiscal_period"
+    filter:
+      - "plan_type = 'NEW'"
+      - "knart IN ('ZGEQ', 'ZGRQ', 'ZHTQ')"
+    display_sign: 1
+
+  - description: "Excise Tax Plan Old Method"
+    technical_name: "excise_tax_plan_old_method"
+    formula: "plan_amount"
+    source_table: "FactTaxPlan"
+    aggregation_type: "SUM"
+    target_column: "region, country, fiscal_year, fiscal_period"
+    filter:
+      - "plan_type = 'OLD'"
+      - "knart IN ('ZHYQ', 'ZNGQ', 'ZZHY')"
+    display_sign: 1
+
+  # ============================================
+  # Parent Measure (Calculated from Leaf Measures)
+  # ============================================
+  
+  - description: "Excise Tax Total"
+    technical_name: "excise_tax_total"
+    formula: "excise_tax_actual + excise_tax_plan_new_method + excise_tax_plan_old_method"
+    aggregation_type: "CALCULATED"
+    target_column: "region, country, fiscal_year, fiscal_period"
+    filter: []
+    display_sign: 1

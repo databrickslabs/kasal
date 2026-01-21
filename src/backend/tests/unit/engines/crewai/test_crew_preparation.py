@@ -222,13 +222,16 @@ class TestCrewPreparation:
         """Test successful task creation."""
         # Setup agents first
         crew_preparation.agents = {"researcher": MagicMock(), "writer": MagicMock()}
-        
+
         mock_task1 = MagicMock()
+        mock_task1.async_execution = False  # Explicitly set to avoid MagicMock truthy behavior
         mock_task2 = MagicMock()
-        
+        mock_task2.async_execution = True  # Match config (write_task has async=True)
+
         with patch('src.engines.crewai.helpers.task_helpers.create_task', side_effect=[mock_task1, mock_task2]):
             result = await crew_preparation._create_tasks()
-            
+
+            # Only 1 async task, so no completion task added
             assert result is True
             assert len(crew_preparation.tasks) == 2
             assert crew_preparation.tasks[0] == mock_task1
@@ -239,16 +242,19 @@ class TestCrewPreparation:
         """Test task creation with context resolution."""
         # Setup agents first
         crew_preparation.agents = {"researcher": MagicMock(), "writer": MagicMock()}
-        
+
         mock_task1 = MagicMock()
+        mock_task1.async_execution = False  # Explicitly set to avoid MagicMock truthy behavior
         mock_task2 = MagicMock()
+        mock_task2.async_execution = True  # Match config (write_task has async=True)
         mock_task2.context = None  # Initialize context
-        
+
         with patch('src.engines.crewai.helpers.task_helpers.create_task', side_effect=[mock_task1, mock_task2]):
             result = await crew_preparation._create_tasks()
-            
+
             assert result is True
-            # Verify context was set on the second task
+            # Context is set then cleared for async tasks to enable parallel execution
+            # (but since only 1 async task, context is set and not cleared)
             assert mock_task2.context == [mock_task1]
     
     @pytest.mark.asyncio
@@ -283,11 +289,18 @@ class TestCrewPreparation:
         assert result is False
     
     @pytest.mark.asyncio
-    async def test_create_tasks_async_execution_validation(self, crew_preparation):
-        """Test async execution validation (only last task can be async)."""
+    async def test_create_tasks_async_execution_parallel(self, crew_preparation):
+        """Test parallel execution setup for multiple async tasks.
+
+        CrewAI validates: "The crew must end with at most one asynchronous task"
+        Solution: Keep ALL async tasks as async (they run in parallel), add a minimal
+        completion task with context=[all_async_tasks] to satisfy CrewAI validation.
+
+        IMPORTANT: Async tasks must NOT have context set to run truly in parallel.
+        """
         crew_preparation.agents = {"researcher": MagicMock(), "writer": MagicMock()}
-        
-        # Both tasks set to async - first should be changed to sync
+
+        # Both tasks set to async - they should run in parallel
         crew_preparation.config["tasks"] = [
             {
                 "id": "task1",
@@ -295,33 +308,54 @@ class TestCrewPreparation:
                 "description": "First task",
                 "agent": "researcher",
                 "expected_output": "Output 1",
-                "async_execution": True  # Should be changed to False
+                "async_execution": True  # Will remain True (runs in parallel)
             },
             {
-                "id": "task2", 
+                "id": "task2",
                 "name": "task2",
                 "description": "Second task",
                 "agent": "writer",
                 "expected_output": "Output 2",
-                "async_execution": True  # Should remain True
+                "async_execution": True  # Will remain True (runs in parallel)
             }
         ]
-        
+
         mock_task1 = MagicMock()
+        mock_task1.async_execution = True
+        mock_task1.context = None
+        mock_task1.description = "First task"
+        mock_task1.agent = MagicMock()
+
         mock_task2 = MagicMock()
-        
+        mock_task2.async_execution = True
+        mock_task2.context = None
+        mock_task2.description = "Second task"
+        mock_task2.agent = MagicMock()
+
         with patch('src.engines.crewai.helpers.task_helpers.create_task', side_effect=[mock_task1, mock_task2]) as mock_create:
-            result = await crew_preparation._create_tasks()
-            
-            assert result is True
-            
-            # Check that the first task was called with async_execution=False
-            first_call_config = mock_create.call_args_list[0][1]['task_config']
-            assert first_call_config['async_execution'] is False
-            
-            # Check that the second task was called with async_execution=True
-            second_call_config = mock_create.call_args_list[1][1]['task_config']
-            assert second_call_config['async_execution'] is True
+            # Patch crewai.Task since the code does 'from crewai import Task as CrewAITask'
+            with patch('crewai.Task') as mock_task_class:
+                mock_completion_task = MagicMock()
+                mock_task_class.return_value = mock_completion_task
+
+                result = await crew_preparation._create_tasks()
+
+                assert result is True
+
+                # Both tasks should be created with async_execution=True
+                first_call_config = mock_create.call_args_list[0][1]['task_config']
+                assert first_call_config['async_execution'] is True
+
+                second_call_config = mock_create.call_args_list[1][1]['task_config']
+                assert second_call_config['async_execution'] is True
+
+                # Both async tasks remain async (for parallel execution)
+                assert mock_task1.async_execution is True
+                assert mock_task2.async_execution is True
+
+                # A completion task should be added (3 tasks total)
+                assert len(crew_preparation.tasks) == 3
+                assert crew_preparation.tasks[2] == mock_completion_task
     
     @pytest.mark.asyncio
     async def test_create_tasks_exception_handling(self, crew_preparation):
@@ -339,14 +373,14 @@ class TestCrewPreparation:
     async def test_create_tasks_string_context(self, crew_preparation):
         """Test task creation with string context."""
         crew_preparation.agents = {"researcher": MagicMock(), "writer": MagicMock()}
-        
-        # Modify config to have string context 
+
+        # Modify config to have string context
         crew_preparation.config["tasks"] = [
             {
                 "id": "research_task",
                 "name": "research_task",
                 "description": "Research AI trends",
-                "agent": "researcher", 
+                "agent": "researcher",
                 "expected_output": "Research report"
             },
             {
@@ -358,14 +392,16 @@ class TestCrewPreparation:
                 "context": "research_task"  # String context
             }
         ]
-        
+
         mock_task1 = MagicMock()
+        mock_task1.async_execution = False  # Explicitly set to avoid MagicMock truthy behavior
         mock_task2 = MagicMock()
+        mock_task2.async_execution = False  # Explicitly set to avoid MagicMock truthy behavior
         mock_task2.context = None
-        
+
         with patch('src.engines.crewai.helpers.task_helpers.create_task', side_effect=[mock_task1, mock_task2]):
             result = await crew_preparation._create_tasks()
-            
+
             assert result is True
             assert mock_task2.context == [mock_task1]
     
@@ -373,14 +409,14 @@ class TestCrewPreparation:
     async def test_create_tasks_dict_context_with_task_ids(self, crew_preparation):
         """Test task creation with dict context containing task_ids."""
         crew_preparation.agents = {"researcher": MagicMock(), "writer": MagicMock()}
-        
+
         # Modify config to have dict context with task_ids
         crew_preparation.config["tasks"] = [
             {
                 "id": "research_task",
                 "name": "research_task",
                 "description": "Research AI trends",
-                "agent": "researcher", 
+                "agent": "researcher",
                 "expected_output": "Research report"
             },
             {
@@ -392,14 +428,16 @@ class TestCrewPreparation:
                 "context": {"task_ids": ["research_task"]}  # Dict context with task_ids
             }
         ]
-        
+
         mock_task1 = MagicMock()
+        mock_task1.async_execution = False  # Explicitly set to avoid MagicMock truthy behavior
         mock_task2 = MagicMock()
+        mock_task2.async_execution = False  # Explicitly set to avoid MagicMock truthy behavior
         mock_task2.context = None
-        
+
         with patch('src.engines.crewai.helpers.task_helpers.create_task', side_effect=[mock_task1, mock_task2]):
             result = await crew_preparation._create_tasks()
-            
+
             assert result is True
             assert mock_task2.context == [mock_task1]
     
@@ -407,13 +445,13 @@ class TestCrewPreparation:
     async def test_create_tasks_unresolvable_context_references(self, crew_preparation):
         """Test task creation when context references can't be resolved."""
         crew_preparation.agents = {"researcher": MagicMock(), "writer": MagicMock()}
-        
+
         crew_preparation.config["tasks"] = [
             {
                 "id": "research_task",
                 "name": "research_task",
                 "description": "Research AI trends",
-                "agent": "researcher", 
+                "agent": "researcher",
                 "expected_output": "Research report",
                 "context": []  # Empty context (no warning expected)
             },
@@ -421,20 +459,22 @@ class TestCrewPreparation:
                 "id": "write_task",
                 "name": "write_task",
                 "description": "Write report",
-                "agent": "writer", 
+                "agent": "writer",
                 "expected_output": "Written report",
                 "context": ["nonexistent1", "nonexistent2"]  # All invalid references
             }
         ]
-        
+
         mock_task1 = MagicMock()
+        mock_task1.async_execution = False  # Explicitly set to avoid MagicMock truthy behavior
         mock_task2 = MagicMock()
-        
+        mock_task2.async_execution = False  # Explicitly set to avoid MagicMock truthy behavior
+
         with patch('src.engines.crewai.helpers.task_helpers.create_task', side_effect=[mock_task1, mock_task2]), \
              patch('src.engines.crewai.crew_preparation.logger') as mock_logger:
-            
+
             result = await crew_preparation._create_tasks()
-            
+
             assert result is True
             # Check that warning was logged for no resolvable context tasks
             mock_logger.warning.assert_any_call("No context tasks could be resolved for task write_task")

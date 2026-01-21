@@ -299,7 +299,7 @@ class AgentGenerationService:
                 "llm": model,
                 "function_calling_llm": None,
                 "max_iter": 25,
-                "max_rpm": None,
+                "max_rpm": 10,
                 "max_execution_time": None,
                 "verbose": False,
                 "allow_delegation": False,
@@ -321,7 +321,7 @@ class AgentGenerationService:
             default_config = {
                 "function_calling_llm": None,
                 "max_iter": 25,
-                "max_rpm": None,
+                "max_rpm": 10,
                 "max_execution_time": None,
                 "verbose": False,
                 "allow_delegation": False,

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { 
-  Box, 
-  IconButton, 
-  Tooltip, 
+import {
+  Box,
+  IconButton,
+  Tooltip,
   CircularProgress,
   Menu,
   MenuItem
@@ -17,6 +17,7 @@ import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
 import _SaveIcon from '@mui/icons-material/Save';
 import SettingsIcon from '@mui/icons-material/Settings';
+import AccountTreeIcon from '@mui/icons-material/AccountTree';
 
 // Components
 import _SaveCrew from '../Crew/SaveCrew';
@@ -43,37 +44,24 @@ interface WorkflowToolbarProps {
   nodes: Node[];
   edges: Edge[];
   saveCrewRef: React.RefObject<HTMLButtonElement>;
+  saveFlowRef: React.RefObject<HTMLButtonElement>;
 }
 
 const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
-  selectedModel,
-  setSelectedModel,
-  planningEnabled,
-  setPlanningEnabled,
-  schemaDetectionEnabled,
-  setSchemaDetectionEnabled,
-  reasoningEnabled,
-  setReasoningEnabled,
-  setIsAgentDialogOpen,
-  setIsTaskDialogOpen,
-  setIsFlowDialogOpen,
   setIsCrewPlanningOpen,
-  setIsLogsDialogOpen,
   setIsConfigurationDialogOpen,
   setIsCrewDialogOpen,
-  handleRunClick,
-  isRunning,
   nodes,
   edges,
-  saveCrewRef
+  saveCrewRef,
+  saveFlowRef
 }) => {
   const { t } = useTranslation();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const open = Boolean(anchorEl);
 
-  const { 
-    executeCrew, 
-    executeFlow,
+  const {
+    executeCrew,
     isExecuting,
     errorMessage,
     showError,
@@ -82,9 +70,20 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
     setShowError,
     setShowSuccess,
     setErrorMessage,
+    handleRunClick: storeHandleRunClick,
   } = useCrewExecutionStore();
 
   const canRunCrew = React.useMemo(() => hasCrewContent(nodes), [nodes]);
+
+  // Check if all edges are configured for flow execution
+  const canRunFlow = React.useMemo(() => {
+    if (edges.length === 0) return true; // No edges means simple flow
+    return edges.every(edge => {
+      const hasSourceTasks = edge.data?.listenToTaskIds && edge.data.listenToTaskIds.length > 0;
+      const hasTargetTasks = edge.data?.targetTaskIds && edge.data.targetTaskIds.length > 0;
+      return hasSourceTasks && hasTargetTasks;
+    });
+  }, [edges]);
 
   const handleMenuClose = useCallback(() => {
     setAnchorEl(null);
@@ -96,18 +95,38 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
       await executeCrew(nodes, edges);
     } catch (error) {
       console.error('[WorkflowToolbar] Error executing crew:', error);
-      // The error will also be handled by the store and useEffect, but this provides backup
     }
   }, [executeCrew, nodes, edges, handleMenuClose]);
-  
+
   const handleExecuteFlow = useCallback(async () => {
     handleMenuClose();
-    
+
     try {
       // Check if there are nodes on the canvas first
       if (nodes.length === 0) {
         console.error('[WorkflowToolbar] Cannot execute flow: No nodes on canvas');
         setErrorMessage('Cannot execute flow: No nodes on canvas');
+        setShowError(true);
+        return;
+      }
+
+      // CRITICAL: Validate all edges are properly configured before execution
+      const unconfiguredEdges = edges.filter(edge => {
+        const hasSourceTasks = edge.data?.listenToTaskIds && edge.data.listenToTaskIds.length > 0;
+        const hasTargetTasks = edge.data?.targetTaskIds && edge.data.targetTaskIds.length > 0;
+        return !hasSourceTasks || !hasTargetTasks;
+      });
+
+      if (unconfiguredEdges.length > 0) {
+        const edgeDescriptions = unconfiguredEdges.map((edge, index) => {
+          const sourceNode = nodes.find(n => n.id === edge.source);
+          const targetNode = nodes.find(n => n.id === edge.target);
+          return `${index + 1}. ${sourceNode?.data?.crewName || 'Unknown'} → ${targetNode?.data?.crewName || 'Unknown'}`;
+        }).join('\n');
+
+        const errorMsg = `Cannot execute flow: ${unconfiguredEdges.length} connection(s) not configured.\n\nPlease configure these connections by clicking on them and selecting tasks:\n${edgeDescriptions}`;
+        console.error('[WorkflowToolbar]', errorMsg);
+        setErrorMessage(errorMsg);
         setShowError(true);
         return;
       }
@@ -118,16 +137,15 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
         acc[type] = (acc[type] || 0) + 1;
         return acc;
       }, {} as Record<string, number>);
-      
+
       console.log('[WorkflowToolbar] Node types on canvas before execution:', nodeTypes);
-      
-      // Execute the flow
-      console.log('[WorkflowToolbar] Executing flow with nodes:', nodes.length, 'edges:', edges.length);
-      await executeFlow(nodes, edges);
-      console.log('[WorkflowToolbar] Flow execution initiated successfully');
+      console.log('[WorkflowToolbar] All edges validated successfully');
+
+      // Use the store's handleRunClick which includes checkpoint checking
+      console.log('[WorkflowToolbar] Calling store handleRunClick for flow execution');
+      await storeHandleRunClick('flow');
     } catch (error) {
       console.error('[WorkflowToolbar] Error executing flow:', error);
-      // Display error to user
       if (error instanceof Error) {
         setErrorMessage(`Flow execution failed: ${error.message}`);
       } else {
@@ -135,7 +153,7 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
       }
       setShowError(true);
     }
-  }, [executeFlow, nodes, edges, handleMenuClose, setErrorMessage, setShowError]);
+  }, [nodes, edges, handleMenuClose, setErrorMessage, setShowError, storeHandleRunClick]);
 
   // Handle click to open execution menu
   const handleExecuteClick = (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -147,7 +165,6 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
     console.log('[WorkflowToolbar] useEffect triggered - showError:', showError, 'errorMessage:', errorMessage);
     if (showError && errorMessage) {
       console.log('[WorkflowToolbar] Conditions met, showing toast...');
-      // Import toast from react-hot-toast and show error
       import('react-hot-toast').then(({ toast }) => {
         console.log('[WorkflowToolbar] Toast loaded, showing error toast:', errorMessage);
         toast.error(errorMessage, {
@@ -161,7 +178,6 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
         });
       }).catch((error) => {
         console.error('[WorkflowToolbar] Failed to load toast:', error);
-        // Fallback: show alert if toast fails to load
         alert(`Execution Error: ${errorMessage}`);
       });
       setShowError(false);
@@ -170,22 +186,21 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
 
   useEffect(() => {
     if (showSuccess) {
-      // Show success message using your preferred notification system
       console.log(successMessage);
       setShowSuccess(false);
     }
   }, [showSuccess, successMessage, setShowSuccess]);
 
   return (
-    <Box sx={{ 
-      display: 'flex', 
-      justifyContent: 'space-between', 
+    <Box sx={{
+      display: 'flex',
+      justifyContent: 'space-between',
       p: 1.5,
       borderBottom: '1px solid',
       borderColor: 'divider',
       bgcolor: 'background.paper',
       position: 'fixed',
-      top: '48px', // Position below TabBar
+      top: '48px',
       left: 0,
       right: 0,
       zIndex: 1000
@@ -214,10 +229,10 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
         <Box sx={{ height: 24, mx: 1, borderLeft: '1px solid rgba(0, 0, 0, 0.12)' }} />
 
         <Tooltip title={t('nemo.buttons.generateCrew') || 'Generate Crew'}>
-          <IconButton 
+          <IconButton
             onClick={() => setIsCrewPlanningOpen(true)}
             size="small"
-            sx={{ 
+            sx={{
               border: '1px solid #2E3B55',
               borderRadius: 1,
               p: 1,
@@ -271,7 +286,25 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
             }}
           >
             <MenuItem onClick={handleExecuteCrew}>Execute Crew</MenuItem>
-            <MenuItem onClick={handleExecuteFlow}>Execute Flow</MenuItem>
+            <Tooltip
+              title={!canRunFlow ? "Some connections are not configured. Click on orange connections to configure them." : ""}
+              placement="right"
+            >
+              <span>
+                <MenuItem
+                  onClick={handleExecuteFlow}
+                  disabled={!canRunFlow}
+                  sx={{
+                    '&.Mui-disabled': {
+                      opacity: 0.5,
+                      pointerEvents: 'auto',
+                    }
+                  }}
+                >
+                  Execute Flow
+                </MenuItem>
+              </span>
+            </Tooltip>
           </Menu>
         </div>
 
@@ -304,7 +337,6 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               }}
               data-tour="save-button"
               onClick={() => {
-                // Trigger the save crew dialog via an event
                 const event = new CustomEvent('openSaveCrewDialog');
                 window.dispatchEvent(event);
               }}
@@ -313,9 +345,31 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
             </IconButton>
           </span>
         </Tooltip>
+
+        <Tooltip title={t('nemo.buttons.saveFlow') || 'Save Flow'}>
+          <span>
+            <IconButton
+              ref={saveFlowRef}
+              size="small"
+              sx={{
+                border: '1px solid rgba(0, 0, 0, 0.12)',
+                borderRadius: 1,
+                p: 1,
+                '&:hover': { backgroundColor: 'action.hover' }
+              }}
+              data-tour="save-flow-button"
+              onClick={() => {
+                const event = new CustomEvent('openSaveFlowDialog');
+                window.dispatchEvent(event);
+              }}
+            >
+              <AccountTreeIcon sx={{ fontSize: 20 }} />
+            </IconButton>
+          </span>
+        </Tooltip>
       </Box>
     </Box>
   );
 };
 
-export default WorkflowToolbar; 
+export default WorkflowToolbar;

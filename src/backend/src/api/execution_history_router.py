@@ -326,13 +326,16 @@ async def delete_all_executions(
     service: ExecutionHistoryService = Depends(get_execution_history_service)
 ):
     """
-    Delete all executions and their associated data.
-    
+    Delete all executions and their associated data for the user's groups.
+
+    This endpoint ensures tenant isolation by only deleting executions
+    that belong to the groups the user has access to.
+
     Returns:
         DeleteResponse with information about the deleted data
     """
     try:
-        return await service.delete_all_executions()
+        return await service.delete_all_executions(group_ids=group_context.group_ids)
     except Exception as e:
         logger.error(f"Error deleting all executions: {str(e)}")
         raise HTTPException(

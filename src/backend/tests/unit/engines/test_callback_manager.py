@@ -68,7 +68,7 @@ class TestCallbackManager:
             # Check that callbacks were created with correct parameters
             mock_job_callback.assert_called_once_with(
                 job_id=mock_job_id,
-                guardrail_max_retries=3,
+                max_retries=3,
                 group_context=mock_group_context
             )
             mock_event_callback.assert_called_once_with(

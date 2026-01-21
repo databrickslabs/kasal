@@ -30,18 +30,19 @@ def upgrade() -> None:
     
     # ### Update the temporary column with values converted from the original column
     # ### This will involve a database lookup to convert integer IDs to their UUID equivalents
+    # ### Handle both integer flow_id and UUID flow_id columns by using explicit CAST
     op.execute("""
         UPDATE flow_executions fe
         SET flow_id_uuid = f.id
         FROM flows f
-        WHERE fe.flow_id = f.id::text::integer
+        WHERE CAST(fe.flow_id AS TEXT) = CAST(f.id AS TEXT)
     """)
     
-    # ### Handle dynamic flows (flow_id = 0)
+    # ### Handle dynamic flows (flow_id = 0 or '0')
     op.execute("""
         UPDATE flow_executions
         SET flow_id_uuid = '00000000-0000-0000-0000-000000000000'
-        WHERE flow_id = 0
+        WHERE CAST(flow_id AS TEXT) = '0'
     """)
     
     # Drop any foreign key constraints on flow_id column

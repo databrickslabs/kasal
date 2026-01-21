@@ -227,14 +227,21 @@ export class FlowService {
       };
 
       // Ensure nodes and edges are properly formatted
+      // CRITICAL: Preserve ALL node properties to maintain visual state and custom data
       const nodes = flow.nodes.map(node => {
         flowLogger.debug('Processing node:', node.id);
         return {
           id: node.id,
           type: node.type,
           position: node.position || { x: 0, y: 0 },
+          // Preserve additional top-level properties like width, height, style if they exist
+          ...(node.width !== undefined && { width: node.width }),
+          ...(node.height !== undefined && { height: node.height }),
+          ...(node.style && { style: node.style }),
+          ...(node.className && { className: node.className }),
+          ...(node.dragging !== undefined && { dragging: node.dragging }),
           data: {
-            ...node.data,
+            ...node.data,  // Preserve ALL data properties (allTasks, selectedTasks, order, flowConfig, etc.)
             label: node.data?.label || node.id
           }
         };
@@ -246,7 +253,17 @@ export class FlowService {
           id: edge.id,
           source: edge.source,
           target: edge.target,
-          type: edge.type || 'default'
+          type: edge.type || 'default',
+          // Preserve style and other edge properties
+          ...(edge.style && { style: edge.style }),
+          ...(edge.animated !== undefined && { animated: edge.animated }),
+          ...(edge.label && { label: edge.label }),
+          ...(edge.labelStyle && { labelStyle: edge.labelStyle }),
+          ...(edge.labelBgStyle && { labelBgStyle: edge.labelBgStyle }),
+          ...(edge.className && { className: edge.className }),
+          data: edge.data || {},  // Preserve ALL edge data (configured, listenToTaskIds, targetTaskIds, logicType, routerConfig, etc.)
+          sourceHandle: edge.sourceHandle,
+          targetHandle: edge.targetHandle
         };
       });
       
@@ -382,9 +399,46 @@ export class FlowService {
             isStartPoint: true
           }))
       } : {};
-      
+
+      // Process nodes and edges if provided
+      // CRITICAL: Preserve ALL node properties to maintain visual state and custom data
+      const nodes = flow.nodes ? flow.nodes.map(node => ({
+        id: node.id,
+        type: node.type,
+        position: node.position || { x: 0, y: 0 },
+        // Preserve additional top-level properties like width, height, style if they exist
+        ...(node.width !== undefined && { width: node.width }),
+        ...(node.height !== undefined && { height: node.height }),
+        ...(node.style && { style: node.style }),
+        ...(node.className && { className: node.className }),
+        ...(node.dragging !== undefined && { dragging: node.dragging }),
+        data: {
+          ...node.data,  // Preserve ALL data properties (allTasks, selectedTasks, order, flowConfig, etc.)
+          label: node.data?.label || node.id
+        }
+      })) : undefined;
+
+      const edges = flow.edges ? flow.edges.map(edge => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        type: edge.type || 'default',
+        // Preserve style and other edge properties
+        ...(edge.style && { style: edge.style }),
+        ...(edge.animated !== undefined && { animated: edge.animated }),
+        ...(edge.label && { label: edge.label }),
+        ...(edge.labelStyle && { labelStyle: edge.labelStyle }),
+        ...(edge.labelBgStyle && { labelBgStyle: edge.labelBgStyle }),
+        ...(edge.className && { className: edge.className }),
+        data: edge.data || {},  // Preserve ALL edge data (configured, listenToTaskIds, targetTaskIds, logicType, routerConfig, etc.)
+        sourceHandle: edge.sourceHandle,
+        targetHandle: edge.targetHandle
+      })) : undefined;
+
       const data = {
         name: flow.name,
+        ...(nodes ? { nodes } : {}),
+        ...(edges ? { edges } : {}),
         flow_config
       };
       
@@ -481,12 +535,90 @@ export class FlowService {
     }
   }
 
-  static async deleteAllFlows(): Promise<void> {
+  /**
+   * Get available checkpoints for a flow that can be resumed.
+   * @param flowId - The flow ID to get checkpoints for
+   * @param statusFilter - Filter by checkpoint status (default: 'active')
+   * @returns List of available checkpoints
+   */
+  static async getFlowCheckpoints(flowId: string, statusFilter = 'active'): Promise<FlowCheckpointListResponse> {
     try {
-      await apiClient.delete('/flows');
+      // Format ID as UUID if needed
+      let formattedId = flowId;
+      if (flowId && !flowId.includes('-') && flowId.length >= 32) {
+        formattedId = [
+          flowId.substring(0, 8),
+          flowId.substring(8, 12),
+          flowId.substring(12, 16),
+          flowId.substring(16, 20),
+          flowId.substring(20)
+        ].join('-');
+      }
+
+      const response = await apiClient.get(`/flows/${formattedId}/checkpoints`, {
+        params: { status_filter: statusFilter }
+      });
+
+      flowLogger.debug('Checkpoints fetched:', response.data);
+      return response.data;
     } catch (error) {
-      console.error('Error deleting all flows:', error);
-      throw error;
+      flowLogger.error('Error fetching flow checkpoints:', error);
+      return { flow_id: flowId, checkpoints: [], total: 0 };
     }
   }
+
+  /**
+   * Delete/expire a checkpoint so it won't appear in the resume list.
+   * @param flowId - The flow ID
+   * @param executionId - The execution ID of the checkpoint to delete
+   * @returns Success status
+   */
+  static async deleteFlowCheckpoint(flowId: string, executionId: number): Promise<boolean> {
+    try {
+      // Format ID as UUID if needed
+      let formattedId = flowId;
+      if (flowId && !flowId.includes('-') && flowId.length >= 32) {
+        formattedId = [
+          flowId.substring(0, 8),
+          flowId.substring(8, 12),
+          flowId.substring(12, 16),
+          flowId.substring(16, 20),
+          flowId.substring(20)
+        ].join('-');
+      }
+
+      await apiClient.delete(`/flows/${formattedId}/checkpoints/${executionId}`);
+      flowLogger.info('Checkpoint deleted successfully');
+      return true;
+    } catch (error) {
+      flowLogger.error('Error deleting checkpoint:', error);
+      return false;
+    }
+  }
+}
+
+// Types for checkpoint operations
+export interface CrewCheckpoint {
+  crew_name: string;
+  sequence: number;
+  status: string;
+  output_preview: string | null;
+  completed_at: string;
+}
+
+export interface FlowCheckpoint {
+  execution_id: number;
+  job_id: string;
+  flow_uuid: string;
+  checkpoint_method: string | null;
+  checkpoint_status: string;
+  created_at: string;
+  run_name: string | null;
+  crew_checkpoints?: CrewCheckpoint[];
+}
+
+export interface FlowCheckpointListResponse {
+  flow_id: string | null;
+  checkpoints: FlowCheckpoint[];
+  total: number;
 }

@@ -10,21 +10,26 @@ import {
 import {
   PersonAdd as PersonAddIcon,
   AddTask as AddTaskIcon,
-  AccountTree as AccountTreeIcon,
+  AccountTree as WorkflowIcon,
   Save as SaveIcon,
   MenuBook as MenuBookIcon,
   Schedule as ScheduleIcon,
   Assessment as LogsIcon,
   History as HistoryIcon,
+  PlayArrow as PlayArrowIcon,
+  FileDownload as FileDownloadIcon,
 } from '@mui/icons-material';
+import { Edge } from 'reactflow';
 import { useFlowConfigStore } from '../../store/flowConfig';
 import { usePermissionStore } from '../../store/permissions';
+import { useTabManagerStore } from '../../store/tabManager';
+import ExportCrewDialog from '../CrewExport/ExportCrewDialog';
 
 interface SidebarItem {
   id: string;
   icon?: React.ReactNode;
   tooltip?: string;
-  onClick?: () => void;
+  onClick?: (event?: React.MouseEvent<HTMLElement>) => void;
   disabled?: boolean;
   isActive?: boolean;
   isSeparator?: boolean;
@@ -36,13 +41,21 @@ interface RightSidebarProps {
   isChatOpen: boolean;
   setIsAgentDialogOpen: (open: boolean) => void;
   setIsTaskDialogOpen: (open: boolean) => void;
-  setIsFlowDialogOpen: (open: boolean) => void;
   setIsCrewDialogOpen?: (open: boolean) => void;
   onSaveCrewClick?: () => void;
+  onSaveFlowClick?: () => void;
   showRunHistory?: boolean;
   executionHistoryHeight?: number;
   onOpenSchedulesDialog?: () => void;
   onToggleExecutionHistory?: () => void;
+  areFlowsVisible?: boolean;
+  toggleFlowsVisibility?: () => void;
+  // Play button props
+  hasCrewNodes?: boolean;
+  hasFlowNodes?: boolean;
+  onPlayPlan?: () => void;
+  onPlayFlow?: () => void;
+  edges?: Edge[]; // Add edges for validation
 }
 
 const RightSidebar: React.FC<RightSidebarProps> = ({
@@ -51,21 +64,81 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   isChatOpen,
   setIsAgentDialogOpen,
   setIsTaskDialogOpen,
-  setIsFlowDialogOpen,
   setIsCrewDialogOpen,
   onSaveCrewClick,
+  onSaveFlowClick,
   showRunHistory = false,
   executionHistoryHeight = 200,
   onOpenSchedulesDialog,
   onToggleExecutionHistory,
+  areFlowsVisible = false,
+  toggleFlowsVisibility,
+  hasCrewNodes = false,
+  hasFlowNodes = false,
+  onPlayPlan,
+  onPlayFlow,
+  edges = [],
 }) => {
   const [animateAIAssistant, setAnimateAIAssistant] = useState(true);
   const [chatOpenedByClick, setChatOpenedByClick] = useState(false);
+  const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
+
   const { crewAIFlowEnabled } = useFlowConfigStore();
 
   // Get user permissions
   const { userRole } = usePermissionStore();
   const isOperator = userRole === 'operator';
+  const _isAdmin = userRole === 'admin';
+  const _isEditor = userRole === 'editor';
+
+  // Get active tab's crew info from tabManager
+  const { getActiveTab } = useTabManagerStore();
+  const activeTab = getActiveTab();
+  const savedCrewId = activeTab?.savedCrewId;
+  const savedCrewName = activeTab?.savedCrewName || 'Unnamed Crew';
+
+  // Validate all edges are configured before allowing flow execution
+  const canRunFlow = React.useMemo(() => {
+    if (!hasFlowNodes) return false;
+    if (edges.length === 0) return true; // No edges means simple flow
+    return edges.every(edge => {
+      const hasSourceTasks = edge.data?.listenToTaskIds && edge.data.listenToTaskIds.length > 0;
+      const hasTargetTasks = edge.data?.targetTaskIds && edge.data.targetTaskIds.length > 0;
+      return hasSourceTasks && hasTargetTasks;
+    });
+  }, [hasFlowNodes, edges]);
+
+  // Context-aware play handler - no menu needed
+  const handlePlayClick = () => {
+    // If on flow canvas, run flow; otherwise run crew
+    if (areFlowsVisible) {
+      if (onPlayFlow) {
+        console.log('[RightSidebar] Running flow (context: flow canvas visible)');
+        onPlayFlow();
+      }
+    } else {
+      if (onPlayPlan) {
+        console.log('[RightSidebar] Running crew (context: crew canvas visible)');
+        onPlayPlan();
+      }
+    }
+  };
+
+  // Context-aware save handler - no menu needed
+  const handleSaveClick = () => {
+    // If on flow canvas, save flow; otherwise save crew
+    if (areFlowsVisible) {
+      if (onSaveFlowClick) {
+        console.log('[RightSidebar] Saving flow (context: flow canvas visible)');
+        onSaveFlowClick();
+      }
+    } else {
+      if (onSaveCrewClick) {
+        console.log('[RightSidebar] Saving crew (context: crew canvas visible)');
+        onSaveCrewClick();
+      }
+    }
+  };
 
 
   useEffect(() => {
@@ -91,10 +164,27 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
     }
   }, [isChatOpen]);
 
+  // Determine if play button should be enabled based on context
+  const canExecute = areFlowsVisible ? canRunFlow : hasCrewNodes;
+  const playButtonTooltip = areFlowsVisible
+    ? (canRunFlow ? 'Run Flow' : 'Configure flow connections to run')
+    : (hasCrewNodes ? 'Run Crew' : 'No Crew to Execute');
 
   const sidebarItems: SidebarItem[] = [
-    // Only show Add Agent, Add Task, and Save Crew for non-operators
-    ...(!isOperator ? [
+    // Play button at the top - context-aware
+    {
+      id: 'play-execution',
+      icon: <PlayArrowIcon />,
+      tooltip: playButtonTooltip,
+      onClick: handlePlayClick,
+      disabled: !canExecute
+    },
+    // Only show Add Agent, Add Task, and Save for non-operators AND when not on flow canvas
+    ...(!isOperator && !areFlowsVisible ? [
+      {
+        id: 'separator1',
+        isSeparator: true
+      },
       {
         id: 'add-agent',
         icon: <PersonAddIcon />,
@@ -114,17 +204,49 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
         isSeparator: true
       },
       {
-        id: 'save-crew',
+        id: 'save-context',
         icon: <SaveIcon />,
         tooltip: 'Save Crew',
-        onClick: onSaveCrewClick,
+        onClick: handleSaveClick,
         disabled: false
       }
     ] : []),
+    // Show Save Flow button when on flow canvas and user is not an operator
+    ...(!isOperator && areFlowsVisible ? [
+      {
+        id: 'separator2',
+        isSeparator: true
+      },
+      {
+        id: 'save-context',
+        icon: <SaveIcon />,
+        tooltip: 'Save Flow',
+        onClick: handleSaveClick,
+        disabled: false
+      }
+    ] : []),
+    // Export button - always visible for non-operators (works for both crew and flow)
+    ...(!isOperator ? [
+      {
+        id: 'separator-export',
+        isSeparator: true
+      },
+      {
+        id: 'export-notebook',
+        icon: <FileDownloadIcon />,
+        tooltip: savedCrewId ? 'Export To Notebook' : 'Save crew first to export',
+        onClick: () => setIsExportDialogOpen(true),
+        disabled: !savedCrewId
+      }
+    ] : []),
+    {
+      id: 'separator-catalog',
+      isSeparator: true
+    },
     {
       id: 'open-catalog',
       icon: <MenuBookIcon />,
-      tooltip: 'Open Catalog',
+      tooltip: areFlowsVisible ? 'Open Workflow Catalog' : 'Open Catalog',
       onClick: () => setIsCrewDialogOpen?.(true),
       disabled: false
     },
@@ -134,24 +256,28 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
         isSeparator: true
       },
       {
-        id: 'add-flow',
-        icon: <AccountTreeIcon />,
-        tooltip: 'Add Flow',
-        onClick: () => setIsFlowDialogOpen(true),
+        id: 'toggle-flows',
+        icon: <WorkflowIcon />,
+        tooltip: areFlowsVisible ? 'Hide Workflow Panel' : 'Show Workflow Panel',
+        onClick: toggleFlowsVisibility,
+        disabled: !toggleFlowsVisibility,
+        isActive: areFlowsVisible
+      }
+    ] : []),
+    // Only show View Assistant Logs when NOT on flow canvas
+    ...(!areFlowsVisible ? [
+      {
+        id: 'separator4',
+        isSeparator: true
+      },
+      {
+        id: 'view-logs',
+        icon: <LogsIcon />,
+        tooltip: 'View Assistant Logs',
+        onClick: onOpenLogsDialog,
         disabled: false
       }
     ] : []),
-    {
-      id: 'separator4',
-      isSeparator: true
-    },
-    {
-      id: 'view-logs',
-      icon: <LogsIcon />,
-      tooltip: 'View Assistant Logs',
-      onClick: onOpenLogsDialog,
-      disabled: false
-    },
     {
       id: 'toggle-execution-history',
       icon: <HistoryIcon />,
@@ -222,9 +348,9 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
               ) : (
                 <Tooltip title={item.tooltip} placement="left">
                   <IconButton
-                    onClick={() => {
+                    onClick={(e) => {
                       if (item.onClick && !item.disabled) {
-                        item.onClick();
+                        item.onClick(e);
                       }
                     }}
                     disabled={item.disabled}
@@ -257,6 +383,16 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
           ))}
         </Paper>
       </Box>
+
+      {/* Export Dialog */}
+      {savedCrewId && (
+        <ExportCrewDialog
+          open={isExportDialogOpen}
+          onClose={() => setIsExportDialogOpen(false)}
+          crewId={savedCrewId}
+          crewName={savedCrewName}
+        />
+      )}
     </>
   );
 };

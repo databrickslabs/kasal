@@ -89,14 +89,12 @@ class TestFlowExecutionBase:
     
     def test_flow_execution_base_missing_required_fields(self):
         """Test FlowExecutionBase validation with missing required fields."""
-        # Missing flow_id
-        with pytest.raises(ValidationError) as exc_info:
-            FlowExecutionBase(job_id="test_job")
-        errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
-        assert "flow_id" in missing_fields
-        
-        # Missing job_id
+        # flow_id is optional now (for ad-hoc executions), so only job_id is required
+        execution = FlowExecutionBase(job_id="test_job")
+        assert execution.flow_id is None  # flow_id is optional
+        assert execution.job_id == "test_job"
+
+        # Missing job_id should raise ValidationError
         with pytest.raises(ValidationError) as exc_info:
             FlowExecutionBase(flow_id=uuid4())
         errors = exc_info.value.errors()

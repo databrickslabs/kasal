@@ -2,7 +2,8 @@
 Service for accessing and managing execution traces.
 
 This module provides functions for retrieving and managing execution traces
-from the database.
+from the database. Sensitive data (credentials, secrets, tokens) is automatically
+masked when returning traces to prevent credential leakage.
 """
 
 from typing import List, Optional, Dict, Any
@@ -19,11 +20,46 @@ from src.schemas.execution_trace import (
     DeleteTraceResponse
 )
 from src.utils.user_context import GroupContext
+from src.utils.sensitive_data_utils import mask_sensitive_fields
 
 from src.core.logger import LoggerManager
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().system
+
+
+def _mask_trace_sensitive_data(trace: ExecutionTraceItem) -> ExecutionTraceItem:
+    """
+    Mask sensitive data in trace fields before returning to API.
+
+    Args:
+        trace: ExecutionTraceItem with potentially sensitive data
+
+    Returns:
+        ExecutionTraceItem with sensitive fields masked
+    """
+    # Mask sensitive data in input_data
+    if trace.input_data:
+        trace.input_data = mask_sensitive_fields(trace.input_data)
+
+    # Mask sensitive data in output_data
+    if trace.output_data:
+        trace.output_data = mask_sensitive_fields(trace.output_data)
+
+    # Mask sensitive data in trace_metadata
+    if trace.trace_metadata:
+        trace.trace_metadata = mask_sensitive_fields(trace.trace_metadata)
+
+    # Mask sensitive data in extra_data
+    if trace.extra_data:
+        trace.extra_data = mask_sensitive_fields(trace.extra_data)
+
+    # Mask sensitive data in output if it's a dict
+    if trace.output and isinstance(trace.output, dict):
+        trace.output = mask_sensitive_fields(trace.output)
+
+    return trace
+
 
 class ExecutionTraceService:
     """Service for accessing and managing execution traces."""
@@ -91,14 +127,14 @@ class ExecutionTraceService:
                     if not trace.job_id:
                         trace.job_id = job_id
             
-            # Convert to schema objects
-            trace_items = [ExecutionTraceItem.model_validate(trace) for trace in traces]
-            
+            # Convert to schema objects and mask sensitive data
+            trace_items = [_mask_trace_sensitive_data(ExecutionTraceItem.model_validate(trace)) for trace in traces]
+
             return ExecutionTraceResponseByRunId(
                 run_id=run_id,
                 traces=trace_items
             )
-            
+
         except SQLAlchemyError as e:
             logger.error(f"Database error retrieving traces for execution {run_id}: {str(e)}")
             raise
@@ -164,15 +200,15 @@ class ExecutionTraceService:
                 for trace in traces:
                     if not trace.job_id:
                         trace.job_id = job_id
-            
-            # Convert to schema objects
-            trace_items = [ExecutionTraceItem.model_validate(trace) for trace in traces]
-            
+
+            # Convert to schema objects and mask sensitive data
+            trace_items = [_mask_trace_sensitive_data(ExecutionTraceItem.model_validate(trace)) for trace in traces]
+
             return ExecutionTraceResponseByJobId(
                 job_id=job_id,
                 traces=trace_items
             )
-            
+
         except SQLAlchemyError as e:
             logger.error(f"Database error retrieving traces for execution with job_id {job_id}: {str(e)}")
             raise
@@ -200,17 +236,17 @@ class ExecutionTraceService:
                 limit,
                 offset
             )
-            
-            # Convert to schema objects
-            trace_items = [ExecutionTraceItem.model_validate(trace) for trace in traces]
-            
+
+            # Convert to schema objects and mask sensitive data
+            trace_items = [_mask_trace_sensitive_data(ExecutionTraceItem.model_validate(trace)) for trace in traces]
+
             return ExecutionTraceList(
                 traces=trace_items,
                 total=total_count,
                 limit=limit,
                 offset=offset
             )
-            
+
         except SQLAlchemyError as e:
             logger.error(f"Database error retrieving all traces: {str(e)}")
             raise
@@ -262,69 +298,70 @@ class ExecutionTraceService:
             # Apply pagination
             total_count = len(traces)
             traces = traces[offset:offset + limit]
-            
-            # Convert to schema objects
-            trace_items = [ExecutionTraceItem.model_validate(trace) for trace in traces]
-            
+
+            # Convert to schema objects and mask sensitive data
+            trace_items = [_mask_trace_sensitive_data(ExecutionTraceItem.model_validate(trace)) for trace in traces]
+
             return ExecutionTraceList(
                 traces=trace_items,
                 total=total_count,
                 limit=limit,
                 offset=offset
             )
-            
+
         except SQLAlchemyError as e:
             logger.error(f"Database error retrieving group traces: {str(e)}")
             raise
         except Exception as e:
             logger.error(f"Error retrieving group traces: {str(e)}")
             raise
-    
+
     async def get_trace_by_id(self, trace_id: int) -> Optional[ExecutionTraceItem]:
         """
-        Get a specific trace by ID.
-        
+        Get a specific trace by ID with sensitive data masked.
+
         Args:
             trace_id: ID of the trace to retrieve
-            
+
         Returns:
-            ExecutionTraceItem if found, None otherwise
+            ExecutionTraceItem if found, None otherwise (with sensitive data masked)
         """
         try:
             trace = await self.repository.get_by_id(trace_id)
-                
+
             if not trace:
                 return None
-                
-            return ExecutionTraceItem.model_validate(trace)
-            
+
+            trace_item = ExecutionTraceItem.model_validate(trace)
+            return _mask_trace_sensitive_data(trace_item)
+
         except SQLAlchemyError as e:
             logger.error(f"Database error retrieving trace {trace_id}: {str(e)}")
             raise
         except Exception as e:
             logger.error(f"Error retrieving trace {trace_id}: {str(e)}")
             raise
-    
+
     async def get_trace_by_id_with_group_check(self,
         trace_id: int,
         group_context: GroupContext
     ) -> Optional[ExecutionTraceItem]:
         """
-        Get a specific trace by ID with group authorization.
-        
+        Get a specific trace by ID with group authorization and sensitive data masked.
+
         Args:
             trace_id: ID of the trace to retrieve
             group_context: Group context for authorization
-            
+
         Returns:
-            ExecutionTraceItem if found and authorized, None otherwise
+            ExecutionTraceItem if found and authorized, None otherwise (with sensitive data masked)
         """
         try:
             trace = await self.repository.get_by_id(trace_id)
-                
+
             if not trace:
                 return None
-            
+
             # Check if trace belongs to user's group via job_id
             if trace.job_id and group_context and group_context.group_ids:
                 execution = await self.execution_history_repository.get_execution_by_job_id(
@@ -333,8 +370,9 @@ class ExecutionTraceService:
                 )
                 if not execution:
                     return None  # Not authorized
-                
-            return ExecutionTraceItem.model_validate(trace)
+
+            trace_item = ExecutionTraceItem.model_validate(trace)
+            return _mask_trace_sensitive_data(trace_item)
             
         except SQLAlchemyError as e:
             logger.error(f"Database error retrieving trace {trace_id}: {str(e)}")

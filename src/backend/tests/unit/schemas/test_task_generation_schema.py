@@ -8,7 +8,8 @@ import pytest
 from pydantic import ValidationError
 
 from src.schemas.task_generation import (
-    Agent, TaskGenerationRequest, AdvancedConfig, TaskGenerationResponse
+    Agent, TaskGenerationRequest, AdvancedConfig, TaskGenerationResponse,
+    LLMGuardrailConfig
 )
 
 
@@ -768,3 +769,87 @@ class TestTaskGenerationSchemaIntegration:
         assert file_task.advanced_config.output_file.endswith(".pdf")
         assert file_task.advanced_config.markdown is True
         assert file_task.advanced_config.output_parser == "pdf_generator"
+
+
+class TestLLMGuardrailConfig:
+    """Test cases for LLMGuardrailConfig schema in task generation."""
+
+    def test_valid_llm_guardrail_config(self):
+        """Test valid LLMGuardrailConfig creation."""
+        config = LLMGuardrailConfig(
+            description="Validate output format and accuracy"
+        )
+        assert config.description == "Validate output format and accuracy"
+        assert config.llm_model == "databricks-claude-sonnet-4-5"  # Default
+
+    def test_llm_guardrail_config_with_custom_model(self):
+        """Test LLMGuardrailConfig with custom LLM model."""
+        config = LLMGuardrailConfig(
+            description="Check for factual accuracy",
+            llm_model="gpt-4"
+        )
+        assert config.description == "Check for factual accuracy"
+        assert config.llm_model == "gpt-4"
+
+    def test_llm_guardrail_config_missing_description(self):
+        """Test LLMGuardrailConfig validation with missing description."""
+        with pytest.raises(ValidationError) as exc_info:
+            LLMGuardrailConfig()
+
+        errors = exc_info.value.errors()
+        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        assert "description" in missing_fields
+
+
+class TestTaskGenerationResponseWithGuardrail:
+    """Test cases for TaskGenerationResponse with llm_guardrail field."""
+
+    def test_task_generation_response_with_guardrail(self):
+        """Test TaskGenerationResponse with llm_guardrail."""
+        guardrail = LLMGuardrailConfig(
+            description="Ensure output meets quality standards"
+        )
+        response = TaskGenerationResponse(
+            name="validated_task",
+            description="Task with output validation",
+            expected_output="Validated analysis report",
+            llm_guardrail=guardrail
+        )
+        assert response.llm_guardrail is not None
+        assert response.llm_guardrail.description == "Ensure output meets quality standards"
+        assert response.llm_guardrail.llm_model == "databricks-claude-sonnet-4-5"
+
+    def test_task_generation_response_without_guardrail(self):
+        """Test TaskGenerationResponse without llm_guardrail (default None)."""
+        response = TaskGenerationResponse(
+            name="simple_task",
+            description="Task without validation",
+            expected_output="Simple output"
+        )
+        assert response.llm_guardrail is None
+
+    def test_task_generation_response_guardrail_serialization(self):
+        """Test TaskGenerationResponse serialization with llm_guardrail."""
+        guardrail = LLMGuardrailConfig(
+            description="Validate data integrity",
+            llm_model="claude-3-opus"
+        )
+        response = TaskGenerationResponse(
+            name="serialization_test",
+            description="Test serialization",
+            expected_output="Serialized output",
+            llm_guardrail=guardrail
+        )
+        response_dict = response.model_dump()
+        assert response_dict["llm_guardrail"]["description"] == "Validate data integrity"
+        assert response_dict["llm_guardrail"]["llm_model"] == "claude-3-opus"
+
+    def test_task_generation_response_guardrail_null_explicit(self):
+        """Test TaskGenerationResponse with explicitly null guardrail."""
+        response = TaskGenerationResponse(
+            name="explicit_null_task",
+            description="Task with explicit null guardrail",
+            expected_output="Output",
+            llm_guardrail=None
+        )
+        assert response.llm_guardrail is None

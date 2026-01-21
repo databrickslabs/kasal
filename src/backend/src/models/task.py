@@ -44,8 +44,9 @@ class Task(Base):
     callback_config = Column(JSON, nullable=True)  # Configuration for callbacks like DatabricksVolume
     human_input = Column(Boolean, default=False)
     converter_cls = Column(String)
-    guardrail = Column(String, nullable=True)  # Store guardrail configuration as JSON string
-    
+    guardrail = Column(String, nullable=True)  # Code-based guardrail (function name)
+    llm_guardrail = Column(JSON, nullable=True)  # LLM-based guardrail configuration
+
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -107,7 +108,21 @@ class Task(Base):
         elif 'markdown' in explicit_kwargs and (self.config.get('markdown') is None):
             # Only add to config if markdown was explicitly provided
             self.config['markdown'] = self.markdown
-            
+
+        # Synchronize guardrail field (code-based guardrail)
+        if self.config and 'guardrail' in self.config and self.config['guardrail']:
+            self.guardrail = self.config['guardrail']
+        elif self.guardrail and (not self.config.get('guardrail')):
+            self.config['guardrail'] = self.guardrail
+
+        # Synchronize llm_guardrail field (LLM-based guardrail)
+        # Handle both setting and clearing of llm_guardrail
+        if self.config and 'llm_guardrail' in self.config:
+            # If llm_guardrail is explicitly in config (even if null), use that value
+            self.llm_guardrail = self.config['llm_guardrail']
+        elif self.llm_guardrail and (not self.config.get('llm_guardrail')):
+            self.config['llm_guardrail'] = self.llm_guardrail
+
         # Ensure condition is properly structured in config if present
         if condition is not None:
             # Note: self.config is guaranteed to be a dict at this point due to line 66
