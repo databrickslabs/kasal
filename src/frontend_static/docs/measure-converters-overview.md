@@ -160,7 +160,9 @@ This design enables:
   "inbound_connector": "powerbi",
   "powerbi_semantic_model_id": "dataset-id",
   "powerbi_group_id": "workspace-id",
-  "powerbi_access_token": "token",
+  "powerbi_tenant_id": "<YOUR_AZURE_TENANT_ID>",
+  "powerbi_client_id": "<YOUR_AZURE_CLIENT_ID>",
+  "powerbi_client_secret": "<YOUR_CLIENT_SECRET>",
 
   "outbound_format": "sql",
   "sql_dialect": "databricks"

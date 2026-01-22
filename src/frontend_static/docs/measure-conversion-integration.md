@@ -254,7 +254,7 @@ If using Unity Catalog Metrics as target format:
   "powerbi_group_id": "workspace-456",
   "powerbi_tenant_id": "tenant-789",
   "powerbi_client_id": "client-012",
-  "powerbi_use_device_code": false,
+  "powerbi_client_secret": "<YOUR_CLIENT_SECRET>",
   "powerbi_include_hidden": false,
   "powerbi_filter_pattern": "Sales.*",
 
@@ -501,10 +501,9 @@ export LOG_LEVEL=DEBUG
   inbound_connector: "powerbi",
   powerbi_semantic_model_id: string,  // Required
   powerbi_group_id: string,           // Required
-  powerbi_tenant_id?: string,         // Optional
-  powerbi_client_id?: string,         // Optional
-  powerbi_access_token?: string,      // Optional (alternative to client credentials)
-  powerbi_use_device_code?: boolean,  // Optional
+  powerbi_tenant_id: string,          // Required (Service Principal)
+  powerbi_client_id: string,          // Required (Service Principal)
+  powerbi_client_secret: string,      // Required (Service Principal)
   powerbi_info_table_name?: string,   // Optional (default: "Info Measures")
   powerbi_include_hidden?: boolean,   // Optional (default: false)
   powerbi_filter_pattern?: string     // Optional (regex)
