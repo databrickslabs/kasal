@@ -147,10 +147,16 @@ class AgentConfig:
             from crewai import Agent
             agent = Agent(**agent_kwargs)
             logger.info(f"Successfully configured agent: {agent_data.name} with {len(tools)} tools")
-            
+
+            # Store the memory setting as a custom attribute for later checking
+            # CrewAI's Agent class doesn't store the memory parameter as an attribute,
+            # so we add it ourselves to check when determining crew memory
+            agent._kasal_memory_disabled = agent_kwargs.get('memory') is False
+            logger.info(f"Agent {agent_data.name} memory disabled: {agent._kasal_memory_disabled}")
+
             # We no longer add default tools - respect the agent configuration
             # If an agent has no tools assigned, we don't add any by default
-                    
+
             return agent
             
         except Exception as e:

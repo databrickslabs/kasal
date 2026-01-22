@@ -1083,7 +1083,7 @@ export class CanvasLayoutManager {
   /**
    * Utility method to organize existing nodes to prevent overlap
    */
-  reorganizeNodes(nodes: Node[], canvasType: 'crew' | 'flow' | 'full' = 'full', edges: any[] = []): Node[] {
+  reorganizeNodes(nodes: Node[], canvasType: 'crew' | 'flow' | 'full' = 'full', edges: Array<{ id: string; source: string; target: string }> = []): Node[] {
     const availableArea = this.getAvailableCanvasArea(canvasType);
     const agentNodes = nodes.filter(n => n.type === 'agentNode');
     const managerNodes = nodes.filter(n => n.type === 'managerNode');

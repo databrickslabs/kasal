@@ -14,7 +14,7 @@ interface LoggerOptions {
 
 // Default options
 const defaultOptions: LoggerOptions = {
-  enabled: process.env.NODE_ENV !== 'production',
+  enabled: !import.meta.env.PROD,
   level: 'info',
 };
 

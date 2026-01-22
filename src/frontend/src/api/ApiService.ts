@@ -44,7 +44,7 @@ export const DevUtils = {
   },
 
   isDevelopment: () => {
-    return process.env.NODE_ENV === 'development';
+    return import.meta.env.DEV;
   }
 };
 

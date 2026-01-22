@@ -12,6 +12,7 @@ import os
 from typing import Any, Dict, List, Optional, Union
 from crewai import LLM
 import json
+import litellm
 
 # Use centralized logger
 from src.core.logger import get_logger
@@ -406,11 +407,34 @@ class DatabricksRetryLLM(LLM):
     RATE_LIMIT_INITIAL_BACKOFF = 30.0  # seconds (Databricks rate limits reset ~60s)
     RATE_LIMIT_MAX_BACKOFF = 120.0  # cap at 2 minutes
 
-    def __init__(self, **kwargs):
-        """Initialize the Databricks Retry LLM wrapper."""
+    # Request timeout - prevents hanging on unresponsive endpoints
+    # litellm default is 6000s (100 min) which is way too long
+    REQUEST_TIMEOUT = 120.0  # 2 minutes per request attempt
+
+    def __init__(self, response_model=None, **kwargs):
+        """Initialize the Databricks Retry LLM wrapper.
+
+        Args:
+            response_model: Optional response model (ignored, for compatibility with structured outputs)
+            **kwargs: Additional arguments passed to parent LLM class
+        """
+        # Filter out unsupported parameters that may be passed by newer CrewAI/litellm versions
+        if response_model is not None:
+            logger.warning(f"DatabricksRetryLLM ignoring unsupported response_model parameter")
+
+        # Set default timeout if not provided to prevent hanging requests
+        if 'timeout' not in kwargs:
+            kwargs['timeout'] = self.REQUEST_TIMEOUT
+
+        # IMPORTANT: Databricks provider ignores the timeout parameter in litellm.completion()
+        # We must set litellm.request_timeout globally to enforce request timeouts
+        # See: litellm's get_supported_openai_params() returns False for 'timeout' on Databricks
+        litellm.request_timeout = self.REQUEST_TIMEOUT
+
         super().__init__(**kwargs)
         self._original_model_name = kwargs.get('model', '')
-        logger.info(f"Initialized DatabricksRetryLLM wrapper for model: {self._original_model_name}")
+        timeout_val = kwargs.get('timeout', self.REQUEST_TIMEOUT)
+        logger.info(f"Initialized DatabricksRetryLLM wrapper for model: {self._original_model_name} (timeout: {timeout_val}s, litellm.request_timeout: {litellm.request_timeout}s)")
 
     def _get_crew_logger(self):
         """Get the crew logger for subprocess-compatible logging."""

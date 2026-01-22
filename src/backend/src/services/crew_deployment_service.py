@@ -53,7 +53,7 @@ class CrewDeploymentService:
         Deploy a crew to Databricks Model Serving
 
         Args:
-            crew_id: ID of crew to deploy (string UUID)
+            crew_id: ID of crew to deploy
             config: Model serving configuration
             group_context: Group context for authorization
 
@@ -62,16 +62,8 @@ class CrewDeploymentService:
         """
         logger.info(f"Starting deployment of crew {crew_id} to Model Serving")
 
-        # Convert string UUID to UUID object for database query
-        # This is required for Databricks Apps (SQLite) compatibility
-        from uuid import UUID
-        try:
-            crew_id_uuid = UUID(crew_id) if isinstance(crew_id, str) else crew_id
-        except (ValueError, AttributeError) as e:
-            raise ValueError(f"Invalid crew ID format: {crew_id}") from e
-
         # 1. Get crew data
-        crew = await self.crew_repository.get(crew_id_uuid)
+        crew = await self.crew_repository.get(crew_id)
         if not crew:
             raise ValueError(f"Crew {crew_id} not found")
 

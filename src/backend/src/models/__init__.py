@@ -20,3 +20,6 @@ from src.models.conversion import (
     ConversionJob,
     SavedConverterConfiguration,
 )
+from src.models.user import User, RefreshToken
+from src.models.group import Group, GroupUser
+from src.models.hitl_approval import HITLApproval, HITLWebhook, HITLApprovalStatus, HITLTimeoutAction, HITLRejectionAction

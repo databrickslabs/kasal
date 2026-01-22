@@ -45,7 +45,6 @@ import { AgentBricksEndpointSelector } from '../Common/AgentBricksEndpointSelect
 import { PerplexityConfigSelector } from '../Common/PerplexityConfigSelector';
 import { SerperConfigSelector } from '../Common/SerperConfigSelector';
 import { MCPServerSelector } from '../Common/MCPServerSelector';
-import { MeasureConverterConfigSelector, MeasureConverterConfig } from '../Common/MeasureConverterConfigSelector';
 import { PowerBIConfigSelector, PowerBIConfig } from '../Common/PowerBIConfigSelector';
 import { PerplexityConfig, SerperConfig } from '../../types/config';
 import { type LLMGuardrailConfig } from '../../types/task';
@@ -131,7 +130,6 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const [selectedAgentBricksEndpoint, setSelectedAgentBricksEndpoint] = useState<{ id: string; name: string } | null>(null);
   const [perplexityConfig, setPerplexityConfig] = useState<PerplexityConfig>({});
   const [serperConfig, setSerperConfig] = useState<SerperConfig>({});
-  const [measureConverterConfig, setMeasureConverterConfig] = useState<MeasureConverterConfig>({});
   const [powerBIConfig, setPowerBIConfig] = useState<PowerBIConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
@@ -193,10 +191,6 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
 
       if (initialData.tool_configs.SerperDevTool) {
         setSerperConfig(initialData.tool_configs.SerperDevTool as SerperConfig);
-      }
-
-      if (initialData.tool_configs['Measure Conversion Pipeline']) {
-        setMeasureConverterConfig(initialData.tool_configs['Measure Conversion Pipeline'] as MeasureConverterConfig);
       }
 
       // Check for PowerBIAnalysisTool config
@@ -497,56 +491,6 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
         })) {
           // Remove SerperDevTool config if tool not selected
           delete updatedToolConfigs.SerperDevTool;
-        }
-
-        // Handle Measure Conversion Pipeline config
-        if (measureConverterConfig && Object.keys(measureConverterConfig).length > 0 && formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Measure Conversion Pipeline';
-        })) {
-          updatedToolConfigs = {
-            ...updatedToolConfigs,
-            'Measure Conversion Pipeline': measureConverterConfig
-          };
-        } else if (!formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Measure Conversion Pipeline';
-        })) {
-          // Remove Measure Conversion Pipeline config if tool not selected
-          delete updatedToolConfigs['Measure Conversion Pipeline'];
-        }
-
-        // Handle PowerBIAnalysisTool config
-        if (powerBIConfig && Object.keys(powerBIConfig).length > 0 && formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'PowerBIAnalysisTool';
-        })) {
-          updatedToolConfigs = {
-            ...updatedToolConfigs,
-            PowerBIAnalysisTool: powerBIConfig
-          };
-        } else if (!formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'PowerBIAnalysisTool';
-        })) {
-          // Remove PowerBIAnalysisTool config if tool not selected
-          delete updatedToolConfigs.PowerBIAnalysisTool;
         }
 
         // Handle MCP_SERVERS config - use dict format to match schema
@@ -1180,33 +1124,6 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                   label="Serper Configuration"
                   helperText="Configure Serper.dev search parameters for this task"
                   fullWidth
-                />
-              </Box>
-            )}
-
-            {/* Measure Conversion Pipeline Configuration - Show only when Measure Conversion Pipeline is selected */}
-            {formData.tools.some(toolId => {
-              const tool = tools.find(t =>
-                String(t.id) === String(toolId) ||
-                t.id === Number(toolId) ||
-                t.title === toolId
-              );
-              return tool?.title === 'Measure Conversion Pipeline';
-            }) && (
-              <Box sx={{ mt: 2 }}>
-                <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600 }}>
-                  Measure Conversion Pipeline Configuration
-                </Typography>
-                <MeasureConverterConfigSelector
-                  value={measureConverterConfig}
-                  onChange={(config) => {
-                    setMeasureConverterConfig(config);
-                    // Update tool configs when configuration changes
-                    setToolConfigs(prev => ({
-                      ...prev,
-                      'Measure Conversion Pipeline': config
-                    }));
-                  }}
                 />
               </Box>
             )}

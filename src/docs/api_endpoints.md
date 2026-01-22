@@ -35,7 +35,6 @@ http://localhost:8000/api/v1
 - [Models](#models)
 - [API Keys](#api-keys)
 - [Power BI Integration](#power-bi-integration)
-- [Measure Conversion Pipeline](#measure-conversion-pipeline)
 - [Health & Status](#health--status)
 
 ---
@@ -227,98 +226,22 @@ Authorization: Bearer <JWT_TOKEN>
 
 ## Power BI Integration
 
-### Power BI Analysis Tool
+### Power BI Configuration
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/tasks` | Create task with PowerBIAnalysisTool |
-| `GET` | `/tasks/{id}` | Get PowerBI task configuration |
-| `PUT` | `/tasks/{id}` | Update PowerBI task configuration |
+| `POST` | `/powerbi/config` | Configure Power BI connection |
+| `GET` | `/powerbi/config` | Get Power BI configuration |
 
-#### POST Example: Create Task with PowerBI Analysis Tool
-
-**Request:**
-```bash
-curl -X POST http://localhost:8000/api/v1/tasks \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Analyze Year-over-Year Sales Growth",
-    "description": "Execute DAX analysis on Power BI semantic model to calculate YoY growth for all product categories",
-    "expected_output": "Detailed sales growth analysis with trends and insights",
-    "agent_id": "agent_123",
-    "tools": [71],
-    "tool_configs": {
-      "PowerBIAnalysisTool": {
-        "tenant_id": "<YOUR_AZURE_TENANT_ID>",
-        "client_id": "<YOUR_AZURE_CLIENT_ID>",
-        "semantic_model_id": "<YOUR_POWERBI_SEMANTIC_MODEL_ID>",
-        "workspace_id": "<YOUR_POWERBI_WORKSPACE_ID>",
-        "auth_method": "service_principal",
-        "databricks_job_id": 365257288725339
-      }
-    }
-  }'
-```
-
-**Response:**
+**Power BI Tool Configuration (Task-Level):**
 ```json
 {
-  "id": "task_456",
-  "name": "Analyze Year-over-Year Sales Growth",
-  "description": "Execute DAX analysis on Power BI semantic model to calculate YoY growth for all product categories",
-  "expected_output": "Detailed sales growth analysis with trends and insights",
-  "agent_id": "agent_123",
-  "tools": [71],
-  "tool_configs": {
-    "PowerBIAnalysisTool": {
-      "tenant_id": "<YOUR_AZURE_TENANT_ID>",
-      "client_id": "<YOUR_AZURE_CLIENT_ID>",
-      "semantic_model_id": "<YOUR_POWERBI_SEMANTIC_MODEL_ID>",
-      "workspace_id": "<YOUR_POWERBI_WORKSPACE_ID>",
-      "auth_method": "service_principal",
-      "databricks_job_id": 365257288725339
-    }
-  },
-  "created_at": "2024-12-15T10:00:00Z",
-  "updated_at": "2024-12-15T10:00:00Z"
-}
-```
-
-#### GET Example: Retrieve PowerBI Task Configuration
-
-**Request:**
-```bash
-curl -X GET http://localhost:8000/api/v1/tasks/task_456 \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-**Response:**
-```json
-{
-  "id": "task_456",
-  "name": "Analyze Year-over-Year Sales Growth",
-  "description": "Execute DAX analysis on Power BI semantic model to calculate YoY growth for all product categories",
-  "expected_output": "Detailed sales growth analysis with trends and insights",
-  "agent_id": "agent_123",
-  "tools": [71],
-  "tool_configs": {
-    "PowerBIAnalysisTool": {
-      "tenant_id": "<YOUR_AZURE_TENANT_ID>",
-      "client_id": "<YOUR_AZURE_CLIENT_ID>",
-      "semantic_model_id": "<YOUR_POWERBI_SEMANTIC_MODEL_ID>",
-      "workspace_id": "<YOUR_POWERBI_WORKSPACE_ID>",
-      "auth_method": "service_principal",
-      "databricks_job_id": 365257288725339
-    }
-  },
-  "async_execution": false,
-  "config": {
-    "retry_on_fail": true,
-    "max_retries": 3
-  },
-  "created_at": "2024-12-15T10:00:00Z",
-  "updated_at": "2024-12-15T10:00:00Z"
+  "tenant_id": "Azure AD Tenant ID",
+  "client_id": "Azure AD Application ID",
+  "semantic_model_id": "Power BI Dataset ID",
+  "workspace_id": "Power BI Workspace ID (optional)",
+  "auth_method": "service_principal or device_code",
+  "databricks_job_id": "Databricks Job ID (optional)"
 }
 ```
 
@@ -327,217 +250,6 @@ curl -X GET http://localhost:8000/api/v1/tasks/task_456 \
 - `POWERBI_USERNAME` (for device_code)
 - `POWERBI_PASSWORD` (for device_code)
 - `DATABRICKS_API_KEY` or `DATABRICKS_TOKEN`
-
----
-
-## Measure Conversion Pipeline
-
-### Measure Converter Tool
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/tasks` | Create task with Measure Conversion Pipeline |
-| `GET` | `/tasks/{id}` | Get measure converter task configuration |
-| `PUT` | `/tasks/{id}` | Update measure converter configuration |
-
-#### POST Example: Power BI to Unity Catalog Conversion
-
-**Request:**
-```bash
-curl -X POST http://localhost:8000/api/v1/tasks \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Migrate Sales Measures to UC",
-    "description": "Extract all sales-related measures from Power BI and convert to Unity Catalog Metrics format",
-    "expected_output": "Unity Catalog metrics created in analytics.sales_metrics schema",
-    "agent_id": "agent_789",
-    "tools": [85],
-    "tool_configs": {
-      "Measure Conversion Pipeline": {
-        "inbound_connector": "powerbi",
-        "outbound_format": "uc_metrics",
-        "powerbi_semantic_model_id": "<YOUR_POWERBI_SEMANTIC_MODEL_ID>",
-        "powerbi_group_id": "<YOUR_POWERBI_WORKSPACE_ID>",
-        "powerbi_tenant_id": "<YOUR_AZURE_TENANT_ID>",
-        "powerbi_client_id": "<YOUR_AZURE_CLIENT_ID>",
-        "powerbi_client_secret": "<YOUR_CLIENT_SECRET>",
-        "powerbi_include_hidden": false,
-        "powerbi_filter_pattern": "Sales.*",
-        "uc_catalog": "analytics",
-        "uc_schema": "sales_metrics",
-        "uc_process_structures": true,
-        "definition_name": "Sales Metrics Migration"
-      }
-    }
-  }'
-```
-
-**Response:**
-```json
-{
-  "id": "task_789",
-  "name": "Migrate Sales Measures to UC",
-  "description": "Extract all sales-related measures from Power BI and convert to Unity Catalog Metrics format",
-  "expected_output": "Unity Catalog metrics created in analytics.sales_metrics schema",
-  "agent_id": "agent_789",
-  "tools": [85],
-  "tool_configs": {
-    "Measure Conversion Pipeline": {
-      "inbound_connector": "powerbi",
-      "outbound_format": "uc_metrics",
-      "powerbi_semantic_model_id": "<YOUR_POWERBI_SEMANTIC_MODEL_ID>",
-      "powerbi_group_id": "<YOUR_POWERBI_WORKSPACE_ID>",
-      "powerbi_tenant_id": "<YOUR_AZURE_TENANT_ID>",
-      "powerbi_client_id": "<YOUR_AZURE_CLIENT_ID>",
-      "powerbi_client_secret": "<YOUR_CLIENT_SECRET>",
-      "powerbi_include_hidden": false,
-      "powerbi_filter_pattern": "Sales.*",
-      "uc_catalog": "analytics",
-      "uc_schema": "sales_metrics",
-      "uc_process_structures": true,
-      "definition_name": "Sales Metrics Migration"
-    }
-  },
-  "created_at": "2024-12-15T11:00:00Z",
-  "updated_at": "2024-12-15T11:00:00Z"
-}
-```
-
-#### POST Example: Power BI to SQL Conversion
-
-**Request:**
-```bash
-curl -X POST http://localhost:8000/api/v1/tasks \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Convert Revenue Measures to SQL",
-    "description": "Convert Power BI revenue measures to Snowflake SQL queries",
-    "expected_output": "SQL query definitions compatible with Snowflake",
-    "agent_id": "agent_789",
-    "tools": [85],
-    "tool_configs": {
-      "Measure Conversion Pipeline": {
-        "inbound_connector": "powerbi",
-        "outbound_format": "sql",
-        "powerbi_semantic_model_id": "<YOUR_POWERBI_SEMANTIC_MODEL_ID>",
-        "powerbi_group_id": "<YOUR_POWERBI_WORKSPACE_ID>",
-        "powerbi_tenant_id": "<YOUR_AZURE_TENANT_ID>",
-        "powerbi_client_id": "<YOUR_AZURE_CLIENT_ID>",
-        "powerbi_filter_pattern": "Revenue.*",
-        "sql_dialect": "snowflake",
-        "sql_include_comments": true,
-        "sql_process_structures": true,
-        "definition_name": "Revenue Metrics SQL Export"
-      }
-    }
-  }'
-```
-
-**Response:**
-```json
-{
-  "id": "task_790",
-  "name": "Convert Revenue Measures to SQL",
-  "description": "Convert Power BI revenue measures to Snowflake SQL queries",
-  "expected_output": "SQL query definitions compatible with Snowflake",
-  "agent_id": "agent_789",
-  "tools": [85],
-  "tool_configs": {
-    "Measure Conversion Pipeline": {
-      "inbound_connector": "powerbi",
-      "outbound_format": "sql",
-      "powerbi_semantic_model_id": "<YOUR_POWERBI_SEMANTIC_MODEL_ID>",
-      "powerbi_group_id": "<YOUR_POWERBI_WORKSPACE_ID>",
-      "powerbi_tenant_id": "<YOUR_AZURE_TENANT_ID>",
-      "powerbi_client_id": "<YOUR_AZURE_CLIENT_ID>",
-      "powerbi_filter_pattern": "Revenue.*",
-      "sql_dialect": "snowflake",
-      "sql_include_comments": true,
-      "sql_process_structures": true,
-      "definition_name": "Revenue Metrics SQL Export"
-    }
-  },
-  "created_at": "2024-12-15T11:30:00Z",
-  "updated_at": "2024-12-15T11:30:00Z"
-}
-```
-
-#### POST Example: YAML to DAX Conversion
-
-**Request:**
-```bash
-curl -X POST http://localhost:8000/api/v1/tasks \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Generate DAX from KPI Definitions",
-    "description": "Convert YAML KPI definitions to Power BI DAX measures",
-    "expected_output": "DAX measure definitions ready for Power BI",
-    "agent_id": "agent_789",
-    "tools": [85],
-    "tool_configs": {
-      "Measure Conversion Pipeline": {
-        "inbound_connector": "yaml",
-        "outbound_format": "dax",
-        "yaml_file_path": "/dbfs/mnt/data/kpi_definitions.yaml",
-        "dax_process_structures": true,
-        "definition_name": "KPI to DAX Conversion"
-      }
-    }
-  }'
-```
-
-**Response:**
-```json
-{
-  "id": "task_791",
-  "name": "Generate DAX from KPI Definitions",
-  "description": "Convert YAML KPI definitions to Power BI DAX measures",
-  "expected_output": "DAX measure definitions ready for Power BI",
-  "agent_id": "agent_789",
-  "tools": [85],
-  "tool_configs": {
-    "Measure Conversion Pipeline": {
-      "inbound_connector": "yaml",
-      "outbound_format": "dax",
-      "yaml_file_path": "/dbfs/mnt/data/kpi_definitions.yaml",
-      "dax_process_structures": true,
-      "definition_name": "KPI to DAX Conversion"
-    }
-  },
-  "created_at": "2024-12-15T12:00:00Z",
-  "updated_at": "2024-12-15T12:00:00Z"
-}
-```
-
-**Configuration Options by Format:**
-
-**Inbound Connectors (FROM):**
-- `powerbi`: Extract from Power BI datasets
-  - Required: `powerbi_semantic_model_id`, `powerbi_group_id`, `powerbi_tenant_id`, `powerbi_client_id`
-  - Optional: `powerbi_include_hidden`, `powerbi_filter_pattern`
-- `yaml`: Load from YAML files
-  - Required: `yaml_content` OR `yaml_file_path`
-
-**Outbound Formats (TO):**
-- `dax`: Power BI / Analysis Services measures
-  - Optional: `dax_process_structures`
-- `sql`: SQL queries (multiple dialects)
-  - Optional: `sql_dialect` (databricks, postgresql, mysql, sqlserver, snowflake, bigquery, standard)
-  - Optional: `sql_include_comments`, `sql_process_structures`
-- `uc_metrics`: Databricks Unity Catalog Metrics
-  - Required: `uc_catalog`, `uc_schema`
-  - Optional: `uc_process_structures`
-- `yaml`: Portable YAML definitions
-  - Optional: `definition_name`
-
-**Required API Keys:**
-- `POWERBI_CLIENT_SECRET` (for Power BI source)
-- `POWERBI_USERNAME` (for device_code auth)
-- `POWERBI_PASSWORD` (for device_code auth)
-- `DATABRICKS_API_KEY` (for Unity Catalog target)
 
 ---
 
@@ -711,10 +423,10 @@ curl -X POST http://localhost:8000/api/v1/tasks \
     "tools": [71],
     "tool_configs": {
       "PowerBIAnalysisTool": {
-        "tenant_id": "<YOUR_AZURE_TENANT_ID>",
-        "client_id": "<YOUR_AZURE_CLIENT_ID>",
-        "semantic_model_id": "<YOUR_POWERBI_SEMANTIC_MODEL_ID>",
-        "workspace_id": "<YOUR_POWERBI_WORKSPACE_ID>",
+        "tenant_id": "9f37a392-f0ae-4280-9796-f1864a10effc",
+        "client_id": "7b597aac-de00-44c9-8e2a-3d2c345c36a9",
+        "semantic_model_id": "a17de62e-8dc0-4a8a-acaa-2a9954de8c75",
+        "workspace_id": "bcb084ed-f8c9-422c-b148-29839c0f9227",
         "auth_method": "service_principal",
         "databricks_job_id": 365257288725339
       }

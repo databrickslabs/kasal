@@ -1343,7 +1343,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                 borderRadius: 1,
               },
               '& .MuiInputBase-inputMultiline': {
-                paddingRight: '0 !important',
+                paddingRight: '20px',
                 overflowY: 'auto',
                 // Hide scrollbar but keep scroll functionality
                 scrollbarWidth: 'none', // Firefox
@@ -1580,6 +1580,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                           if (displayName.includes('meta-llama-3-3-70b')) return 'Llama 3.3 70B';
                           if (displayName.includes('gpt-5-mini')) return 'GPT-5 Mini';
                           if (displayName.includes('gpt-5-nano')) return 'GPT-5 Nano';
+                          if (displayName.includes('gpt-5-2') || displayName.includes('gpt-5.2')) return 'GPT-5.2';
                           if (displayName.includes('gpt-5')) return 'GPT-5';
                           if (displayName.includes('gemini-2-5-pro')) return 'Gemini 2.5 Pro';
                           if (displayName.includes('gemini-2-5-flash')) return 'Gemini 2.5 Flash';
@@ -1656,6 +1657,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                                 if (displayName.includes('meta-llama-3-3-70b')) return 'Llama 3.3 70B';
                                 if (displayName.includes('gpt-5-mini')) return 'GPT-5 Mini';
                                 if (displayName.includes('gpt-5-nano')) return 'GPT-5 Nano';
+                                if (displayName.includes('gpt-5-2') || displayName.includes('gpt-5.2')) return 'GPT-5.2';
                                 if (displayName.includes('gpt-5')) return 'GPT-5';
                                 if (displayName.includes('gemini-2-5-pro')) return 'Gemini 2.5 Pro';
                                 if (displayName.includes('gemini-2-5-flash')) return 'Gemini 2.5 Flash';

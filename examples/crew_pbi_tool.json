@@ -25,12 +25,12 @@
         ],
         "tool_configs": {
           "PowerBIAnalysisTool": {
-            "tenant_id": "<YOUR_AZURE_TENANT_ID>",
-            "client_id": "<YOUR_AZURE_CLIENT_ID>",
-            "workspace_id": "<YOUR_POWERBI_WORKSPACE_ID>",
-            "semantic_model_id": "<YOUR_POWERBI_SEMANTIC_MODEL_ID>",
+            "tenant_id": "9f37a392-f0ae-4280-9796-f1864a10effc",
+            "client_id": "7b597aac-de00-44c9-8e2a-3d2c345c36a9",
+            "workspace_id": "bcb084ed-f8c9-422c-b148-29839c0f9227",
+            "semantic_model_id": "a17de62e-8dc0-4a8a-acaa-2a9954de8c75",
             "auth_method": "service_principal",
-            "databricks_job_id": "<YOUR_DATABRICKS_JOB_ID>"
+            "databricks_job_id": 365257288725339
           }
         },
         "agentId": null,

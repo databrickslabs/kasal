@@ -3,6 +3,7 @@ import { Node, Edge } from 'reactflow';
 import { jobExecutionService } from '../api/JobExecutionService';
 import { useWorkflowStore } from './workflow';
 import { useTabManagerStore } from './tabManager';
+import { useFlowExecutionStore } from './flowExecutionStore';
 import { Tool } from '../types/tool';
 import { FlowService, FlowCheckpoint } from '../api/FlowService';
 
@@ -711,6 +712,11 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     const checkForCheckpointsAndExecuteFlow = async (nodes: Node[], edges: Edge[]) => {
       console.log('[CrewExecution] Checking for checkpoints before flow execution');
 
+      // IMMEDIATELY clear flow execution visual indicators before starting new execution
+      // This ensures crew node states reset to default (no green/red indicators) right when user clicks Run
+      console.log('[CrewExecution] Clearing flow execution visual states before starting');
+      useFlowExecutionStore.getState().clearStates();
+
       // Get the current tab's saved flow ID
       const tabManagerState = useTabManagerStore.getState();
       const activeTab = tabManagerState.tabs.find(tab => tab.id === tabManagerState.activeTabId);
@@ -946,5 +952,5 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
 
 // Expose store on window for debugging
 if (typeof window !== 'undefined') {
-  (window as any).useCrewExecutionStore = useCrewExecutionStore;
+  (window as unknown as Record<string, unknown>).useCrewExecutionStore = useCrewExecutionStore;
 }

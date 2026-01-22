@@ -87,22 +87,14 @@ class CrewExportService:
         Get crew with all related agents and tasks
 
         Args:
-            crew_id: Crew ID (string UUID)
+            crew_id: Crew ID
             group_context: Group context for authorization
 
         Returns:
             Dictionary with crew data
         """
-        # Convert string UUID to UUID object for database query
-        # This is required for Databricks Apps (SQLite) compatibility
-        from uuid import UUID
-        try:
-            crew_id_uuid = UUID(crew_id) if isinstance(crew_id, str) else crew_id
-        except (ValueError, AttributeError) as e:
-            raise ValueError(f"Invalid crew ID format: {crew_id}") from e
-
         # Get crew
-        crew = await self.crew_repository.get(crew_id_uuid)
+        crew = await self.crew_repository.get(crew_id)
         if not crew:
             raise ValueError(f"Crew {crew_id} not found")
 

@@ -2,6 +2,29 @@ import { create } from 'zustand';
 import ForceGraph2D from 'force-graph';
 import * as d3 from 'd3-force';
 
+// Type definitions for ForceGraph2D instance (library lacks proper types)
+interface ForceGraphInstance {
+  backgroundColor: (color: string) => ForceGraphInstance;
+  nodeId: (id: string) => ForceGraphInstance;
+  nodeLabel: (fn: (node: EntityNode) => string) => ForceGraphInstance;
+  nodeCanvasObject: (fn: (node: EntityNode, ctx: CanvasRenderingContext2D, scale: number) => void) => ForceGraphInstance;
+  linkWidth: (width: number) => ForceGraphInstance;
+  linkColor: (fn: () => string) => ForceGraphInstance;
+  linkDirectionalArrowLength: (length: number) => ForceGraphInstance;
+  linkDirectionalArrowRelPos: (pos: number) => ForceGraphInstance;
+  linkCurvature: (curvature: number) => ForceGraphInstance;
+  onNodeClick: (fn: (node: EntityNode) => void) => ForceGraphInstance;
+  onBackgroundClick: (fn: () => void) => ForceGraphInstance;
+  d3Force: (name: string, force?: d3.Force<d3.SimulationNodeDatum, undefined> | null) => { strength: (s: number) => void; distance?: (d: number) => void; radius?: (r: number) => { strength: (s: number) => void } } | undefined;
+  graphData: (data: GraphData) => void;
+  zoomToFit: (duration: number, padding: number) => void;
+  zoom: (level?: number, duration?: number) => number;
+  width: () => number;
+  height: () => number;
+  d3ReheatSimulation: (alpha: number) => void;
+  _destructor?: () => void;
+}
+
 interface EntityNode {
   id: string;
   name: string;
@@ -95,7 +118,9 @@ const useEntityGraphStore = create<EntityGraphState>((set, get) => ({
     
     try {
       // Create force graph instance
-      const graph = (ForceGraph2D as any)()(container)
+      // ForceGraph2D is a factory function that returns a constructor
+      const ForceGraphFactory = ForceGraph2D as unknown as () => (container: HTMLElement) => ForceGraphInstance;
+      const graph = ForceGraphFactory()(container)
         .backgroundColor('#fafafa')
         .nodeId('id')
         .nodeLabel((node: EntityNode) => `
@@ -178,9 +203,9 @@ const useEntityGraphStore = create<EntityGraphState>((set, get) => ({
 
       // Configure force simulation
       graph.d3Force('charge')?.strength(state.forceStrength);
-      graph.d3Force('link')?.distance(state.linkDistance);
+      graph.d3Force('link')?.distance?.(state.linkDistance);
       graph.d3Force('center')?.strength(state.centerForce);
-      graph.d3Force('collide')?.radius(25).strength(1.2);
+      graph.d3Force('collide')?.radius?.(25)?.strength(1.2);
       
       // Set x/y forces based on centerForce
       const width = container.offsetWidth;
@@ -232,8 +257,9 @@ const useEntityGraphStore = create<EntityGraphState>((set, get) => ({
     if (graphInstance) {
       console.log('[EntityGraphStore] Cleaning up graph instance');
       try {
-        if (typeof (graphInstance as any)._destructor === 'function') {
-          (graphInstance as any)._destructor();
+        const instance = graphInstance as ForceGraphInstance;
+        if (typeof instance._destructor === 'function') {
+          instance._destructor();
         }
       } catch (err) {
         console.error('[EntityGraphStore] Error during cleanup:', err);
@@ -254,7 +280,7 @@ const useEntityGraphStore = create<EntityGraphState>((set, get) => ({
     
     if (graphInstance && data.nodes.length > 0) {
       console.log('[EntityGraphStore] Updating graph with', data.nodes.length, 'nodes');
-      (graphInstance as any).graphData(data);
+      (graphInstance as ForceGraphInstance).graphData(data);
     }
   },
 
@@ -288,54 +314,55 @@ const useEntityGraphStore = create<EntityGraphState>((set, get) => ({
     set({ forceStrength: strength, linkDistance: distance, centerForce: newCenterForce });
     
     if (graphInstance) {
+      const instance = graphInstance as ForceGraphInstance;
       // Update forces
-      (graphInstance as any).d3Force('charge')?.strength(strength);
-      (graphInstance as any).d3Force('link')?.distance(distance);
-      
+      instance.d3Force('charge')?.strength(strength);
+      instance.d3Force('link')?.distance?.(distance);
+
       // Update center and position forces based on centerForce value
       if (centerForce !== undefined) {
-        const width = (graphInstance as any).width();
-        const height = (graphInstance as any).height();
+        const width = instance.width();
+        const height = instance.height();
         const centerX = width / 2;
         const centerY = height / 2;
-        
+
         // Adjust center force
-        (graphInstance as any).d3Force('center')?.strength(newCenterForce);
+        instance.d3Force('center')?.strength(newCenterForce);
 
         // For spread mode (low values), weaken or remove position forces
         if (newCenterForce < 0.3) {
           // Weak or no position forces for spread mode
-          (graphInstance as any).d3Force('x', null);
-          (graphInstance as any).d3Force('y', null);
-          (graphInstance as any).d3Force('center')?.strength(0.01);
+          instance.d3Force('x', null);
+          instance.d3Force('y', null);
+          instance.d3Force('center')?.strength(0.01);
         }
         // For balanced mode
         else if (newCenterForce < 0.7) {
           // Moderate position forces
-          (graphInstance as any).d3Force('x', d3.forceX(centerX).strength(0.1));
-          (graphInstance as any).d3Force('y', d3.forceY(centerY).strength(0.1));
+          instance.d3Force('x', d3.forceX(centerX).strength(0.1));
+          instance.d3Force('y', d3.forceY(centerY).strength(0.1));
         }
         // For compact mode (high values), use strong position forces
         else {
           // Create strong forceX and forceY to pull to center
-          (graphInstance as any).d3Force('x', d3.forceX(centerX).strength(0.5));
-          (graphInstance as any).d3Force('y', d3.forceY(centerY).strength(0.5));
+          instance.d3Force('x', d3.forceX(centerX).strength(0.5));
+          instance.d3Force('y', d3.forceY(centerY).strength(0.5));
 
           // Also reduce charge force to allow nodes to come closer
-          (graphInstance as any).d3Force('charge')?.strength(-100);
+          instance.d3Force('charge')?.strength(-100);
         }
 
         // Reheat simulation very aggressively for compact mode
         const alphaTarget = newCenterForce > 0.7 ? 1 : 0.8;
-        (graphInstance as any).d3ReheatSimulation(alphaTarget);
+        instance.d3ReheatSimulation(alphaTarget);
 
         // Reset charge force if not in compact mode
         if (newCenterForce < 0.7) {
-          (graphInstance as any).d3Force('charge')?.strength(strength);
+          instance.d3Force('charge')?.strength(strength);
         }
       } else {
         // Regular force updates (when not changing cluster spacing)
-        (graphInstance as any).d3ReheatSimulation(0.3);
+        instance.d3ReheatSimulation(0.3);
       }
     }
   },
@@ -346,7 +373,7 @@ const useEntityGraphStore = create<EntityGraphState>((set, get) => ({
     set({ linkCurvature: curvature });
     
     if (graphInstance) {
-      (graphInstance as any).linkCurvature(curvature);
+      (graphInstance as ForceGraphInstance).linkCurvature(curvature);
     }
   },
 
@@ -379,23 +406,25 @@ const useEntityGraphStore = create<EntityGraphState>((set, get) => ({
   zoomToFit: () => {
     const { graphInstance } = get();
     if (graphInstance) {
-      (graphInstance as any).zoomToFit(400, 50);
+      (graphInstance as ForceGraphInstance).zoomToFit(400, 50);
     }
   },
 
   zoomIn: () => {
     const { graphInstance } = get();
     if (graphInstance) {
-      const currentZoom = (graphInstance as any).zoom();
-      (graphInstance as any).zoom(currentZoom * 1.2, 300);
+      const instance = graphInstance as ForceGraphInstance;
+      const currentZoom = instance.zoom();
+      instance.zoom(currentZoom * 1.2, 300);
     }
   },
 
   zoomOut: () => {
     const { graphInstance } = get();
     if (graphInstance) {
-      const currentZoom = (graphInstance as any).zoom();
-      (graphInstance as any).zoom(currentZoom * 0.8, 300);
+      const instance = graphInstance as ForceGraphInstance;
+      const currentZoom = instance.zoom();
+      instance.zoom(currentZoom * 0.8, 300);
     }
   },
 }));

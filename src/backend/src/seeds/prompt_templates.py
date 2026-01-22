@@ -120,7 +120,6 @@ json
     "context": [],
     "output_json": null,
     "output_pydantic": null,
-    "output_file": null,
     "human_input": false,
     "retry_on_fail": true,
     "max_retries": 3,
@@ -146,6 +145,7 @@ Please follow these strict guidelines when generating your output:
 7. All boolean and null values must use correct JSON syntax.
 8. If markdown is true, ensure the description and expected_output include markdown formatting instructions.
 9. Do not include any explanation or commentary—only return the JSON object.
+10. CRITICAL: Do NOT include an "output_file" field in your response. Task outputs should be returned directly as the task result, NOT written to files. The output_file feature is reserved for explicit user requests only.
 
 LLM GUARDRAIL GUIDELINES:
 The llm_guardrail field enables AI-powered output validation.
@@ -166,16 +166,48 @@ Examples based on task type:
 - Analysis: {"description": "Must contain clear methodology, data-backed findings, and actionable recommendations.", "llm_model": "databricks-claude-sonnet-4-5"}
 - Email: {"description": "Must have proper email structure, clear message body, and professional tone.", "llm_model": "databricks-claude-sonnet-4-5"}
 
-If the user's goal involves creating a presentation, follow these precise guidelines:
-- Generate a single self-contained HTML file with reveal.js fully embedded inline including all CSS and JavaScript directly without external dependencies.
-- Configure viewport constraints in Reveal.initialize() with width: 960, height: 700, margin: 0.04 to fit common screens.
-- Use clean, professional themes like white, black, or league; avoid decorative icons or technical symbols.
-- Structure content with <section> tags for slides; use data-background-color or data-background-gradient for visual interest.
-- Include minified reveal.js and reveal.css inline (embedded code or copied from CDN) so the HTML is standalone.
-- Set readable typography with a base rule like: .reveal .slides { font-size: 36px; } and system fonts; keep a clear h1/h2/h3 hierarchy.
-- Organize slides as: title, overview, key points (one point per slide), conclusion.
-- Enable smooth transitions with data-auto-animate between related slides.
-- Limit expanded content to at most 2× the original word count; favor clarity and readability within the stated viewport boundaries."""
+If the user's goal involves creating a presentation, follow these MANDATORY guidelines:
+
+STRUCTURE & CDN REQUIREMENTS:
+- Generate a single HTML file using reveal.js 5.1.0 from jsDelivr CDN. NEVER embed minified JavaScript inline.
+- In <head>, include: reset.css, reveal.css, and a theme (white, black, league, or moon).
+- Structure: <div class="reveal"><div class="slides"><section>...</section></div></div>
+- Before </body>: load reveal.js and call Reveal.initialize()
+
+CRITICAL CONTENT LIMITS TO PREVENT OVERFLOW (STRICTLY ENFORCE):
+- Maximum 4-5 bullet points per slide (NEVER exceed 5)
+- Maximum 12 words per bullet point (brevity is mandatory)
+- NO nested bullet lists - flat structure only
+- Headings must be under 6 words
+- If a slide includes an image, limit text to 2-3 bullet points only
+- One main concept per slide
+
+REQUIRED CSS BLOCK (MUST include in every presentation inside <style> in <head>):
+.reveal .slides section { overflow: hidden; }
+.reveal h1 { font-size: 2.2em; margin-bottom: 0.5em; }
+.reveal h2 { font-size: 1.5em; margin-bottom: 0.4em; }
+.reveal ul, .reveal ol { font-size: 0.85em; max-height: 60vh; overflow: hidden; margin-left: 1em; }
+.reveal li { margin: 0.4em 0; line-height: 1.3; }
+.reveal img { max-height: 45vh; max-width: 85%; display: block; margin: 0 auto; }
+.reveal p { font-size: 0.9em; max-height: 50vh; overflow: hidden; }
+
+REQUIRED INITIALIZATION (use exactly this configuration):
+Reveal.initialize({ width: 960, height: 700, margin: 0.1, center: true, hash: true, slideNumber: true, transition: 'slide' });
+
+SLIDE ORGANIZATION:
+- Title slide: h1 (max 6 words), optional subtitle as p
+- Overview slide: h2 + maximum 4 bullet points
+- Content slides: h2 + maximum 5 bullet points (12 words each max)
+- Conclusion slide: h2 + 3-4 key takeaways
+- Use data-background-color for visual variety between slides
+
+CRITICAL: For presentation tasks, the task "description" and "expected_output" fields MUST include ALL technical requirements. Here is an EXAMPLE:
+{
+    "name": "Create News Presentation",
+    "description": "Research news and create an HTML presentation. Generate a single HTML file using reveal.js 5.1.0 from jsDelivr CDN. Include CDN links: https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reset.css, reveal.css, and theme/white.css in the head. Structure content with max 4-5 bullet points per slide, 12 words max per bullet. Include required CSS: .reveal .slides section { overflow: hidden; } .reveal ul { max-height: 60vh; overflow: hidden; font-size: 0.85em; }. Initialize with: Reveal.initialize({ width: 960, height: 700, margin: 0.1, center: true, hash: true, slideNumber: true }).",
+    "expected_output": "A complete HTML file with reveal.js 5.1.0 CDN links in head, required CSS block preventing content overflow, Reveal.initialize() configuration with margin: 0.1, slides containing max 5 bullet points each (12 words max per bullet), title slide, overview, content slides, and conclusion.",
+    "llm_guardrail": {"description": "HTML must use reveal.js 5.1.0 CDN (not inline), include overflow prevention CSS, and have no more than 5 bullets per slide with 12 words max each.", "llm_model": "databricks-claude-sonnet-4-5"}
+}"""
 
 GENERATE_TEMPLATES_TEMPLATE = """You are an expert at creating AI agent templates following CrewAI and LangChain best practices.
 Given an agent's role, goal, and backstory, generate three templates that work together cohesively:
@@ -270,7 +302,6 @@ For agents include:
             "config": {},
             "output_json": null,
             "output_pydantic": null,
-            "output_file": null,
             "output": null,
             "callback": null,
             "human_input": false,
@@ -297,6 +328,7 @@ Ensure:
 7. Return the name of the tool exactly as it is in the tools array
 8. If you assign SerperDevTool to an agent, you MUST also assign ScrapeWebsiteTool to that same agent
 9. The total number of tasks MUST NOT exceed 6 tasks
+10. CRITICAL: Do NOT include an "output_file" field in any task. Task outputs should be returned directly as the task result, NOT written to files. The output_file feature is reserved for explicit user requests only.
 
 LLM GUARDRAIL CONFIGURATION:
 The llm_guardrail field enables AI-powered output validation for tasks.
@@ -318,16 +350,49 @@ Examples based on task type:
 
 The guardrail description should answer: "What makes this task's output valid and complete?"
 
-If the user's goal involves creating a presentation, follow these precise guidelines:
-- Generate a single self-contained HTML file with reveal.js fully embedded inline including all CSS and JavaScript directly without external dependencies.
-- Configure viewport constraints in Reveal.initialize() with width: 960, height: 700, margin: 0.04 to fit common screens.
-- Use clean, professional themes like white, black, or league; avoid decorative icons or technical symbols.
-- Structure content with <section> tags for slides; use data-background-color or data-background-gradient for visual interest.
-- Include minified reveal.js and reveal.css inline (embedded code or copied from CDN) so the HTML is standalone.
-- Set readable typography with a base rule like: .reveal .slides { font-size: 36px; } and system fonts; keep a clear h1/h2/h3 hierarchy.
-- Organize slides as: title, overview, key points (one point per slide), conclusion.
-- Enable smooth transitions with data-auto-animate between related slides.
-- Limit expanded content to at most 2× the original word count; favor clarity and readability within the stated viewport boundaries.
+If the user's goal involves creating a presentation, follow these MANDATORY guidelines:
+
+STRUCTURE & CDN REQUIREMENTS:
+- Generate a single HTML file using reveal.js 5.1.0 from jsDelivr CDN. NEVER embed minified JavaScript inline.
+- In <head>, include: reset.css, reveal.css, and a theme (white, black, league, or moon).
+- Structure: <div class="reveal"><div class="slides"><section>...</section></div></div>
+- Before </body>: load reveal.js and call Reveal.initialize()
+
+CRITICAL CONTENT LIMITS TO PREVENT OVERFLOW (STRICTLY ENFORCE):
+- Maximum 4-5 bullet points per slide (NEVER exceed 5)
+- Maximum 12 words per bullet point (brevity is mandatory)
+- NO nested bullet lists - flat structure only
+- Headings must be under 6 words
+- If a slide includes an image, limit text to 2-3 bullet points only
+- One main concept per slide
+
+REQUIRED CSS BLOCK (MUST include in every presentation inside <style> in <head>):
+.reveal .slides section { overflow: hidden; }
+.reveal h1 { font-size: 2.2em; margin-bottom: 0.5em; }
+.reveal h2 { font-size: 1.5em; margin-bottom: 0.4em; }
+.reveal ul, .reveal ol { font-size: 0.85em; max-height: 60vh; overflow: hidden; margin-left: 1em; }
+.reveal li { margin: 0.4em 0; line-height: 1.3; }
+.reveal img { max-height: 45vh; max-width: 85%; display: block; margin: 0 auto; }
+.reveal p { font-size: 0.9em; max-height: 50vh; overflow: hidden; }
+
+REQUIRED INITIALIZATION (use exactly this configuration):
+Reveal.initialize({ width: 960, height: 700, margin: 0.1, center: true, hash: true, slideNumber: true, transition: 'slide' });
+
+SLIDE ORGANIZATION:
+- Title slide: h1 (max 6 words), optional subtitle as p
+- Overview slide: h2 + maximum 4 bullet points
+- Content slides: h2 + maximum 5 bullet points (12 words each max)
+- Conclusion slide: h2 + 3-4 key takeaways
+- Use data-background-color for visual variety between slides
+
+CRITICAL: For presentation tasks, the task "description" and "expected_output" fields MUST include ALL technical requirements. Here is an EXAMPLE of a correctly formatted presentation task:
+{
+    "name": "Create News Presentation",
+    "description": "Research news and create an HTML presentation. Generate a single HTML file using reveal.js 5.1.0 from jsDelivr CDN. Include CDN links: https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reset.css, reveal.css, and theme/white.css in the head. Structure content with max 4-5 bullet points per slide, 12 words max per bullet. Include required CSS: .reveal .slides section { overflow: hidden; } .reveal ul { max-height: 60vh; overflow: hidden; font-size: 0.85em; }. Initialize with: Reveal.initialize({ width: 960, height: 700, margin: 0.1, center: true, hash: true, slideNumber: true }).",
+    "expected_output": "A complete HTML file with reveal.js 5.1.0 CDN links in head, required CSS block preventing content overflow, Reveal.initialize() configuration with margin: 0.1, slides containing max 5 bullet points each (12 words max per bullet), title slide, overview, content slides, and conclusion.",
+    "agent": "Presentation Creator",
+    "llm_guardrail": {"description": "HTML must use reveal.js 5.1.0 CDN (not inline), include overflow prevention CSS, and have no more than 5 bullets per slide with 12 words max each.", "llm_model": "databricks-claude-sonnet-4-5"}
+}
 
 REMINDER: Your output must be PURE, VALID JSON with no additional text. Double-check your response to ensure it is properly formatted JSON and contains NO MORE THAN 6 TASKS."""
 

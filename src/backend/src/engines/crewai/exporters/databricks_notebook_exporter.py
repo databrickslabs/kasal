@@ -669,59 +669,43 @@ print("   Or navigate to the MLflow UI in your workspace")'''
 
         logger.info(f"[Tool Export] Custom tools detected: {custom_tools}")
 
-        # Wrap the entire implementation in try-except for Databricks Apps compatibility
-        try:
-            # Read the actual tool implementations
-            tools_code = []
-            # This file is in: engines/crewai/exporters/databricks_notebook_exporter.py
-            # We need to go up to: engines/crewai/tools/custom/
-            backend_path = Path(__file__).parent.parent  # Go up to crewai directory
-            tools_dir = backend_path / "tools" / "custom"
+        # Read the actual tool implementations
+        tools_code = []
+        # This file is in: engines/crewai/exporters/databricks_notebook_exporter.py
+        # We need to go up to: engines/crewai/tools/custom/
+        backend_path = Path(__file__).parent.parent  # Go up to crewai directory
+        tools_dir = backend_path / "tools" / "custom"
 
-            logger.info(f"[Tool Export] Current file location: {Path(__file__)}")
-            logger.info(f"[Tool Export] Backend path resolved to: {backend_path}")
-            logger.info(f"[Tool Export] Looking for tool files in: {tools_dir}")
-            logger.info(f"[Tool Export] Tools directory exists: {tools_dir.exists()}")
-        except Exception as path_error:
-            logger.error(f"[Tool Export] CRITICAL: Error resolving tool directory path in Databricks Apps: {path_error}", exc_info=True)
-            logger.warning(f"[Tool Export] ⚠️ Falling back to placeholder implementation")
-            # Return placeholder implementation when path resolution fails
-            return self._generate_fallback_tool_placeholder(custom_tools)
+        logger.info(f"[Tool Export] Looking for tool files in: {tools_dir}")
+        logger.info(f"[Tool Export] Tools directory exists: {tools_dir.exists()}")
 
-        try:
-            tool_file_mapping = {
-                "PerplexityTool": "perplexity_tool.py",
-                "GenieTool": "genie_tool.py",
-            }
+        tool_file_mapping = {
+            "PerplexityTool": "perplexity_tool.py",
+            "GenieTool": "genie_tool.py",
+        }
 
-            for tool_name in custom_tools:
-                logger.info(f"[Tool Export] Processing tool: {tool_name}")
-                tool_file = tool_file_mapping.get(tool_name)
-                logger.info(f"[Tool Export] Mapped to file: {tool_file}")
+        for tool_name in custom_tools:
+            logger.info(f"[Tool Export] Processing tool: {tool_name}")
+            tool_file = tool_file_mapping.get(tool_name)
+            logger.info(f"[Tool Export] Mapped to file: {tool_file}")
 
-                if tool_file:
-                    tool_path = tools_dir / tool_file
-                    logger.info(f"[Tool Export] Full path: {tool_path}")
-                    logger.info(f"[Tool Export] File exists: {tool_path.exists()}")
+            if tool_file:
+                tool_path = tools_dir / tool_file
+                logger.info(f"[Tool Export] Full path: {tool_path}")
+                logger.info(f"[Tool Export] File exists: {tool_path.exists()}")
 
-                    if tool_path.exists():
-                        try:
-                            async with aiofiles.open(tool_path, 'r') as f:
-                                tool_code = await f.read()
-                                logger.info(f"[Tool Export] Successfully read {len(tool_code)} characters from {tool_file}")
-                                tools_code.append(f"# {tool_name} Implementation\n{tool_code}")
-                        except Exception as e:
-                            logger.error(f"[Tool Export] Could not read tool file {tool_file}: {e}", exc_info=True)
-                            logger.warning(f"[Tool Export] Will use placeholder for {tool_name}")
-                    else:
-                        logger.warning(f"[Tool Export] Tool file not found: {tool_path}")
+                if tool_path.exists():
+                    try:
+                        async with aiofiles.open(tool_path, 'r') as f:
+                            tool_code = await f.read()
+                            logger.info(f"[Tool Export] Successfully read {len(tool_code)} characters from {tool_file}")
+                            tools_code.append(f"# {tool_name} Implementation\n{tool_code}")
+                    except Exception as e:
+                        logger.error(f"[Tool Export] Could not read tool file {tool_file}: {e}", exc_info=True)
                 else:
-                    logger.warning(f"[Tool Export] No file mapping found for tool: {tool_name}")
-        except Exception as file_error:
-            logger.error(f"[Tool Export] CRITICAL: Error reading tool files in Databricks Apps: {file_error}", exc_info=True)
-            logger.warning(f"[Tool Export] ⚠️ Falling back to placeholder implementation")
-            # Return placeholder implementation when file reading fails
-            return self._generate_fallback_tool_placeholder(custom_tools)
+                    logger.warning(f"[Tool Export] Tool file not found: {tool_path}")
+            else:
+                logger.warning(f"[Tool Export] No file mapping found for tool: {tool_name}")
 
         logger.info(f"[Tool Export] Total tool implementations found: {len(tools_code)}")
 
@@ -739,47 +723,19 @@ print("✅ Custom tools loaded: {', '.join(custom_tools)}")'''
         else:
             logger.warning(f"[Tool Export] ⚠️ No tool implementations found, using placeholder")
             # Fallback to placeholder if no tool implementations found
-            return self._generate_fallback_tool_placeholder(custom_tools)
-
-    def _generate_fallback_tool_placeholder(self, custom_tools: List[str]) -> str:
-        """Generate fallback placeholder when tool files cannot be accessed (e.g., in Databricks Apps)"""
-        logger.info(f"[Tool Export] Generating fallback placeholder for: {custom_tools}")
-        return f'''"""
+            return f'''"""
 Custom Tool Implementations
 
 The following custom tools are used in this crew: {', '.join(custom_tools)}
 
-⚠️ IMPORTANT: Tool implementations could not be loaded from the source code.
-This is expected in Databricks Apps deployments where tool source files are not accessible.
-
-You have two options:
-
-1. Manual Implementation: Add tool code below before the crew definition
-2. Import from Package: If tools are available as a package, import them
-
-Please add implementations for: {', '.join(custom_tools)}
-
-Example implementation structure:
-```python
-from crewai_tools import BaseTool
-
-class YourCustomTool(BaseTool):
-    name: str = "Tool Name"
-    description: str = "What this tool does"
-
-    def _run(self, argument: str) -> str:
-        # Your implementation here
-        return "result"
-```
+TODO: Add custom tool implementations here
 """
 
 from crewai.tools import BaseTool
 from typing import Type
 from pydantic import BaseModel, Field
 
-print("⚠️ Custom tool placeholders generated - implementation required for:", {custom_tools})
-print("   This is expected in Databricks Apps. Add tool implementations above if needed.")
-'''
+print("⚠️  Custom tools detected but not implemented. Please add implementations above.")'''
 
     def _generate_evaluation_code(self, crew_name: str) -> str:
         """Generate MLflow evaluation code"""

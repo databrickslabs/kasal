@@ -1,3 +1,4 @@
+import { vi, Mock, beforeEach, afterEach, describe, it, test, expect } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useMemoryBackendStore, useMemoryBackendConfig, useMemoryBackendType, useDatabricksConfig } from './memoryBackend';
 import { MemoryBackendService } from '../api/MemoryBackendService';
@@ -9,11 +10,11 @@ import {
 } from '../types/memoryBackend';
 
 // Mock the MemoryBackendService
-jest.mock('../api/MemoryBackendService');
+vi.mock('../api/MemoryBackendService');
 
 describe('memoryBackendStore', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     // Reset store state before each test
     act(() => {
       useMemoryBackendStore.getState().resetConfig();
@@ -125,7 +126,7 @@ describe('memoryBackendStore', () => {
   describe('validateConfig', () => {
     it('should validate config successfully', async () => {
       const mockValidationResult = { valid: true };
-      (MemoryBackendService.validateConfig as jest.Mock).mockResolvedValue(mockValidationResult);
+      (MemoryBackendService.validateConfig as Mock).mockResolvedValue(mockValidationResult);
       
       const { result } = renderHook(() => useMemoryBackendStore());
       
@@ -144,7 +145,7 @@ describe('memoryBackendStore', () => {
         valid: false, 
         errors: ['Invalid endpoint', 'Missing index'] 
       };
-      (MemoryBackendService.validateConfig as jest.Mock).mockResolvedValue(mockValidationResult);
+      (MemoryBackendService.validateConfig as Mock).mockResolvedValue(mockValidationResult);
       
       const { result } = renderHook(() => useMemoryBackendStore());
       
@@ -158,7 +159,7 @@ describe('memoryBackendStore', () => {
     });
 
     it('should handle validation exceptions', async () => {
-      (MemoryBackendService.validateConfig as jest.Mock).mockRejectedValue(
+      (MemoryBackendService.validateConfig as Mock).mockRejectedValue(
         new Error('Network error')
       );
       
@@ -185,7 +186,7 @@ describe('memoryBackendStore', () => {
           indexes_found: ['index1', 'index2'],
         },
       };
-      (MemoryBackendService.testDatabricksConnection as jest.Mock).mockResolvedValue(mockTestResult);
+      (MemoryBackendService.testDatabricksConnection as Mock).mockResolvedValue(mockTestResult);
       
       const { result } = renderHook(() => useMemoryBackendStore());
       
@@ -228,7 +229,7 @@ describe('memoryBackendStore', () => {
     });
 
     it('should handle connection test errors', async () => {
-      (MemoryBackendService.testDatabricksConnection as jest.Mock).mockRejectedValue(
+      (MemoryBackendService.testDatabricksConnection as Mock).mockRejectedValue(
         new Error('Connection failed')
       );
       
@@ -277,7 +278,7 @@ describe('memoryBackendStore', () => {
           total_records: 200,
         },
       ];
-      (MemoryBackendService.getAvailableDatabricksIndexes as jest.Mock).mockResolvedValue({
+      (MemoryBackendService.getAvailableDatabricksIndexes as Mock).mockResolvedValue({
         indexes: mockIndexes,
         endpoint_name: 'test-endpoint',
       });
@@ -313,7 +314,7 @@ describe('memoryBackendStore', () => {
     });
 
     it('should handle index loading errors', async () => {
-      (MemoryBackendService.getAvailableDatabricksIndexes as jest.Mock).mockRejectedValue(
+      (MemoryBackendService.getAvailableDatabricksIndexes as Mock).mockRejectedValue(
         new Error('Failed to fetch indexes')
       );
       
@@ -340,8 +341,8 @@ describe('memoryBackendStore', () => {
 
   describe('saveConfig', () => {
     it('should save config successfully after validation', async () => {
-      (MemoryBackendService.validateConfig as jest.Mock).mockResolvedValue({ valid: true });
-      (MemoryBackendService.saveConfig as jest.Mock).mockResolvedValue({ 
+      (MemoryBackendService.validateConfig as Mock).mockResolvedValue({ valid: true });
+      (MemoryBackendService.saveConfig as Mock).mockResolvedValue({ 
         success: true, 
         message: 'Config saved' 
       });
@@ -359,7 +360,7 @@ describe('memoryBackendStore', () => {
     });
 
     it('should not save if validation fails', async () => {
-      (MemoryBackendService.validateConfig as jest.Mock).mockResolvedValue({ 
+      (MemoryBackendService.validateConfig as Mock).mockResolvedValue({ 
         valid: false, 
         errors: ['Invalid config'] 
       });
@@ -376,8 +377,8 @@ describe('memoryBackendStore', () => {
     });
 
     it('should handle save errors', async () => {
-      (MemoryBackendService.validateConfig as jest.Mock).mockResolvedValue({ valid: true });
-      (MemoryBackendService.saveConfig as jest.Mock).mockRejectedValue(
+      (MemoryBackendService.validateConfig as Mock).mockResolvedValue({ valid: true });
+      (MemoryBackendService.saveConfig as Mock).mockRejectedValue(
         new Error('Save failed')
       );
       
@@ -405,7 +406,7 @@ describe('memoryBackendStore', () => {
           short_term_index: 'loaded-index',
         },
       };
-      (MemoryBackendService.getConfig as jest.Mock).mockResolvedValue(mockConfig);
+      (MemoryBackendService.getConfig as Mock).mockResolvedValue(mockConfig);
       
       const { result } = renderHook(() => useMemoryBackendStore());
       
@@ -418,7 +419,7 @@ describe('memoryBackendStore', () => {
     });
 
     it('should handle null config response', async () => {
-      (MemoryBackendService.getConfig as jest.Mock).mockResolvedValue(null);
+      (MemoryBackendService.getConfig as Mock).mockResolvedValue(null);
       
       const { result } = renderHook(() => useMemoryBackendStore());
       
@@ -431,7 +432,7 @@ describe('memoryBackendStore', () => {
     });
 
     it('should handle load errors', async () => {
-      (MemoryBackendService.getConfig as jest.Mock).mockRejectedValue(
+      (MemoryBackendService.getConfig as Mock).mockRejectedValue(
         new Error('Load failed')
       );
       

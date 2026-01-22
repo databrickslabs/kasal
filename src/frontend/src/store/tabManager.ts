@@ -569,5 +569,5 @@ export const useTabManagerStore = create<TabManagerState>()(
 
 // Expose store on window for debugging
 if (typeof window !== 'undefined') {
-  (window as any).useTabManagerStore = useTabManagerStore;
+  (window as unknown as Record<string, unknown>).useTabManagerStore = useTabManagerStore;
 }

@@ -15,7 +15,7 @@ class FakeRepo:
         self.deleted = []
         self.toggle_enabled_calls = []
         self.update_config_value_calls = []
-        self.crewai_flow_enabled = False
+        self.crewai_flow_enabled = True  # Default to enabled
         self.crewai_debug_tracing = False
     async def find_all(self):
         return []

@@ -66,7 +66,7 @@ export const PowerBIConfigSelector: React.FC<PowerBIConfigSelectorProps> = ({
   disabled = false
 }) => {
   const [config, setConfig] = useState<PowerBIConfig>({ ...DEFAULT_CONFIG, ...value });
-  const [expanded, setExpanded] = useState<boolean>(true); // Start expanded so configuration is visible
+  const [expanded, setExpanded] = useState<boolean>(false);
   const { secrets, fetchAPIKeys } = useAPIKeysStore();
   const [missingApiKeys, setMissingApiKeys] = useState<string[]>([]);
 

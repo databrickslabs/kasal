@@ -33,6 +33,7 @@ from src.core.logger import LoggerManager
 from src.db.session import async_session_factory
 from src.services.api_keys_service import ApiKeysService
 from src.engines.crewai.flow.backend_flow import BackendFlow
+from src.engines.crewai.flow.exceptions import FlowPausedForApprovalException
 
 # Initialize flow-specific logger
 logger = LoggerManager.get_instance().flow
@@ -221,15 +222,39 @@ class FlowRunnerService:
             # Create a sanitized config for database storage (remove non-serializable objects)
             sanitized_config = {k: v for k, v in config.items() if k != 'group_context'}
 
-            # Create a flow execution record via service layer
-            execution = await self.flow_execution_service.create_execution(
-                flow_id=flow_id,  # None for ad-hoc executions, UUID for saved flows
-                job_id=job_id,
-                run_name=run_name,
-                config=sanitized_config,
-                group_id=group_id
-            )
-            logger.info(f"Created flow execution record with ID {execution.id} for group {group_id}")
+            # Check if this is a resume scenario - if so, use existing execution record
+            resume_from_execution_id = config.get('resume_from_execution_id') if config else None
+
+            if resume_from_execution_id:
+                # RESUME SCENARIO: Reuse existing execution record
+                logger.info(f"🔄 RESUME: Reusing existing execution for job_id={resume_from_execution_id}")
+
+                # Get the existing execution record by job_id
+                exec_repo = ExecutionHistoryRepository(self.db)
+                existing_execution = await exec_repo.get_execution_by_job_id(resume_from_execution_id)
+
+                if existing_execution:
+                    execution = existing_execution
+                    # Update status to RUNNING for the resume
+                    execution.status = FlowExecutionStatus.RUNNING.value
+                    await self.db.commit()
+                    logger.info(f"🔄 RESUME: Found existing execution with ID {execution.id}, status set to RUNNING")
+                else:
+                    logger.error(f"🔄 RESUME: Could not find execution for job_id={resume_from_execution_id}")
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Execution not found for resume: {resume_from_execution_id}"
+                    )
+            else:
+                # NEW EXECUTION: Create a flow execution record via service layer
+                execution = await self.flow_execution_service.create_execution(
+                    flow_id=flow_id,  # None for ad-hoc executions, UUID for saved flows
+                    job_id=job_id,
+                    run_name=run_name,
+                    config=sanitized_config,
+                    group_id=group_id
+                )
+                logger.info(f"Created flow execution record with ID {execution.id} for group {group_id}")
             
             # Start the appropriate execution method based on flow_id
             # IMPORTANT: Use await instead of create_task to ensure subprocess waits for completion
@@ -244,6 +269,11 @@ class FlowRunnerService:
 
             # Return the actual flow result instead of just a status message
             if flow_result and flow_result.get("success"):
+                # Check if flow was paused for HITL approval - pass through the result as-is
+                if flow_result.get("hitl_paused") or flow_result.get("paused_for_approval"):
+                    logger.info(f"🚦 run_flow: Passing through HITL pause result for {job_id}")
+                    return flow_result  # Return the HITL pause result directly
+
                 return_dict = {
                     "job_id": job_id,
                     "execution_id": execution.id,
@@ -458,6 +488,56 @@ class FlowRunnerService:
                         logger.error(f"Dynamic flow execution {execution_id} failed: {error_msg}")
                         return {"success": False, "error": error_msg, "execution_id": execution_id}
 
+                except FlowPausedForApprovalException as pause_exc:
+                    # Flow paused at HITL gate - this is not an error, it's a controlled pause
+                    logger.info(f"🚦 Flow paused for approval at gate {pause_exc.gate_node_id}")
+                    logger.info(f"   Approval ID: {pause_exc.approval_id}")
+                    logger.info(f"   Execution ID: {pause_exc.execution_id}")
+                    logger.info(f"   Crew sequence: {pause_exc.crew_sequence}")
+
+                    # Update execution status to WAITING_FOR_APPROVAL
+                    await flow_execution_service.update_execution_status(
+                        execution_id=execution_id,
+                        status=FlowExecutionStatus.WAITING_FOR_APPROVAL,  # HITL pause
+                        result={
+                            "hitl_paused": True,
+                            "approval_id": pause_exc.approval_id,
+                            "gate_node_id": pause_exc.gate_node_id,
+                            "message": pause_exc.message,
+                            "crew_sequence": pause_exc.crew_sequence
+                        }
+                    )
+
+                    # Save checkpoint info for resume (resume data is in result field)
+                    logger.info(f"🔍 HITL checkpoint save check for execution {execution_id} [run_flow_internal]")
+                    logger.info(f"   pause_exc.flow_uuid: {pause_exc.flow_uuid}")
+                    if pause_exc.flow_uuid:
+                        try:
+                            from src.services.execution_history_service import ExecutionHistoryService
+                            history_service = ExecutionHistoryService(session)
+                            await history_service.set_checkpoint_active(
+                                execution_id=execution_id,
+                                flow_uuid=pause_exc.flow_uuid,
+                                checkpoint_method="hitl_gate_pause"
+                            )
+                            logger.info(f"✅ Saved HITL checkpoint for execution {execution_id} with flow_uuid={pause_exc.flow_uuid}")
+                        except Exception as checkpoint_err:
+                            logger.error(f"❌ Could not save HITL checkpoint info: {checkpoint_err}", exc_info=True)
+                    else:
+                        logger.warning(f"⚠️ No flow_uuid available - checkpoint NOT saved! Resume dialog will not work.")
+
+                    return {
+                        "success": True,  # Not a failure - controlled pause
+                        "paused_for_approval": True,
+                        "hitl_paused": True,  # Critical: process_flow_executor.py checks this key
+                        "approval_id": pause_exc.approval_id,
+                        "gate_node_id": pause_exc.gate_node_id,
+                        "message": pause_exc.message,
+                        "execution_id": execution_id,
+                        "flow_uuid": pause_exc.flow_uuid,
+                        "crew_sequence": pause_exc.crew_sequence
+                    }
+
                 except Exception as kickoff_error:
                     logger.error(f"Error during backend_flow.kickoff() for dynamic flow {execution_id}: {kickoff_error}", exc_info=True)
                     await flow_execution_service.update_execution_status(
@@ -466,6 +546,10 @@ class FlowRunnerService:
                         error=str(kickoff_error)
                     )
                     return {"success": False, "error": str(kickoff_error), "execution_id": execution_id}
+
+            except FlowPausedForApprovalException as pause_exc:
+                # Re-raise to handle at top level (shouldn't happen but just in case)
+                raise
 
             except Exception as e:
                 logger.error(f"Error running dynamic flow execution {execution_id}: {e}", exc_info=True)
@@ -823,6 +907,56 @@ class FlowRunnerService:
                         )
                         logger.info(f"Updated flow execution {execution_id} with final status: FAILED")
                         return {"success": False, "error": error_msg, "execution_id": execution_id}
+
+                except FlowPausedForApprovalException as pause_exc:
+                    # Flow paused at HITL gate - this is not an error, it's a controlled pause
+                    logger.info(f"🚦 Flow paused for approval at gate {pause_exc.gate_node_id}")
+                    logger.info(f"   Approval ID: {pause_exc.approval_id}")
+                    logger.info(f"   Execution ID: {pause_exc.execution_id}")
+                    logger.info(f"   Crew sequence: {pause_exc.crew_sequence}")
+
+                    # Update execution status to WAITING_FOR_APPROVAL
+                    await flow_execution_service.update_execution_status(
+                        execution_id=execution_id,
+                        status=FlowExecutionStatus.WAITING_FOR_APPROVAL,
+                        result={
+                            "hitl_paused": True,
+                            "approval_id": pause_exc.approval_id,
+                            "gate_node_id": pause_exc.gate_node_id,
+                            "message": pause_exc.message,
+                            "crew_sequence": pause_exc.crew_sequence
+                        }
+                    )
+
+                    # Save checkpoint info for resume (resume data is in result field)
+                    logger.info(f"🔍 HITL checkpoint save check for execution {execution_id} [run_flow]")
+                    logger.info(f"   pause_exc.flow_uuid: {pause_exc.flow_uuid}")
+                    if pause_exc.flow_uuid:
+                        try:
+                            from src.services.execution_history_service import ExecutionHistoryService
+                            history_service = ExecutionHistoryService(session)
+                            await history_service.set_checkpoint_active(
+                                execution_id=execution_id,
+                                flow_uuid=pause_exc.flow_uuid,
+                                checkpoint_method="hitl_gate_pause"
+                            )
+                            logger.info(f"✅ Saved HITL checkpoint for execution {execution_id} with flow_uuid={pause_exc.flow_uuid}")
+                        except Exception as checkpoint_err:
+                            logger.error(f"❌ Could not save HITL checkpoint info: {checkpoint_err}", exc_info=True)
+                    else:
+                        logger.warning(f"⚠️ No flow_uuid available - checkpoint NOT saved! Resume dialog will not work.")
+
+                    return {
+                        "success": True,
+                        "paused_for_approval": True,
+                        "approval_id": pause_exc.approval_id,
+                        "gate_node_id": pause_exc.gate_node_id,
+                        "message": pause_exc.message,
+                        "execution_id": execution_id,
+                        "flow_uuid": pause_exc.flow_uuid,
+                        "crew_sequence": pause_exc.crew_sequence
+                    }
+
                 except Exception as kickoff_error:
                     logger.error(f"Error executing flow {flow_id}: {kickoff_error}", exc_info=True)
                     await flow_execution_service.update_execution_status(
@@ -831,6 +965,11 @@ class FlowRunnerService:
                         error=str(kickoff_error)
                     )
                     return {"success": False, "error": str(kickoff_error), "execution_id": execution_id}
+
+            except FlowPausedForApprovalException:
+                # Re-raise to handle at caller level
+                raise
+
             except Exception as e:
                 logger.error(f"Error in flow execution {execution_id}: {e}", exc_info=True)
                 try:

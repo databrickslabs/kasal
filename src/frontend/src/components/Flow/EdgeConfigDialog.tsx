@@ -19,11 +19,13 @@ import {
   FormGroup,
   Select,
   MenuItem,
-  IconButton
+  IconButton,
+  InputLabel,
 } from '@mui/material';
 import {
   Delete as DeleteIcon,
-  Add as AddIcon
+  Add as AddIcon,
+  PanTool as PanToolIcon,
 } from '@mui/icons-material';
 import { Edge, Node } from 'reactflow';
 import ConditionBuilder, { Condition, conditionsToPython, pythonToConditions } from './ConditionBuilder';
@@ -57,6 +59,15 @@ interface EdgeConfigDialogProps {
   flowStateVariables?: string[];  // State variables from other edges in the flow
 }
 
+// HITL (Human in the Loop) configuration
+export interface HITLConfig {
+  enabled: boolean;
+  message: string;                          // Message shown to approvers
+  timeout_seconds: number;                  // Timeout before automatic action
+  timeout_action: 'auto_reject' | 'fail';   // Action on timeout
+  require_comment: boolean;                 // Require comment for approval/rejection
+}
+
 export interface EdgeConfig {
   logicType: FlowLogicType;
   routerCondition?: string;       // Evaluated against state variables (e.g., "state.confidence > 0.8")
@@ -66,6 +77,8 @@ export interface EdgeConfig {
   // State management (aligned with CrewAI Flow state)
   stateMappings?: StateMapping[]; // Extract task outputs → state variables (with sourceTaskId)
   checkpoint?: boolean;           // Enable @persist - checkpoint after this step for resume capability
+  // HITL (Human in the Loop) - requires checkpoint to be enabled
+  hitl?: HITLConfig;
 }
 
 const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
@@ -86,6 +99,13 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
   // State management
   const [stateMappings, setStateMappings] = useState<StateMapping[]>([]);
   const [checkpoint, setCheckpoint] = useState(false);
+
+  // HITL configuration
+  const [hitlEnabled, setHitlEnabled] = useState(false);
+  const [hitlMessage, setHitlMessage] = useState('Please review and approve to continue');
+  const [hitlTimeoutSeconds, setHitlTimeoutSeconds] = useState(86400); // 24 hours default
+  const [hitlTimeoutAction, setHitlTimeoutAction] = useState<'auto_reject' | 'fail'>('auto_reject');
+  const [hitlRequireComment, setHitlRequireComment] = useState(false);
 
   // Get target node from passed nodes prop
   const targetNode = edge ? nodes.find(n => n.id === edge.target) : null;
@@ -115,6 +135,11 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
         logicType: edge.data.logicType,
         listenToTaskIds: edge.data.listenToTaskIds,
         stateMappings: edge.data.stateMappings,
+        checkpoint: edge.data.checkpoint,
+        'checkpoint type': typeof edge.data.checkpoint,
+        hitl: edge.data.hitl,
+        'hitl.enabled': edge.data.hitl?.enabled,
+        'hitl.enabled type': typeof edge.data.hitl?.enabled,
         allDataKeys: Object.keys(edge.data)
       });
 
@@ -130,7 +155,24 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
 
       // Load state management settings
       setStateMappings(edge.data.stateMappings || []);
-      setCheckpoint(edge.data.checkpoint || false);
+      // Use explicit boolean check to handle false values correctly
+      setCheckpoint(edge.data.checkpoint === true);
+
+      // Load HITL configuration
+      if (edge.data.hitl) {
+        // Use explicit boolean check to handle false values correctly
+        setHitlEnabled(edge.data.hitl.enabled === true);
+        setHitlMessage(edge.data.hitl.message || 'Please review and approve to continue');
+        setHitlTimeoutSeconds(edge.data.hitl.timeout_seconds || 86400);
+        setHitlTimeoutAction(edge.data.hitl.timeout_action || 'auto_reject');
+        setHitlRequireComment(edge.data.hitl.require_comment === true);
+      } else {
+        setHitlEnabled(false);
+        setHitlMessage('Please review and approve to continue');
+        setHitlTimeoutSeconds(86400);
+        setHitlTimeoutAction('auto_reject');
+        setHitlRequireComment(false);
+      }
     } else {
       // Reset to defaults
       setLogicType('NONE');
@@ -140,6 +182,12 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
       setTargetTaskIds([]);
       setStateMappings([]);
       setCheckpoint(false);
+      // Reset HITL
+      setHitlEnabled(false);
+      setHitlMessage('Please review and approve to continue');
+      setHitlTimeoutSeconds(86400);
+      setHitlTimeoutAction('auto_reject');
+      setHitlRequireComment(false);
     }
   }, [edge]);
 
@@ -172,7 +220,22 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
       targetTaskIds,
       // Include state management if configured
       ...(validStateMappings.length > 0 && { stateMappings: validStateMappings }),
-      ...(checkpoint && { checkpoint: true }),
+      // Always include checkpoint (explicit true/false)
+      checkpoint: checkpoint,
+      // Always include HITL config (when checkpoint enabled, use settings; when disabled, explicitly disable)
+      hitl: checkpoint ? {
+        enabled: hitlEnabled,
+        message: hitlMessage,
+        timeout_seconds: hitlTimeoutSeconds,
+        timeout_action: hitlTimeoutAction,
+        require_comment: hitlRequireComment,
+      } : {
+        enabled: false,
+        message: 'Please review and approve to continue',
+        timeout_seconds: 86400,
+        timeout_action: 'auto_reject' as const,
+        require_comment: false,
+      },
     };
 
     // Only include router condition if logic type is ROUTER
@@ -685,7 +748,13 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
               <Checkbox
                 size="small"
                 checked={checkpoint}
-                onChange={(e) => setCheckpoint(e.target.checked)}
+                onChange={(e) => {
+                  setCheckpoint(e.target.checked);
+                  // Disable HITL if checkpoint is disabled
+                  if (!e.target.checked) {
+                    setHitlEnabled(false);
+                  }
+                }}
               />
             }
             label={
@@ -695,6 +764,104 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
             }
             sx={{ mt: 1, ml: 0 }}
           />
+
+          {/* HITL (Human in the Loop) Configuration - visible always, enabled only when checkpoint is enabled */}
+          <Box sx={{
+            mt: 2,
+            p: 2,
+            bgcolor: checkpoint ? 'warning.light' : 'action.disabledBackground',
+            borderRadius: 1,
+            border: '1px solid',
+            borderColor: checkpoint ? 'warning.main' : 'divider',
+            opacity: checkpoint ? 1 : 0.7,
+          }}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  size="small"
+                  checked={hitlEnabled}
+                  onChange={(e) => setHitlEnabled(e.target.checked)}
+                  disabled={!checkpoint}
+                />
+              }
+              label={
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <PanToolIcon sx={{ fontSize: 18, color: checkpoint ? 'warning.dark' : 'text.disabled' }} />
+                  <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 600, color: checkpoint ? 'text.primary' : 'text.disabled' }}>
+                    Require Human Approval (HITL)
+                  </Typography>
+                  {!checkpoint && (
+                    <Typography variant="caption" sx={{ color: 'text.secondary', fontStyle: 'italic' }}>
+                      — Enable checkpoint first
+                    </Typography>
+                  )}
+                </Box>
+              }
+              sx={{ ml: 0, mb: (hitlEnabled && checkpoint) ? 2 : 0 }}
+            />
+
+            {hitlEnabled && checkpoint && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pl: 4 }}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Approval Message"
+                  placeholder="Message shown to approvers..."
+                  value={hitlMessage}
+                  onChange={(e) => setHitlMessage(e.target.value)}
+                  multiline
+                  rows={2}
+                  helperText="This message will be displayed to reviewers when requesting approval"
+                />
+
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  <TextField
+                    size="small"
+                    type="number"
+                    label="Timeout (seconds)"
+                    value={hitlTimeoutSeconds}
+                    onChange={(e) => setHitlTimeoutSeconds(parseInt(e.target.value) || 86400)}
+                    sx={{ width: 150 }}
+                    helperText={
+                      hitlTimeoutSeconds < 3600
+                        ? `${Math.floor(hitlTimeoutSeconds / 60)} minutes`
+                        : hitlTimeoutSeconds < 86400
+                        ? `${Math.floor(hitlTimeoutSeconds / 3600)} hours`
+                        : `${Math.floor(hitlTimeoutSeconds / 86400)} days`
+                    }
+                  />
+
+                  <FormControl size="small" sx={{ minWidth: 200 }}>
+                    <InputLabel>On Timeout</InputLabel>
+                    <Select
+                      value={hitlTimeoutAction}
+                      label="On Timeout"
+                      onChange={(e) => setHitlTimeoutAction(e.target.value as 'auto_reject' | 'fail')}
+                    >
+                      <MenuItem value="auto_reject">Auto-reject (allow retry)</MenuItem>
+                      <MenuItem value="fail">Fail flow execution</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Box>
+
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      size="small"
+                      checked={hitlRequireComment}
+                      onChange={(e) => setHitlRequireComment(e.target.checked)}
+                    />
+                  }
+                  label={
+                    <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>
+                      Require comment for approval/rejection
+                    </Typography>
+                  }
+                  sx={{ ml: 0 }}
+                />
+              </Box>
+            )}
+          </Box>
 
           {/* Description */}
           <TextField

@@ -405,8 +405,8 @@ The PowerBIAnalysisTool supports two authentication methods:
 **Configuration**:
 ```json
 {
-  "tenant_id": "<YOUR_AZURE_TENANT_ID>",
-  "client_id": "<YOUR_AZURE_CLIENT_ID>",
+  "tenant_id": "9f37a392-f0ae-4280-9796-f1864a10effc",
+  "client_id": "7b597aac-de00-44c9-8e2a-3d2c345c36a9",
   "auth_method": "service_principal"
 }
 ```
@@ -430,7 +430,7 @@ The PowerBIAnalysisTool supports two authentication methods:
 **Configuration**:
 ```json
 {
-  "tenant_id": "<YOUR_AZURE_TENANT_ID>",
+  "tenant_id": "9f37a392-f0ae-4280-9796-f1864a10effc",
   "client_id": "1950a258-227b-4e31-a9cf-717495945fc2",
   "auth_method": "device_code"
 }
@@ -475,10 +475,10 @@ Configure Power BI settings at the **task level** for flexibility across differe
   "tools": [71],
   "tool_configs": {
     "PowerBIAnalysisTool": {
-      "tenant_id": "<YOUR_AZURE_TENANT_ID>",
-      "client_id": "<YOUR_AZURE_CLIENT_ID>",
-      "semantic_model_id": "<YOUR_POWERBI_SEMANTIC_MODEL_ID>",
-      "workspace_id": "<YOUR_POWERBI_WORKSPACE_ID>",
+      "tenant_id": "9f37a392-f0ae-4280-9796-f1864a10effc",
+      "client_id": "7b597aac-de00-44c9-8e2a-3d2c345c36a9",
+      "semantic_model_id": "a17de62e-8dc0-4a8a-acaa-2a9954de8c75",
+      "workspace_id": "bcb084ed-f8c9-422c-b148-29839c0f9227",
       "auth_method": "service_principal",
       "databricks_job_id": 365257288725339
     }
@@ -553,10 +553,10 @@ If keys are missing, an error alert is displayed with instructions.
   "tools": [71],
   "tool_configs": {
     "PowerBIAnalysisTool": {
-      "tenant_id": "<YOUR_AZURE_TENANT_ID>",
-      "client_id": "<YOUR_AZURE_CLIENT_ID>",
-      "semantic_model_id": "<YOUR_POWERBI_SEMANTIC_MODEL_ID>",
-      "workspace_id": "<YOUR_POWERBI_WORKSPACE_ID>",
+      "tenant_id": "9f37a392-f0ae-4280-9796-f1864a10effc",
+      "client_id": "7b597aac-de00-44c9-8e2a-3d2c345c36a9",
+      "semantic_model_id": "a17de62e-8dc0-4a8a-acaa-2a9954de8c75",
+      "workspace_id": "bcb084ed-f8c9-422c-b148-29839c0f9227",
       "auth_method": "service_principal",
       "databricks_job_id": 365257288725339
     }
@@ -902,10 +902,10 @@ powerbi_config = {
 ```json
 {
   "question": "Analyze Q4 revenue",
-  "semantic_model_id": "<YOUR_POWERBI_SEMANTIC_MODEL_ID>",
-  "workspace_id": "<YOUR_POWERBI_WORKSPACE_ID>",
-  "tenant_id": "<YOUR_AZURE_TENANT_ID>",
-  "client_id": "<YOUR_AZURE_CLIENT_ID>"
+  "semantic_model_id": "a17de62e-8dc0-4a8a-acaa-2a9954de8c75",
+  "workspace_id": "bcb084ed-f8c9-422c-b148-29839c0f9227",
+  "tenant_id": "9f37a392-f0ae-4280-9796-f1864a10effc",
+  "client_id": "7b597aac-de00-44c9-8e2a-3d2c345c36a9"
 }
 ```
 
