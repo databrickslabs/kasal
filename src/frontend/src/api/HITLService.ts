@@ -161,8 +161,8 @@ export class HITLService {
    * Get all pending HITL approvals for the current group.
    */
   static async getPendingApprovals(
-    limit: number = 50,
-    offset: number = 0
+    limit = 50,
+    offset = 0
   ): Promise<HITLApprovalListResponse> {
     const response = await apiClient.get<HITLApprovalListResponse>(
       '/hitl/pending',
