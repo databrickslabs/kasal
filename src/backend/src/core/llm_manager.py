@@ -22,6 +22,8 @@ import pathlib
 # CRITICAL: Import and apply model handlers BEFORE importing litellm
 # This ensures the monkey patches are applied to handle model-specific responses
 from src.core.llm_handlers.databricks_gpt_oss_handler import DatabricksGPTOSSHandler, DatabricksGPTOSSLLM, DatabricksRetryLLM
+from src.core.llm_handlers.gpt5_handler import GPT5Handler
+from src.core.llm_handlers.gpt5_llm_wrapper import GPT5CompatibleLLM
 
 # Now import litellm after the monkey patch has been applied
 import litellm
@@ -889,14 +891,23 @@ class LLMManager:
         
         # Add max_output_tokens if defined in model config
         if "max_output_tokens" in model_config_dict and model_config_dict["max_output_tokens"]:
-            # litellm 1.75.8+ handles GPT-5 max_completion_tokens automatically
-            llm_params["max_tokens"] = model_config_dict["max_output_tokens"]
-            logger.info(f"Setting max_tokens to {model_config_dict['max_output_tokens']} for model {prefixed_model}")
+            # GPT-5 and newer OpenAI reasoning models use max_completion_tokens instead of max_tokens
+            if provider == ModelProvider.OPENAI and "gpt-5" in model_name_value.lower():
+                llm_params["max_completion_tokens"] = model_config_dict["max_output_tokens"]
+                logger.info(f"Setting max_completion_tokens to {model_config_dict['max_output_tokens']} for GPT-5 model {prefixed_model}")
+            else:
+                llm_params["max_tokens"] = model_config_dict["max_output_tokens"]
+                logger.info(f"Setting max_tokens to {model_config_dict['max_output_tokens']} for model {prefixed_model}")
         
         # Create and return the CrewAI LLM
-        # litellm 1.75.8+ handles GPT-5 natively, no need for custom wrapper
-        logger.info(f"Creating CrewAI LLM with model: {prefixed_model}")
-        return LLM(**llm_params)
+        # GPT-5/5.2 models need custom wrapper to handle max_tokens -> max_completion_tokens
+        # CrewAI's LLM class internally adds max_tokens which GPT-5 doesn't support
+        if provider == ModelProvider.OPENAI and "gpt-5" in model_name_value.lower():
+            logger.info(f"Using GPT5CompatibleLLM wrapper for GPT-5 model: {prefixed_model}")
+            return GPT5CompatibleLLM(**llm_params)
+        else:
+            logger.info(f"Creating CrewAI LLM with model: {prefixed_model}")
+            return LLM(**llm_params)
 
     @staticmethod
     async def get_llm(model_name: str, temperature: Optional[float] = None):
@@ -1184,5 +1195,69 @@ class LLMManager:
             failure_count = LLMManager._embedding_failures[provider]['count']
             if failure_count >= LLMManager._embedding_failure_threshold:
                 embedding_logger.error(f"Circuit breaker tripped for {provider} embeddings after {failure_count} failures")
-            
+
             return None
+
+    @staticmethod
+    async def acompletion(**kwargs) -> Any:
+        """
+        Centralized async completion wrapper that handles model-specific transformations.
+
+        This method should be used instead of calling litellm.acompletion directly
+        to ensure proper handling of:
+        - GPT-5/5.2 max_tokens → max_completion_tokens transformation
+        - Deep research model tool injection (web_search_preview)
+        - Other model-specific requirements
+
+        Args:
+            **kwargs: All parameters to pass to litellm.acompletion
+
+        Returns:
+            The response from litellm.acompletion
+        """
+        # Extract model name for detection
+        model = kwargs.get('model', '')
+
+        # Handle GPT-5/5.2 models - transform max_tokens to max_completion_tokens
+        if GPT5Handler.is_gpt5_model(model):
+            if 'max_tokens' in kwargs:
+                max_tokens_value = kwargs.pop('max_tokens')
+                if 'max_completion_tokens' not in kwargs:
+                    kwargs['max_completion_tokens'] = max_tokens_value
+                    logger.info(f"LLMManager.acompletion: Transformed max_tokens ({max_tokens_value}) to max_completion_tokens for GPT-5 model: {model}")
+
+            # Remove unsupported parameters for GPT-5/reasoning models
+            unsupported_params = ['stop', 'logit_bias', 'presence_penalty', 'frequency_penalty']
+            for param in unsupported_params:
+                if param in kwargs:
+                    kwargs.pop(param)
+                    logger.debug(f"LLMManager.acompletion: Removed unsupported param '{param}' for GPT-5 model: {model}")
+
+        # Handle deep research models - inject required tools
+        deep_research_patterns = ['o3-deep-research', 'o4-mini-deep-research', 'deep-research']
+        is_deep_research = any(pattern in model.lower() for pattern in deep_research_patterns)
+
+        if is_deep_research:
+            existing_tools = kwargs.get('tools', [])
+            required_tool_types = {'web_search_preview', 'mcp', 'file_search'}
+
+            # Check if any required tool is already present
+            has_required_tool = any(
+                tool.get('type', '') in required_tool_types
+                for tool in existing_tools
+            )
+
+            # Inject web_search_preview if no required tool is present
+            if not has_required_tool:
+                kwargs['tools'] = existing_tools + [{"type": "web_search_preview"}]
+                logger.info(f"LLMManager.acompletion: Injected web_search_preview tool for deep research model: {model}")
+
+            # Transform max_tokens for deep research models too (they're reasoning models)
+            if 'max_tokens' in kwargs:
+                max_tokens_value = kwargs.pop('max_tokens')
+                if 'max_completion_tokens' not in kwargs:
+                    kwargs['max_completion_tokens'] = max_tokens_value
+                    logger.info(f"LLMManager.acompletion: Transformed max_tokens to max_completion_tokens for deep research model: {model}")
+
+        # Call litellm.acompletion with transformed parameters
+        return await litellm.acompletion(**kwargs)

@@ -1,6 +1,20 @@
 import { Edge, Node } from 'reactflow';
 import { FlowConfiguration, Listener, Action, StartingPoint, Router } from '../types/flow';
 
+// Task type used in flow configuration
+interface FlowTask {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+// State mapping type for router configuration
+interface StateMapping {
+  sourceTaskId: string;
+  outputField: string;
+  stateVariable: string;
+}
+
 /**
  * Build FlowConfiguration from nodes and edges
  * This utility is used by both SaveFlow (when saving) and JobExecutionService (when executing without saving)
@@ -29,7 +43,7 @@ export const buildFlowConfiguration = (nodes: Node[], edges: Edge[], flowName: s
 
           // Filter tasks based on targetTaskIds from edge configuration
           const targetTasks = edge.data.targetTaskIds
-            ? node.data.allTasks.filter((t: any) => edge.data.targetTaskIds.includes(t.id))
+            ? node.data.allTasks.filter((t: FlowTask) => edge.data.targetTaskIds.includes(t.id))
             : node.data.allTasks;
 
           const listener: Listener = {
@@ -69,10 +83,10 @@ export const buildFlowConfiguration = (nodes: Node[], edges: Edge[], flowName: s
 
       // If no tasks are explicitly selected, use all tasks (fallback for simple flows)
       const tasksToUse = selectedTaskIds.size > 0
-        ? node.data.allTasks.filter((task: any) => selectedTaskIds.has(task.id))
+        ? node.data.allTasks.filter((task: FlowTask) => selectedTaskIds.has(task.id))
         : node.data.allTasks;
 
-      tasksToUse.forEach((task: any) => {
+      tasksToUse.forEach((task: FlowTask) => {
         startingPoints.push({
           crewId: node.data.crewId || node.id,
           crewName: node.data.crewName || node.data.label,
@@ -91,7 +105,7 @@ export const buildFlowConfiguration = (nodes: Node[], edges: Edge[], flowName: s
       const targetNode = nodes.find(n => n.id === edge.target);
       if (targetNode) {
         edge.data.targetTaskIds.forEach((taskId: string) => {
-          const task = targetNode.data?.allTasks?.find((t: any) => t.id === taskId);
+          const task = targetNode.data?.allTasks?.find((t: FlowTask) => t.id === taskId);
           if (task) {
             actions.push({
               id: `action-${edge.id}-${taskId}`,
@@ -119,7 +133,7 @@ export const buildFlowConfiguration = (nodes: Node[], edges: Edge[], flowName: s
       if (!routerEdgeGroups.has(groupKey)) {
         routerEdgeGroups.set(groupKey, []);
       }
-      routerEdgeGroups.get(groupKey)!.push(edge);
+      routerEdgeGroups.get(groupKey)?.push(edge);
     }
   });
 
@@ -157,9 +171,9 @@ export const buildFlowConfiguration = (nodes: Node[], edges: Edge[], flowName: s
       } else {
         // Fallback: check if any of the source node's tasks are in a listener's tasks
         // This handles cases where the crewId doesn't match exactly
-        const sourceTaskIds = sourceNode.data?.allTasks?.map((t: any) => t.id) || [];
+        const sourceTaskIds = sourceNode.data?.allTasks?.map((t: FlowTask) => t.id) || [];
         const listenerByTask = listeners.findIndex(l =>
-          l.tasks?.some((t: any) => sourceTaskIds.includes(t.id))
+          l.tasks?.some((t: FlowTask) => sourceTaskIds.includes(t.id))
         );
 
         if (listenerByTask >= 0) {
@@ -178,7 +192,7 @@ export const buildFlowConfiguration = (nodes: Node[], edges: Edge[], flowName: s
 
     // Build routes from all edges in this group
     // Route name is auto-generated from target crew name for simplicity
-    const routes: Record<string, any[]> = {};
+    const routes: Record<string, Array<{ id: string; crewId: string; crewName: string }>> = {};
     const routeConditions: Record<string, string> = {};
 
     groupEdges.forEach(edge => {
@@ -187,7 +201,7 @@ export const buildFlowConfiguration = (nodes: Node[], edges: Edge[], flowName: s
 
       // Collect state mappings from this edge
       if (edge.data?.stateMappings && Array.isArray(edge.data.stateMappings)) {
-        edge.data.stateMappings.forEach((mapping: any) => {
+        edge.data.stateMappings.forEach((mapping: StateMapping) => {
           if (mapping.sourceTaskId && mapping.outputField && mapping.stateVariable) {
             // Avoid duplicates
             const exists = allStateMappings.some(
@@ -212,11 +226,11 @@ export const buildFlowConfiguration = (nodes: Node[], edges: Edge[], flowName: s
 
       // Get target tasks for this route
       const targetTasks = edge.data.targetTaskIds
-        ? targetNode.data?.allTasks?.filter((t: any) => edge.data.targetTaskIds.includes(t.id)) || []
+        ? targetNode.data?.allTasks?.filter((t: FlowTask) => edge.data.targetTaskIds.includes(t.id)) || []
         : targetNode.data?.allTasks || [];
 
       // Convert to the format backend expects
-      const routeTasks = targetTasks.map((task: any) => ({
+      const routeTasks = targetTasks.map((task: FlowTask) => ({
         id: task.id,
         crewId: targetNode.data.crewId || targetNode.id,
         crewName: targetNode.data.crewName || targetNode.data.label
@@ -239,7 +253,7 @@ export const buildFlowConfiguration = (nodes: Node[], edges: Edge[], flowName: s
     // If no routes were created, skip this router
     if (Object.keys(routes).length === 0) return;
 
-    const router: any = {
+    const router: Router = {
       name: `router_${groupKey.replace(/[^a-zA-Z0-9_]/g, '_')}`,
       listenTo,
       stateMappings: allStateMappings,  // State mappings to extract task outputs → state variables

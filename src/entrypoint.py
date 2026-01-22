@@ -96,7 +96,7 @@ class SPAMiddleware(BaseHTTPMiddleware):
         # Skip API routes, static files, manifest, and markdown files
         if (path.startswith("/api/") or
             path.startswith("/api-docs") or
-            path.startswith("/static/") or
+            path.startswith("/assets/") or  # Vite build output
             path == "/favicon.ico" or
             path == "/manifest.json" or
             path == "/robots.txt" or
@@ -317,15 +317,11 @@ def run_app():
 
         # Mount static files if they exist
         if os.path.exists(frontend_static_dir):
-            # Check if there's a static directory inside frontend_static_dir
-            static_dir = os.path.join(frontend_static_dir, "static")
-            if os.path.exists(static_dir):
-                logger.info(f"Mounting /static from {static_dir}")
-                app.mount("/static", StaticFiles(directory=static_dir), name="static")
-            else:
-                # Maybe the static files are directly in the frontend_static_dir
-                logger.info(f"Mounting /static directly from {frontend_static_dir}")
-                app.mount("/static", StaticFiles(directory=frontend_static_dir), name="static")
+            # Mount Vite's assets directory
+            assets_dir = os.path.join(frontend_static_dir, "assets")
+            if os.path.exists(assets_dir):
+                logger.info(f"Mounting /assets from {assets_dir}")
+                app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
             # Mount individual static assets
             favicon_ico = os.path.join(frontend_static_dir, "favicon.ico")
@@ -339,7 +335,7 @@ def run_app():
                 @app.get("/manifest.json")
                 async def serve_manifest():
                     return FileResponse(manifest_json)
-            # Serve common root-level assets used by CRA builds
+            # Serve common root-level assets
             logo192_png = os.path.join(frontend_static_dir, "logo192.png")
             if os.path.exists(logo192_png):
                 @app.get("/logo192.png")

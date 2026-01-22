@@ -117,12 +117,21 @@ export interface StartingPoint {
 export interface RouterTaskConfig {
   id: string;
   crewId: string;
+  crewName?: string;
+}
+
+// State mapping for router configuration - extracts task outputs to state variables
+export interface RouterStateMapping {
+  sourceTaskId: string;
+  outputField: string;
+  stateVariable: string;
 }
 
 export interface Router {
   name: string;
   listenTo: string;  // Method name to listen to
-  conditionField: string;  // Field to evaluate for routing
+  conditionField?: string;  // Field to evaluate for routing (optional, deprecated)
+  stateMappings?: RouterStateMapping[];  // State mappings to extract task outputs → state variables
   routes: Record<string, RouterTaskConfig[]>;  // Route name -> array of task configs
   condition?: string;  // Python condition expression for routing (deprecated, use routeConditions)
   routeConditions?: Record<string, string>;  // Route name -> Python condition expression

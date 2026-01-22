@@ -573,16 +573,8 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
         'src.services.trace_queue',  # Add trace queue logger
         'src.engines.crewai.execution_runner',  # Add execution runner logger
         'src.services.databricks_knowledge_service',  # Add knowledge service logger for search debugging
-        'converters.pipeline',  # Converter pipeline logger
-        'converters.inbound.powerbi.connector',  # Power BI connector logger
-        'converters.inbound.powerbi.dax_parser',  # DAX parser logger
-        'converters.outbound.dax.generator',  # DAX generator logger
-        'converters.outbound.sql.generator',  # SQL generator logger
-        'converters.outbound.uc_metrics.generator',  # UC Metrics generator logger
-        'src.engines.crewai.tools.custom.measure_conversion_pipeline_tool',  # Measure conversion tool logger
-        'src.engines.crewai.tools.custom.powerbi_connector_tool',  # Power BI connector tool logger
-        'src.engines.crewai.tools.custom.powerbi_analysis_tool',  # PowerBI analysis tool logger
-        'src.engines.crewai.tools.custom.databricks_jobs_tool',  # Databricks jobs tool logger
+        'src.engines.crewai.tools.custom.powerbi_analysis_tool',  # Add PowerBI tool logger
+        'src.engines.crewai.tools.custom.databricks_jobs_tool',  # Add Databricks jobs tool logger
         '__main__'  # For any direct logging in subprocess
     ]:
         module_logger = get_logger(logger_name)

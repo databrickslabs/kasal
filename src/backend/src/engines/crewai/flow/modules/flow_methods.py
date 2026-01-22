@@ -5,6 +5,7 @@ This module handles dynamic creation of flow methods (starting points, listeners
 """
 import logging
 import asyncio
+import uuid
 from typing import Dict, List, Any, Optional, Callable
 from crewai.flow.flow import listen, router, start, and_, or_
 from crewai import Crew, Process, Task
@@ -223,33 +224,52 @@ class FlowMethodFactory:
             # This follows the same pattern as CrewPreparation in regular crew execution
             logger.info(f"Creating Crew instance: {crew_name}")
 
-            # Determine crew memory setting - crew_data takes priority, then agent settings
+            # Determine crew memory setting - check both crew config AND agent settings
             crew_memory = True  # Default
-            if crew_data and hasattr(crew_data, 'memory') and crew_data.memory is not None:
-                crew_memory = crew_data.memory
-                logger.info(f"Using crew memory setting from configuration: {crew_memory}")
-            else:
-                # Check agent memory settings to determine crew memory
-                agents_with_memory_enabled = []
-                agents_with_memory_disabled = []
-                for agent in agents:
-                    agent_role = agent.role if hasattr(agent, 'role') else 'Unknown'
-                    # Check if agent has memory attribute set
-                    if hasattr(agent, 'memory'):
-                        if agent.memory is False:
-                            agents_with_memory_disabled.append(agent_role)
-                        else:
-                            agents_with_memory_enabled.append(agent_role)
-                    else:
-                        # Default to memory enabled if not specified
-                        agents_with_memory_enabled.append(agent_role)
 
-                # Determine crew memory setting
-                if agents_with_memory_disabled and not agents_with_memory_enabled:
-                    crew_memory = False
-                    logger.info(f"All agents have memory disabled - setting crew memory to False")
+            # First, get crew-level memory setting if available
+            crew_memory_from_config = None
+            if crew_data and hasattr(crew_data, 'memory') and crew_data.memory is not None:
+                crew_memory_from_config = crew_data.memory
+                logger.info(f"Crew memory setting from configuration: {crew_memory_from_config}")
+
+            # Then check agent memory settings - this is ALWAYS checked, not just as fallback
+            # We check our custom _kasal_memory_disabled attribute since CrewAI Agent doesn't store memory as an attribute
+            agents_with_memory_enabled = []
+            agents_with_memory_disabled = []
+            logger.info(f"Checking memory settings for {len(agents)} agents in crew {crew_name}")
+            for agent in agents:
+                agent_role = agent.role if hasattr(agent, 'role') else 'Unknown'
+                # Check our custom attribute that was set during agent configuration
+                has_kasal_attr = hasattr(agent, '_kasal_memory_disabled')
+                kasal_memory_disabled = getattr(agent, '_kasal_memory_disabled', False)
+                logger.info(f"  Agent '{agent_role}': has_kasal_attr={has_kasal_attr}, _kasal_memory_disabled={kasal_memory_disabled}")
+                if has_kasal_attr and kasal_memory_disabled:
+                    agents_with_memory_disabled.append(agent_role)
+                    logger.info(f"  → Agent '{agent_role}' has memory DISABLED (via _kasal_memory_disabled)")
                 else:
-                    logger.info(f"At least one agent has memory enabled - setting crew memory to True")
+                    agents_with_memory_enabled.append(agent_role)
+                    logger.info(f"  → Agent '{agent_role}' has memory ENABLED")
+
+            # Determine final crew memory setting:
+            # 1. If ALL agents have memory disabled, crew memory should be False (regardless of crew config)
+            # 2. If crew config explicitly sets memory=False, use that
+            # 3. Otherwise use crew config or default to True
+            all_agents_memory_disabled = agents_with_memory_disabled and not agents_with_memory_enabled
+
+            if all_agents_memory_disabled:
+                crew_memory = False
+                logger.info(f"All agents have memory disabled ({agents_with_memory_disabled}) - setting crew memory to False")
+            elif crew_memory_from_config is False:
+                crew_memory = False
+                logger.info(f"Crew memory explicitly disabled in configuration")
+            elif crew_memory_from_config is True:
+                crew_memory = True
+                logger.info(f"Using crew memory setting from configuration: True")
+            else:
+                # Default: at least one agent has memory enabled
+                crew_memory = True
+                logger.info(f"At least one agent has memory enabled ({agents_with_memory_enabled}) - setting crew memory to True")
 
             # Determine process type from crew_data
             process_type = Process.sequential  # Default
@@ -506,34 +526,52 @@ class FlowMethodFactory:
             listener_crew_name = crew_name if crew_name else (agents[0].role if agents and hasattr(agents[0], 'role') and agents[0].role else "Listener Crew")
             logger.info(f"Creating listener crew with name: {listener_crew_name}")
 
-            # Determine crew memory setting - crew_data takes priority, then agent settings
+            # Determine crew memory setting - check both crew config AND agent settings
             crew_memory = True  # Default
-            if crew_data and hasattr(crew_data, 'memory') and crew_data.memory is not None:
-                crew_memory = crew_data.memory
-                logger.info(f"Using listener crew memory setting from configuration: {crew_memory}")
-            else:
-                # Determine memory setting based on agent configuration
-                # This follows the same pattern as CrewPreparation in regular crew execution
-                agents_with_memory_enabled = []
-                agents_with_memory_disabled = []
-                for agent in agents:
-                    agent_role = agent.role if hasattr(agent, 'role') else 'Unknown'
-                    # Check if agent has memory attribute set
-                    if hasattr(agent, 'memory'):
-                        if agent.memory is False:
-                            agents_with_memory_disabled.append(agent_role)
-                        else:
-                            agents_with_memory_enabled.append(agent_role)
-                    else:
-                        # Default to memory enabled if not specified
-                        agents_with_memory_enabled.append(agent_role)
 
-                # Determine crew memory setting
-                if agents_with_memory_disabled and not agents_with_memory_enabled:
-                    crew_memory = False
-                    logger.info(f"All agents have memory disabled - setting listener crew memory to False")
+            # First, get crew-level memory setting if available
+            crew_memory_from_config = None
+            if crew_data and hasattr(crew_data, 'memory') and crew_data.memory is not None:
+                crew_memory_from_config = crew_data.memory
+                logger.info(f"Listener crew memory setting from configuration: {crew_memory_from_config}")
+
+            # Then check agent memory settings - this is ALWAYS checked, not just as fallback
+            # We check our custom _kasal_memory_disabled attribute since CrewAI Agent doesn't store memory as an attribute
+            agents_with_memory_enabled = []
+            agents_with_memory_disabled = []
+            logger.info(f"Checking memory settings for {len(agents)} agents in listener crew {listener_crew_name}")
+            for agent in agents:
+                agent_role = agent.role if hasattr(agent, 'role') else 'Unknown'
+                # Check our custom attribute that was set during agent configuration
+                has_kasal_attr = hasattr(agent, '_kasal_memory_disabled')
+                kasal_memory_disabled = getattr(agent, '_kasal_memory_disabled', False)
+                logger.info(f"  Agent '{agent_role}': has_kasal_attr={has_kasal_attr}, _kasal_memory_disabled={kasal_memory_disabled}")
+                if has_kasal_attr and kasal_memory_disabled:
+                    agents_with_memory_disabled.append(agent_role)
+                    logger.info(f"  → Agent '{agent_role}' has memory DISABLED (via _kasal_memory_disabled)")
                 else:
-                    logger.info(f"At least one agent has memory enabled - setting listener crew memory to True")
+                    agents_with_memory_enabled.append(agent_role)
+                    logger.info(f"  → Agent '{agent_role}' has memory ENABLED")
+
+            # Determine final crew memory setting:
+            # 1. If ALL agents have memory disabled, crew memory should be False (regardless of crew config)
+            # 2. If crew config explicitly sets memory=False, use that
+            # 3. Otherwise use crew config or default to True
+            all_agents_memory_disabled = agents_with_memory_disabled and not agents_with_memory_enabled
+
+            if all_agents_memory_disabled:
+                crew_memory = False
+                logger.info(f"All agents have memory disabled ({agents_with_memory_disabled}) - setting listener crew memory to False")
+            elif crew_memory_from_config is False:
+                crew_memory = False
+                logger.info(f"Listener crew memory explicitly disabled in configuration")
+            elif crew_memory_from_config is True:
+                crew_memory = True
+                logger.info(f"Using listener crew memory setting from configuration: True")
+            else:
+                # Default: at least one agent has memory enabled
+                crew_memory = True
+                logger.info(f"At least one agent has memory enabled ({agents_with_memory_enabled}) - setting listener crew memory to True")
 
             # Determine process type from crew_data
             process_type = Process.sequential  # Default
@@ -688,9 +726,10 @@ class FlowMethodFactory:
         """
         Create a stub method for a crew that should be skipped during checkpoint resume.
 
-        When resuming from a checkpoint, crews that have already completed (sequence <= resume_from)
+        When resuming from a checkpoint, crews that have already completed (sequence < resume_from)
         are replaced with stub methods that return the checkpoint output from the database,
         allowing the flow to continue with proper context for downstream crews.
+        Note: resume_from is the sequence of the crew TO RUN, not the last completed.
 
         Args:
             method_name: Name of the flow method
@@ -888,3 +927,213 @@ class FlowMethodFactory:
             skipped_listener_method.__name__ = method_name
             skipped_listener_method.__qualname__ = method_name
             return skipped_listener_method
+
+    @staticmethod
+    def create_hitl_gate_method(
+        method_name: str,
+        gate_node_id: str,
+        gate_config: Dict[str, Any],
+        previous_method_name: str,
+        crew_sequence: int,
+        callbacks: Optional[Dict[str, Any]] = None,
+        group_context: Optional[Any] = None
+    ) -> Callable:
+        """
+        Create an HITL gate method that pauses flow for human approval.
+
+        This method listens to the previous crew's completion, then:
+        1. Creates an HITLApproval record in the database
+        2. Updates execution status to WAITING_FOR_APPROVAL
+        3. Sends webhook notifications
+        4. Raises FlowPausedForApprovalException to pause flow
+
+        Args:
+            method_name: Name of the gate method
+            gate_node_id: ID of the HITL gate node in the flow
+            gate_config: Gate configuration dict with:
+                - message: Display message for approver
+                - timeout_seconds: Seconds before timeout
+                - timeout_action: Action on timeout (auto_reject, fail)
+                - require_comment: Whether comment is required
+                - allowed_approvers: List of allowed approver emails
+            previous_method_name: Name of the method this gate listens to
+            crew_sequence: Sequence number of the previous crew
+            callbacks: Callbacks dict with job_id and other metadata
+            group_context: Group context for multi-tenant isolation
+
+        Returns:
+            Async function decorated with @listen() that pauses for approval
+        """
+        @listen(previous_method_name)
+        async def hitl_gate_method(self, previous_output=None):
+            """HITL gate method - pauses flow for human approval."""
+            from src.engines.crewai.flow.exceptions import FlowPausedForApprovalException
+            from src.db.session import async_session_factory
+            from src.services.hitl_service import HITLService
+            from src.services.hitl_webhook_service import HITLWebhookService
+            from src.repositories.hitl_repository import HITLApprovalRepository
+            from src.models.hitl_approval import HITLApprovalStatus
+
+            logger.info("="*80)
+            logger.info(f"🚦 HITL GATE REACHED: {gate_node_id}")
+            logger.info(f"Method: {method_name}")
+            logger.info(f"Listening to: {previous_method_name}")
+            logger.info(f"Gate config: {gate_config}")
+            logger.info("="*80)
+
+            # Extract execution context
+            job_id = callbacks.get('job_id') if callbacks else None
+            flow_id = callbacks.get('flow_id') if callbacks else None
+
+            logger.info(f"📋 Extracted from callbacks:")
+            logger.info(f"   job_id: {job_id}")
+            logger.info(f"   flow_id: {flow_id}")
+            logger.info(f"   callbacks keys: {list(callbacks.keys()) if callbacks else 'None'}")
+
+            if not job_id:
+                logger.error("No job_id found in callbacks - cannot create HITL approval")
+                raise ValueError("HITL gate requires job_id in callbacks")
+
+            # Get group_id from context
+            group_id = None
+            if group_context:
+                if hasattr(group_context, 'primary_group_id'):
+                    group_id = group_context.primary_group_id
+                elif hasattr(group_context, 'group_ids') and group_context.group_ids:
+                    group_id = group_context.group_ids[0]
+
+            if not group_id:
+                logger.error("No group_id found in group_context - cannot create HITL approval")
+                raise ValueError("HITL gate requires group_id in context")
+
+            # Check if there's already an APPROVED approval for this gate
+            # This happens when resuming after approval
+            async with async_session_factory() as session:
+                hitl_repo = HITLApprovalRepository(session)
+                existing_approvals = await hitl_repo.get_all_for_execution(job_id, group_id)
+
+                # Look for an approved approval for this specific gate
+                approved_for_gate = None
+                for approval in existing_approvals:
+                    if (approval.gate_node_id == gate_node_id and
+                        approval.status == HITLApprovalStatus.APPROVED):
+                        approved_for_gate = approval
+                        break
+
+                if approved_for_gate:
+                    logger.info("="*80)
+                    logger.info(f"✅ HITL GATE ALREADY APPROVED: {gate_node_id}")
+                    logger.info(f"   Approval ID: {approved_for_gate.id}")
+                    logger.info(f"   Approved by: {approved_for_gate.responded_by}")
+                    logger.info(f"   Approved at: {approved_for_gate.responded_at}")
+                    logger.info("   Passing through to next step...")
+                    logger.info("="*80)
+                    # Return the previous output to continue the flow
+                    return previous_output
+
+            # Get previous crew name and output
+            previous_crew_name = previous_method_name
+            previous_crew_output = None
+            if previous_output:
+                if isinstance(previous_output, str):
+                    previous_crew_output = previous_output
+                elif hasattr(previous_output, 'raw'):
+                    previous_crew_output = str(previous_output.raw)
+                else:
+                    previous_crew_output = str(previous_output)
+
+            # Get flow state snapshot
+            flow_state_snapshot = {}
+            if hasattr(self, 'state'):
+                try:
+                    if hasattr(self.state, 'model_dump'):
+                        flow_state_snapshot = self.state.model_dump()
+                    elif isinstance(self.state, dict):
+                        flow_state_snapshot = dict(self.state)
+                except Exception as e:
+                    logger.warning(f"Could not serialize flow state: {e}")
+
+            # Get flow_uuid for checkpoint
+            flow_uuid = None
+            logger.info(f"🔍 HITL gate checkpoint extraction:")
+            logger.info(f"   hasattr(self, 'state'): {hasattr(self, 'state')}")
+            if hasattr(self, 'state'):
+                state = self.state
+                logger.info(f"   self.state type: {type(state)}")
+                logger.info(f"   hasattr(self.state, 'id'): {hasattr(state, 'id')}")
+                if hasattr(state, 'id'):
+                    flow_uuid = getattr(state, 'id', None)
+                    logger.info(f"   ✅ Extracted flow_uuid from state.id: {flow_uuid}")
+                elif isinstance(state, dict) and 'id' in state:
+                    # Try to get id from dict-like state
+                    flow_uuid = state['id']
+                    logger.info(f"   ✅ Extracted flow_uuid from dict state['id']: {flow_uuid}")
+
+            # Fallback: Generate a UUID if none was found
+            # This ensures checkpoint functionality works even if @persist state.id is not available
+            if not flow_uuid:
+                flow_uuid = str(uuid.uuid4())
+                logger.warning(f"   ⚠️ No state.id found - generated fallback flow_uuid: {flow_uuid}")
+                # Store in state for future reference if possible
+                if hasattr(self, 'state'):
+                    try:
+                        if hasattr(self.state, 'id'):
+                            setattr(self.state, 'id', flow_uuid)
+                        elif isinstance(self.state, dict):
+                            self.state['id'] = flow_uuid
+                        logger.info(f"   ✅ Stored generated flow_uuid in state")
+                    except Exception as e:
+                        logger.warning(f"   Could not store flow_uuid in state: {e}")
+
+            # Create HITL approval request
+            async with async_session_factory() as session:
+                hitl_service = HITLService(session)
+                webhook_service = HITLWebhookService(session)
+
+                approval = await hitl_service.create_approval_request(
+                    execution_id=job_id,
+                    flow_id=flow_id or "",
+                    gate_node_id=gate_node_id,
+                    crew_sequence=crew_sequence,
+                    gate_config=gate_config,
+                    group_id=group_id,
+                    previous_crew_name=previous_crew_name,
+                    previous_crew_output=previous_crew_output,
+                    flow_state_snapshot=flow_state_snapshot
+                )
+
+                await session.commit()
+
+                logger.info(f"✅ Created HITL approval {approval.id}")
+                logger.info(f"   Execution: {job_id}")
+                logger.info(f"   Gate: {gate_node_id}")
+                logger.info(f"   Expires at: {approval.expires_at}")
+
+                # Send webhook notification
+                try:
+                    # Build approval URL (this would be configured in settings)
+                    approval_url = f"/flows/approvals/{approval.id}"
+
+                    await webhook_service.send_gate_reached_notification(
+                        approval=approval,
+                        approval_url=approval_url
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to send webhook notification: {e}")
+
+            # Raise exception to pause flow
+            logger.info("🛑 PAUSING FLOW FOR HUMAN APPROVAL")
+            logger.info("="*80)
+
+            raise FlowPausedForApprovalException(
+                approval_id=approval.id,
+                gate_node_id=gate_node_id,
+                message=gate_config.get('message', 'Approval required to proceed'),
+                execution_id=job_id,
+                crew_sequence=crew_sequence,
+                flow_uuid=flow_uuid
+            )
+
+        hitl_gate_method.__name__ = method_name
+        hitl_gate_method.__qualname__ = method_name
+        return hitl_gate_method

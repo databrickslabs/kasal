@@ -1,3 +1,4 @@
+import { vi, Mock, beforeEach, afterEach, describe, it, test, expect } from 'vitest';
 import { DefaultMemoryBackendService } from './DefaultMemoryBackendService';
 import { MemoryBackendConfig, MemoryBackendType } from '../types/memoryBackend';
 
@@ -11,11 +12,11 @@ describe('DefaultMemoryBackendService', () => {
     (DefaultMemoryBackendService as any).instance = undefined;
     service = DefaultMemoryBackendService.getInstance();
     // Mock console.error
-    jest.spyOn(console, 'error').mockImplementation(jest.fn());
+    vi.spyOn(console, 'error').mockImplementation(vi.fn());
   });
 
   afterEach(() => {
-    (console.error as jest.Mock).mockRestore();
+    (console.error as Mock).mockRestore();
   });
 
   describe('getInstance', () => {

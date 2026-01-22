@@ -8,6 +8,7 @@ import CodeIcon from '@mui/icons-material/Code';
 import MemoryIcon from '@mui/icons-material/Memory';
 import { Agent } from '../../api/AgentService';
 import AgentForm from './AgentForm';
+import LLMSelectionDialog from './LLMSelectionDialog';
 import { ToolService } from '../../api/ToolService';
 import { Tool, KnowledgeSource } from '../../types/agent';
 import { Theme } from '@mui/material/styles';
@@ -52,6 +53,7 @@ interface AgentNodeData {
 const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) => {
   const { setNodes, setEdges, getNodes, getEdges } = useReactFlow();
   const [isEditing, setIsEditing] = useState(false);
+  const [isLLMDialogOpen, setIsLLMDialogOpen] = useState(false);
   const [tools, setTools] = useState<Tool[]>([]);
 
   // Local selection state
@@ -158,7 +160,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
     } catch (error) {
       console.error('Failed to fetch agent data:', error);
     }
-  }, [data.agentId, data.id, data.agent_id]);
+  }, [data, getAgent]);
 
   useEffect(() => {
     // Cleanup when dialog opens/closes if needed
@@ -246,6 +248,42 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       console.error('Failed to update node:', error);
     }
   }, [id, setNodes, updateAgent, data.agentId]);
+
+  // Handle LLM selection from the quick LLM dialog
+  const handleLLMSelect = useCallback((selectedLLM: string) => {
+    // Update the node data with the new LLM
+    setNodes(nodes => nodes.map(node => {
+      if (node.id === id) {
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            llm: selectedLLM,
+          }
+        };
+      }
+      return node;
+    }));
+
+    // Update the agent store if we have an agent ID
+    if (data.agentId && agentData) {
+      const updatedAgent = { ...agentData, llm: selectedLLM };
+      updateAgent(data.agentId, updatedAgent);
+      setAgentData(updatedAgent);
+    }
+
+    // Mark tab as dirty since agent was modified
+    markCurrentTabDirty();
+
+    setIsLLMDialogOpen(false);
+  }, [id, setNodes, data.agentId, agentData, updateAgent, markCurrentTabDirty]);
+
+  // Handle click on LLM badge to open quick LLM selector
+  const handleLLMBadgeClick = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsLLMDialogOpen(true);
+  }, []);
 
   // Removed problematic useEffect that was causing infinite API calls
   // Agent data is now managed by the store and fetched once on mount
@@ -499,24 +537,29 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
         {data.role || 'Agent'}
       </Typography>
 
-      <Box sx={{
-        background: (theme: Theme) => `linear-gradient(135deg, ${theme.palette.primary.main}15, ${theme.palette.primary.main}30)`,
-        borderRadius: '4px',
-        padding: '2px 6px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        mt: 0.25,
-        mb: 0.25,
-        border: (theme: Theme) => `1px solid ${theme.palette.primary.main}20`,
-        boxShadow: (theme: Theme) => `0 1px 2px ${theme.palette.primary.main}10`,
-        transition: 'all 0.2s ease',
-        maxWidth: '120px',
-        '&:hover': {
-          background: (theme: Theme) => `linear-gradient(135deg, ${theme.palette.primary.main}25, ${theme.palette.primary.main}40)`,
-          boxShadow: (theme: Theme) => `0 2px 4px ${theme.palette.primary.main}15`,
-        }
-      }}>
+      <Box
+        onClick={handleLLMBadgeClick}
+        sx={{
+          background: (theme: Theme) => `linear-gradient(135deg, ${theme.palette.primary.main}15, ${theme.palette.primary.main}30)`,
+          borderRadius: '4px',
+          padding: '2px 6px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          mt: 0.25,
+          mb: 0.25,
+          border: (theme: Theme) => `1px solid ${theme.palette.primary.main}20`,
+          boxShadow: (theme: Theme) => `0 1px 2px ${theme.palette.primary.main}10`,
+          transition: 'all 0.2s ease',
+          maxWidth: '120px',
+          cursor: 'pointer',
+          '&:hover': {
+            background: (theme: Theme) => `linear-gradient(135deg, ${theme.palette.primary.main}25, ${theme.palette.primary.main}40)`,
+            boxShadow: (theme: Theme) => `0 2px 4px ${theme.palette.primary.main}15`,
+            transform: 'scale(1.02)',
+          }
+        }}
+      >
         <MemoryIcon sx={{
           fontSize: '0.65rem',
           mr: 0.25,
@@ -674,6 +717,13 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Quick LLM Selection Dialog */}
+      <LLMSelectionDialog
+        open={isLLMDialogOpen}
+        onClose={() => setIsLLMDialogOpen(false)}
+        onSelectLLM={handleLLMSelect}
+      />
     </Box>
   );
 };

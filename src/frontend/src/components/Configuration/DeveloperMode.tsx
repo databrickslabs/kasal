@@ -95,7 +95,7 @@ const DeveloperMode: React.FC = () => {
   };
 
   // Only show in development mode
-  if (process.env.NODE_ENV !== 'development') {
+  if (!import.meta.env.DEV) {
     return null;
   }
 

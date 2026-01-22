@@ -1,17 +1,29 @@
+import { vi, Mock, beforeEach, afterEach, describe, it, expect } from 'vitest';
 import DatabricksVectorSearchService from './DatabricksVectorSearchService';
 import { apiClient } from '../config/api/ApiConfig';
 import { SetupResult, DatabricksMemoryConfig, MemoryBackendType } from '../types/memoryBackend';
 
-jest.mock('../config/api/ApiConfig');
+vi.mock('../config/api/ApiConfig', () => ({
+  apiClient: {
+    get: vi.fn(),
+    post: vi.fn(),
+    put: vi.fn(),
+    delete: vi.fn(),
+    patch: vi.fn(),
+  },
+  config: {
+    apiUrl: 'http://localhost:8000/api/v1',
+  },
+}));
 
 describe('DatabricksVectorSearchService', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
-    jest.spyOn(console, 'log').mockImplementation(jest.fn());
+    vi.clearAllMocks();
+    vi.spyOn(console, 'log').mockImplementation(vi.fn());
   });
 
   afterEach(() => {
-    (console.log as jest.Mock).mockRestore();
+    (console.log as Mock).mockRestore();
   });
 
   describe('performOneClickSetup', () => {
@@ -55,7 +67,7 @@ describe('DatabricksVectorSearchService', () => {
         },
         backend_id: 'backend-123',
       };
-      (apiClient.post as jest.Mock).mockResolvedValue({ data: mockResponse });
+      (apiClient.post as Mock).mockResolvedValue({ data: mockResponse });
 
       const result = await DatabricksVectorSearchService.performOneClickSetup(config);
 
@@ -71,8 +83,8 @@ describe('DatabricksVectorSearchService', () => {
         { id: 'config-2' },
         { id: 'config-3' },
       ];
-      (apiClient.get as jest.Mock).mockResolvedValue({ data: mockConfigs });
-      (apiClient.delete as jest.Mock).mockResolvedValue({});
+      (apiClient.get as Mock).mockResolvedValue({ data: mockConfigs });
+      (apiClient.delete as Mock).mockResolvedValue({});
 
       await DatabricksVectorSearchService.deleteAllConfigurations();
 
@@ -84,7 +96,7 @@ describe('DatabricksVectorSearchService', () => {
     });
 
     it('should handle empty configurations', async () => {
-      (apiClient.get as jest.Mock).mockResolvedValue({ data: [] });
+      (apiClient.get as Mock).mockResolvedValue({ data: [] });
 
       await DatabricksVectorSearchService.deleteAllConfigurations();
 
@@ -93,7 +105,7 @@ describe('DatabricksVectorSearchService', () => {
     });
 
     it('should handle null configurations', async () => {
-      (apiClient.get as jest.Mock).mockResolvedValue({ data: null });
+      (apiClient.get as Mock).mockResolvedValue({ data: null });
 
       await DatabricksVectorSearchService.deleteAllConfigurations();
 
@@ -104,7 +116,7 @@ describe('DatabricksVectorSearchService', () => {
 
   describe('cleanupDisabledConfigurations', () => {
     it('should cleanup disabled configurations', async () => {
-      (apiClient.delete as jest.Mock).mockResolvedValue({});
+      (apiClient.delete as Mock).mockResolvedValue({});
 
       await DatabricksVectorSearchService.cleanupDisabledConfigurations();
 
@@ -112,7 +124,7 @@ describe('DatabricksVectorSearchService', () => {
     });
 
     it('should handle cleanup errors gracefully', async () => {
-      (apiClient.delete as jest.Mock).mockRejectedValue(new Error('Not found'));
+      (apiClient.delete as Mock).mockRejectedValue(new Error('Not found'));
 
       await expect(DatabricksVectorSearchService.cleanupDisabledConfigurations()).resolves.not.toThrow();
       expect(console.log).toHaveBeenCalledWith('No disabled configurations to clean up');
@@ -122,7 +134,7 @@ describe('DatabricksVectorSearchService', () => {
   describe('switchToDisabledMode', () => {
     it('should switch to disabled mode', async () => {
       const mockResponse = { id: 'disabled-config-id', backend_type: 'disabled' };
-      (apiClient.post as jest.Mock).mockResolvedValue(mockResponse);
+      (apiClient.post as Mock).mockResolvedValue(mockResponse);
 
       const result = await DatabricksVectorSearchService.switchToDisabledMode();
 
@@ -144,7 +156,7 @@ describe('DatabricksVectorSearchService', () => {
         } as DatabricksMemoryConfig,
       };
       const mockResponse = { id: backendId, backend_type: 'databricks' };
-      (apiClient.put as jest.Mock).mockResolvedValue({ data: mockResponse });
+      (apiClient.put as Mock).mockResolvedValue({ data: mockResponse });
 
       const result = await DatabricksVectorSearchService.updateBackendConfiguration(backendId, config);
 
@@ -168,7 +180,7 @@ describe('DatabricksVectorSearchService', () => {
           },
         },
       };
-      (apiClient.get as jest.Mock).mockResolvedValue({ data: mockResponse });
+      (apiClient.get as Mock).mockResolvedValue({ data: mockResponse });
 
       const result = await DatabricksVectorSearchService.verifyResources(workspaceUrl, backendId);
 
@@ -184,7 +196,7 @@ describe('DatabricksVectorSearchService', () => {
     it('should verify resources without backendId', async () => {
       const workspaceUrl = 'https://example.databricks.com';
       const mockResponse = { success: false };
-      (apiClient.get as jest.Mock).mockResolvedValue({ data: mockResponse });
+      (apiClient.get as Mock).mockResolvedValue({ data: mockResponse });
 
       const result = await DatabricksVectorSearchService.verifyResources(workspaceUrl);
 
@@ -206,7 +218,7 @@ describe('DatabricksVectorSearchService', () => {
         endpoint_name: 'test-endpoint',
       };
       const mockResponse = { success: true, message: 'Index deleted' };
-      (apiClient.delete as jest.Mock).mockResolvedValue({ data: mockResponse });
+      (apiClient.delete as Mock).mockResolvedValue({ data: mockResponse });
 
       const result = await DatabricksVectorSearchService.deleteIndex(config);
 
@@ -229,7 +241,7 @@ describe('DatabricksVectorSearchService', () => {
         ready: true,
         index_type: 'DELTA_SYNC',
       };
-      (apiClient.get as jest.Mock).mockResolvedValue({ data: mockResponse });
+      (apiClient.get as Mock).mockResolvedValue({ data: mockResponse });
 
       const result = await DatabricksVectorSearchService.getIndexInfo(workspaceUrl, indexName, endpointName);
 
@@ -253,7 +265,7 @@ describe('DatabricksVectorSearchService', () => {
         batch_size: 100,
       };
       const mockResponse = { success: true, message: 'Index emptied', deleted_count: 50 };
-      (apiClient.post as jest.Mock).mockResolvedValue({ data: mockResponse });
+      (apiClient.post as Mock).mockResolvedValue({ data: mockResponse });
 
       const result = await DatabricksVectorSearchService.emptyIndex(config);
 
@@ -268,7 +280,7 @@ describe('DatabricksVectorSearchService', () => {
         endpoint_name: 'test-endpoint',
       };
       const mockResponse = { success: true, message: 'Index emptied' };
-      (apiClient.post as jest.Mock).mockResolvedValue({ data: mockResponse });
+      (apiClient.post as Mock).mockResolvedValue({ data: mockResponse });
 
       const result = await DatabricksVectorSearchService.emptyIndex(config);
 
@@ -287,7 +299,7 @@ describe('DatabricksVectorSearchService', () => {
         total_chunks: 150,
         failed_files: [],
       };
-      (apiClient.post as jest.Mock).mockResolvedValue({ data: mockResponse });
+      (apiClient.post as Mock).mockResolvedValue({ data: mockResponse });
 
       const result = await DatabricksVectorSearchService.reseedDocumentation(workspaceUrl);
 
@@ -305,7 +317,7 @@ describe('DatabricksVectorSearchService', () => {
         endpoint_name: 'test-endpoint',
       };
       const mockResponse = { success: true, message: 'Endpoint deleted' };
-      (apiClient.delete as jest.Mock).mockResolvedValue({ data: mockResponse });
+      (apiClient.delete as Mock).mockResolvedValue({ data: mockResponse });
 
       const result = await DatabricksVectorSearchService.deleteEndpoint(config);
 
@@ -335,7 +347,7 @@ describe('DatabricksVectorSearchService', () => {
 
     it('should create new configuration', async () => {
       const mockResponse = { data: { id: 'new-config-id' } };
-      (apiClient.post as jest.Mock).mockResolvedValue(mockResponse);
+      (apiClient.post as Mock).mockResolvedValue(mockResponse);
 
       const result = await DatabricksVectorSearchService.saveManualConfiguration(mockConfig);
 
@@ -346,7 +358,7 @@ describe('DatabricksVectorSearchService', () => {
     it('should update existing configuration', async () => {
       const existingConfigId = 'existing-config-id';
       const mockResponse = { data: { id: existingConfigId } };
-      (apiClient.put as jest.Mock).mockResolvedValue(mockResponse);
+      (apiClient.put as Mock).mockResolvedValue(mockResponse);
 
       const result = await DatabricksVectorSearchService.saveManualConfiguration(mockConfig, existingConfigId);
 

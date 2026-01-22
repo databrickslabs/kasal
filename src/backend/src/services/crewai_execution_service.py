@@ -246,38 +246,6 @@ class CrewAIExecutionService:
                                             crew_logger.info(f"Using tool_configs from database for task {task_id}: {task_config['tool_configs']}")
                                         else:
                                             crew_logger.info(f"Keeping tool_configs from YAML for task {task_id}: {task_config['tool_configs']}")
-
-                                        # ===== DYNAMIC TASK DESCRIPTION FIX =====
-                                        # For Measure Conversion Pipeline tasks, update description dynamically
-                                        if task_config['tool_configs'] and "Measure Conversion Pipeline" in task_config['tool_configs']:
-                                            mcp_config = task_config['tool_configs']["Measure Conversion Pipeline"]
-                                            inbound_connector = mcp_config.get('inbound_connector', 'YAML')
-                                            outbound_format = mcp_config.get('outbound_format', 'DAX')
-
-                                            # Map format codes to display names
-                                            format_display_names = {
-                                                'powerbi': 'Power BI',
-                                                'yaml': 'YAML',
-                                                'dax': 'DAX',
-                                                'sql': 'SQL',
-                                                'uc_metrics': 'UC Metrics',
-                                                'tableau': 'Tableau',
-                                                'excel': 'Excel'
-                                            }
-
-                                            inbound_display = format_display_names.get(inbound_connector, inbound_connector.upper())
-                                            outbound_display = format_display_names.get(outbound_format, outbound_format.upper())
-
-                                            # Update task description dynamically
-                                            task_config['description'] = f"""Use the Measure Conversion Pipeline tool to convert the provided {inbound_display} measure definition to {outbound_display} format.
-The tool configuration has been pre-configured with:
-  - Inbound format: {inbound_display}
-  - Outbound format: {outbound_display}
-  - Configuration: [provided in tool_configs]
-
-Call the Measure Conversion Pipeline tool to perform the conversion and return the generated {outbound_display} measures."""
-
-                                            crew_logger.info(f"Task {task_id} - Updated description dynamically for {inbound_display} → {outbound_display} conversion")
                                     else:
                                         crew_logger.warning(f"Task {task_id} does not have tool_configs attribute")
                                         if 'tool_configs' not in task_config:

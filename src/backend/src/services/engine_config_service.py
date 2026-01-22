@@ -195,15 +195,15 @@ class EngineConfigService:
     async def get_crewai_flow_enabled(self) -> bool:
         """
         Get the CrewAI flow enabled status.
-        
+
         Returns:
-            True if flow is enabled, False otherwise (defaults to False if not found)
+            True if flow is enabled (defaults to True if not found or on error)
         """
         try:
             return await self.repository.get_crewai_flow_enabled()
         except Exception as e:
             logger.error(f"Error getting CrewAI flow enabled status: {str(e)}")
-            return False  # Default to disabled on error
+            return True  # Default to enabled on error
     
     async def set_crewai_flow_enabled(self, enabled: bool) -> bool:
         """

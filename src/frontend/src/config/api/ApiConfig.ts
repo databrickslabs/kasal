@@ -2,8 +2,8 @@ import axios from 'axios';
 
 export const config = {
   apiUrl:
-    process.env.REACT_APP_API_URL ||
-    (process.env.NODE_ENV === 'development'
+    import.meta.env.VITE_API_URL ||
+    (import.meta.env.DEV
       ? 'http://localhost:8000/api/v1'
       : '/api/v1'),
 };
@@ -32,8 +32,8 @@ apiClient.interceptors.request.use(
 
     // For local development: simulate Databricks Apps auth header
     // In production, this header is set by the Databricks Apps gateway
-    if (process.env.NODE_ENV === 'development') {
-      const devEmail = process.env.REACT_APP_DEV_USER_EMAIL || 'dev@localhost';
+    if (import.meta.env.DEV) {
+      const devEmail = import.meta.env.VITE_DEV_USER_EMAIL || 'dev@localhost';
       config.headers['X-Forwarded-Email'] = devEmail;
     }
 
@@ -47,11 +47,11 @@ apiClient.interceptors.request.use(
 // Track refresh token request to prevent multiple simultaneous refreshes
 let isRefreshing = false;
 let failedQueue: Array<{
-  resolve: (value?: any) => void;
-  reject: (reason?: any) => void;
+  resolve: (value?: unknown) => void;
+  reject: (reason?: unknown) => void;
 }> = [];
 
-const processQueue = (error: any, token: string | null = null) => {
+const processQueue = (error: unknown, token: string | null = null) => {
   failedQueue.forEach((prom) => {
     if (error) {
       prom.reject(error);

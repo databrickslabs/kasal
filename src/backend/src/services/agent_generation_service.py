@@ -252,8 +252,8 @@ class AgentGenerationService:
         
         # Generate completion with litellm directly
         try:
-            # Use the rate limit handler utility to handle potential rate limit errors
-            response = await litellm.acompletion(
+            # Use LLMManager wrapper (handles GPT-5/deep research models)
+            response = await LLMManager.acompletion(
                 **model_params,
                 messages=messages,
                 temperature=0.2 if fast_planning else 0.7,

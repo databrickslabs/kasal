@@ -22,18 +22,17 @@ async def test_generate_execution_name_success(monkeypatch):
         async def create_log(self, **kwargs):
             return True
 
-    # Stub LLMManager and litellm
+    # Stub LLMManager (now uses LLMManager.acompletion instead of litellm.acompletion directly)
     class FakeLLMManager:
         @staticmethod
         async def configure_litellm(model: str):
             return {"model": model}
 
-    async def fake_acompletion(**kwargs):
-        return {"choices": [{"message": {"content": "My Nice Name"}}]}
+        @staticmethod
+        async def acompletion(**kwargs):
+            return {"choices": [{"message": {"content": "My Nice Name"}}]}
 
     monkeypatch.setattr(module, "LLMManager", FakeLLMManager, raising=True)
-    import litellm
-    monkeypatch.setattr(litellm, "acompletion", fake_acompletion, raising=True)
 
     svc = Svc(log_service=FakeLogService(), template_service=FakeTemplateService())
     req = ExecutionNameGenerationRequest(model="gpt-test", agents_yaml={}, tasks_yaml={})

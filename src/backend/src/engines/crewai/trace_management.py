@@ -6,6 +6,7 @@ This module provides functionality for managing trace data from CrewAI execution
 import logging
 import asyncio
 import queue
+import threading
 from typing import Optional, Dict, Any
 from datetime import datetime
 
@@ -14,17 +15,22 @@ logger = logging.getLogger(__name__)
 class TraceManager:
     """
     Manages the trace writer for CrewAI engine executions.
-    
+
     This class handles the background tasks that read from the trace queue
     and write to the database.
+
+    IMPORTANT: The writer task must be started and stopped in the SAME event loop.
+    Using different loops will cause RuntimeError ("attached to a different loop").
     """
-    
+
     # Class variables for singleton writer task
     _trace_writer_task: Optional[asyncio.Task] = None
     _logs_writer_task: Optional[asyncio.Task] = None
-    _shutdown_event: asyncio.Event = asyncio.Event()
+    _shutdown_event: Optional[asyncio.Event] = None  # Created lazily in the right loop
     _writer_started: bool = False
-    _lock = asyncio.Lock()  # Lock for starting the writer
+    _lock: Optional[asyncio.Lock] = None  # Created lazily in the right loop
+    _writer_loop: Optional[asyncio.AbstractEventLoop] = None  # Track which loop owns the tasks
+    _thread_lock = threading.Lock()  # Thread-safe lock for cross-loop state checks
     
     @classmethod
     async def _trace_writer_loop(cls):
@@ -218,12 +224,15 @@ class TraceManager:
                                         if isinstance(output_data, dict):
                                             output_content = output_data.get("content")
                                             if output_content is None:
-                                                # No 'content' field - serialize the entire dict to JSON for visibility
-                                                try:
-                                                    import json
-                                                    output_content = json.dumps(output_data, ensure_ascii=False)
-                                                except Exception:
-                                                    output_content = str(output_data)
+                                                # CRITICAL FIX: Check for legacy "output_content" field (from execution_callback.py)
+                                                output_content = trace_data.get("output_content")
+                                                if output_content is None:
+                                                    # No 'content' or 'output_content' field - serialize the entire dict to JSON for visibility
+                                                    try:
+                                                        import json
+                                                        output_content = json.dumps(output_data, ensure_ascii=False)
+                                                    except Exception:
+                                                        output_content = str(output_data)
                                         else:
                                             output_content = str(output_data) if output_data else ""
 
@@ -299,18 +308,44 @@ class TraceManager:
     async def ensure_writer_started(cls):
         """Starts the writer task if it hasn't been started yet."""
         logger.debug("[TRACE_DEBUG] ensure_writer_started called")
+
+        # Get current event loop
+        current_loop = asyncio.get_running_loop()
+
+        # Create lock lazily in the current loop if not exists or if loop changed
+        if cls._lock is None or cls._writer_loop != current_loop:
+            cls._lock = asyncio.Lock()
+
         async with cls._lock:
+            # Create shutdown event lazily in the current loop
+            if cls._shutdown_event is None or cls._writer_loop != current_loop:
+                cls._shutdown_event = asyncio.Event()
+
+            # Check if we're in a different loop than where tasks were created
+            if cls._writer_loop is not None and cls._writer_loop != current_loop:
+                logger.warning(
+                    "[TraceManager] Loop change detected! Previous loop is different from current. "
+                    "Resetting writer state to avoid cross-loop issues."
+                )
+                # Reset state - previous tasks are invalid in the new loop
+                cls._trace_writer_task = None
+                cls._logs_writer_task = None
+                cls._writer_started = False
+
+            # Store the current loop reference
+            cls._writer_loop = current_loop
+
             if not cls._writer_started:
                 if cls._trace_writer_task is None or cls._trace_writer_task.done():
                     logger.info("[TraceManager] Starting trace writer task...")
                     cls._shutdown_event.clear()
                     cls._trace_writer_task = asyncio.create_task(cls._trace_writer_loop())
-                    cls._writer_started = True # Mark as started
+                    cls._writer_started = True  # Mark as started
                     logger.info("[TraceManager] Trace writer task started.")
                 else:
                     logger.debug("[TraceManager] Trace writer task already running (found existing task).")
-                    cls._writer_started = True # Mark as started even if found existing
-                
+                    cls._writer_started = True  # Mark as started even if found existing
+
             # Also start the logs writer task if needed
             if cls._logs_writer_task is None or cls._logs_writer_task.done():
                 logger.info("[TraceManager] Starting logs writer task...")
@@ -325,11 +360,60 @@ class TraceManager:
     @classmethod
     async def stop_writer(cls):
         """Signals the writer task to stop."""
-        async with cls._lock: # Ensure stop logic is sequential
+        # Get current event loop
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        # Detect loop mismatch - this is a critical situation
+        loop_mismatch = (
+            cls._writer_loop is not None and
+            current_loop is not None and
+            cls._writer_loop != current_loop
+        )
+
+        if loop_mismatch:
+            logger.warning(
+                "[TraceManager] LOOP MISMATCH DETECTED in stop_writer! "
+                "Writer was started in a different event loop. "
+                "Cannot await tasks from different loop. Forcing cleanup."
+            )
+            # Use thread-safe approach to reset state
+            with cls._thread_lock:
+                # Cancel tasks if possible (without awaiting)
+                if cls._trace_writer_task and not cls._trace_writer_task.done():
+                    try:
+                        cls._trace_writer_task.cancel()
+                    except Exception:
+                        pass
+                if cls._logs_writer_task and not cls._logs_writer_task.done():
+                    try:
+                        cls._logs_writer_task.cancel()
+                    except Exception:
+                        pass
+                # Reset all state
+                cls._trace_writer_task = None
+                cls._logs_writer_task = None
+                cls._writer_started = False
+                cls._writer_loop = None
+                cls._shutdown_event = None
+                cls._lock = None
+            logger.info("[TraceManager] State reset due to loop mismatch. Tasks cancelled (best effort).")
+            return
+
+        # Create lock lazily if needed (for the current loop)
+        if cls._lock is None:
+            cls._lock = asyncio.Lock()
+
+        async with cls._lock:
             # Set shutdown event to signal both writer loops to stop
-            logger.info("[TraceManager] Setting shutdown event for all writer tasks...")
-            cls._shutdown_event.set()
-            
+            if cls._shutdown_event is not None:
+                logger.info("[TraceManager] Setting shutdown event for all writer tasks...")
+                cls._shutdown_event.set()
+            else:
+                logger.debug("[TraceManager] No shutdown event exists (writer may not have been started).")
+
             # Add None to trace queue to help unblock queue.get()
             try:
                 from queue import Full
@@ -338,7 +422,7 @@ class TraceManager:
                 queue.put_nowait(None)
             except Full:
                 logger.warning("[TraceManager] Trace queue full, writer might take longer to stop.")
-            
+
             # Stop trace writer task
             if cls._writer_started and cls._trace_writer_task and not cls._trace_writer_task.done():
                 logger.info("[TraceManager] Stopping trace writer task...")
@@ -352,11 +436,11 @@ class TraceManager:
                     logger.error(f"[TraceManager] Error stopping trace writer task: {e}", exc_info=True)
                 finally:
                     cls._trace_writer_task = None
-                    cls._writer_started = False # Mark as stopped
+                    cls._writer_started = False  # Mark as stopped
             else:
-                 logger.debug("[TraceManager] Trace writer task not running or already stopped.")
-                 cls._writer_started = False # Ensure marked as stopped
-            
+                logger.debug("[TraceManager] Trace writer task not running or already stopped.")
+                cls._writer_started = False  # Ensure marked as stopped
+
             # Use the logs writer service to stop the logs writer
             if cls._logs_writer_task and not cls._logs_writer_task.done():
                 logger.info("[TraceManager] Stopping logs writer task...")
@@ -370,3 +454,6 @@ class TraceManager:
                 cls._logs_writer_task = None
             else:
                 logger.debug("[TraceManager] Logs writer task not running or already stopped.")
+
+            # Reset loop reference
+            cls._writer_loop = None

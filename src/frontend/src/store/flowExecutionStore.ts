@@ -137,6 +137,11 @@ if (typeof window !== 'undefined') {
   window.addEventListener('jobCreated', ((event: CustomEvent) => {
     const detail = event.detail;
     if (detail && detail.jobId) {
+      // ALWAYS clear previous states when any job is created
+      // This ensures crew nodes reset to default state before new execution starts
+      console.log('[FlowExecutionStore] Job created, clearing all previous crew node states');
+      useFlowExecutionStore.getState().clearStates();
+
       // Check if this is a flow execution by checking the job name
       const isFlowExecution = detail.jobName?.toLowerCase().includes('flow');
       if (isFlowExecution) {
@@ -151,10 +156,17 @@ if (typeof window !== 'undefined') {
     const state = useFlowExecutionStore.getState();
     if (detail && detail.jobId === state.currentJobId) {
       console.log('[FlowExecutionStore] Flow execution completed:', detail.jobId);
-      // Give time for final state update
+      // Give time for final state update before stopping polling
       setTimeout(() => {
         state.stopPolling();
       }, 1000);
+
+      // Clear crew node states after 10 seconds to give users time to see final status
+      // This matches the behavior of clearTaskStates in WorkflowDesigner
+      setTimeout(() => {
+        console.log('[FlowExecutionStore] Clearing crew node states after completion delay');
+        useFlowExecutionStore.getState().clearStates();
+      }, 10000);
     }
   }) as EventListener);
 
@@ -164,6 +176,12 @@ if (typeof window !== 'undefined') {
     if (detail && detail.jobId === state.currentJobId) {
       console.log('[FlowExecutionStore] Flow execution failed:', detail.jobId);
       state.stopPolling();
+
+      // Clear crew node states after 10 seconds for failed jobs too
+      setTimeout(() => {
+        console.log('[FlowExecutionStore] Clearing crew node states after failure delay');
+        useFlowExecutionStore.getState().clearStates();
+      }, 10000);
     }
   }) as EventListener);
 

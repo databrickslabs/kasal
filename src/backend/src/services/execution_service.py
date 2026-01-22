@@ -528,7 +528,7 @@ class ExecutionService:
                         "error": e.error,
                         "group_email": e.group_email,
                         "group_id": e.group_id,  # CRITICAL: Include group_id for frontend security filtering
-                        "inputs": masked_inputs,  # Include the masked inputs field
+                        "inputs": masked_inputs,  # Include the masked inputs field (sensitive data redacted)
                         # Flow scheduling support - include execution_type and flow_id
                         "execution_type": getattr(e, 'execution_type', None) or (masked_inputs.get('execution_type') if masked_inputs else None) or 'crew',
                         "flow_id": str(e.flow_id) if getattr(e, 'flow_id', None) else (masked_inputs.get('flow_id') if masked_inputs else None)

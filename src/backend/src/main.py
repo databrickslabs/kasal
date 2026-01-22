@@ -232,6 +232,18 @@ async def lifespan(app: FastAPI):
     else:
         system_logger.warning("Skipping scheduler initialization. Database not ready.")
 
+    # Start HITL timeout service for processing expired approvals
+    hitl_timeout_started = False
+    if db_initialized:
+        try:
+            from src.services.hitl_timeout_service import start_hitl_timeout_service
+            await start_hitl_timeout_service()
+            hitl_timeout_started = True
+            system_logger.info("HITL timeout service started successfully")
+        except Exception as e:
+            system_logger.error(f"Failed to start HITL timeout service: {e}")
+            # Don't raise - allow app to start without HITL timeout service
+
     system_logger.info("Application startup complete")
 
     try:
@@ -246,6 +258,16 @@ async def lifespan(app: FastAPI):
                     system_logger.info(f"Cleaned up {cleaned_jobs} running jobs during shutdown")
             except Exception as e:
                 system_logger.error(f"Error cleaning up jobs during shutdown: {e}")
+
+        # Stop HITL timeout service if it was started
+        if 'hitl_timeout_started' in locals() and hitl_timeout_started:
+            system_logger.info("Stopping HITL timeout service...")
+            try:
+                from src.services.hitl_timeout_service import stop_hitl_timeout_service
+                await stop_hitl_timeout_service()
+                system_logger.info("HITL timeout service stopped successfully.")
+            except Exception as e:
+                system_logger.error(f"Error stopping HITL timeout service: {e}")
 
         # Stop embedding queue service if it was started
         if 'embedding_queue_started' in locals() and embedding_queue_started:

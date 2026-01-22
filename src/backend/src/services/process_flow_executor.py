@@ -292,68 +292,57 @@ def run_flow_in_process(
             except Exception as e:
                 async_logger.error(f"[FLOW_SUBPROCESS] Failed to initialize UserContext: {e}")
 
-        # Initialize TraceManager and event listeners in subprocess (CRITICAL for execution_logs and execution_trace)
-        try:
-            async_logger.info(f"[FLOW_SUBPROCESS] Initializing TraceManager and event listeners for {execution_id}")
-
-            # Create new event loop for async initialization
-            init_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(init_loop)
-
-            async def initialize_tracing():
-                try:
-                    from src.engines.crewai.trace_management import TraceManager
-                    from src.engines.crewai.callbacks.logging_callbacks import (
-                        AgentTraceEventListener,
-                        TaskCompletionEventListener
-                    )
-                    from crewai.events import crewai_event_bus
-
-                    # Start trace and logs writers
-                    await TraceManager.ensure_writer_started()
-                    async_logger.info(f"[FLOW_SUBPROCESS] TraceManager writer started for {execution_id}")
-
-                    # Create and register event listeners
-                    # Read debug tracing flag from environment variable
-                    debug_tracing_enabled = os.environ.get('CREWAI_DEBUG_TRACING', 'true').lower() == 'true'
-                    async_logger.info(f"[FLOW_SUBPROCESS] Debug tracing flag from environment: {debug_tracing_enabled}")
-
-                    trace_listener = AgentTraceEventListener(
-                        job_id=execution_id,
-                        group_context=group_context,
-                        debug_tracing=debug_tracing_enabled
-                    )
-                    trace_listener.setup_listeners(crewai_event_bus)
-                    async_logger.info(f"[FLOW_SUBPROCESS] AgentTraceEventListener registered for {execution_id} (debug_tracing={debug_tracing_enabled})")
-
-                    # Log that subprocess mode is enabled for direct DB writes
-                    async_logger.info(f"[FLOW_SUBPROCESS] CREW_SUBPROCESS_MODE={os.environ.get('CREW_SUBPROCESS_MODE')} - Direct DB writes enabled")
-
-                    # Create task completion listener
-                    task_listener = TaskCompletionEventListener(
-                        job_id=execution_id,
-                        group_context=group_context
-                    )
-                    task_listener.setup_listeners(crewai_event_bus)
-                    async_logger.info(f"[FLOW_SUBPROCESS] TaskCompletionEventListener registered for {execution_id}")
-
-                except Exception as listener_error:
-                    async_logger.error(f"[FLOW_SUBPROCESS] Failed to initialize event listeners: {listener_error}", exc_info=True)
-                    raise
-
-            # Run initialization in the init loop
-            init_loop.run_until_complete(initialize_tracing())
-            init_loop.close()
-
-            async_logger.info(f"[FLOW_SUBPROCESS] Successfully initialized tracing and event listeners")
-
-        except Exception as trace_init_error:
-            async_logger.error(f"[FLOW_SUBPROCESS] Failed to initialize TraceManager: {trace_init_error}", exc_info=True)
-            # Continue execution even if trace initialization fails
-
-        # Run the flow execution asynchronously
+        # Run the flow execution asynchronously (with initialization in same loop)
         async def run_async_flow():
-            """Execute the flow in an async context"""
+            """Execute the flow in an async context with TraceManager in same event loop"""
+
+            # Initialize TraceManager and event listeners FIRST (in same loop as execution)
+            # This is CRITICAL - TraceManager must be started in the same loop that will call stop_writer()
+            try:
+                async_logger.info(f"[FLOW_SUBPROCESS] Initializing TraceManager and event listeners for {execution_id}")
+
+                from src.engines.crewai.trace_management import TraceManager
+                from src.engines.crewai.callbacks.logging_callbacks import (
+                    AgentTraceEventListener,
+                    TaskCompletionEventListener
+                )
+                from crewai.events import crewai_event_bus
+
+                # Start trace and logs writers
+                await TraceManager.ensure_writer_started()
+                async_logger.info(f"[FLOW_SUBPROCESS] TraceManager writer started for {execution_id}")
+
+                # Create and register event listeners
+                # Read debug tracing flag from environment variable
+                debug_tracing_enabled = os.environ.get('CREWAI_DEBUG_TRACING', 'true').lower() == 'true'
+                async_logger.info(f"[FLOW_SUBPROCESS] Debug tracing flag from environment: {debug_tracing_enabled}")
+
+                trace_listener = AgentTraceEventListener(
+                    job_id=execution_id,
+                    group_context=group_context,
+                    debug_tracing=debug_tracing_enabled
+                )
+                trace_listener.setup_listeners(crewai_event_bus)
+                async_logger.info(f"[FLOW_SUBPROCESS] AgentTraceEventListener registered for {execution_id} (debug_tracing={debug_tracing_enabled})")
+
+                # Log that subprocess mode is enabled for direct DB writes
+                async_logger.info(f"[FLOW_SUBPROCESS] CREW_SUBPROCESS_MODE={os.environ.get('CREW_SUBPROCESS_MODE')} - Direct DB writes enabled")
+
+                # Create task completion listener
+                task_listener = TaskCompletionEventListener(
+                    job_id=execution_id,
+                    group_context=group_context
+                )
+                task_listener.setup_listeners(crewai_event_bus)
+                async_logger.info(f"[FLOW_SUBPROCESS] TaskCompletionEventListener registered for {execution_id}")
+
+                async_logger.info(f"[FLOW_SUBPROCESS] Successfully initialized tracing and event listeners")
+
+            except Exception as trace_init_error:
+                async_logger.error(f"[FLOW_SUBPROCESS] Failed to initialize TraceManager: {trace_init_error}", exc_info=True)
+                # Continue execution even if trace initialization fails
+
+            # Now run the actual flow execution
             try:
                 from src.db.session import async_session_factory
                 from src.engines.crewai.flow.flow_runner_service import FlowRunnerService
@@ -363,13 +352,18 @@ def run_flow_in_process(
                     flow_runner = FlowRunnerService(session)
 
                     # Extract flow parameters from config
-                    flow_id = flow_config.get('flow_id')
+                    # flow_id may be at top level or nested in inputs (from execution_service)
+                    flow_id = flow_config.get('flow_id') or flow_config.get('inputs', {}).get('flow_id')
                     run_name = flow_config.get('run_name')
 
                     async_logger.info(f"[FLOW_SUBPROCESS] Starting flow execution")
                     async_logger.info(f"  flow_id: {flow_id}")
                     async_logger.info(f"  execution_id: {execution_id}")
                     async_logger.info(f"  run_name: {run_name}")
+                    async_logger.info(f"  flow_config keys: {list(flow_config.keys())}")
+                    if 'inputs' in flow_config:
+                        async_logger.info(f"  flow_config['inputs'] keys: {list(flow_config.get('inputs', {}).keys())}")
+                        async_logger.info(f"  flow_config['inputs']['flow_id']: {flow_config.get('inputs', {}).get('flow_id')}")
 
                     # Call run_flow() which now uses await (not create_task) to ensure subprocess
                     # waits for completion before capturing stdout in finally block
@@ -432,6 +426,31 @@ def run_flow_in_process(
                 processed_result = "Flow execution completed (no result returned)"
 
             async_logger.info(f"[FLOW_SUBPROCESS] Final processed result type: {type(processed_result)}")
+
+            # Debug: Log result keys and hitl_paused value for HITL troubleshooting
+            if isinstance(result, dict):
+                async_logger.info(f"[FLOW_SUBPROCESS] Result keys: {list(result.keys())}")
+                async_logger.info(f"[FLOW_SUBPROCESS] hitl_paused value: {result.get('hitl_paused')}")
+                async_logger.info(f"[FLOW_SUBPROCESS] paused_for_approval value: {result.get('paused_for_approval')}")
+
+            # Check if flow was paused for HITL approval
+            # IMPORTANT: Check both hitl_paused AND paused_for_approval - the subprocess uses paused_for_approval
+            if isinstance(result, dict) and (result.get("hitl_paused") or result.get("paused_for_approval")):
+                async_logger.info(f"[FLOW_SUBPROCESS] 🚦 Flow paused for HITL approval")
+                return_dict = {
+                    "status": "WAITING_FOR_APPROVAL",
+                    "execution_id": execution_id,
+                    "result": result,  # Pass through the full HITL result
+                    "hitl_paused": True,
+                    "paused_for_approval": True,  # Pass through for flow_execution_runner
+                    "approval_id": result.get("approval_id"),
+                    "gate_node_id": result.get("gate_node_id"),
+                    "message": result.get("message"),
+                    "crew_sequence": result.get("crew_sequence"),
+                    "flow_uuid": result.get("flow_uuid"),
+                    "process_id": os.getpid()
+                }
+                return return_dict
 
             # Build return dict with flow_uuid for checkpoint/resume functionality
             return_dict = {
@@ -520,9 +539,11 @@ def run_flow_in_process(
             if output:
                 # Log the captured output to flow.log with execution ID
                 # The database handler will automatically write to execution_logs
+                # FILTER: Skip CrewAI Flow's built-in visualization to reduce log spam
                 for line in output.split('\n'):
-                    if line.strip():
-                        async_logger.info(f"[STDOUT] {line.strip()}")
+                    line_stripped = line.strip()
+                    if line_stripped and not _is_crewai_flow_visualization(line_stripped):
+                        async_logger.info(f"[STDOUT] {line_stripped}")
         except Exception as capture_error:
             # Log any errors in stdout capture (shouldn't happen normally)
             try:
@@ -671,6 +692,33 @@ class ProcessFlowExecutor:
                 "execution_id": execution_id,
                 "error": str(e)
             })
+        finally:
+            # CRITICAL: Explicitly exit the subprocess after putting result in queue
+            # Without this, the process stays alive waiting for background threads/tasks
+            # This prevents zombie subprocess accumulation
+
+            # Flush and close all logging handlers to prevent blocking on I/O
+            import logging
+            logging.shutdown()
+
+            # Force exit the subprocess
+            import sys
+            import os
+
+            # Log that we're exiting (might not be written if handlers already closed)
+            try:
+                logger = logging.getLogger('flow')
+                logger.info(f"[SUBPROCESS EXIT] Process {os.getpid()} exiting for execution {execution_id}")
+            except:
+                pass
+
+            # CRITICAL: Use os._exit(0) instead of sys.exit(0)
+            # os._exit(0) forcefully terminates without waiting for non-daemon threads
+            # This is necessary because HITL flows leave background tasks running
+            # (TraceManager writers, event listeners) that prevent sys.exit(0) from completing
+            # Normal sys.exit(0) waits for all threads → process hangs as zombie
+            # os._exit(0) terminates immediately → process exits cleanly
+            os._exit(0)
 
     async def run_flow_isolated(
         self,
@@ -1045,6 +1093,9 @@ class ProcessFlowExecutor:
         This method reads the flow.log file, extracts logs for the specific execution,
         and writes them to the database for persistent storage and later retrieval.
 
+        NOTE: This is a non-critical operation. If it fails, the flow execution is still
+        considered successful. Traces are captured separately by TraceManager.
+
         Args:
             log_queue: Not used anymore, kept for compatibility
             execution_id: The execution ID for logging
@@ -1054,10 +1105,7 @@ class ProcessFlowExecutor:
 
         try:
             import os
-            import json
-            from datetime import datetime, timezone
-            from sqlalchemy.ext.asyncio import create_async_engine
-            from sqlalchemy import text
+            from datetime import datetime
             from src.config.settings import settings
 
             # Get the flow.log path
@@ -1105,35 +1153,80 @@ class ProcessFlowExecutor:
             else:
                 logger.info(f"Found {len(logs_to_write)-1} logs for execution {exec_id_short} in flow.log")
 
-            # Build database URL
+            # Try to write logs using synchronous SQLite (more reliable in post-subprocess context)
+            # Async database operations can have greenlet/event loop issues after subprocess completion
             if settings.DATABASE_TYPE == 'sqlite':
-                db_url = f'sqlite+aiosqlite:///{settings.SQLITE_DB_PATH}'
-                logger.info(f"[ProcessFlowExecutor] Using SQLite database: {settings.SQLITE_DB_PATH}")
+                await self._write_logs_sqlite_sync(logs_to_write, settings.SQLITE_DB_PATH)
             else:
-                postgres_user = settings.POSTGRES_USER or 'postgres'
-                postgres_password = settings.POSTGRES_PASSWORD or 'postgres'
-                postgres_server = settings.POSTGRES_SERVER or 'localhost'
-                postgres_port = settings.POSTGRES_PORT or '5432'
-                postgres_db = settings.POSTGRES_DB or 'kasal'
-                db_url = f'postgresql+asyncpg://{postgres_user}:{postgres_password}@{postgres_server}:{postgres_port}/{postgres_db}'
-                logger.info(f"[ProcessFlowExecutor] Using PostgreSQL database: {postgres_server}:{postgres_port}/{postgres_db}")
+                # For PostgreSQL, use async with NullPool
+                await self._write_logs_postgres_async(logs_to_write, settings)
 
-            # Write logs to database
-            engine = create_async_engine(db_url)
+        except Exception as e:
+            # Log the error but don't fail the execution - this is a non-critical operation
+            logger.warning(f"[ProcessFlowExecutor] Failed to write logs to database (non-critical): {e}")
+            logger.info(f"[ProcessFlowExecutor] Logs are still available in flow.log file")
+
+    async def _write_logs_sqlite_sync(self, logs_to_write: list, db_path: str):
+        """Write logs to SQLite using synchronous operations to avoid event loop issues."""
+        import sqlite3
+        from concurrent.futures import ThreadPoolExecutor
+
+        def sync_write():
+            try:
+                conn = sqlite3.connect(db_path)
+                cursor = conn.cursor()
+                for log_data in logs_to_write:
+                    cursor.execute("""
+                        INSERT INTO execution_logs (execution_id, content, timestamp, group_id, group_email)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (
+                        log_data['execution_id'],
+                        log_data['content'],
+                        log_data['timestamp'].isoformat() if log_data['timestamp'] else None,
+                        log_data['group_id'],
+                        log_data['group_email']
+                    ))
+                conn.commit()
+                conn.close()
+                return len(logs_to_write)
+            except Exception as e:
+                logger.warning(f"[ProcessFlowExecutor] SQLite sync write failed: {e}")
+                return 0
+
+        # Run in thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            count = await loop.run_in_executor(executor, sync_write)
+            if count > 0:
+                logger.info(f"[ProcessFlowExecutor] Successfully wrote {count} logs to SQLite execution_logs table")
+
+    async def _write_logs_postgres_async(self, logs_to_write: list, settings):
+        """Write logs to PostgreSQL using async with NullPool."""
+        from sqlalchemy.ext.asyncio import create_async_engine
+        from sqlalchemy import text
+        from sqlalchemy.pool import NullPool
+
+        postgres_user = settings.POSTGRES_USER or 'postgres'
+        postgres_password = settings.POSTGRES_PASSWORD or 'postgres'
+        postgres_server = settings.POSTGRES_SERVER or 'localhost'
+        postgres_port = settings.POSTGRES_PORT or '5432'
+        postgres_db = settings.POSTGRES_DB or 'kasal'
+        db_url = f'postgresql+asyncpg://{postgres_user}:{postgres_password}@{postgres_server}:{postgres_port}/{postgres_db}'
+        logger.info(f"[ProcessFlowExecutor] Using PostgreSQL database: {postgres_server}:{postgres_port}/{postgres_db}")
+
+        # Use NullPool to avoid connection pooling issues in post-subprocess context
+        engine = create_async_engine(db_url, poolclass=NullPool)
+
+        try:
             async with engine.begin() as conn:
                 for log_data in logs_to_write:
                     await conn.execute(text("""
                         INSERT INTO execution_logs (execution_id, content, timestamp, group_id, group_email)
                         VALUES (:execution_id, :content, :timestamp, :group_id, :group_email)
                     """), log_data)
-
+            logger.info(f"[ProcessFlowExecutor] Successfully wrote {len(logs_to_write)} logs to PostgreSQL execution_logs table")
+        finally:
             await engine.dispose()
-            logger.info(f"[ProcessFlowExecutor] Successfully wrote {len(logs_to_write)} logs to execution_logs table")
-
-        except Exception as e:
-            import traceback
-            logger.error(f"[ProcessFlowExecutor] Error processing logs from flow.log: {e}")
-            logger.error(f"[ProcessFlowExecutor] Full traceback:\n{traceback.format_exc()}")
 
     def get_execution_info(self, execution_id: str) -> Optional[Dict[str, Any]]:
         """Get information about a running execution."""

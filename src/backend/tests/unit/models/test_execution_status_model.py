@@ -36,12 +36,12 @@ class TestExecutionStatus:
         assert isinstance(ExecutionStatus.CANCELLED, str)
 
     def test_execution_status_enum_count(self):
-        """Test that ExecutionStatus has exactly 8 values."""
+        """Test that ExecutionStatus has exactly 10 values (including HITL statuses)."""
         # Act
         status_values = list(ExecutionStatus)
-        
-        # Assert
-        assert len(status_values) == 8
+
+        # Assert - 8 original + 2 HITL statuses (WAITING_FOR_APPROVAL, REJECTED)
+        assert len(status_values) == 10
 
     def test_execution_status_enum_membership(self):
         """Test ExecutionStatus enum membership."""
@@ -83,27 +83,32 @@ class TestExecutionStatus:
         """Test iteration over ExecutionStatus enum."""
         # Act
         status_values = [status.value for status in ExecutionStatus]
-        
-        # Assert
-        expected_values = ["PENDING", "PREPARING", "RUNNING", "STOPPING", "STOPPED", "COMPLETED", "FAILED", "CANCELLED"]
+
+        # Assert - includes HITL statuses in actual enum definition order
+        expected_values = [
+            "PENDING", "PREPARING", "RUNNING", "WAITING_FOR_APPROVAL",
+            "STOPPING", "STOPPED", "COMPLETED", "FAILED", "REJECTED", "CANCELLED"
+        ]
         assert status_values == expected_values
 
     def test_execution_status_workflow_order(self):
         """Test that ExecutionStatus values represent a logical workflow."""
         # Act
         status_list = list(ExecutionStatus)
-        
+
         # Assert - Check that statuses are in logical order
         assert status_list[0] == ExecutionStatus.PENDING
         assert status_list[1] == ExecutionStatus.PREPARING
         assert status_list[2] == ExecutionStatus.RUNNING
-        assert status_list[3] == ExecutionStatus.STOPPING
-        assert status_list[4] == ExecutionStatus.STOPPED
+        assert status_list[3] == ExecutionStatus.WAITING_FOR_APPROVAL  # HITL gate pause
+        assert status_list[4] == ExecutionStatus.STOPPING
+        assert status_list[5] == ExecutionStatus.STOPPED
         # Final states can be in any order but should include:
-        final_states = status_list[5:]
+        final_states = status_list[6:]
         assert ExecutionStatus.COMPLETED in final_states
         assert ExecutionStatus.FAILED in final_states
         assert ExecutionStatus.CANCELLED in final_states
+        assert ExecutionStatus.REJECTED in final_states
 
     def test_execution_status_case_sensitivity(self):
         """Test ExecutionStatus case sensitivity."""
@@ -237,19 +242,21 @@ class TestExecutionStatusUseCases:
         """Test ExecutionStatus JSON serialization compatibility."""
         # Act
         status_values = {status.name: status.value for status in ExecutionStatus}
-        
-        # Assert
+
+        # Assert - includes HITL statuses
         expected_mapping = {
             "PENDING": "PENDING",
-            "PREPARING": "PREPARING", 
+            "PREPARING": "PREPARING",
             "RUNNING": "RUNNING",
             "STOPPING": "STOPPING",
             "STOPPED": "STOPPED",
             "COMPLETED": "COMPLETED",
             "FAILED": "FAILED",
-            "CANCELLED": "CANCELLED"
+            "CANCELLED": "CANCELLED",
+            "WAITING_FOR_APPROVAL": "WAITING_FOR_APPROVAL",
+            "REJECTED": "REJECTED"
         }
-        
+
         assert status_values == expected_mapping
 
     def test_execution_status_database_compatibility(self):
@@ -271,8 +278,9 @@ class TestExecutionStatusUseCases:
             assert isinstance(status.value, str)
             # Status values should be descriptive
             assert len(status.value) >= 6  # Shortest is "FAILED" with 6 chars
-            # Should not contain special characters that could cause issues
-            assert status.value.isalpha()
+            # Should only contain uppercase letters and underscores (for WAITING_FOR_APPROVAL)
+            assert status.value.replace("_", "").isalpha()
+            assert status.value.isupper()
 
     def test_execution_status_logging_compatibility(self):
         """Test ExecutionStatus logging compatibility."""
