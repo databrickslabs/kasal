@@ -328,7 +328,9 @@ Use these tools within AI agent crews for intelligent measure conversions.
   "inbound_connector": "powerbi",
   "powerbi_semantic_model_id": "abc-123-def",
   "powerbi_group_id": "workspace-456",
-  "powerbi_access_token": "Bearer eyJ...",
+  "powerbi_tenant_id": "<YOUR_AZURE_TENANT_ID>",
+  "powerbi_client_id": "<YOUR_AZURE_CLIENT_ID>",
+  "powerbi_client_secret": "<YOUR_CLIENT_SECRET>",
   "powerbi_info_table_name": "Info Measures",  # optional
   "powerbi_include_hidden": False,  # optional
   "powerbi_filter_pattern": "^Sales.*"  # optional regex
@@ -540,7 +542,9 @@ response = requests.post(
         "inputs": {
             "powerbi_semantic_model_id": "abc-123",
             "powerbi_group_id": "workspace-456",
-            "powerbi_access_token": "Bearer ...",
+            "powerbi_tenant_id": "<YOUR_AZURE_TENANT_ID>",
+            "powerbi_client_id": "<YOUR_AZURE_CLIENT_ID>",
+            "powerbi_client_secret": "<YOUR_CLIENT_SECRET>",
             "sql_dialect": "databricks"
         }
     },
@@ -641,7 +645,9 @@ crew_execution = {
         "inbound_connector": "powerbi",
         "powerbi_semantic_model_id": "abc-123",
         "powerbi_group_id": "workspace-456",
-        "powerbi_access_token": "Bearer ...",
+        "powerbi_tenant_id": "<YOUR_AZURE_TENANT_ID>",
+            "powerbi_client_id": "<YOUR_AZURE_CLIENT_ID>",
+            "powerbi_client_secret": "<YOUR_CLIENT_SECRET>",
         "outbound_format": "sql",
         "sql_dialect": "databricks"
     }
@@ -910,7 +916,9 @@ execution = requests.post(f"{CREWS_API}/{crew['id']}/execute", json={
         "inbound_connector": "powerbi",
         "powerbi_semantic_model_id": "your-model-id",
         "powerbi_group_id": "your-workspace-id",
-        "powerbi_access_token": "Bearer your-token",
+        "powerbi_tenant_id": "<YOUR_AZURE_TENANT_ID>",
+        "powerbi_client_id": "<YOUR_AZURE_CLIENT_ID>",
+        "powerbi_client_secret": "<YOUR_CLIENT_SECRET>",
         "outbound_format": "sql",
         "sql_dialect": "databricks"
     }

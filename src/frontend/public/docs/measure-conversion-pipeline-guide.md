@@ -37,7 +37,9 @@ Extract measures from Power BI datasets using the REST API.
 **Required Parameters:**
 - `powerbi_semantic_model_id` - Dataset/semantic model ID
 - `powerbi_group_id` - Workspace ID
-- `powerbi_access_token` - OAuth access token for authentication
+- `powerbi_tenant_id` - Azure AD tenant ID
+- `powerbi_client_id` - Application/Client ID
+- `powerbi_client_secret` - Client secret
 
 **Optional Parameters:**
 - `powerbi_info_table_name` - Name of Info Measures table (default: "Info Measures")
@@ -50,7 +52,9 @@ Extract measures from Power BI datasets using the REST API.
   "inbound_connector": "powerbi",
   "powerbi_semantic_model_id": "abc-123-def",
   "powerbi_group_id": "workspace-456",
-  "powerbi_access_token": "eyJ...",
+  "powerbi_tenant_id": "<YOUR_AZURE_TENANT_ID>",
+  "powerbi_client_id": "<YOUR_AZURE_CLIENT_ID>",
+  "powerbi_client_secret": "<YOUR_CLIENT_SECRET>",
   "powerbi_include_hidden": false
 }
 ```
@@ -155,7 +159,9 @@ Convert Power BI measures to Databricks SQL queries.
   "inbound_connector": "powerbi",
   "powerbi_semantic_model_id": "my-dataset",
   "powerbi_group_id": "my-workspace",
-  "powerbi_access_token": "eyJ...",
+  "powerbi_tenant_id": "<YOUR_AZURE_TENANT_ID>",
+  "powerbi_client_id": "<YOUR_AZURE_CLIENT_ID>",
+  "powerbi_client_secret": "<YOUR_CLIENT_SECRET>",
 
   "outbound_format": "sql",
   "sql_dialect": "databricks",
@@ -186,7 +192,9 @@ Move Power BI measures to Databricks Metrics Store for governance.
   "inbound_connector": "powerbi",
   "powerbi_semantic_model_id": "my-dataset",
   "powerbi_group_id": "my-workspace",
-  "powerbi_access_token": "eyJ...",
+  "powerbi_tenant_id": "<YOUR_AZURE_TENANT_ID>",
+  "powerbi_client_id": "<YOUR_AZURE_CLIENT_ID>",
+  "powerbi_client_secret": "<YOUR_CLIENT_SECRET>",
 
   "outbound_format": "uc_metrics",
   "uc_catalog": "production",
@@ -203,7 +211,9 @@ Export Power BI measures to portable YAML format for documentation.
   "inbound_connector": "powerbi",
   "powerbi_semantic_model_id": "my-dataset",
   "powerbi_group_id": "my-workspace",
-  "powerbi_access_token": "eyJ...",
+  "powerbi_tenant_id": "<YOUR_AZURE_TENANT_ID>",
+  "powerbi_client_id": "<YOUR_AZURE_CLIENT_ID>",
+  "powerbi_client_secret": "<YOUR_CLIENT_SECRET>",
 
   "outbound_format": "yaml"
 }
@@ -266,7 +276,9 @@ Specify a custom name for the generated KPI definition:
 |-----------|------|----------|---------|-------------|
 | `powerbi_semantic_model_id` | string | Yes* | - | Dataset/semantic model ID |
 | `powerbi_group_id` | string | Yes* | - | Workspace ID |
-| `powerbi_access_token` | string | Yes* | - | OAuth access token |
+| `powerbi_tenant_id` | string | Yes* | - | Azure AD tenant ID |
+| `powerbi_client_id` | string | Yes* | - | Application/Client ID |
+| `powerbi_client_secret` | string | Yes* | - | Client secret |
 | `powerbi_info_table_name` | string | No | "Info Measures" | Info Measures table name |
 | `powerbi_include_hidden` | boolean | No | false | Include hidden measures |
 | `powerbi_filter_pattern` | string | No | - | Regex filter for measure names |
