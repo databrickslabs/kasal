@@ -26,6 +26,7 @@ tools_data = [
     (69, "MCPTool", "An advanced adapter for Model Context Protocol (MCP) servers that enables access to thousands of specialized tools from the MCP ecosystem. This tool establishes and manages connections with MCP servers through SSE (Server-Sent Events), providing seamless integration with community-built tool collections. Perfect for extending agent capabilities with domain-specific tools without requiring custom development or direct integration work.", "integration"),
     (70, "DatabricksJobsTool", "A comprehensive Databricks Jobs management tool using direct REST API calls for optimal performance. IMPORTANT WORKFLOW: Always use 'get_notebook' action FIRST to analyze job notebooks and understand required parameters before running any job with custom parameters. This ensures proper parameter construction and prevents job failures. Available actions: (1) 'list' - List all jobs in workspace with optional name/ID filtering, (2) 'list_my_jobs' - List only jobs created by current user, (3) 'get' - Get detailed job configuration and recent run history, (4) 'get_notebook' - Analyze notebook content to understand parameters, widgets, and logic (REQUIRED before running jobs with parameters), (5) 'run' - Trigger job execution with custom parameters (use dict for notebook/SQL tasks, list for Python tasks), (6) 'monitor' - Track real-time execution status and task progress, (7) 'create' - Create new jobs with custom configurations. The tool provides intelligent parameter analysis, suggesting proper parameter structures based on notebook patterns (search jobs, ETL jobs, etc.). Supports OAuth/OBO authentication, PAT tokens, and Databricks CLI profiles. All operations use direct REST API calls avoiding SDK overhead for faster execution. Essential for automating data pipelines, orchestrating workflows, and integrating Databricks jobs into AI agent systems.", "database"),
     (72, "PowerBIAnalysisTool", "Execute complex Power BI analysis via Databricks jobs for heavy computational workloads. This tool wraps DAX queries in Databricks job execution, enabling large-scale data processing, multi-query analysis, and resource-intensive computations. Perfect for year-over-year analysis, trend detection, comprehensive reporting, and complex business intelligence tasks that require significant compute resources. Integrates with DatabricksJobsTool for job orchestration and monitoring. IMPORTANT: To enable this tool, you MUST configure the following API Keys in Settings → API Keys: POWERBI_CLIENT_SECRET, POWERBI_USERNAME, POWERBI_PASSWORD, and DATABRICKS_API_KEY (or DATABRICKS_TOKEN).", "database"),
+    (73, "Measure Conversion Pipeline", "Universal measure conversion pipeline for converting business metrics between different BI platforms and formats. Supports multiple inbound connectors (Power BI, YAML) and outbound formats (DAX, SQL, UC Metrics, YAML). Perfect for migrating Power BI measures to Databricks SQL, generating UC Metrics from YAML definitions, or converting between different BI platforms. Configure the source format (FROM) and target format (TO) along with authentication credentials in the task configuration. Supports both static configuration (values entered in UI) and dynamic mode (values provided at runtime via execution inputs).", "transform"),
 ]
 
 def get_tool_configs():
@@ -96,7 +97,32 @@ def get_tool_configs():
             "workspace_id": "",  # Default Power BI Workspace ID (optional, can be overridden per task)
             "semantic_model_id": "",  # Default Power BI Semantic Model ID (optional, can be overridden per task)
             "auth_method": "service_principal"  # Authentication method: "service_principal" or "device_code"
-        }   # PowerBIAnalysisTool
+        },  # PowerBIAnalysisTool
+        "73": {
+            "result_as_answer": True,
+            "mode": "static",  # Configuration mode: "static" (UI-configured) or "dynamic" (runtime inputs)
+            "inbound_connector": "powerbi",  # Source: "powerbi" or "yaml"
+            "outbound_format": "uc_metrics",  # Target: "dax", "sql", "uc_metrics", "yaml"
+            # Power BI inbound configuration
+            "powerbi_semantic_model_id": "",
+            "powerbi_group_id": "",
+            "powerbi_tenant_id": "",
+            "powerbi_client_id": "",
+            "powerbi_client_secret": "",
+            "powerbi_info_table_name": "Info Measures",
+            "powerbi_include_hidden": False,
+            "powerbi_filter_pattern": "",
+            # SQL outbound configuration
+            "sql_dialect": "databricks",
+            "sql_include_comments": True,
+            "sql_process_structures": True,
+            # UC Metrics outbound configuration
+            "uc_catalog": "main",
+            "uc_schema": "default",
+            "uc_process_structures": True,
+            # DAX outbound configuration
+            "dax_process_structures": True
+        }   # Measure Conversion Pipeline
     }
 
 async def seed_async():
@@ -114,7 +140,7 @@ async def seed_async():
     tools_error = 0
 
     # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72]
+    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73]
 
     for tool_id, title, description, icon in tools_data:
         try:
@@ -177,7 +203,7 @@ def seed_sync():
     tools_error = 0
 
     # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72]
+    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73]
 
     for tool_id, title, description, icon in tools_data:
         try:

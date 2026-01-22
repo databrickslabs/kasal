@@ -46,6 +46,7 @@ import { PerplexityConfigSelector } from '../Common/PerplexityConfigSelector';
 import { SerperConfigSelector } from '../Common/SerperConfigSelector';
 import { MCPServerSelector } from '../Common/MCPServerSelector';
 import { PowerBIConfigSelector, PowerBIConfig } from '../Common/PowerBIConfigSelector';
+import { MeasureConverterConfigSelector, MeasureConverterConfig } from '../Common/MeasureConverterConfigSelector';
 import { PerplexityConfig, SerperConfig } from '../../types/config';
 import { type LLMGuardrailConfig } from '../../types/task';
 import { ModelService } from '../../api/ModelService';
@@ -131,6 +132,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const [perplexityConfig, setPerplexityConfig] = useState<PerplexityConfig>({});
   const [serperConfig, setSerperConfig] = useState<SerperConfig>({});
   const [powerBIConfig, setPowerBIConfig] = useState<PowerBIConfig>({});
+  const [measureConverterConfig, setMeasureConverterConfig] = useState<MeasureConverterConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
   const [showBestPractices, setShowBestPractices] = useState(false);
@@ -196,6 +198,11 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       // Check for PowerBIAnalysisTool config
       if (initialData.tool_configs.PowerBIAnalysisTool) {
         setPowerBIConfig(initialData.tool_configs.PowerBIAnalysisTool as PowerBIConfig);
+      }
+
+      // Check for Measure Conversion Pipeline config
+      if (initialData.tool_configs['Measure Conversion Pipeline']) {
+        setMeasureConverterConfig(initialData.tool_configs['Measure Conversion Pipeline'] as MeasureConverterConfig);
       }
 
       // Check for MCP_SERVERS config
@@ -491,6 +498,31 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
         })) {
           // Remove SerperDevTool config if tool not selected
           delete updatedToolConfigs.SerperDevTool;
+        }
+
+        // Handle Measure Conversion Pipeline config
+        if (measureConverterConfig && Object.keys(measureConverterConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Measure Conversion Pipeline';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            'Measure Conversion Pipeline': measureConverterConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Measure Conversion Pipeline';
+        })) {
+          // Remove Measure Conversion Pipeline config if tool not selected
+          delete updatedToolConfigs['Measure Conversion Pipeline'];
         }
 
         // Handle MCP_SERVERS config - use dict format to match schema
@@ -1152,6 +1184,40 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                   helperText="Configure Power BI authentication and semantic model for this task"
                   fullWidth
                 />
+              </Box>
+            )}
+
+            {/* Measure Conversion Pipeline Configuration - Show only when tool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'Measure Conversion Pipeline';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  Measure Conversion Pipeline Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(156, 39, 176, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(156, 39, 176, 0.2)'
+                }}>
+                  <MeasureConverterConfigSelector
+                    value={measureConverterConfig}
+                    onChange={(config) => {
+                      setMeasureConverterConfig(config);
+                      // Update tool configs when configuration changes
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'Measure Conversion Pipeline': config
+                      }));
+                    }}
+                  />
+                </Box>
               </Box>
             )}
 
