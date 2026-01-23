@@ -46,10 +46,6 @@ export interface MeasureConverterConfig {
   sql_dialect?: string;
   sql_include_comments?: boolean;
   sql_process_structures?: boolean;
-  // UC Metrics outbound params
-  uc_catalog?: string;
-  uc_schema?: string;
-  uc_process_structures?: boolean;
   // DAX outbound params
   dax_process_structures?: boolean;
   // General
@@ -474,37 +470,6 @@ export const MeasureConverterConfigSelector: React.FC<MeasureConverterConfigSele
                   <Checkbox
                     checked={value.sql_process_structures !== false}
                     onChange={(e) => handleFieldChange('sql_process_structures', e.target.checked)}
-                    disabled={disabled}
-                  />
-                }
-                label="Process time intelligence structures"
-              />
-            </Box>
-          )}
-
-          {mode === 'static' && outboundFormat === 'uc_metrics' && (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <TextField
-                label="Unity Catalog Catalog"
-                value={value.uc_catalog || 'main'}
-                onChange={(e) => handleFieldChange('uc_catalog', e.target.value)}
-                disabled={disabled}
-                fullWidth
-                size="small"
-              />
-              <TextField
-                label="Unity Catalog Schema"
-                value={value.uc_schema || 'default'}
-                onChange={(e) => handleFieldChange('uc_schema', e.target.value)}
-                disabled={disabled}
-                fullWidth
-                size="small"
-              />
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={value.uc_process_structures !== false}
-                    onChange={(e) => handleFieldChange('uc_process_structures', e.target.checked)}
                     disabled={disabled}
                   />
                 }

@@ -238,11 +238,6 @@ export interface MeasureConversionConfig {
   sql_include_comments?: boolean;
   sql_process_structures?: boolean;
 
-  // UC Metrics Config
-  uc_catalog?: string;
-  uc_schema?: string;
-  uc_process_structures?: boolean;
-
   // DAX Config
   dax_process_structures?: boolean;
 
