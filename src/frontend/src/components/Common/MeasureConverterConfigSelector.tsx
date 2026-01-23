@@ -414,8 +414,8 @@ export const MeasureConverterConfigSelector: React.FC<MeasureConverterConfigSele
         </>
       )}
 
-      {/* Outbound Configuration */}
-      {outboundFormat && (
+      {/* Outbound Configuration - only show for formats that have config options */}
+      {outboundFormat && (mode === 'dynamic' || outboundFormat === 'sql' || outboundFormat === 'dax') && (
         <>
           <Divider sx={{ my: 1 }} />
           <Typography variant="subtitle2" color="secondary" sx={{ fontWeight: 600 }}>
