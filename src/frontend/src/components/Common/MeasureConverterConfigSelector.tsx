@@ -37,7 +37,6 @@ export interface MeasureConverterConfig {
   powerbi_client_id?: string;
   powerbi_client_secret?: string;
   // Power BI other settings
-  powerbi_info_table_name?: string;
   powerbi_include_hidden?: boolean;
   powerbi_filter_pattern?: string;
   // YAML inbound params
@@ -357,14 +356,6 @@ export const MeasureConverterConfigSelector: React.FC<MeasureConverterConfigSele
 
               <Divider sx={{ my: 1 }} />
 
-              <TextField
-                label="Info Measures Table Name"
-                value={value.powerbi_info_table_name || 'Info Measures'}
-                onChange={(e) => handleFieldChange('powerbi_info_table_name', e.target.value)}
-                disabled={disabled}
-                fullWidth
-                size="small"
-              />
               <FormControlLabel
                 control={
                   <Checkbox

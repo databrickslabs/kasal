@@ -67,7 +67,6 @@ export const MeasureConverterConfig: React.FC<MeasureConverterConfigProps> = ({
   const [config, setConfig] = useState<MeasureConversionConfig>({
     inbound_connector: 'powerbi',
     outbound_format: 'dax',
-    powerbi_info_table_name: 'Info Measures',
     powerbi_include_hidden: false,
     sql_dialect: 'databricks',
     sql_include_comments: true,
@@ -275,15 +274,6 @@ export const MeasureConverterConfig: React.FC<MeasureConverterConfigProps> = ({
                 type="password"
                 helperText="Client secret for service principal"
                 required
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                label="Info Table Name"
-                value={config.powerbi_info_table_name || 'Info Measures'}
-                onChange={(e) => setConfig({ ...config, powerbi_info_table_name: e.target.value })}
-                helperText="Name of the Info Measures table"
               />
             </Grid>
             <Grid item xs={12} md={6}>
