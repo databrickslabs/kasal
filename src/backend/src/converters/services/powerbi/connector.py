@@ -105,6 +105,11 @@ class PowerBIConnector(BaseInboundConnector):
         self.dax_parser = DAXExpressionParser()
 
         # Initialize AadService for authentication
+        # Debug logging to help diagnose authentication issues
+        self.logger.info(f"[POWERBI CONNECTOR DEBUG] Initializing with:")
+        self.logger.info(f"[POWERBI CONNECTOR DEBUG]   tenant_id: '{tenant_id}'")
+        self.logger.info(f"[POWERBI CONNECTOR DEBUG]   client_id: '{client_id}'")
+        self.logger.info(f"[POWERBI CONNECTOR DEBUG]   client_secret length: {len(client_secret) if client_secret else 0}")
         self.aad_service = AadService(
             client_id=client_id,
             client_secret=client_secret,
