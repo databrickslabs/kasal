@@ -58,6 +58,15 @@ const docSections: DocSection[] = [
       { label: 'Power BI Integration', file: 'powerbi_integration' },
     ],
   },
+  {
+    label: 'Measure Converter',
+    items: [
+      { label: 'Pipeline Guide', file: 'measure-conversion-pipeline-guide' },
+      { label: 'Converters Overview', file: 'measure-converters-overview' },
+      { label: 'Architecture', file: 'converter-architecture' },
+      { label: 'API Integration', file: 'converter-api-integration' },
+    ],
+  },
 
 ];
 
