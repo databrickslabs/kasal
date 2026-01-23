@@ -1,7 +1,7 @@
 """
 Azure AD Authentication Service for Power BI API
 
-Provides authentication using Microsoft Authentication Library (MSAL)
+Provides authentication using Azure Identity ClientSecretCredential
 for Power BI App Owns Data scenarios.
 
 Supports both direct credential parameters and database-stored credentials
@@ -11,13 +11,14 @@ with project-specific and global fallback options.
 import logging
 from typing import Dict, Optional
 
-# Optional MSAL import
+# Optional azure.identity import
 try:
-    import msal
-    MSAL_AVAILABLE = True
+    from azure.identity import ClientSecretCredential
+    AZURE_IDENTITY_AVAILABLE = True
 except ImportError:
-    MSAL_AVAILABLE = False
-    logging.warning("msal not available. Install with: pip install msal")
+    ClientSecretCredential = None  # type: ignore
+    AZURE_IDENTITY_AVAILABLE = False
+    logging.warning("azure-identity not available. Install with: pip install azure-identity")
 
 
 class AadService:
@@ -100,7 +101,7 @@ class AadService:
             str: Access token for Power BI API
 
         Raises:
-            RuntimeError: If MSAL library not available
+            RuntimeError: If azure-identity library not available
             ValueError: If credentials are missing or invalid
             Exception: If token acquisition fails
         """
@@ -109,11 +110,11 @@ class AadService:
             self.logger.info("Using pre-obtained access token")
             return self._access_token
 
-        # Ensure MSAL is available
-        if not MSAL_AVAILABLE:
+        # Ensure azure-identity is available
+        if not AZURE_IDENTITY_AVAILABLE:
             raise RuntimeError(
-                "MSAL library required for authentication. "
-                "Install with: pip install msal"
+                "azure-identity library required for authentication. "
+                "Install with: pip install azure-identity"
             )
 
         # Priority 2: Use direct credentials
@@ -139,8 +140,8 @@ class AadService:
                 "3. Enable use_database with project_id"
             )
 
-        # Acquire token using MSAL
-        return self._acquire_token_with_msal(credentials)
+        # Acquire token using ClientSecretCredential
+        return self._acquire_token_with_client_credential(credentials)
 
     def _get_credentials_from_database(self) -> Optional[Dict[str, str]]:
         """
@@ -172,9 +173,9 @@ class AadService:
             "Use direct credentials or pre-obtained access token."
         )
 
-    def _acquire_token_with_msal(self, credentials: Dict[str, str]) -> str:
+    def _acquire_token_with_client_credential(self, credentials: Dict[str, str]) -> str:
         """
-        Acquire access token using MSAL Confidential Client Application.
+        Acquire access token using Azure Identity ClientSecretCredential.
 
         Uses Service Principal (client credentials) flow which is
         Microsoft's recommended approach for Power BI App Owns Data scenarios.
@@ -199,36 +200,30 @@ class AadService:
                 "Incomplete credentials. Required: client_id, client_secret, tenant_id"
             )
 
+        # Type assertions after validation
+        assert client_id is not None
+        assert client_secret is not None
+        assert tenant_id is not None
+
         try:
-            # Build authority URL
-            authority = f"{self.AUTHORITY_BASE}/{tenant_id}"
+            self.logger.info(f"Acquiring token for tenant: {tenant_id}, client_id: {client_id}")
 
-            self.logger.info(f"Acquiring token for tenant: {tenant_id}")
+            # Ensure ClientSecretCredential is available (should be checked earlier)
+            if ClientSecretCredential is None:
+                raise RuntimeError("azure-identity library not available")
 
-            # Create MSAL confidential client
-            app = msal.ConfidentialClientApplication(
+            # Create ClientSecretCredential and get token
+            credential = ClientSecretCredential(
+                tenant_id=tenant_id,
                 client_id=client_id,
-                client_credential=client_secret,
-                authority=authority,
+                client_secret=client_secret,
             )
 
             # Acquire token for Power BI API
-            result = app.acquire_token_for_client(scopes=[self.POWERBI_SCOPE])
+            token_response = credential.get_token(self.POWERBI_SCOPE)
 
-            # Check for successful token acquisition
-            if "access_token" in result:
-                self.logger.info("Access token acquired successfully")
-                return result["access_token"]
-            else:
-                # Extract error details
-                error = result.get("error", "unknown_error")
-                error_description = result.get("error_description", "No description provided")
-
-                raise Exception(
-                    f"Failed to acquire access token\n"
-                    f"Error: {error}\n"
-                    f"Description: {error_description}"
-                )
+            self.logger.info("Access token acquired successfully")
+            return token_response.token
 
         except Exception as ex:
             self.logger.error(f"Token acquisition failed: {str(ex)}")
