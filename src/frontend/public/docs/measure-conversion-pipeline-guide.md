@@ -7,6 +7,101 @@ The **Measure Conversion Pipeline** is a universal converter that transforms bus
 - **FROM** (Inbound Connector): Source system or format
 - **TO** (Outbound Format): Target format or platform
 
+## Prerequisites - Service Principal Setup
+
+> **Important**: This setup is required before using the Power BI connector. Without proper Service Principal configuration, the application cannot access Power BI workspaces and metadata.
+
+### Why Service Principal Authentication is Required
+
+The Measure Conversion Pipeline uses Microsoft's Power BI REST APIs to programmatically access dataset metadata, measures, and model information. Service Principal authentication provides:
+
+- **Secure API Access**: Application-level credentials without user interaction
+- **Tenant-Wide Access**: Ability to access all workspaces (with proper permissions)
+- **Automation Support**: No manual login required for scheduled conversions
+
+### Step-by-Step: Service Principal Configuration
+
+#### Step 1: Create Azure AD App Registration
+
+In the **Azure Portal**:
+
+1. Navigate to **Azure Active Directory** → **App registrations**
+2. Click **New registration**
+3. Enter an application name (e.g., "Measure-Converter-ServicePrincipal")
+4. Select **Accounts in this organizational directory only**
+5. Click **Register**
+6. **Save the following values** - you'll need them later:
+   - **Application (client) ID** - This is your `client_id`
+   - **Directory (tenant) ID** - This is your `tenant_id`
+
+#### Step 2: Configure API Permissions
+
+In your App Registration:
+
+1. Go to **API permissions**
+2. Click **Add a permission**
+3. Select **Power BI Service**
+4. Choose **Delegated permissions**
+5. Add the following permissions:
+
+| Permission | Type | Admin Consent | Purpose |
+|------------|------|---------------|---------|
+| `Dataset.Read.All` | Delegated | Required | Read dataset metadata and measures |
+| `Workspace.Read.All` | Delegated | Optional | List accessible workspaces |
+
+6. Click **Grant admin consent for [Your Organization]**
+
+> **Note**: Admin consent is required for these permissions. You may need to request this from your Azure AD administrator if you don't have admin rights.
+
+#### Step 3: Create Client Secret
+
+Generate authentication credentials:
+
+1. In your App Registration, go to **Certificates & secrets**
+2. Click **New client secret**
+3. Enter a description (e.g., "Measure Converter Production")
+4. Select expiration period (recommended: 24 months)
+5. Click **Add**
+6. **IMMEDIATELY COPY THE SECRET VALUE** - you cannot retrieve it later!
+
+> **Security Warning**: Store the client secret securely. Never commit it to source control or share it publicly. Treat it like a password.
+
+#### Step 4: Enable Service Principal in Power BI
+
+Power BI Admin Portal configuration:
+
+1. Go to **Power BI Admin Portal** (app.powerbi.com → Settings → Admin portal)
+2. Navigate to **Tenant settings**
+3. Scroll to **Developer settings**
+4. Enable **"Allow service principals to use Power BI APIs"**
+5. Add your service principal to the allowed list:
+   - Either by **Application ID**, or
+   - By adding it to a **Security Group** that's allowed
+6. Click **Apply**
+
+> **Note**: Changes to Power BI tenant settings may take up to 15 minutes to propagate.
+
+#### Step 5: Grant Workspace Access
+
+For each workspace you want to access:
+
+1. Open the workspace in Power BI
+2. Click **Manage access** (or Access in older versions)
+3. Add your Service Principal (search by Application ID or name)
+4. Assign at least **Viewer** role (or higher for write operations)
+
+### Required Credentials Summary
+
+| Credential | Where to Find | Example Format |
+|------------|---------------|----------------|
+| **Tenant ID** | Azure Portal → Azure AD → Overview | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
+| **Client ID** | Azure Portal → App Registration → Overview | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
+| **Client Secret** | Azure Portal → App Registration → Certificates & secrets | `abc123...` (long string) |
+| **Workspace ID** | Power BI URL: `app.powerbi.com/groups/{workspace_id}/...` | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
+| **Dataset ID** | Power BI URL: `app.powerbi.com/.../datasets/{dataset_id}/...` | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
+
+---
+
 ## Quick Start
 
 ### Basic Workflow
@@ -19,12 +114,11 @@ The **Measure Conversion Pipeline** is a universal converter that transforms bus
 2. **Select Outbound Format** (`outbound_format`): Choose your target
    - `dax` - Power BI / Analysis Services measures
    - `sql` - SQL queries (multiple dialects supported)
-   - `uc_metrics` - Databricks Unity Catalog Metrics Store
-   - `yaml` - Portable YAML definition format
+   - `uc_metrics` - Databricks Unity Catalog Metrics Store (downloadable YAML)
 
 3. **Configure Source-Specific Parameters**: Provide authentication and connection details
 
-4. **Configure Target-Specific Parameters**: Set output preferences (dialect, catalog, etc.)
+4. **Configure Target-Specific Parameters**: Set output preferences (dialect, etc.)
 
 5. **Execute**: Run the conversion pipeline
 
@@ -42,7 +136,6 @@ Extract measures from Power BI datasets using the REST API.
 - `powerbi_client_secret` - Client secret
 
 **Optional Parameters:**
-- `powerbi_info_table_name` - Name of Info Measures table (default: "Info Measures")
 - `powerbi_include_hidden` - Include hidden measures (default: false)
 - `powerbi_filter_pattern` - Regex pattern to filter measure names
 
@@ -119,32 +212,12 @@ Generate SQL queries compatible with multiple database platforms.
 
 Generate Databricks Unity Catalog Metrics Store definitions.
 
-**Optional Parameters:**
-- `uc_catalog` - Unity Catalog catalog name (default: "main")
-- `uc_schema` - Unity Catalog schema name (default: "default")
-- `uc_process_structures` - Process time intelligence structures (default: true)
-
-**Output:** Unity Catalog Metrics YAML definition
+**Output:** Downloadable Unity Catalog Metrics YAML definition file
 
 **Example:**
 ```json
 {
-  "outbound_format": "uc_metrics",
-  "uc_catalog": "production",
-  "uc_schema": "metrics"
-}
-```
-
-### YAML (`yaml`)
-
-Export to portable YAML KPI definition format.
-
-**Output:** Structured YAML definition
-
-**Example:**
-```json
-{
-  "outbound_format": "yaml"
+  "outbound_format": "uc_metrics"
 }
 ```
 
@@ -196,9 +269,7 @@ Move Power BI measures to Databricks Metrics Store for governance.
   "powerbi_client_id": "<YOUR_AZURE_CLIENT_ID>",
   "powerbi_client_secret": "<YOUR_CLIENT_SECRET>",
 
-  "outbound_format": "uc_metrics",
-  "uc_catalog": "production",
-  "uc_schema": "business_metrics"
+  "outbound_format": "uc_metrics"
 }
 ```
 
@@ -241,7 +312,6 @@ The pipeline can process time intelligence structures (YTD, QTD, MTD, rolling pe
 
 - **DAX**: `dax_process_structures` (default: true)
 - **SQL**: `sql_process_structures` (default: true)
-- **UC Metrics**: `uc_process_structures` (default: true)
 
 ### Measure Filtering
 
@@ -279,7 +349,6 @@ Specify a custom name for the generated KPI definition:
 | `powerbi_tenant_id` | string | Yes* | - | Azure AD tenant ID |
 | `powerbi_client_id` | string | Yes* | - | Application/Client ID |
 | `powerbi_client_secret` | string | Yes* | - | Client secret |
-| `powerbi_info_table_name` | string | No | "Info Measures" | Info Measures table name |
 | `powerbi_include_hidden` | boolean | No | false | Include hidden measures |
 | `powerbi_filter_pattern` | string | No | - | Regex filter for measure names |
 
@@ -302,14 +371,6 @@ Specify a custom name for the generated KPI definition:
 | `sql_include_comments` | boolean | No | true | Include comments in SQL |
 | `sql_process_structures` | boolean | No | true | Process time intelligence |
 
-### UC Metrics Parameters
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `uc_catalog` | string | No | "main" | Unity Catalog catalog name |
-| `uc_schema` | string | No | "default" | Unity Catalog schema name |
-| `uc_process_structures` | boolean | No | true | Process time intelligence |
-
 ### DAX Parameters
 
 | Parameter | Type | Required | Default | Description |
@@ -318,17 +379,53 @@ Specify a custom name for the generated KPI definition:
 
 ## Troubleshooting
 
-### Authentication Issues
+### Service Principal Authentication Issues
 
-**Problem**: "Error: Missing required parameters"
-**Solution**: Ensure you provide all required parameters for your inbound connector:
-- Power BI requires: `semantic_model_id`, `group_id`, `access_token`
-- YAML requires: `yaml_content` OR `yaml_file_path`
+**Problem**: `AADSTS700016: Application with identifier 'xxx' was not found in the directory`
+
+**Solutions**:
+- Verify the `tenant_id` matches the Azure AD tenant where the app is registered
+- Confirm the `client_id` is correct (Application ID from Azure Portal)
+- Ensure the app registration exists and hasn't been deleted
+
+**Problem**: `Insufficient privileges to complete the operation`
+
+**Solutions**:
+- Verify admin consent was granted for API permissions
+- Ensure the Service Principal is enabled in Power BI Admin Portal
+- Confirm the Service Principal has been granted access to the workspace
+- Wait 15 minutes after making changes for them to propagate
+
+**Problem**: `Invalid client secret`
+
+**Solutions**:
+- Regenerate the client secret in Azure Portal
+- Ensure there are no leading/trailing spaces when copying the secret
+- Check that the secret hasn't expired
+
+### Connection Test Fails
+
+**Problem**: Cannot connect to Power BI
+
+**Solutions**:
+- Verify all credentials are correct (no extra spaces)
+- Check if firewall or network policies are blocking Power BI API access
+- Ensure the Power BI service is accessible from your network
+
+### Empty Results
+
+**Problem**: No measures extracted from Power BI
+
+**Solutions**:
+- Verify the dataset contains measures (not just columns)
+- Check if `powerbi_filter_pattern` is too restrictive
+- Ensure the Service Principal has at least Viewer access to the workspace
+- Try with `powerbi_include_hidden: true` to include hidden measures
 
 ### Invalid Format Errors
 
 **Problem**: "Error: Invalid outbound_format"
-**Solution**: Use only supported formats: `dax`, `sql`, `uc_metrics`, `yaml`
+**Solution**: Use only supported formats: `dax`, `sql`, `uc_metrics`
 
 **Problem**: "Error: Unsupported inbound_connector"
 **Solution**: Use only supported connectors: `powerbi`, `yaml`
@@ -337,14 +434,6 @@ Specify a custom name for the generated KPI definition:
 
 **Problem**: Generated SQL doesn't work in my database
 **Solution**: Verify you're using the correct `sql_dialect` for your database platform
-
-### Empty Results
-
-**Problem**: No measures extracted from Power BI
-**Solution**:
-- Check that the Info Measures table exists in your dataset
-- Verify your access token has permission to read the dataset
-- Check if `powerbi_filter_pattern` is too restrictive
 
 ## Architecture
 
@@ -371,6 +460,14 @@ The Measure Conversion Pipeline uses a clean architecture pattern:
 │ (DAX/SQL/UC)    │
 └─────────────────┘
 ```
+
+## Additional Resources
+
+### Microsoft Documentation
+
+- [Register an application with Microsoft identity platform](https://learn.microsoft.com/en-us/azure/active-directory/develop/quickstart-register-app)
+- [Power BI REST API - Datasets](https://learn.microsoft.com/en-us/rest/api/power-bi/datasets)
+- [Automate workspace and dataset tasks with service principals](https://learn.microsoft.com/en-us/power-bi/enterprise/service-premium-service-principal)
 
 ## Future Enhancements
 
