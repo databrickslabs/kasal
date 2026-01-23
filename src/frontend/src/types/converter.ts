@@ -223,7 +223,6 @@ export interface MeasureConversionConfig {
   powerbi_tenant_id?: string;
   powerbi_client_id?: string;
   powerbi_client_secret?: string;
-  powerbi_info_table_name?: string;
   powerbi_include_hidden?: boolean;
   powerbi_filter_pattern?: string;
 
