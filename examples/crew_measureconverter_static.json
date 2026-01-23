@@ -1,6 +1,6 @@
 {
   "id": "13072f95-2f75-48c7-9fd4-b2e7ee64bbb6",
-  "name": "Measure Converter - Static Configuration",
+  "name": "Measure Converter - Static Parameters",
   "agent_ids": [
     "dc2b6828-ceaf-4e76-a7ab-158275764b57"
   ],
@@ -27,9 +27,9 @@
           "Measure Conversion Pipeline": {
             "inbound_connector": "powerbi",
             "outbound_format": "uc_metrics",
-            "powerbi_tenant_id": "<YOUR_TENANT_ID>",
+            "powerbi_tenant_id": "<YOUR_TENTANT_ID>",
             "powerbi_group_id": "<YOUR_WORKSPACE_ID>",
-            "powerbi_semantic_model_id": "<YOUR_DATASET_ID>",
+            "powerbi_semantic_model_id": "<YOUR_SEMANTIC_MODEL_ID>",
             "powerbi_client_secret": "<YOUR_CLIENT_SECRET>",
             "powerbi_client_id": "<YOUR_CLIENT_ID>",
             "powerbi_include_hidden": true,
