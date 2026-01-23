@@ -18,7 +18,12 @@ class PowerBIConnector(BaseInboundConnector):
     """
     Power BI Inbound Connector.
 
-    Connects to Power BI dataset via REST API and extracts measures from Info Measures table.
+    Connects to Power BI dataset via REST API and extracts measures using either:
+    1. $SYSTEM.MDSCHEMA_MEASURES system query (default, recommended)
+    2. Custom Info Measures table (legacy, requires pre-existing table)
+
+    The system schema approach is preferred as it works on any Power BI dataset
+    without requiring additional setup.
 
     Authentication options (via AadService):
     1. Service Principal (client_id + client_secret + tenant_id) - Recommended
@@ -26,24 +31,24 @@ class PowerBIConnector(BaseInboundConnector):
     3. Database-stored credentials (future: project-specific with global fallback)
 
     Example usage:
-        # Service Principal authentication
+        # Using system schema (default, recommended)
         connector = PowerBIConnector(
             semantic_model_id="abc123",
             group_id="workspace456",
-            tenant_id="tenant789",
-            client_id="app123",
-            client_secret="secret"
+            access_token="eyJ..."
         )
 
-        # Pre-obtained token
+        # Using legacy Info Measures table
         connector = PowerBIConnector(
             semantic_model_id="abc123",
             group_id="workspace456",
-            access_token="eyJ..."  # From frontend OAuth
+            access_token="eyJ...",
+            use_system_schema=False,
+            info_table_name="Info Measures"
         )
 
         with connector:
-            kpis = connector.extract_measures(include_hidden=False)
+            kpis = connector.extract_measures()
     """
 
     # Power BI API endpoint
@@ -59,6 +64,7 @@ class PowerBIConnector(BaseInboundConnector):
         access_token: Optional[str] = None,
         project_id: Optional[str] = None,
         use_database: bool = False,
+        use_system_schema: bool = True,
         info_table_name: str = "Info Measures",
         **kwargs
     ):
@@ -74,7 +80,8 @@ class PowerBIConnector(BaseInboundConnector):
             access_token: Pre-obtained access token from frontend OAuth
             project_id: Project ID for database credential lookup (future)
             use_database: Enable database credential lookup (future)
-            info_table_name: Name of the Info Measures table
+            use_system_schema: Use $SYSTEM.MDSCHEMA_MEASURES (recommended, default True)
+            info_table_name: Name of the Info Measures table (fallback if use_system_schema=False)
         """
         connection_params = {
             "semantic_model_id": semantic_model_id,
@@ -85,12 +92,14 @@ class PowerBIConnector(BaseInboundConnector):
             "access_token": access_token,
             "project_id": project_id,
             "use_database": use_database,
+            "use_system_schema": use_system_schema,
             "info_table_name": info_table_name,
         }
         super().__init__(connection_params)
 
         self.semantic_model_id = semantic_model_id
         self.group_id = group_id
+        self.use_system_schema = use_system_schema
         self.info_table_name = info_table_name
         self._access_token = access_token
         self.dax_parser = DAXExpressionParser()
@@ -181,27 +190,51 @@ class PowerBIConnector(BaseInboundConnector):
             self.logger.error(error_msg)
             raise RuntimeError(error_msg)
 
-    def extract_measures(
-        self,
-        include_hidden: bool = False,
-        filter_pattern: Optional[str] = None,
-    ) -> List[KPI]:
+    def _extract_measures_from_system_schema(self) -> List[Dict[str, Any]]:
         """
-        Extract measures from Info Measures table.
+        Extract measures using $SYSTEM.MDSCHEMA_MEASURES system query.
 
-        Args:
-            include_hidden: Include hidden measures
-            filter_pattern: Regex pattern to filter measure names
+        This is the recommended approach as it works on any Power BI dataset
+        without requiring a pre-existing Info Measures table.
 
         Returns:
-            List of KPI objects
+            List of measure dictionaries with Name, Expression, Description, Table
         """
-        if not self._connected:
-            raise RuntimeError("Not connected. Call connect() first.")
+        self.logger.info("Extracting measures using $SYSTEM.MDSCHEMA_MEASURES")
 
+        dax_query = """
+        SELECT
+            [MEASURE_NAME] as [Measure Name],
+            [EXPRESSION] as [Expression],
+            [DESCRIPTION] as [Description],
+            [MEASUREGROUP_NAME] as [Table]
+        FROM $SYSTEM.MDSCHEMA_MEASURES
+        """
+
+        rows = self._execute_dax_query(dax_query)
+
+        # Filter out system measures like __Default measure
+        filtered_rows = [
+            row for row in rows
+            if not row.get('[Measure Name]', row.get('Measure Name', '')).startswith('__')
+        ]
+
+        self.logger.info(
+            f"Found {len(filtered_rows)} measures from system schema "
+            f"(filtered {len(rows) - len(filtered_rows)} system measures)"
+        )
+
+        return filtered_rows
+
+    def _extract_measures_from_info_table(self) -> List[Dict[str, Any]]:
+        """
+        Extract measures from a custom Info Measures table (legacy approach).
+
+        Returns:
+            List of measure dictionaries
+        """
         self.logger.info(f"Extracting measures from '{self.info_table_name}' table")
 
-        # Build DAX query
         dax_query = f"""
         EVALUATE
         SELECTCOLUMNS(
@@ -217,26 +250,77 @@ class PowerBIConnector(BaseInboundConnector):
         )
         """
 
-        # Execute query
-        rows = self._execute_dax_query(dax_query)
+        return self._execute_dax_query(dax_query)
+
+    def extract_measures(
+        self,
+        include_hidden: bool = False,
+        filter_pattern: Optional[str] = None,
+    ) -> List[KPI]:
+        """
+        Extract measures from Power BI dataset.
+
+        Uses $SYSTEM.MDSCHEMA_MEASURES by default (recommended) or falls back
+        to custom Info Measures table if use_system_schema=False.
+
+        Args:
+            include_hidden: Include hidden measures (only applicable for Info Table mode)
+            filter_pattern: Regex pattern to filter measure names
+
+        Returns:
+            List of KPI objects
+        """
+        if not self._connected:
+            raise RuntimeError("Not connected. Call connect() first.")
+
+        # Extract measures using preferred method
+        if self.use_system_schema:
+            rows = self._extract_measures_from_system_schema()
+            # System schema uses different column names
+            name_col = '[Measure Name]'
+            name_col_alt = 'Measure Name'
+            table_col = '[Table]'
+            table_col_alt = 'Table'
+            desc_col = '[Description]'
+            desc_col_alt = 'Description'
+            expr_col = '[Expression]'
+            expr_col_alt = 'Expression'
+        else:
+            rows = self._extract_measures_from_info_table()
+            # Info table uses bracketed column names
+            name_col = '[Name]'
+            name_col_alt = 'Name'
+            table_col = '[Table]'
+            table_col_alt = 'Table'
+            desc_col = '[Description]'
+            desc_col_alt = 'Description'
+            expr_col = '[Expression]'
+            expr_col_alt = 'Expression'
+
+        # Helper to get value from row with fallback column name
+        def get_value(row: Dict, col: str, alt_col: str, default: Any = None) -> Any:
+            return row.get(col, row.get(alt_col, default))
 
         # Build list of all measure names for advanced parsing
-        measures_list = [row.get('[Name]', '') for row in rows]
+        measures_list = [get_value(row, name_col, name_col_alt, '') for row in rows]
 
         # Parse and convert to KPI
         kpis = []
         for row in rows:
-            # Skip hidden measures if requested
-            if not include_hidden and row.get('[IsHidden]', False):
-                continue
+            # Skip hidden measures if requested (only applicable for Info Table mode)
+            if not self.use_system_schema and not include_hidden:
+                if row.get('[IsHidden]', False):
+                    continue
+
+            # Get measure name
+            measure_name = get_value(row, name_col, name_col_alt, '')
 
             # Apply filter pattern
-            measure_name = row.get('[Name]', '')
             if filter_pattern and not re.match(filter_pattern, measure_name):
                 continue
 
             # Parse DAX expression using ADVANCED mode
-            expression = row.get('[Expression]', '')
+            expression = get_value(row, expr_col, expr_col_alt, '')
             parsed = self.dax_parser.parse_advanced(expression, measures_list)
 
             # Log transpilation info
@@ -253,13 +337,16 @@ class PowerBIConnector(BaseInboundConnector):
             filters = []
 
             # Determine source table
-            source_table = parsed['source_table'] or row.get('[Table]')
+            source_table = parsed['source_table'] or get_value(row, table_col, table_col_alt)
+
+            # Get description
+            description = get_value(row, desc_col, desc_col_alt) or measure_name
 
             # Create KPI with additional metadata from advanced parsing
             kpi = KPI(
                 technical_name=technical_name,
                 formula=parsed['base_formula'],
-                description=row.get('[Description]') or measure_name,
+                description=description,
                 source_table=source_table,
                 aggregation_type=parsed['aggregation_type'],
                 display_sign=1,
