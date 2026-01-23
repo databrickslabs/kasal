@@ -71,9 +71,6 @@ export const MeasureConverterConfig: React.FC<MeasureConverterConfigProps> = ({
     sql_dialect: 'databricks',
     sql_include_comments: true,
     sql_process_structures: true,
-    uc_catalog: 'main',
-    uc_schema: 'default',
-    uc_process_structures: true,
     dax_process_structures: true,
     result_as_answer: false,
     ...initialConfig,
@@ -377,41 +374,6 @@ export const MeasureConverterConfig: React.FC<MeasureConverterConfigProps> = ({
                   <Switch
                     checked={config.sql_process_structures !== false}
                     onChange={(e) => setConfig({ ...config, sql_process_structures: e.target.checked })}
-                  />
-                }
-                label="Process Time Intelligence Structures"
-              />
-            </Grid>
-          </Grid>
-        )}
-
-        {/* UC Metrics Configuration */}
-        {config.outbound_format === 'uc_metrics' && (
-          <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                label="Unity Catalog Catalog"
-                value={config.uc_catalog || 'main'}
-                onChange={(e) => setConfig({ ...config, uc_catalog: e.target.value })}
-                helperText="Catalog name (default: 'main')"
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                label="Unity Catalog Schema"
-                value={config.uc_schema || 'default'}
-                onChange={(e) => setConfig({ ...config, uc_schema: e.target.value })}
-                helperText="Schema name (default: 'default')"
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={config.uc_process_structures !== false}
-                    onChange={(e) => setConfig({ ...config, uc_process_structures: e.target.checked })}
                   />
                 }
                 label="Process Time Intelligence Structures"
