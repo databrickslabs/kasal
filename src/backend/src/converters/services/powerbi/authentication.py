@@ -206,7 +206,10 @@ class AadService:
         assert tenant_id is not None
 
         try:
-            self.logger.info(f"Acquiring token for tenant: {tenant_id}, client_id: {client_id}")
+            self.logger.info(f"[AUTH DEBUG] Acquiring token with:")
+            self.logger.info(f"[AUTH DEBUG]   tenant_id: '{tenant_id}' (type: {type(tenant_id).__name__})")
+            self.logger.info(f"[AUTH DEBUG]   client_id: '{client_id}' (type: {type(client_id).__name__})")
+            self.logger.info(f"[AUTH DEBUG]   client_secret length: {len(client_secret) if client_secret else 0}")
 
             # Ensure ClientSecretCredential is available (should be checked earlier)
             if ClientSecretCredential is None:

@@ -377,6 +377,14 @@ class MeasureConversionPipelineTool(BaseTool):
                     return ("Error: Power BI requires Service Principal authentication.\n"
                             "Provide: powerbi_tenant_id + powerbi_client_id + powerbi_client_secret")
 
+                # DEBUG: Log the actual credential values being used
+                logger.info(f"[TOOL DEBUG] PowerBI credentials being used:")
+                logger.info(f"[TOOL DEBUG]   tenant_id: '{tenant_id}'")
+                logger.info(f"[TOOL DEBUG]   client_id: '{client_id}'")
+                logger.info(f"[TOOL DEBUG]   client_secret length: {len(client_secret) if client_secret else 0}")
+                logger.info(f"[TOOL DEBUG]   semantic_model_id: '{semantic_model_id}'")
+                logger.info(f"[TOOL DEBUG]   group_id: '{group_id}'")
+
                 inbound_params = {
                     "semantic_model_id": semantic_model_id,
                     "group_id": group_id,
