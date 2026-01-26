@@ -102,11 +102,12 @@ class ExecutionService:
 
     def _mask_inputs_sensitive_data(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Mask sensitive fields in execution inputs before returning to API.
+        Mask sensitive fields in execution inputs before returning to API or storing to database.
 
         This method processes the inputs dictionary which may contain:
         - agents_yaml: Dict of agent configs with tool_configs containing secrets
         - tasks_yaml: Dict of task configs with tool_configs containing secrets
+        - inputs: Dict of user-provided inputs that may contain secrets (client_secret, etc.)
 
         Args:
             inputs: The raw inputs dictionary from execution
@@ -131,6 +132,11 @@ class ExecutionService:
             for task_key, task_config in masked_inputs['tasks_yaml'].items():
                 if isinstance(task_config, dict) and 'tool_configs' in task_config:
                     task_config['tool_configs'] = mask_sensitive_fields(task_config['tool_configs'])
+
+        # Mask sensitive fields in the nested 'inputs' dictionary (user-provided values)
+        # This catches fields like client_secret, password, token, api_key, etc.
+        if 'inputs' in masked_inputs and isinstance(masked_inputs['inputs'], dict):
+            masked_inputs['inputs'] = mask_sensitive_fields(masked_inputs['inputs'])
 
         return masked_inputs
 
@@ -907,8 +913,13 @@ class ExecutionService:
                 config.inputs["flow_id"] = str(flow_id)
                 logger.info(f"[ExecutionService.create_execution] Added flow_id {flow_id} to config.inputs")
 
+            # SECURITY: Mask sensitive fields (client_secret, password, token, etc.) BEFORE storing to database
+            # This ensures secrets are never persisted in plaintext
+            masked_inputs = self._mask_inputs_sensitive_data(inputs)
+            logger.info(f"[ExecutionService.create_execution] Masked sensitive fields in inputs before database storage")
+
             # Sanitize inputs to ensure all values are JSON serializable
-            sanitized_inputs = ExecutionService.sanitize_for_database(inputs)
+            sanitized_inputs = ExecutionService.sanitize_for_database(masked_inputs)
 
             # Create execution data with RUNNING status for immediate visibility
             execution_data = {
