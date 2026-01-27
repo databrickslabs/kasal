@@ -320,11 +320,28 @@ class MeasureConversionPipelineTool(BaseTool):
             logger.info(f"[TOOL CALL] Instance {instance_id} - _default_config outbound_format: {self._default_config.get('outbound_format', 'NOT SET')}")
 
             # Merge agent-provided kwargs with pre-configured defaults
-            # Filter out None values from kwargs to avoid overriding pre-configured values
-            filtered_kwargs = {k: v for k, v in kwargs.items() if v is not None}
-            logger.info(f"[TOOL CALL] Instance {instance_id} - Filtered kwargs (removed None): {list(filtered_kwargs.keys())}")
+            # Filter out None values AND placeholder-like strings that agents often generate
+            def is_placeholder(value: Any) -> bool:
+                """Check if a value looks like an agent-generated placeholder."""
+                if not isinstance(value, str):
+                    return False
+                placeholder_patterns = [
+                    "your_", "your-", "<your", "[your",
+                    "placeholder", "example_", "example-",
+                    "xxx", "yyy", "zzz",
+                    "insert_", "enter_", "put_",
+                    "replace_", "fill_in",
+                ]
+                value_lower = value.lower()
+                return any(pattern in value_lower for pattern in placeholder_patterns)
 
-            # Pre-configured values take precedence unless agent explicitly provides non-None values
+            filtered_kwargs = {
+                k: v for k, v in kwargs.items()
+                if v is not None and not is_placeholder(v)
+            }
+            logger.info(f"[TOOL CALL] Instance {instance_id} - Filtered kwargs (removed None/placeholders): {list(filtered_kwargs.keys())}")
+
+            # Pre-configured values take precedence over agent-provided placeholders
             merged_kwargs = {**self._default_config, **filtered_kwargs}
 
             # DYNAMIC PARAMETER RESOLUTION: Resolve placeholders from execution inputs

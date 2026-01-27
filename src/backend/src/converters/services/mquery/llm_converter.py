@@ -2,10 +2,10 @@
 LLM-Powered M-Query to SQL Converter
 
 This module uses an LLM (via Databricks Foundation Model API) to convert
-complex Power BI M-Query expressions to Databricks SQL.
+Power BI M-Query expressions to Databricks SQL.
 
-For simple cases (embedded SQL), it extracts directly.
-For complex cases (transformations, parameters), it uses LLM intelligence.
+The conversion is primarily LLM-based - the raw M-Query expression is sent
+to the LLM which parses and converts it to SQL.
 
 Author: Kasal Team
 Date: 2025
@@ -13,14 +13,12 @@ Date: 2025
 
 import json
 import logging
-import re
 from typing import Dict, List, Optional, Any
 
 import httpx
 
 from .models import (
     MQueryExpression,
-    ExpressionType,
     ConversionResult,
     PowerBITable
 )
@@ -131,58 +129,26 @@ Be thorough and accurate. This code will be used in production."""
 ```
 {expression.raw_expression}
 ```
-
 """
 
-        # Add pre-extracted info if available
-        if expression.embedded_sql:
-            prompt += f"""
-## Pre-extracted SQL (from Value.NativeQuery)
-```sql
-{expression.embedded_sql}
-```
-
-"""
-
-        if expression.parameters:
-            params_str = "\n".join([
-                f"  - {p['name']} ({p.get('type', 'STRING')}): {p.get('context', '')}"
-                for p in expression.parameters
-            ])
-            prompt += f"""
-## Detected Parameters
-{params_str}
-
-"""
-
-        if expression.transformations:
-            transforms_str = "\n".join([
-                f"  - {t['type']}: {t.get('sql_hint', t.get('mquery', ''))}"
-                for t in expression.transformations
-            ])
-            prompt += f"""
-## Detected Transformations
-{transforms_str}
-
-"""
-
+        # Add connection metadata if available (for context)
         if expression.server or expression.catalog:
             prompt += f"""
-## Source Connection
+## Source Connection (detected)
 - Server/Workspace: {expression.server or 'N/A'}
 - Catalog: {expression.catalog or 'N/A'}
 - Database/Schema: {expression.database or 'N/A'}
 - Warehouse: {expression.warehouse_path or 'N/A'}
-
 """
 
         prompt += """
 ## Instructions
-1. Generate a CREATE OR REPLACE VIEW statement for Databricks
-2. Convert all M-Query transformations to SQL (WHERE, COALESCE, LIMIT, etc.)
-3. Replace parameter concatenations with Databricks widget syntax
-4. If the source is already Databricks, simplify the view to reference the source directly
-5. Include comments explaining any complex conversions
+1. Parse the M-Query expression to extract the SQL query
+2. Note: M-Query escape sequences like #(lf) = newline, #(cr) = carriage return, #(tab) = tab
+3. Generate a CREATE OR REPLACE VIEW statement for Databricks Unity Catalog
+4. Convert any M-Query transformations (Table.SelectRows, Table.ReplaceValue, etc.) to SQL equivalents
+5. If parameters are concatenated (e.g., '\" & ParamName & \"'), replace with Databricks widget syntax
+6. If the source is already Databricks, extract the SQL and create a simple view
 
 Respond with valid JSON only (no markdown code blocks around the JSON)."""
 
@@ -255,104 +221,38 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
         self,
         table_name: str,
         expression: MQueryExpression,
-        columns: List[Dict[str, str]],
-        target_catalog: Optional[str] = None,
-        target_schema: Optional[str] = None
+        columns: List[Dict[str, str]],  # noqa: ARG002
+        target_catalog: Optional[str] = None,  # noqa: ARG002
+        target_schema: Optional[str] = None  # noqa: ARG002
     ) -> ConversionResult:
         """
-        Rule-based conversion for simple cases (no LLM needed).
+        Fallback conversion when LLM is not available.
 
-        Used when:
-        - LLM is not configured
-        - Expression has embedded SQL and no complex transformations
+        This is a simple fallback that indicates LLM conversion is required.
+        The actual M-Query to SQL conversion should be done by the LLM.
+
+        Note: columns, target_catalog, target_schema are kept for API compatibility
+        but not used since LLM is required for actual conversion.
         """
-        target_loc = f"{target_catalog or 'catalog'}.{target_schema or 'schema'}.{table_name}"
+        logger.warning(f"[LLM_CONVERTER] LLM not available for '{table_name}', returning raw expression")
 
-        # For native queries with embedded SQL
-        if expression.expression_type == ExpressionType.NATIVE_QUERY and expression.embedded_sql:
-            sql = expression.embedded_sql
-
-            # Apply transformations
-            sql_parts = [sql]
-            where_clauses = []
-            coalesce_columns = []
-            limit_clause = None
-
-            for transform in expression.transformations:
-                if transform["type"] == "filter":
-                    # Convert M-Query filter to SQL WHERE
-                    condition = transform.get("condition", "")
-                    # Basic conversion: [column] → column
-                    condition = re.sub(r'\[(\w+)\]', r'\1', condition)
-                    where_clauses.append(condition)
-                elif transform["type"] == "replace_null":
-                    coalesce_columns.append({
-                        "column": transform["column"],
-                        "replacement": transform["replacement"]
-                    })
-                elif transform["type"] == "limit":
-                    limit_clause = transform.get("limit_variable", "1000")
-
-            # Build final SQL
-            if where_clauses or coalesce_columns or limit_clause:
-                # Wrap in CTE
-                final_sql = f"WITH base_query AS (\n{sql}\n)\nSELECT * FROM base_query"
-                if where_clauses:
-                    final_sql += f"\nWHERE {' AND '.join(where_clauses)}"
-                if limit_clause:
-                    final_sql += f"\nLIMIT {limit_clause}"
-            else:
-                final_sql = sql
-
-            # Create view SQL
-            create_view_sql = f"CREATE OR REPLACE VIEW {target_loc} AS\n{final_sql}"
-
-            return ConversionResult(
-                table_name=table_name,
-                expression_type=expression.expression_type,
-                success=True,
-                databricks_sql=final_sql,
-                create_view_sql=create_view_sql,
-                parameters=expression.parameters,
-                transformations=expression.transformations,
-                source_connection={
-                    "server": expression.server,
-                    "database": expression.database,
-                    "catalog": expression.catalog
-                },
-                notes="Rule-based conversion (no LLM)"
-            )
-
-        # For Databricks catalog sources
-        elif expression.expression_type == ExpressionType.DATABRICKS_CATALOG:
-            source_loc = f"{expression.catalog or 'catalog'}.{expression.database or 'schema'}"
-            final_sql = f"SELECT * FROM {source_loc}.source_table"
-            create_view_sql = f"CREATE OR REPLACE VIEW {target_loc} AS\n{final_sql}"
-
-            return ConversionResult(
-                table_name=table_name,
-                expression_type=expression.expression_type,
-                success=True,
-                databricks_sql=final_sql,
-                create_view_sql=create_view_sql,
-                parameters=expression.parameters,
-                transformations=expression.transformations,
-                source_connection={
-                    "workspace": expression.server,
-                    "catalog": expression.catalog,
-                    "database": expression.database
-                },
-                notes="Source is already Databricks - verify source table name"
-            )
-
-        # For other types, return partial result
         return ConversionResult(
             table_name=table_name,
             expression_type=expression.expression_type,
             success=False,
-            error_message="Complex expression requires LLM conversion",
-            parameters=expression.parameters,
-            transformations=expression.transformations
+            original_expression=expression.raw_expression,
+            error_message=(
+                "LLM conversion required but not available. "
+                "Please configure Databricks LLM credentials (llm_workspace_url and llm_token) "
+                "to convert M-Query expressions to SQL."
+            ),
+            source_connection={
+                "server": expression.server,
+                "database": expression.database,
+                "catalog": expression.catalog,
+                "warehouse_path": expression.warehouse_path
+            },
+            notes="LLM required for M-Query conversion"
         )
 
     async def convert_expression(
@@ -367,75 +267,80 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
         """
         Convert a single M-Query expression to Databricks SQL.
 
+        Uses LLM-first approach - sends the raw M-Query directly to the LLM for conversion.
+        Falls back to rule-based only if LLM is not configured.
+
         Args:
             table_name: Name of the table
             expression: Parsed MQueryExpression
             columns: List of column definitions
             target_catalog: Target Unity Catalog catalog
             target_schema: Target schema
-            use_llm: Whether to use LLM for complex conversions
+            use_llm: Whether to use LLM for conversions (default: True)
 
         Returns:
             ConversionResult with generated SQL
         """
         logger.info(f"Converting expression for table '{table_name}' ({expression.expression_type.value})")
 
-        # For simple cases or when LLM is disabled, use rule-based conversion
-        if not use_llm or (
-            expression.expression_type == ExpressionType.NATIVE_QUERY
-            and expression.embedded_sql
-            and len(expression.transformations) <= 2
-        ):
-            return self._rule_based_conversion(
+        # LLM-first approach: Always use LLM if available
+        if use_llm and self.workspace_url and self.token:
+            logger.info(f"[LLM_CONVERTER] Using LLM conversion for '{table_name}'")
+
+            # Use LLM for conversion
+            system_prompt = self._get_system_prompt()
+            user_prompt = self._create_conversion_prompt(
                 table_name, expression, columns, target_catalog, target_schema
             )
 
-        # Use LLM for complex conversions
-        system_prompt = self._get_system_prompt()
-        user_prompt = self._create_conversion_prompt(
+            llm_response = await self._call_llm(user_prompt, system_prompt)
+
+            if llm_response.get("content"):
+                # LLM succeeded - parse and return result
+                parsed = self._parse_llm_response(llm_response["content"])
+                tokens = llm_response.get("usage", {}).get("total_tokens", 0)
+                self.total_tokens += tokens
+
+                if parsed.get("success", False):
+                    logger.info(f"[LLM_CONVERTER] LLM conversion successful for '{table_name}'")
+                    return ConversionResult(
+                        table_name=table_name,
+                        expression_type=expression.expression_type,
+                        success=True,
+                        original_expression=expression.raw_expression,
+                        databricks_sql=parsed.get("databricks_sql"),
+                        create_view_sql=parsed.get("create_view_sql"),
+                        databricks_python=parsed.get("databricks_python"),
+                        parameters=parsed.get("parameters", []),
+                        transformations=parsed.get("transformations", []),
+                        llm_explanation=parsed.get("explanation"),
+                        llm_model=self.model,
+                        tokens_used=tokens,
+                        source_connection=parsed.get("source_connection"),
+                        notes=parsed.get("notes")
+                    )
+                else:
+                    # LLM returned an error
+                    logger.warning(f"[LLM_CONVERTER] LLM returned error for '{table_name}': {parsed.get('error')}")
+                    return ConversionResult(
+                        table_name=table_name,
+                        expression_type=expression.expression_type,
+                        success=False,
+                        original_expression=expression.raw_expression,
+                        error_message=parsed.get("error", "LLM conversion failed"),
+                        llm_model=self.model,
+                        tokens_used=tokens
+                    )
+            else:
+                # LLM call failed - fall back to rule-based
+                logger.warning(f"[LLM_CONVERTER] LLM call failed for '{table_name}': {llm_response.get('error')}")
+                # Fall through to rule-based conversion
+        else:
+            logger.info(f"[LLM_CONVERTER] LLM not available, using rule-based conversion for '{table_name}'")
+
+        # Fallback: Rule-based conversion (when LLM is not configured or failed)
+        return self._rule_based_conversion(
             table_name, expression, columns, target_catalog, target_schema
-        )
-
-        llm_response = await self._call_llm(user_prompt, system_prompt)
-
-        if not llm_response.get("content"):
-            # Fall back to rule-based if LLM fails
-            logger.warning(f"LLM conversion failed, falling back to rule-based: {llm_response.get('error')}")
-            result = self._rule_based_conversion(
-                table_name, expression, columns, target_catalog, target_schema
-            )
-            result.notes = f"LLM failed ({llm_response.get('error')}), used rule-based conversion"
-            return result
-
-        # Parse LLM response
-        parsed = self._parse_llm_response(llm_response["content"])
-        tokens = llm_response.get("usage", {}).get("total_tokens", 0)
-        self.total_tokens += tokens
-
-        if not parsed.get("success", False):
-            return ConversionResult(
-                table_name=table_name,
-                expression_type=expression.expression_type,
-                success=False,
-                error_message=parsed.get("error", "LLM conversion failed"),
-                llm_model=self.model,
-                tokens_used=tokens
-            )
-
-        return ConversionResult(
-            table_name=table_name,
-            expression_type=expression.expression_type,
-            success=True,
-            databricks_sql=parsed.get("databricks_sql"),
-            create_view_sql=parsed.get("create_view_sql"),
-            databricks_python=parsed.get("databricks_python"),
-            parameters=parsed.get("parameters", []),
-            transformations=parsed.get("transformations", []),
-            llm_explanation=parsed.get("explanation"),
-            llm_model=self.model,
-            tokens_used=tokens,
-            source_connection=parsed.get("source_connection"),
-            notes=parsed.get("notes")
         )
 
     async def convert_table(
