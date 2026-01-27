@@ -90,6 +90,13 @@ except ImportError as e:
     MqueryConversionPipelineTool = None
     logging.warning(f"Could not import MqueryConversionPipelineTool: {e}")
 
+# Power BI Relationships Tool
+try:
+    from .custom.powerbi_relationships_tool import PowerBIRelationshipsTool
+except ImportError as e:
+    PowerBIRelationshipsTool = None
+    logging.warning(f"Could not import PowerBIRelationshipsTool: {e}")
+
 # Setup logger
 logger = logging.getLogger(__name__)
 
@@ -141,6 +148,8 @@ class ToolFactory:
             self._tool_implementations["Measure Conversion Pipeline"] = MeasureConversionPipelineTool
         if MqueryConversionPipelineTool is not None:
             self._tool_implementations["M-Query Conversion Pipeline"] = MqueryConversionPipelineTool
+        if PowerBIRelationshipsTool is not None:
+            self._tool_implementations["Power BI Relationships Tool"] = PowerBIRelationshipsTool
 
         # Initialize _initialized flag
         self._initialized = False
@@ -1431,6 +1440,41 @@ class ToolFactory:
                     return tool_instance
                 except Exception as e:
                     logger.error(f"[ToolFactory] ✗ Failed to create M-Query Conversion Pipeline: {e}")
+                    import traceback
+                    logger.error(f"[ToolFactory] Traceback: {traceback.format_exc()}")
+                    raise
+
+            # Power BI Relationships Tool
+            elif tool_name == "Power BI Relationships Tool":
+                # PowerBIRelationshipsTool accepts configuration directly
+                tool_config['result_as_answer'] = result_as_answer
+
+                # Enhanced logging to track tool configuration
+                logger.info(f"[ToolFactory] Creating Power BI Relationships Tool with merged config")
+                logger.info(f"[ToolFactory]   - workspace_id: {tool_config.get('workspace_id', 'NOT SET')[:30] if tool_config.get('workspace_id') else 'NOT SET'}...")
+                logger.info(f"[ToolFactory]   - dataset_id: {tool_config.get('dataset_id', 'NOT SET')[:30] if tool_config.get('dataset_id') else 'NOT SET'}...")
+                logger.info(f"[ToolFactory]   - tenant_id: {tool_config.get('tenant_id', 'NOT SET')[:20] if tool_config.get('tenant_id') else 'NOT SET'}...")
+                logger.info(f"[ToolFactory]   - client_id: {tool_config.get('client_id', 'NOT SET')[:20] if tool_config.get('client_id') else 'NOT SET'}...")
+                logger.info(f"[ToolFactory]   - target_catalog: {tool_config.get('target_catalog', 'NOT SET')}")
+                logger.info(f"[ToolFactory]   - target_schema: {tool_config.get('target_schema', 'NOT SET')}")
+
+                # Verify that Service Principal credentials are present
+                has_sp_creds = bool(
+                    tool_config.get('workspace_id') and
+                    tool_config.get('dataset_id') and
+                    tool_config.get('client_id') and
+                    tool_config.get('tenant_id') and
+                    tool_config.get('client_secret')
+                )
+                logger.info(f"[ToolFactory]   - Service Principal credentials present: {has_sp_creds}")
+
+                # Create the tool with the merged configuration
+                try:
+                    tool_instance = tool_class(**tool_config)
+                    logger.info(f"[ToolFactory] ✓ Successfully created Power BI Relationships Tool instance")
+                    return tool_instance
+                except Exception as e:
+                    logger.error(f"[ToolFactory] ✗ Failed to create Power BI Relationships Tool: {e}")
                     import traceback
                     logger.error(f"[ToolFactory] Traceback: {traceback.format_exc()}")
                     raise

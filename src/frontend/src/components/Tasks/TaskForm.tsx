@@ -48,6 +48,7 @@ import { MCPServerSelector } from '../Common/MCPServerSelector';
 import { PowerBIConfigSelector, PowerBIConfig } from '../Common/PowerBIConfigSelector';
 import { MeasureConverterConfigSelector, MeasureConverterConfig } from '../Common/MeasureConverterConfigSelector';
 import { MQueryConverterConfigSelector, MQueryConverterConfig } from '../Common/MQueryConverterConfigSelector';
+import { PowerBIRelationshipsConfigSelector, PowerBIRelationshipsConfig } from '../Common/PowerBIRelationshipsConfigSelector';
 import { PerplexityConfig, SerperConfig } from '../../types/config';
 import { type LLMGuardrailConfig } from '../../types/task';
 import { ModelService } from '../../api/ModelService';
@@ -135,6 +136,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const [powerBIConfig, setPowerBIConfig] = useState<PowerBIConfig>({});
   const [measureConverterConfig, setMeasureConverterConfig] = useState<MeasureConverterConfig>({});
   const [mQueryConverterConfig, setMQueryConverterConfig] = useState<MQueryConverterConfig>({});
+  const [powerBIRelationshipsConfig, setPowerBIRelationshipsConfig] = useState<PowerBIRelationshipsConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
   const [showBestPractices, setShowBestPractices] = useState(false);
@@ -210,6 +212,11 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       // Check for M-Query Conversion Pipeline config
       if (initialData.tool_configs['M-Query Conversion Pipeline']) {
         setMQueryConverterConfig(initialData.tool_configs['M-Query Conversion Pipeline'] as MQueryConverterConfig);
+      }
+
+      // Check for Power BI Relationships Tool config
+      if (initialData.tool_configs['Power BI Relationships Tool']) {
+        setPowerBIRelationshipsConfig(initialData.tool_configs['Power BI Relationships Tool'] as PowerBIRelationshipsConfig);
       }
 
       // Check for MCP_SERVERS config
@@ -555,6 +562,31 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
         })) {
           // Remove M-Query Conversion Pipeline config if tool not selected
           delete updatedToolConfigs['M-Query Conversion Pipeline'];
+        }
+
+        // Handle Power BI Relationships Tool config
+        if (powerBIRelationshipsConfig && Object.keys(powerBIRelationshipsConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Relationships Tool';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            'Power BI Relationships Tool': powerBIRelationshipsConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Relationships Tool';
+        })) {
+          // Remove Power BI Relationships Tool config if tool not selected
+          delete updatedToolConfigs['Power BI Relationships Tool'];
         }
 
         // Handle MCP_SERVERS config - use dict format to match schema
@@ -1280,6 +1312,40 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                       setToolConfigs(prev => ({
                         ...prev,
                         'M-Query Conversion Pipeline': config
+                      }));
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+
+            {/* Power BI Relationships Tool Configuration - Show only when tool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'Power BI Relationships Tool';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  Power BI Relationships Tool Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(76, 175, 80, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(76, 175, 80, 0.2)'
+                }}>
+                  <PowerBIRelationshipsConfigSelector
+                    value={powerBIRelationshipsConfig}
+                    onChange={(config) => {
+                      setPowerBIRelationshipsConfig(config);
+                      // Update tool configs when configuration changes
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'Power BI Relationships Tool': config
                       }));
                     }}
                   />

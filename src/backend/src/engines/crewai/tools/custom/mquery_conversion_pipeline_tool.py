@@ -64,18 +64,18 @@ class MqueryConversionPipelineSchema(BaseModel):
         description="[Power BI] Specific dataset/semantic model ID to filter (optional, scans all if not provided)"
     )
 
-    # Service Principal authentication (required)
+    # Service Principal authentication for Admin API (required)
     tenant_id: Optional[str] = Field(
         None,
-        description="[Power BI Auth] Azure AD tenant ID (required)"
+        description="[Power BI Auth] Azure AD tenant ID for Admin API (required)"
     )
     client_id: Optional[str] = Field(
         None,
-        description="[Power BI Auth] Application/Client ID (required)"
+        description="[Power BI Auth] Application/Client ID for Admin API (required)"
     )
     client_secret: Optional[str] = Field(
         None,
-        description="[Power BI Auth] Client secret (required)"
+        description="[Power BI Auth] Client secret for Admin API (required)"
     )
 
     # ===== LLM CONVERSION CONFIGURATION =====
@@ -133,10 +133,6 @@ class MqueryConversionPipelineSchema(BaseModel):
     )
 
     # ===== OUTPUT OPTIONS =====
-    include_relationships: bool = Field(
-        True,
-        description="[Output] Include relationships with FK constraint SQL (default: True)"
-    )
     include_summary: bool = Field(
         True,
         description="[Output] Include summary report in output (default: True)"
@@ -157,7 +153,9 @@ class MqueryConversionPipelineTool(BaseTool):
     - Parse Value.NativeQuery, DatabricksMultiCloud.Catalogs, Sql.Database, etc.
     - Convert M-Query transformations to SQL equivalents
     - Generate CREATE VIEW statements for Unity Catalog
-    - Extract relationships as FK constraint SQL
+
+    **Note**: For relationship extraction, use the dedicated Power BI Relationships Tool
+    which uses INFO.VIEW.RELATIONSHIPS() and supports workspace member Service Principals.
 
     **Expression Types Supported**:
     - **Native Query**: SQL embedded in Value.NativeQuery
@@ -214,7 +212,7 @@ class MqueryConversionPipelineTool(BaseTool):
             # Power BI Admin API
             "workspace_id": kwargs.get("workspace_id"),
             "dataset_id": kwargs.get("dataset_id"),
-            # Authentication
+            # Admin API Authentication (required)
             "tenant_id": kwargs.get("tenant_id"),
             "client_id": kwargs.get("client_id"),
             "client_secret": kwargs.get("client_secret"),
@@ -234,7 +232,6 @@ class MqueryConversionPipelineTool(BaseTool):
             "include_hidden_tables": kwargs.get("include_hidden_tables", False),
             "skip_static_tables": kwargs.get("skip_static_tables", True),
             # Output Options
-            "include_relationships": kwargs.get("include_relationships", True),
             "include_summary": kwargs.get("include_summary", True),
         }
 
@@ -426,7 +423,6 @@ class MqueryConversionPipelineTool(BaseTool):
             )
 
             # Execute async conversion (use_llm was computed earlier)
-            include_relationships = merged_kwargs.get("include_relationships", True)
             include_summary = merged_kwargs.get("include_summary", True)
 
             # Run async conversion in sync context (handles both async and sync calling contexts)
@@ -440,7 +436,6 @@ class MqueryConversionPipelineTool(BaseTool):
                 result=result,
                 workspace_id=workspace_id,
                 dataset_id=dataset_id,
-                include_relationships=include_relationships,
                 include_summary=include_summary
             )
 
@@ -473,8 +468,7 @@ class MqueryConversionPipelineTool(BaseTool):
                 for model in models:
                     results = await connector.convert_all_tables(model, use_llm=use_llm)
                     all_results[model.name] = {
-                        "tables": results,
-                        "relationships": connector.get_relationships(model)
+                        "tables": results
                     }
 
                 # Generate summary
@@ -499,7 +493,6 @@ class MqueryConversionPipelineTool(BaseTool):
         result: Dict[str, Any],
         workspace_id: str,
         dataset_id: Optional[str],
-        include_relationships: bool,
         include_summary: bool
     ) -> str:
         """Format the conversion output."""
@@ -556,18 +549,6 @@ class MqueryConversionPipelineTool(BaseTool):
                             output.append(f"\n*{conv.notes}*\n")
                     else:
                         output.append(f"**Status**: Failed - {conv.error_message}\n")
-
-            # Process relationships
-            if include_relationships:
-                relationships = model_data.get("relationships", [])
-                if relationships:
-                    output.append(f"\n### Relationships ({len(relationships)})\n")
-                    for rel in relationships:
-                        output.append(f"- **{rel['name']}**: {rel['from_table']}.{rel['from_column']} → {rel['to_table']}.{rel['to_column']}")
-                        if rel.get('uc_fk_sql'):
-                            output.append("```sql")
-                            output.append(rel['uc_fk_sql'])
-                            output.append("```")
 
         # Add summary
         if include_summary:

@@ -20,6 +20,7 @@ import httpx
 from .models import (
     SemanticModel,
     PowerBITable,
+    TableRelationship,
     ScanStatus,
     MQueryConversionConfig
 )
@@ -368,3 +369,139 @@ class PowerBIAdminScanner:
             f"in model '{semantic_model.name}'"
         )
         return tables
+
+    async def fetch_relationships_via_execute_queries(
+        self,
+        workspace_id: str,
+        dataset_id: str
+    ) -> List[TableRelationship]:
+        """
+        Fetch relationships using the Execute Queries API with INFO.VIEW.RELATIONSHIPS().
+
+        This is a fallback method when the Admin API scan doesn't return relationships.
+        The INFO.VIEW.RELATIONSHIPS() DAX function works via the REST Execute Queries API
+        (unlike INFO.RELATIONSHIPS() which doesn't work via REST).
+
+        NOTE: The Execute Queries API typically requires a Service Principal that is a member
+        of the workspace. If the Admin API Service Principal doesn't have workspace access,
+        this method may fail. For dedicated relationship extraction, use the Power BI
+        Relationships Tool which supports separate credentials.
+
+        Args:
+            workspace_id: Power BI workspace ID
+            dataset_id: Dataset/semantic model ID
+
+        Returns:
+            List of TableRelationship objects
+        """
+        url = f"{self.API_BASE}/groups/{workspace_id}/datasets/{dataset_id}/executeQueries"
+
+        payload = {
+            "queries": [{"query": "EVALUATE INFO.VIEW.RELATIONSHIPS()"}],
+            "serializerSettings": {"includeNulls": True}
+        }
+
+        logger.info(f"Fetching relationships via Execute Queries API for dataset {dataset_id}")
+
+        try:
+            # Use the Admin API token - may work if the SP also has workspace access
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post(
+                    url,
+                    headers=self._get_headers(),
+                    json=payload
+                )
+
+            response.raise_for_status()
+            data = response.json()
+
+            # Extract rows from response
+            rows = data.get("results", [{}])[0].get("tables", [{}])[0].get("rows", [])
+
+            # Parse relationships and deduplicate (bidirectional relationships appear twice)
+            relationships = []
+            seen_ids = set()
+
+            for row in rows:
+                rel_id = row.get("[ID]")
+
+                # Skip duplicates
+                if rel_id in seen_ids:
+                    continue
+                seen_ids.add(rel_id)
+
+                # Skip system tables (LocalDateTable, etc.)
+                from_table = row.get("[FromTable]", "")
+                to_table = row.get("[ToTable]", "")
+                if "LocalDateTable" in from_table or "LocalDateTable" in to_table:
+                    continue
+
+                # Map cardinality from INFO.VIEW.RELATIONSHIPS format
+                from_card = row.get("[FromCardinality]", "")
+                to_card = row.get("[ToCardinality]", "")
+                if from_card == "Many" and to_card == "One":
+                    cardinality = "ManyToOne"
+                elif from_card == "One" and to_card == "Many":
+                    cardinality = "OneToMany"
+                elif from_card == "One" and to_card == "One":
+                    cardinality = "OneToOne"
+                elif from_card == "Many" and to_card == "Many":
+                    cardinality = "ManyToMany"
+                else:
+                    cardinality = "ManyToOne"  # Default
+
+                relationship = TableRelationship(
+                    name=row.get("[Name]", f"rel_{rel_id}"),
+                    from_table=from_table,
+                    from_column=row.get("[FromColumn]", ""),
+                    to_table=to_table,
+                    to_column=row.get("[ToColumn]", ""),
+                    cross_filtering_behavior=row.get("[CrossFilteringBehavior]", "OneDirection"),
+                    is_active=row.get("[IsActive]", True),
+                    cardinality=cardinality
+                )
+                relationships.append(relationship)
+
+            logger.info(f"Extracted {len(relationships)} relationship(s) via Execute Queries API")
+            return relationships
+
+        except httpx.HTTPStatusError as e:
+            logger.warning(
+                f"Failed to fetch relationships via Execute Queries API: {e.response.status_code} - "
+                f"This may be due to insufficient permissions on the dataset. "
+                f"The Service Principal needs Dataset.Read.All or equivalent permissions."
+            )
+            return []
+        except Exception as e:
+            logger.warning(f"Error fetching relationships via Execute Queries API: {e}")
+            return []
+
+    async def enrich_model_with_relationships(
+        self,
+        model: SemanticModel,
+        workspace_id: str
+    ) -> SemanticModel:
+        """
+        Enrich a semantic model with relationships fetched via Execute Queries API.
+
+        This method is useful when the Admin API scan doesn't return relationships.
+        It uses the INFO.VIEW.RELATIONSHIPS() DAX function which reliably returns
+        all relationships in the model.
+
+        Args:
+            model: SemanticModel to enrich
+            workspace_id: Workspace ID containing the model
+
+        Returns:
+            SemanticModel with enriched relationships
+        """
+        if not model.relationships:
+            logger.info(
+                f"Model '{model.name}' has no relationships from Admin API scan, "
+                f"attempting to fetch via Execute Queries API..."
+            )
+            model.relationships = await self.fetch_relationships_via_execute_queries(
+                workspace_id=workspace_id,
+                dataset_id=model.id
+            )
+        return model

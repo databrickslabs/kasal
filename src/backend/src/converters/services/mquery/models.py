@@ -285,7 +285,7 @@ class ScanStatus:
 @dataclass
 class MQueryConversionConfig:
     """Configuration for M-Query conversion"""
-    # Power BI connection
+    # Power BI Admin API connection (requires Admin-level Service Principal)
     tenant_id: str
     client_id: str
     client_secret: str
