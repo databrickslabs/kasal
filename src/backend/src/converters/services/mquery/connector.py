@@ -350,7 +350,21 @@ class MQueryConnector(BaseInboundConnector):
             return []
 
         relationships = []
+        catalog = self.config.target_catalog or 'catalog'
+        schema = self.config.target_schema or 'schema'
+
         for rel in target_model.relationships:
+            # Clean table names (remove spaces, special chars)
+            from_table_clean = rel.from_table.replace(" ", "_").replace("-", "_")
+            to_table_clean = rel.to_table.replace(" ", "_").replace("-", "_")
+            from_col_clean = rel.from_column.replace(" ", "_").replace("-", "_")
+
+            # Generate FK constraint name
+            constraint_name = f"fk_{from_table_clean}_{from_col_clean}_{to_table_clean}"
+            # Truncate if too long (UC has limits on identifier length)
+            if len(constraint_name) > 128:
+                constraint_name = constraint_name[:128]
+
             relationships.append({
                 "name": rel.name,
                 "from_table": rel.from_table,
@@ -358,12 +372,18 @@ class MQueryConnector(BaseInboundConnector):
                 "to_table": rel.to_table,
                 "to_column": rel.to_column,
                 "cardinality": rel.cardinality,
+                "cross_filtering": rel.cross_filtering_behavior,
                 "is_active": rel.is_active,
                 "uc_fk_sql": (
-                    f"ALTER TABLE {self.config.target_catalog or 'catalog'}."
-                    f"{self.config.target_schema or 'schema'}.{rel.from_table} "
-                    f"ADD CONSTRAINT fk_{rel.name} FOREIGN KEY ({rel.from_column}) "
-                    f"REFERENCES {rel.to_table}({rel.to_column})"
+                    f"-- Relationship: {rel.name}\n"
+                    f"-- Cardinality: {rel.cardinality}\n"
+                    f"-- Cross-filtering: {rel.cross_filtering_behavior}\n"
+                    f"-- Active: {rel.is_active}\n"
+                    f"ALTER TABLE {catalog}.{schema}.{from_table_clean}\n"
+                    f"ADD CONSTRAINT {constraint_name}\n"
+                    f"FOREIGN KEY ({rel.from_column})\n"
+                    f"REFERENCES {catalog}.{schema}.{to_table_clean}({rel.to_column})\n"
+                    f"NOT ENFORCED;"
                 )
             })
 
