@@ -38,9 +38,6 @@ export interface MQueryConverterConfig {
   llm_token?: string;
   llm_model?: string;
   use_llm?: boolean;
-  // Target Configuration
-  target_catalog?: string;
-  target_schema?: string;
   // Scan Options
   include_lineage?: boolean;
   include_datasource_details?: boolean;
@@ -88,8 +85,6 @@ export const MQueryConverterConfigSelector: React.FC<MQueryConverterConfigSelect
         updatedConfig.tenant_id = '{tenant_id}';
         updatedConfig.client_id = '{client_id}';
         updatedConfig.client_secret = '{client_secret}';
-        updatedConfig.target_catalog = '{target_catalog}';
-        updatedConfig.target_schema = '{target_schema}';
         // Keep LLM and options as static values
         updatedConfig.use_llm = value.use_llm !== false;
         updatedConfig.llm_model = value.llm_model || 'databricks-claude-sonnet-4';
@@ -158,8 +153,6 @@ export const MQueryConverterConfigSelector: React.FC<MQueryConverterConfigSelect
             <Chip label="tenant_id" size="small" color="primary" variant="outlined" />
             <Chip label="client_id" size="small" color="primary" variant="outlined" />
             <Chip label="client_secret" size="small" color="primary" variant="outlined" />
-            <Chip label="target_catalog" size="small" color="secondary" variant="outlined" />
-            <Chip label="target_schema" size="small" color="secondary" variant="outlined" />
           </Box>
           <Box sx={{ mt: 1 }}>
             <Typography variant="caption" color="text.secondary">
@@ -182,8 +175,6 @@ export const MQueryConverterConfigSelector: React.FC<MQueryConverterConfigSelect
             <li><code>tenant_id</code> → <Chip label="{tenant_id}" size="small" /></li>
             <li><code>client_id</code> → <Chip label="{client_id}" size="small" /></li>
             <li><code>client_secret</code> → <Chip label="{client_secret}" size="small" /></li>
-            <li><code>target_catalog</code> → <Chip label="{target_catalog}" size="small" /></li>
-            <li><code>target_schema</code> → <Chip label="{target_schema}" size="small" /></li>
           </Box>
         </Alert>
       )}
@@ -253,33 +244,6 @@ export const MQueryConverterConfigSelector: React.FC<MQueryConverterConfigSelect
               type="password"
               fullWidth
               helperText="Client secret for service principal"
-              size="small"
-            />
-          </Box>
-
-          <Divider sx={{ my: 1 }}>
-            <Typography variant="caption" color="text.secondary">
-              Target Unity Catalog Location
-            </Typography>
-          </Divider>
-
-          <Box sx={{ display: 'flex', gap: 2 }}>
-            <TextField
-              label="Target Catalog"
-              value={value.target_catalog || 'main'}
-              onChange={(e) => handleFieldChange('target_catalog', e.target.value)}
-              disabled={disabled}
-              fullWidth
-              helperText="Unity Catalog catalog name"
-              size="small"
-            />
-            <TextField
-              label="Target Schema"
-              value={value.target_schema || 'default'}
-              onChange={(e) => handleFieldChange('target_schema', e.target.value)}
-              disabled={disabled}
-              fullWidth
-              helperText="Unity Catalog schema name"
               size="small"
             />
           </Box>
