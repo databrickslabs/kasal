@@ -47,6 +47,7 @@ import { SerperConfigSelector } from '../Common/SerperConfigSelector';
 import { MCPServerSelector } from '../Common/MCPServerSelector';
 import { PowerBIConfigSelector, PowerBIConfig } from '../Common/PowerBIConfigSelector';
 import { MeasureConverterConfigSelector, MeasureConverterConfig } from '../Common/MeasureConverterConfigSelector';
+import { MQueryConverterConfigSelector, MQueryConverterConfig } from '../Common/MQueryConverterConfigSelector';
 import { PerplexityConfig, SerperConfig } from '../../types/config';
 import { type LLMGuardrailConfig } from '../../types/task';
 import { ModelService } from '../../api/ModelService';
@@ -133,6 +134,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const [serperConfig, setSerperConfig] = useState<SerperConfig>({});
   const [powerBIConfig, setPowerBIConfig] = useState<PowerBIConfig>({});
   const [measureConverterConfig, setMeasureConverterConfig] = useState<MeasureConverterConfig>({});
+  const [mQueryConverterConfig, setMQueryConverterConfig] = useState<MQueryConverterConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
   const [showBestPractices, setShowBestPractices] = useState(false);
@@ -203,6 +205,11 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       // Check for Measure Conversion Pipeline config
       if (initialData.tool_configs['Measure Conversion Pipeline']) {
         setMeasureConverterConfig(initialData.tool_configs['Measure Conversion Pipeline'] as MeasureConverterConfig);
+      }
+
+      // Check for M-Query Conversion Pipeline config
+      if (initialData.tool_configs['M-Query Conversion Pipeline']) {
+        setMQueryConverterConfig(initialData.tool_configs['M-Query Conversion Pipeline'] as MQueryConverterConfig);
       }
 
       // Check for MCP_SERVERS config
@@ -523,6 +530,31 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
         })) {
           // Remove Measure Conversion Pipeline config if tool not selected
           delete updatedToolConfigs['Measure Conversion Pipeline'];
+        }
+
+        // Handle M-Query Conversion Pipeline config
+        if (mQueryConverterConfig && Object.keys(mQueryConverterConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'M-Query Conversion Pipeline';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            'M-Query Conversion Pipeline': mQueryConverterConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'M-Query Conversion Pipeline';
+        })) {
+          // Remove M-Query Conversion Pipeline config if tool not selected
+          delete updatedToolConfigs['M-Query Conversion Pipeline'];
         }
 
         // Handle MCP_SERVERS config - use dict format to match schema
@@ -1214,6 +1246,40 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                       setToolConfigs(prev => ({
                         ...prev,
                         'Measure Conversion Pipeline': config
+                      }));
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+
+            {/* M-Query Conversion Pipeline Configuration - Show only when tool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'M-Query Conversion Pipeline';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  M-Query Conversion Pipeline Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(25, 118, 210, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(25, 118, 210, 0.2)'
+                }}>
+                  <MQueryConverterConfigSelector
+                    value={mQueryConverterConfig}
+                    onChange={(config) => {
+                      setMQueryConverterConfig(config);
+                      // Update tool configs when configuration changes
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'M-Query Conversion Pipeline': config
                       }));
                     }}
                   />

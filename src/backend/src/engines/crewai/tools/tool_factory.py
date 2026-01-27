@@ -83,6 +83,13 @@ except ImportError as e:
     MeasureConversionPipelineTool = None
     logging.warning(f"Could not import converter tools: {e}")
 
+# M-Query Conversion Pipeline Tool
+try:
+    from .custom.mquery_conversion_pipeline_tool import MqueryConversionPipelineTool
+except ImportError as e:
+    MqueryConversionPipelineTool = None
+    logging.warning(f"Could not import MqueryConversionPipelineTool: {e}")
+
 # Setup logger
 logger = logging.getLogger(__name__)
 
@@ -132,6 +139,8 @@ class ToolFactory:
             self._tool_implementations["PowerBIConnectorTool"] = PowerBIConnectorTool
         if MeasureConversionPipelineTool is not None:
             self._tool_implementations["Measure Conversion Pipeline"] = MeasureConversionPipelineTool
+        if MqueryConversionPipelineTool is not None:
+            self._tool_implementations["M-Query Conversion Pipeline"] = MqueryConversionPipelineTool
 
         # Initialize _initialized flag
         self._initialized = False
@@ -1388,6 +1397,40 @@ class ToolFactory:
                     return tool_instance
                 except Exception as e:
                     logger.error(f"[ToolFactory] ✗ Failed to create Measure Conversion Pipeline: {e}")
+                    import traceback
+                    logger.error(f"[ToolFactory] Traceback: {traceback.format_exc()}")
+                    raise
+
+            # M-Query Conversion Pipeline
+            elif tool_name == "M-Query Conversion Pipeline":
+                # MqueryConversionPipelineTool accepts configuration directly
+                tool_config['result_as_answer'] = result_as_answer
+
+                # Enhanced logging to track tool configuration
+                logger.info(f"[ToolFactory] Creating M-Query Conversion Pipeline with merged config")
+                logger.info(f"[ToolFactory]   - workspace_id: {tool_config.get('workspace_id', 'NOT SET')[:30] if tool_config.get('workspace_id') else 'NOT SET'}...")
+                logger.info(f"[ToolFactory]   - dataset_id: {tool_config.get('dataset_id', 'NOT SET')[:30] if tool_config.get('dataset_id') else 'NOT SET'}...")
+                logger.info(f"[ToolFactory]   - tenant_id: {tool_config.get('tenant_id', 'NOT SET')[:20] if tool_config.get('tenant_id') else 'NOT SET'}...")
+                logger.info(f"[ToolFactory]   - client_id: {tool_config.get('client_id', 'NOT SET')[:20] if tool_config.get('client_id') else 'NOT SET'}...")
+                logger.info(f"[ToolFactory]   - target_catalog: {tool_config.get('target_catalog', 'NOT SET')}")
+                logger.info(f"[ToolFactory]   - target_schema: {tool_config.get('target_schema', 'NOT SET')}")
+
+                # Verify that Service Principal credentials are present before creating the tool
+                has_admin_api_creds = bool(
+                    tool_config.get('workspace_id') and
+                    tool_config.get('client_id') and
+                    tool_config.get('tenant_id') and
+                    tool_config.get('client_secret')
+                )
+                logger.info(f"[ToolFactory]   - Power BI Admin API credentials present: {has_admin_api_creds}")
+
+                # Create the tool with the merged configuration
+                try:
+                    tool_instance = tool_class(**tool_config)
+                    logger.info(f"[ToolFactory] ✓ Successfully created M-Query Conversion Pipeline tool instance")
+                    return tool_instance
+                except Exception as e:
+                    logger.error(f"[ToolFactory] ✗ Failed to create M-Query Conversion Pipeline: {e}")
                     import traceback
                     logger.error(f"[ToolFactory] Traceback: {traceback.format_exc()}")
                     raise

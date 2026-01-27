@@ -85,7 +85,7 @@ DYNAMIC_CREW_TASK = {
         "object with the error of the conversion should be output."
     ),
     "agent_id": "example-msc-dynamic-agent-001",
-    "tools": ["76"],  # Measure Conversion Pipeline tool ID
+    "tools": ["73"],  # Measure Conversion Pipeline tool ID
     "tool_configs": {
         "Measure Conversion Pipeline": {
             "mode": "dynamic",
@@ -160,7 +160,7 @@ DYNAMIC_CREW = {
             "position": {"x": 368, "y": 68},
             "data": {
                 "label": "Run Measure Conversion with Dynamic Parameters",
-                "tools": ["76"],
+                "tools": ["73"],
                 "tool_configs": DYNAMIC_CREW_TASK["tool_configs"],
                 "agentId": None,
                 "taskId": "example-msc-dynamic-task-001",
@@ -241,7 +241,7 @@ STATIC_CREW_TASK = {
         "object with the error of the conversion should be output."
     ),
     "agent_id": "example-msc-static-agent-001",
-    "tools": ["76"],  # Measure Conversion Pipeline tool ID
+    "tools": ["73"],  # Measure Conversion Pipeline tool ID
     "tool_configs": {
         "Measure Conversion Pipeline": {
             "inbound_connector": "powerbi",
@@ -316,7 +316,7 @@ STATIC_CREW = {
             "position": {"x": 43, "y": 182},
             "data": {
                 "label": "Run Measure Conversion with Static Parameters",
-                "tools": ["76"],
+                "tools": ["73"],
                 "tool_configs": STATIC_CREW_TASK["tool_configs"],
                 "agentId": None,
                 "taskId": "example-msc-static-task-001",
@@ -341,10 +341,352 @@ STATIC_CREW = {
 
 
 # ============================================================================
+# Example Crew 3: M-Query Conversion - Dynamic Parameter Mode
+# ============================================================================
+# This crew uses the M-Query Conversion Pipeline to extract M-Query expressions
+# from Power BI semantic models and convert them to Databricks SQL.
+
+MQUERY_DYNAMIC_CREW_AGENT = {
+    "id": "example-mquery-dynamic-agent-001",
+    "name": "M-Query Converter",
+    "role": "M-Query Extraction and Conversion Specialist",
+    "goal": (
+        "Extract M-Query expressions from Power BI semantic models using the Admin API "
+        "and convert them to Databricks SQL CREATE VIEW statements.\n\n"
+        "You will scan the specified workspace, extract all table definitions, "
+        "and generate SQL code for Unity Catalog."
+    ),
+    "backstory": (
+        "Expert in Power BI data models and M-Query (Power Query) with deep knowledge "
+        "of Databricks SQL and Unity Catalog. Specializes in migrating Power BI "
+        "data models to Databricks, understanding complex M-Query transformations, "
+        "and generating production-ready SQL code."
+    ),
+    "llm": "databricks-llama-4-maverick",
+    "tools": [],
+    "tool_configs": {},
+    "max_iter": 25,
+    "max_rpm": 1,
+    "max_execution_time": 600,  # M-Query extraction can take longer
+    "verbose": False,
+    "allow_delegation": False,
+    "cache": True,
+    "memory": True,
+    "embedder_config": {
+        "provider": "databricks",
+        "config": {
+            "model": "databricks-gte-large-en"
+        }
+    },
+    "allow_code_execution": False,
+    "code_execution_mode": "safe",
+    "max_retry_limit": 3,
+    "use_system_prompt": True,
+    "respect_context_window": True,
+}
+
+MQUERY_DYNAMIC_CREW_TASK = {
+    "id": "example-mquery-dynamic-task-001",
+    "name": "Extract and Convert M-Query to SQL",
+    "description": (
+        "Extract M-Query expressions from Power BI and convert them to Databricks SQL.\n\n"
+        "**Source Configuration:**\n"
+        "- Workspace ID: {workspace_id}\n"
+        "- Dataset ID: {dataset_id} (optional)\n"
+        "- Tenant ID: {tenant_id}\n"
+        "- Client ID: {client_id}\n"
+        "- Client Secret: {client_secret}\n\n"
+        "**Target Configuration:**\n"
+        "- Catalog: {target_catalog}\n"
+        "- Schema: {target_schema}\n\n"
+        "Call the M-Query Conversion Pipeline tool to perform the extraction and conversion. "
+        "The tool will scan the Power BI workspace, extract M-Query expressions from all tables, "
+        "and generate CREATE VIEW statements for Unity Catalog. "
+        "Return the generated SQL code along with relationships and summary information."
+    ),
+    "expected_output": (
+        "A comprehensive report containing:\n"
+        "1. CREATE VIEW SQL statements for each table\n"
+        "2. Foreign key constraint SQL for relationships\n"
+        "3. Summary of expression types found (native_query, databricks_catalog, etc.)\n"
+        "4. Any conversion notes or warnings"
+    ),
+    "agent_id": "example-mquery-dynamic-agent-001",
+    "tools": ["74"],  # M-Query Conversion Pipeline tool ID
+    "tool_configs": {
+        "M-Query Conversion Pipeline": {
+            "mode": "dynamic",
+            "workspace_id": "{workspace_id}",
+            "dataset_id": "{dataset_id}",
+            "tenant_id": "{tenant_id}",
+            "client_id": "{client_id}",
+            "client_secret": "{client_secret}",
+            "target_catalog": "{target_catalog}",
+            "target_schema": "{target_schema}",
+            "use_llm": True,
+            "include_hidden_tables": False,
+            "skip_static_tables": True,
+            "include_relationships": True,
+            "include_summary": True,
+        }
+    },
+    "async_execution": False,
+    "context": [],
+    "config": {
+        "cache_response": False,
+        "cache_ttl": 3600,
+        "retry_on_fail": True,
+        "max_retries": 3,
+        "priority": 1,
+        "error_handling": "default",
+        "human_input": False,
+        "markdown": False,
+    },
+}
+
+MQUERY_DYNAMIC_CREW = {
+    "id": "example-mquery-dynamic-crew-001",
+    "name": "M-Query Converter - Dynamic Parameters",
+    "process": "sequential",
+    "planning": False,
+    "reasoning": False,
+    "memory": True,
+    "verbose": True,
+    "agent_ids": ["example-mquery-dynamic-agent-001"],
+    "task_ids": ["example-mquery-dynamic-task-001"],
+    "nodes": [
+        {
+            "id": "agent-example-mquery-dynamic-agent-001",
+            "type": "agentNode",
+            "position": {"x": 68, "y": 73},
+            "data": {
+                "label": "M-Query Converter",
+                "role": MQUERY_DYNAMIC_CREW_AGENT["role"],
+                "goal": MQUERY_DYNAMIC_CREW_AGENT["goal"],
+                "backstory": MQUERY_DYNAMIC_CREW_AGENT["backstory"],
+                "tools": [],
+                "tool_configs": {},
+                "agentId": "example-mquery-dynamic-agent-001",
+                "taskId": None,
+                "llm": "databricks-llama-4-maverick",
+                "max_iter": 25,
+                "max_rpm": 1,
+                "max_execution_time": 600,
+                "verbose": False,
+                "allow_delegation": False,
+                "cache": True,
+                "memory": True,
+                "embedder_config": MQUERY_DYNAMIC_CREW_AGENT["embedder_config"],
+                "allow_code_execution": False,
+                "code_execution_mode": "safe",
+                "max_retry_limit": 3,
+                "use_system_prompt": True,
+                "respect_context_window": True,
+                "type": "agent",
+            },
+        },
+        {
+            "id": "task-example-mquery-dynamic-task-001",
+            "type": "taskNode",
+            "position": {"x": 368, "y": 68},
+            "data": {
+                "label": "Extract and Convert M-Query to SQL",
+                "tools": ["74"],
+                "tool_configs": MQUERY_DYNAMIC_CREW_TASK["tool_configs"],
+                "agentId": None,
+                "taskId": "example-mquery-dynamic-task-001",
+                "memory": True,
+                "type": "task",
+                "description": MQUERY_DYNAMIC_CREW_TASK["description"],
+                "expected_output": MQUERY_DYNAMIC_CREW_TASK["expected_output"],
+                "config": MQUERY_DYNAMIC_CREW_TASK["config"],
+                "context": [],
+                "async_execution": False,
+            },
+        },
+    ],
+    "edges": [
+        {
+            "source": "agent-example-mquery-dynamic-agent-001",
+            "target": "task-example-mquery-dynamic-task-001",
+            "id": "edge-mquery-dynamic-agent-to-task",
+        }
+    ],
+}
+
+
+# ============================================================================
+# Example Crew 4: M-Query Conversion - Static Configuration Mode
+# ============================================================================
+# This crew has all parameters configured directly in the UI.
+
+MQUERY_STATIC_CREW_AGENT = {
+    "id": "example-mquery-static-agent-001",
+    "name": "M-Query Converter",
+    "role": "M-Query Extraction and Conversion Specialist",
+    "goal": (
+        "Extract M-Query expressions from Power BI semantic models using the Admin API "
+        "and convert them to Databricks SQL CREATE VIEW statements.\n\n"
+        "You will scan the specified workspace, extract all table definitions, "
+        "and generate SQL code for Unity Catalog."
+    ),
+    "backstory": (
+        "Expert in Power BI data models and M-Query (Power Query) with deep knowledge "
+        "of Databricks SQL and Unity Catalog. Specializes in migrating Power BI "
+        "data models to Databricks, understanding complex M-Query transformations, "
+        "and generating production-ready SQL code."
+    ),
+    "llm": "databricks-llama-4-maverick",
+    "tools": [],
+    "tool_configs": None,
+    "max_iter": 25,
+    "max_rpm": 1,
+    "max_execution_time": 600,
+    "verbose": False,
+    "allow_delegation": False,
+    "cache": True,
+    "memory": True,
+    "embedder_config": {
+        "provider": "databricks",
+        "config": {
+            "model": "databricks-gte-large-en"
+        }
+    },
+    "allow_code_execution": False,
+    "code_execution_mode": "safe",
+    "max_retry_limit": 3,
+    "use_system_prompt": True,
+    "respect_context_window": True,
+}
+
+MQUERY_STATIC_CREW_TASK = {
+    "id": "example-mquery-static-task-001",
+    "name": "Extract and Convert M-Query to SQL (Static)",
+    "description": (
+        "Use the M-Query Conversion Pipeline tool to extract M-Query expressions "
+        "from the configured Power BI workspace and convert them to Databricks SQL.\n\n"
+        "The tool has been pre-configured with workspace and authentication credentials. "
+        "Call the tool to perform the extraction and conversion, then return the "
+        "generated SQL code along with relationships and summary information."
+    ),
+    "expected_output": (
+        "A comprehensive report containing:\n"
+        "1. CREATE VIEW SQL statements for each table\n"
+        "2. Foreign key constraint SQL for relationships\n"
+        "3. Summary of expression types found\n"
+        "4. Any conversion notes or warnings"
+    ),
+    "agent_id": "example-mquery-static-agent-001",
+    "tools": ["74"],  # M-Query Conversion Pipeline tool ID
+    "tool_configs": {
+        "M-Query Conversion Pipeline": {
+            "mode": "static",
+            # PLACEHOLDER VALUES - Users must replace with their own credentials
+            "workspace_id": "<YOUR_WORKSPACE_ID>",
+            "dataset_id": "",
+            "tenant_id": "<YOUR_TENANT_ID>",
+            "client_id": "<YOUR_CLIENT_ID>",
+            "client_secret": "<YOUR_CLIENT_SECRET>",
+            "target_catalog": "main",
+            "target_schema": "default",
+            "use_llm": True,
+            "include_hidden_tables": False,
+            "skip_static_tables": True,
+            "include_relationships": True,
+            "include_summary": True,
+        }
+    },
+    "async_execution": False,
+    "context": [],
+    "config": {
+        "cache_response": False,
+        "cache_ttl": 3600,
+        "retry_on_fail": True,
+        "max_retries": 3,
+        "priority": 1,
+        "error_handling": "default",
+        "human_input": False,
+        "markdown": False,
+    },
+}
+
+MQUERY_STATIC_CREW = {
+    "id": "example-mquery-static-crew-001",
+    "name": "M-Query Converter - Static Configuration",
+    "process": "sequential",
+    "planning": False,
+    "reasoning": False,
+    "memory": True,
+    "verbose": True,
+    "agent_ids": ["example-mquery-static-agent-001"],
+    "task_ids": ["example-mquery-static-task-001"],
+    "nodes": [
+        {
+            "id": "agent-example-mquery-static-agent-001",
+            "type": "agentNode",
+            "position": {"x": -178, "y": 182},
+            "data": {
+                "label": "M-Query Converter",
+                "role": MQUERY_STATIC_CREW_AGENT["role"],
+                "goal": MQUERY_STATIC_CREW_AGENT["goal"],
+                "backstory": MQUERY_STATIC_CREW_AGENT["backstory"],
+                "tools": [],
+                "tool_configs": None,
+                "agentId": "example-mquery-static-agent-001",
+                "taskId": None,
+                "llm": "databricks-llama-4-maverick",
+                "max_iter": 25,
+                "max_rpm": 1,
+                "max_execution_time": 600,
+                "verbose": False,
+                "allow_delegation": False,
+                "cache": True,
+                "memory": True,
+                "embedder_config": MQUERY_STATIC_CREW_AGENT["embedder_config"],
+                "allow_code_execution": False,
+                "code_execution_mode": "safe",
+                "max_retry_limit": 3,
+                "use_system_prompt": True,
+                "respect_context_window": True,
+                "type": "agent",
+            },
+        },
+        {
+            "id": "task-example-mquery-static-task-001",
+            "type": "taskNode",
+            "position": {"x": 43, "y": 182},
+            "data": {
+                "label": "Extract and Convert M-Query to SQL (Static)",
+                "tools": ["74"],
+                "tool_configs": MQUERY_STATIC_CREW_TASK["tool_configs"],
+                "agentId": None,
+                "taskId": "example-mquery-static-task-001",
+                "memory": True,
+                "type": "task",
+                "description": MQUERY_STATIC_CREW_TASK["description"],
+                "expected_output": MQUERY_STATIC_CREW_TASK["expected_output"],
+                "config": MQUERY_STATIC_CREW_TASK["config"],
+                "context": [],
+                "async_execution": False,
+            },
+        },
+    ],
+    "edges": [
+        {
+            "source": "agent-example-mquery-static-agent-001",
+            "target": "task-example-mquery-static-task-001",
+            "id": "edge-mquery-static-agent-to-task",
+        }
+    ],
+}
+
+
+# ============================================================================
 # All Example Crews
 # ============================================================================
 
 EXAMPLE_CREWS = [
+    # Measure Conversion Pipeline Crews
     {
         "crew": DYNAMIC_CREW,
         "agent": DYNAMIC_CREW_AGENT,
@@ -354,6 +696,17 @@ EXAMPLE_CREWS = [
         "crew": STATIC_CREW,
         "agent": STATIC_CREW_AGENT,
         "task": STATIC_CREW_TASK,
+    },
+    # M-Query Conversion Pipeline Crews
+    {
+        "crew": MQUERY_DYNAMIC_CREW,
+        "agent": MQUERY_DYNAMIC_CREW_AGENT,
+        "task": MQUERY_DYNAMIC_CREW_TASK,
+    },
+    {
+        "crew": MQUERY_STATIC_CREW,
+        "agent": MQUERY_STATIC_CREW_AGENT,
+        "task": MQUERY_STATIC_CREW_TASK,
     },
 ]
 

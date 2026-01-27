@@ -246,6 +246,9 @@ class ConversionResult:
     expression_type: ExpressionType
     success: bool
 
+    # Original source expression (for display/debugging)
+    original_expression: Optional[str] = None
+
     # Generated SQL
     databricks_sql: Optional[str] = None
     create_view_sql: Optional[str] = None
