@@ -139,9 +139,6 @@ def get_tool_configs():
             "llm_token": "",
             "llm_model": "databricks-claude-sonnet-4",
             "use_llm": True,
-            # Target Configuration
-            "target_catalog": "main",
-            "target_schema": "default",
             # Scan Options
             "include_lineage": True,
             "include_datasource_details": True,
