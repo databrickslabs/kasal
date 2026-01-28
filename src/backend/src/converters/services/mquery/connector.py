@@ -31,7 +31,7 @@ from .models import (
     ExpressionType
 )
 from .scanner import PowerBIAdminScanner
-from .parser import MQueryParser
+from .parser import MQueryParser, TableFromRowsConverter
 from .llm_converter import MQueryLLMConverter
 
 logger = logging.getLogger(__name__)
@@ -321,17 +321,53 @@ class MQueryConnector(BaseInboundConnector):
         tables = self.get_tables_with_mquery(model)
         results = {}
 
-        for table in tables:
-            # Skip static tables if configured
-            if self.config.skip_static_tables:
-                has_static = any(
-                    expr.expression_type == ExpressionType.TABLE_FROM_ROWS
-                    for expr in table.source_expressions
-                )
-                if has_static:
-                    logger.info(f"Skipping static table '{table.name}'")
-                    continue
+        # Initialize Table.FromRows converter
+        from_rows_converter = TableFromRowsConverter(
+            target_catalog=self.config.target_catalog or "main",
+            target_schema=self.config.target_schema or "default"
+        )
 
+        for table in tables:
+            # Check if this is a Table.FromRows expression
+            has_static = any(
+                expr.expression_type == ExpressionType.TABLE_FROM_ROWS
+                for expr in table.source_expressions
+            )
+
+            if has_static:
+                # Convert Table.FromRows using dedicated converter (no LLM needed)
+                logger.info(f"Converting static table '{table.name}' using TableFromRowsConverter")
+
+                # Get the expression
+                for expr in table.source_expressions:
+                    if expr.expression_type == ExpressionType.TABLE_FROM_ROWS:
+                        sql = from_rows_converter.convert_to_sql(
+                            expression=expr.raw_expression,
+                            table_name=table.name,
+                            columns_from_schema=[
+                                {"name": col.name, "dataType": col.data_type.value}
+                                for col in table.columns
+                            ]
+                        )
+
+                        if sql:
+                            # Create ConversionResult for the static table
+                            result = ConversionResult(
+                                table_name=table.name,
+                                expression_type=ExpressionType.TABLE_FROM_ROWS,
+                                success=True,
+                                original_expression=expr.raw_expression,
+                                create_view_sql=sql,
+                                notes="Converted from Table.FromRows (static data)"
+                            )
+                            results[table.name] = [result]
+                            logger.info(f"Successfully converted static table '{table.name}'")
+                        else:
+                            logger.warning(f"Failed to convert static table '{table.name}'")
+                        break  # Only process first Table.FromRows expression
+                continue
+
+            # For non-static tables, use normal conversion
             table_results = await self.convert_table(
                 table,
                 use_llm=use_llm,

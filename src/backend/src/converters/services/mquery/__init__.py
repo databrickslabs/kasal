@@ -67,7 +67,7 @@ from .models import (
 )
 
 from .scanner import PowerBIAdminScanner
-from .parser import MQueryParser
+from .parser import MQueryParser, TableFromRowsConverter
 from .llm_converter import MQueryLLMConverter
 from .connector import MQueryConnector
 
@@ -81,6 +81,7 @@ __all__ = [
     # Supporting services
     "PowerBIAdminScanner",
     "MQueryParser",
+    "TableFromRowsConverter",
     "MQueryLLMConverter",
 
     # Models - Expression types
