@@ -470,7 +470,15 @@ class PowerBIRelationshipsTool(BaseTool):
         target_catalog: str,
         target_schema: str,
     ) -> List[str]:
-        """Generate Unity Catalog FK constraint statements."""
+        """
+        Generate Unity Catalog FK constraint statements.
+
+        Handles different cardinality patterns:
+        - * to 1 (Many to One): Standard FK from many side to one side
+        - 1 to 1 (One to One): FK + UNIQUE constraint for true 1:1
+        - 1 to * (One to Many): Flip FK direction (FK goes on many side)
+        - * to * (Many to Many): Warning comment - needs junction table
+        """
         statements = []
 
         for rel in relationships:
@@ -480,28 +488,93 @@ class PowerBIRelationshipsTool(BaseTool):
             from_column = rel["from_column"]
             to_column = rel["to_column"]
 
-            # Generate constraint name
-            constraint_name = f"fk_{from_table}_{from_column}_{to_table}"
-            if len(constraint_name) > 128:
-                constraint_name = constraint_name[:128]
-
-            # Format cardinality for comment
+            # Determine cardinality pattern
             from_card = "*" if rel["from_cardinality"] == "Many" else "1"
             to_card = "*" if rel["to_cardinality"] == "Many" else "1"
             cardinality_str = f"{from_card} to {to_card}"
 
-            sql = (
+            # Build relationship header comment
+            header = (
                 f"-- Relationship: {rel['name']}\n"
                 f"-- Cardinality: {cardinality_str}\n"
                 f"-- Cross-filtering: {rel['cross_filtering']}\n"
-                f"-- Active: {rel['is_active']}\n"
-                f"ALTER TABLE {target_catalog}.{target_schema}.{from_table}\n"
-                f"ADD CONSTRAINT {constraint_name}\n"
-                f"FOREIGN KEY ({from_column})\n"
-                f"REFERENCES {target_catalog}.{target_schema}.{to_table}({to_column})\n"
-                f"NOT ENFORCED;"
+                f"-- Active: {rel['is_active']}"
             )
-            statements.append(sql)
+
+            # Handle different cardinality patterns
+            if from_card == "*" and to_card == "*":
+                # Many-to-Many: Cannot be represented with simple FK
+                sql = (
+                    f"{header}\n"
+                    f"-- WARNING: Many-to-many relationship detected.\n"
+                    f"-- This cannot be directly converted to a foreign key constraint.\n"
+                    f"-- Consider creating a junction/bridge table:\n"
+                    f"--   CREATE TABLE {target_catalog}.{target_schema}.{from_table}_{to_table}_bridge (\n"
+                    f"--     {from_column} STRING,\n"
+                    f"--     {to_column} STRING,\n"
+                    f"--     PRIMARY KEY ({from_column}, {to_column})\n"
+                    f"--   );\n"
+                    f"-- Then create FKs from the bridge table to both sides."
+                )
+                statements.append(sql)
+
+            elif from_card == "1" and to_card == "*":
+                # One-to-Many: FK should be on the "many" side (to_table)
+                # Flip direction: to_table references from_table
+                constraint_name = f"fk_{to_table}_{to_column}_{from_table}"
+                if len(constraint_name) > 128:
+                    constraint_name = constraint_name[:128]
+
+                sql = (
+                    f"{header}\n"
+                    f"-- Note: FK placed on 'many' side ({to_table}) referencing 'one' side ({from_table})\n"
+                    f"ALTER TABLE {target_catalog}.{target_schema}.{to_table}\n"
+                    f"ADD CONSTRAINT {constraint_name}\n"
+                    f"FOREIGN KEY ({to_column})\n"
+                    f"REFERENCES {target_catalog}.{target_schema}.{from_table}({from_column})\n"
+                    f"NOT ENFORCED;"
+                )
+                statements.append(sql)
+
+            elif from_card == "1" and to_card == "1":
+                # One-to-One: FK + UNIQUE constraint
+                constraint_name = f"fk_{from_table}_{from_column}_{to_table}"
+                if len(constraint_name) > 128:
+                    constraint_name = constraint_name[:128]
+                unique_constraint_name = f"uq_{from_table}_{from_column}"
+                if len(unique_constraint_name) > 128:
+                    unique_constraint_name = unique_constraint_name[:128]
+
+                sql = (
+                    f"{header}\n"
+                    f"-- Note: UNIQUE constraint added to enforce true 1:1 cardinality\n"
+                    f"ALTER TABLE {target_catalog}.{target_schema}.{from_table}\n"
+                    f"ADD CONSTRAINT {constraint_name}\n"
+                    f"FOREIGN KEY ({from_column})\n"
+                    f"REFERENCES {target_catalog}.{target_schema}.{to_table}({to_column})\n"
+                    f"NOT ENFORCED;\n\n"
+                    f"ALTER TABLE {target_catalog}.{target_schema}.{from_table}\n"
+                    f"ADD CONSTRAINT {unique_constraint_name}\n"
+                    f"UNIQUE ({from_column})\n"
+                    f"NOT ENFORCED;"
+                )
+                statements.append(sql)
+
+            else:
+                # Many-to-One (* to 1): Standard FK pattern - perfect match
+                constraint_name = f"fk_{from_table}_{from_column}_{to_table}"
+                if len(constraint_name) > 128:
+                    constraint_name = constraint_name[:128]
+
+                sql = (
+                    f"{header}\n"
+                    f"ALTER TABLE {target_catalog}.{target_schema}.{from_table}\n"
+                    f"ADD CONSTRAINT {constraint_name}\n"
+                    f"FOREIGN KEY ({from_column})\n"
+                    f"REFERENCES {target_catalog}.{target_schema}.{to_table}({to_column})\n"
+                    f"NOT ENFORCED;"
+                )
+                statements.append(sql)
 
         return statements
 
@@ -551,14 +624,26 @@ class PowerBIRelationshipsTool(BaseTool):
         output.append(f"- **Active**: {active_count}")
         output.append(f"- **Inactive**: {inactive_count}")
 
-        # Cardinality breakdown
+        # Cardinality breakdown with conversion notes
         cardinality_counts = {}
         for rel in relationships:
-            key = f"{rel['from_cardinality']} to {rel['to_cardinality']}"
+            from_card = "*" if rel["from_cardinality"] == "Many" else "1"
+            to_card = "*" if rel["to_cardinality"] == "Many" else "1"
+            key = f"{from_card} to {to_card}"
             cardinality_counts[key] = cardinality_counts.get(key, 0) + 1
 
-        output.append("\n**Cardinality Breakdown**:")
+        output.append("\n**Cardinality Breakdown & Conversion Notes**:")
+
+        # Define conversion notes for each pattern
+        conversion_notes = {
+            "* to 1": "✅ Perfect FK match",
+            "1 to 1": "⚠️ FK + UNIQUE constraint added",
+            "1 to *": "⚠️ FK direction flipped (placed on 'many' side)",
+            "* to *": "❌ Needs junction table (warning added)",
+        }
+
         for card, count in cardinality_counts.items():
-            output.append(f"- {card}: {count}")
+            note = conversion_notes.get(card, "")
+            output.append(f"- {card}: {count} {note}")
 
         return "\n".join(output)
