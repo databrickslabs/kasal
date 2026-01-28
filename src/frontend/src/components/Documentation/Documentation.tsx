@@ -56,15 +56,16 @@ const docSections: DocSection[] = [
     label: 'Integrations',
     items: [
       { label: 'Power BI Integration', file: 'powerbi_integration' },
+      { label: 'Power BI Tools Guide', file: 'powerbi-tools-guide' },
     ],
   },
   {
-    label: 'Measure Converter',
+    label: 'Power BI Tools',
     items: [
-      { label: 'Pipeline Guide', file: 'measure-conversion-pipeline-guide' },
-      { label: 'Converters Overview', file: 'measure-converters-overview' },
-      { label: 'Architecture', file: 'converter-architecture' },
-      { label: 'API Integration', file: 'converter-api-integration' },
+      { label: 'Measure Conversion Tool', file: 'tool-measure-conversion' },
+      { label: 'M-Query Conversion Tool', file: 'tool-mquery-conversion' },
+      { label: 'Relationships Tool', file: 'tool-relationships-conversion' },
+      { label: 'Hierarchies Tool', file: 'tool-hierarchies-conversion' },
     ],
   },
 

@@ -2,7 +2,11 @@
 
 ## Overview
 
-The **Measure Conversion Pipeline** is a universal converter that transforms business metrics and measures between different BI platforms and formats. It provides a simple dropdown-based UX where you select:
+The **Measure Conversion Pipeline** (Tool ID: 74) is a universal converter that transforms **DAX measures** (business metrics) between different BI platforms and formats. It provides a simple dropdown-based UX where you select:
+
+> **Important**: This tool converts **DAX measures** (KPIs, calculated measures).
+> For converting **M-Query table sources** (Power Query expressions) to SQL views, use the **M-Query Conversion Pipeline** (Tool ID: 75).
+> See [Power BI Tools Guide](./powerbi-tools-guide.md) for the complete set of Power BI migration tools.
 
 - **FROM** (Inbound Connector): Source system or format
 - **TO** (Outbound Format): Target format or platform
@@ -479,9 +483,26 @@ The Measure Conversion Pipeline uses a clean architecture pattern:
 
 ## Related Tools
 
+### YAML Converters
 - **YAMLToDAXTool** (ID: 71): Dedicated YAML → DAX converter
 - **YAMLToSQLTool** (ID: 72): Dedicated YAML → SQL converter
 - **YAMLToUCMetricsTool** (ID: 73): Dedicated YAML → UC Metrics converter
-- **PowerBIConnectorTool**: Standalone Power BI extraction tool
 
-The Measure Conversion Pipeline combines all these capabilities into a single, unified interface.
+### Power BI Migration Suite
+- **Measure Conversion Pipeline** (ID: 74): Convert DAX measures to SQL/UC Metrics (this tool)
+- **M-Query Conversion Pipeline** (ID: 75): Convert M-Query table sources to SQL views - [Details](./powerbi-tools-guide.md)
+- **Power BI Relationships Tool** (ID: 70): Extract relationships as FK constraints - [Details](./powerbi-tools-guide.md)
+- **Power BI Hierarchies Tool** (ID: 76): Extract hierarchies as dimension views - [Details](./powerbi-tools-guide.md)
+
+### Service Principal Requirements
+
+Different tools require different Service Principal configurations:
+
+| Tool | SVP Type Required |
+|------|-------------------|
+| Measure Conversion Pipeline | Non-Admin API SVP |
+| M-Query Conversion Pipeline | **Admin API SVP** |
+| Power BI Relationships Tool | Non-Admin API SVP |
+| Power BI Hierarchies Tool | Non-Admin API SVP |
+
+For detailed SVP setup instructions, see [Power BI Tools Guide](./powerbi-tools-guide.md).
