@@ -56,6 +56,7 @@ class TableColumn:
     column_type: str = "Data"  # Data, Calculated, etc.
     description: Optional[str] = None
     format_string: Optional[str] = None
+    expression: Optional[str] = None  # DAX expression for calculated columns
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "TableColumn":
@@ -66,8 +67,14 @@ class TableColumn:
             is_hidden=data.get("isHidden", False),
             column_type=data.get("columnType", "Data"),
             description=data.get("description"),
-            format_string=data.get("formatString")
+            format_string=data.get("formatString"),
+            expression=data.get("expression")  # Capture DAX for calculated columns
         )
+
+    @property
+    def is_calculated(self) -> bool:
+        """Check if this is a calculated column"""
+        return self.column_type == "Calculated" and self.expression is not None
 
 
 @dataclass
@@ -214,7 +221,7 @@ class SemanticModel:
     expressions: List[Dict[str, Any]] = field(default_factory=list)
 
     @classmethod
-    def from_scan_result(cls, dataset_data: Dict[str, Any], workspace_id: str = None, workspace_name: str = None) -> "SemanticModel":
+    def from_scan_result(cls, dataset_data: Dict[str, Any], workspace_id: Optional[str] = None, workspace_name: Optional[str] = None) -> "SemanticModel":
         """Create SemanticModel from Admin API scan result"""
         tables = [
             PowerBITable.from_dict(t)
@@ -240,6 +247,18 @@ class SemanticModel:
 
 
 @dataclass
+class CalculatedColumnResult:
+    """Result from calculated column DAX to SQL conversion"""
+    column_name: str
+    original_dax: str
+    sql_expression: Optional[str] = None
+    data_type: Optional[str] = None
+    success: bool = False
+    error_message: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@dataclass
 class ConversionResult:
     """Result from M-Query to SQL conversion"""
     table_name: str
@@ -260,6 +279,9 @@ class ConversionResult:
     parameters: List[Dict[str, str]] = field(default_factory=list)
     transformations: List[Dict[str, Any]] = field(default_factory=list)
 
+    # Calculated columns (DAX expressions converted to SQL)
+    calculated_columns: List[CalculatedColumnResult] = field(default_factory=list)
+
     # LLM metadata
     llm_explanation: Optional[str] = None
     llm_model: Optional[str] = None
@@ -270,7 +292,7 @@ class ConversionResult:
     notes: Optional[str] = None
 
     # Source info
-    source_connection: Optional[Dict[str, str]] = None
+    source_connection: Optional[Dict[str, Any]] = None
 
 
 @dataclass

@@ -276,7 +276,8 @@ class MQueryConnector(BaseInboundConnector):
     async def convert_table(
         self,
         table: PowerBITable,
-        use_llm: bool = True
+        use_llm: bool = True,
+        include_calculated_columns: bool = True
     ) -> List[ConversionResult]:
         """
         Convert a single table's M-Query expressions to SQL.
@@ -284,6 +285,7 @@ class MQueryConnector(BaseInboundConnector):
         Args:
             table: PowerBITable with parsed expressions
             use_llm: Whether to use LLM for complex conversions
+            include_calculated_columns: Whether to convert and include calculated columns
 
         Returns:
             List of ConversionResult objects
@@ -295,13 +297,15 @@ class MQueryConnector(BaseInboundConnector):
             table=table,
             target_catalog=self.config.target_catalog,
             target_schema=self.config.target_schema,
-            use_llm=use_llm and bool(self.config.llm_workspace_url)
+            use_llm=use_llm and bool(self.config.llm_workspace_url),
+            include_calculated_columns=include_calculated_columns
         )
 
     async def convert_all_tables(
         self,
         model: Optional[SemanticModel] = None,
-        use_llm: bool = True
+        use_llm: bool = True,
+        include_calculated_columns: bool = True
     ) -> Dict[str, List[ConversionResult]]:
         """
         Convert all tables in a semantic model.
@@ -309,6 +313,7 @@ class MQueryConnector(BaseInboundConnector):
         Args:
             model: Specific model to convert (uses first if not specified)
             use_llm: Whether to use LLM for complex conversions
+            include_calculated_columns: Whether to convert and include calculated columns
 
         Returns:
             Dict mapping table names to ConversionResult lists
@@ -327,7 +332,11 @@ class MQueryConnector(BaseInboundConnector):
                     logger.info(f"Skipping static table '{table.name}'")
                     continue
 
-            table_results = await self.convert_table(table, use_llm=use_llm)
+            table_results = await self.convert_table(
+                table,
+                use_llm=use_llm,
+                include_calculated_columns=include_calculated_columns
+            )
             results[table.name] = table_results
 
         return results
@@ -389,6 +398,39 @@ class MQueryConnector(BaseInboundConnector):
 
         return relationships
 
+    def get_calculated_columns(
+        self,
+        model: Optional[SemanticModel] = None
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Get calculated columns from all tables in a semantic model.
+
+        Args:
+            model: Specific model (uses first if not specified)
+
+        Returns:
+            Dict mapping table names to lists of calculated column info
+        """
+        target_model = model or (self._semantic_models[0] if self._semantic_models else None)
+        if not target_model:
+            return {}
+
+        result = {}
+        for table in target_model.tables:
+            calculated_cols = [col for col in table.columns if col.is_calculated]
+            if calculated_cols:
+                result[table.name] = [
+                    {
+                        "name": col.name,
+                        "data_type": col.data_type.value,
+                        "expression": col.expression,
+                        "is_hidden": col.is_hidden
+                    }
+                    for col in calculated_cols
+                ]
+
+        return result
+
     def generate_summary_report(self) -> Dict[str, Any]:
         """
         Generate a summary report of extracted data.
@@ -401,13 +443,25 @@ class MQueryConnector(BaseInboundConnector):
 
         total_tables = 0
         total_measures = 0
+        total_calculated_columns = 0
         expression_types = {}
         tables_by_type = {}
+        tables_with_calculated_columns = []
 
         for model in self._semantic_models:
             for table in model.tables:
                 total_tables += 1
                 total_measures += len(table.measures)
+
+                # Count calculated columns
+                calc_cols = [col for col in table.columns if col.is_calculated]
+                if calc_cols:
+                    total_calculated_columns += len(calc_cols)
+                    tables_with_calculated_columns.append({
+                        "table": table.name,
+                        "calculated_column_count": len(calc_cols),
+                        "columns": [col.name for col in calc_cols]
+                    })
 
                 for expr in table.source_expressions:
                     expr_type = expr.expression_type.value
@@ -423,6 +477,8 @@ class MQueryConnector(BaseInboundConnector):
             "model_count": len(self._semantic_models),
             "total_tables": total_tables,
             "total_measures": total_measures,
+            "total_calculated_columns": total_calculated_columns,
+            "tables_with_calculated_columns": tables_with_calculated_columns,
             "expression_types": expression_types,
             "tables_by_type": tables_by_type,
             "relationships_count": sum(
