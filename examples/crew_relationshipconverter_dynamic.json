@@ -105,7 +105,7 @@
         "goal": "Translate given mquery definitions efficiently into the requested SQL syntax.\n\nYou will make sure that the action run will only trigger 1 time and not more.",
         "backstory": "Experienced PBI and SQL Engineer with 10+ years of experience in managing, translating, and optimizing PBI semantic rleationships and translating them into SQL for Databricks.",
         "tools": [
-          "74"
+          "75"
         ],
         "tool_configs": {},
         "agentId": "1c4fa8af-01de-4cd6-b539-b48cbcee57dd",

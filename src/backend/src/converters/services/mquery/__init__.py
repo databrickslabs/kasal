@@ -60,7 +60,10 @@ from .models import (
     ConversionResult,
     CalculatedColumnResult,
     ScanStatus,
-    MQueryConversionConfig
+    MQueryConversionConfig,
+    # Hierarchy models (kept for use by external tools like PowerBIHierarchiesTool)
+    Hierarchy,
+    HierarchyLevel,
 )
 
 from .scanner import PowerBIAdminScanner
@@ -91,6 +94,8 @@ __all__ = [
     "MQueryExpression",
     "PowerBITable",
     "TableRelationship",
+    "Hierarchy",
+    "HierarchyLevel",
     "SemanticModel",
 
     # Models - Results

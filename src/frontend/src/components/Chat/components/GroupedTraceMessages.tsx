@@ -14,7 +14,8 @@ import {
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { ChatMessage } from '../types';
-import { stripAnsiEscapes } from '../utils/textProcessing';
+import { stripAnsiEscapes, isMarkdown } from '../utils/textProcessing';
+import { MessageContent } from './MessageRenderer';
 
 interface GroupedTraceMessagesProps {
   messages: ChatMessage[];
@@ -172,12 +173,43 @@ export const GroupedTraceMessages: React.FC<GroupedTraceMessagesProps> = ({ mess
                     );
                   }
                 } catch (e) {
-                  // Not JSON, render as regular content in light grey
-                  contentElement = (
-                    <Box sx={{ whiteSpace: 'pre-wrap', color: 'rgba(0, 0, 0, 0.4)' }}>
-                      {processedContent}
-                    </Box>
-                  );
+                  // Not JSON - check if it's markdown (has code blocks, headers, etc.)
+                  if (isMarkdown(processedContent)) {
+                    // Render markdown content with proper formatting
+                    contentElement = (
+                      <Box sx={{
+                        color: 'text.primary',
+                        '& pre': {
+                          backgroundColor: 'rgba(0, 0, 0, 0.05)',
+                          padding: '12px',
+                          borderRadius: '4px',
+                          overflow: 'auto',
+                          margin: '8px 0',
+                        },
+                        '& code': {
+                          fontFamily: 'monospace',
+                          fontSize: '0.875rem',
+                        },
+                        '& h1, & h2, & h3, & h4': {
+                          marginTop: '16px',
+                          marginBottom: '8px',
+                          fontWeight: 600,
+                        },
+                        '& p': {
+                          margin: '8px 0',
+                        },
+                      }}>
+                        <MessageContent content={processedContent} />
+                      </Box>
+                    );
+                  } else {
+                    // Regular text content in light grey
+                    contentElement = (
+                      <Box sx={{ whiteSpace: 'pre-wrap', color: 'rgba(0, 0, 0, 0.4)' }}>
+                        {processedContent}
+                      </Box>
+                    );
+                  }
                 }
                 
                 return (
