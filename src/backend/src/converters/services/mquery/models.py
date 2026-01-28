@@ -204,6 +204,63 @@ class TableRelationship:
 
 
 @dataclass
+class HierarchyLevel:
+    """Represents a single level in a Power BI hierarchy"""
+    name: str
+    ordinal: int  # Position in the hierarchy (0 = top level)
+    column_name: str  # The column this level is based on
+    description: Optional[str] = None
+
+    @classmethod
+    def from_info_levels_row(cls, row: Dict[str, Any]) -> "HierarchyLevel":
+        """Create HierarchyLevel from INFO.LEVELS() row"""
+        return cls(
+            name=row.get("[Name]", ""),
+            ordinal=row.get("[Ordinal]", 0),
+            column_name=row.get("[Column]", "") or row.get("[ColumnName]", ""),
+            description=row.get("[Description]")
+        )
+
+
+@dataclass
+class Hierarchy:
+    """Represents a Power BI hierarchy with its levels"""
+    name: str
+    table_name: str
+    levels: List[HierarchyLevel]
+    description: Optional[str] = None
+    is_hidden: bool = False
+
+    @classmethod
+    def from_info_hierarchies_row(
+        cls,
+        row: Dict[str, Any],
+        levels: Optional[List[HierarchyLevel]] = None
+    ) -> "Hierarchy":
+        """Create Hierarchy from INFO.HIERARCHIES() row"""
+        return cls(
+            name=row.get("[Name]", ""),
+            table_name=row.get("[TableName]", "") or row.get("[Table]", ""),
+            levels=levels or [],
+            description=row.get("[Description]"),
+            is_hidden=row.get("[IsHidden]", False)
+        )
+
+    def get_columns_ordered(self) -> List[str]:
+        """Get column names ordered by hierarchy level (top to bottom)"""
+        sorted_levels = sorted(self.levels, key=lambda x: x.ordinal)
+        return [level.column_name for level in sorted_levels]
+
+    def to_sql_comment(self) -> str:
+        """Generate SQL comment documenting the hierarchy"""
+        level_info = " → ".join([
+            f"{level.name} ({level.column_name})"
+            for level in sorted(self.levels, key=lambda x: x.ordinal)
+        ])
+        return f"-- Hierarchy: {self.name} on table {self.table_name}\n-- Levels: {level_info}"
+
+
+@dataclass
 class SemanticModel:
     """Represents a complete Power BI semantic model"""
     id: str

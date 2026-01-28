@@ -29,6 +29,7 @@ tools_data = [
     (73, "Measure Conversion Pipeline", "Universal measure conversion pipeline for converting business metrics between different BI platforms and formats. Supports multiple inbound connectors (Power BI, YAML) and outbound formats (DAX, SQL, UC Metrics, YAML). Perfect for migrating Power BI measures to Databricks SQL, generating UC Metrics from YAML definitions, or converting between different BI platforms. Configure the source format (FROM) and target format (TO) along with authentication credentials in the task configuration. Supports both static configuration (values entered in UI) and dynamic mode (values provided at runtime via execution inputs).", "transform"),
     (74, "M-Query Conversion Pipeline", "Extracts M-Query (Power Query) expressions from Power BI semantic models using the Admin API and converts them to Databricks SQL. This tool scans Power BI workspaces to extract table definitions including Value.NativeQuery (embedded SQL), DatabricksMultiCloud.Catalogs connections, Sql.Database connections, and various Table.* transformations. It generates CREATE VIEW statements for Unity Catalog. Supports both rule-based conversion for simple expressions and LLM-powered conversion for complex M-Query transformations. Perfect for migrating Power BI data models to Databricks, extracting SQL logic for documentation, or analyzing M-Query patterns for migration planning. Requires Service Principal with Power BI Admin API permissions.", "transform"),
     (75, "Power BI Relationships Tool", "Extracts relationships from Power BI semantic models using the Execute Queries API with INFO.VIEW.RELATIONSHIPS() DAX function. Generates Unity Catalog Foreign Key constraint statements (NOT ENFORCED). IMPORTANT: Requires a Service Principal that is a WORKSPACE MEMBER with dataset read permissions - this is different from the Admin API which requires admin-level permissions. Perfect for migrating Power BI relationships to Unity Catalog as informational FKs, documenting data model relationships, or generating DDL for Databricks tables.", "transform"),
+    (76, "Power BI Hierarchies Tool", "Extracts hierarchies from Microsoft Fabric semantic models using the Fabric API getDefinition endpoint (TMDL format). Parses TMDL to extract hierarchy definitions and generates Unity Catalog dimension views with hierarchy_path columns plus metadata table DDL. IMPORTANT: Requires a Service Principal with SemanticModel.ReadWrite.All permissions and works with Fabric workspaces only (not legacy Power BI Service). Perfect for migrating Power BI hierarchies to Databricks as dimension views, documenting drill-down structures, or generating DDL for dimension tables.", "transform"),
 ]
 
 def get_tool_configs():
@@ -166,7 +167,24 @@ def get_tool_configs():
             # Output Options
             "include_inactive": False,
             "skip_system_tables": True
-        }   # Power BI Relationships Tool
+        },  # Power BI Relationships Tool
+        "76": {
+            "result_as_answer": True,
+            "mode": "static",  # Configuration mode: "static" (UI-configured) or "dynamic" (runtime inputs with {placeholders})
+            # Power BI / Fabric Configuration (supports {placeholder} syntax in dynamic mode)
+            "workspace_id": "",
+            "dataset_id": "",
+            # Service Principal authentication (requires SemanticModel.ReadWrite.All)
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
+            # Unity Catalog Target (supports {placeholder} syntax in dynamic mode)
+            "target_catalog": "main",
+            "target_schema": "default",
+            # Output Options
+            "skip_system_tables": True,
+            "include_hidden": False
+        }   # Power BI Hierarchies Tool
     }
 
 async def seed_async():
@@ -184,7 +202,7 @@ async def seed_async():
     tools_error = 0
 
     # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75]
+    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76]
 
     for tool_id, title, description, icon in tools_data:
         try:
@@ -247,7 +265,7 @@ def seed_sync():
     tools_error = 0
 
     # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75]
+    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76]
 
     for tool_id, title, description, icon in tools_data:
         try:

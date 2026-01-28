@@ -49,6 +49,7 @@ import { PowerBIConfigSelector, PowerBIConfig } from '../Common/PowerBIConfigSel
 import { MeasureConverterConfigSelector, MeasureConverterConfig } from '../Common/MeasureConverterConfigSelector';
 import { MQueryConverterConfigSelector, MQueryConverterConfig } from '../Common/MQueryConverterConfigSelector';
 import { PowerBIRelationshipsConfigSelector, PowerBIRelationshipsConfig } from '../Common/PowerBIRelationshipsConfigSelector';
+import { PowerBIHierarchiesConfigSelector, PowerBIHierarchiesConfig } from '../Common/PowerBIHierarchiesConfigSelector';
 import { PerplexityConfig, SerperConfig } from '../../types/config';
 import { type LLMGuardrailConfig } from '../../types/task';
 import { ModelService } from '../../api/ModelService';
@@ -137,6 +138,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const [measureConverterConfig, setMeasureConverterConfig] = useState<MeasureConverterConfig>({});
   const [mQueryConverterConfig, setMQueryConverterConfig] = useState<MQueryConverterConfig>({});
   const [powerBIRelationshipsConfig, setPowerBIRelationshipsConfig] = useState<PowerBIRelationshipsConfig>({});
+  const [powerBIHierarchiesConfig, setPowerBIHierarchiesConfig] = useState<PowerBIHierarchiesConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
   const [showBestPractices, setShowBestPractices] = useState(false);
@@ -217,6 +219,11 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       // Check for Power BI Relationships Tool config
       if (initialData.tool_configs['Power BI Relationships Tool']) {
         setPowerBIRelationshipsConfig(initialData.tool_configs['Power BI Relationships Tool'] as PowerBIRelationshipsConfig);
+      }
+
+      // Check for Power BI Hierarchies Tool config
+      if (initialData.tool_configs['Power BI Hierarchies Tool']) {
+        setPowerBIHierarchiesConfig(initialData.tool_configs['Power BI Hierarchies Tool'] as PowerBIHierarchiesConfig);
       }
 
       // Check for MCP_SERVERS config
@@ -587,6 +594,31 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
         })) {
           // Remove Power BI Relationships Tool config if tool not selected
           delete updatedToolConfigs['Power BI Relationships Tool'];
+        }
+
+        // Handle Power BI Hierarchies Tool config
+        if (powerBIHierarchiesConfig && Object.keys(powerBIHierarchiesConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Hierarchies Tool';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            'Power BI Hierarchies Tool': powerBIHierarchiesConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Hierarchies Tool';
+        })) {
+          // Remove Power BI Hierarchies Tool config if tool not selected
+          delete updatedToolConfigs['Power BI Hierarchies Tool'];
         }
 
         // Handle MCP_SERVERS config - use dict format to match schema
@@ -1346,6 +1378,40 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                       setToolConfigs(prev => ({
                         ...prev,
                         'Power BI Relationships Tool': config
+                      }));
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+
+            {/* Power BI Hierarchies Tool Configuration - Show only when tool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'Power BI Hierarchies Tool';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  Power BI Hierarchies Tool Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(156, 39, 176, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(156, 39, 176, 0.2)'
+                }}>
+                  <PowerBIHierarchiesConfigSelector
+                    value={powerBIHierarchiesConfig}
+                    onChange={(config) => {
+                      setPowerBIHierarchiesConfig(config);
+                      // Update tool configs when configuration changes
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'Power BI Hierarchies Tool': config
                       }));
                     }}
                   />
