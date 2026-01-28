@@ -216,3 +216,281 @@ class MQueryParser:
             "warehouse_path": expression.warehouse_path,
             "enable_folding": expression.enable_folding
         }
+
+
+class TableFromRowsConverter:
+    """
+    Separate converter for Table.FromRows M-Query expressions.
+
+    Converts static data tables defined in Power BI M-Query to SQL VALUES statements.
+    This is a standalone converter that doesn't affect the main LLM-based conversion flow.
+
+    Example M-Query:
+        let
+          Source = Table.FromRows({
+            {"value1", "value2"},
+            {"value3", "value4"}
+          },
+          type table [Column1 = text, Column2 = text])
+        in Source
+
+    Converts to SQL:
+        CREATE OR REPLACE VIEW catalog.schema.table_name AS
+        SELECT * FROM VALUES
+          ('value1', 'value2'),
+          ('value3', 'value4')
+        AS t(Column1, Column2);
+    """
+
+    def __init__(self, target_catalog: str = "main", target_schema: str = "default"):
+        """
+        Initialize the Table.FromRows converter.
+
+        Args:
+            target_catalog: Target Unity Catalog catalog name
+            target_schema: Target Unity Catalog schema name
+        """
+        self.target_catalog = target_catalog
+        self.target_schema = target_schema
+
+    def is_table_from_rows(self, expression: str) -> bool:
+        """Check if expression contains Table.FromRows."""
+        return bool(re.search(r"Table\.FromRows\s*\(", expression, re.IGNORECASE))
+
+    def extract_rows(self, expression: str) -> list:
+        """
+        Extract row data from Table.FromRows expression.
+
+        Args:
+            expression: M-Query expression containing Table.FromRows
+
+        Returns:
+            List of row tuples
+        """
+        rows = []
+
+        # Find the rows section: Table.FromRows( { {row1}, {row2}, ... }, type table [...] )
+        # Match the content between Table.FromRows( { and }, type table
+        rows_match = re.search(
+            r"Table\.FromRows\s*\(\s*\{\s*((?:\{[^}]*\}\s*,?\s*)+)\s*\}",
+            expression,
+            re.IGNORECASE | re.DOTALL
+        )
+
+        if not rows_match:
+            logger.warning("[TableFromRows] Could not extract rows from expression")
+            return rows
+
+        rows_content = rows_match.group(1)
+
+        # Extract individual row tuples: {"value1", "value2", ...}
+        row_pattern = re.compile(r"\{([^}]+)\}")
+        for row_match in row_pattern.finditer(rows_content):
+            row_content = row_match.group(1)
+
+            # Parse values - handle quoted strings and unquoted values
+            values = []
+            # Match quoted strings or unquoted values
+            value_pattern = re.compile(r'"([^"]*)"|([^,"\s]+)')
+            for value_match in value_pattern.finditer(row_content):
+                if value_match.group(1) is not None:
+                    values.append(value_match.group(1))
+                elif value_match.group(2) is not None:
+                    values.append(value_match.group(2))
+
+            if values:
+                rows.append(tuple(values))
+
+        logger.info(f"[TableFromRows] Extracted {len(rows)} rows")
+        return rows
+
+    def extract_column_definitions(self, expression: str) -> list:
+        """
+        Extract column names and types from type table [...] definition.
+
+        Args:
+            expression: M-Query expression
+
+        Returns:
+            List of (column_name, column_type) tuples
+        """
+        columns = []
+
+        # Find type table [ Column1 = text, Column2 = number, ... ]
+        type_table_match = re.search(
+            r"type\s+table\s*\[\s*((?:[^\]]+))\s*\]",
+            expression,
+            re.IGNORECASE | re.DOTALL
+        )
+
+        if not type_table_match:
+            logger.warning("[TableFromRows] Could not find type table definition")
+            return columns
+
+        type_content = type_table_match.group(1)
+
+        # Parse column definitions: ColumnName = type
+        column_pattern = re.compile(r"(\w+)\s*=\s*(text|number|Int64\.Type|type\s+\w+|\w+)")
+        for col_match in column_pattern.finditer(type_content):
+            col_name = col_match.group(1)
+            col_type = col_match.group(2).strip()
+            columns.append((col_name, col_type))
+
+        logger.info(f"[TableFromRows] Extracted {len(columns)} column definitions")
+        return columns
+
+    def mquery_type_to_sql(self, mquery_type: str) -> str:
+        """
+        Convert M-Query type to SQL type.
+
+        Args:
+            mquery_type: M-Query type string
+
+        Returns:
+            SQL type string
+        """
+        type_map = {
+            "text": "STRING",
+            "number": "DOUBLE",
+            "int64.type": "BIGINT",
+            "type number": "DOUBLE",
+            "type text": "STRING",
+            "type date": "DATE",
+            "type datetime": "TIMESTAMP",
+            "type datetimezone": "TIMESTAMP",
+            "type time": "STRING",
+            "type duration": "STRING",
+            "type logical": "BOOLEAN",
+            "type binary": "BINARY",
+        }
+        return type_map.get(mquery_type.lower(), "STRING")
+
+    def convert_to_sql(
+        self,
+        expression: str,
+        table_name: str,
+        columns_from_schema: Optional[list] = None
+    ) -> Optional[str]:
+        """
+        Convert Table.FromRows M-Query to CREATE VIEW with VALUES statement.
+
+        Args:
+            expression: M-Query expression containing Table.FromRows
+            table_name: Name for the output view
+            columns_from_schema: Optional list of column dicts from API schema
+                                (fallback if type table parsing fails)
+
+        Returns:
+            SQL CREATE VIEW statement or None if conversion fails
+        """
+        if not self.is_table_from_rows(expression):
+            logger.info(f"[TableFromRows] Expression is not Table.FromRows, skipping")
+            return None
+
+        # Extract rows
+        rows = self.extract_rows(expression)
+        if not rows:
+            logger.warning(f"[TableFromRows] No rows extracted from {table_name}")
+            return None
+
+        # Extract column definitions from type table
+        columns = self.extract_column_definitions(expression)
+
+        # Fallback to schema columns if type table parsing fails
+        if not columns and columns_from_schema:
+            columns = [
+                (col.get("name", f"col{i}"), col.get("dataType", "String"))
+                for i, col in enumerate(columns_from_schema)
+            ]
+            logger.info(f"[TableFromRows] Using schema columns as fallback: {len(columns)} columns")
+
+        if not columns:
+            logger.warning(f"[TableFromRows] No column definitions found for {table_name}")
+            # Try to infer column count from first row
+            if rows:
+                columns = [(f"col{i}", "text") for i in range(len(rows[0]))]
+                logger.info(f"[TableFromRows] Inferred {len(columns)} columns from row data")
+
+        # Build column names list
+        column_names = [col[0] for col in columns]
+
+        # Sanitize table name
+        safe_table_name = re.sub(r"[^a-zA-Z0-9_]", "_", table_name.lower())
+
+        # Build VALUES clause
+        values_rows = []
+        for row in rows:
+            # Quote string values, handle NULLs
+            formatted_values = []
+            for val in row:
+                if val is None or val.lower() == "null":
+                    formatted_values.append("NULL")
+                else:
+                    # Escape single quotes in values
+                    escaped_val = val.replace("'", "''")
+                    formatted_values.append(f"'{escaped_val}'")
+            values_rows.append(f"  ({', '.join(formatted_values)})")
+
+        # Build the SQL - join rows with comma and newline
+        values_str = ',\n'.join(values_rows)
+        sql = f"""CREATE OR REPLACE VIEW {self.target_catalog}.{self.target_schema}.{safe_table_name} AS
+SELECT * FROM VALUES
+{values_str}
+AS t({', '.join(column_names)});"""
+
+        logger.info(f"[TableFromRows] Generated SQL for {table_name}: {len(rows)} rows, {len(columns)} columns")
+        return sql
+
+    def convert_table(
+        self,
+        table_data: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Convert a Power BI table with Table.FromRows source to SQL.
+
+        Args:
+            table_data: Table dict from Power BI API containing:
+                - name: Table name
+                - columns: List of column definitions
+                - source: List with expression dict
+
+        Returns:
+            Dict with table_name, sql, row_count, column_count or None
+        """
+        table_name = table_data.get("name", "unknown_table")
+
+        # Get source expression
+        sources = table_data.get("source", [])
+        if not sources:
+            logger.info(f"[TableFromRows] No source expressions for {table_name}")
+            return None
+
+        expression = sources[0].get("expression", "")
+        if not expression:
+            logger.info(f"[TableFromRows] Empty expression for {table_name}")
+            return None
+
+        # Check if it's Table.FromRows
+        if not self.is_table_from_rows(expression):
+            return None
+
+        # Get column schema as fallback
+        columns_from_schema = table_data.get("columns", [])
+
+        # Convert to SQL
+        sql = self.convert_to_sql(expression, table_name, columns_from_schema)
+
+        if not sql:
+            return None
+
+        # Count rows for reporting
+        rows = self.extract_rows(expression)
+        columns = self.extract_column_definitions(expression) or columns_from_schema
+
+        return {
+            "table_name": table_name,
+            "sql": sql,
+            "row_count": len(rows),
+            "column_count": len(columns),
+            "expression_type": "table_from_rows"
+        }
