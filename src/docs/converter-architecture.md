@@ -1016,6 +1016,8 @@ GET /api/converters/discovery/health
 
 ## 🚦 Current Status
 
+### DAX Measure Converters
+
 | Connector | Type | Status | Version |
 |-----------|------|--------|---------|
 | Power BI | Inbound | ✅ Active | 1.0.0 |
@@ -1026,6 +1028,19 @@ GET /api/converters/discovery/health
 | SQL | Outbound | ✅ Active | 1.0.0 |
 | UC Metrics | Outbound | ✅ Active | 1.0.0 |
 | YAML | Outbound | ✅ Active | 1.0.0 |
+
+### Power BI Migration Tools
+
+For complete Power BI to Databricks migration, additional tools are available:
+
+| Tool | ID | Purpose | Status |
+|------|-----|---------|--------|
+| Measure Conversion Pipeline | 74 | DAX measures → SQL/UC Metrics | ✅ Active |
+| M-Query Conversion Pipeline | 75 | M-Query table sources → SQL views | ✅ Active |
+| Power BI Relationships Tool | 70 | Relationships → FK constraints | ✅ Active |
+| Power BI Hierarchies Tool | 76 | Hierarchies → Dimension views | ✅ Active |
+
+See [Power BI Tools Guide](./powerbi-tools-guide.md) for detailed documentation on each tool.
 
 ---
 

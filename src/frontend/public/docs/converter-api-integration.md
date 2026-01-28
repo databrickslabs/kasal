@@ -972,3 +972,24 @@ requests.post(f"{CONVERTER_API}/configs/{config['id']}/use")
 - ✅ Reusable configurations across crews
 - ✅ Analytics on conversion patterns
 - ✅ Production-ready measure migration workflows
+
+---
+
+## Related Documentation
+
+### Complete Power BI Migration Suite
+
+This document covers the **Measure Conversion Pipeline** (DAX measures). For complete Power BI to Databricks migration, see:
+
+| Tool | Purpose | Documentation |
+|------|---------|---------------|
+| **Measure Conversion Pipeline** | DAX measures → SQL/UC Metrics | This document |
+| **M-Query Conversion Pipeline** | M-Query table sources → SQL views | [Power BI Tools Guide](./powerbi-tools-guide.md) |
+| **Power BI Relationships Tool** | Relationships → FK constraints | [Power BI Tools Guide](./powerbi-tools-guide.md) |
+| **Power BI Hierarchies Tool** | Hierarchies → Dimension views | [Power BI Tools Guide](./powerbi-tools-guide.md) |
+
+The [Power BI Tools Guide](./powerbi-tools-guide.md) also covers:
+- Service Principal configuration (Admin API vs Non-Admin API)
+- Row-Level Security (RLS) considerations
+- When to use Service Account vs Service Principal
+- Troubleshooting common issues

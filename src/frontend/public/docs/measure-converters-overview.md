@@ -4,6 +4,20 @@
 
 The Kasal Measure Conversion system enables seamless migration and transformation of business metrics between different BI platforms and formats. This system provides both **specialized converters** for specific workflows and a **universal pipeline** for flexible conversions.
 
+> **Note**: This document covers **DAX Measure conversion** (transforming Power BI measures to SQL/UC Metrics).
+> For **M-Query table source conversion** and other Power BI migration tools, see the [Power BI Tools Guide](./powerbi-tools-guide.md).
+
+## Power BI Migration Tools Overview
+
+Kasal provides a complete suite of tools for Power BI to Databricks migration:
+
+| Tool | ID | Purpose | Documentation |
+|------|-----|---------|---------------|
+| **Measure Conversion Pipeline** | 74 | Convert DAX measures to SQL/UC Metrics | This document |
+| **M-Query Conversion Pipeline** | 75 | Convert M-Query table sources to SQL views | [Power BI Tools Guide](./powerbi-tools-guide.md) |
+| **Power BI Relationships Tool** | 70 | Extract relationships as FK constraints | [Power BI Tools Guide](./powerbi-tools-guide.md) |
+| **Power BI Hierarchies Tool** | 76 | Extract hierarchies as dimension views | [Power BI Tools Guide](./powerbi-tools-guide.md) |
+
 ## Architecture
 
 ### Three-Layer Design
