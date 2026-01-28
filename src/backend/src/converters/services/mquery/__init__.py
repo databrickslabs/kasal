@@ -58,6 +58,7 @@ from .models import (
     TableRelationship,
     SemanticModel,
     ConversionResult,
+    CalculatedColumnResult,
     ScanStatus,
     MQueryConversionConfig
 )
@@ -94,5 +95,6 @@ __all__ = [
 
     # Models - Results
     "ConversionResult",
+    "CalculatedColumnResult",
     "ScanStatus",
 ]
