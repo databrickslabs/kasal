@@ -364,11 +364,16 @@ class ScanStatus:
 @dataclass
 class MQueryConversionConfig:
     """Configuration for M-Query conversion"""
-    # Power BI Admin API connection (requires Admin-level Service Principal)
-    tenant_id: str
-    client_id: str
-    client_secret: str
-    workspace_id: str
+    # Power BI Admin API connection
+    # Option 1: Service Principal (requires Admin-level permissions)
+    tenant_id: Optional[str] = None
+    client_id: Optional[str] = None
+    client_secret: Optional[str] = None
+    # Option 2: User OAuth token (alternative to Service Principal)
+    access_token: Optional[str] = None
+
+    # Required
+    workspace_id: str = ""
     dataset_id: Optional[str] = None  # If None, scan all datasets
 
     # LLM configuration

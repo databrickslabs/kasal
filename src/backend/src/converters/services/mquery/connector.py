@@ -78,7 +78,8 @@ class MQueryConnector(BaseInboundConnector):
             access_token: Optional pre-obtained access token
         """
         self.config = config
-        self._access_token = access_token
+        # Use access_token from config if provided, otherwise from constructor
+        self._access_token = access_token or config.access_token
         self._connected = False
 
         # Initialize services

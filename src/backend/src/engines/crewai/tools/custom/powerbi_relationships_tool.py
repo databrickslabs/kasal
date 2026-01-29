@@ -51,6 +51,12 @@ class PowerBIRelationshipsSchema(BaseModel):
         description="[Auth] Client secret (required)"
     )
 
+    # User OAuth token (alternative to Service Principal)
+    access_token: Optional[str] = Field(
+        None,
+        description="[Auth] Pre-obtained OAuth access token (alternative to Service Principal credentials). Use this when authenticating as a user instead of Service Principal."
+    )
+
     # ===== UNITY CATALOG TARGET CONFIGURATION =====
     target_catalog: str = Field(
         "main",
@@ -140,6 +146,8 @@ class PowerBIRelationshipsTool(BaseTool):
             "tenant_id": kwargs.get("tenant_id"),
             "client_id": kwargs.get("client_id"),
             "client_secret": kwargs.get("client_secret"),
+            # User OAuth token (alternative to Service Principal)
+            "access_token": kwargs.get("access_token"),
             # Unity Catalog Target
             "target_catalog": kwargs.get("target_catalog", "main"),
             "target_schema": kwargs.get("target_schema", "default"),
@@ -266,14 +274,23 @@ class PowerBIRelationshipsTool(BaseTool):
             tenant_id = merged_kwargs.get("tenant_id")
             client_id = merged_kwargs.get("client_id")
             client_secret = merged_kwargs.get("client_secret")
+            access_token = merged_kwargs.get("access_token")
 
             # Validate required parameters
             if not workspace_id:
                 return "Error: workspace_id is required"
             if not dataset_id:
                 return "Error: dataset_id is required"
-            if not all([tenant_id, client_id, client_secret]):
-                return "Error: Service Principal credentials required (tenant_id, client_id, client_secret)"
+
+            # Check authentication - need either Service Principal OR access_token
+            has_spn_auth = all([tenant_id, client_id, client_secret])
+            has_token_auth = bool(access_token)
+
+            if not has_spn_auth and not has_token_auth:
+                return ("Error: Authentication required.\n"
+                        "Provide either:\n"
+                        "  - Service Principal: tenant_id + client_id + client_secret\n"
+                        "  - User OAuth: access_token")
 
             logger.info(f"[PowerBIRelationshipsTool] Extracting relationships from dataset {dataset_id}")
 
@@ -281,9 +298,10 @@ class PowerBIRelationshipsTool(BaseTool):
             result = self._run_sync(self._extract_relationships(
                 workspace_id=workspace_id,
                 dataset_id=dataset_id,
-                tenant_id=tenant_id,
-                client_id=client_id,
-                client_secret=client_secret,
+                tenant_id=tenant_id if has_spn_auth else None,
+                client_id=client_id if has_spn_auth else None,
+                client_secret=client_secret if has_spn_auth else None,
+                access_token=access_token if has_token_auth else None,
                 target_catalog=merged_kwargs.get("target_catalog", "main"),
                 target_schema=merged_kwargs.get("target_schema", "default"),
                 include_inactive=merged_kwargs.get("include_inactive", False),
@@ -316,9 +334,10 @@ class PowerBIRelationshipsTool(BaseTool):
         self,
         workspace_id: str,
         dataset_id: str,
-        tenant_id: str,
-        client_id: str,
-        client_secret: str,
+        tenant_id: Optional[str],
+        client_id: Optional[str],
+        client_secret: Optional[str],
+        access_token: Optional[str],
         target_catalog: str,
         target_schema: str,
         include_inactive: bool,
@@ -326,8 +345,11 @@ class PowerBIRelationshipsTool(BaseTool):
     ) -> str:
         """Extract relationships and format output."""
 
-        # Get access token
-        token = await self._get_access_token(tenant_id, client_id, client_secret)
+        # Get access token - use provided token or obtain via SPN
+        if access_token:
+            token = access_token
+        else:
+            token = await self._get_access_token(tenant_id, client_id, client_secret)
 
         # Execute INFO.VIEW.RELATIONSHIPS() query
         relationships = await self._fetch_relationships(
@@ -369,9 +391,9 @@ class PowerBIRelationshipsTool(BaseTool):
 
     async def _get_access_token(
         self,
-        tenant_id: str,
-        client_id: str,
-        client_secret: str
+        tenant_id: Optional[str],
+        client_id: Optional[str],
+        client_secret: Optional[str]
     ) -> str:
         """Get OAuth access token using Service Principal."""
         url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"

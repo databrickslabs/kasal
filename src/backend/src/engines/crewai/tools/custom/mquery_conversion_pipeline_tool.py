@@ -78,6 +78,12 @@ class MqueryConversionPipelineSchema(BaseModel):
         description="[Power BI Auth] Client secret for Admin API (required)"
     )
 
+    # User OAuth token (alternative to Service Principal)
+    access_token: Optional[str] = Field(
+        None,
+        description="[Power BI Auth] Pre-obtained OAuth access token (alternative to Service Principal credentials). Use this when authenticating as a user instead of Service Principal."
+    )
+
     # ===== LLM CONVERSION CONFIGURATION =====
     llm_workspace_url: Optional[str] = Field(
         None,
@@ -216,6 +222,8 @@ class MqueryConversionPipelineTool(BaseTool):
             "tenant_id": kwargs.get("tenant_id"),
             "client_id": kwargs.get("client_id"),
             "client_secret": kwargs.get("client_secret"),
+            # User OAuth token (alternative to Service Principal)
+            "access_token": kwargs.get("access_token"),
             # LLM Configuration
             "llm_workspace_url": kwargs.get("llm_workspace_url"),
             "llm_token": kwargs.get("llm_token"),
@@ -362,12 +370,21 @@ class MqueryConversionPipelineTool(BaseTool):
             tenant_id = merged_kwargs.get("tenant_id")
             client_id = merged_kwargs.get("client_id")
             client_secret = merged_kwargs.get("client_secret")
+            access_token = merged_kwargs.get("access_token")
 
             # Validate required parameters
             if not workspace_id:
                 return "Error: workspace_id is required"
-            if not all([tenant_id, client_id, client_secret]):
-                return "Error: Service Principal authentication required (tenant_id, client_id, client_secret)"
+
+            # Check authentication - need either Service Principal OR access_token
+            has_spn_auth = all([tenant_id, client_id, client_secret])
+            has_token_auth = bool(access_token)
+
+            if not has_spn_auth and not has_token_auth:
+                return ("Error: Authentication required.\n"
+                        "Provide either:\n"
+                        "  - Service Principal: tenant_id + client_id + client_secret\n"
+                        "  - User OAuth: access_token")
 
             logger.info(f"[TOOL CALL] Instance {instance_id} - Executing M-Query extraction for workspace: {workspace_id}")
 
@@ -399,11 +416,16 @@ class MqueryConversionPipelineTool(BaseTool):
             use_llm = merged_kwargs.get("use_llm", True) and bool(llm_workspace_url) and bool(llm_token)
             logger.info(f"[TOOL CALL] LLM conversion enabled: {use_llm}")
 
-            # Create configuration
+            # Create configuration based on authentication method
+            logger.info(f"[TOOL CALL] Creating config with auth_method: {'access_token' if has_token_auth else 'service_principal'}")
+
             config = MQueryConversionConfig(
-                tenant_id=tenant_id,
-                client_id=client_id,
-                client_secret=client_secret,
+                # Authentication - pass based on method
+                tenant_id=tenant_id if has_spn_auth else None,
+                client_id=client_id if has_spn_auth else None,
+                client_secret=client_secret if has_spn_auth else None,
+                access_token=access_token if has_token_auth else None,
+                # Required
                 workspace_id=workspace_id,
                 dataset_id=dataset_id,
                 # LLM Configuration

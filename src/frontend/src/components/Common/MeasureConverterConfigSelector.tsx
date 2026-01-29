@@ -21,8 +21,15 @@ import {
   ToggleButtonGroup,
   ToggleButton,
   Alert,
-  Chip
+  Chip,
+  Button
 } from '@mui/material';
+import LoginIcon from '@mui/icons-material/Login';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import { usePowerBIOAuth } from '../../hooks/usePowerBIOAuth';
+
+// Authentication method type
+export type PowerBIAuthMethod = 'service_principal' | 'user_oauth';
 
 export interface MeasureConverterConfig {
   // Configuration mode
@@ -32,10 +39,15 @@ export interface MeasureConverterConfig {
   // Power BI inbound params
   powerbi_semantic_model_id?: string;
   powerbi_group_id?: string;
+  // Authentication method
+  powerbi_auth_method?: PowerBIAuthMethod;
   // Power BI Service Principal authentication
   powerbi_tenant_id?: string;
   powerbi_client_id?: string;
   powerbi_client_secret?: string;
+  // Power BI User OAuth authentication
+  powerbi_oauth_client_id?: string; // Azure AD app client ID for OAuth
+  powerbi_access_token?: string;
   // Power BI other settings
   powerbi_include_hidden?: boolean;
   powerbi_filter_pattern?: string;
@@ -65,6 +77,11 @@ export const MeasureConverterConfigSelector: React.FC<MeasureConverterConfigSele
   onChange,
   disabled = false
 }) => {
+  // OAuth hook for User OAuth authentication - pass the client ID from config
+  const { accessToken, isAuthenticated, signIn, signOut, userEmail, isLoading: oauthLoading, error: oauthError } = usePowerBIOAuth({
+    clientId: value.powerbi_oauth_client_id || ''
+  });
+
   const handleFieldChange = (field: keyof MeasureConverterConfig, fieldValue: string | boolean) => {
     onChange({
       ...value,
@@ -75,6 +92,40 @@ export const MeasureConverterConfigSelector: React.FC<MeasureConverterConfigSele
   const handleSelectChange = (field: keyof MeasureConverterConfig) => (event: SelectChangeEvent) => {
     handleFieldChange(field, event.target.value);
   };
+
+  const handleAuthMethodChange = (_event: React.MouseEvent<HTMLElement>, newMethod: PowerBIAuthMethod | null) => {
+    if (newMethod !== null) {
+      const updatedConfig: MeasureConverterConfig = {
+        ...value,
+        powerbi_auth_method: newMethod
+      };
+
+      // Clear credentials when switching methods
+      if (newMethod === 'user_oauth') {
+        updatedConfig.powerbi_tenant_id = undefined;
+        updatedConfig.powerbi_client_id = undefined;
+        updatedConfig.powerbi_client_secret = undefined;
+        // Set access token if authenticated
+        if (accessToken) {
+          updatedConfig.powerbi_access_token = accessToken;
+        }
+      } else {
+        updatedConfig.powerbi_access_token = undefined;
+      }
+
+      onChange(updatedConfig);
+    }
+  };
+
+  // Update access token when OAuth state changes
+  React.useEffect(() => {
+    if (value.powerbi_auth_method === 'user_oauth' && accessToken) {
+      onChange({
+        ...value,
+        powerbi_access_token: accessToken
+      });
+    }
+  }, [accessToken, value.powerbi_auth_method]);
 
   const handleModeChange = (_event: React.MouseEvent<HTMLElement>, newMode: 'static' | 'dynamic' | null) => {
     if (newMode !== null) {
@@ -91,9 +142,11 @@ export const MeasureConverterConfigSelector: React.FC<MeasureConverterConfigSele
         // Set all Power BI parameters to placeholders
         updatedConfig.powerbi_semantic_model_id = '{dataset_id}';
         updatedConfig.powerbi_group_id = '{workspace_id}';
+        // Auth can be either SPN or access_token in dynamic mode
         updatedConfig.powerbi_tenant_id = '{tenant_id}';
         updatedConfig.powerbi_client_id = '{client_id}';
         updatedConfig.powerbi_client_secret = '{client_secret}';
+        updatedConfig.powerbi_access_token = '{access_token}';
 
         // Set outbound format to placeholder
         updatedConfig.outbound_format = '{target}';
@@ -113,6 +166,7 @@ export const MeasureConverterConfigSelector: React.FC<MeasureConverterConfigSele
   const inboundConnector = value.inbound_connector || '';
   const outboundFormat = value.outbound_format || '';
   const mode = value.mode || 'static';
+  const authMethod = value.powerbi_auth_method || 'service_principal';
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -160,26 +214,49 @@ export const MeasureConverterConfigSelector: React.FC<MeasureConverterConfigSele
           <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
             Dynamic Parameters Mode
           </Typography>
-          <Typography variant="caption">
-            Configuration values will be resolved from execution inputs at runtime.
-            Use this mode when calling the crew from external applications.
-            <br /><br />
-            <strong>Required execution inputs:</strong>
+          <Typography variant="caption" component="div">
+            Parameters will be resolved from execution inputs at runtime.
+            Use this when calling from external apps (e.g., Databricks Apps).
           </Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 1 }}>
-            {inboundConnector === 'powerbi' && (
-              <>
-                <Chip label="dataset_id" size="small" color="primary" variant="outlined" />
-                <Chip label="workspace_id" size="small" color="primary" variant="outlined" />
-                <Chip label="tenant_id" size="small" color="primary" variant="outlined" />
-                <Chip label="client_id" size="small" color="primary" variant="outlined" />
-                <Chip label="client_secret" size="small" color="primary" variant="outlined" />
-              </>
-            )}
-            {outboundFormat && (
+
+          <Box sx={{ mt: 1.5, p: 1, bgcolor: 'rgba(0,0,0,0.04)', borderRadius: 1 }}>
+            <Typography variant="caption" sx={{ fontWeight: 600 }}>
+              Required inputs:
+            </Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+              <Chip label="dataset_id" size="small" color="primary" variant="outlined" />
+              <Chip label="workspace_id" size="small" color="primary" variant="outlined" />
               <Chip label="target" size="small" color="secondary" variant="outlined" />
-            )}
+            </Box>
           </Box>
+
+          <Box sx={{ mt: 1.5, p: 1, bgcolor: 'rgba(0,0,0,0.04)', borderRadius: 1 }}>
+            <Typography variant="caption" sx={{ fontWeight: 600 }}>
+              Authentication (choose one):
+            </Typography>
+            <Box sx={{ mt: 0.5 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                <Chip label="access_token" size="small" color="success" />
+                <Typography variant="caption">← User OAuth (recommended for user context)</Typography>
+              </Box>
+              <Typography variant="caption" color="text.secondary" sx={{ pl: 1, display: 'block', mb: 0.5 }}>
+                <em>or</em>
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Chip label="tenant_id" size="small" variant="outlined" />
+                <Chip label="client_id" size="small" variant="outlined" />
+                <Chip label="client_secret" size="small" variant="outlined" />
+                <Typography variant="caption">← Service Principal</Typography>
+              </Box>
+            </Box>
+          </Box>
+
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+            <strong>Example with OAuth:</strong>{' '}
+            <code style={{ fontSize: '0.7rem' }}>
+              {`{ "dataset_id": "...", "workspace_id": "...", "target": "sql", "access_token": "eyJ..." }`}
+            </code>
+          </Typography>
         </Alert>
       )}
 
@@ -282,9 +359,18 @@ export const MeasureConverterConfigSelector: React.FC<MeasureConverterConfigSele
               <Box component="ul" sx={{ pl: 2, mb: 0 }}>
                 <li><code>powerbi_semantic_model_id</code> → <Chip label="{dataset_id}" size="small" /></li>
                 <li><code>powerbi_group_id</code> → <Chip label="{workspace_id}" size="small" /></li>
-                <li><code>powerbi_tenant_id</code> → <Chip label="{tenant_id}" size="small" /></li>
-                <li><code>powerbi_client_id</code> → <Chip label="{client_id}" size="small" /></li>
-                <li><code>powerbi_client_secret</code> → <Chip label="{client_secret}" size="small" /></li>
+              </Box>
+              <Typography variant="body2" sx={{ mt: 1, mb: 0.5 }}>
+                <strong>Authentication (provide one):</strong>
+              </Typography>
+              <Box component="ul" sx={{ pl: 2, mb: 0 }}>
+                <li><code>powerbi_access_token</code> → <Chip label="{access_token}" size="small" color="success" /> (User OAuth)</li>
+                <li><em>or</em> Service Principal:</li>
+                <Box component="ul" sx={{ pl: 2, mb: 0 }}>
+                  <li><code>powerbi_tenant_id</code> → <Chip label="{tenant_id}" size="small" /></li>
+                  <li><code>powerbi_client_id</code> → <Chip label="{client_id}" size="small" /></li>
+                  <li><code>powerbi_client_secret</code> → <Chip label="{client_secret}" size="small" /></li>
+                </Box>
               </Box>
               <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
                 These values will be provided when executing the crew via the <code>inputs</code> parameter.
@@ -318,37 +404,154 @@ export const MeasureConverterConfigSelector: React.FC<MeasureConverterConfigSele
 
               <Divider sx={{ my: 1 }}>
                 <Typography variant="caption" color="text.secondary">
-                  Service Principal Authentication
+                  Authentication Method
                 </Typography>
               </Divider>
-              <TextField
-                label="Tenant ID"
-                value={value.powerbi_tenant_id || ''}
-                onChange={(e) => handleFieldChange('powerbi_tenant_id', e.target.value)}
+
+              {/* Auth Method Toggle */}
+              <ToggleButtonGroup
+                value={authMethod}
+                exclusive
+                onChange={handleAuthMethodChange}
                 disabled={disabled}
                 fullWidth
-                helperText="Azure AD tenant ID"
                 size="small"
-              />
-              <TextField
-                label="Client ID"
-                value={value.powerbi_client_id || ''}
-                onChange={(e) => handleFieldChange('powerbi_client_id', e.target.value)}
-                disabled={disabled}
-                fullWidth
-                helperText="Application/Client ID"
-                size="small"
-              />
-              <TextField
-                label="Client Secret"
-                value={value.powerbi_client_secret || ''}
-                onChange={(e) => handleFieldChange('powerbi_client_secret', e.target.value)}
-                disabled={disabled}
-                type="password"
-                fullWidth
-                helperText="Client secret for service principal"
-                size="small"
-              />
+              >
+                <ToggleButton value="service_principal">
+                  <Box sx={{ textAlign: 'center', py: 0.5 }}>
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      Service Principal
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      App registration credentials
+                    </Typography>
+                  </Box>
+                </ToggleButton>
+                <ToggleButton value="user_oauth">
+                  <Box sx={{ textAlign: 'center', py: 0.5 }}>
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      User OAuth
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Sign in with Microsoft
+                    </Typography>
+                  </Box>
+                </ToggleButton>
+              </ToggleButtonGroup>
+
+              {/* Service Principal Authentication Fields */}
+              {authMethod === 'service_principal' && (
+                <>
+                  <TextField
+                    label="Tenant ID"
+                    value={value.powerbi_tenant_id || ''}
+                    onChange={(e) => handleFieldChange('powerbi_tenant_id', e.target.value)}
+                    disabled={disabled}
+                    fullWidth
+                    helperText="Azure AD tenant ID"
+                    size="small"
+                  />
+                  <TextField
+                    label="Client ID"
+                    value={value.powerbi_client_id || ''}
+                    onChange={(e) => handleFieldChange('powerbi_client_id', e.target.value)}
+                    disabled={disabled}
+                    fullWidth
+                    helperText="Application/Client ID"
+                    size="small"
+                  />
+                  <TextField
+                    label="Client Secret"
+                    value={value.powerbi_client_secret || ''}
+                    onChange={(e) => handleFieldChange('powerbi_client_secret', e.target.value)}
+                    disabled={disabled}
+                    type="password"
+                    fullWidth
+                    helperText="Client secret for service principal"
+                    size="small"
+                  />
+                </>
+              )}
+
+              {/* User OAuth Authentication */}
+              {authMethod === 'user_oauth' && (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <Alert severity="info" variant="outlined">
+                    <Typography variant="caption" component="div">
+                      <strong>Option 1:</strong> If you have an Azure AD app, enter its Client ID and sign in.
+                      <br />
+                      <strong>Option 2:</strong> Get a token from{' '}
+                      <a
+                        href="https://learn.microsoft.com/en-us/rest/api/power-bi/datasets/get-dataset?tryIt=true"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Microsoft's API docs (Try It)
+                      </a>
+                      {' '}and paste it below.
+                    </Typography>
+                  </Alert>
+
+                  <TextField
+                    label="OAuth Client ID (Optional)"
+                    value={value.powerbi_oauth_client_id || ''}
+                    onChange={(e) => handleFieldChange('powerbi_oauth_client_id', e.target.value)}
+                    disabled={disabled || isAuthenticated}
+                    fullWidth
+                    helperText="Your Azure AD app Client ID for OAuth sign-in"
+                    size="small"
+                  />
+
+                  <TextField
+                    label="Access Token (Alternative)"
+                    value={value.powerbi_access_token || ''}
+                    onChange={(e) => handleFieldChange('powerbi_access_token', e.target.value)}
+                    disabled={disabled || isAuthenticated}
+                    fullWidth
+                    type="password"
+                    helperText="Paste a token from Microsoft's Try It page"
+                    size="small"
+                  />
+
+                  {oauthError && (
+                    <Alert severity="error" variant="outlined">
+                      <Typography variant="caption">{oauthError}</Typography>
+                    </Alert>
+                  )}
+
+                  {!isAuthenticated && !value.powerbi_access_token ? (
+                    <Button
+                      variant="contained"
+                      onClick={signIn}
+                      disabled={disabled || oauthLoading || !value.powerbi_oauth_client_id}
+                      startIcon={<LoginIcon />}
+                      fullWidth
+                    >
+                      {oauthLoading ? 'Signing in...' : 'Sign in with Microsoft'}
+                    </Button>
+                  ) : value.powerbi_access_token && !isAuthenticated ? (
+                    <Alert severity="success" icon={<CheckCircleIcon />}>
+                      <Typography variant="body2">Access token provided</Typography>
+                    </Alert>
+                  ) : (
+                    <>
+                      <Alert severity="success" icon={<CheckCircleIcon />}>
+                        <Typography variant="body2">
+                          Signed in as <strong>{userEmail || 'User'}</strong>
+                        </Typography>
+                      </Alert>
+                      <Button
+                        variant="outlined"
+                        onClick={signOut}
+                        disabled={disabled}
+                        size="small"
+                      >
+                        Sign Out
+                      </Button>
+                    </>
+                  )}
+                </Box>
+              )}
 
               <Divider sx={{ my: 1 }} />
 
