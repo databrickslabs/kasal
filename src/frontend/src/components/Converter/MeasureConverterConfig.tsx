@@ -26,6 +26,11 @@ import {
 import {
   PlayArrow as RunIcon,
   Save as SaveIcon,
+  Logout as LogoutIcon,
+  Key as KeyIcon,
+  Person as PersonIcon,
+  Login as LoginIcon,
+  CheckCircle as CheckCircleIcon,
 } from '@mui/icons-material';
 import type {
   MeasureConversionConfig,
@@ -33,8 +38,10 @@ import type {
   InboundFormat,
   OutboundFormat,
   SQLDialect,
+  PowerBIAuthMethod,
 } from '../../types/converter';
 import { ConverterService } from '../../api/ConverterService';
+import { usePowerBIOAuth } from '../../hooks/usePowerBIOAuth';
 import toast from 'react-hot-toast';
 
 interface MeasureConverterConfigProps {
@@ -67,6 +74,7 @@ export const MeasureConverterConfig: React.FC<MeasureConverterConfigProps> = ({
   const [config, setConfig] = useState<MeasureConversionConfig>({
     inbound_connector: 'powerbi',
     outbound_format: 'dax',
+    powerbi_auth_method: 'service_principal',
     powerbi_include_hidden: false,
     sql_dialect: 'databricks',
     sql_include_comments: true,
@@ -80,6 +88,21 @@ export const MeasureConverterConfig: React.FC<MeasureConverterConfigProps> = ({
   const [error, setError] = useState<string | undefined>();
   const [configName, setConfigName] = useState('');
   const [showSaveDialog, setShowSaveDialog] = useState(false);
+
+  // Power BI OAuth hook - only used when auth_method is 'user_oauth'
+  // Uses separate OAuth client ID field (different from Service Principal client_id)
+  const {
+    accessToken: oauthAccessToken,
+    isAuthenticated: isOAuthAuthenticated,
+    isLoading: isOAuthLoading,
+    error: oauthError,
+    userEmail,
+    signIn: oauthSignIn,
+    signOut: oauthSignOut,
+  } = usePowerBIOAuth({
+    // This client ID should be configured in your Azure App Registration for OAuth
+    clientId: config.powerbi_oauth_client_id || '',
+  });
 
   // Update config when prop changes
   useEffect(() => {
@@ -109,9 +132,22 @@ export const MeasureConverterConfig: React.FC<MeasureConverterConfigProps> = ({
         setError('Power BI requires: Dataset ID and Workspace ID');
         return;
       }
-      if (!config.powerbi_tenant_id || !config.powerbi_client_id || !config.powerbi_client_secret) {
-        setError('Power BI requires Service Principal credentials: Tenant ID, Client ID, and Client Secret');
-        return;
+
+      // Validate based on auth method
+      const authMethod = config.powerbi_auth_method || 'service_principal';
+      if (authMethod === 'service_principal') {
+        if (!config.powerbi_tenant_id || !config.powerbi_client_id || !config.powerbi_client_secret) {
+          setError('Service Principal authentication requires: Tenant ID, Client ID, and Client Secret');
+          return;
+        }
+      } else if (authMethod === 'user_oauth') {
+        // Accept either: OAuth sign-in, or manually pasted access token
+        const hasOAuthToken = isOAuthAuthenticated || oauthAccessToken;
+        const hasManualToken = config.powerbi_access_token;
+        if (!hasOAuthToken && !hasManualToken) {
+          setError('Please either sign in with Microsoft or paste an access token');
+          return;
+        }
       }
     } else if (config.inbound_connector === 'yaml') {
       if (!config.yaml_content && !config.yaml_file_path) {
@@ -123,18 +159,32 @@ export const MeasureConverterConfig: React.FC<MeasureConverterConfigProps> = ({
     setError(undefined);
     setIsLoading(true);
 
+    // Build final config with access token if using OAuth
+    const finalConfig = { ...config };
+    if (config.inbound_connector === 'powerbi' && config.powerbi_auth_method === 'user_oauth') {
+      // Prefer OAuth token if authenticated, otherwise use manually pasted token
+      if (oauthAccessToken) {
+        finalConfig.powerbi_access_token = oauthAccessToken;
+      }
+      // Clear SPN credentials when using OAuth (token is already set)
+      delete finalConfig.powerbi_tenant_id;
+      delete finalConfig.powerbi_client_id;
+      delete finalConfig.powerbi_client_secret;
+      delete finalConfig.powerbi_oauth_client_id; // Don't send OAuth client ID to backend
+    }
+
     try {
       // Call the provided onRun callback if exists
       if (onRun) {
-        await onRun(config);
+        await onRun(finalConfig);
         toast.success('Conversion started successfully');
       } else {
         // Or create a job directly
         const job = await ConverterService.createJob({
-          source_format: config.inbound_connector,
-          target_format: config.outbound_format,
-          configuration: config,
-          name: `${getFormatDisplayName(config.inbound_connector)} → ${getFormatDisplayName(config.outbound_format)}`,
+          source_format: finalConfig.inbound_connector,
+          target_format: finalConfig.outbound_format,
+          configuration: finalConfig,
+          name: `${getFormatDisplayName(finalConfig.inbound_connector)} → ${getFormatDisplayName(finalConfig.outbound_format)}`,
         });
         toast.success(`Job created: ${job.id}`);
       }
@@ -237,42 +287,171 @@ export const MeasureConverterConfig: React.FC<MeasureConverterConfigProps> = ({
                 required
               />
             </Grid>
+
+            {/* Authentication Method Selector */}
             <Grid item xs={12}>
-              <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
-                Service Principal Authentication
+              <Divider sx={{ my: 1 }} />
+              <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 2, mt: 1 }}>
+                Authentication Method
               </Typography>
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <Button
+                  variant={config.powerbi_auth_method === 'service_principal' ? 'contained' : 'outlined'}
+                  startIcon={<KeyIcon />}
+                  onClick={() => setConfig({ ...config, powerbi_auth_method: 'service_principal' })}
+                  sx={{ flex: 1 }}
+                >
+                  Service Principal
+                </Button>
+                <Button
+                  variant={config.powerbi_auth_method === 'user_oauth' ? 'contained' : 'outlined'}
+                  startIcon={<PersonIcon />}
+                  onClick={() => setConfig({ ...config, powerbi_auth_method: 'user_oauth' })}
+                  sx={{ flex: 1 }}
+                >
+                  User OAuth
+                </Button>
+              </Box>
             </Grid>
-            <Grid item xs={12} md={4}>
-              <TextField
-                fullWidth
-                label="Tenant ID *"
-                value={config.powerbi_tenant_id || ''}
-                onChange={(e) => setConfig({ ...config, powerbi_tenant_id: e.target.value })}
-                helperText="Azure AD tenant ID"
-                required
-              />
-            </Grid>
-            <Grid item xs={12} md={4}>
-              <TextField
-                fullWidth
-                label="Client ID *"
-                value={config.powerbi_client_id || ''}
-                onChange={(e) => setConfig({ ...config, powerbi_client_id: e.target.value })}
-                helperText="Application/Client ID"
-                required
-              />
-            </Grid>
-            <Grid item xs={12} md={4}>
-              <TextField
-                fullWidth
-                label="Client Secret *"
-                value={config.powerbi_client_secret || ''}
-                onChange={(e) => setConfig({ ...config, powerbi_client_secret: e.target.value })}
-                type="password"
-                helperText="Client secret for service principal"
-                required
-              />
-            </Grid>
+
+            {/* Service Principal Authentication */}
+            {config.powerbi_auth_method === 'service_principal' && (
+              <>
+                <Grid item xs={12}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    Enter your Azure AD Service Principal credentials
+                  </Typography>
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <TextField
+                    fullWidth
+                    label="Tenant ID *"
+                    value={config.powerbi_tenant_id || ''}
+                    onChange={(e) => setConfig({ ...config, powerbi_tenant_id: e.target.value })}
+                    helperText="Azure AD tenant ID"
+                    required
+                  />
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <TextField
+                    fullWidth
+                    label="Client ID *"
+                    value={config.powerbi_client_id || ''}
+                    onChange={(e) => setConfig({ ...config, powerbi_client_id: e.target.value })}
+                    helperText="Application/Client ID"
+                    required
+                  />
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <TextField
+                    fullWidth
+                    label="Client Secret *"
+                    value={config.powerbi_client_secret || ''}
+                    onChange={(e) => setConfig({ ...config, powerbi_client_secret: e.target.value })}
+                    type="password"
+                    helperText="Client secret for service principal"
+                    required
+                  />
+                </Grid>
+              </>
+            )}
+
+            {/* User OAuth Authentication */}
+            {config.powerbi_auth_method === 'user_oauth' && (
+              <>
+                <Grid item xs={12}>
+                  <Alert severity="info" sx={{ mb: 1 }}>
+                    <Typography variant="body2" gutterBottom>
+                      Sign in with your Microsoft account to access Power BI with your own permissions.
+                    </Typography>
+                    <Typography variant="body2">
+                      <strong>Option 1:</strong> If you have an Azure AD app registration, enter its Client ID below.
+                    </Typography>
+                    <Typography variant="body2">
+                      <strong>Option 2:</strong> Use{' '}
+                      <a
+                        href="https://learn.microsoft.com/en-us/rest/api/power-bi/datasets/get-dataset?tryIt=true"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ color: 'inherit' }}
+                      >
+                        Microsoft's interactive API docs
+                      </a>
+                      {' '}to get an access token, then paste it below.
+                    </Typography>
+                  </Alert>
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <TextField
+                    fullWidth
+                    label="OAuth Client ID (Optional)"
+                    value={config.powerbi_oauth_client_id || ''}
+                    onChange={(e) => setConfig({ ...config, powerbi_oauth_client_id: e.target.value })}
+                    helperText="Your Azure AD app Client ID for OAuth sign-in"
+                    disabled={isOAuthAuthenticated}
+                  />
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <TextField
+                    fullWidth
+                    label="Access Token (Alternative)"
+                    value={config.powerbi_access_token || ''}
+                    onChange={(e) => setConfig({ ...config, powerbi_access_token: e.target.value })}
+                    helperText="Paste a token from Microsoft's Try It page"
+                    type="password"
+                    disabled={isOAuthAuthenticated}
+                  />
+                </Grid>
+                <Grid item xs={12}>
+                  {oauthError && (
+                    <Alert severity="error" sx={{ mb: 2 }}>
+                      {oauthError}
+                    </Alert>
+                  )}
+                  {!isOAuthAuthenticated && !config.powerbi_access_token ? (
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      startIcon={isOAuthLoading ? <CircularProgress size={20} /> : <LoginIcon />}
+                      onClick={oauthSignIn}
+                      disabled={isOAuthLoading || !config.powerbi_oauth_client_id}
+                      fullWidth
+                      sx={{ py: 1.5 }}
+                    >
+                      {isOAuthLoading ? 'Signing in...' : 'Sign in with Microsoft'}
+                    </Button>
+                  ) : config.powerbi_access_token && !isOAuthAuthenticated ? (
+                    <Alert severity="success" icon={<CheckCircleIcon />}>
+                      <Typography variant="body2">
+                        Access token provided manually
+                      </Typography>
+                    </Alert>
+                  ) : (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, p: 2, bgcolor: 'success.light', borderRadius: 1 }}>
+                      <CheckCircleIcon color="success" />
+                      <Box sx={{ flexGrow: 1 }}>
+                        <Typography variant="body2" fontWeight="bold" color="success.dark">
+                          Signed in as {userEmail || 'Microsoft User'}
+                        </Typography>
+                        <Typography variant="caption" color="success.dark">
+                          OAuth token obtained successfully
+                        </Typography>
+                      </Box>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        startIcon={<LogoutIcon />}
+                        onClick={oauthSignOut}
+                        color="inherit"
+                      >
+                        Sign Out
+                      </Button>
+                    </Box>
+                  )}
+                </Grid>
+              </>
+            )}
+
             <Grid item xs={12} md={6}>
               <TextField
                 fullWidth

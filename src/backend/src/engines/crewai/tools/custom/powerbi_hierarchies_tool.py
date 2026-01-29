@@ -56,6 +56,12 @@ class PowerBIHierarchiesSchema(BaseModel):
         description="[Auth] Client secret (required)"
     )
 
+    # User OAuth token (alternative to Service Principal)
+    access_token: Optional[str] = Field(
+        None,
+        description="[Auth] Pre-obtained OAuth access token (alternative to Service Principal credentials). Use this when authenticating as a user instead of Service Principal."
+    )
+
     # ===== UNITY CATALOG TARGET CONFIGURATION =====
     target_catalog: str = Field(
         "main",
@@ -149,6 +155,8 @@ class PowerBIHierarchiesTool(BaseTool):
             "tenant_id": kwargs.get("tenant_id"),
             "client_id": kwargs.get("client_id"),
             "client_secret": kwargs.get("client_secret"),
+            # User OAuth token (alternative to Service Principal)
+            "access_token": kwargs.get("access_token"),
             # Unity Catalog Target
             "target_catalog": kwargs.get("target_catalog", "main"),
             "target_schema": kwargs.get("target_schema", "default"),
@@ -253,14 +261,23 @@ class PowerBIHierarchiesTool(BaseTool):
             tenant_id = merged_kwargs.get("tenant_id")
             client_id = merged_kwargs.get("client_id")
             client_secret = merged_kwargs.get("client_secret")
+            access_token = merged_kwargs.get("access_token")
 
             # Validate required parameters
             if not workspace_id:
                 return "Error: workspace_id is required"
             if not dataset_id:
                 return "Error: dataset_id is required"
-            if not all([tenant_id, client_id, client_secret]):
-                return "Error: Service Principal credentials required (tenant_id, client_id, client_secret)"
+
+            # Check authentication - need either Service Principal OR access_token
+            has_spn_auth = all([tenant_id, client_id, client_secret])
+            has_token_auth = bool(access_token)
+
+            if not has_spn_auth and not has_token_auth:
+                return ("Error: Authentication required.\n"
+                        "Provide either:\n"
+                        "  - Service Principal: tenant_id + client_id + client_secret\n"
+                        "  - User OAuth: access_token")
 
             logger.info(f"[PowerBIHierarchiesTool] Extracting hierarchies from dataset {dataset_id}")
 
@@ -268,9 +285,10 @@ class PowerBIHierarchiesTool(BaseTool):
             result = self._run_sync(self._extract_hierarchies(
                 workspace_id=workspace_id,
                 dataset_id=dataset_id,
-                tenant_id=tenant_id,
-                client_id=client_id,
-                client_secret=client_secret,
+                tenant_id=tenant_id if has_spn_auth else None,
+                client_id=client_id if has_spn_auth else None,
+                client_secret=client_secret if has_spn_auth else None,
+                access_token=access_token if has_token_auth else None,
                 target_catalog=merged_kwargs.get("target_catalog", "main"),
                 target_schema=merged_kwargs.get("target_schema", "default"),
                 skip_system_tables=merged_kwargs.get("skip_system_tables", True),
@@ -303,9 +321,10 @@ class PowerBIHierarchiesTool(BaseTool):
         self,
         workspace_id: str,
         dataset_id: str,
-        tenant_id: str,
-        client_id: str,
-        client_secret: str,
+        tenant_id: Optional[str],
+        client_id: Optional[str],
+        client_secret: Optional[str],
+        access_token: Optional[str],
         target_catalog: str,
         target_schema: str,
         skip_system_tables: bool,
@@ -313,8 +332,11 @@ class PowerBIHierarchiesTool(BaseTool):
     ) -> str:
         """Extract hierarchies and format output."""
 
-        # Get access token
-        token = await self._get_access_token(tenant_id, client_id, client_secret)
+        # Get access token - use provided token or obtain via SPN
+        if access_token:
+            token = access_token
+        else:
+            token = await self._get_access_token(tenant_id, client_id, client_secret)
 
         # Fetch hierarchies and levels
         hierarchies = await self._fetch_hierarchies(
@@ -426,9 +448,9 @@ class PowerBIHierarchiesTool(BaseTool):
 
     async def _get_access_token(
         self,
-        tenant_id: str,
-        client_id: str,
-        client_secret: str,
+        tenant_id: Optional[str],
+        client_id: Optional[str],
+        client_secret: Optional[str],
         scope: str = "https://api.fabric.microsoft.com/.default"
     ) -> str:
         """Get OAuth access token using Service Principal.
