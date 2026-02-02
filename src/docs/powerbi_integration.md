@@ -23,9 +23,27 @@ Complete guide for integrating Power BI with Kasal AI agents for advanced busine
 
 ---
 
+## Power BI Tools Overview
+
+Kasal provides multiple Power BI integration tools for different use cases:
+
+| Tool | ID | Purpose | Guide |
+|------|----|---------|-------|
+| **Power BI Analysis Tool** | 71 | Execute DAX queries via Databricks jobs | This document |
+| **Measure Conversion Pipeline** | 73 | Convert DAX measures to UC Metrics/SQL | [Guide](./tool-measure-conversion.md) |
+| **M-Query Conversion Pipeline** | 74 | Convert M-Query/Power Query to SQL views | [Guide](./tool-mquery-conversion.md) |
+| **Relationships Tool** | 75 | Extract relationships as FK constraints | [Guide](./tool-relationships-conversion.md) |
+| **Hierarchies Tool** | 76 | Extract hierarchies as dimension views | [Guide](./tool-hierarchies-conversion.md) |
+| **Field Parameters & Calc Groups** | 77 | Extract field params to SQL UNION views | [Guide](./tool-field-parameters.md) |
+| **Report References Tool** | 78 | Map measures/tables to report pages | [Guide](./tool-report-references.md) |
+
+> **Tip**: See the [Power BI Migration Tools Guide](./powerbi-tools-guide.md) for comprehensive Service Principal setup instructions.
+
+---
+
 ## Overview
 
-The Power BI integration enables Kasal AI agents to execute complex analysis against Power BI semantic models using Databricks compute resources. This provides a production-ready, API-driven connector for Power BI analytics within AI workflows based on a preconfigured template notebook for tracability.
+The Power BI Analysis Tool (ID: 71) enables Kasal AI agents to execute complex analysis against Power BI semantic models using Databricks compute resources. This provides a production-ready, API-driven connector for Power BI analytics within AI workflows based on a preconfigured template notebook for tracability.
 
 **Key Features:**
 - DAX query execution against Power BI semantic models

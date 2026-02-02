@@ -66,6 +66,8 @@ const docSections: DocSection[] = [
       { label: 'M-Query Conversion Tool', file: 'tool-mquery-conversion' },
       { label: 'Relationships Tool', file: 'tool-relationships-conversion' },
       { label: 'Hierarchies Tool', file: 'tool-hierarchies-conversion' },
+      { label: 'Field Parameters & Calc Groups', file: 'tool-field-parameters' },
+      { label: 'Report References Tool', file: 'tool-report-references' },
     ],
   },
 
