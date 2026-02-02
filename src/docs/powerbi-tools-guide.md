@@ -4,7 +4,7 @@ This guide covers the Power BI migration tools available in Kasal for converting
 
 ## Overview
 
-Kasal provides four specialized tools for migrating different aspects of Power BI semantic models to Databricks:
+Kasal provides six specialized tools for migrating different aspects of Power BI semantic models to Databricks:
 
 | Tool | ID | Purpose | SVP Type | Details |
 |------|----|---------|----------|---------|
@@ -12,6 +12,8 @@ Kasal provides four specialized tools for migrating different aspects of Power B
 | **M-Query Conversion Pipeline** | 74 | Convert M-Query/Power Query to SQL views | **Admin API** | [Full Guide](./tool-mquery-conversion.md) |
 | **Power BI Relationships Tool** | 75 | Extract relationships as FK constraints | Non-Admin API | [Full Guide](./tool-relationships-conversion.md) |
 | **Power BI Hierarchies Tool** | 76 | Extract hierarchies as dimension views | Non-Admin API | [Full Guide](./tool-hierarchies-conversion.md) |
+| **Field Parameters & Calculation Groups** | 77 | Extract field parameters/calc groups to SQL UNION views | Non-Admin API | [Full Guide](./tool-field-parameters.md) |
+| **Report References Tool** | 78 | Map measures/tables to report pages with URLs | Non-Admin API | [Full Guide](./tool-report-references.md) |
 
 > **Tip**: Click the "Full Guide" links above for detailed architecture, API examples, and troubleshooting for each tool.
 
@@ -448,19 +450,143 @@ CREATE TABLE IF NOT EXISTS main.default._metadata_hierarchies (
 );
 ```
 
+### 5. Field Parameters & Calculation Groups Tool
+
+**Purpose**: Extracts Field Parameters and Calculation Groups from Fabric semantic models and generates:
+- SQL UNION views that replicate the dynamic column switching behavior
+- Metadata tables for field parameter and calculation group definitions
+
+**API Used**: Fabric API `getDefinition` endpoint (returns TMDL format)
+
+**SVP Requirement**: Non-Admin API SVP with `SemanticModel.ReadWrite.All`
+
+**Important**: This tool works with **Microsoft Fabric workspaces only** (not legacy Power BI Service workspaces).
+
+**Configuration:**
+```yaml
+workspace_id: "your-fabric-workspace-guid"
+dataset_id: "your-semantic-model-guid"
+tenant_id: "your-tenant-guid"
+client_id: "your-sp-client-id"
+client_secret: "your-sp-secret"
+
+# Output options
+target_catalog: "main"
+target_schema: "default"
+output_format: "sql"  # "sql", "json", or "markdown"
+include_metadata_table: true
+```
+
+**Output Example (Field Parameter):**
+```sql
+-- Field Parameter View: Dynamic Measure Selector
+CREATE OR REPLACE VIEW main.default.vw_field_param_measure_selector AS
+SELECT 'Revenue' AS field_name, SUM(amount) AS value FROM main.default.sales
+UNION ALL
+SELECT 'Profit' AS field_name, SUM(profit) AS value FROM main.default.sales
+UNION ALL
+SELECT 'Units Sold' AS field_name, SUM(quantity) AS value FROM main.default.sales;
+```
+
+**Output Example (Calculation Group):**
+```sql
+-- Calculation Group View: Time Intelligence
+CREATE OR REPLACE VIEW main.default.vw_calc_group_time_intelligence AS
+SELECT 'Current' AS calculation_name, SUM(amount) AS value FROM main.default.sales
+UNION ALL
+SELECT 'YoY' AS calculation_name,
+       SUM(amount) - LAG(SUM(amount)) OVER (ORDER BY year) AS value
+FROM main.default.sales
+UNION ALL
+SELECT 'YTD' AS calculation_name,
+       SUM(SUM(amount)) OVER (ORDER BY date ROWS UNBOUNDED PRECEDING) AS value
+FROM main.default.sales;
+```
+
+**Full Guide**: [Field Parameters & Calculation Groups Tool](./tool-field-parameters.md)
+
+### 6. Report References Tool
+
+**Purpose**: Extracts visual-to-measure/table mappings from Fabric reports using the Report Definition API (PBIR format). Generates:
+- Report structure analysis (pages, visuals)
+- Measure/table usage mapping per page with **direct page URLs for navigation**
+- Cross-reference matrix showing which measures are used where
+
+**API Used**: Fabric Report Definition API `getDefinition` endpoint (returns PBIR format)
+
+**SVP Requirement**: Non-Admin API SVP with `Report.ReadWrite.All`
+
+**Important**: This tool works with **Microsoft Fabric reports only** (PBIR format). Traditional .pbix uploads may not have this format.
+
+**Key Feature**: **Dataset-based Discovery** - Provide a `dataset_id` to automatically discover ALL reports using that semantic model and extract references from each.
+
+**Configuration:**
+```yaml
+workspace_id: "your-fabric-workspace-guid"
+dataset_id: "your-semantic-model-guid"    # Recommended: discovers ALL reports using this dataset
+# report_id: "your-report-guid"           # Alternative: single specific report
+
+tenant_id: "your-tenant-guid"
+client_id: "your-sp-client-id"
+client_secret: "your-sp-secret"
+
+# Output options
+output_format: "json"  # "json", "markdown", or "matrix"
+include_visual_details: true
+group_by: "page"       # "page", "measure", or "table"
+```
+
+**Output Example (JSON):**
+```json
+{
+  "report_references": [
+    {
+      "report_id": "f8ebce44-c9cb-4041-88d2-4ca33f314e82",
+      "report_name": "Sales Dashboard",
+      "report_url": "https://app.powerbi.com/groups/.../reports/...",
+      "pages": [
+        {
+          "page_name": "Revenue Overview",
+          "page_url": "https://app.powerbi.com/groups/.../reports/.../ReportSection1",
+          "measures": [
+            {"measure_name": "Total Revenue", "table_name": "Sales"},
+            {"measure_name": "YoY Growth", "table_name": "Sales"}
+          ]
+        }
+      ]
+    }
+  ],
+  "measure_usage": {
+    "Total Revenue": [
+      {"report_name": "Sales Dashboard", "page_name": "Revenue Overview"}
+    ]
+  }
+}
+```
+
+**Use Cases:**
+- **Impact Analysis**: Before modifying a measure, see all report pages that will be affected
+- **Documentation**: Generate comprehensive report-to-measure mappings
+- **Migration Planning**: Understand report dependencies on semantic model measures
+- **Audit**: Track measure usage across all reports in a workspace
+
+**Full Guide**: [Report References Tool](./tool-report-references.md)
+
 ---
 
 ## Quick Reference: Which SVP Do I Need?
 
 ```
-┌─────────────────────────────────┬───────────────────┬─────────────────────────┐
-│ Tool                            │ SVP Type          │ Key Permission          │
-├─────────────────────────────────┼───────────────────┼─────────────────────────┤
-│ Measure Conversion Pipeline     │ Non-Admin API     │ Dataset.Read.All        │
-│ M-Query Conversion Pipeline     │ Admin API         │ Dataset.ReadWrite.All   │
-│ Power BI Relationships Tool     │ Non-Admin API     │ Dataset.Read.All        │
-│ Power BI Hierarchies Tool       │ Non-Admin API     │ SemanticModel.ReadWrite │
-└─────────────────────────────────┴───────────────────┴─────────────────────────┘
+┌────────────────────────────────────────┬───────────────────┬─────────────────────────┐
+│ Tool                                   │ SVP Type          │ Key Permission          │
+├────────────────────────────────────────┼───────────────────┼─────────────────────────┤
+│ Measure Conversion Pipeline            │ Non-Admin API     │ Dataset.Read.All        │
+│ M-Query Conversion Pipeline            │ Admin API         │ Dataset.ReadWrite.All   │
+│ Power BI Relationships Tool            │ Non-Admin API     │ Dataset.Read.All        │
+│ Power BI Hierarchies Tool              │ Non-Admin API     │ SemanticModel.ReadWrite │
+│ Field Parameters & Calculation Groups  │ Non-Admin API     │ SemanticModel.ReadWrite │
+│ Report References Tool                 │ Non-Admin API     │ Report.ReadWrite.All    │
+└────────────────────────────────────────┴───────────────────┴─────────────────────────┘
 ```
 
 ---
