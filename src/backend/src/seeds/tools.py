@@ -30,6 +30,7 @@ tools_data = [
     (74, "M-Query Conversion Pipeline", "Extracts M-Query (Power Query) expressions from Power BI semantic models using the Admin API and converts them to Databricks SQL. This tool scans Power BI workspaces to extract table definitions including Value.NativeQuery (embedded SQL), DatabricksMultiCloud.Catalogs connections, Sql.Database connections, and various Table.* transformations. It generates CREATE VIEW statements for Unity Catalog. Supports both rule-based conversion for simple expressions and LLM-powered conversion for complex M-Query transformations. Perfect for migrating Power BI data models to Databricks, extracting SQL logic for documentation, or analyzing M-Query patterns for migration planning. Requires Service Principal with Power BI Admin API permissions.", "transform"),
     (75, "Power BI Relationships Tool", "Extracts relationships from Power BI semantic models using the Execute Queries API with INFO.VIEW.RELATIONSHIPS() DAX function. Generates Unity Catalog Foreign Key constraint statements (NOT ENFORCED). IMPORTANT: Requires a Service Principal that is a WORKSPACE MEMBER with dataset read permissions - this is different from the Admin API which requires admin-level permissions. Perfect for migrating Power BI relationships to Unity Catalog as informational FKs, documenting data model relationships, or generating DDL for Databricks tables.", "transform"),
     (76, "Power BI Hierarchies Tool", "Extracts hierarchies from Microsoft Fabric semantic models using the Fabric API getDefinition endpoint (TMDL format). Parses TMDL to extract hierarchy definitions and generates Unity Catalog dimension views with hierarchy_path columns plus metadata table DDL. IMPORTANT: Requires a Service Principal with SemanticModel.ReadWrite.All permissions and works with Fabric workspaces only (not legacy Power BI Service). Perfect for migrating Power BI hierarchies to Databricks as dimension views, documenting drill-down structures, or generating DDL for dimension tables.", "transform"),
+    (77, "Power BI Field Parameters & Calculation Groups Tool", "Extracts Field Parameters and Calculation Groups from Microsoft Fabric semantic models using the Fabric API getDefinition endpoint (TMDL format). Field Parameters allow users to dynamically switch between measures in reports using NAMEOF() DAX functions. Calculation Groups provide reusable time intelligence calculations (YTD, PY, YoY%, MTD) using SELECTEDMEASURE() patterns. Generates Unity Catalog metadata tables with parameter/calculation item details and SQL patterns for implementing equivalent logic. IMPORTANT: Requires a Service Principal with SemanticModel.ReadWrite.All permissions and works with Fabric workspaces only (not legacy Power BI Service). Perfect for documenting Power BI dynamic measure switching, migrating time intelligence patterns to Databricks, or generating SQL equivalents for calculation group logic.", "transform"),
 ]
 
 def get_tool_configs():
@@ -184,7 +185,25 @@ def get_tool_configs():
             # Output Options
             "skip_system_tables": True,
             "include_hidden": False
-        }   # Power BI Hierarchies Tool
+        },   # Power BI Hierarchies Tool
+        "77": {
+            "result_as_answer": True,
+            "mode": "static",  # Configuration mode: "static" (UI-configured) or "dynamic" (runtime inputs with {placeholders})
+            # Power BI / Fabric Configuration (supports {placeholder} syntax in dynamic mode)
+            "workspace_id": "",
+            "dataset_id": "",
+            # Service Principal authentication (requires SemanticModel.ReadWrite.All)
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
+            # Unity Catalog Target (supports {placeholder} syntax in dynamic mode)
+            "target_catalog": "main",
+            "target_schema": "default",
+            # Output Options
+            "output_format": "markdown",  # Output format: "markdown", "json", or "sql"
+            "skip_system_tables": True,
+            "include_hidden": False
+        }   # Power BI Field Parameters & Calculation Groups Tool
     }
 
 async def seed_async():
@@ -202,7 +221,7 @@ async def seed_async():
     tools_error = 0
 
     # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76]
+    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77]
 
     for tool_id, title, description, icon in tools_data:
         try:
@@ -265,7 +284,7 @@ def seed_sync():
     tools_error = 0
 
     # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76]
+    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77]
 
     for tool_id, title, description, icon in tools_data:
         try:

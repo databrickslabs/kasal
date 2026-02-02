@@ -1,9 +1,9 @@
 /**
- * Power BI Hierarchies Configuration Selector Component
+ * Power BI Field Parameters & Calculation Groups Configuration Selector Component
  *
- * Provides configuration UI for the Power BI Hierarchies Tool.
- * Extracts hierarchies from Power BI/Fabric semantic models using the Fabric API getDefinition
- * endpoint (TMDL format) and generates Unity Catalog dimension views.
+ * Provides configuration UI for the Power BI Field Parameters & Calculation Groups Tool.
+ * Extracts Field Parameters (NAMEOF patterns) and Calculation Groups (SELECTEDMEASURE patterns)
+ * from Power BI/Fabric semantic models using the Fabric API getDefinition endpoint (TMDL format).
  */
 
 import React from 'react';
@@ -21,7 +21,11 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
-  Button
+  Button,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import LoginIcon from '@mui/icons-material/Login';
@@ -31,7 +35,10 @@ import { usePowerBIOAuth } from '../../hooks/usePowerBIOAuth';
 // Authentication method type
 export type PowerBIAuthMethod = 'service_principal' | 'user_oauth';
 
-export interface PowerBIHierarchiesConfig {
+// Output format type
+export type OutputFormat = 'markdown' | 'json' | 'sql';
+
+export interface PowerBIFieldParametersConfig {
   // Configuration mode
   mode?: 'static' | 'dynamic';
   // Power BI / Fabric Configuration
@@ -50,19 +57,20 @@ export interface PowerBIHierarchiesConfig {
   target_catalog?: string;
   target_schema?: string;
   // Output Options
+  output_format?: OutputFormat;
   skip_system_tables?: boolean;
   include_hidden?: boolean;
   // Index signature for compatibility
   [key: string]: string | boolean | undefined;
 }
 
-interface PowerBIHierarchiesConfigSelectorProps {
-  value: PowerBIHierarchiesConfig;
-  onChange: (config: PowerBIHierarchiesConfig) => void;
+interface PowerBIFieldParametersConfigSelectorProps {
+  value: PowerBIFieldParametersConfig;
+  onChange: (config: PowerBIFieldParametersConfig) => void;
   disabled?: boolean;
 }
 
-export const PowerBIHierarchiesConfigSelector: React.FC<PowerBIHierarchiesConfigSelectorProps> = ({
+export const PowerBIFieldParametersConfigSelector: React.FC<PowerBIFieldParametersConfigSelectorProps> = ({
   value = {},
   onChange,
   disabled = false
@@ -72,7 +80,7 @@ export const PowerBIHierarchiesConfigSelector: React.FC<PowerBIHierarchiesConfig
     clientId: value.oauth_client_id || ''
   });
 
-  const handleFieldChange = (field: keyof PowerBIHierarchiesConfig, fieldValue: string | boolean) => {
+  const handleFieldChange = (field: keyof PowerBIFieldParametersConfig, fieldValue: string | boolean) => {
     onChange({
       ...value,
       [field]: fieldValue
@@ -81,7 +89,7 @@ export const PowerBIHierarchiesConfigSelector: React.FC<PowerBIHierarchiesConfig
 
   const handleAuthMethodChange = (_event: React.MouseEvent<HTMLElement>, newMethod: PowerBIAuthMethod | null) => {
     if (newMethod !== null) {
-      const updatedConfig: PowerBIHierarchiesConfig = {
+      const updatedConfig: PowerBIFieldParametersConfig = {
         ...value,
         auth_method: newMethod
       };
@@ -121,7 +129,7 @@ export const PowerBIHierarchiesConfigSelector: React.FC<PowerBIHierarchiesConfig
 
   const handleModeChange = (_event: React.MouseEvent<HTMLElement>, newMode: 'static' | 'dynamic' | null) => {
     if (newMode !== null) {
-      const updatedConfig: PowerBIHierarchiesConfig = {
+      const updatedConfig: PowerBIFieldParametersConfig = {
         ...value,
         mode: newMode
       };
@@ -140,6 +148,7 @@ export const PowerBIHierarchiesConfigSelector: React.FC<PowerBIHierarchiesConfig
         updatedConfig.target_catalog = '{target_catalog}';
         updatedConfig.target_schema = '{target_schema}';
         // Keep output options as static values
+        updatedConfig.output_format = value.output_format || 'markdown';
         updatedConfig.skip_system_tables = value.skip_system_tables !== false;
         updatedConfig.include_hidden = value.include_hidden || false;
       } else {
@@ -224,6 +233,7 @@ export const PowerBIHierarchiesConfigSelector: React.FC<PowerBIHierarchiesConfig
             <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
               Optional: <Chip label="target_catalog" size="small" variant="outlined" sx={{ ml: 0.5 }} />
               <Chip label="target_schema" size="small" variant="outlined" sx={{ ml: 0.5 }} />
+              <Chip label="output_format" size="small" variant="outlined" sx={{ ml: 0.5 }} />
             </Typography>
           </Box>
 
@@ -282,7 +292,7 @@ export const PowerBIHierarchiesConfigSelector: React.FC<PowerBIHierarchiesConfig
               disabled={disabled}
               required
               fullWidth
-              helperText="Semantic model/dataset ID to extract hierarchies from"
+              helperText="Semantic model/dataset ID to extract field parameters and calculation groups from"
               size="small"
             />
           </Box>
@@ -464,7 +474,7 @@ export const PowerBIHierarchiesConfigSelector: React.FC<PowerBIHierarchiesConfig
               onChange={(e) => handleFieldChange('target_catalog', e.target.value)}
               disabled={disabled}
               fullWidth
-              helperText="Unity Catalog catalog name for dimension views"
+              helperText="Unity Catalog catalog name for metadata tables"
               size="small"
             />
             <TextField
@@ -473,7 +483,7 @@ export const PowerBIHierarchiesConfigSelector: React.FC<PowerBIHierarchiesConfig
               onChange={(e) => handleFieldChange('target_schema', e.target.value)}
               disabled={disabled}
               fullWidth
-              helperText="Unity Catalog schema name for dimension views"
+              helperText="Unity Catalog schema name for metadata tables"
               size="small"
             />
           </Box>
@@ -486,7 +496,20 @@ export const PowerBIHierarchiesConfigSelector: React.FC<PowerBIHierarchiesConfig
           <Typography variant="subtitle2">Output Options</Typography>
         </AccordionSummary>
         <AccordionDetails>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Output Format</InputLabel>
+              <Select
+                value={value.output_format || 'markdown'}
+                label="Output Format"
+                onChange={(e) => handleFieldChange('output_format', e.target.value)}
+                disabled={disabled}
+              >
+                <MenuItem value="markdown">Markdown (Human-readable report)</MenuItem>
+                <MenuItem value="json">JSON (Structured data)</MenuItem>
+                <MenuItem value="sql">SQL (Unity Catalog DDL statements)</MenuItem>
+              </Select>
+            </FormControl>
             <FormControlLabel
               control={
                 <Checkbox
@@ -507,7 +530,7 @@ export const PowerBIHierarchiesConfigSelector: React.FC<PowerBIHierarchiesConfig
                   size="small"
                 />
               }
-              label={<Typography variant="body2">Include hidden hierarchies</Typography>}
+              label={<Typography variant="body2">Include hidden field parameters and calculation groups</Typography>}
             />
           </Box>
         </AccordionDetails>
@@ -516,20 +539,38 @@ export const PowerBIHierarchiesConfigSelector: React.FC<PowerBIHierarchiesConfig
       {/* Info about what the tool does */}
       <Alert severity="info" variant="outlined" sx={{ mt: 1 }}>
         <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
-          What this tool does:
+          What this tool extracts:
         </Typography>
         <Typography variant="caption">
-          Extracts hierarchies from Power BI/Fabric semantic models using the Fabric API
-          <code>getDefinition</code> endpoint which returns TMDL format. Generates Unity Catalog
-          dimension views with <code>hierarchy_path</code> column and metadata tables.
+          Extracts <strong>Field Parameters</strong> and <strong>Calculation Groups</strong> from Power BI/Fabric
+          semantic models using the Fabric API <code>getDefinition</code> endpoint (TMDL format).
         </Typography>
-        <Box component="ul" sx={{ pl: 2, mt: 0.5, mb: 0, fontSize: '0.75rem' }}>
-          <li>Extracts all hierarchy definitions (levels, columns, ordinals)</li>
-          <li>Generates CREATE VIEW statements with CONCAT-based hierarchy_path</li>
-          <li>Creates _metadata_hierarchies table DDL and INSERT statements</li>
-          <li>Supports drill-down path visualization</li>
-          <li>Filters system date hierarchies by default</li>
+
+        <Box sx={{ mt: 1 }}>
+          <Typography variant="caption" sx={{ fontWeight: 600 }}>
+            Field Parameters (NAMEOF patterns):
+          </Typography>
+          <Box component="ul" sx={{ pl: 2, mt: 0.5, mb: 1, fontSize: '0.75rem' }}>
+            <li>Dynamic measure switching in reports</li>
+            <li>KPI selectors, metric pickers</li>
+            <li>Tuples with label, measure reference, ordinal</li>
+          </Box>
         </Box>
+
+        <Box>
+          <Typography variant="caption" sx={{ fontWeight: 600 }}>
+            Calculation Groups (SELECTEDMEASURE patterns):
+          </Typography>
+          <Box component="ul" sx={{ pl: 2, mt: 0.5, mb: 0, fontSize: '0.75rem' }}>
+            <li>Time Intelligence (YTD, PY, YoY%, MTD)</li>
+            <li>Reusable calculations across measures</li>
+            <li>DAX expressions with precedence ordering</li>
+          </Box>
+        </Box>
+
+        <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+          Generates Unity Catalog metadata tables and SQL patterns for equivalent logic.
+        </Typography>
       </Alert>
     </Box>
   );
