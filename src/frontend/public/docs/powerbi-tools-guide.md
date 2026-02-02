@@ -19,54 +19,247 @@ Kasal provides four specialized tools for migrating different aspects of Power B
 
 ## Service Principal Requirements
 
-### Understanding the Two Types of Service Principals
+Power BI has two distinct API access patterns, each requiring different permissions and setup procedures. You will need **two separate Service Principals** depending on which tools you plan to use.
 
-Power BI has two distinct API access patterns, each requiring different permissions:
+---
 
-#### 1. Non-Admin API Service Principal (Execute Queries API)
+## Guide 1: Non-Admin API Service Principal (Execute Queries API)
+
+### Overview
 
 **Used by**: Measure Conversion Pipeline, Relationships Tool, Hierarchies Tool
 
 This Service Principal needs to be a **workspace member** with read access to datasets. It uses the Execute Queries API to run DAX queries like `INFO.VIEW.RELATIONSHIPS()`.
 
-**Required API Permissions:**
+> ⚠️ **Important**: This Service Principal requires workspace-level access, not tenant-level admin permissions. It must be added as a member of each Power BI workspace you want to access.
 
-| API / Permission | Type | Description | Admin Consent |
-|------------------|------|-------------|---------------|
-| Power BI REST APIs | | | |
+### Required API Permissions
+
+| API / Permission | Type | Description | Admin Consent Required |
+|------------------|------|-------------|------------------------|
+| **Power BI REST APIs** | | | |
 | `user_impersonation` | Delegated | Access Power BI workspace | No |
-| Power BI Service | | | |
+| **Power BI Service** | | | |
 | `Dataset.Read.All` | Delegated | View all datasets | No |
-| `Tenant.Read.All` | Application | View all content in tenant | Yes |
+| `Tenant.Read.All` | Application | View all content in tenant | **Yes** |
 
-**Setup Steps:**
-1. Create an App Registration in Azure AD
-2. Add the above API permissions
-3. Grant admin consent for `Tenant.Read.All`
-4. Add the Service Principal as a **Member** of the Power BI workspace
-5. Ensure the SP has at least **Viewer** role on the datasets
+### Step-by-Step Setup
 
-#### 2. Admin API Service Principal (Scan/Admin API)
+#### Step 1: Create Azure AD App Registration
+
+1. Navigate to [Azure Portal](https://portal.azure.com)
+2. Go to **Azure Active Directory** → **App registrations**
+3. Click **New registration**
+4. Configure the registration:
+   - **Name**: Enter an application name (e.g., "PowerBI-NonAdmin-Connector")
+   - **Supported account types**: Select **Accounts in this organizational directory only**
+   - **Redirect URI**: Leave blank (not required for service principal)
+5. Click **Register**
+6. **Save the Application (client) ID** - you'll need this later
+7. **Save the Directory (tenant) ID** from the Overview page
+
+#### Step 2: Configure API Permissions
+
+1. In your App Registration, go to **API permissions**
+2. Click **Add a permission**
+3. Select **Power BI Service**
+4. Choose **Delegated permissions** and add:
+   - `Dataset.Read.All` - View all datasets
+   - `user_impersonation` - Access Power BI workspace (under Power BI REST APIs if shown separately)
+5. Click **Add a permission** again
+6. Select **Power BI Service**
+7. Choose **Application permissions** and add:
+   - `Tenant.Read.All` - View all content in tenant
+8. Click **Grant admin consent for [Your Organization]**
+
+> ⚠️ **Note**: Admin consent is required for `Tenant.Read.All`. You may need to request this from your Azure AD administrator if you don't have admin rights.
+
+#### Step 3: Create Client Secret
+
+1. In your App Registration, go to **Certificates & secrets**
+2. Click **New client secret**
+3. Configure the secret:
+   - **Description**: Enter a description (e.g., "PowerBI Migration Tool - NonAdmin")
+   - **Expires**: Select expiration period (recommended: 24 months)
+4. Click **Add**
+5. **IMMEDIATELY COPY THE SECRET VALUE** - you cannot retrieve it later!
+
+> 🔴 **Security Warning**: Store the client secret securely. Never commit it to source control or share it publicly. Treat it like a password.
+
+#### Step 4: Add Service Principal to Power BI Workspace
+
+1. Go to [Power BI Service](https://app.powerbi.com)
+2. Navigate to the workspace you want to access
+3. Click **Access** (gear icon or "..." menu)
+4. Click **Add people or groups**
+5. Search for your App Registration name (e.g., "PowerBI-NonAdmin-Connector")
+6. Select the application and assign the **Viewer** role (minimum required)
+7. Click **Add**
+
+> **Tip**: For migration purposes, you may want to assign **Contributor** role to ensure full read access to all dataset metadata.
+
+#### Step 5: Configure the Migration Tool
+
+1. Navigate to the **Configuration** page in Kasal
+2. Select the **Power BI Non-Admin** configuration section
+3. Enter the following values:
+
+| Field | Value |
+|-------|-------|
+| **Tenant ID** | Your Azure AD tenant ID (from Step 1) |
+| **Client ID** | Application (client) ID from Step 1 |
+| **Client Secret** | Client secret value from Step 3 |
+
+4. Click **Save Configuration**
+5. Test the connection using the **Test Connection** button
+
+### Verification Checklist
+
+- [ ] App Registration created in Azure AD
+- [ ] `Dataset.Read.All` (Delegated) permission added
+- [ ] `Tenant.Read.All` (Application) permission added
+- [ ] Admin consent granted for all permissions
+- [ ] Client secret created and stored securely
+- [ ] Service Principal added to Power BI workspace(s) as Member
+- [ ] Connection test successful in Kasal
+
+---
+
+## Guide 2: Admin API Service Principal (Scan/Admin API)
+
+### Overview
 
 **Used by**: M-Query Conversion Pipeline
 
-This Service Principal requires Power BI Admin API access to scan workspaces and extract M-Query expressions. This is a **tenant-level** permission.
+This Service Principal requires **Power BI Admin API access** to scan workspaces and extract M-Query expressions. This is a **tenant-level** permission that allows scanning workspace metadata across the entire organization.
 
-**Required API Permissions:**
+> ⚠️ **Important**: Admin-level access is required because the Workspace Scan API (`/admin/workspaces/scanResult`) is an Admin API that requires tenant-wide permissions. Without admin-level permissions, you will receive authorization errors when attempting to scan workspaces.
 
-| API / Permission | Type | Description | Admin Consent |
-|------------------|------|-------------|---------------|
-| Microsoft Graph | | | |
+### Business Context
+
+We are developing a customer-facing tool to help users migrate analytics workloads from Power BI to Databricks with a single click. This leverages the Microsoft Power BI Admin Workspace APIs (specifically, the workspace scan API), which allows us to programmatically access model, lineage, M-Query expressions, and user details for all workspaces.
+
+To fully test and roll out this capability, the service principal must access tenant-wide workspace metadata across the organization (not just individual workspaces it owns) using the Admin API.
+
+### Required API Permissions
+
+| API / Permission | Type | Description | Admin Consent Required |
+|------------------|------|-------------|------------------------|
+| **Microsoft Graph** | | | |
 | `User.Read` | Delegated | Sign in and read user profile | No |
-| Power BI Service | | | |
+| **Power BI Service** | | | |
 | `Dataset.ReadWrite.All` | Delegated | Read and write all datasets | No |
 
-**Additional Requirements:**
-- The Service Principal must be enabled in Power BI Admin Portal:
-  1. Go to **Power BI Admin Portal** → **Tenant Settings**
-  2. Enable **"Allow service principals to use Power BI APIs"**
-  3. Add your Service Principal to the allowed security group
-- The SP needs to be in a security group with Admin API access
+### Additional Tenant-Level Requirements
+
+Beyond API permissions, the Service Principal must be enabled in **Power BI Admin Portal**:
+
+1. The Service Principal must be added to a **security group** that has Admin API access
+2. The **"Allow service principals to use Power BI APIs"** setting must be enabled
+3. The **"Allow service principals to use read-only admin APIs"** setting must be enabled
+
+### Step-by-Step Setup
+
+#### Step 1: Create Azure AD App Registration
+
+1. Navigate to [Azure Portal](https://portal.azure.com)
+2. Go to **Azure Active Directory** → **App registrations**
+3. Click **New registration**
+4. Configure the registration:
+   - **Name**: Enter an application name (e.g., "PowerBI-Admin-Connector")
+   - **Supported account types**: Select **Accounts in this organizational directory only**
+   - **Redirect URI**: Leave blank
+5. Click **Register**
+6. **Save the Application (client) ID** - you'll need this later
+7. **Save the Directory (tenant) ID** from the Overview page
+
+#### Step 2: Configure API Permissions
+
+1. In your App Registration, go to **API permissions**
+2. Click **Add a permission**
+3. Select **Microsoft Graph**
+4. Choose **Delegated permissions** and add:
+   - `User.Read` - Sign in and read user profile
+5. Click **Add a permission** again
+6. Select **Power BI Service**
+7. Choose **Delegated permissions** and add:
+   - `Dataset.ReadWrite.All` - Read and write all datasets
+8. Click **Grant admin consent for [Your Organization]**
+
+#### Step 3: Create Client Secret
+
+1. In your App Registration, go to **Certificates & secrets**
+2. Click **New client secret**
+3. Configure the secret:
+   - **Description**: Enter a description (e.g., "PowerBI Migration Tool - Admin")
+   - **Expires**: Select expiration period (recommended: 24 months)
+4. Click **Add**
+5. **IMMEDIATELY COPY THE SECRET VALUE** - you cannot retrieve it later!
+
+> 🔴 **Security Warning**: Store the client secret securely. This secret grants tenant-wide admin access to Power BI metadata. Treat it with the highest security.
+
+#### Step 4: Create Security Group for Admin API Access
+
+1. In Azure Portal, go to **Azure Active Directory** → **Groups**
+2. Click **New group**
+3. Configure the group:
+   - **Group type**: Security
+   - **Group name**: Enter a name (e.g., "PowerBI-AdminAPI-ServicePrincipals")
+   - **Group description**: "Service Principals with Power BI Admin API access"
+   - **Membership type**: Assigned
+4. Click **Create**
+5. Open the newly created group
+6. Go to **Members** → **Add members**
+7. Search for your App Registration name (e.g., "PowerBI-Admin-Connector")
+8. Select the application and click **Select**
+
+#### Step 5: Enable Service Principal in Power BI Admin Portal
+
+1. Go to [Power BI Admin Portal](https://app.powerbi.com/admin-portal/tenantSettings)
+2. Sign in with a Power BI Admin account
+3. Scroll to **Developer settings** section
+4. Enable **"Allow service principals to use Power BI APIs"**:
+   - Toggle the setting to **Enabled**
+   - Under **Apply to**, select **Specific security groups**
+   - Add your security group (e.g., "PowerBI-AdminAPI-ServicePrincipals")
+5. Enable **"Allow service principals to use read-only admin APIs"**:
+   - Toggle the setting to **Enabled**
+   - Under **Apply to**, select **Specific security groups**
+   - Add your security group (e.g., "PowerBI-AdminAPI-ServicePrincipals")
+6. Click **Apply**
+
+> ⚠️ **Note**: Changes to Power BI tenant settings may take **up to 15 minutes** to propagate. Wait before testing the connection.
+
+#### Step 6: Configure the Migration Tool
+
+1. Navigate to the **Configuration** page in Kasal
+2. Select the **Power BI Admin** configuration section
+3. Enter the following values:
+
+| Field | Value |
+|-------|-------|
+| **Tenant ID** | Your Azure AD tenant ID (from Step 1) |
+| **Client ID** | Application (client) ID from Step 1 |
+| **Client Secret** | Client secret value from Step 3 |
+
+4. Click **Save Configuration**
+5. Wait 15 minutes after enabling tenant settings
+6. Test the connection using the **Test Connection** button
+
+### Verification Checklist
+
+- [ ] App Registration created in Azure AD
+- [ ] `User.Read` (Delegated, Microsoft Graph) permission added
+- [ ] `Dataset.ReadWrite.All` (Delegated, Power BI Service) permission added
+- [ ] Admin consent granted for all permissions
+- [ ] Client secret created and stored securely
+- [ ] Security group created for Admin API access
+- [ ] Service Principal added to security group
+- [ ] "Allow service principals to use Power BI APIs" enabled in Admin Portal
+- [ ] "Allow service principals to use read-only admin APIs" enabled in Admin Portal
+- [ ] Security group added to both settings
+- [ ] Waited 15 minutes for propagation
+- [ ] Connection test successful in Kasal
 
 ---
 
@@ -279,7 +472,8 @@ CREATE TABLE IF NOT EXISTS main.default._metadata_hierarchies (
 **1. "Unauthorized" or "Forbidden" errors**
 - Verify the Service Principal has the correct permissions
 - Check if admin consent was granted for Application permissions
-- Ensure the SP is added to the Power BI workspace as a member
+- For Non-Admin API: Ensure the SP is added to the Power BI workspace as a member
+- For Admin API: Ensure the SP is in the allowed security group in tenant settings
 
 **2. "No data returned" from queries**
 - RLS may be filtering data - consider using a Service Account
@@ -289,7 +483,9 @@ CREATE TABLE IF NOT EXISTS main.default._metadata_hierarchies (
 **3. M-Query tool returns empty results**
 - Admin API SVP is required - check tenant settings
 - Ensure "Allow service principals to use Power BI APIs" is enabled
+- Ensure "Allow service principals to use read-only admin APIs" is enabled
 - Verify the SP is in the allowed security group
+- Wait 15 minutes after enabling settings for propagation
 
 **4. Hierarchies tool fails**
 - Only works with Fabric workspaces (not legacy Power BI Service)
@@ -299,6 +495,30 @@ CREATE TABLE IF NOT EXISTS main.default._metadata_hierarchies (
 **5. Static tables (Table.FromRows) not converted**
 - As of latest version, Table.FromRows expressions are automatically converted
 - Check that `skip_static_tables` is not explicitly set to skip them
+
+**6. Connection test fails**
+- Check the following:
+  - Client ID and Client Secret are correct (no extra spaces)
+  - Tenant ID matches your Azure AD tenant
+  - Client secret hasn't expired
+  - Firewall or network policies aren't blocking Power BI API access
+
+**7. No workspaces visible (Admin API)**
+- Ensure that:
+  - Service principal has read-only admin API access enabled in Power BI
+  - Application permissions (not just delegated) are properly configured
+  - The service principal is added to the security group allowed to use admin APIs
+
+---
+
+## Additional Resources
+
+### Microsoft Documentation
+
+- [Admin - WorkspaceInfo PostWorkspaceInfo API](https://learn.microsoft.com/en-us/rest/api/power-bi/admin/workspace-info-post-workspace-info)
+- [Automate Premium workspace and dataset tasks with service principals](https://learn.microsoft.com/en-us/power-bi/enterprise/service-premium-service-principal)
+- [Register an application with Microsoft identity platform](https://learn.microsoft.com/en-us/azure/active-directory/develop/quickstart-register-app)
+- [Power BI REST API Reference](https://learn.microsoft.com/en-us/rest/api/power-bi/)
 
 ---
 
