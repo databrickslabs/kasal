@@ -312,7 +312,8 @@ async def create_task(
                         debug_tools = [
                             "GenieTool", "SerperDevTool", "DatabricksKnowledgeSearchTool",
                             "PowerBIAnalysisTool", "Power BI Field Parameters & Calculation Groups Tool",
-                            "Power BI Hierarchies Tool", "M-Query Conversion Pipeline", "Measure Conversion Pipeline"
+                            "Power BI Hierarchies Tool", "Power BI Report References Tool",
+                            "M-Query Conversion Pipeline", "Measure Conversion Pipeline"
                         ]
                         if tool_name in debug_tools:
                             logger.info(f"Task {task_key} - {tool_name} task_tool_configs keys: {list(task_tool_configs.keys())}")

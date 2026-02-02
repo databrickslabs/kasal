@@ -31,6 +31,7 @@ tools_data = [
     (75, "Power BI Relationships Tool", "Extracts relationships from Power BI semantic models using the Execute Queries API with INFO.VIEW.RELATIONSHIPS() DAX function. Generates Unity Catalog Foreign Key constraint statements (NOT ENFORCED). IMPORTANT: Requires a Service Principal that is a WORKSPACE MEMBER with dataset read permissions - this is different from the Admin API which requires admin-level permissions. Perfect for migrating Power BI relationships to Unity Catalog as informational FKs, documenting data model relationships, or generating DDL for Databricks tables.", "transform"),
     (76, "Power BI Hierarchies Tool", "Extracts hierarchies from Microsoft Fabric semantic models using the Fabric API getDefinition endpoint (TMDL format). Parses TMDL to extract hierarchy definitions and generates Unity Catalog dimension views with hierarchy_path columns plus metadata table DDL. IMPORTANT: Requires a Service Principal with SemanticModel.ReadWrite.All permissions and works with Fabric workspaces only (not legacy Power BI Service). Perfect for migrating Power BI hierarchies to Databricks as dimension views, documenting drill-down structures, or generating DDL for dimension tables.", "transform"),
     (77, "Power BI Field Parameters & Calculation Groups Tool", "Extracts Field Parameters and Calculation Groups from Microsoft Fabric semantic models using the Fabric API getDefinition endpoint (TMDL format). Field Parameters allow users to dynamically switch between measures in reports using NAMEOF() DAX functions. Calculation Groups provide reusable time intelligence calculations (YTD, PY, YoY%, MTD) using SELECTEDMEASURE() patterns. Generates Unity Catalog metadata tables with parameter/calculation item details and SQL patterns for implementing equivalent logic. IMPORTANT: Requires a Service Principal with SemanticModel.ReadWrite.All permissions and works with Fabric workspaces only (not legacy Power BI Service). Perfect for documenting Power BI dynamic measure switching, migrating time intelligence patterns to Databricks, or generating SQL equivalents for calculation group logic.", "transform"),
+    (78, "Power BI Report References Tool", "Extracts visual-to-measure and visual-to-table references from Microsoft Fabric reports using the Fabric Report Definition API (PBIR format). Shows which measures, tables, and fields are used in each report page and visual. Output formats include markdown (grouped by page, measure, or table), JSON, and matrix view. IMPORTANT: Requires a Service Principal with Report.ReadWrite.All permissions and works only with Fabric reports in PBIR format. Perfect for understanding report dependencies, impact analysis for measure/table changes, identifying unused measures, and documenting report-to-semantic-model relationships.", "transform"),
 ]
 
 def get_tool_configs():
@@ -203,7 +204,23 @@ def get_tool_configs():
             "output_format": "markdown",  # Output format: "markdown", "json", or "sql"
             "skip_system_tables": True,
             "include_hidden": False
-        }   # Power BI Field Parameters & Calculation Groups Tool
+        },  # Power BI Field Parameters & Calculation Groups Tool
+        "78": {
+            # Mode: "static" = use values below, "dynamic" = resolve from execution_inputs
+            "mode": "static",
+            # Power BI Configuration (supports {placeholder} syntax in dynamic mode)
+            "workspace_id": "",
+            "dataset_id": "",  # Recommended: discovers ALL reports using this dataset
+            "report_id": "",   # Alternative: single specific report (ignored if dataset_id provided)
+            # Service Principal authentication (requires Report.ReadWrite.All)
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
+            # Output Options
+            "output_format": "markdown",  # Output format: "markdown", "json", or "matrix"
+            "include_visual_details": True,
+            "group_by": "page"  # Group results by: "page", "measure", or "table"
+        }   # Power BI Report References Tool
     }
 
 async def seed_async():
