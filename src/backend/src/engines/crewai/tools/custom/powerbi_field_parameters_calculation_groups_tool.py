@@ -34,11 +34,11 @@ class PowerBIFieldParametersCalculationGroupsSchema(BaseModel):
     # ===== POWER BI CONFIGURATION =====
     workspace_id: Optional[str] = Field(
         None,
-        description="[Power BI] Workspace ID containing the semantic model. Supports {workspace_id} placeholder."
+        description="[Power BI] Workspace ID (GUID) containing the semantic model. Leave empty to use pre-configured value."
     )
     dataset_id: Optional[str] = Field(
         None,
-        description="[Power BI] Dataset/Semantic Model ID to extract from. Supports {dataset_id} placeholder."
+        description="[Power BI] Dataset/Semantic Model ID (GUID) to extract from. Leave empty to use pre-configured value."
     )
 
     # ===== SERVICE PRINCIPAL AUTHENTICATION =====
@@ -155,27 +155,46 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
         instance_id = str(uuid.uuid4())[:8]
 
         logger.info(f"[PowerBIFieldParametersCalculationGroupsTool.__init__] Instance ID: {instance_id}")
+        logger.info(f"[PowerBIFieldParametersCalculationGroupsTool.__init__] kwargs keys: {list(kwargs.keys())}")
+
+        # Helper to check if a value is a placeholder that should be treated as empty
+        def is_placeholder_value(value: Any) -> bool:
+            if not isinstance(value, str):
+                return False
+            # Check for {placeholder} patterns
+            if re.search(r'^\{[a-z_]+\}$', value):
+                return True
+            return False
+
+        # Helper to get value, treating placeholders as None
+        def get_filtered_value(key: str, default: Any = None) -> Any:
+            value = kwargs.get(key, default)
+            if is_placeholder_value(value):
+                logger.info(f"[PowerBIFieldParametersCalculationGroupsTool.__init__] Filtering placeholder for {key}: {value}")
+                return default
+            return value
 
         # Extract execution_inputs for dynamic parameter resolution
         execution_inputs = kwargs.get("execution_inputs", {})
 
-        # Store configuration values
+        # Store configuration values - filter out placeholder values
         default_config = {
-            "workspace_id": kwargs.get("workspace_id"),
-            "dataset_id": kwargs.get("dataset_id"),
-            "tenant_id": kwargs.get("tenant_id"),
-            "client_id": kwargs.get("client_id"),
-            "client_secret": kwargs.get("client_secret"),
-            "access_token": kwargs.get("access_token"),
-            "target_catalog": kwargs.get("target_catalog", "main"),
-            "target_schema": kwargs.get("target_schema", "default"),
-            "llm_workspace_url": kwargs.get("llm_workspace_url"),
-            "llm_token": kwargs.get("llm_token"),
-            "llm_model": kwargs.get("llm_model", "databricks-claude-sonnet-4"),
-            "translate_measures": kwargs.get("translate_measures", True),
-            "include_sql_translation": kwargs.get("include_sql_translation", True),
-            "include_metadata_tables": kwargs.get("include_metadata_tables", True),
-            "output_format": kwargs.get("output_format", "markdown"),
+            "workspace_id": get_filtered_value("workspace_id"),
+            "dataset_id": get_filtered_value("dataset_id"),
+            "tenant_id": get_filtered_value("tenant_id"),
+            "client_id": get_filtered_value("client_id"),
+            "client_secret": get_filtered_value("client_secret"),
+            "access_token": get_filtered_value("access_token"),
+            "target_catalog": get_filtered_value("target_catalog", "main"),
+            "target_schema": get_filtered_value("target_schema", "default"),
+            "llm_workspace_url": get_filtered_value("llm_workspace_url"),
+            "llm_token": get_filtered_value("llm_token"),
+            "llm_model": get_filtered_value("llm_model", "databricks-claude-sonnet-4"),
+            "translate_measures": get_filtered_value("translate_measures", True),
+            "include_sql_translation": get_filtered_value("include_sql_translation", True),
+            "include_metadata_tables": get_filtered_value("include_metadata_tables", True),
+            "output_format": get_filtered_value("output_format", "markdown"),
+            "mode": get_filtered_value("mode", "static"),  # Also store mode for debugging
         }
 
         # Dynamic parameter resolution
@@ -224,17 +243,28 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
             # Extract execution_inputs
             execution_inputs = kwargs.pop('execution_inputs', {})
 
-            # Filter placeholder values
+            # Filter placeholder values - including {placeholder} patterns from dynamic mode
             def is_placeholder(value: Any) -> bool:
                 if not isinstance(value, str):
                     return False
+                # Check for common placeholder patterns
                 patterns = ["your_", "placeholder", "example_", "xxx", "insert_", "<"]
-                return any(p in value.lower() for p in patterns)
+                if any(p in value.lower() for p in patterns):
+                    return True
+                # Check for {placeholder} patterns (e.g., {workspace_id}, {dataset_id})
+                if re.search(r'^\{[a-z_]+\}$', value):
+                    return True
+                return False
 
             filtered_kwargs = {
                 k: v for k, v in kwargs.items()
                 if v is not None and not is_placeholder(v)
             }
+
+            # Log what was filtered for debugging
+            filtered_out = {k: v for k, v in kwargs.items() if v is not None and is_placeholder(v)}
+            if filtered_out:
+                logger.info(f"[PowerBIFieldParametersCalculationGroupsTool] Filtered out placeholder kwargs: {list(filtered_out.keys())}")
 
             # Merge with defaults
             merged_kwargs = {**self._default_config, **filtered_kwargs}
@@ -274,13 +304,31 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
                     unresolved.append(param_name)
 
             if unresolved:
+                # Log detailed debug info
+                mode = merged_kwargs.get('mode', 'unknown')
+                logger.error(f"[PowerBIFieldParametersCalculationGroupsTool] Unresolved placeholders: {unresolved}")
+                logger.error(f"[PowerBIFieldParametersCalculationGroupsTool] Mode: {mode}")
+                logger.error(f"[PowerBIFieldParametersCalculationGroupsTool] _default_config keys: {list(self._default_config.keys())}")
+                logger.error(f"[PowerBIFieldParametersCalculationGroupsTool] kwargs keys: {list(kwargs.keys())}")
+                # Log actual values (mask secrets)
+                for param_name, param_value in [("workspace_id", workspace_id), ("dataset_id", dataset_id)]:
+                    logger.error(f"[PowerBIFieldParametersCalculationGroupsTool] {param_name}: {param_value}")
+
                 return (
                     f"Error: Unresolved placeholder(s) detected: {', '.join(unresolved)}\n\n"
+                    f"**Debug Info**:\n"
+                    f"- Mode in config: {mode}\n"
+                    f"- workspace_id value: `{workspace_id}`\n"
+                    f"- dataset_id value: `{dataset_id}`\n\n"
                     "This usually means the tool is configured in **dynamic mode** but no "
-                    "execution_inputs were provided.\n\n"
+                    "execution_inputs were provided, OR the task's tool_configs weren't "
+                    "properly saved/loaded.\n\n"
                     "**Solutions**:\n"
-                    "1. Switch to **Static** mode in the UI and enter actual values\n"
-                    "2. Or provide values via execution_inputs when calling the crew\n\n"
+                    "1. **Re-save the task**: Open the task in the UI, verify you're in Static mode, "
+                    "enter actual values, and save again\n"
+                    "2. **Check the crew logs**: Look for `[ToolFactory]` and `tool_config_override` "
+                    "to see what values are being passed\n"
+                    "3. **Dynamic mode**: If using dynamic mode, provide values via execution_inputs\n\n"
                     "For static configuration, enter real credentials (not {placeholder} values)."
                 )
 
@@ -973,30 +1021,45 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
         self,
         field_parameters: List[Dict[str, Any]],
         calculation_groups: List[Dict[str, Any]],
-        _referenced_measures: List[Dict[str, Any]],  # Reserved for future use
+        referenced_measures: List[Dict[str, Any]],
         target_catalog: str,
         target_schema: str,
     ) -> str:
-        """Format output as SQL statements only."""
+        """Format output as comprehensive SQL statements (Option C)."""
         sql_lines = []
 
-        sql_lines.append("-- Power BI Field Parameters & Calculation Groups SQL Export")
-        sql_lines.append(f"-- Target: {target_catalog}.{target_schema}")
+        sql_lines.append("-- ============================================================")
+        sql_lines.append("-- POWER BI FIELD PARAMETERS & CALCULATION GROUPS")
+        sql_lines.append("-- Comprehensive SQL Export (Option C: Full Flexibility)")
+        sql_lines.append("-- ============================================================")
+        sql_lines.append(f"-- Target Catalog: {target_catalog}")
+        sql_lines.append(f"-- Target Schema: {target_schema}")
+        sql_lines.append("--")
+        sql_lines.append("-- This SQL provides:")
+        sql_lines.append("--   1. Config tables for metadata storage")
+        sql_lines.append("--   2. Measure definitions table (translated DAX)")
+        sql_lines.append("--   3. Dynamic KPI selection view with time intelligence")
+        sql_lines.append("--   4. Parameterized query templates for AI/BI Genie")
+        sql_lines.append("-- ============================================================")
+        sql_lines.append("")
+
+        # ==========================================
+        # SECTION 1: CONFIG TABLES
+        # ==========================================
+        sql_lines.append("-- ==========================================")
+        sql_lines.append("-- SECTION 1: CONFIGURATION TABLES")
+        sql_lines.append("-- ==========================================")
         sql_lines.append("")
 
         # Field Parameters Config Table
-        sql_lines.append("-- ==========================================")
-        sql_lines.append("-- FIELD PARAMETERS CONFIGURATION")
-        sql_lines.append("-- ==========================================")
-        sql_lines.append("")
         sql_lines.append(f"CREATE TABLE IF NOT EXISTS {target_catalog}.{target_schema}._config_field_parameters (")
-        sql_lines.append("    parameter_name STRING,")
-        sql_lines.append("    label STRING,")
-        sql_lines.append("    source_table STRING,")
-        sql_lines.append("    source_measure STRING,")
-        sql_lines.append("    ordinal INT,")
+        sql_lines.append("    parameter_name STRING COMMENT 'Field parameter name (e.g., KPI Selector)',")
+        sql_lines.append("    label STRING COMMENT 'User-friendly display label',")
+        sql_lines.append("    source_table STRING COMMENT 'Source table containing the measure',")
+        sql_lines.append("    source_measure STRING COMMENT 'Measure name in source table',")
+        sql_lines.append("    ordinal INT COMMENT 'Display order',")
         sql_lines.append("    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP()")
-        sql_lines.append(");")
+        sql_lines.append(") COMMENT 'Power BI field parameter configuration';")
         sql_lines.append("")
 
         if field_parameters:
@@ -1014,32 +1077,371 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
             sql_lines.append("")
 
         # Calculation Groups Config Table
-        sql_lines.append("-- ==========================================")
-        sql_lines.append("-- CALCULATION GROUPS CONFIGURATION")
-        sql_lines.append("-- ==========================================")
-        sql_lines.append("")
         sql_lines.append(f"CREATE TABLE IF NOT EXISTS {target_catalog}.{target_schema}._config_calculation_groups (")
-        sql_lines.append("    group_name STRING,")
-        sql_lines.append("    item_name STRING,")
-        sql_lines.append("    dax_expression STRING,")
-        sql_lines.append("    precedence INT,")
-        sql_lines.append("    ordinal INT,")
+        sql_lines.append("    group_name STRING COMMENT 'Calculation group name',")
+        sql_lines.append("    item_name STRING COMMENT 'Time intelligence type',")
+        sql_lines.append("    dax_expression STRING COMMENT 'Original DAX expression',")
+        sql_lines.append("    sql_pattern STRING COMMENT 'SQL equivalent pattern',")
+        sql_lines.append("    precedence INT COMMENT 'Calculation precedence',")
+        sql_lines.append("    ordinal INT COMMENT 'Display order',")
         sql_lines.append("    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP()")
-        sql_lines.append(");")
+        sql_lines.append(") COMMENT 'Power BI calculation group configuration';")
         sql_lines.append("")
 
         if calculation_groups:
             sql_lines.append(f"INSERT INTO {target_catalog}.{target_schema}._config_calculation_groups")
-            sql_lines.append("(group_name, item_name, dax_expression, precedence, ordinal)")
+            sql_lines.append("(group_name, item_name, dax_expression, sql_pattern, precedence, ordinal)")
             sql_lines.append("VALUES")
             inserts = []
             for cg in calculation_groups:
                 for item in cg['items']:
                     escaped_expr = item['expression'].replace("'", "''").replace('\n', '\\n')
+                    sql_pattern = self._get_sql_pattern_for_calc_item(item['name'])
                     inserts.append(
                         f"('{cg['name']}', '{item['name']}', '{escaped_expr}', "
-                        f"{cg['precedence']}, {item['ordinal']})"
+                        f"'{sql_pattern}', {cg['precedence']}, {item['ordinal']})"
                     )
             sql_lines.append(",\n".join(inserts) + ";")
+            sql_lines.append("")
+
+        # ==========================================
+        # SECTION 2: MEASURE DEFINITIONS TABLE
+        # ==========================================
+        sql_lines.append("")
+        sql_lines.append("-- ==========================================")
+        sql_lines.append("-- SECTION 2: MEASURE DEFINITIONS")
+        sql_lines.append("-- ==========================================")
+        sql_lines.append("")
+
+        sql_lines.append(f"CREATE TABLE IF NOT EXISTS {target_catalog}.{target_schema}._config_measures (")
+        sql_lines.append("    measure_name STRING COMMENT 'Measure identifier',")
+        sql_lines.append("    source_table STRING COMMENT 'Source table name',")
+        sql_lines.append("    dax_expression STRING COMMENT 'Original DAX expression',")
+        sql_lines.append("    sql_expression STRING COMMENT 'Translated SQL expression',")
+        sql_lines.append("    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP()")
+        sql_lines.append(") COMMENT 'Power BI measure definitions with SQL translations';")
+        sql_lines.append("")
+
+        if referenced_measures:
+            sql_lines.append(f"INSERT INTO {target_catalog}.{target_schema}._config_measures")
+            sql_lines.append("(measure_name, source_table, dax_expression, sql_expression)")
+            sql_lines.append("VALUES")
+            inserts = []
+            for measure in referenced_measures:
+                dax_expr = (measure.get('expression') or '').replace("'", "''").replace('\n', '\\n')
+                sql_expr = self._translate_dax_to_sql_simple(measure.get('expression'), measure.get('table'))
+                inserts.append(
+                    f"('{measure['name']}', '{measure.get('table', '')}', "
+                    f"'{dax_expr}', '{sql_expr}')"
+                )
+            sql_lines.append(",\n".join(inserts) + ";")
+            sql_lines.append("")
+
+        # ==========================================
+        # SECTION 3: WORKING KPI BASE VIEW (UNION)
+        # ==========================================
+        sql_lines.append("")
+        sql_lines.append("-- ==========================================")
+        sql_lines.append("-- SECTION 3: WORKING KPI BASE VIEW")
+        sql_lines.append("-- ==========================================")
+        sql_lines.append("-- This view queries actual source tables and UNIONs results")
+        sql_lines.append("-- Each KPI is aggregated from its source table")
+        sql_lines.append("-- NOTE: Assumes source tables exist in the target catalog/schema")
+        sql_lines.append("--       Adjust table references if they are in different locations")
+        sql_lines.append("")
+
+        if field_parameters and referenced_measures:
+            fp = field_parameters[0]
+
+            sql_lines.append(f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_base AS")
+
+            union_parts = []
+            for idx, item in enumerate(fp['items']):
+                measure = next((m for m in referenced_measures if m['name'] == item['source_measure']), None)
+                if measure and measure.get('expression'):
+                    sql_expr = self._translate_dax_to_sql_simple(measure['expression'], measure.get('table'))
+                    source_table = item['source_table']
+                    # Qualify table with catalog.schema
+                    qualified_table = f"{target_catalog}.{target_schema}.{source_table}"
+
+                    union_part = f"""SELECT
+    '{item['label']}' AS kpi_name,
+    {sql_expr} AS kpi_value
+FROM {qualified_table}"""
+                    union_parts.append(union_part)
+
+            if union_parts:
+                sql_lines.append("\nUNION ALL\n".join(union_parts) + ";")
+            sql_lines.append("")
+
+            # Also create a simple usage example
+            sql_lines.append("-- Usage examples:")
+            sql_lines.append(f"-- SELECT * FROM {target_catalog}.{target_schema}.v_kpi_base;")
+            sql_lines.append(f"-- SELECT * FROM {target_catalog}.{target_schema}.v_kpi_base WHERE kpi_name = 'Confirmed PHC';")
+            sql_lines.append("")
+
+        # ==========================================
+        # SECTION 4: KPI VIEW WITH TIME DIMENSIONS
+        # ==========================================
+        sql_lines.append("")
+        sql_lines.append("-- ==========================================")
+        sql_lines.append("-- SECTION 4: KPI VIEW WITH TIME DIMENSIONS")
+        sql_lines.append("-- ==========================================")
+        sql_lines.append("-- This view adds date grouping for time intelligence")
+        sql_lines.append("-- IMPORTANT: Update 'date_column' to match your actual date column name")
+        sql_lines.append("")
+
+        if field_parameters and referenced_measures:
+            fp = field_parameters[0]
+
+            sql_lines.append(f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_with_dates AS")
+
+            union_parts = []
+            for idx, item in enumerate(fp['items']):
+                measure = next((m for m in referenced_measures if m['name'] == item['source_measure']), None)
+                if measure and measure.get('expression'):
+                    sql_expr = self._translate_dax_to_sql_simple(measure['expression'], measure.get('table'))
+                    source_table = item['source_table']
+                    qualified_table = f"{target_catalog}.{target_schema}.{source_table}"
+
+                    # Generate SQL that groups by date dimensions
+                    union_part = f"""SELECT
+    '{item['label']}' AS kpi_name,
+    {sql_expr} AS kpi_value,
+    -- Update these date expressions to match your actual date column
+    DATE_TRUNC('day', CURRENT_DATE()) AS report_date,
+    YEAR(CURRENT_DATE()) AS report_year,
+    MONTH(CURRENT_DATE()) AS report_month
+FROM {qualified_table}"""
+                    union_parts.append(union_part)
+
+            if union_parts:
+                sql_lines.append("\nUNION ALL\n".join(union_parts) + ";")
+            sql_lines.append("")
+
+        # ==========================================
+        # SECTION 5: TIME INTELLIGENCE VIEWS
+        # ==========================================
+        sql_lines.append("")
+        sql_lines.append("-- ==========================================")
+        sql_lines.append("-- SECTION 5: TIME INTELLIGENCE VIEWS")
+        sql_lines.append("-- ==========================================")
+        sql_lines.append("-- These views apply standard time intelligence patterns")
+        sql_lines.append("-- IMPORTANT: Assumes your source tables have a 'date_column' column")
+        sql_lines.append("--            Replace 'date_column' with your actual date column name")
+        sql_lines.append("")
+
+        if field_parameters and referenced_measures and calculation_groups:
+            fp = field_parameters[0]
+
+            # Generate YTD View
+            sql_lines.append(f"-- YTD (Year-to-Date) View")
+            sql_lines.append(f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_ytd AS")
+
+            union_parts = []
+            for item in fp['items']:
+                measure = next((m for m in referenced_measures if m['name'] == item['source_measure']), None)
+                if measure and measure.get('expression'):
+                    sql_expr = self._translate_dax_to_sql_simple(measure['expression'], measure.get('table'))
+                    source_table = item['source_table']
+                    qualified_table = f"{target_catalog}.{target_schema}.{source_table}"
+
+                    union_part = f"""SELECT
+    '{item['label']}' AS kpi_name,
+    'YTD' AS time_period,
+    {sql_expr} AS kpi_value
+FROM {qualified_table}
+WHERE date_column >= DATE_TRUNC('year', CURRENT_DATE())
+  AND date_column <= CURRENT_DATE()"""
+                    union_parts.append(union_part)
+
+            if union_parts:
+                sql_lines.append("\nUNION ALL\n".join(union_parts) + ";")
+            sql_lines.append("")
+
+            # Generate MTD View
+            sql_lines.append(f"-- MTD (Month-to-Date) View")
+            sql_lines.append(f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_mtd AS")
+
+            union_parts = []
+            for item in fp['items']:
+                measure = next((m for m in referenced_measures if m['name'] == item['source_measure']), None)
+                if measure and measure.get('expression'):
+                    sql_expr = self._translate_dax_to_sql_simple(measure['expression'], measure.get('table'))
+                    source_table = item['source_table']
+                    qualified_table = f"{target_catalog}.{target_schema}.{source_table}"
+
+                    union_part = f"""SELECT
+    '{item['label']}' AS kpi_name,
+    'MTD' AS time_period,
+    {sql_expr} AS kpi_value
+FROM {qualified_table}
+WHERE date_column >= DATE_TRUNC('month', CURRENT_DATE())
+  AND date_column <= CURRENT_DATE()"""
+                    union_parts.append(union_part)
+
+            if union_parts:
+                sql_lines.append("\nUNION ALL\n".join(union_parts) + ";")
+            sql_lines.append("")
+
+            # Generate Prior Year View
+            sql_lines.append(f"-- PY (Prior Year) View")
+            sql_lines.append(f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_py AS")
+
+            union_parts = []
+            for item in fp['items']:
+                measure = next((m for m in referenced_measures if m['name'] == item['source_measure']), None)
+                if measure and measure.get('expression'):
+                    sql_expr = self._translate_dax_to_sql_simple(measure['expression'], measure.get('table'))
+                    source_table = item['source_table']
+                    qualified_table = f"{target_catalog}.{target_schema}.{source_table}"
+
+                    union_part = f"""SELECT
+    '{item['label']}' AS kpi_name,
+    'PY' AS time_period,
+    {sql_expr} AS kpi_value
+FROM {qualified_table}
+WHERE date_column >= DATEADD(year, -1, DATE_TRUNC('year', CURRENT_DATE()))
+  AND date_column <= DATEADD(year, -1, CURRENT_DATE())"""
+                    union_parts.append(union_part)
+
+            if union_parts:
+                sql_lines.append("\nUNION ALL\n".join(union_parts) + ";")
+            sql_lines.append("")
+
+        # ==========================================
+        # SECTION 6: COMBINED TIME INTELLIGENCE VIEW
+        # ==========================================
+        sql_lines.append("")
+        sql_lines.append("-- ==========================================")
+        sql_lines.append("-- SECTION 6: COMBINED TIME INTELLIGENCE VIEW")
+        sql_lines.append("-- ==========================================")
+        sql_lines.append("-- Master view combining all time periods for easy querying")
+        sql_lines.append("-- Query: SELECT * FROM v_kpi_all_periods WHERE kpi_name = 'X' AND time_period = 'YTD'")
+        sql_lines.append("")
+
+        if field_parameters and referenced_measures:
+            sql_lines.append(f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_all_periods AS")
+            sql_lines.append(f"SELECT kpi_name, 'Current' AS time_period, kpi_value FROM {target_catalog}.{target_schema}.v_kpi_base")
+            sql_lines.append("UNION ALL")
+            sql_lines.append(f"SELECT kpi_name, time_period, kpi_value FROM {target_catalog}.{target_schema}.v_kpi_ytd")
+            sql_lines.append("UNION ALL")
+            sql_lines.append(f"SELECT kpi_name, time_period, kpi_value FROM {target_catalog}.{target_schema}.v_kpi_mtd")
+            sql_lines.append("UNION ALL")
+            sql_lines.append(f"SELECT kpi_name, time_period, kpi_value FROM {target_catalog}.{target_schema}.v_kpi_py;")
+            sql_lines.append("")
+
+            sql_lines.append("-- Usage examples:")
+            sql_lines.append(f"-- Get all KPIs with all time periods:")
+            sql_lines.append(f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_all_periods;")
+            sql_lines.append("")
+            sql_lines.append(f"-- Get specific KPI across time periods:")
+            sql_lines.append(f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_all_periods WHERE kpi_name = 'Confirmed PHC';")
+            sql_lines.append("")
+            sql_lines.append(f"-- Compare Current vs YTD for all KPIs:")
+            sql_lines.append(f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_all_periods WHERE time_period IN ('Current', 'YTD');")
+            sql_lines.append("")
+
+        # ==========================================
+        # SECTION 7: YoY COMPARISON VIEW
+        # ==========================================
+        sql_lines.append("")
+        sql_lines.append("-- ==========================================")
+        sql_lines.append("-- SECTION 7: YEAR-OVER-YEAR COMPARISON VIEW")
+        sql_lines.append("-- ==========================================")
+        sql_lines.append("-- Calculates YoY % change by comparing Current to Prior Year")
+        sql_lines.append("")
+
+        if field_parameters and referenced_measures:
+            sql_lines.append(f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_yoy AS")
+            sql_lines.append("SELECT")
+            sql_lines.append("    c.kpi_name,")
+            sql_lines.append("    c.kpi_value AS current_value,")
+            sql_lines.append("    p.kpi_value AS prior_year_value,")
+            sql_lines.append("    c.kpi_value - p.kpi_value AS yoy_change,")
+            sql_lines.append("    CASE WHEN p.kpi_value != 0")
+            sql_lines.append("         THEN ROUND((c.kpi_value - p.kpi_value) / p.kpi_value * 100, 2)")
+            sql_lines.append("         ELSE NULL")
+            sql_lines.append("    END AS yoy_pct_change")
+            sql_lines.append(f"FROM {target_catalog}.{target_schema}.v_kpi_base c")
+            sql_lines.append(f"LEFT JOIN {target_catalog}.{target_schema}.v_kpi_py p ON c.kpi_name = p.kpi_name;")
+            sql_lines.append("")
+
+            sql_lines.append("-- Usage:")
+            sql_lines.append(f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_yoy;")
+            sql_lines.append(f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_yoy WHERE yoy_pct_change > 10;  -- KPIs up more than 10%")
+            sql_lines.append("")
+
+        # Summary
+        sql_lines.append("")
+        sql_lines.append("-- ==========================================")
+        sql_lines.append("-- SUMMARY")
+        sql_lines.append("-- ==========================================")
+        sql_lines.append(f"-- Field Parameters: {len(field_parameters)}")
+        sql_lines.append(f"-- Calculation Groups: {len(calculation_groups)}")
+        sql_lines.append(f"-- Referenced Measures: {len(referenced_measures)}")
+        sql_lines.append("--")
+        sql_lines.append("-- Objects created:")
+        sql_lines.append(f"--   TABLE: {target_catalog}.{target_schema}._config_field_parameters  (metadata)")
+        sql_lines.append(f"--   TABLE: {target_catalog}.{target_schema}._config_calculation_groups (metadata)")
+        sql_lines.append(f"--   TABLE: {target_catalog}.{target_schema}._config_measures           (metadata)")
+        sql_lines.append(f"--   VIEW:  {target_catalog}.{target_schema}.v_kpi_base                 (base KPI values)")
+        sql_lines.append(f"--   VIEW:  {target_catalog}.{target_schema}.v_kpi_with_dates           (KPIs with date dims)")
+        sql_lines.append(f"--   VIEW:  {target_catalog}.{target_schema}.v_kpi_ytd                  (Year-to-Date)")
+        sql_lines.append(f"--   VIEW:  {target_catalog}.{target_schema}.v_kpi_mtd                  (Month-to-Date)")
+        sql_lines.append(f"--   VIEW:  {target_catalog}.{target_schema}.v_kpi_py                   (Prior Year)")
+        sql_lines.append(f"--   VIEW:  {target_catalog}.{target_schema}.v_kpi_all_periods          (Combined view)")
+        sql_lines.append(f"--   VIEW:  {target_catalog}.{target_schema}.v_kpi_yoy                  (YoY comparison)")
+        sql_lines.append("--")
+        sql_lines.append("-- IMPORTANT: Before running, update 'date_column' references to your actual date column!")
+        sql_lines.append("--")
+        sql_lines.append("-- Quick Start:")
+        sql_lines.append(f"--   1. Run this SQL to create all objects")
+        sql_lines.append(f"--   2. SELECT * FROM {target_catalog}.{target_schema}.v_kpi_all_periods;")
+        sql_lines.append(f"--   3. SELECT * FROM {target_catalog}.{target_schema}.v_kpi_yoy;")
 
         return "\n".join(sql_lines)
+
+    def _get_sql_pattern_for_calc_item(self, item_name: str) -> str:
+        """Get SQL pattern template for a calculation item."""
+        name_upper = item_name.upper()
+        if name_upper == 'CURRENT':
+            return '{measure}'
+        elif 'YTD' in name_upper:
+            return 'SUM({measure}) WHERE date >= DATE_TRUNC(year)'
+        elif 'MTD' in name_upper:
+            return 'SUM({measure}) WHERE date >= DATE_TRUNC(month)'
+        elif name_upper in ('PY', 'PRIOR YEAR', 'LY'):
+            return 'SUM({measure}) WHERE year = year - 1'
+        elif 'YOY' in name_upper:
+            return '(current - prior) / NULLIF(prior, 0)'
+        return '{measure}'
+
+    def _translate_dax_to_sql_simple(self, dax_expression: Optional[str], table_name: Optional[str]) -> str:
+        """Simple DAX to SQL translation for common patterns."""
+        if not dax_expression:
+            return 'NULL'
+
+        sql = dax_expression.strip()
+
+        # Handle common DAX patterns
+        # SUM(table[column]) -> SUM(column)
+        sql = re.sub(r"SUM\s*\(\s*'?(\w+)'?\s*\[(\w+)\]\s*\)", r"SUM(\2)", sql, flags=re.IGNORECASE)
+        # AVERAGE(table[column]) -> AVG(column)
+        sql = re.sub(r"AVERAGE\s*\(\s*'?(\w+)'?\s*\[(\w+)\]\s*\)", r"AVG(\2)", sql, flags=re.IGNORECASE)
+        # COUNT(table[column]) -> COUNT(column)
+        sql = re.sub(r"COUNT\s*\(\s*'?(\w+)'?\s*\[(\w+)\]\s*\)", r"COUNT(\2)", sql, flags=re.IGNORECASE)
+        # COUNTROWS(table) -> COUNT(*)
+        sql = re.sub(r"COUNTROWS\s*\(\s*'?(\w+)'?\s*\)", r"COUNT(*)", sql, flags=re.IGNORECASE)
+        # DISTINCTCOUNT(table[column]) -> COUNT(DISTINCT column)
+        sql = re.sub(r"DISTINCTCOUNT\s*\(\s*'?(\w+)'?\s*\[(\w+)\]\s*\)", r"COUNT(DISTINCT \2)", sql, flags=re.IGNORECASE)
+        # MIN/MAX
+        sql = re.sub(r"MIN\s*\(\s*'?(\w+)'?\s*\[(\w+)\]\s*\)", r"MIN(\2)", sql, flags=re.IGNORECASE)
+        sql = re.sub(r"MAX\s*\(\s*'?(\w+)'?\s*\[(\w+)\]\s*\)", r"MAX(\2)", sql, flags=re.IGNORECASE)
+        # DIVIDE(a, b) -> a / NULLIF(b, 0)
+        sql = re.sub(r"DIVIDE\s*\(\s*([^,]+)\s*,\s*([^)]+)\s*\)", r"(\1) / NULLIF(\2, 0)", sql, flags=re.IGNORECASE)
+
+        # Escape single quotes for SQL string
+        sql = sql.replace("'", "''")
+
+        return sql

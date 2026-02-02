@@ -309,9 +309,19 @@ async def create_task(
                         tool_override = task_tool_configs.get(tool_name, {})
                         
                         # Debug logging for tool configs
-                        if tool_name in ["GenieTool", "SerperDevTool", "DatabricksKnowledgeSearchTool", "PowerBIAnalysisTool"]:
-                            logger.info(f"Task {task_key} - {tool_name} task_tool_configs: {task_tool_configs}")
+                        debug_tools = [
+                            "GenieTool", "SerperDevTool", "DatabricksKnowledgeSearchTool",
+                            "PowerBIAnalysisTool", "Power BI Field Parameters & Calculation Groups Tool",
+                            "Power BI Hierarchies Tool", "M-Query Conversion Pipeline", "Measure Conversion Pipeline"
+                        ]
+                        if tool_name in debug_tools:
+                            logger.info(f"Task {task_key} - {tool_name} task_tool_configs keys: {list(task_tool_configs.keys())}")
                             logger.info(f"Task {task_key} - {tool_name} tool_override: {tool_override}")
+                            # Also log if the override has actual values
+                            if tool_override:
+                                override_preview = {k: (v[:30] + '...' if isinstance(v, str) and len(v) > 30 else v)
+                                                   for k, v in tool_override.items() if v and 'secret' not in k.lower()}
+                                logger.info(f"Task {task_key} - {tool_name} override values preview: {override_preview}")
                         
                         # Create the tool instance with overrides
                         tool_instance = tool_factory.create_tool(
