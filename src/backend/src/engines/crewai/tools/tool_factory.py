@@ -104,6 +104,13 @@ except ImportError as e:
     PowerBIHierarchiesTool = None
     logging.warning(f"Could not import PowerBIHierarchiesTool: {e}")
 
+# Power BI Field Parameters & Calculation Groups Tool
+try:
+    from .custom.powerbi_field_parameters_calculation_groups_tool import PowerBIFieldParametersCalculationGroupsTool
+except ImportError as e:
+    PowerBIFieldParametersCalculationGroupsTool = None
+    logging.warning(f"Could not import PowerBIFieldParametersCalculationGroupsTool: {e}")
+
 # Setup logger
 logger = logging.getLogger(__name__)
 
@@ -159,6 +166,8 @@ class ToolFactory:
             self._tool_implementations["Power BI Relationships Tool"] = PowerBIRelationshipsTool
         if PowerBIHierarchiesTool is not None:
             self._tool_implementations["Power BI Hierarchies Tool"] = PowerBIHierarchiesTool
+        if PowerBIFieldParametersCalculationGroupsTool is not None:
+            self._tool_implementations["Power BI Field Parameters & Calculation Groups Tool"] = PowerBIFieldParametersCalculationGroupsTool
 
         # Initialize _initialized flag
         self._initialized = False
@@ -1519,6 +1528,41 @@ class ToolFactory:
                     return tool_instance
                 except Exception as e:
                     logger.error(f"[ToolFactory] ✗ Failed to create Power BI Hierarchies Tool: {e}")
+                    import traceback
+                    logger.error(f"[ToolFactory] Traceback: {traceback.format_exc()}")
+                    raise
+
+            # Power BI Field Parameters & Calculation Groups Tool
+            elif tool_name == "Power BI Field Parameters & Calculation Groups Tool":
+                # Tool accepts configuration directly
+                tool_config['result_as_answer'] = result_as_answer
+
+                # Enhanced logging to track tool configuration
+                logger.info(f"[ToolFactory] Creating Power BI Field Parameters & Calculation Groups Tool with merged config")
+                logger.info(f"[ToolFactory]   - workspace_id: {tool_config.get('workspace_id', 'NOT SET')[:30] if tool_config.get('workspace_id') else 'NOT SET'}...")
+                logger.info(f"[ToolFactory]   - dataset_id: {tool_config.get('dataset_id', 'NOT SET')[:30] if tool_config.get('dataset_id') else 'NOT SET'}...")
+                logger.info(f"[ToolFactory]   - tenant_id: {tool_config.get('tenant_id', 'NOT SET')[:20] if tool_config.get('tenant_id') else 'NOT SET'}...")
+                logger.info(f"[ToolFactory]   - client_id: {tool_config.get('client_id', 'NOT SET')[:20] if tool_config.get('client_id') else 'NOT SET'}...")
+                logger.info(f"[ToolFactory]   - target_catalog: {tool_config.get('target_catalog', 'NOT SET')}")
+                logger.info(f"[ToolFactory]   - target_schema: {tool_config.get('target_schema', 'NOT SET')}")
+
+                # Verify that Service Principal credentials are present
+                has_sp_creds = bool(
+                    tool_config.get('workspace_id') and
+                    tool_config.get('dataset_id') and
+                    tool_config.get('client_id') and
+                    tool_config.get('tenant_id') and
+                    tool_config.get('client_secret')
+                )
+                logger.info(f"[ToolFactory]   - Service Principal credentials present: {has_sp_creds}")
+
+                # Create the tool with the merged configuration
+                try:
+                    tool_instance = tool_class(**tool_config)
+                    logger.info(f"[ToolFactory] ✓ Successfully created Power BI Field Parameters & Calculation Groups Tool instance")
+                    return tool_instance
+                except Exception as e:
+                    logger.error(f"[ToolFactory] ✗ Failed to create Power BI Field Parameters & Calculation Groups Tool: {e}")
                     import traceback
                     logger.error(f"[ToolFactory] Traceback: {traceback.format_exc()}")
                     raise

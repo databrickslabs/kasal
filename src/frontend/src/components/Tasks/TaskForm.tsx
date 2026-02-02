@@ -50,6 +50,7 @@ import { MeasureConverterConfigSelector, MeasureConverterConfig } from '../Commo
 import { MQueryConverterConfigSelector, MQueryConverterConfig } from '../Common/MQueryConverterConfigSelector';
 import { PowerBIRelationshipsConfigSelector, PowerBIRelationshipsConfig } from '../Common/PowerBIRelationshipsConfigSelector';
 import { PowerBIHierarchiesConfigSelector, PowerBIHierarchiesConfig } from '../Common/PowerBIHierarchiesConfigSelector';
+import { PowerBIFieldParametersConfigSelector, PowerBIFieldParametersConfig } from '../Common/PowerBIFieldParametersConfigSelector';
 import { PerplexityConfig, SerperConfig } from '../../types/config';
 import { type LLMGuardrailConfig } from '../../types/task';
 import { ModelService } from '../../api/ModelService';
@@ -139,6 +140,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const [mQueryConverterConfig, setMQueryConverterConfig] = useState<MQueryConverterConfig>({});
   const [powerBIRelationshipsConfig, setPowerBIRelationshipsConfig] = useState<PowerBIRelationshipsConfig>({});
   const [powerBIHierarchiesConfig, setPowerBIHierarchiesConfig] = useState<PowerBIHierarchiesConfig>({});
+  const [powerBIFieldParametersConfig, setPowerBIFieldParametersConfig] = useState<PowerBIFieldParametersConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
   const [showBestPractices, setShowBestPractices] = useState(false);
@@ -224,6 +226,11 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       // Check for Power BI Hierarchies Tool config
       if (initialData.tool_configs['Power BI Hierarchies Tool']) {
         setPowerBIHierarchiesConfig(initialData.tool_configs['Power BI Hierarchies Tool'] as PowerBIHierarchiesConfig);
+      }
+
+      // Check for Power BI Field Parameters & Calculation Groups Tool config
+      if (initialData.tool_configs['Power BI Field Parameters & Calculation Groups Tool']) {
+        setPowerBIFieldParametersConfig(initialData.tool_configs['Power BI Field Parameters & Calculation Groups Tool'] as PowerBIFieldParametersConfig);
       }
 
       // Check for MCP_SERVERS config
@@ -619,6 +626,31 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
         })) {
           // Remove Power BI Hierarchies Tool config if tool not selected
           delete updatedToolConfigs['Power BI Hierarchies Tool'];
+        }
+
+        // Handle Power BI Field Parameters & Calculation Groups Tool config
+        if (powerBIFieldParametersConfig && Object.keys(powerBIFieldParametersConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Field Parameters & Calculation Groups Tool';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            'Power BI Field Parameters & Calculation Groups Tool': powerBIFieldParametersConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Field Parameters & Calculation Groups Tool';
+        })) {
+          // Remove Power BI Field Parameters & Calculation Groups Tool config if tool not selected
+          delete updatedToolConfigs['Power BI Field Parameters & Calculation Groups Tool'];
         }
 
         // Handle MCP_SERVERS config - use dict format to match schema
@@ -1412,6 +1444,40 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                       setToolConfigs(prev => ({
                         ...prev,
                         'Power BI Hierarchies Tool': config
+                      }));
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+
+            {/* Power BI Field Parameters & Calculation Groups Tool Configuration - Show only when tool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'Power BI Field Parameters & Calculation Groups Tool';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  Power BI Field Parameters & Calculation Groups Tool Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(0, 150, 136, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(0, 150, 136, 0.2)'
+                }}>
+                  <PowerBIFieldParametersConfigSelector
+                    value={powerBIFieldParametersConfig}
+                    onChange={(config) => {
+                      setPowerBIFieldParametersConfig(config);
+                      // Update tool configs when configuration changes
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'Power BI Field Parameters & Calculation Groups Tool': config
                       }));
                     }}
                   />
