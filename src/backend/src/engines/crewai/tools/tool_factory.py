@@ -713,6 +713,20 @@ class ToolFactory:
                         merged_val = tool_config.get(key, 'NOT IN MERGED')
                         logger.info(f"[ToolFactory]   {key}: base='{base_val}' → override='{override_val}' → merged='{merged_val}'")
 
+            # Verify override for Power BI Field Parameters tool
+            if tool_name == "Power BI Field Parameters & Calculation Groups Tool":
+                logger.info(f"[ToolFactory] {tool_name} - Verifying config:")
+                for key in ['workspace_id', 'dataset_id', 'tenant_id', 'client_id', 'client_secret', 'mode']:
+                    base_val = base_config.get(key, 'NOT IN BASE')
+                    override_val = (tool_config_override or {}).get(key, 'NOT IN OVERRIDE')
+                    merged_val = tool_config.get(key, 'NOT IN MERGED')
+                    # Mask secrets
+                    if 'secret' in key.lower():
+                        base_val = '***' if base_val and base_val != 'NOT IN BASE' else base_val
+                        override_val = '***' if override_val and override_val != 'NOT IN OVERRIDE' else override_val
+                        merged_val = '***' if merged_val and merged_val != 'NOT IN MERGED' else merged_val
+                    logger.info(f"[ToolFactory]   {key}: base='{base_val}' → override='{override_val}' → merged='{merged_val}'")
+
             # Handle specific tool types
             if tool_name == "PerplexityTool":
                 # Use parameters directly from tool config
