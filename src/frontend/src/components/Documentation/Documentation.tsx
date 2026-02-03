@@ -62,6 +62,7 @@ const docSections: DocSection[] = [
   {
     label: 'Power BI Tools',
     items: [
+      { label: 'Comprehensive Analysis Tool', file: 'tool-comprehensive-analysis' },
       { label: 'Measure Conversion Tool', file: 'tool-measure-conversion' },
       { label: 'M-Query Conversion Tool', file: 'tool-mquery-conversion' },
       { label: 'Relationships Tool', file: 'tool-relationships-conversion' },

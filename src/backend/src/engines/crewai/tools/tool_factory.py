@@ -1345,57 +1345,57 @@ class ToolFactory:
                 return tool
 
             elif tool_name == "PowerBIAnalysisTool":
-                # Create PowerBIAnalysisTool with group_id and PowerBI configuration
-                group_id = None
-                databricks_job_id = None
-                tenant_id = None
-                client_id = None
-                workspace_id = None
-                semantic_model_id = None
-                auth_method = "service_principal"
+                # Create PowerBIAnalysisTool with Power BI and LLM configuration
+                # This tool converts business questions into DAX queries and executes them
+                tool_args = {}
 
                 try:
-                    if isinstance(self.config, dict):
-                        group_id = self.config.get("group_id")
-
                     # Extract PowerBI config from tool_config (merged base + override)
                     if tool_config and isinstance(tool_config, dict):
-                        databricks_job_id = tool_config.get("databricks_job_id")
-                        tenant_id = tool_config.get("tenant_id")
-                        client_id = tool_config.get("client_id")
-                        workspace_id = tool_config.get("workspace_id")
-                        semantic_model_id = tool_config.get("semantic_model_id")
-                        auth_method = tool_config.get("auth_method", "service_principal")
+                        # Power BI Configuration
+                        tool_args["workspace_id"] = tool_config.get("workspace_id")
+                        tool_args["dataset_id"] = tool_config.get("dataset_id")
+
+                        # Service Principal Authentication
+                        tool_args["tenant_id"] = tool_config.get("tenant_id")
+                        tool_args["client_id"] = tool_config.get("client_id")
+                        tool_args["client_secret"] = tool_config.get("client_secret")
+
+                        # OAuth Authentication (alternative)
+                        tool_args["access_token"] = tool_config.get("access_token")
+
+                        # LLM Configuration for DAX generation
+                        tool_args["llm_workspace_url"] = tool_config.get("llm_workspace_url")
+                        tool_args["llm_token"] = tool_config.get("llm_token")
+                        tool_args["llm_model"] = tool_config.get("llm_model", "databricks-claude-sonnet-4")
+
+                        # Options
+                        tool_args["include_visual_references"] = tool_config.get("include_visual_references", True)
+                        tool_args["skip_system_tables"] = tool_config.get("skip_system_tables", True)
+                        tool_args["output_format"] = tool_config.get("output_format", "markdown")
 
                     # Allow tool_config_override to override specific fields
                     if isinstance(tool_config_override, dict):
-                        if "databricks_job_id" in tool_config_override:
-                            databricks_job_id = tool_config_override["databricks_job_id"]
-                        if "tenant_id" in tool_config_override:
-                            tenant_id = tool_config_override["tenant_id"]
-                        if "client_id" in tool_config_override:
-                            client_id = tool_config_override["client_id"]
-                        if "workspace_id" in tool_config_override:
-                            workspace_id = tool_config_override["workspace_id"]
-                        if "semantic_model_id" in tool_config_override:
-                            semantic_model_id = tool_config_override["semantic_model_id"]
-                        if "auth_method" in tool_config_override:
-                            auth_method = tool_config_override["auth_method"]
-                except Exception as e:
-                    logger.error(f"Error extracting PowerBI config: {e}")
-                    group_id = None
-                    databricks_job_id = None
+                        for key in ["workspace_id", "dataset_id", "tenant_id", "client_id",
+                                    "client_secret", "access_token", "llm_workspace_url",
+                                    "llm_token", "llm_model", "include_visual_references",
+                                    "skip_system_tables", "output_format"]:
+                            if key in tool_config_override:
+                                tool_args[key] = tool_config_override[key]
 
-                logger.info(f"Creating PowerBIAnalysisTool with group_id: {group_id}, databricks_job_id: {databricks_job_id}, tenant_id: {'***' if tenant_id else None}, client_id: {'***' if client_id else None}")
-                return tool_class(
-                    group_id=group_id or "default",
-                    databricks_job_id=databricks_job_id,
-                    tenant_id=tenant_id,
-                    client_id=client_id,
-                    workspace_id=workspace_id,
-                    semantic_model_id=semantic_model_id,
-                    auth_method=auth_method
-                )
+                    # Filter out None values
+                    tool_args = {k: v for k, v in tool_args.items() if v is not None}
+
+                except Exception as e:
+                    logger.error(f"Error extracting PowerBI Analysis config: {e}")
+                    tool_args = {}
+
+                logger.info(f"Creating PowerBIAnalysisTool with workspace_id: {tool_args.get('workspace_id')}, "
+                           f"dataset_id: {tool_args.get('dataset_id')}, "
+                           f"tenant_id: {'***' if tool_args.get('tenant_id') else None}, "
+                           f"has_access_token: {bool(tool_args.get('access_token'))}, "
+                           f"llm_configured: {bool(tool_args.get('llm_workspace_url'))}")
+                return tool_class(**tool_args)
 
             elif tool_name == "MCPTool":
                 # MCPTool might need special configuration

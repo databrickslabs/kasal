@@ -1,29 +1,29 @@
-import logging
+"""
+Power BI Analysis Tool for CrewAI
+
+Orchestrates Power BI model analysis and DAX query execution:
+1. Calls Measure Conversion Pipeline to extract measures and model context
+2. Uses LLM to generate intelligent DAX based on user questions
+3. Executes DAX queries via Power BI Execute Queries API
+4. Searches for visual references in reports
+
+Author: Kasal Team
+Date: 2026
+"""
+
 import asyncio
+import base64
+import logging
 import json
-import time
 import re
-import os
-from datetime import datetime
-from typing import Any, Optional, Type
+from typing import Any, Optional, Type, Dict, List
 from concurrent.futures import ThreadPoolExecutor
 
 from crewai.tools import BaseTool
-from pydantic import BaseModel, Field, PrivateAttr, model_validator
+from pydantic import BaseModel, Field, PrivateAttr
+import httpx
 
 logger = logging.getLogger(__name__)
-
-# Emergency debug logging to file (bypasses all logging config)
-def _debug_log(msg: str):
-    """Write debug message directly to file, bypassing logger."""
-    try:
-        debug_file = '/tmp/powerbi_tool_debug.log'
-        with open(debug_file, 'a') as f:
-            timestamp = datetime.now().isoformat()
-            f.write(f"[{timestamp}] {msg}\n")
-            f.flush()
-    except Exception:
-        pass  # Silently fail if we can't write debug log
 
 # Thread pool executor for running async operations from sync context
 _EXECUTOR = ThreadPoolExecutor(max_workers=5)
@@ -32,26 +32,13 @@ _EXECUTOR = ThreadPoolExecutor(max_workers=5)
 def _run_async_in_sync_context(coro):
     """
     Safely run an async coroutine from a synchronous context.
-
-    This handles the case where we're already in an event loop (e.g., FastAPI)
-    and need to execute async code from a sync function (e.g., CrewAI tool's _run method).
-
-    Args:
-        coro: The coroutine to execute
-
-    Returns:
-        The result of the coroutine execution
+    Handles nested event loop scenarios (e.g., FastAPI).
     """
     try:
-        # Try to get the current running loop
         loop = asyncio.get_running_loop()
-        # We're already in an async context, run in executor to avoid nested loop issues
-        logger.debug("Detected running event loop, using ThreadPoolExecutor")
         future = _EXECUTOR.submit(asyncio.run, coro)
         return future.result()
     except RuntimeError:
-        # No event loop running, we can safely create one
-        logger.debug("No running event loop detected, creating new loop")
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
@@ -60,812 +47,977 @@ def _run_async_in_sync_context(coro):
             loop.close()
 
 
-class PowerBIAnalysisToolSchema(BaseModel):
+class PowerBIAnalysisSchema(BaseModel):
     """Input schema for PowerBIAnalysisTool."""
 
-    dashboard_id: str = Field(
-        ..., description="Power BI dashboard/semantic model ID to analyze"
-    )
-    questions: list = Field(
-        ..., description="Business questions to analyze using DAX"
-    )
-    workspace_id: Optional[str] = Field(
-        None, description="Power BI workspace ID (uses default if not provided)"
-    )
-    dax_statement: Optional[str] = Field(
-        None, description="Pre-generated DAX statement (optional, will be generated if not provided)"
-    )
-    job_id: Optional[int] = Field(
-        None, description="Databricks job ID to execute (overrides configured job_id if provided)"
-    )
-    additional_params: Optional[dict] = Field(
-        None, description=(
-            "Additional parameters for Power BI authentication and Databricks job execution. "
-            "Required fields: 'tenant_id' (Azure AD Tenant ID), 'client_id' (Azure AD Application ID). "
-            "Optional fields: 'auth_method' (default: 'service_principal'), 'sample_size', 'metadata', 'task_key'. "
-            "NOTE: Credentials auto-fetched from API Keys: POWERBI_CLIENT_SECRET, POWERBI_USERNAME, POWERBI_PASSWORD, DATABRICKS_TOKEN. "
-            "Databricks host auto-detected from environment. "
-            "Example: {'tenant_id': 'xxx', 'client_id': 'yyy', 'auth_method': 'service_principal'}"
-        )
+    # ===== USER QUESTION =====
+    user_question: Optional[str] = Field(
+        None,
+        description="[Required] The business question to answer using Power BI data. Example: 'What are total sales by region?'"
     )
 
-    @model_validator(mode='after')
-    def validate_input(self) -> 'PowerBIAnalysisToolSchema':
-        """Validate the input parameters."""
-        if not self.questions and not self.dax_statement:
-            raise ValueError("Either 'questions' or 'dax_statement' must be provided")
-        return self
+    # ===== POWER BI CONFIGURATION =====
+    workspace_id: Optional[str] = Field(
+        None,
+        description="[Power BI] Workspace ID (GUID) containing the semantic model."
+    )
+    dataset_id: Optional[str] = Field(
+        None,
+        description="[Power BI] Dataset/Semantic Model ID (GUID) to query."
+    )
+
+    # ===== SERVICE PRINCIPAL AUTHENTICATION =====
+    tenant_id: Optional[str] = Field(
+        None,
+        description="[Auth] Azure AD tenant ID for Service Principal."
+    )
+    client_id: Optional[str] = Field(
+        None,
+        description="[Auth] Application/Client ID (SemanticModel.ReadWrite.All permission)."
+    )
+    client_secret: Optional[str] = Field(
+        None,
+        description="[Auth] Client secret for Service Principal."
+    )
+
+    # ===== OR USER OAUTH =====
+    access_token: Optional[str] = Field(
+        None,
+        description="[Auth] Access token for user OAuth authentication (alternative to SP)."
+    )
+
+    # ===== LLM CONFIGURATION =====
+    llm_workspace_url: Optional[str] = Field(
+        None,
+        description="[LLM] Databricks workspace URL for LLM-based DAX generation."
+    )
+    llm_token: Optional[str] = Field(
+        None,
+        description="[LLM] Databricks token for LLM access."
+    )
+    llm_model: str = Field(
+        "databricks-claude-sonnet-4",
+        description="[LLM] Model to use for DAX generation."
+    )
+
+    # ===== OPTIONS =====
+    include_visual_references: bool = Field(
+        True,
+        description="[Options] Search for visual references after DAX execution."
+    )
+    skip_system_tables: bool = Field(
+        True,
+        description="[Options] Skip system tables like LocalDateTable."
+    )
+    output_format: str = Field(
+        "markdown",
+        description="[Output] Output format: 'markdown' or 'json'."
+    )
 
 
 class PowerBIAnalysisTool(BaseTool):
     """
-    A tool for complex Power BI analysis using Databricks job execution.
+    Power BI Analysis Tool - Question-to-DAX-to-Results Pipeline.
 
-    This tool is designed for:
-    - Heavy computational analysis
-    - Long-running DAX queries
-    - Complex data transformations
-    - Result persistence to Databricks volumes
-    - Integration with other data sources
+    **Flow**:
+    1. **Extract Model Context**: Fetches measures, relationships from semantic model
+    2. **Generate DAX**: Uses LLM to convert user question into DAX query
+    3. **Execute DAX**: Runs the query via Power BI Execute Queries API
+    4. **Find Visual References**: Identifies which reports/visuals use the queried measures
 
+    **Authentication**:
+    - Service Principal (client_id + client_secret) OR
+    - User OAuth (access_token)
 
-    Architecture:
-    1. Accepts business questions or DAX statements
-    2. Triggers Databricks job with parameters
-    3. Databricks notebook executes DAX against Power BI
-    4. Results are processed and optionally stored
-    5. Returns analysis results to agent
+    **Use Cases**:
+    - Answer business questions using Power BI data
+    - Generate and validate DAX queries
+    - Understand measure usage across reports
     """
 
-    name: str = "Power BI Analysis (Databricks)"
+    name: str = "Power BI Comprehensive Analysis"
     description: str = (
-        "Execute complex Power BI analysis using Databricks jobs. "
-        "Suitable for heavy computations, long-running queries, and advanced analytics. "
-        "\n\nREQUIRED PARAMETERS:\n"
-        "- 'job_id': Databricks job ID to execute (can be set in tool config as default)\n"
-        "- 'dashboard_id': Power BI semantic model ID to query\n"
-        "- 'questions': List of business questions to analyze\n"
-        "- 'additional_params': Dict with Power BI authentication:\n"
-        "  - 'tenant_id': Azure AD Tenant ID (required)\n"
-        "  - 'client_id': Azure AD Application ID (required)\n"
-        "  - 'auth_method': Authentication method (default: 'service_principal')\n"
-        "  - NOTE: Credentials auto-fetched from API Keys:\n"
-        "    - POWERBI_CLIENT_SECRET (for service_principal auth)\n"
-        "    - POWERBI_USERNAME (optional, for device_code auth)\n"
-        "    - POWERBI_PASSWORD (optional, for device_code auth)\n"
-        "    - DATABRICKS_TOKEN (for Databricks API access)\n"
-        "\n\nOPTIONAL PARAMETERS:\n"
-        "- 'workspace_id': Power BI workspace ID\n"
-        "- 'dax_statement': Pre-generated DAX query\n"
-        "- Additional params: 'databricks_host', 'databricks_token', 'sample_size', 'metadata', "
-        "'task_key' (default: 'pbi_e2e_pipeline' for multi-task jobs)\n"
-        "\n\nEXAMPLE:\n"
-        "job_id=365257288725339, dashboard_id='a17de62e-...', questions=['What is total NSR?'], "
-        "additional_params={'tenant_id': 'xxx-xxx', 'client_id': 'yyy-yyy', 'auth_method': 'service_principal'}"
+        "Converts business questions into DAX queries and executes them against Power BI semantic models. "
+        "Extracts model context (measures, relationships), generates intelligent DAX using LLM, "
+        "executes the query, and finds visual references. "
+        "Requires workspace_id, dataset_id, and authentication (Service Principal or OAuth)."
     )
-    args_schema: Type[BaseModel] = PowerBIAnalysisToolSchema
+    args_schema: Type[BaseModel] = PowerBIAnalysisSchema
 
-    _group_id: Optional[str] = PrivateAttr(default=None)
-    _databricks_job_id: Optional[int] = PrivateAttr(default=None)
-    _tenant_id: Optional[str] = PrivateAttr(default=None)
-    _client_id: Optional[str] = PrivateAttr(default=None)
-    _workspace_id: Optional[str] = PrivateAttr(default=None)
-    _semantic_model_id: Optional[str] = PrivateAttr(default=None)
-    _auth_method: Optional[str] = PrivateAttr(default="service_principal")
+    # Private attributes
+    _instance_id: str = PrivateAttr()
+    _default_config: Dict[str, Any] = PrivateAttr()
 
-    def __init__(
-        self,
-        group_id: Optional[str] = None,
-        databricks_job_id: Optional[int] = None,
-        tenant_id: Optional[str] = None,
-        client_id: Optional[str] = None,
-        workspace_id: Optional[str] = None,
-        semantic_model_id: Optional[str] = None,
-        auth_method: Optional[str] = "service_principal",
-        **kwargs
-    ):
-        """
-        Initialize PowerBIAnalysisTool.
+    model_config = {"arbitrary_types_allowed": True, "extra": "allow"}
 
-        Args:
-            group_id: Group ID for multi-tenant support
-            databricks_job_id: Databricks job ID for Power BI analysis (if pre-configured)
-            tenant_id: Azure AD Tenant ID for Power BI authentication
-            client_id: Azure AD Application/Client ID for Power BI authentication
-            workspace_id: Default Power BI Workspace ID (optional, can be overridden per task)
-            semantic_model_id: Default Power BI Semantic Model ID (optional, can be overridden per task)
-            auth_method: Authentication method ("service_principal" or "device_code")
-            **kwargs: Additional keyword arguments for BaseTool
-        """
-        super().__init__(**kwargs)
-        self._group_id = group_id
-        self._databricks_job_id = databricks_job_id
-        self._tenant_id = tenant_id
-        self._client_id = client_id
-        self._workspace_id = workspace_id
-        self._semantic_model_id = semantic_model_id
-        self._auth_method = auth_method
+    def __init__(self, **kwargs: Any) -> None:
+        """Initialize the Analysis tool."""
+        import uuid
+        instance_id = str(uuid.uuid4())[:8]
 
-        # Clear debug log file at initialization
-        try:
-            debug_file = '/tmp/powerbi_tool_debug.log'
-            if os.path.exists(debug_file):
-                os.remove(debug_file)
-        except Exception:
-            pass
+        logger.info(f"[PowerBIAnalysisTool.__init__] Instance ID: {instance_id}")
 
-        _debug_log(f"PowerBIAnalysisTool initialized for group: {group_id or 'default'}, job_id: {databricks_job_id}")
-        logger.info(f"PowerBIAnalysisTool initialized for group: {group_id or 'default'}")
+        # Store configuration
+        default_config = {
+            "workspace_id": kwargs.get("workspace_id"),
+            "dataset_id": kwargs.get("dataset_id"),
+            "tenant_id": kwargs.get("tenant_id"),
+            "client_id": kwargs.get("client_id"),
+            "client_secret": kwargs.get("client_secret"),
+            "access_token": kwargs.get("access_token"),
+            "llm_workspace_url": kwargs.get("llm_workspace_url"),
+            "llm_token": kwargs.get("llm_token"),
+            "llm_model": kwargs.get("llm_model", "databricks-claude-sonnet-4"),
+            "include_visual_references": kwargs.get("include_visual_references", True),
+            "skip_system_tables": kwargs.get("skip_system_tables", True),
+            "output_format": kwargs.get("output_format", "markdown"),
+        }
+
+        # Call parent init
+        tool_kwargs = {k: v for k, v in kwargs.items() if k not in default_config}
+        super().__init__(**tool_kwargs)
+
+        self._instance_id = instance_id
+        self._default_config = default_config
+
+    def _is_placeholder_value(self, value: Any) -> bool:
+        """Check if a value looks like a placeholder/example that should be ignored."""
+        if not isinstance(value, str):
+            return False
+
+        # Common placeholder patterns
+        placeholder_patterns = [
+            # UUID-like placeholders (12345678-1234-1234-1234-123456789012)
+            r'^[0-9]{8}-[0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{12}$',
+            # Explicit placeholder strings
+            r'your_.*_here',
+            r'your-.*-here',
+            r'<.*>',
+            r'\{.*\}',
+            r'placeholder',
+            r'example\.com',
+            r'^https://your-',
+            r'^https://.*-url\.com$',
+        ]
+
+        import re
+        value_lower = value.lower()
+        for pattern in placeholder_patterns:
+            if re.search(pattern, value_lower):
+                return True
+
+        return False
 
     def _run(self, **kwargs: Any) -> str:
-        """
-        Execute a Power BI analysis action via Databricks job.
-
-        Args:
-            job_id (Optional[int]): Databricks job ID to execute (overrides configured job_id)
-            dashboard_id (str): Power BI dashboard/semantic model ID
-            questions (list): Business questions to analyze
-            workspace_id (Optional[str]): Workspace ID
-            dax_statement (Optional[str]): Pre-generated DAX statement
-            additional_params (Optional[dict]): Additional parameters for the Databricks job
-                (e.g., auth_method, tenant_id, client_id, client_secret, sample_size, etc.)
-
-        Returns:
-            str: Formatted analysis results
-        """
-        _debug_log(f"PowerBI tool _run called with job_id={kwargs.get('job_id')}, dashboard_id={kwargs.get('dashboard_id')}")
-        logger.info(f"[POWERBI-TOOL] _run called with job_id={kwargs.get('job_id')}")
-        # Use helper function to safely run async code from sync context
-        result = _run_async_in_sync_context(self._execute_analysis(**kwargs))
-        _debug_log(f"PowerBI tool _run returning result of type {type(result)}, length={len(str(result))}")
-        logger.info(f"[POWERBI-TOOL] _run returning result length={len(str(result))}")
-        return result
-
-    async def _execute_analysis(self, **kwargs) -> str:
-        """
-        Async implementation of analysis execution via Databricks.
-
-        Args:
-            **kwargs: Analysis parameters including job_id, dashboard_id, questions, etc.
-
-        Returns:
-            str: Formatted analysis results
-        """
-        dashboard_id = kwargs.get('dashboard_id')
-        questions = kwargs.get('questions', [])
-        workspace_id = kwargs.get('workspace_id')
-        job_id = kwargs.get('job_id')  # Get job_id from parameters
-        additional_params = kwargs.get('additional_params')  # Get additional parameters
-
-        _debug_log(f"_execute_analysis started: job_id={job_id}, dashboard_id={dashboard_id}, questions={questions}")
-        logger.info(f"[POWERBI-TOOL] _execute_analysis started")
-
+        """Execute the Power BI analysis pipeline."""
         try:
-            # Import here to avoid circular dependency
-            from .databricks_jobs_tool import DatabricksJobsTool
+            instance_id = getattr(self, '_instance_id', 'UNKNOWN')
+            logger.info(f"[PowerBIAnalysisTool] Instance {instance_id} - _run() called")
+            logger.info(f"[PowerBIAnalysisTool] Default config keys: {list(self._default_config.keys())}")
+            logger.info(f"[PowerBIAnalysisTool] Runtime kwargs keys: {list(kwargs.keys())}")
 
-            # Auto-detect Databricks configuration
-            databricks_host = None
-            databricks_token = None
-            tool_config = {}
+            # Filter out placeholder/example values from kwargs
+            filtered_kwargs = {}
+            for k, v in kwargs.items():
+                if v is not None and not self._is_placeholder_value(v):
+                    filtered_kwargs[k] = v
+                elif self._is_placeholder_value(v):
+                    logger.info(f"[PowerBIAnalysisTool] Ignoring placeholder value for '{k}': {v[:30] if isinstance(v, str) else v}...")
 
-            # 1. Try to get databricks_host from unified auth (auto-detect from environment)
-            try:
-                from src.utils.databricks_auth import get_auth_context
-                auth_context = await get_auth_context()
-                if auth_context and auth_context.workspace_url:
-                    databricks_host = auth_context.workspace_url
-                    logger.info(f"Auto-detected databricks_host from environment: {databricks_host}")
-            except Exception as e:
-                logger.debug(f"Could not auto-detect databricks_host from auth context: {e}")
+            # Merge configurations:
+            # - For user_question: prefer kwargs (the actual question from the agent)
+            # - For auth/connection params: prefer default config (pre-configured values)
+            # - For options: prefer kwargs if provided, else default config
+            merged_config = {}
 
-            # 2. Override with additional_params if explicitly provided
-            if additional_params and 'databricks_host' in additional_params:
-                databricks_host = additional_params['databricks_host']
-                logger.info(f"Using databricks_host from additional_params: {databricks_host}")
+            # Connection and auth parameters - default config takes precedence
+            config_params = ["workspace_id", "dataset_id", "tenant_id", "client_id",
+                           "client_secret", "access_token", "llm_workspace_url",
+                           "llm_token", "llm_model"]
+            for key in config_params:
+                default_val = self._default_config.get(key)
+                kwarg_val = filtered_kwargs.get(key)
+                # Use default config if available, otherwise use kwargs
+                merged_config[key] = default_val if default_val is not None else kwarg_val
 
-            # 3. Try to get databricks_token from API Keys first (secure)
-            try:
-                from src.services.api_keys_service import ApiKeysService
-                from src.db.session import async_session_factory
-                from src.utils.encryption_utils import EncryptionUtils
+            # User question - prefer kwargs (the actual question from the agent)
+            kwarg_question = filtered_kwargs.get("user_question")
+            default_question = self._default_config.get("user_question")
+            merged_config["user_question"] = kwarg_question if kwarg_question else default_question
 
-                async with async_session_factory() as session:
-                    api_keys_service = ApiKeysService(session, group_id=self._group_id)
-                    # Try both DATABRICKS_TOKEN and DATABRICKS_API_KEY
-                    token_obj = await api_keys_service.find_by_name("DATABRICKS_TOKEN")
-                    if not token_obj:
-                        token_obj = await api_keys_service.find_by_name("DATABRICKS_API_KEY")
+            # Options - prefer kwargs if provided
+            for key in ["include_visual_references", "skip_system_tables", "output_format"]:
+                kwarg_val = filtered_kwargs.get(key)
+                default_val = self._default_config.get(key)
+                merged_config[key] = kwarg_val if kwarg_val is not None else default_val
 
-                    if token_obj and token_obj.encrypted_value:
-                        databricks_token = EncryptionUtils.decrypt_value(token_obj.encrypted_value)
-                        logger.info("Retrieved databricks_token from API Keys")
-            except Exception as e:
-                logger.debug(f"Could not retrieve databricks_token from API Keys: {e}")
+            logger.info(f"[PowerBIAnalysisTool] Merged config - workspace_id: {merged_config.get('workspace_id')}, "
+                       f"question: {merged_config.get('user_question', '')[:50] if merged_config.get('user_question') else 'None'}...")
 
-            # 4. Fall back to additional_params if not found in API Keys
-            if not databricks_token and additional_params and 'databricks_token' in additional_params:
-                databricks_token = additional_params['databricks_token']
-                logger.info("Using databricks_token from additional_params")
+            # Validate required parameters
+            user_question = merged_config.get("user_question")
+            workspace_id = merged_config.get("workspace_id")
+            dataset_id = merged_config.get("dataset_id")
 
-            # 5. Build tool_config for DatabricksJobsTool
-            if databricks_token:
-                tool_config['DATABRICKS_API_KEY'] = databricks_token
+            if not user_question:
+                return "Error: user_question is required. Please provide a business question to answer."
+            if not workspace_id:
+                return "Error: workspace_id is required."
+            if not dataset_id:
+                return "Error: dataset_id is required."
 
-            if databricks_host:
-                tool_config['DATABRICKS_HOST'] = databricks_host
+            # Validate authentication
+            has_sp_auth = all([
+                merged_config.get("tenant_id"),
+                merged_config.get("client_id"),
+                merged_config.get("client_secret")
+            ])
+            has_oauth = bool(merged_config.get("access_token"))
 
-            # Create DatabricksJobsTool instance with proper configuration
-            databricks_tool = DatabricksJobsTool(
-                databricks_host=databricks_host,
-                tool_config=tool_config,
-                token_required=False  # We handle auth through tool_config
-            )
-
-            # Prepare job parameters with correct field names for Databricks job
-            # The job expects:
-            # - "question" (singular string, not "questions" array)
-            # - "semantic_model_id" (not "dashboard_id")
-            # - No "dax_statement" field
-
-            # Convert questions array to single question string (take first question)
-            question_str = questions[0] if questions and len(questions) > 0 else ""
-
-            # Determine semantic_model_id with priority: task config > kwargs > fallback
-            # PRIORITY 1: Use semantic_model_id from task config if available
-            effective_semantic_model_id = self._semantic_model_id if self._semantic_model_id else dashboard_id
-
-            job_params = {
-                "question": question_str,                           # Singular, not plural
-                "semantic_model_id": effective_semantic_model_id,   # Use prioritized value
-                "workspace_id": workspace_id,
-                # dax_statement is NOT sent to the job (internal to PowerBI tool)
-            }
-
-            logger.info(f"Prepared job parameters with question: '{question_str[:50] if question_str else ''}...' and semantic_model_id: {effective_semantic_model_id}")
-
-            # Build PowerBI configuration with precedence: tool config (from task) > additional_params (from LLM)
-            powerbi_config = {}
-
-            # PRIORITY 1: Use tool initialization values (from task config) - HIGHEST PRIORITY
-            if self._tenant_id:
-                powerbi_config['tenant_id'] = self._tenant_id
-            if self._client_id:
-                powerbi_config['client_id'] = self._client_id
-            if self._auth_method:
-                powerbi_config['auth_method'] = self._auth_method
-            if self._workspace_id:
-                powerbi_config['workspace_id'] = self._workspace_id
-
-            # PRIORITY 2: Fall back to additional_params only if not already set (from LLM - lower priority)
-            if additional_params:
-                if 'tenant_id' not in powerbi_config and 'tenant_id' in additional_params:
-                    powerbi_config['tenant_id'] = additional_params['tenant_id']
-                if 'client_id' not in powerbi_config and 'client_id' in additional_params:
-                    powerbi_config['client_id'] = additional_params['client_id']
-                if 'auth_method' not in powerbi_config and 'auth_method' in additional_params:
-                    powerbi_config['auth_method'] = additional_params['auth_method']
-                if 'workspace_id' not in powerbi_config and 'workspace_id' in additional_params:
-                    powerbi_config['workspace_id'] = additional_params['workspace_id']
-
-            # Use workspace_id from kwargs if provided (override everything)
-            if workspace_id:
-                powerbi_config['workspace_id'] = workspace_id
-
-            logger.info(f"PowerBI config (task-level overrides applied): {list(powerbi_config.keys())}")
-
-            # Fetch PowerBI credentials from API Keys service (encrypted storage)
-            # These are sensitive and should never be stored in task config or passed in plain text
-            try:
-                from src.services.api_keys_service import ApiKeysService
-                from src.db.session import async_session_factory
-                from src.utils.encryption_utils import EncryptionUtils
-
-                async with async_session_factory() as session:
-                    # Use group_id for multi-tenant isolation
-                    api_keys_service = ApiKeysService(session, group_id=self._group_id)
-
-                    # Fetch client_secret (required for service_principal auth)
-                    client_secret_obj = await api_keys_service.find_by_name("POWERBI_CLIENT_SECRET")
-                    if client_secret_obj and client_secret_obj.encrypted_value:
-                        client_secret = EncryptionUtils.decrypt_value(client_secret_obj.encrypted_value)
-                        powerbi_config['client_secret'] = client_secret
-                        logger.info("Successfully retrieved POWERBI_CLIENT_SECRET from API Keys")
-                    else:
-                        logger.warning("POWERBI_CLIENT_SECRET not found in API Keys")
-
-                    # Fetch username (optional, for device_code or interactive auth)
-                    username_obj = await api_keys_service.find_by_name("POWERBI_USERNAME")
-                    if username_obj and username_obj.encrypted_value:
-                        username = EncryptionUtils.decrypt_value(username_obj.encrypted_value)
-                        powerbi_config['username'] = username
-                        logger.info("Successfully retrieved POWERBI_USERNAME from API Keys")
-
-                    # Fetch password (optional, for device_code or interactive auth)
-                    password_obj = await api_keys_service.find_by_name("POWERBI_PASSWORD")
-                    if password_obj and password_obj.encrypted_value:
-                        password = EncryptionUtils.decrypt_value(password_obj.encrypted_value)
-                        powerbi_config['password'] = password
-                        logger.info("Successfully retrieved POWERBI_PASSWORD from API Keys")
-
-            except Exception as e:
-                logger.error(f"Error retrieving PowerBI credentials from API Keys: {e}")
-                # Continue without credentials - they might be provided via additional_params
-
-            # Merge additional parameters (these will be passed to the Databricks notebook/job)
-            if additional_params:
-                # Create a copy to avoid modifying the original
-                job_additional_params = additional_params.copy()
-
-                # Remove auth params that we already extracted (they're in powerbi_config or tool_config)
-                # This avoids duplication in job_params
-                for key in ['tenant_id', 'client_id', 'auth_method', 'client_secret', 'username', 'password', 'databricks_host', 'databricks_token']:
-                    job_additional_params.pop(key, None)
-
-                job_params.update(job_additional_params)
-                logger.info(f"Added {len(job_additional_params)} additional parameters to job_params")
-
-            # Merge PowerBI config into job_params
-            job_params.update(powerbi_config)
-
-            # Add Databricks configuration to job_params (needed by the notebook)
-            if databricks_host:
-                job_params['databricks_host'] = databricks_host
-                logger.info(f"Added databricks_host to job_params: {databricks_host}")
-
-            if databricks_token:
-                job_params['databricks_token'] = databricks_token
-                logger.info("Added databricks_token to job_params (value hidden for security)")
-
-            # Determine which job_id to use: parameter takes precedence over configured value
-            effective_job_id = job_id if job_id is not None else self._databricks_job_id
-
-            # If job_id is available (from parameter or configuration), run it; otherwise, return instructions
-            if effective_job_id:
-                logger.info(f"Running Databricks job {effective_job_id} for Power BI analysis")
-                logger.info(f"Job parameters: {list(job_params.keys())}")
-                logger.info(f"Databricks host configured: {databricks_host}")
-                logger.info(f"Databricks token configured: {'Yes' if databricks_token else 'No'}")
-
-                # Trigger job run
-                logger.info(f"🚀 Triggering Databricks job {effective_job_id} with {len(job_params)} parameters")
-                run_result = databricks_tool._run(
-                    action="run",
-                    job_id=effective_job_id,
-                    job_params=job_params
+            if not has_sp_auth and not has_oauth:
+                return (
+                    "Error: Authentication required.\n"
+                    "Provide either:\n"
+                    "- Service Principal: tenant_id, client_id, client_secret\n"
+                    "- OR User OAuth: access_token"
                 )
 
-                logger.info(f"📝 Job trigger result: {run_result[:200]}...")
+            # Run async pipeline
+            result = _run_async_in_sync_context(self._execute_analysis_pipeline(merged_config))
 
-                # Parse run_id from result
-                # Expected format: "✅ Job run started successfully\nRun ID: 12345\n..."
-                run_id = self._extract_run_id(run_result)
-                logger.info(f"📍 Extracted run_id: {run_id}")
-
-                if run_id:
-                    # Get the task_key from additional_params if provided, otherwise use default
-                    task_key = additional_params.get('task_key', 'pbi_e2e_pipeline') if additional_params else 'pbi_e2e_pipeline'
-                    _debug_log(f"Monitoring Databricks job run {run_id}, task: {task_key}")
-                    logger.info(f"[POWERBI-TOOL] Monitoring Databricks job run {run_id}, task: {task_key}")
-
-                    # Poll for completion
-                    max_wait = 300  # 5 minutes
-                    poll_interval = 5  # 5 seconds
-                    elapsed = 0
-
-                    while elapsed < max_wait:
-                        # Check task status directly (for multi-task jobs)
-                        task_status = await self._check_task_status(databricks_tool, run_id, task_key)
-
-                        logger.warning(f"⏱️ Task '{task_key}' status: {task_status} (elapsed: {elapsed}s/{max_wait}s)")
-
-                        if task_status == "SUCCESS":
-                            # Task completed successfully - extract the notebook output
-                            _debug_log(f"Task '{task_key}' SUCCESS - extracting output from run_id={run_id}")
-                            logger.info(f"[POWERBI-TOOL] 🎯 Task '{task_key}' completed successfully (run_id: {run_id}), extracting notebook output...")
-
-                            try:
-                                # Get the notebook output by calling the Databricks API directly
-                                _debug_log(f"Calling _get_notebook_output with run_id={run_id}, task_key={task_key}")
-                                logger.info(f"[POWERBI-TOOL] Calling _get_notebook_output with run_id={run_id}, task_key={task_key}")
-                                result_data = await self._get_notebook_output(databricks_tool, run_id, task_key)
-                                _debug_log(f"_get_notebook_output returned: {type(result_data)} - has_data={bool(result_data)}")
-                                logger.info(f"[POWERBI-TOOL] _get_notebook_output returned: {type(result_data)} - {bool(result_data)}")
-
-                                if result_data:
-                                    rows_count = result_data.get('rows_returned', 0)
-                                    _debug_log(f"Successfully extracted {rows_count} rows from task output")
-                                    logger.info(f"[POWERBI-TOOL] ✅ Successfully extracted {rows_count} rows from task output")
-                                    formatted_result = self._format_analysis_result(
-                                        dashboard_id,
-                                        question_str,
-                                        result_data
-                                    )
-                                    _debug_log(f"Formatted result length: {len(formatted_result)} chars")
-                                    logger.info(f"[POWERBI-TOOL] Formatted result length: {len(formatted_result)} chars")
-                                    logger.info(f"[POWERBI-TOOL] Result preview: {formatted_result[:500]}")
-                                    _debug_log(f"Returning formatted result: {formatted_result[:200]}...")
-                                    return formatted_result
-                                else:
-                                    # Fallback to basic success message if we can't extract data
-                                    # Return detailed debug info to help diagnose the issue
-                                    logger.error(f"[POWERBI-TOOL] ❌ result_data is None/empty")
-                                    logger.error(f"[POWERBI-TOOL] Failed to extract result data from task '{task_key}' (run_id: {run_id})")
-
-                                    # Include debug information in the response
-                                    debug_info = f"✅ Task '{task_key}' completed successfully but could not extract detailed results.\n\n"
-                                    debug_info += f"**Debug Information:**\n"
-                                    debug_info += f"- Run ID: {run_id}\n"
-                                    debug_info += f"- Task Key: {task_key}\n"
-                                    debug_info += f"- Extraction returned: None\n\n"
-
-                                    # Include extraction debug steps if available
-                                    if hasattr(self, '_extraction_debug') and self._extraction_debug:
-                                        debug_info += f"**Extraction Steps:**\n"
-                                        for step in self._extraction_debug:
-                                            debug_info += f"- {step}\n"
-                                        debug_info += "\n"
-
-                                    debug_info += f"**Troubleshooting:**\n"
-                                    debug_info += f"1. Check backend logs/console for '[POWERBI-TOOL]' messages\n"
-                                    debug_info += f"2. The notebook should exit with: 'Notebook exited: {{...}}' containing result_data\n"
-                                    debug_info += f"3. Verify the task '{task_key}' exists in the multi-task job\n"
-
-                                    return debug_info
-                            except Exception as e:
-                                logger.error(f"[POWERBI-TOOL] ❌ EXCEPTION during result extraction: {str(e)}", exc_info=True)
-                                return f"✅ Task '{task_key}' completed successfully but extraction failed: {str(e)}\n\nRun ID: {run_id}"
-                        elif task_status in ["FAILED", "CANCELED", "TIMEDOUT"]:
-                            logger.error(f"Task '{task_key}' failed with status: {task_status}")
-                            return f"❌ Analysis Failed\n\nTask '{task_key}' status: {task_status}\nRun ID: {run_id}"
-                        elif task_status in ["RUNNING", "PENDING", "BLOCKED"]:
-                            # Still running, wait and retry
-                            logger.info(f"Task '{task_key}' still {task_status}, waiting {poll_interval}s...")
-                            time.sleep(poll_interval)
-                            elapsed += poll_interval
-                        else:
-                            logger.warning(f"Unknown task status: {task_status}")
-                            time.sleep(poll_interval)
-                            elapsed += poll_interval
-
-                    logger.error(f"Task '{task_key}' did not complete within {max_wait} seconds")
-                    return f"⏱️ Analysis Timeout\n\nTask '{task_key}' did not complete within {max_wait} seconds.\nRun ID: {run_id}\nLast status: {task_status}"
-                else:
-                    return f"❌ Failed to extract run ID from result:\n{run_result}"
-
-            else:
-                # No job configured - return instructions for setup
-                return self._format_setup_instructions(dashboard_id, question_str, job_params)
+            return result
 
         except Exception as e:
-            logger.error(f"Error executing Power BI analysis: {e}", exc_info=True)
-            return f"❌ Error executing analysis: {str(e)}"
+            logger.error(f"[PowerBIAnalysisTool] Error: {str(e)}", exc_info=True)
+            return f"Error: {str(e)}"
 
-    def _extract_run_id(self, result: str) -> Optional[int]:
-        """Extract run ID from Databricks job result."""
+    async def _execute_analysis_pipeline(self, config: Dict[str, Any]) -> str:
+        """Execute the full analysis pipeline."""
+        user_question = config["user_question"]
+        workspace_id = config["workspace_id"]
+        dataset_id = config["dataset_id"]
+        output_format = config.get("output_format", "markdown")
+
+        logger.info(f"Starting analysis pipeline: question='{user_question[:50]}...', workspace={workspace_id}")
+
+        # Initialize results
+        results = {
+            "user_question": user_question,
+            "workspace_id": workspace_id,
+            "dataset_id": dataset_id,
+            "model_context": {
+                "measures": [],
+                "relationships": [],
+                "tables": []
+            },
+            "generated_dax": None,
+            "dax_execution": {
+                "success": False,
+                "data": [],
+                "row_count": 0,
+                "error": None
+            },
+            "visual_references": [],
+            "errors": []
+        }
+
+        # Step 1: Get access token
         try:
-            # Look for "Run ID: 12345" pattern
-            match = re.search(r'Run ID:\s*(\d+)', result)
-            if match:
-                return int(match.group(1))
+            access_token = await self._get_access_token(config)
+            logger.info("Access token obtained successfully")
         except Exception as e:
-            logger.error(f"Error extracting run ID: {e}")
-        return None
+            results["errors"].append(f"Authentication error: {str(e)}")
+            return self._format_output(results, output_format)
 
-    async def _check_task_status(self, databricks_tool, run_id: int, task_key: str = "pbi_e2e_pipeline") -> str:
-        """
-        Check the status of a specific task in a Databricks job run.
-
-        Args:
-            databricks_tool: DatabricksJobsTool instance
-            run_id: The run ID to check
-            task_key: The task key/name to check status for
-
-        Returns:
-            Task status string: SUCCESS, FAILED, RUNNING, PENDING, etc.
-        """
+        # Step 2: Extract model context (measures, relationships)
         try:
-            # Get run details
-            run_details_endpoint = f"/api/2.1/jobs/runs/get?run_id={run_id}"
-            run_details = await databricks_tool._make_api_call("GET", run_details_endpoint)
-
-            # Check if this is a multi-task job
-            tasks = run_details.get('tasks', [])
-
-            if tasks:
-                # Multi-task job - find the specific task
-                target_task = None
-                for task in tasks:
-                    if task.get('task_key') == task_key:
-                        target_task = task
-                        break
-
-                if target_task:
-                    # Get the task's state
-                    state = target_task.get('state', {})
-                    life_cycle_state = state.get('life_cycle_state', 'UNKNOWN')
-                    result_state = state.get('result_state', '')
-
-                    # If task has completed, return the result_state (SUCCESS, FAILED, etc.)
-                    if life_cycle_state in ['TERMINATED', 'INTERNAL_ERROR']:
-                        return result_state if result_state else 'FAILED'
-                    else:
-                        # Task is still running/pending
-                        return life_cycle_state
-                else:
-                    logger.warning(f"Task '{task_key}' not found in run {run_id}")
-                    # Return the main run status as fallback
-                    state = run_details.get('state', {})
-                    life_cycle_state = state.get('life_cycle_state', 'UNKNOWN')
-                    result_state = state.get('result_state', '')
-                    return result_state if result_state else life_cycle_state
-            else:
-                # Single-task job - get the main run status
-                state = run_details.get('state', {})
-                life_cycle_state = state.get('life_cycle_state', 'UNKNOWN')
-                result_state = state.get('result_state', '')
-
-                # If run has completed, return the result_state
-                if life_cycle_state in ['TERMINATED', 'INTERNAL_ERROR']:
-                    return result_state if result_state else 'FAILED'
-                else:
-                    return life_cycle_state
-
+            model_context = await self._extract_model_context(
+                workspace_id, dataset_id, access_token, config
+            )
+            results["model_context"] = model_context
+            logger.info(f"Model context extracted: {len(model_context['measures'])} measures, {len(model_context['relationships'])} relationships")
         except Exception as e:
-            logger.error(f"Error checking task status: {e}", exc_info=True)
-            return "ERROR"
+            results["errors"].append(f"Model extraction error: {str(e)}")
+            logger.error(f"Model extraction failed: {e}")
 
-    def _format_success_result(self, result: str, semantic_model_id: str, question: str) -> str:
-        """Format successful analysis result."""
-        output = f"✅ Power BI Analysis Complete\n\n"
-        output += f"📊 Semantic Model: {semantic_model_id}\n"
-        output += f"❓ Question Analyzed: {question}\n"
-        output += f"\n{result}\n"
-        return output
+        # Step 3: Generate DAX using LLM
+        if results["model_context"]["measures"] or results["model_context"]["tables"]:
+            try:
+                generated_dax = await self._generate_dax_with_llm(
+                    user_question, results["model_context"], config
+                )
+                results["generated_dax"] = generated_dax
+                logger.info(f"DAX generated: {generated_dax[:100] if generated_dax else 'None'}...")
+            except Exception as e:
+                results["errors"].append(f"DAX generation error: {str(e)}")
+                logger.error(f"DAX generation failed: {e}")
 
-    async def _get_notebook_output(self, databricks_tool, run_id: int, task_key: str = "pbi_e2e_pipeline") -> Optional[dict]:
-        """
-        Extract notebook output from a completed Databricks job run.
+        # Step 4: Execute DAX query
+        if results["generated_dax"]:
+            try:
+                execution_result = await self._execute_dax_query(
+                    workspace_id, dataset_id, access_token, results["generated_dax"]
+                )
+                results["dax_execution"] = execution_result
+                logger.info(f"DAX execution: success={execution_result['success']}, rows={execution_result['row_count']}")
+            except Exception as e:
+                results["errors"].append(f"DAX execution error: {str(e)}")
+                results["dax_execution"]["error"] = str(e)
+                logger.error(f"DAX execution failed: {e}")
 
-        For multi-task jobs, extracts output from the specified task.
+        # Step 5: Find visual references (optional)
+        if config.get("include_visual_references", True) and results["model_context"]["measures"]:
+            try:
+                # Get measures used in the generated DAX
+                used_measures = self._extract_measures_from_dax(
+                    results["generated_dax"] or "",
+                    [m["name"] for m in results["model_context"]["measures"]]
+                )
+                if used_measures:
+                    visual_refs = await self._find_visual_references(
+                        workspace_id, dataset_id, access_token, used_measures
+                    )
+                    results["visual_references"] = visual_refs
+                    logger.info(f"Found {len(visual_refs)} visual references")
+            except Exception as e:
+                results["errors"].append(f"Visual reference error: {str(e)}")
+                logger.error(f"Visual reference search failed: {e}")
 
-        Args:
-            databricks_tool: DatabricksJobsTool instance
-            run_id: The run ID to get output from
-            task_key: The task key/name to get output from (default: "pbi_e2e_pipeline")
+        return self._format_output(results, output_format)
 
-        Returns:
-            Parsed notebook output as dict, or None if extraction fails
-        """
-        # Track extraction steps for debugging
-        self._extraction_debug = []
+    async def _get_access_token(self, config: Dict[str, Any]) -> str:
+        """Get OAuth access token using Service Principal or return provided token."""
+        # If access_token provided, use it directly
+        if config.get("access_token"):
+            return config["access_token"]
 
+        # Otherwise, use Service Principal
+        tenant_id = config["tenant_id"]
+        client_id = config["client_id"]
+        client_secret = config["client_secret"]
+
+        url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+        data = {
+            "grant_type": "client_credentials",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "scope": "https://analysis.windows.net/powerbi/api/.default"
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(url, data=data)
+            response.raise_for_status()
+            return response.json()["access_token"]
+
+    async def _extract_model_context(
+        self,
+        workspace_id: str,
+        dataset_id: str,
+        access_token: str,
+        config: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Extract measures, relationships, and tables from the semantic model."""
+        model_context = {
+            "measures": [],
+            "relationships": [],
+            "tables": []
+        }
+
+        # Get Fabric token for TMDL (may need different scope)
+        fabric_token = access_token
         try:
-            _debug_log(f"_get_notebook_output: run_id={run_id}, task_key={task_key}")
-            self._extraction_debug.append(f"Starting extraction for run_id={run_id}, task_key={task_key}")
-            # For multi-task jobs, we need to get the run details first to find the task
-            logger.info(f"[POWERBI-TOOL] 🔍 Getting run details for run {run_id}, looking for task '{task_key}'")
-
-            # First, get the run details to see if it's a multi-task job
-            run_details_endpoint = f"/api/2.1/jobs/runs/get?run_id={run_id}"
-            _debug_log(f"Making API call to: {run_details_endpoint}")
-            logger.info(f"[POWERBI-TOOL] Making API call to: {run_details_endpoint}")
-            self._extraction_debug.append(f"API call: {run_details_endpoint}")
-            run_details = await databricks_tool._make_api_call("GET", run_details_endpoint)
-
-            _debug_log(f"Got run details with {len(run_details)} keys")
-            logger.info(f"[POWERBI-TOOL] 📋 Got run details with keys: {list(run_details.keys())}")
-            self._extraction_debug.append(f"Run details keys: {list(run_details.keys())}")
-
-            # Check if this is a multi-task job
-            tasks = run_details.get('tasks', [])
-            _debug_log(f"Found {len(tasks)} tasks in run")
-            logger.info(f"[POWERBI-TOOL] 🔢 Found {len(tasks)} tasks in run")
-            self._extraction_debug.append(f"Found {len(tasks)} tasks")
-
-            if tasks:
-                # Multi-task job - find the specific task
-                task_keys = [t.get('task_key') for t in tasks]
-                logger.info(f"[POWERBI-TOOL] 🔎 Multi-task job detected. Available tasks: {task_keys}")
-                self._extraction_debug.append(f"Available tasks: {task_keys}")
-
-                target_task = None
-                for task in tasks:
-                    if task.get('task_key') == task_key:
-                        target_task = task
-                        break
-
-                if target_task:
-                    # Get the task's run_id
-                    task_run_id = target_task.get('run_id')
-                    _debug_log(f"Found task '{task_key}' with run_id={task_run_id}")
-                    logger.info(f"[POWERBI-TOOL] ✅ Found task '{task_key}' with run_id {task_run_id}")
-                    self._extraction_debug.append(f"Found task '{task_key}' with run_id={task_run_id}")
-
-                    # Get the output for this specific task run
-                    task_output_endpoint = f"/api/2.1/jobs/runs/get-output?run_id={task_run_id}"
-                    _debug_log(f"Fetching task output from: {task_output_endpoint}")
-                    logger.info(f"[POWERBI-TOOL] 📥 Fetching task output from: {task_output_endpoint}")
-                    self._extraction_debug.append(f"Fetching output: {task_output_endpoint}")
-                    task_response = await databricks_tool._make_api_call("GET", task_output_endpoint)
-
-                    _debug_log(f"Task response has {len(task_response)} keys")
-                    logger.info(f"[POWERBI-TOOL] 📦 Task response keys: {list(task_response.keys())}")
-                    self._extraction_debug.append(f"Response keys: {list(task_response.keys())}")
-                    notebook_output = task_response.get('notebook_output', {})
-                    _debug_log(f"Notebook output has {len(notebook_output)} keys")
-                    logger.info(f"[POWERBI-TOOL] 📓 Notebook output keys: {list(notebook_output.keys())}")
-                    self._extraction_debug.append(f"Notebook output keys: {list(notebook_output.keys())}")
-                    result_text = notebook_output.get('result', '')
-                    _debug_log(f"Result text length: {len(result_text)} chars, preview: {result_text[:100]}")
-                    logger.info(f"[POWERBI-TOOL] 📝 Result text length: {len(result_text)} chars")
-                    self._extraction_debug.append(f"Result text length: {len(result_text)} chars")
-                else:
-                    logger.warning(f"Task '{task_key}' not found. Available tasks: {[t.get('task_key') for t in tasks]}")
-                    # Fall back to getting output from the main run (might work for some jobs)
-                    output_endpoint = f"/api/2.1/jobs/runs/get-output?run_id={run_id}"
-                    response = await databricks_tool._make_api_call("GET", output_endpoint)
-                    notebook_output = response.get('notebook_output', {})
-                    result_text = notebook_output.get('result', '')
-            else:
-                # Single-task job - get output directly
-                logger.info(f"Single-task job detected, getting output directly")
-                output_endpoint = f"/api/2.1/jobs/runs/get-output?run_id={run_id}"
-                response = await databricks_tool._make_api_call("GET", output_endpoint)
-                notebook_output = response.get('notebook_output', {})
-                result_text = notebook_output.get('result', '')
-
-            if not result_text:
-                logger.error(f"[POWERBI-TOOL] ❌ No notebook output result found in response")
-                self._extraction_debug.append("ERROR: No result_text found")
-                return None
-
-            _debug_log(f"Result text preview: {result_text[:200]}")
-            logger.info(f"[POWERBI-TOOL] 📄 Notebook output result (first 200 chars): {result_text[:200]}")
-            self._extraction_debug.append(f"Result preview: {result_text[:100]}...")
-
-            # Try two parsing strategies:
-            # 1. Look for "Notebook exited: {...}" pattern (older format)
-            # 2. Parse result_text directly as JSON (current Databricks format from dbutils.notebook.exit)
-
-            json_str = None
-            match = re.search(r'Notebook exited:\s*({.+})', result_text, re.DOTALL)
-
-            if match:
-                _debug_log("Found 'Notebook exited:' pattern in output")
-                logger.info(f"[POWERBI-TOOL] 🎯 Found 'Notebook exited:' pattern in output")
-                self._extraction_debug.append("Pattern matched: 'Notebook exited:'")
-                json_str = match.group(1)
-            else:
-                # Try parsing result_text directly as JSON (Databricks dbutils.notebook.exit format)
-                _debug_log("No 'Notebook exited:' pattern, trying direct JSON parse")
-                logger.info(f"[POWERBI-TOOL] No 'Notebook exited:' pattern found, trying direct JSON parse")
-                self._extraction_debug.append("No 'Notebook exited:' pattern - attempting direct JSON parse")
-                json_str = result_text.strip()
-
-            if json_str:
-                _debug_log(f"Attempting to parse JSON (length: {len(json_str)} chars)")
-                logger.info(f"[POWERBI-TOOL] Found JSON in notebook output (length: {len(json_str)} chars)")
-                self._extraction_debug.append(f"JSON length: {len(json_str)} chars")
-
-                try:
-                    parsed_output = json.loads(json_str)
-                    _debug_log(f"Successfully parsed JSON, keys: {list(parsed_output.keys())}")
-                    logger.info(f"[POWERBI-TOOL] ✅ Successfully parsed notebook output JSON")
-                    logger.info(f"[POWERBI-TOOL] 📊 Parsed output keys: {list(parsed_output.keys())}")
-                    self._extraction_debug.append(f"JSON parsed successfully, keys: {list(parsed_output.keys())}")
-
-                    # Extract the actual result data from pipeline_steps.step_3_execution.result_data
-                    pipeline_steps = parsed_output.get('pipeline_steps', {})
-                    _debug_log(f"Pipeline steps: {list(pipeline_steps.keys())}")
-                    logger.info(f"[POWERBI-TOOL] 🔧 Pipeline steps available: {list(pipeline_steps.keys())}")
-                    self._extraction_debug.append(f"Pipeline steps: {list(pipeline_steps.keys())}")
-
-                    step_3 = pipeline_steps.get('step_3_execution', {})
-                    _debug_log(f"Step 3 keys: {list(step_3.keys())}")
-                    logger.info(f"[POWERBI-TOOL] 🎯 Step 3 (execution) keys: {list(step_3.keys())}")
-                    self._extraction_debug.append(f"Step 3 keys: {list(step_3.keys())}")
-
-                    result_data = step_3.get('result_data', [])
-
-                    if result_data:
-                        _debug_log(f"SUCCESS: Extracted {len(result_data)} result rows")
-                        logger.info(f"[POWERBI-TOOL] 🎉 Successfully extracted {len(result_data)} result rows")
-                        self._extraction_debug.append(f"SUCCESS: Extracted {len(result_data)} rows")
-
-                        # Build return data
-                        return_data = {
-                            'status': parsed_output.get('status'),
-                            'execution_time': parsed_output.get('execution_time'),
-                            'generated_dax': pipeline_steps.get('step_2_dax_generation', {}).get('generated_dax'),
-                            'rows_returned': step_3.get('rows_returned', 0),
-                            'columns': step_3.get('columns', []),
-                            'result_data': result_data
-                        }
-                        _debug_log(f"Returning data with {len(str(return_data))} chars")
-                        return return_data
-                    else:
-                        logger.error(f"[POWERBI-TOOL] ❌ No result_data found in step_3_execution")
-                        logger.error(f"[POWERBI-TOOL] step_3_execution content: {json.dumps(step_3, indent=2)[:500]}")
-                        self._extraction_debug.append("ERROR: result_data is empty/missing in step_3_execution")
-                        self._extraction_debug.append(f"step_3 content: {json.dumps(step_3, indent=2)[:200]}")
-                        return None
-                except json.JSONDecodeError as e:
-                    logger.error(f"[POWERBI-TOOL] ❌ Failed to parse JSON: {e}")
-                    logger.error(f"[POWERBI-TOOL] JSON string (first 500 chars): {json_str[:500]}")
-                    self._extraction_debug.append(f"ERROR: JSON parse failed - {str(e)}")
-                    return None
-            else:
-                logger.error(f"[POWERBI-TOOL] ❌ No JSON string to parse")
-                logger.error(f"[POWERBI-TOOL] Result text (first 500 chars): {result_text[:500]}")
-                self._extraction_debug.append("ERROR: No JSON string extracted from result")
-                return None
-
+            if config.get("tenant_id") and config.get("client_id") and config.get("client_secret"):
+                fabric_token = await self._get_fabric_token(config)
         except Exception as e:
-            logger.error(f"[POWERBI-TOOL] ❌ EXCEPTION in _get_notebook_output: {str(e)}", exc_info=True)
-            self._extraction_debug.append(f"EXCEPTION: {str(e)}")
+            logger.warning(f"Could not get Fabric token, using Power BI token: {e}")
+
+        # Fetch TMDL for measures and tables
+        tmdl_parts = await self._fetch_tmdl_definition(workspace_id, dataset_id, fabric_token)
+        if tmdl_parts:
+            measures, tables = self._parse_tmdl_for_measures_and_tables(tmdl_parts, config)
+            model_context["measures"] = measures
+            model_context["tables"] = tables
+
+        # Fetch relationships via DAX
+        relationships = await self._fetch_relationships(workspace_id, dataset_id, access_token, config)
+        model_context["relationships"] = relationships
+
+        return model_context
+
+    async def _get_fabric_token(self, config: Dict[str, Any]) -> str:
+        """Get Fabric API token for TMDL access."""
+        url = f"https://login.microsoftonline.com/{config['tenant_id']}/oauth2/v2.0/token"
+        data = {
+            "grant_type": "client_credentials",
+            "client_id": config["client_id"],
+            "client_secret": config["client_secret"],
+            "scope": "https://api.fabric.microsoft.com/.default"
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(url, data=data)
+            response.raise_for_status()
+            return response.json()["access_token"]
+
+    async def _fetch_tmdl_definition(
+        self,
+        workspace_id: str,
+        dataset_id: str,
+        access_token: str
+    ) -> List[Dict[str, Any]]:
+        """Fetch TMDL definition from Fabric API."""
+        url = f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}/semanticModels/{dataset_id}/getDefinition?format=TMDL"
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            try:
+                response = await client.post(url, headers=headers)
+
+                if response.status_code == 202:
+                    # Long-running operation - poll for completion
+                    location = response.headers.get("Location")
+                    if not location:
+                        return []
+
+                    for _ in range(60):
+                        await asyncio.sleep(2)
+                        poll_response = await client.get(location, headers=headers)
+                        poll_data = poll_response.json()
+
+                        if poll_data.get("status") == "Succeeded":
+                            result_url = location + "/result"
+                            result_response = await client.get(result_url, headers=headers)
+                            result_response.raise_for_status()
+                            return result_response.json().get("definition", {}).get("parts", [])
+                        elif poll_data.get("status") == "Failed":
+                            logger.error(f"TMDL fetch failed: {poll_data}")
+                            return []
+
+                    return []
+
+                elif response.status_code == 200:
+                    return response.json().get("definition", {}).get("parts", [])
+                else:
+                    logger.error(f"TMDL fetch error: {response.status_code}")
+                    return []
+
+            except Exception as e:
+                logger.error(f"TMDL fetch exception: {e}")
+                return []
+
+    def _parse_tmdl_for_measures_and_tables(
+        self,
+        tmdl_parts: List[Dict[str, Any]],
+        config: Dict[str, Any]
+    ) -> tuple:
+        """Parse TMDL parts to extract measures and tables."""
+        measures = []
+        tables = []
+
+        for part in tmdl_parts:
+            path = part.get("path", "")
+            payload = part.get("payload", "")
+
+            if not path.startswith("definition/tables/") or not path.endswith(".tmdl"):
+                continue
+
+            try:
+                tmdl_content = base64.b64decode(payload).decode("utf-8")
+
+                # Extract table name
+                table_match = re.match(r"table\s+(?:'([^']+)'|(\w+))", tmdl_content.strip())
+                if not table_match:
+                    continue
+                table_name = table_match.group(1) or table_match.group(2)
+
+                # Skip system tables
+                if config.get("skip_system_tables", True):
+                    if "LocalDateTable" in table_name or "DateTableTemplate" in table_name:
+                        continue
+
+                # Add table
+                tables.append({"name": table_name})
+
+                # Extract columns
+                column_pattern = re.compile(
+                    r"column\s+(?:'([^']+)'|(\w+))",
+                    re.MULTILINE
+                )
+                columns = []
+                for col_match in column_pattern.finditer(tmdl_content):
+                    col_name = col_match.group(1) or col_match.group(2)
+                    columns.append(col_name)
+
+                if columns:
+                    tables[-1]["columns"] = columns
+
+                # Extract measures
+                measure_pattern = re.compile(
+                    r"measure\s+(?:'([^']+)'|(\w+))\s*=\s*([\s\S]*?)(?=\n\s*measure|\n\s*column|\n\t[^\t]|\Z)",
+                    re.MULTILINE
+                )
+
+                for match in measure_pattern.finditer(tmdl_content):
+                    measure_name = match.group(1) or match.group(2)
+                    expression = match.group(3).strip()
+
+                    # Clean expression (remove metadata lines)
+                    clean_lines = []
+                    for line in expression.split('\n'):
+                        stripped = line.strip()
+                        if stripped.startswith(('lineageTag:', 'formatString:', 'annotation', 'isHidden')):
+                            break
+                        clean_lines.append(line)
+
+                    measures.append({
+                        "name": measure_name,
+                        "table": table_name,
+                        "expression": '\n'.join(clean_lines).strip()
+                    })
+
+            except Exception as e:
+                logger.warning(f"Error parsing TMDL from {path}: {e}")
+
+        logger.info(f"Parsed {len(measures)} measure(s), {len(tables)} table(s)")
+        return measures, tables
+
+    async def _fetch_relationships(
+        self,
+        workspace_id: str,
+        dataset_id: str,
+        access_token: str,
+        config: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """Extract relationships using INFO.VIEW.RELATIONSHIPS() DAX function."""
+        url = f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/datasets/{dataset_id}/executeQueries"
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "queries": [{"query": "EVALUATE INFO.VIEW.RELATIONSHIPS()"}],
+            "serializerSettings": {"includeNulls": True}
+        }
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            try:
+                response = await client.post(url, headers=headers, json=payload)
+                response.raise_for_status()
+                data = response.json()
+
+                rows = data.get("results", [{}])[0].get("tables", [{}])[0].get("rows", [])
+                relationships = []
+                seen_ids = set()
+
+                for row in rows:
+                    rel_id = row.get("[ID]")
+                    if rel_id in seen_ids:
+                        continue
+                    seen_ids.add(rel_id)
+
+                    from_table = row.get("[FromTable]", "")
+                    to_table = row.get("[ToTable]", "")
+
+                    # Skip system tables
+                    if config.get("skip_system_tables", True):
+                        if "LocalDateTable" in from_table or "LocalDateTable" in to_table:
+                            continue
+
+                    relationships.append({
+                        "from_table": from_table,
+                        "from_column": row.get("[FromColumn]", ""),
+                        "to_table": to_table,
+                        "to_column": row.get("[ToColumn]", ""),
+                        "is_active": row.get("[IsActive]", True)
+                    })
+
+                return relationships
+
+            except Exception as e:
+                logger.error(f"Relationships extraction error: {e}")
+                return []
+
+    async def _generate_dax_with_llm(
+        self,
+        user_question: str,
+        model_context: Dict[str, Any],
+        config: Dict[str, Any]
+    ) -> Optional[str]:
+        """Generate DAX query using LLM based on user question and model context."""
+        llm_workspace_url = config.get("llm_workspace_url")
+        llm_token = config.get("llm_token")
+        llm_model = config.get("llm_model", "databricks-claude-sonnet-4")
+
+        if not llm_workspace_url or not llm_token:
+            # Fallback: Generate simple DAX without LLM
+            return self._generate_simple_dax(user_question, model_context)
+
+        # Build context for LLM
+        measures = model_context.get("measures", [])
+        measures_text = "\n".join([
+            f"- {m['name']} (Table: {m['table']}): {m['expression'][:100]}..."
+            for m in measures[:20]
+        ])
+
+        # Log extracted measures for debugging
+        logger.info(f"[DAX Generation] Extracted {len(measures)} measures from model")
+        if measures:
+            logger.info(f"[DAX Generation] Sample measures: {[m['name'] for m in measures[:5]]}")
+        else:
+            logger.warning("[DAX Generation] No measures found in model context!")
+
+        tables_text = "\n".join([
+            f"- {t['name']}: columns={t.get('columns', [])[:5]}"
+            for t in model_context.get("tables", [])[:15]
+        ])
+
+        relationships_text = "\n".join([
+            f"- {r['from_table']}[{r['from_column']}] -> {r['to_table']}[{r['to_column']}]"
+            for r in model_context.get("relationships", [])[:15]
+        ])
+
+        # Check if we have measures to work with
+        if not measures:
+            logger.warning("[DAX Generation] No measures available - cannot generate meaningful query")
             return None
 
-    def _format_analysis_result(self, semantic_model_id: str, question: str, result_data: dict) -> str:
-        """
-        Format the extracted analysis results in a nice, readable format.
+        prompt = f"""You are a DAX query expert. Generate a DAX query to answer the user's question.
 
-        Args:
-            semantic_model_id: The Power BI semantic model ID
-            question: The business question that was analyzed
-            result_data: Extracted result data from notebook
+## User Question
+{user_question}
 
-        Returns:
-            Formatted result string
-        """
-        output = f"✅ Power BI Analysis Complete\n\n"
-        output += f"📊 **Semantic Model**: {semantic_model_id}\n"
-        output += f"❓ **Question**: {question}\n\n"
+## Available Measures
+{measures_text}
 
-        # Show execution info
-        status = result_data.get('status', 'unknown')
-        execution_time = result_data.get('execution_time', 'unknown')
-        output += f"⏱️ **Execution Time**: {execution_time}\n"
-        output += f"✨ **Status**: {status}\n\n"
+## Available Tables
+{tables_text if tables_text else "No tables found"}
 
-        # Show the generated DAX query
-        generated_dax = result_data.get('generated_dax')
-        if generated_dax:
-            output += f"📝 **Generated DAX Query**:\n```dax\n{generated_dax}\n```\n\n"
+## Relationships
+{relationships_text if relationships_text else "No relationships found"}
 
-        # Show results summary
-        rows_returned = result_data.get('rows_returned', 0)
-        columns = result_data.get('columns', [])
-        output += f"📈 **Results Summary**:\n"
-        output += f"- Rows returned: {rows_returned}\n"
-        output += f"- Columns: {', '.join(columns)}\n\n"
+## CRITICAL INSTRUCTIONS
+1. **ONLY use measure names from the "Available Measures" list above**
+2. **DO NOT invent, modify, or guess measure names**
+3. If the question asks for "average", use AVERAGEX or include averaging logic
+4. Use EVALUATE with SUMMARIZECOLUMNS or other appropriate DAX functions
+5. Return ONLY the DAX query without explanations or markdown formatting
+6. The query must be executable via Power BI Execute Queries API
 
-        # Show the actual data
-        data_rows = result_data.get('result_data', [])
-        if data_rows:
-            output += f"📊 **Result Data**:\n\n"
+## Examples of CORRECT measure usage:
+- If measure is listed as "Total Sales", use [Total Sales]
+- If measure is listed as "Revenue Amount", use [Revenue Amount]
 
-            # Format as a table
-            output += f"Showing the complete list of data (total: {len(data_rows)}):\n\n"
-            output += "```json\n"
-            output += json.dumps(data_rows, indent=2)
-            output += "\n```\n"
+## Examples of INCORRECT usage (DO NOT DO THIS):
+- DO NOT use [Total_Sales] if only [Total Sales] exists
+- DO NOT add suffixes like [measure_doc] or [measure_calc]
+- DO NOT modify measure names in any way
+
+## DAX Query:
+"""
+
+        # Log the full prompt for debugging
+        logger.info("=" * 80)
+        logger.info("[DAX Generation] LLM Prompt:")
+        logger.info(prompt)
+        logger.info("=" * 80)
+
+        # Call Databricks LLM
+        url = f"{llm_workspace_url.rstrip('/')}/serving-endpoints/{llm_model}/invocations"
+        headers = {
+            "Authorization": f"Bearer {llm_token}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 1000,
+            "temperature": 0.1
+        }
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            try:
+                response = await client.post(url, headers=headers, json=payload)
+                response.raise_for_status()
+                result = response.json()
+
+                # Extract DAX from response
+                content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+                # Log the raw LLM response
+                logger.info("=" * 80)
+                logger.info("[DAX Generation] LLM Raw Response:")
+                logger.info(content)
+                logger.info("=" * 80)
+
+                # Clean up: extract just the DAX query
+                dax = self._extract_dax_from_llm_response(content)
+
+                # Log the extracted DAX
+                logger.info(f"[DAX Generation] Extracted DAX Query:")
+                logger.info(dax)
+                logger.info("=" * 80)
+
+                # Validate that generated DAX uses only available measures
+                available_measure_names = [m["name"] for m in model_context.get("measures", [])]
+
+                # Check for hallucinated measures - extract all [measure] references
+                dax_pattern = r'\[([^\]]+)\]'
+                all_references = re.findall(dax_pattern, dax)
+
+                # Filter to get only measure references (not table[column] references)
+                table_columns = set()
+                for table in model_context.get("tables", []):
+                    table_name = table["name"]
+                    for col in table.get("columns", []):
+                        table_columns.add(f"{table_name}[{col}]")
+
+                # Find references that look like measures (not part of table[column])
+                potential_measures = []
+                for ref in all_references:
+                    # Check if this is part of a table[column] pattern
+                    is_table_column = any(f"{table['name']}[{ref}]" in dax for table in model_context.get("tables", []))
+                    if not is_table_column:
+                        potential_measures.append(ref)
+
+                # Check for measures not in available list
+                hallucinated = [m for m in potential_measures if m not in available_measure_names]
+                if hallucinated:
+                    logger.warning(f"[DAX Generation] LLM may have used non-existent measures: {hallucinated}")
+                    logger.warning(f"[DAX Generation] Available measures are: {available_measure_names[:10]}")
+
+                return dax
+
+            except Exception as e:
+                logger.error(f"LLM DAX generation error: {e}")
+                # Fallback to simple generation
+                return self._generate_simple_dax(user_question, model_context)
+
+    def _extract_dax_from_llm_response(self, content: str) -> str:
+        """Extract clean DAX query from LLM response."""
+        # Remove markdown code blocks
+        content = re.sub(r'```dax\s*', '', content)
+        content = re.sub(r'```\s*', '', content)
+
+        # Find EVALUATE statement
+        evaluate_match = re.search(r'(EVALUATE[\s\S]+?)(?:\n\n|$)', content, re.IGNORECASE)
+        if evaluate_match:
+            return evaluate_match.group(1).strip()
+
+        return content.strip()
+
+    def _generate_simple_dax(self, user_question: str, model_context: Dict[str, Any]) -> Optional[str]:
+        """Generate a simple DAX query without LLM."""
+        measures = model_context.get("measures", [])
+        if not measures:
+            return None
+
+        # Find best matching measure based on question keywords
+        question_lower = user_question.lower()
+        best_measure = None
+
+        for measure in measures:
+            measure_name_lower = measure["name"].lower()
+            if any(word in question_lower for word in measure_name_lower.split()):
+                best_measure = measure
+                break
+
+        if not best_measure:
+            best_measure = measures[0]
+
+        # Generate simple EVALUATE query
+        return f"""EVALUATE
+SUMMARIZECOLUMNS(
+    "Result", [{best_measure['name']}]
+)"""
+
+    async def _execute_dax_query(
+        self,
+        workspace_id: str,
+        dataset_id: str,
+        access_token: str,
+        dax_query: str
+    ) -> Dict[str, Any]:
+        """Execute DAX query via Power BI Execute Queries API."""
+        url = f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/datasets/{dataset_id}/executeQueries"
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "queries": [{"query": dax_query}],
+            "serializerSettings": {"includeNulls": True}
+        }
+
+        result = {
+            "success": False,
+            "data": [],
+            "row_count": 0,
+            "columns": [],
+            "error": None
+        }
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            try:
+                response = await client.post(url, headers=headers, json=payload)
+                response.raise_for_status()
+                data = response.json()
+
+                # Check for errors in response
+                if "error" in data:
+                    result["error"] = data["error"].get("message", str(data["error"]))
+                    return result
+
+                # Extract results
+                tables = data.get("results", [{}])[0].get("tables", [])
+                if tables:
+                    rows = tables[0].get("rows", [])
+                    result["data"] = rows
+                    result["row_count"] = len(rows)
+                    result["success"] = True
+
+                    # Extract column names
+                    if rows:
+                        result["columns"] = list(rows[0].keys())
+
+                return result
+
+            except httpx.HTTPStatusError as e:
+                error_text = e.response.text if hasattr(e.response, 'text') else str(e)
+                result["error"] = f"HTTP {e.response.status_code}: {error_text}"
+                return result
+            except Exception as e:
+                result["error"] = str(e)
+                return result
+
+    def _extract_measures_from_dax(self, dax_query: str, available_measures: List[str]) -> List[str]:
+        """Extract measure names used in a DAX query."""
+        used_measures = []
+        for measure in available_measures:
+            # Check for [MeasureName] pattern
+            if f"[{measure}]" in dax_query:
+                used_measures.append(measure)
+        return used_measures
+
+    async def _find_visual_references(
+        self,
+        workspace_id: str,
+        dataset_id: str,
+        access_token: str,
+        measures: List[str]
+    ) -> List[Dict[str, Any]]:
+        """Find reports and visuals that use the specified measures."""
+        visual_refs = []
+
+        # Get reports using this dataset
+        reports_url = f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/reports"
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            try:
+                reports_response = await client.get(reports_url, headers=headers)
+                reports_response.raise_for_status()
+                reports_data = reports_response.json()
+
+                # Filter reports using our dataset
+                reports = [
+                    r for r in reports_data.get("value", [])
+                    if r.get("datasetId") == dataset_id
+                ]
+
+                for report in reports[:5]:  # Limit to 5 reports
+                    report_name = report.get("name")
+                    report_url = report.get("webUrl", "")
+
+                    # Check if any of our measures are likely in this report
+                    # (Full visual parsing would require Fabric API which may not be available)
+                    for measure in measures:
+                        visual_refs.append({
+                            "report_name": report_name,
+                            "report_url": report_url,
+                            "measure": measure,
+                            "note": "Report uses the same dataset - measure likely present"
+                        })
+
+            except Exception as e:
+                logger.error(f"Visual reference search error: {e}")
+
+        return visual_refs
+
+    def _format_output(self, results: Dict[str, Any], output_format: str) -> str:
+        """Format the results for output."""
+        if output_format == "json":
+            return json.dumps(results, indent=2, default=str)
+
+        # Markdown format
+        output = []
+
+        output.append("# Power BI Analysis Results\n")
+        output.append(f"**Question**: {results['user_question']}")
+        output.append(f"**Workspace**: `{results['workspace_id']}`")
+        output.append(f"**Dataset**: `{results['dataset_id']}`\n")
+
+        # Errors
+        if results.get("errors"):
+            output.append("## ⚠️ Errors\n")
+            for error in results["errors"]:
+                output.append(f"- {error}")
+            output.append("")
+
+        # Model Context Summary
+        ctx = results.get("model_context", {})
+        output.append("## Model Context\n")
+        output.append(f"- **Measures**: {len(ctx.get('measures', []))}")
+        output.append(f"- **Tables**: {len(ctx.get('tables', []))}")
+        output.append(f"- **Relationships**: {len(ctx.get('relationships', []))}\n")
+
+        # Generated DAX
+        if results.get("generated_dax"):
+            output.append("## Generated DAX Query\n")
+            output.append("```dax")
+            output.append(results["generated_dax"])
+            output.append("```\n")
+
+        # Execution Results
+        exec_result = results.get("dax_execution", {})
+        output.append("## Execution Results\n")
+
+        if exec_result.get("success"):
+            output.append(f"✅ **Success** - {exec_result.get('row_count', 0)} rows returned\n")
+
+            # Show data as table
+            data = exec_result.get("data", [])
+            if data:
+                columns = exec_result.get("columns", list(data[0].keys()) if data else [])
+
+                # Table header
+                output.append("| " + " | ".join(str(c).replace("[", "").replace("]", "") for c in columns) + " |")
+                output.append("| " + " | ".join(["---"] * len(columns)) + " |")
+
+                # Table rows (limit to 20)
+                for row in data[:20]:
+                    values = [str(row.get(c, ""))[:50] for c in columns]
+                    output.append("| " + " | ".join(values) + " |")
+
+                if len(data) > 20:
+                    output.append(f"\n*... and {len(data) - 20} more rows*")
         else:
-            output += "⚠️ No result data returned\n"
+            output.append(f"❌ **Failed**: {exec_result.get('error', 'Unknown error')}")
+        output.append("")
 
-        return output
+        # Visual References
+        if results.get("visual_references"):
+            output.append("## Visual References\n")
+            output.append("Reports using the queried measures:\n")
 
-    def _format_setup_instructions(self, semantic_model_id: str, question: str, job_params: dict) -> str:
-        """Format setup instructions when no Databricks job is configured."""
-        output = f"⚙️ Power BI Analysis Setup Required\n\n"
-        output += f"To execute Power BI analysis via Databricks, you need to:\n\n"
-        output += f"1. **Create a Databricks job** with the Power BI analysis notebook\n"
-        output += f"2. **Configure the job ID** in this tool\n\n"
-        output += f"**Analysis Parameters:**\n"
-        output += f"- Semantic Model: {semantic_model_id}\n"
-        output += f"- Question: {question}\n\n"
-        output += f"**Job Parameters (JSON):**\n"
-        output += f"```json\n{json.dumps(job_params, indent=2)}\n```\n\n"
-        output += f"**Notebook Location:**\n"
-        output += f"`scripts/dax_analysis_job.py` (from your ask.md guide)\n\n"
-        return output
+            seen_reports = set()
+            for ref in results["visual_references"]:
+                if ref["report_name"] not in seen_reports:
+                    output.append(f"- **{ref['report_name']}**: [{ref['report_url']}]({ref['report_url']})")
+                    seen_reports.add(ref["report_name"])
+
+        return "\n".join(output)

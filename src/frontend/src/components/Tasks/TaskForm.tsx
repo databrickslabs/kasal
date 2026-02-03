@@ -45,7 +45,7 @@ import { AgentBricksEndpointSelector } from '../Common/AgentBricksEndpointSelect
 import { PerplexityConfigSelector } from '../Common/PerplexityConfigSelector';
 import { SerperConfigSelector } from '../Common/SerperConfigSelector';
 import { MCPServerSelector } from '../Common/MCPServerSelector';
-import { PowerBIConfigSelector, PowerBIConfig } from '../Common/PowerBIConfigSelector';
+import { PowerBIAnalysisConfigSelector, PowerBIAnalysisConfig } from '../Common/PowerBIAnalysisConfigSelector';
 import { MeasureConverterConfigSelector, MeasureConverterConfig } from '../Common/MeasureConverterConfigSelector';
 import { MQueryConverterConfigSelector, MQueryConverterConfig } from '../Common/MQueryConverterConfigSelector';
 import { PowerBIRelationshipsConfigSelector, PowerBIRelationshipsConfig } from '../Common/PowerBIRelationshipsConfigSelector';
@@ -136,7 +136,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const [selectedAgentBricksEndpoint, setSelectedAgentBricksEndpoint] = useState<{ id: string; name: string } | null>(null);
   const [perplexityConfig, setPerplexityConfig] = useState<PerplexityConfig>({});
   const [serperConfig, setSerperConfig] = useState<SerperConfig>({});
-  const [powerBIConfig, setPowerBIConfig] = useState<PowerBIConfig>({});
+  const [powerBIConfig, setPowerBIConfig] = useState<PowerBIAnalysisConfig>({});
   const [measureConverterConfig, setMeasureConverterConfig] = useState<MeasureConverterConfig>({});
   const [mQueryConverterConfig, setMQueryConverterConfig] = useState<MQueryConverterConfig>({});
   const [powerBIRelationshipsConfig, setPowerBIRelationshipsConfig] = useState<PowerBIRelationshipsConfig>({});
@@ -207,7 +207,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
 
       // Check for PowerBIAnalysisTool config
       if (initialData.tool_configs.PowerBIAnalysisTool) {
-        setPowerBIConfig(initialData.tool_configs.PowerBIAnalysisTool as PowerBIConfig);
+        setPowerBIConfig(initialData.tool_configs.PowerBIAnalysisTool as PowerBIAnalysisConfig);
       }
 
       // Check for Measure Conversion Pipeline config
@@ -1320,7 +1320,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
               </Box>
             )}
 
-            {/* Power BI Configuration - Show only when PowerBIAnalysisTool is selected */}
+            {/* Power BI Comprehensive Analysis Configuration - Show only when PowerBIAnalysisTool is selected */}
             {formData.tools.some(toolId => {
               const tool = tools.find(t =>
                 String(t.id) === String(toolId) ||
@@ -1330,20 +1330,27 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
               return tool?.title === 'PowerBIAnalysisTool';
             }) && (
               <Box sx={{ mt: 2 }}>
-                <PowerBIConfigSelector
-                  value={powerBIConfig}
-                  onChange={(config) => {
-                    setPowerBIConfig(config);
-                    // Update tool configs when configuration changes
-                    setToolConfigs(prev => ({
-                      ...prev,
-                      PowerBIAnalysisTool: config
-                    }));
-                  }}
-                  label="Power BI Configuration"
-                  helperText="Configure Power BI authentication and semantic model for this task"
-                  fullWidth
-                />
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  Power BI Comprehensive Analysis Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(25, 118, 210, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(25, 118, 210, 0.2)'
+                }}>
+                  <PowerBIAnalysisConfigSelector
+                    value={powerBIConfig}
+                    onChange={(config) => {
+                      setPowerBIConfig(config);
+                      // Update tool configs when configuration changes
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        PowerBIAnalysisTool: config
+                      }));
+                    }}
+                  />
+                </Box>
               </Box>
             )}
 
