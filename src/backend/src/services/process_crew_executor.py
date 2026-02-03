@@ -806,6 +806,23 @@ def run_crew_in_process(
                 except Exception as e:
                     async_logger.warning(f"[SUBPROCESS] Could not inject group_id into crew_config: {e}")
 
+                # CRITICAL: Inject execution inputs into crew_config BEFORE ToolFactory creation
+                # This enables placeholder resolution for dynamic tool configs like {tenant_id}, {workspace_id}, etc.
+                # The ToolFactory looks for inputs in config['inputs']['inputs'] for placeholder resolution
+                try:
+                    if isinstance(crew_config, dict) and inputs:
+                        # Ensure inputs structure exists for ToolFactory placeholder resolution
+                        if 'inputs' not in crew_config:
+                            crew_config['inputs'] = {}
+                        if isinstance(crew_config['inputs'], dict):
+                            # Store inputs in nested structure that ToolFactory expects
+                            crew_config['inputs']['inputs'] = inputs
+                            async_logger.info(f"[SUBPROCESS] Injected execution inputs into crew_config for tool placeholder resolution: {list(inputs.keys())}")
+                        else:
+                            async_logger.warning(f"[SUBPROCESS] crew_config['inputs'] is not a dict, cannot inject execution inputs")
+                except Exception as e:
+                    async_logger.warning(f"[SUBPROCESS] Could not inject execution inputs into crew_config: {e}")
+
                 # Extract user_token from crew_config for OBO authentication
                 # The user_token is passed from the parent process via crew_config
                 user_token = None

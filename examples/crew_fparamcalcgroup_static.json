@@ -1,0 +1,172 @@
+{
+  "id": "e04bc2f2-c252-4ac4-9777-12d7472c3624",
+  "name": "fparam_calgr_conv_static",
+  "agent_ids": [
+    "8756d950-5a92-422f-a5c2-649091d99fd6"
+  ],
+  "task_ids": [
+    "c968f841-b3b1-49f9-954c-db027e5d2e69"
+  ],
+  "nodes": [
+    {
+      "id": "task-c968f841-b3b1-49f9-954c-db027e5d2e69",
+      "type": "taskNode",
+      "position": {
+        "x": 367.33333333333337,
+        "y": 68
+      },
+      "data": {
+        "label": "Run Field Param & Calc Group Conversion with Parameters",
+        "role": null,
+        "goal": null,
+        "backstory": null,
+        "tools": [
+          "77"
+        ],
+        "tool_configs": {
+          "Power BI Field Parameters & Calculation Groups Tool": {
+            "workspace_id": "<YOUR_WORKSPACE_ID>",
+            "dataset_id": "<YOUR_DATASET_ID>",
+            "client_id": "<YOUR_CLIENT_ID>",
+            "client_secret": "<YOUR_CLIENT_SECRET>",
+            "tenant_id": "<YOUR_TENANT_ID>"
+          }
+        },
+        "agentId": null,
+        "taskId": "c968f841-b3b1-49f9-954c-db027e5d2e69",
+        "llm": null,
+        "function_calling_llm": null,
+        "max_iter": null,
+        "max_rpm": null,
+        "max_execution_time": null,
+        "verbose": null,
+        "allow_delegation": null,
+        "cache": null,
+        "memory": true,
+        "embedder_config": null,
+        "system_template": null,
+        "prompt_template": null,
+        "response_template": null,
+        "allow_code_execution": null,
+        "code_execution_mode": null,
+        "max_retry_limit": null,
+        "use_system_prompt": null,
+        "respect_context_window": null,
+        "type": "task",
+        "description": "Use the Field Param & Calc Group Conversion Pipeline tool to convert the measure accordingly to the FROM and TO format defined in the tool-configuration.\n\nCall the Field Param & Calc Group Conversion Pipeline tool to perform the conversion and return the generated SQL in the desired output format.",
+        "expected_output": "When everything is mappable, the agent should return something like a SQL‑style or object‑style file. While for Transformations containing errors in the parsing another SQL object with the error of the conversion should be output.",
+        "icon": null,
+        "advanced_config": null,
+        "config": {
+          "cache_response": false,
+          "cache_ttl": 3600,
+          "retry_on_fail": true,
+          "max_retries": 3,
+          "timeout": null,
+          "priority": 1,
+          "error_handling": "default",
+          "output_file": null,
+          "output_json": null,
+          "output_pydantic": null,
+          "validation_function": null,
+          "callback_function": null,
+          "human_input": false,
+          "markdown": false,
+          "llm_guardrail": null
+        },
+        "context": [],
+        "async_execution": false,
+        "knowledge_sources": null,
+        "markdown": false,
+        "llm_guardrail": null
+      },
+      "width": null,
+      "height": null,
+      "selected": null,
+      "positionAbsolute": null,
+      "dragging": null,
+      "style": null
+    },
+    {
+      "id": "agent-8756d950-5a92-422f-a5c2-649091d99fd6",
+      "type": "agentNode",
+      "position": {
+        "x": 68,
+        "y": 73
+      },
+      "data": {
+        "label": "Field Param & Calc Group Converter",
+        "role": "Field Param & Calc Group  Conversion Manager",
+        "goal": "Translate given mquery definitions efficiently into the requested SQL syntax.\n\nYou will make sure that the action run will only trigger 1 time and not more.",
+        "backstory": "Experienced PBI and SQL Engineer with 10+ years of experience in managing, translating, and optimizing field parameters & calculation group expressions and translating them into SQL for Databricks.",
+        "tools": [
+          "74"
+        ],
+        "tool_configs": {},
+        "agentId": "8756d950-5a92-422f-a5c2-649091d99fd6",
+        "taskId": null,
+        "llm": "databricks-llama-4-maverick",
+        "function_calling_llm": null,
+        "max_iter": 25,
+        "max_rpm": 1,
+        "max_execution_time": 300,
+        "verbose": false,
+        "allow_delegation": false,
+        "cache": false,
+        "memory": false,
+        "embedder_config": {
+          "provider": "databricks",
+          "config": {
+            "model": "databricks-gte-large-en"
+          }
+        },
+        "system_template": null,
+        "prompt_template": null,
+        "response_template": null,
+        "allow_code_execution": false,
+        "code_execution_mode": "safe",
+        "max_retry_limit": 3,
+        "use_system_prompt": true,
+        "respect_context_window": true,
+        "type": "agent",
+        "description": null,
+        "expected_output": null,
+        "icon": null,
+        "advanced_config": null,
+        "config": null,
+        "context": [],
+        "async_execution": false,
+        "knowledge_sources": [],
+        "markdown": false,
+        "llm_guardrail": null
+      },
+      "width": null,
+      "height": null,
+      "selected": null,
+      "positionAbsolute": null,
+      "dragging": null,
+      "style": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "agent-8756d950-5a92-422f-a5c2-649091d99fd6",
+      "target": "task-c968f841-b3b1-49f9-954c-db027e5d2e69",
+      "id": "reactflow__edge-agent-2d21de66-438d-4a70-8be0-f16dd0a8d4aa-task-c2c71f3e-89e8-4786-84dd-fd0e2f063ad1-right-left",
+      "sourceHandle": null,
+      "targetHandle": null
+    }
+  ],
+  "created_at": "2026-02-02T15:06:00.125478",
+  "updated_at": "2026-02-02T15:06:00.125480",
+  "process": "sequential",
+  "planning": false,
+  "planning_llm": null,
+  "reasoning": false,
+  "reasoning_llm": null,
+  "manager_llm": null,
+  "tool_configs": null,
+  "memory": true,
+  "verbose": true,
+  "max_rpm": null
+}
