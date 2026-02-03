@@ -129,7 +129,7 @@ class TestMCPAdapter:
                 assert tools[0]['name'] == 'test_tool'
                 assert tools[0]['description'] == 'Test tool description'
                 assert tools[0]['adapter'] == adapter
-                
+
                 mock_connect.assert_called_once_with(adapter.server_url, headers={'Authorization': 'Bearer token'})
                 mock_session.initialize.assert_called_once()
                 mock_session.list_tools.assert_called_once()

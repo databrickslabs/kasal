@@ -8,7 +8,7 @@ different LLM providers through litellm.
 import logging
 import os
 import json
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional, Union, Tuple
 import time
 
 from crewai import LLM
@@ -311,7 +311,7 @@ class LiteLLMTokenTelemetryLogger(CustomLogger):
         # Use module logger (already configured with handlers)
         self.logger = logger
     
-    def _should_send(self, kwargs, response_obj) -> tuple:
+    def _should_send(self, kwargs: Dict[str, Any], response_obj: Any) -> Tuple[bool, Optional[Dict], Optional[str], Optional[str]]:
         """Check if telemetry should be sent. Returns (should_send, usage, model, product_context)."""
         
         usage = response_obj.get('usage', {})
