@@ -1,0 +1,179 @@
+{
+  "id": "7b07f5bc-0e82-4695-a0a0-76d4037875dc",
+  "name": "fparam_calgr_conv_param",
+  "agent_ids": [
+    "b77783c5-5703-4f39-b8b7-76ae4d540531"
+  ],
+  "task_ids": [
+    "bbbd97d5-2d89-41ad-9527-9b6f318da705"
+  ],
+  "nodes": [
+    {
+      "id": "task-bbbd97d5-2d89-41ad-9527-9b6f318da705",
+      "type": "taskNode",
+      "position": {
+        "x": 290,
+        "y": 80.00000000000001
+      },
+      "data": {
+        "label": "Run Field Param & Calc Group Conversion with Parameters",
+        "role": null,
+        "goal": null,
+        "backstory": null,
+        "tools": [
+          "77"
+        ],
+        "tool_configs": {
+          "Power BI Field Parameters & Calculation Groups Tool": {
+            "workspace_id": "{workspace_id}",
+            "dataset_id": "{dataset_id}",
+            "client_id": "{client_id}",
+            "client_secret": "{client_secret}",
+            "tenant_id": "{tenant_id}",
+            "mode": "dynamic",
+            "access_token": "{access_token}",
+            "target_catalog": "{target_catalog}",
+            "target_schema": "{target_schema}",
+            "output_format": "markdown",
+            "skip_system_tables": true,
+            "include_hidden": false
+          }
+        },
+        "agentId": null,
+        "taskId": "bbbd97d5-2d89-41ad-9527-9b6f318da705",
+        "llm": null,
+        "function_calling_llm": null,
+        "max_iter": null,
+        "max_rpm": null,
+        "max_execution_time": null,
+        "verbose": null,
+        "allow_delegation": null,
+        "cache": null,
+        "memory": true,
+        "embedder_config": null,
+        "system_template": null,
+        "prompt_template": null,
+        "response_template": null,
+        "allow_code_execution": null,
+        "code_execution_mode": null,
+        "max_retry_limit": null,
+        "use_system_prompt": null,
+        "respect_context_window": null,
+        "type": "task",
+        "description": "Extract and compute statements to the target format using the PowerBI Field Paramters & Calculation Groups Pipeline tool.\n\nSource Configuration:\n  - Dataset ID: {dataset_id}\n  - Workspace ID: {workspace_id}\n  - Tenant ID: {tenant_id}\n  - Client ID: {client_id}\n  - Client Secret: {client_secret}\n\nCall the Field Parameter & Calculation Groups tool to perform the conversion. The tool has been pre-configured to use the parameters above. Simply invoke the tool without any additional parameters - it will automatically use the provided credentials and configuration. Return the generated measures in the target format.",
+        "expected_output": "When everything is mappable, the agent should return something like a SQL‑style or object‑style file. While for Transformations containing errors in the parsing another SQL object with the error of the conversion should be output.",
+        "icon": null,
+        "advanced_config": null,
+        "config": {
+          "cache_response": false,
+          "cache_ttl": 3600,
+          "retry_on_fail": true,
+          "max_retries": 3,
+          "timeout": null,
+          "priority": 1,
+          "error_handling": "default",
+          "output_file": null,
+          "output_json": null,
+          "output_pydantic": null,
+          "validation_function": null,
+          "callback_function": null,
+          "human_input": false,
+          "markdown": false,
+          "llm_guardrail": null
+        },
+        "context": [],
+        "async_execution": false,
+        "knowledge_sources": null,
+        "markdown": false,
+        "llm_guardrail": null
+      },
+      "width": null,
+      "height": null,
+      "selected": null,
+      "positionAbsolute": null,
+      "dragging": null,
+      "style": null
+    },
+    {
+      "id": "agent-b77783c5-5703-4f39-b8b7-76ae4d540531",
+      "type": "agentNode",
+      "position": {
+        "x": 68,
+        "y": 73
+      },
+      "data": {
+        "label": "Field Param & Calc Group Converter",
+        "role": "Field Param & Calc Group  Conversion Manager",
+        "goal": "Translate given mquery definitions efficiently into the requested SQL syntax.\n\nYou will make sure that the action run will only trigger 1 time and not more.",
+        "backstory": "Experienced PBI and SQL Engineer with 10+ years of experience in managing, translating, and optimizing field parameters & calculation group expressions and translating them into SQL for Databricks.",
+        "tools": [
+          "74"
+        ],
+        "tool_configs": {},
+        "agentId": "b77783c5-5703-4f39-b8b7-76ae4d540531",
+        "taskId": null,
+        "llm": "databricks-llama-4-maverick",
+        "function_calling_llm": null,
+        "max_iter": 25,
+        "max_rpm": 1,
+        "max_execution_time": 300,
+        "verbose": false,
+        "allow_delegation": false,
+        "cache": false,
+        "memory": false,
+        "embedder_config": {
+          "provider": "databricks",
+          "config": {
+            "model": "databricks-gte-large-en"
+          }
+        },
+        "system_template": null,
+        "prompt_template": null,
+        "response_template": null,
+        "allow_code_execution": false,
+        "code_execution_mode": "safe",
+        "max_retry_limit": 3,
+        "use_system_prompt": true,
+        "respect_context_window": true,
+        "type": "agent",
+        "description": null,
+        "expected_output": null,
+        "icon": null,
+        "advanced_config": null,
+        "config": null,
+        "context": [],
+        "async_execution": false,
+        "knowledge_sources": [],
+        "markdown": false,
+        "llm_guardrail": null
+      },
+      "width": null,
+      "height": null,
+      "selected": null,
+      "positionAbsolute": null,
+      "dragging": null,
+      "style": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "agent-b77783c5-5703-4f39-b8b7-76ae4d540531",
+      "target": "task-bbbd97d5-2d89-41ad-9527-9b6f318da705",
+      "id": "reactflow__edge-agent-2d21de66-438d-4a70-8be0-f16dd0a8d4aa-task-c2c71f3e-89e8-4786-84dd-fd0e2f063ad1-right-left",
+      "sourceHandle": null,
+      "targetHandle": null
+    }
+  ],
+  "created_at": "2026-02-03T16:18:11.298037",
+  "updated_at": "2026-02-03T16:18:11.298038",
+  "process": "sequential",
+  "planning": false,
+  "planning_llm": null,
+  "reasoning": false,
+  "reasoning_llm": null,
+  "manager_llm": null,
+  "tool_configs": null,
+  "memory": true,
+  "verbose": true,
+  "max_rpm": null
+}
