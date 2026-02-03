@@ -647,8 +647,9 @@ async def create_task(
                     llm_model = f"databricks/{llm_model}"
                     guardrail_logger.info(f"Added databricks/ prefix to model: {llm_model}")
 
-            # Create LLM instance for the guardrail
-            guardrail_llm = LLM(model=llm_model)
+            # Create LLM instance for the guardrail with custom User-Agent
+            from src.utils.telemetry import get_user_agent_header, KasalProduct
+            guardrail_llm = LLM(model=llm_model, extra_headers=get_user_agent_header(KasalProduct.GUARDRAIL))
 
             # Create LLMGuardrail (OSS-compatible, NOT HallucinationGuardrail)
             llm_guardrail = LLMGuardrail(

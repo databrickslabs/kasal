@@ -7,6 +7,7 @@ import asyncio
 import os
 from pathlib import Path
 
+from src.utils.telemetry import get_user_agent_header, KasalProduct
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -194,8 +195,10 @@ class GenieTool(BaseTool):
                 logger.error("No authentication method available")
                 return None
 
-            # Return headers from auth context
-            return auth.get_headers()
+            # Return headers from auth context with telemetry
+            headers = auth.get_headers()
+            headers.update(get_user_agent_header(KasalProduct.GENIE))  # Kasal_genie User-Agent
+            return headers
         except Exception as e:
             logger.error(f"Error getting auth headers: {e}")
             return None

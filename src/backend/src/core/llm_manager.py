@@ -8,7 +8,7 @@ different LLM providers through litellm.
 import logging
 import os
 import json
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional, Union, Tuple
 import time
 
 from crewai import LLM
@@ -48,6 +48,14 @@ embedding_logger = LoggerManager.get_instance().documentation_embedding
 # Set drop_params to True to automatically drop unsupported parameters
 # This is especially useful for GPT-5 and other new models that may have different parameter support
 # Note: With litellm 1.75.8+, GPT-5 is natively supported
+
+# Module-level token for subprocess callback fallback (contextvars don't propagate to callback threads)
+_subprocess_user_token: Optional[str] = None
+
+def set_subprocess_user_token(token: str) -> None:
+    """Set token for LiteLLM callback fallback in subprocess mode."""
+    global _subprocess_user_token
+    _subprocess_user_token = token
 litellm.drop_params = True
 logger.info("Set litellm.drop_params=True to handle unsupported parameters gracefully")
 
@@ -292,6 +300,111 @@ class LiteLLMFileLogger(CustomLogger):
 # Create logger instance
 litellm_file_logger = LiteLLMFileLogger()
 
+# Dedicated callback for token telemetry to Databricks logfood
+class LiteLLMTokenTelemetryLogger(CustomLogger):
+    """
+    Sends token usage telemetry to Databricks logfood.
+    Uses get_auth_context for unified authentication.
+    """
+    
+    def __init__(self):
+        # Use module logger (already configured with handlers)
+        self.logger = logger
+    
+    def _should_send(self, kwargs: Dict[str, Any], response_obj: Any) -> Tuple[bool, Optional[Dict], Optional[str], Optional[str]]:
+        """Check if telemetry should be sent. Returns (should_send, usage, model, product_context)."""
+        
+        usage = response_obj.get('usage', {})
+        if not usage:
+            self.logger.debug(f"[TokenTelemetry] No usage in response - type={type(response_obj).__name__}")
+            return False, None, None, None
+        
+        model = kwargs.get('model', 'unknown')
+        
+        # Extract product context from User-Agent (e.g., "kasal_agent/0.1.0" -> "agent")
+        extra_headers = kwargs.get('extra_headers', {})
+        user_agent = extra_headers.get('User-Agent', '')
+        if '_' in user_agent and '/' in user_agent:
+            product_context = user_agent.split('_')[1].split('/')[0]
+        else:
+            product_context = "llm"
+        
+        return True, usage, model, product_context
+    
+    def log_success_event(self, kwargs, response_obj, start_time, end_time):
+        """Sync callback."""
+        model = kwargs.get('model', 'unknown')
+        usage = response_obj.get('usage', {}) if hasattr(response_obj, 'get') else {}
+        
+        should_send, usage, model, product_context = self._should_send(kwargs, response_obj)
+        if not should_send:
+            self.logger.debug(f"[TokenTelemetry] _should_send returned False")
+            return
+        
+        msg = f"[TokenTelemetry] Sending: model={model}, context={product_context}, tokens={usage.get('total_tokens', 0)}"
+        self.logger.info(msg)
+        
+        try:
+            import asyncio
+            from src.utils.telemetry import send_logfood_telemetry
+            from src.utils.user_context import UserContext
+            
+            # Get user token from context (set during request via contextvars)
+            # Falls back to module-level token for subprocess callback threads
+            user_token = UserContext.get_user_token() or _subprocess_user_token
+            
+            # Use skip_db_auth=True to avoid opening database sessions during callbacks,
+            # which can cause SQLAlchemy session conflicts with ongoing transactions
+            coro = send_logfood_telemetry(
+                usage=usage, model=model, product_context=product_context, 
+                user_token=user_token, skip_db_auth=True
+            )
+            
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(coro)
+            except RuntimeError:
+                asyncio.run(coro)
+        except Exception as e:
+            self.logger.debug(f"Token telemetry failed: {e}")
+    
+    async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
+        """Async callback."""
+        model = kwargs.get('model', 'unknown')
+        usage = response_obj.get('usage', {}) if hasattr(response_obj, 'get') else {}
+        
+        should_send, usage, model, product_context = self._should_send(kwargs, response_obj)
+        if not should_send:
+            self.logger.debug(f"[TokenTelemetry] _should_send returned False")
+            return
+        
+        msg = f"[TokenTelemetry] Sending: model={model}, context={product_context}, tokens={usage.get('total_tokens', 0)}"
+        self.logger.info(msg)
+        
+        try:
+            from src.utils.telemetry import send_logfood_telemetry
+            from src.utils.user_context import UserContext
+            
+            # Get user token from context (set during request via contextvars)
+            # Falls back to module-level token for subprocess callback threads
+            user_token = UserContext.get_user_token() or _subprocess_user_token
+            
+            # Use skip_db_auth=True to avoid opening database sessions during callbacks,
+            # which can cause SQLAlchemy session conflicts with ongoing transactions
+            await send_logfood_telemetry(
+                usage=usage, model=model, product_context=product_context,
+                user_token=user_token, skip_db_auth=True
+            )
+        except Exception as e:
+            self.logger.debug(f"Token telemetry failed: {e}")
+
+
+# Create telemetry logger instance
+litellm_token_telemetry_logger = LiteLLMTokenTelemetryLogger()
+
+# Register callbacks with LiteLLM
+litellm.callbacks = [litellm_token_telemetry_logger]
+
 # Set up other litellm configuration
 litellm.modify_params = True  # This helps with Anthropic API compatibility
 litellm.num_retries = 5  # Global retries setting
@@ -406,10 +519,10 @@ def _configure_databricks_mlflow():
     except Exception as e:
         logger.warning(f"Failed to configure Databricks MLflow: {e}")
 
-# Configure litellm callbacks to file logger by default
-litellm.success_callback = [litellm_file_logger]
+# Configure litellm callbacks to file logger and telemetry logger
+litellm.success_callback = [litellm_file_logger, litellm_token_telemetry_logger]
 litellm.failure_callback = [litellm_file_logger]
-logger.info("Using file-based logging for LLM observability")
+logger.info("Using file-based logging and token telemetry for LLM observability")
 
 # Configure logging
 logger.info(f"Configured LiteLLM to write logs to: {log_file_path}")
@@ -815,6 +928,11 @@ class LLMManager:
                 llm_params["api_key"] = api_key
             if api_base:
                 llm_params["api_base"] = api_base
+            
+            # Add User-Agent header for Databricks API attribution
+            # Using extra_headers instead of user_agent param (which Databricks rejects in body)
+            from src.utils.telemetry import get_user_agent_header, KasalProduct
+            llm_params["extra_headers"] = get_user_agent_header(KasalProduct.AGENT)
             
             # Add max_output_tokens if defined in model config
             if "max_output_tokens" in model_config_dict and model_config_dict["max_output_tokens"]:

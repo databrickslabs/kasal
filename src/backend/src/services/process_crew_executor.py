@@ -371,6 +371,9 @@ def run_crew_in_process(
                 user_token = crew_config.get('user_token')
                 if user_token:
                     UserContext.set_user_token(user_token)
+                    # Also set for LiteLLM callback fallback (contextvars don't propagate to callback threads)
+                    from src.core.llm_manager import set_subprocess_user_token
+                    set_subprocess_user_token(user_token)
                     subprocess_logger.info(f"[SUBPROCESS] ✓ UserContext initialized with group_id={group_id} and OBO token")
                 else:
                     subprocess_logger.info(f"[SUBPROCESS] ✓ UserContext initialized with group_id={group_id} (no OBO token)")

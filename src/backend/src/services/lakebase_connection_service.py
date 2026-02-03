@@ -14,6 +14,7 @@ from typing import Optional, Tuple, Dict, Any
 from urllib.parse import quote
 
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.useragent import with_product
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine
 from sqlalchemy.pool import NullPool
@@ -21,6 +22,7 @@ from sqlalchemy.engine import Engine
 
 from src.core.base_service import BaseService
 from src.utils.databricks_auth import get_workspace_client
+from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +65,8 @@ class LakebaseConnectionService(BaseService):
             # Use unified auth priority: OBO → PAT → SPN
             # This is lazy initialization - only creates client when actually needed
             logger.info("Creating WorkspaceClient for Lakebase (lazy initialization)")
+            # Set custom User-Agent for Lakebase operations
+            with_product(f"{KASAL_BASE}_{KasalProduct.LAKEBASE}", VERSION)
             self._workspace_client = await get_workspace_client(self.user_token)
             if not self._workspace_client:
                 error_msg = (

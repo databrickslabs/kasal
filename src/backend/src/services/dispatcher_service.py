@@ -533,11 +533,13 @@ Please analyze this message and provide your intent classification, considering 
             model_params = await LLMManager.configure_litellm(model)
 
             # Prepare completion parameters
+            from src.utils.telemetry import get_user_agent_header, KasalProduct
             completion_params = {
                 **model_params,
                 "messages": messages,
                 "temperature": 0.3,  # Lower temperature for more consistent intent detection
-                "max_tokens": 4000
+                "max_tokens": 4000,
+                "extra_headers": get_user_agent_header(KasalProduct.INTENT_DETECTION)
             }
 
             # With litellm 1.75.8+, GPT-5 is natively supported
