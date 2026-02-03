@@ -656,13 +656,19 @@ class PowerBIReportReferencesTool(BaseTool):
         return {}
 
     def _parse_pages(self, report_parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Parse page definitions from PBIR structure."""
+        """Parse page definitions from PBIR structure.
+
+        Supports two PBIR formats:
+        1. Separate files: definition/pages/{pageId}/page.json
+        2. Embedded in report.json: pages array inside the report.json file
+        """
         pages = []
 
         # Log all paths for debugging if no pages found
         all_paths = [part.get("path", "") for part in report_parts]
         logger.info(f"[_parse_pages] Total parts: {len(report_parts)}, paths: {all_paths[:10]}...")
 
+        # Method 1: Look for separate page.json files
         for part in report_parts:
             path = part.get("path", "")
             path_lower = path.lower()
@@ -710,17 +716,84 @@ class PowerBIReportReferencesTool(BaseTool):
                 except Exception as e:
                     logger.warning(f"Error parsing page from {path}: {e}")
 
+        # Method 2: If no pages found, try parsing from report.json (embedded format)
         if not pages:
-            logger.warning(f"[_parse_pages] No pages found. All paths: {all_paths}")
+            logger.info("[_parse_pages] No separate page files found, trying embedded format in report.json")
+            pages = self._parse_pages_from_report_json(report_parts)
+
+        if not pages:
+            logger.warning(f"[_parse_pages] No pages found in either format. All paths: {all_paths}")
 
         # Sort pages by ordinal
         pages.sort(key=lambda p: p.get("ordinal", 0))
         return pages
 
+    def _parse_pages_from_report_json(self, report_parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Parse pages embedded in report.json (older PBIR format)."""
+        pages = []
+
+        for part in report_parts:
+            path = part.get("path", "")
+
+            # Find report.json
+            if path.lower() == "report.json" or path.lower().endswith("/report.json"):
+                try:
+                    payload = part.get("payload", "")
+                    content = base64.b64decode(payload).decode("utf-8")
+                    report_data = json.loads(content)
+
+                    logger.info(f"[_parse_pages_from_report_json] Parsing report.json, keys: {list(report_data.keys())}")
+
+                    # Look for pages in various possible locations
+                    pages_data = None
+
+                    # Try different possible structures
+                    if "pages" in report_data:
+                        pages_data = report_data["pages"]
+                    elif "sections" in report_data:
+                        # Legacy format uses "sections" instead of "pages"
+                        pages_data = report_data["sections"]
+                    elif "reportPages" in report_data:
+                        pages_data = report_data["reportPages"]
+
+                    if pages_data and isinstance(pages_data, list):
+                        logger.info(f"[_parse_pages_from_report_json] Found {len(pages_data)} pages in report.json")
+                        for idx, page_data in enumerate(pages_data):
+                            if isinstance(page_data, dict):
+                                page_id = page_data.get("name") or page_data.get("id") or f"page_{idx}"
+                                pages.append({
+                                    "id": page_id,
+                                    "name": page_data.get("name", page_id),
+                                    "displayName": page_data.get("displayName", page_data.get("name", page_id)),
+                                    "ordinal": page_data.get("ordinal", idx),
+                                    "config": page_data
+                                })
+                                logger.info(f"Found embedded page: {page_data.get('displayName', page_id)}")
+                    else:
+                        # Log what we did find for debugging
+                        logger.warning(f"[_parse_pages_from_report_json] No pages array found. report.json structure: {list(report_data.keys())}")
+                        # Log first level values that might be arrays
+                        for key, value in report_data.items():
+                            if isinstance(value, list):
+                                logger.info(f"  Found array '{key}' with {len(value)} items")
+                            elif isinstance(value, dict):
+                                logger.info(f"  Found dict '{key}' with keys: {list(value.keys())[:5]}")
+
+                except Exception as e:
+                    logger.warning(f"Error parsing report.json for pages: {e}")
+
+        return pages
+
     def _parse_visuals(self, report_parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Parse visual definitions from PBIR structure."""
+        """Parse visual definitions from PBIR structure.
+
+        Supports two PBIR formats:
+        1. Separate files: definition/pages/{pageId}/visuals/{visualId}/visual.json
+        2. Embedded in report.json: visuals inside each page's configuration
+        """
         visuals = []
 
+        # Method 1: Look for separate visual.json files
         for part in report_parts:
             path = part.get("path", "")
             path_lower = path.lower()
@@ -775,7 +848,104 @@ class PowerBIReportReferencesTool(BaseTool):
                 except Exception as e:
                     logger.warning(f"Error parsing visual from {path}: {e}")
 
-        logger.info(f"[_parse_visuals] Found {len(visuals)} visuals")
+        # Method 2: If no visuals found, try parsing from report.json (embedded format)
+        if not visuals:
+            logger.info("[_parse_visuals] No separate visual files found, trying embedded format in report.json")
+            visuals = self._parse_visuals_from_report_json(report_parts)
+
+        logger.info(f"[_parse_visuals] Found {len(visuals)} visuals total")
+        return visuals
+
+    def _parse_visuals_from_report_json(self, report_parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Parse visuals embedded in report.json (older PBIR format)."""
+        visuals = []
+
+        for part in report_parts:
+            path = part.get("path", "")
+
+            # Find report.json
+            if path.lower() == "report.json" or path.lower().endswith("/report.json"):
+                try:
+                    payload = part.get("payload", "")
+                    content = base64.b64decode(payload).decode("utf-8")
+                    report_data = json.loads(content)
+
+                    # Look for pages in various possible locations
+                    pages_data = None
+                    if "pages" in report_data:
+                        pages_data = report_data["pages"]
+                    elif "sections" in report_data:
+                        pages_data = report_data["sections"]
+                    elif "reportPages" in report_data:
+                        pages_data = report_data["reportPages"]
+
+                    if pages_data and isinstance(pages_data, list):
+                        for page_data in pages_data:
+                            if not isinstance(page_data, dict):
+                                continue
+
+                            page_id = page_data.get("name") or page_data.get("id")
+
+                            # Look for visuals within the page
+                            visuals_data = None
+                            if "visualContainers" in page_data:
+                                visuals_data = page_data["visualContainers"]
+                            elif "visuals" in page_data:
+                                visuals_data = page_data["visuals"]
+
+                            if visuals_data and isinstance(visuals_data, list):
+                                for vis_idx, vis_data in enumerate(visuals_data):
+                                    if not isinstance(vis_data, dict):
+                                        continue
+
+                                    visual_id = vis_data.get("name") or vis_data.get("id") or f"visual_{vis_idx}"
+
+                                    # Extract visual type and parsed config
+                                    visual_type = "unknown"
+                                    parsed_config = {}
+
+                                    if "config" in vis_data:
+                                        config_str = vis_data.get("config", "")
+                                        # Config might be a JSON string
+                                        if isinstance(config_str, str):
+                                            try:
+                                                parsed_config = json.loads(config_str)
+                                                visual_type = parsed_config.get("singleVisual", {}).get("visualType", "unknown")
+                                            except json.JSONDecodeError:
+                                                logger.warning(f"Failed to parse config for visual {visual_id}")
+                                        elif isinstance(config_str, dict):
+                                            parsed_config = config_str
+                                            visual_type = parsed_config.get("singleVisual", {}).get("visualType", "unknown")
+                                    elif "visualType" in vis_data:
+                                        visual_type = vis_data.get("visualType", "unknown")
+                                        parsed_config = vis_data
+                                    elif "visual" in vis_data and isinstance(vis_data["visual"], dict):
+                                        visual_type = vis_data["visual"].get("visualType", "unknown")
+                                        parsed_config = vis_data
+
+                                    # Log first visual's parsed config structure for debugging
+                                    if vis_idx == 0:
+                                        logger.info(f"[_parse_visuals_from_report_json] First visual parsed_config keys: {list(parsed_config.keys())}")
+                                        if "singleVisual" in parsed_config:
+                                            sv = parsed_config["singleVisual"]
+                                            logger.info(f"[_parse_visuals_from_report_json] singleVisual keys: {list(sv.keys()) if isinstance(sv, dict) else 'not a dict'}")
+                                            if isinstance(sv, dict) and "prototypeQuery" in sv:
+                                                pq = sv["prototypeQuery"]
+                                                logger.info(f"[_parse_visuals_from_report_json] prototypeQuery keys: {list(pq.keys()) if isinstance(pq, dict) else 'not a dict'}")
+
+                                    visuals.append({
+                                        "id": visual_id,
+                                        "page_id": page_id,
+                                        "type": visual_type,
+                                        "name": vis_data.get("name", visual_id),
+                                        "config": parsed_config  # Store the PARSED config, not the raw vis_data
+                                    })
+
+                        logger.info(f"[_parse_visuals_from_report_json] Found {len(visuals)} embedded visuals")
+
+                except Exception as e:
+                    logger.warning(f"Error parsing report.json for visuals: {e}", exc_info=True)
+
         return visuals
 
     def _extract_visual_references(self, visuals: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -784,7 +954,48 @@ class PowerBIReportReferencesTool(BaseTool):
 
         for visual in visuals:
             config = visual.get("config", {})
+            original_config = config  # Keep for debugging
+
+            # Handle embedded format where config is a JSON string
+            if isinstance(config, str):
+                try:
+                    config = json.loads(config)
+                    logger.debug(f"[_extract_visual_references] Parsed config string for visual {visual.get('id')}")
+                except json.JSONDecodeError:
+                    logger.warning(f"[_extract_visual_references] Failed to parse config string for visual {visual.get('id')}")
+                    config = {}
+
+            # Log the config structure for debugging (first visual only to avoid spam)
+            if visuals.index(visual) == 0:
+                config_keys = list(config.keys()) if isinstance(config, dict) else []
+                logger.info(f"[_extract_visual_references] First visual config keys: {config_keys}")
+                if "singleVisual" in config:
+                    sv = config["singleVisual"]
+                    sv_keys = list(sv.keys()) if isinstance(sv, dict) else []
+                    logger.info(f"[_extract_visual_references] singleVisual keys: {sv_keys}")
+                    if isinstance(sv, dict):
+                        # Log prototypeQuery structure
+                        if "prototypeQuery" in sv:
+                            pq = sv["prototypeQuery"]
+                            pq_keys = list(pq.keys()) if isinstance(pq, dict) else []
+                            logger.info(f"[_extract_visual_references] prototypeQuery keys: {pq_keys}")
+                            if isinstance(pq, dict):
+                                from_clause = pq.get("From", [])
+                                select_clause = pq.get("Select", [])
+                                logger.info(f"[_extract_visual_references] prototypeQuery.From: {len(from_clause)} items, Select: {len(select_clause)} items")
+                                if from_clause:
+                                    logger.info(f"[_extract_visual_references] First From item: {from_clause[0] if from_clause else 'none'}")
+                                if select_clause:
+                                    logger.info(f"[_extract_visual_references] First Select item: {select_clause[0] if select_clause else 'none'}")
+                        # Log projections structure
+                        if "projections" in sv:
+                            proj = sv["projections"]
+                            logger.info(f"[_extract_visual_references] projections keys: {list(proj.keys()) if isinstance(proj, dict) else 'not a dict'}")
+
+            # Try different config structures
             visual_config = config.get("visual", {})
+            if not visual_config and "singleVisual" in config:
+                visual_config = config.get("singleVisual", {})
 
             # Extract data bindings
             measures: Set[str] = set()
@@ -810,14 +1021,44 @@ class PowerBIReportReferencesTool(BaseTool):
             # Method 5: Deep search for any field references in config
             self._deep_search_references(visual_config, measures, tables, columns)
 
+            # Method 6: Also deep search the outer config (for embedded format)
+            if config != visual_config:
+                self._deep_search_references(config, measures, tables, columns)
+
+            # Method 7: Parse singleVisual structure (common in embedded format)
+            single_visual = config.get("singleVisual", {})
+            if single_visual:
+                # Extract from projections
+                projections = single_visual.get("projections", {})
+                self._extract_from_projections(projections, measures, tables, columns)
+
+                # Extract from prototypeQuery
+                prototype_query = single_visual.get("prototypeQuery", {})
+                self._extract_from_prototype_query(prototype_query, measures, tables, columns)
+
+            # Log extraction results for first visual
+            if visuals.index(visual) == 0:
+                logger.info(f"[_extract_visual_references] First visual extraction results - tables: {tables}, measures: {measures}, columns: {columns}")
+
+            # Clean up extracted values - remove trailing parentheses
+            def clean_value(val: str) -> str:
+                """Remove trailing parentheses from field names."""
+                if val.endswith(")") and "(" not in val:
+                    return val.rstrip(")")
+                return val
+
+            cleaned_measures = sorted(set(clean_value(m) for m in measures))
+            cleaned_tables = sorted(set(clean_value(t) for t in tables))
+            cleaned_columns = sorted(set(clean_value(c) for c in columns))
+
             references.append({
                 "visual_id": visual.get("id"),
                 "page_id": visual.get("page_id"),
                 "visual_type": visual.get("type"),
                 "visual_name": visual.get("name"),
-                "measures": sorted(list(measures)),
-                "tables": sorted(list(tables)),
-                "columns": sorted(list(columns)),
+                "measures": cleaned_measures,
+                "tables": cleaned_tables,
+                "columns": cleaned_columns,
             })
 
         return references
@@ -878,6 +1119,62 @@ class PowerBIReportReferencesTool(BaseTool):
                                 expr = prop_value.get("expr", {})
                                 self._extract_from_expression(expr, measures, tables, columns)
 
+    def _extract_from_projections(
+        self,
+        projections: Dict[str, Any],
+        measures: Set[str],
+        tables: Set[str],
+        columns: Set[str]
+    ) -> None:
+        """Extract references from projections structure (embedded format)."""
+        # Projections can contain various roles like Values, Category, Series, etc.
+        for role_name, role_items in projections.items():
+            if not isinstance(role_items, list):
+                continue
+
+            for item in role_items:
+                if not isinstance(item, dict):
+                    continue
+
+                # Check for queryRef which contains the field reference
+                query_ref = item.get("queryRef")
+                if query_ref and isinstance(query_ref, str):
+                    # queryRef format: "Table.Field" or "Table.Measure"
+                    if "." in query_ref:
+                        parts = query_ref.split(".")
+                        if len(parts) >= 2:
+                            tables.add(parts[0])
+                            # Could be measure or column based on role
+                            if role_name.lower() in ("values", "y", "y2"):
+                                measures.add(parts[-1])
+                            else:
+                                columns.add(parts[-1])
+
+                # Check for field in different structures
+                field = item.get("field", {})
+                if isinstance(field, dict):
+                    measure_info = field.get("Measure", {})
+                    if measure_info:
+                        prop = measure_info.get("Property")
+                        if prop:
+                            measures.add(prop)
+                        expr = measure_info.get("Expression", {})
+                        source_ref = expr.get("SourceRef", {})
+                        entity = source_ref.get("Entity")
+                        if entity:
+                            tables.add(entity)
+
+                    col_info = field.get("Column", {})
+                    if col_info:
+                        prop = col_info.get("Property")
+                        if prop:
+                            columns.add(prop)
+                        expr = col_info.get("Expression", {})
+                        source_ref = expr.get("SourceRef", {})
+                        entity = source_ref.get("Entity")
+                        if entity:
+                            tables.add(entity)
+
     def _extract_from_prototype_query(
         self,
         prototype_query: Dict[str, Any],
@@ -885,8 +1182,20 @@ class PowerBIReportReferencesTool(BaseTool):
         tables: Set[str],
         columns: Set[str]
     ) -> None:
-        """Extract references from prototypeQuery (legacy format)."""
-        select = prototype_query.get("Select", [])
+        """Extract references from prototypeQuery (Power BI format)."""
+        # Extract tables from "From" clause
+        from_clause = prototype_query.get("From", []) or prototype_query.get("from", [])
+        source_map: Dict[str, str] = {}  # Map source alias to entity name
+        for from_item in from_clause:
+            if isinstance(from_item, dict):
+                entity = from_item.get("Entity") or from_item.get("entity")
+                alias = from_item.get("Name") or from_item.get("name")
+                if entity:
+                    tables.add(entity)
+                    if alias:
+                        source_map[alias] = entity
+
+        select = prototype_query.get("Select", []) or prototype_query.get("select", [])
         for item in select:
             if isinstance(item, dict):
                 # Check Measure
@@ -898,8 +1207,11 @@ class PowerBIReportReferencesTool(BaseTool):
                     expr = measure_ref.get("Expression", {})
                     source_ref = expr.get("SourceRef", {})
                     entity = source_ref.get("Entity")
+                    source_alias = source_ref.get("Source")
                     if entity:
                         tables.add(entity)
+                    elif source_alias and source_alias in source_map:
+                        tables.add(source_map[source_alias])
 
                 # Check Column
                 col_ref = item.get("Column", {})
@@ -910,8 +1222,26 @@ class PowerBIReportReferencesTool(BaseTool):
                     expr = col_ref.get("Expression", {})
                     source_ref = expr.get("SourceRef", {})
                     entity = source_ref.get("Entity")
+                    source_alias = source_ref.get("Source")
                     if entity:
                         tables.add(entity)
+                    elif source_alias and source_alias in source_map:
+                        tables.add(source_map[source_alias])
+
+                # Check "Name" field which often contains "Table.Field" format
+                name = item.get("Name") or item.get("name")
+                if name and isinstance(name, str) and "." in name:
+                    parts = name.split(".")
+                    if len(parts) >= 2:
+                        # First part is table, last part is field
+                        table_name = parts[0]
+                        field_name = parts[-1]
+                        tables.add(table_name)
+                        # Determine if it's a measure or column based on whether Measure or Column was found
+                        if measure_ref:
+                            measures.add(field_name)
+                        else:
+                            columns.add(field_name)
 
     def _extract_from_data_transforms(
         self,
@@ -1009,7 +1339,7 @@ class PowerBIReportReferencesTool(BaseTool):
         depth: int = 0
     ) -> None:
         """Deep search for field references in any structure."""
-        if depth > 10:  # Prevent infinite recursion
+        if depth > 15:  # Prevent infinite recursion
             return
 
         if isinstance(obj, dict):
@@ -1018,7 +1348,7 @@ class PowerBIReportReferencesTool(BaseTool):
                 key_lower = key.lower()
 
                 # Entity/Table references
-                if key_lower in ("entity", "table", "source"):
+                if key_lower in ("entity", "table", "source", "tablename"):
                     if isinstance(value, str) and value and not value.startswith("_"):
                         tables.add(value)
 
@@ -1028,9 +1358,24 @@ class PowerBIReportReferencesTool(BaseTool):
                         measures.add(value)
 
                 # Column references
-                elif key_lower in ("column", "property", "field"):
+                elif key_lower in ("column", "property", "field", "columnname"):
                     if isinstance(value, str) and value and not value.startswith("_"):
                         columns.add(value)
+
+                # queryRef pattern: "Table.Field" (common in embedded format)
+                elif key_lower == "queryref":
+                    if isinstance(value, str) and "." in value:
+                        parts = value.split(".")
+                        if len(parts) >= 2:
+                            tables.add(parts[0])
+                            columns.add(parts[-1])
+
+                # displayName pattern that might contain table.field
+                elif key_lower == "displayname":
+                    if isinstance(value, str) and "." in value:
+                        parts = value.split(".")
+                        if len(parts) >= 2 and not parts[0].startswith("Sum") and not parts[0].startswith("Count"):
+                            tables.add(parts[0])
 
                 # Recurse
                 self._deep_search_references(value, measures, tables, columns, depth + 1)
@@ -1561,19 +1906,36 @@ class PowerBIReportReferencesTool(BaseTool):
         all_report_results: List[Dict[str, Any]],
         failed_reports: List[Dict[str, str]],
     ) -> str:
-        """Format multi-report output as JSON with page URLs."""
+        """Format multi-report output as JSON with page URLs and visuals per page."""
         # Build reports array
         reports = []
         for r in all_report_results:
-            # Clean pages for output (include URLs)
+            visual_references = r.get("visual_references", [])
+
+            # Clean pages for output (include URLs and visuals per page)
             clean_pages = []
             for p in r["pages"]:
+                page_id = p["id"]
+                # Get visuals for this page
+                page_visuals = [
+                    {
+                        "visual_id": v.get("visual_id"),
+                        "visual_type": v.get("visual_type"),
+                        "measures": v.get("measures", []),
+                        "tables": v.get("tables", []),
+                        "columns": v.get("columns", []),
+                    }
+                    for v in visual_references
+                    if v.get("page_id") == page_id
+                ]
+
                 clean_pages.append({
-                    "id": p["id"],
+                    "id": page_id,
                     "name": p["name"],
                     "displayName": p["displayName"],
                     "ordinal": p.get("ordinal", 0),
                     "url": p.get("url", ""),
+                    "visuals": page_visuals,
                 })
 
             report_entry = {
@@ -1581,7 +1943,7 @@ class PowerBIReportReferencesTool(BaseTool):
                 "report_name": r["report_name"],
                 "report_url": r["report_url"],
                 "pages": clean_pages,
-                "visual_references": r["visual_references"],
+                "visual_references": visual_references,  # Keep flat list for compatibility
                 "cross_reference": r["cross_ref"],
             }
 
