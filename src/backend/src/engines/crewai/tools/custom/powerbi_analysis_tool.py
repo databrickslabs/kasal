@@ -109,6 +109,10 @@ class PowerBIAnalysisSchema(BaseModel):
         True,
         description="[Options] Skip system tables like LocalDateTable."
     )
+    max_dax_retries: int = Field(
+        5,
+        description="[Options] Maximum number of retry attempts if DAX execution fails (1-10)."
+    )
     output_format: str = Field(
         "markdown",
         description="[Output] Output format: 'markdown' or 'json'."
@@ -170,6 +174,7 @@ class PowerBIAnalysisTool(BaseTool):
             "llm_model": kwargs.get("llm_model", "databricks-claude-sonnet-4"),
             "include_visual_references": kwargs.get("include_visual_references", True),
             "skip_system_tables": kwargs.get("skip_system_tables", True),
+            "max_dax_retries": kwargs.get("max_dax_retries", 5),
             "output_format": kwargs.get("output_format", "markdown"),
         }
 
@@ -246,7 +251,7 @@ class PowerBIAnalysisTool(BaseTool):
             merged_config["user_question"] = kwarg_question if kwarg_question else default_question
 
             # Options - prefer kwargs if provided
-            for key in ["include_visual_references", "skip_system_tables", "output_format"]:
+            for key in ["include_visual_references", "skip_system_tables", "max_dax_retries", "output_format"]:
                 kwarg_val = filtered_kwargs.get(key)
                 default_val = self._default_config.get(key)
                 merged_config[key] = kwarg_val if kwarg_val is not None else default_val
@@ -340,30 +345,85 @@ class PowerBIAnalysisTool(BaseTool):
             results["errors"].append(f"Model extraction error: {str(e)}")
             logger.error(f"Model extraction failed: {e}")
 
-        # Step 3: Generate DAX using LLM
-        if results["model_context"]["measures"] or results["model_context"]["tables"]:
-            try:
-                generated_dax = await self._generate_dax_with_llm(
-                    user_question, results["model_context"], config
-                )
-                results["generated_dax"] = generated_dax
-                logger.info(f"DAX generated: {generated_dax[:100] if generated_dax else 'None'}...")
-            except Exception as e:
-                results["errors"].append(f"DAX generation error: {str(e)}")
-                logger.error(f"DAX generation failed: {e}")
+        # Step 3: Generate DAX using LLM with retry mechanism
+        max_retries = config.get("max_dax_retries", 5)
+        dax_attempts = []
 
-        # Step 4: Execute DAX query
-        if results["generated_dax"]:
-            try:
-                execution_result = await self._execute_dax_query(
-                    workspace_id, dataset_id, access_token, results["generated_dax"]
-                )
-                results["dax_execution"] = execution_result
-                logger.info(f"DAX execution: success={execution_result['success']}, rows={execution_result['row_count']}")
-            except Exception as e:
-                results["errors"].append(f"DAX execution error: {str(e)}")
-                results["dax_execution"]["error"] = str(e)
-                logger.error(f"DAX execution failed: {e}")
+        if results["model_context"]["measures"] or results["model_context"]["tables"]:
+            for attempt in range(max_retries):
+                try:
+                    # Generate DAX (with error feedback on retries)
+                    if attempt == 0:
+                        # First attempt - no previous errors
+                        generated_dax = await self._generate_dax_with_llm(
+                            user_question, results["model_context"], config
+                        )
+                    else:
+                        # Retry with error feedback
+                        logger.info(f"[DAX Generation] Retry attempt {attempt + 1}/{max_retries}")
+                        generated_dax = await self._generate_dax_with_self_correction(
+                            user_question,
+                            results["model_context"],
+                            config,
+                            dax_attempts
+                        )
+
+                    results["generated_dax"] = generated_dax
+                    logger.info(f"DAX generated (attempt {attempt + 1}): {generated_dax[:100] if generated_dax else 'None'}...")
+
+                    # Try to execute the generated DAX
+                    if generated_dax:
+                        execution_result = await self._execute_dax_query(
+                            workspace_id, dataset_id, access_token, generated_dax
+                        )
+
+                        # Store attempt info
+                        dax_attempts.append({
+                            "attempt": attempt + 1,
+                            "dax": generated_dax,
+                            "success": execution_result["success"],
+                            "error": execution_result.get("error"),
+                            "row_count": execution_result.get("row_count", 0)
+                        })
+
+                        # If successful, break out of retry loop
+                        if execution_result["success"]:
+                            results["dax_execution"] = execution_result
+                            logger.info(f"✅ DAX execution successful on attempt {attempt + 1}: rows={execution_result['row_count']}")
+                            break
+                        else:
+                            # Failed - log and retry
+                            logger.warning(f"❌ DAX execution failed on attempt {attempt + 1}: {execution_result.get('error', 'Unknown error')}")
+                            results["dax_execution"] = execution_result
+
+                            # If this was the last attempt, keep the error
+                            if attempt == max_retries - 1:
+                                results["errors"].append(f"DAX execution failed after {max_retries} attempts: {execution_result.get('error')}")
+                                logger.error(f"DAX execution failed after {max_retries} attempts")
+                    else:
+                        logger.warning(f"No DAX generated on attempt {attempt + 1}")
+                        if attempt == max_retries - 1:
+                            results["errors"].append("Failed to generate valid DAX query")
+
+                except Exception as e:
+                    error_msg = str(e)
+                    logger.error(f"DAX generation/execution error on attempt {attempt + 1}: {error_msg}")
+
+                    # Store failed attempt
+                    dax_attempts.append({
+                        "attempt": attempt + 1,
+                        "dax": results.get("generated_dax"),
+                        "success": False,
+                        "error": error_msg,
+                        "row_count": 0
+                    })
+
+                    # If last attempt, add to errors
+                    if attempt == max_retries - 1:
+                        results["errors"].append(f"DAX generation error after {max_retries} attempts: {error_msg}")
+
+        # Store all attempts for debugging
+        results["dax_attempts"] = dax_attempts
 
         # Step 5: Find visual references (optional)
         if config.get("include_visual_references", True) and results["model_context"]["measures"]:
@@ -807,6 +867,141 @@ class PowerBIAnalysisTool(BaseTool):
 
         return content.strip()
 
+    async def _generate_dax_with_self_correction(
+        self,
+        user_question: str,
+        model_context: Dict[str, Any],
+        config: Dict[str, Any],
+        previous_attempts: List[Dict[str, Any]]
+    ) -> Optional[str]:
+        """Generate DAX with self-correction based on previous failed attempts."""
+        llm_workspace_url = config.get("llm_workspace_url")
+        llm_token = config.get("llm_token")
+        llm_model = config.get("llm_model", "databricks-claude-sonnet-4")
+
+        if not llm_workspace_url or not llm_token:
+            return None
+
+        # Build context about previous attempts
+        attempts_text = "\n\n".join([
+            f"### Attempt {att['attempt']}\n"
+            f"**DAX Query:**\n```dax\n{att['dax']}\n```\n"
+            f"**Result:** {'✅ SUCCESS' if att['success'] else '❌ FAILED'}\n"
+            f"**Error:** {att['error']}" if not att['success'] else ""
+            for att in previous_attempts
+        ])
+
+        # Build measures and tables context
+        measures = model_context.get("measures", [])
+        measures_text = "\n".join([
+            f"- {m['name']} (Table: {m['table']}): {m['expression'][:100]}..."
+            for m in measures[:20]
+        ])
+
+        tables_text = "\n".join([
+            f"- {t['name']}: columns={t.get('columns', [])[:5]}"
+            for t in model_context.get("tables", [])[:15]
+        ])
+
+        relationships_text = "\n".join([
+            f"- {r['from_table']}[{r['from_column']}] -> {r['to_table']}[{r['to_column']}]"
+            for r in model_context.get("relationships", [])[:15]
+        ])
+
+        # Create self-correction prompt
+        prompt = f"""You are a DAX query expert. Your previous attempt(s) to generate a DAX query failed.
+Analyze the error(s) and generate a CORRECTED query.
+
+## User Question
+{user_question}
+
+## Previous Failed Attempts
+{attempts_text}
+
+## Available Measures
+{measures_text}
+
+## Available Tables
+{tables_text if tables_text else "No tables found"}
+
+## Relationships
+{relationships_text if relationships_text else "No relationships found"}
+
+## CRITICAL INSTRUCTIONS FOR CORRECTION
+1. **Analyze the error message** from the previous attempt(s)
+2. **ONLY use measure names from the "Available Measures" list above**
+3. **ONLY use table and column names from the "Available Tables" list above**
+4. **DO NOT repeat the same mistake** - generate a DIFFERENT query than before
+5. Common DAX errors to avoid:
+   - Table or column doesn't exist → Check spelling and use exact names from lists above
+   - Invalid relationship → Use only relationships listed above
+   - Syntax error → Ensure proper DAX syntax (EVALUATE, SUMMARIZECOLUMNS, etc.)
+   - Type mismatch → Ensure columns and measures are used correctly
+6. Return ONLY the corrected DAX query without explanations
+
+## Corrected DAX Query:
+"""
+
+        # Log the self-correction prompt
+        logger.info("=" * 80)
+        logger.info(f"[DAX Self-Correction] Attempt {len(previous_attempts) + 1} Prompt:")
+        logger.info(prompt)
+        logger.info("=" * 80)
+
+        # Call LLM
+        url = f"{llm_workspace_url.rstrip('/')}/serving-endpoints/{llm_model}/invocations"
+        headers = {
+            "Authorization": f"Bearer {llm_token}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 1000,
+            "temperature": 0.1
+        }
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            try:
+                response = await client.post(url, headers=headers, json=payload)
+                response.raise_for_status()
+                result = response.json()
+
+                content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+                # Log response
+                logger.info("=" * 80)
+                logger.info("[DAX Self-Correction] LLM Response:")
+                logger.info(content)
+                logger.info("=" * 80)
+
+                # Extract DAX
+                dax = self._extract_dax_from_llm_response(content)
+
+                # Validate against available measures
+                available_measure_names = [m["name"] for m in model_context.get("measures", [])]
+
+                # Check for hallucinated measures - extract all [measure] references
+                dax_pattern = r'\[([^\]]+)\]'
+                all_references = re.findall(dax_pattern, dax)
+
+                # Find references that look like measures (not part of table[column])
+                potential_measures = []
+                for ref in all_references:
+                    is_table_column = any(f"{table['name']}[{ref}]" in dax for table in model_context.get("tables", []))
+                    if not is_table_column:
+                        potential_measures.append(ref)
+
+                hallucinated = [m for m in potential_measures if m not in available_measure_names]
+                if hallucinated:
+                    logger.warning(f"[DAX Self-Correction] LLM may have used non-existent measures: {hallucinated}")
+
+                logger.info(f"[DAX Self-Correction] Extracted DAX: {dax[:100]}...")
+                return dax
+
+            except Exception as e:
+                logger.error(f"LLM self-correction error: {e}")
+                return None
+
     def _generate_simple_dax(self, user_question: str, model_context: Dict[str, Any]) -> Optional[str]:
         """Generate a simple DAX query without LLM."""
         measures = model_context.get("measures", [])
@@ -978,6 +1173,18 @@ SUMMARIZECOLUMNS(
         # Generated DAX
         if results.get("generated_dax"):
             output.append("## Generated DAX Query\n")
+
+            # Show retry attempts if there were multiple
+            dax_attempts = results.get("dax_attempts", [])
+            if len(dax_attempts) > 1:
+                output.append(f"**Attempts**: {len(dax_attempts)} (successful on attempt {len(dax_attempts)})\n")
+                output.append("\n### Retry History\n")
+                for att in dax_attempts[:-1]:  # Show all failed attempts
+                    output.append(f"**Attempt {att['attempt']}**: ❌ Failed")
+                    if att.get('error'):
+                        output.append(f"  - Error: {att['error'][:100]}...")
+                output.append(f"**Attempt {dax_attempts[-1]['attempt']}**: ✅ Success\n")
+
             output.append("```dax")
             output.append(results["generated_dax"])
             output.append("```\n")
