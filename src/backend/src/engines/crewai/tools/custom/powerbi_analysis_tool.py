@@ -53,7 +53,7 @@ class PowerBIAnalysisSchema(BaseModel):
     # ===== USER QUESTION =====
     user_question: Optional[str] = Field(
         None,
-        description="[Required] The business question to answer using Power BI data. Example: 'What are total sales by region?'"
+        description="The business question to answer using Power BI data. This should come from the task description or be pre-configured in tool_configs."
     )
 
     # ===== POWER BI CONFIGURATION =====
@@ -141,10 +141,10 @@ class PowerBIAnalysisTool(BaseTool):
 
     name: str = "Power BI Comprehensive Analysis"
     description: str = (
-        "Converts business questions into DAX queries and executes them against Power BI semantic models. "
-        "Extracts model context (measures, relationships), generates intelligent DAX using LLM, "
-        "executes the query, and finds visual references. "
-        "Requires workspace_id, dataset_id, and authentication (Service Principal or OAuth)."
+        "Analyzes Power BI data by converting business questions into DAX queries. "
+        "IMPORTANT: Extract the user's business question from the task description and pass it as 'user_question' parameter. "
+        "The tool will: 1) Extract Power BI model context, 2) Generate DAX query using LLM, 3) Execute the query, 4) Return results. "
+        "Connection credentials (workspace_id, dataset_id, authentication) are pre-configured - do not provide them unless overriding."
     )
     args_schema: Type[BaseModel] = PowerBIAnalysisSchema
 
@@ -160,6 +160,7 @@ class PowerBIAnalysisTool(BaseTool):
         instance_id = str(uuid.uuid4())[:8]
 
         logger.info(f"[PowerBIAnalysisTool.__init__] Instance ID: {instance_id}")
+        logger.info(f"[PowerBIAnalysisTool.__init__] Received user_question in kwargs: {kwargs.get('user_question', 'NOT PROVIDED')}")
 
         # Store configuration
         default_config = {
@@ -176,6 +177,7 @@ class PowerBIAnalysisTool(BaseTool):
             "skip_system_tables": kwargs.get("skip_system_tables", True),
             "max_dax_retries": kwargs.get("max_dax_retries", 5),
             "output_format": kwargs.get("output_format", "markdown"),
+            "user_question": kwargs.get("user_question"),  # Pre-configured question from frontend
         }
 
         # Call parent init
@@ -184,6 +186,8 @@ class PowerBIAnalysisTool(BaseTool):
 
         self._instance_id = instance_id
         self._default_config = default_config
+
+        logger.info(f"[PowerBIAnalysisTool.__init__] Stored in default_config - user_question: {default_config.get('user_question', 'NOT SET')}")
 
     def _is_placeholder_value(self, value: Any) -> bool:
         """Check if a value looks like a placeholder/example that should be ignored."""
@@ -245,10 +249,11 @@ class PowerBIAnalysisTool(BaseTool):
                 # Use default config if available, otherwise use kwargs
                 merged_config[key] = default_val if default_val is not None else kwarg_val
 
-            # User question - prefer kwargs (the actual question from the agent)
+            # User question - prefer default config (pre-configured) over agent's input
+            # This ensures the tool_configs question takes precedence
             kwarg_question = filtered_kwargs.get("user_question")
             default_question = self._default_config.get("user_question")
-            merged_config["user_question"] = kwarg_question if kwarg_question else default_question
+            merged_config["user_question"] = default_question if default_question is not None else kwarg_question
 
             # Options - prefer kwargs if provided
             for key in ["include_visual_references", "skip_system_tables", "max_dax_retries", "output_format"]:
@@ -256,6 +261,9 @@ class PowerBIAnalysisTool(BaseTool):
                 default_val = self._default_config.get(key)
                 merged_config[key] = kwarg_val if kwarg_val is not None else default_val
 
+            logger.info(f"[PowerBIAnalysisTool] DEFAULT CONFIG user_question: {self._default_config.get('user_question', 'NOT SET')}")
+            logger.info(f"[PowerBIAnalysisTool] KWARGS user_question: {filtered_kwargs.get('user_question', 'NOT SET')}")
+            logger.info(f"[PowerBIAnalysisTool] MERGED user_question: {merged_config.get('user_question', 'NOT SET')}")
             logger.info(f"[PowerBIAnalysisTool] Merged config - workspace_id: {merged_config.get('workspace_id')}, "
                        f"question: {merged_config.get('user_question', '')[:50] if merged_config.get('user_question') else 'None'}...")
 

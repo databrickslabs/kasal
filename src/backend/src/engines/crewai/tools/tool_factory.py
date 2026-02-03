@@ -1374,12 +1374,15 @@ class ToolFactory:
                         tool_args["skip_system_tables"] = tool_config.get("skip_system_tables", True)
                         tool_args["output_format"] = tool_config.get("output_format", "markdown")
 
+                        # User Question (pre-configured question from frontend)
+                        tool_args["user_question"] = tool_config.get("user_question")
+
                     # Allow tool_config_override to override specific fields
                     if isinstance(tool_config_override, dict):
                         for key in ["workspace_id", "dataset_id", "tenant_id", "client_id",
                                     "client_secret", "access_token", "llm_workspace_url",
                                     "llm_token", "llm_model", "include_visual_references",
-                                    "skip_system_tables", "output_format"]:
+                                    "skip_system_tables", "output_format", "user_question"]:
                             if key in tool_config_override:
                                 tool_args[key] = tool_config_override[key]
 
@@ -1394,7 +1397,8 @@ class ToolFactory:
                            f"dataset_id: {tool_args.get('dataset_id')}, "
                            f"tenant_id: {'***' if tool_args.get('tenant_id') else None}, "
                            f"has_access_token: {bool(tool_args.get('access_token'))}, "
-                           f"llm_configured: {bool(tool_args.get('llm_workspace_url'))}")
+                           f"llm_configured: {bool(tool_args.get('llm_workspace_url'))}, "
+                           f"user_question: {tool_args.get('user_question', 'NOT SET')}")
                 return tool_class(**tool_args)
 
             elif tool_name == "MCPTool":
