@@ -155,7 +155,8 @@ class ToolFactory:
             "AgentBricksTool": AgentBricksTool,
             "DatabricksJobsTool": DatabricksJobsTool,
             "DatabricksKnowledgeSearchTool": DatabricksKnowledgeSearchTool,
-            "PowerBIAnalysisTool": PowerBIAnalysisTool,
+            "Power BI Comprehensive Analysis Tool": PowerBIAnalysisTool,  # New display name
+            "PowerBIAnalysisTool": PowerBIAnalysisTool,  # Keep old name for backward compatibility
         }
 
         # Add MCPTool if it was successfully imported
@@ -1344,9 +1345,9 @@ class ToolFactory:
                 tool = DatabricksKnowledgeSearchTool(**tool_args)
                 return tool
 
-            elif tool_name == "PowerBIAnalysisTool":
-                # Create PowerBIAnalysisTool with Power BI and LLM configuration
-                # This tool converts business questions into DAX queries and executes them
+            elif tool_name == "Power BI Comprehensive Analysis Tool":
+                # Create Power BI Comprehensive Analysis Tool with Power BI and LLM configuration
+                # This tool converts business questions into DAX queries and executes them with intelligent self-correction
                 tool_args = {}
 
                 try:
@@ -1393,7 +1394,7 @@ class ToolFactory:
                     logger.error(f"Error extracting PowerBI Analysis config: {e}")
                     tool_args = {}
 
-                logger.info(f"Creating PowerBIAnalysisTool with workspace_id: {tool_args.get('workspace_id')}, "
+                logger.info(f"Creating Power BI Comprehensive Analysis Tool with workspace_id: {tool_args.get('workspace_id')}, "
                            f"dataset_id: {tool_args.get('dataset_id')}, "
                            f"tenant_id: {'***' if tool_args.get('tenant_id') else None}, "
                            f"has_access_token: {bool(tool_args.get('access_token'))}, "

@@ -205,9 +205,9 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
         setSerperConfig(initialData.tool_configs.SerperDevTool as SerperConfig);
       }
 
-      // Check for PowerBIAnalysisTool config
-      if (initialData.tool_configs.PowerBIAnalysisTool) {
-        setPowerBIConfig(initialData.tool_configs.PowerBIAnalysisTool as PowerBIAnalysisConfig);
+      // Check for Power BI Comprehensive Analysis Tool config
+      if (initialData.tool_configs['Power BI Comprehensive Analysis Tool']) {
+        setPowerBIConfig(initialData.tool_configs['Power BI Comprehensive Analysis Tool'] as PowerBIAnalysisConfig);
       }
 
       // Check for Measure Conversion Pipeline config
@@ -1320,14 +1320,14 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
               </Box>
             )}
 
-            {/* Power BI Comprehensive Analysis Configuration - Show only when PowerBIAnalysisTool is selected */}
+            {/* Power BI Comprehensive Analysis Configuration - Show only when Power BI Comprehensive Analysis Tool is selected */}
             {formData.tools.some(toolId => {
               const tool = tools.find(t =>
                 String(t.id) === String(toolId) ||
                 t.id === Number(toolId) ||
                 t.title === toolId
               );
-              return tool?.title === 'PowerBIAnalysisTool';
+              return tool?.title === 'Power BI Comprehensive Analysis Tool';
             }) && (
               <Box sx={{ mt: 2 }}>
                 <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
@@ -1346,7 +1346,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                       // Update tool configs when configuration changes
                       setToolConfigs(prev => ({
                         ...prev,
-                        PowerBIAnalysisTool: config
+                        'Power BI Comprehensive Analysis Tool': config
                       }));
                     }}
                   />

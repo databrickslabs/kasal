@@ -29,7 +29,7 @@ Kasal provides multiple Power BI integration tools for different use cases:
 
 | Tool | ID | Purpose | Guide |
 |------|----|---------|-------|
-| **Power BI Analysis Tool** | 71 | Execute DAX queries via Databricks jobs | This document |
+| **Comprehensive Analysis Tool** | 72 | Answer business questions via intelligent DAX generation with self-correction | [Guide](./tool-comprehensive-analysis.md) |
 | **Measure Conversion Pipeline** | 73 | Convert DAX measures to UC Metrics/SQL | [Guide](./tool-measure-conversion.md) |
 | **M-Query Conversion Pipeline** | 74 | Convert M-Query/Power Query to SQL views | [Guide](./tool-mquery-conversion.md) |
 | **Relationships Tool** | 75 | Extract relationships as FK constraints | [Guide](./tool-relationships-conversion.md) |
@@ -43,7 +43,7 @@ Kasal provides multiple Power BI integration tools for different use cases:
 
 ## Overview
 
-The Power BI Analysis Tool (ID: 71) enables Kasal AI agents to execute complex analysis against Power BI semantic models using Databricks compute resources. This provides a production-ready, API-driven connector for Power BI analytics within AI workflows based on a preconfigured template notebook for tracability.
+The Power BI Comprehensive Analysis Tool (ID: 72) enables Kasal AI agents to answer business questions by converting natural language queries into DAX queries with intelligent self-correction. This provides a production-ready, API-driven connector for Power BI analytics within AI workflows.
 
 **Key Features:**
 - DAX query execution against Power BI semantic models
@@ -520,10 +520,12 @@ If keys are missing, an error alert is displayed with instructions.
 
 ### Tool Overview
 
-**PowerBIAnalysisTool** (ID: 71) enables complex Power BI analysis via Databricks job orchestration.
+**Power BI Comprehensive Analysis Tool** (ID: 72) enables business question answering via intelligent DAX generation with self-correction.
 
 **Best for**:
-- Heavy computation and large datasets
+- Ad-hoc business questions and data exploration
+- Self-service BI without manual DAX writing
+- Learning DAX through LLM-generated examples
 - Complex multi-query analysis
 - Year-over-year comparisons
 - Trend detection and forecasting
