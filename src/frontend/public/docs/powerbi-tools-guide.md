@@ -4,10 +4,11 @@ This guide covers the Power BI migration tools available in Kasal for converting
 
 ## Overview
 
-Kasal provides six specialized tools for migrating different aspects of Power BI semantic models to Databricks:
+Kasal provides seven specialized tools for migrating different aspects of Power BI semantic models to Databricks and for analyzing Power BI data:
 
 | Tool | ID | Purpose | SVP Type | Details |
 |------|----|---------|----------|---------|
+| **Comprehensive Analysis Tool** | 72 | Answer business questions via intelligent DAX generation with self-correction | **Admin API**  | [Full Guide](./tool-comprehensive-analysis.md) |
 | **Measure Conversion Pipeline** | 73 | Convert DAX measures to UC Metrics/SQL | Non-Admin API | [Full Guide](./tool-measure-conversion.md) |
 | **M-Query Conversion Pipeline** | 74 | Convert M-Query/Power Query to SQL views | **Admin API** | [Full Guide](./tool-mquery-conversion.md) |
 | **Power BI Relationships Tool** | 75 | Extract relationships as FK constraints | Non-Admin API | [Full Guide](./tool-relationships-conversion.md) |
@@ -572,6 +573,114 @@ group_by: "page"       # "page", "measure", or "table"
 
 **Full Guide**: [Report References Tool](./tool-report-references.md)
 
+### 7. Comprehensive Analysis Tool
+
+**Purpose**: Answer ad-hoc business questions by converting natural language queries into DAX queries and executing them against Power BI semantic models. Features intelligent self-correction with up to 5 retry attempts.
+
+**API Used**: Execute Queries API with `EVALUATE` DAX queries
+
+**SVP Requirement**: Non-Admin API SVP with `SemanticModel.ReadWrite.All`
+
+**Key Features**:
+- **Intelligent Self-Correction**: Automatically retries failed queries with LLM-based error analysis
+- **Measure Hallucination Detection**: Validates generated DAX uses only available measures
+- **Visual References**: Identifies which reports use the queried measures
+- **Enhanced Logging**: Full diagnostic logging for debugging and optimization
+
+**Configuration:**
+```yaml
+# Required
+user_question: "What are total sales by region?"
+workspace_id: "your-workspace-guid"
+dataset_id: "your-dataset-guid"
+
+# Authentication (Service Principal)
+tenant_id: "your-tenant-guid"
+client_id: "your-sp-client-id"
+client_secret: "your-sp-secret"
+
+# OR User OAuth
+# access_token: "user-oauth-token"
+
+# LLM for intelligent DAX generation (optional)
+llm_workspace_url: "https://your-workspace.databricks.com"
+llm_token: "your-databricks-token"
+llm_model: "databricks-claude-sonnet-4"
+
+# Retry configuration
+max_dax_retries: 5  # 1-10, default 5
+
+# Output options
+include_visual_references: true
+skip_system_tables: true
+output_format: "markdown"  # or "json"
+```
+
+**Output Example (with retry history):**
+```markdown
+# Power BI Analysis Results
+
+**Question**: What are total sales by region?
+
+## Generated DAX Query
+
+**Attempts**: 2 (successful on attempt 2)
+
+### Retry History
+**Attempt 1**: ❌ Failed
+  - Error: Table 'Sales' does not exist
+**Attempt 2**: ✅ Success
+
+```dax
+EVALUATE
+SUMMARIZECOLUMNS(
+    'Geography'[Region],
+    "Total Sales", [Total Sales]
+)
+ORDER BY [Total Sales] DESC
+```
+
+## Execution Results
+
+✅ **Success** - 5 rows returned
+
+| Region | Total Sales |
+| --- | --- |
+| North | 1,234,567 |
+| South | 987,654 |
+```
+
+**Use Cases:**
+- **Ad-hoc Analysis**: Answer business questions without writing DAX manually
+- **Data Exploration**: Quickly explore semantic model data with natural language
+- **Self-Service BI**: Enable non-technical users to query Power BI data
+- **Validation**: Test measure logic and data quality
+- **Learning**: Understand DAX through LLM-generated examples
+
+**How Self-Correction Works:**
+1. LLM generates DAX from user question + model context
+2. Execute query against Power BI
+3. If failed:
+   - Capture exact error message
+   - LLM analyzes error and generates corrected DAX
+   - Re-execute corrected query
+   - Repeat up to `max_dax_retries` times
+4. Return results with full retry history
+
+**Corrects:**
+- Table/column name errors
+- Syntax errors
+- Relationship errors
+- Type mismatches
+- Measure reference errors
+
+**Performance:**
+- First attempt success: ~2-5 seconds
+- Each retry: +2-5 seconds
+- Max latency (5 retries): ~25-30 seconds
+
+**Full Guide**: [Comprehensive Analysis Tool](./tool-comprehensive-analysis.md)
+
 ---
 
 ## Quick Reference: Which SVP Do I Need?
@@ -586,6 +695,7 @@ group_by: "page"       # "page", "measure", or "table"
 │ Power BI Hierarchies Tool              │ Non-Admin API     │ SemanticModel.ReadWrite │
 │ Field Parameters & Calculation Groups  │ Non-Admin API     │ SemanticModel.ReadWrite │
 │ Report References Tool                 │ Non-Admin API     │ Report.ReadWrite.All    │
+│ Comprehensive Analysis Tool            │ Non-Admin API     │ SemanticModel.ReadWrite │
 └────────────────────────────────────────┴───────────────────┴─────────────────────────┘
 ```
 
