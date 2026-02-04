@@ -69,7 +69,7 @@ class PowerBIAnalysisSchema(BaseModel):
     # ===== SERVICE PRINCIPAL AUTHENTICATION =====
     tenant_id: Optional[str] = Field(
         None,
-        description="[Auth] Azure AD tenant ID for Service Principal."
+        description="[Auth] Azure AD tenant ID for Service Principal or Service Account."
     )
     client_id: Optional[str] = Field(
         None,
@@ -80,10 +80,24 @@ class PowerBIAnalysisSchema(BaseModel):
         description="[Auth] Client secret for Service Principal."
     )
 
+    # ===== SERVICE ACCOUNT AUTHENTICATION =====
+    username: Optional[str] = Field(
+        None,
+        description="[Auth] Service account username/UPN for Service Account authentication."
+    )
+    password: Optional[str] = Field(
+        None,
+        description="[Auth] Service account password for Service Account authentication."
+    )
+    auth_method: Optional[str] = Field(
+        None,
+        description="[Auth] Authentication method: 'service_principal', 'service_account', or auto-detect."
+    )
+
     # ===== OR USER OAUTH =====
     access_token: Optional[str] = Field(
         None,
-        description="[Auth] Access token for user OAuth authentication (alternative to SP)."
+        description="[Auth] Access token for user OAuth authentication (alternative to SP/SA)."
     )
 
     # ===== LLM CONFIGURATION =====
@@ -129,9 +143,10 @@ class PowerBIAnalysisTool(BaseTool):
     3. **Execute DAX**: Runs the query via Power BI Execute Queries API
     4. **Find Visual References**: Identifies which reports/visuals use the queried measures
 
-    **Authentication**:
-    - Service Principal (client_id + client_secret) OR
-    - User OAuth (access_token)
+    **Authentication** (choose one):
+    - **Service Principal**: client_id + client_secret + tenant_id (App Owns Data)
+    - **Service Account**: username + password + client_id + tenant_id (User credentials)
+    - **User OAuth**: access_token (pre-obtained token)
 
     **Use Cases**:
     - Answer business questions using Power BI data
@@ -169,6 +184,9 @@ class PowerBIAnalysisTool(BaseTool):
             "tenant_id": kwargs.get("tenant_id"),
             "client_id": kwargs.get("client_id"),
             "client_secret": kwargs.get("client_secret"),
+            "username": kwargs.get("username"),
+            "password": kwargs.get("password"),
+            "auth_method": kwargs.get("auth_method"),
             "access_token": kwargs.get("access_token"),
             "llm_workspace_url": kwargs.get("llm_workspace_url"),
             "llm_token": kwargs.get("llm_token"),
@@ -241,8 +259,8 @@ class PowerBIAnalysisTool(BaseTool):
 
             # Connection and auth parameters - default config takes precedence
             config_params = ["workspace_id", "dataset_id", "tenant_id", "client_id",
-                           "client_secret", "access_token", "llm_workspace_url",
-                           "llm_token", "llm_model"]
+                           "client_secret", "username", "password", "auth_method",
+                           "access_token", "llm_workspace_url", "llm_token", "llm_model"]
             for key in config_params:
                 default_val = self._default_config.get(key)
                 kwarg_val = filtered_kwargs.get(key)
@@ -285,14 +303,21 @@ class PowerBIAnalysisTool(BaseTool):
                 merged_config.get("client_id"),
                 merged_config.get("client_secret")
             ])
+            has_sa_auth = all([
+                merged_config.get("tenant_id"),
+                merged_config.get("client_id"),
+                merged_config.get("username"),
+                merged_config.get("password")
+            ])
             has_oauth = bool(merged_config.get("access_token"))
 
-            if not has_sp_auth and not has_oauth:
+            if not has_sp_auth and not has_sa_auth and not has_oauth:
                 return (
                     "Error: Authentication required.\n"
-                    "Provide either:\n"
+                    "Provide one of:\n"
                     "- Service Principal: tenant_id, client_id, client_secret\n"
-                    "- OR User OAuth: access_token"
+                    "- Service Account: tenant_id, client_id, username, password\n"
+                    "- User OAuth: access_token"
                 )
 
             # Run async pipeline
@@ -454,28 +479,19 @@ class PowerBIAnalysisTool(BaseTool):
         return self._format_output(results, output_format)
 
     async def _get_access_token(self, config: Dict[str, Any]) -> str:
-        """Get OAuth access token using Service Principal or return provided token."""
-        # If access_token provided, use it directly
-        if config.get("access_token"):
-            return config["access_token"]
+        """
+        Get OAuth access token using centralized AadService.
 
-        # Otherwise, use Service Principal
-        tenant_id = config["tenant_id"]
-        client_id = config["client_id"]
-        client_secret = config["client_secret"]
+        Supports three authentication methods:
+        1. Pre-obtained access_token (User OAuth)
+        2. Service Principal (client credentials)
+        3. Service Account (username/password ROPC flow)
 
-        url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
-        data = {
-            "grant_type": "client_credentials",
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "scope": "https://analysis.windows.net/powerbi/api/.default"
-        }
-
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(url, data=data)
-            response.raise_for_status()
-            return response.json()["access_token"]
+        Uses the shared powerbi_auth_utils module for consistent authentication
+        across all Power BI tools.
+        """
+        from src.engines.crewai.tools.custom.powerbi_auth_utils import get_powerbi_access_token_from_config
+        return await get_powerbi_access_token_from_config(config)
 
     async def _extract_model_context(
         self,
@@ -513,19 +529,14 @@ class PowerBIAnalysisTool(BaseTool):
         return model_context
 
     async def _get_fabric_token(self, config: Dict[str, Any]) -> str:
-        """Get Fabric API token for TMDL access."""
-        url = f"https://login.microsoftonline.com/{config['tenant_id']}/oauth2/v2.0/token"
-        data = {
-            "grant_type": "client_credentials",
-            "client_id": config["client_id"],
-            "client_secret": config["client_secret"],
-            "scope": "https://api.fabric.microsoft.com/.default"
-        }
+        """
+        Get Fabric API token for TMDL access.
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(url, data=data)
-            response.raise_for_status()
-            return response.json()["access_token"]
+        Uses the shared powerbi_auth_utils module for consistent authentication.
+        Supports Service Principal and Service Account authentication.
+        """
+        from src.engines.crewai.tools.custom.powerbi_auth_utils import get_fabric_access_token_from_config
+        return await get_fabric_access_token_from_config(config)
 
     async def _fetch_tmdl_definition(
         self,

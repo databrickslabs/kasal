@@ -36,11 +36,15 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import LoginIcon from '@mui/icons-material/Login';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import SecurityIcon from '@mui/icons-material/Security';
+import PersonIcon from '@mui/icons-material/Person';
 import QuestionAnswerIcon from '@mui/icons-material/QuestionAnswer';
 import { usePowerBIOAuth } from '../../hooks/usePowerBIOAuth';
 
 // Authentication method type
-export type PowerBIAuthMethod = 'service_principal' | 'user_oauth';
+// - service_principal: App credentials (client_id + client_secret + tenant_id)
+// - service_account: User credentials (username + password + client_id + tenant_id)
+// - user_oauth: Interactive OAuth sign-in with Microsoft
+export type PowerBIAuthMethod = 'service_principal' | 'service_account' | 'user_oauth';
 
 export interface PowerBIAnalysisConfig {
   // Configuration mode
@@ -56,10 +60,15 @@ export interface PowerBIAnalysisConfig {
   // Authentication method
   auth_method?: PowerBIAuthMethod;
 
-  // Service Principal Authentication (single SP)
+  // Service Principal Authentication (client_id + client_secret + tenant_id)
   tenant_id?: string;
   client_id?: string;
   client_secret?: string;
+
+  // Service Account Authentication (username + password + client_id + tenant_id)
+  // Used when Service Principal doesn't have sufficient permissions to read Power BI data
+  username?: string;
+  password?: string;
 
   // User OAuth authentication (alternative)
   oauth_client_id?: string;
@@ -114,12 +123,19 @@ export const PowerBIAnalysisConfigSelector: React.FC<PowerBIAnalysisConfigSelect
         updatedConfig.tenant_id = undefined;
         updatedConfig.client_id = undefined;
         updatedConfig.client_secret = undefined;
+        updatedConfig.username = undefined;
+        updatedConfig.password = undefined;
         // Set access token if authenticated
         if (accessToken) {
           updatedConfig.access_token = accessToken;
         }
-      } else {
+      } else if (newMethod === 'service_principal') {
         updatedConfig.access_token = undefined;
+        updatedConfig.username = undefined;
+        updatedConfig.password = undefined;
+      } else if (newMethod === 'service_account') {
+        updatedConfig.access_token = undefined;
+        updatedConfig.client_secret = undefined;
       }
 
       onChange(updatedConfig);
@@ -151,6 +167,8 @@ export const PowerBIAnalysisConfigSelector: React.FC<PowerBIAnalysisConfigSelect
         updatedConfig.tenant_id = '{tenant_id}';
         updatedConfig.client_id = '{client_id}';
         updatedConfig.client_secret = '{client_secret}';
+        updatedConfig.username = '{username}';
+        updatedConfig.password = '{password}';
         updatedConfig.access_token = '{access_token}';
         // Keep options as static values
         updatedConfig.include_visual_references = value.include_visual_references !== false;
@@ -236,12 +254,21 @@ export const PowerBIAnalysisConfigSelector: React.FC<PowerBIAnalysisConfigSelect
                 <Typography variant="caption">← User OAuth (recommended)</Typography>
               </Box>
               <Typography variant="caption" color="text.secondary" sx={{ pl: 1, display: 'block', mb: 0.5 }}>
-                <em>or</em>
+                <em>or Service Principal:</em>
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
+                <Chip label="tenant_id" size="small" variant="outlined" />
+                <Chip label="client_id" size="small" variant="outlined" />
+                <Chip label="client_secret" size="small" variant="outlined" />
+              </Box>
+              <Typography variant="caption" color="text.secondary" sx={{ pl: 1, display: 'block', mb: 0.5 }}>
+                <em>or Service Account:</em>
               </Typography>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                 <Chip label="tenant_id" size="small" variant="outlined" />
                 <Chip label="client_id" size="small" variant="outlined" />
-                <Chip label="client_secret" size="small" variant="outlined" />
+                <Chip label="username" size="small" variant="outlined" />
+                <Chip label="password" size="small" variant="outlined" />
               </Box>
             </Box>
           </Box>
@@ -332,6 +359,17 @@ export const PowerBIAnalysisConfigSelector: React.FC<PowerBIAnalysisConfigSelect
                 </Typography>
               </Box>
             </ToggleButton>
+            <ToggleButton value="service_account">
+              <Box sx={{ textAlign: 'center', py: 0.5 }}>
+                <PersonIcon sx={{ fontSize: 18, mb: 0.5 }} />
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                  Service Account
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  User credentials
+                </Typography>
+              </Box>
+            </ToggleButton>
             <ToggleButton value="user_oauth">
               <Box sx={{ textAlign: 'center', py: 0.5 }}>
                 <LoginIcon sx={{ fontSize: 18, mb: 0.5 }} />
@@ -382,6 +420,60 @@ export const PowerBIAnalysisConfigSelector: React.FC<PowerBIAnalysisConfigSelect
                 type="password"
                 fullWidth
                 helperText="Client secret for service principal"
+                size="small"
+              />
+            </Box>
+          )}
+
+          {/* Service Account Authentication Fields */}
+          {authMethod === 'service_account' && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Alert severity="warning" variant="outlined" sx={{ py: 0.5 }}>
+                <Typography variant="caption">
+                  Use service account when Service Principal lacks permissions to read Power BI data.
+                  The account must have access to the semantic model.
+                </Typography>
+              </Alert>
+              <TextField
+                label="Tenant ID"
+                value={value.tenant_id || ''}
+                onChange={(e) => handleFieldChange('tenant_id', e.target.value)}
+                disabled={disabled}
+                required
+                fullWidth
+                helperText="Azure AD tenant ID"
+                size="small"
+              />
+              <TextField
+                label="Client ID"
+                value={value.client_id || ''}
+                onChange={(e) => handleFieldChange('client_id', e.target.value)}
+                disabled={disabled}
+                required
+                fullWidth
+                helperText="Application/Client ID (Azure AD app registration)"
+                size="small"
+              />
+              <TextField
+                label="Username"
+                value={value.username || ''}
+                onChange={(e) => handleFieldChange('username', e.target.value)}
+                disabled={disabled}
+                required
+                fullWidth
+                placeholder="serviceaccount@domain.com"
+                helperText="Service account UPN (email)"
+                size="small"
+              />
+              <TextField
+                label="Password"
+                value={value.password || ''}
+                onChange={(e) => handleFieldChange('password', e.target.value)}
+                disabled={disabled}
+                required
+                type="password"
+                fullWidth
+                helperText="Service account password"
                 size="small"
               />
             </Box>

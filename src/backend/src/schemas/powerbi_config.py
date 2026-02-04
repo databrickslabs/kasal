@@ -10,7 +10,12 @@ class PowerBIConfigBase(BaseModel):
     workspace_id: Optional[str] = None
     semantic_model_id: Optional[str] = None
     enabled: bool = True
-    auth_method: str = "username_password"  # "username_password" or "device_code"
+    # Auth methods:
+    # - "service_principal": Uses client_id + client_secret + tenant_id (App Owns Data)
+    # - "service_account": Uses username + password + client_id + tenant_id (User credentials)
+    # - "username_password": Legacy alias for service_account
+    # - "device_code": Interactive browser-based authentication
+    auth_method: str = "service_principal"
 
 
 class PowerBIConfigCreate(PowerBIConfigBase):

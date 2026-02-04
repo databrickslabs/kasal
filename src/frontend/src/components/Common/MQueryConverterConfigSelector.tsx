@@ -25,10 +25,12 @@ import {
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import LoginIcon from '@mui/icons-material/Login';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import SecurityIcon from '@mui/icons-material/Security';
+import PersonIcon from '@mui/icons-material/Person';
 import { usePowerBIOAuth } from '../../hooks/usePowerBIOAuth';
 
 // Authentication method type
-export type PowerBIAuthMethod = 'service_principal' | 'user_oauth';
+export type PowerBIAuthMethod = 'service_principal' | 'service_account' | 'user_oauth';
 
 export interface MQueryConverterConfig {
   // Configuration mode
@@ -42,6 +44,9 @@ export interface MQueryConverterConfig {
   tenant_id?: string;
   client_id?: string;
   client_secret?: string;
+  // Service Account authentication
+  username?: string;
+  password?: string;
   // User OAuth authentication
   oauth_client_id?: string; // Azure AD app client ID for OAuth
   access_token?: string;
@@ -99,12 +104,19 @@ export const MQueryConverterConfigSelector: React.FC<MQueryConverterConfigSelect
         updatedConfig.tenant_id = undefined;
         updatedConfig.client_id = undefined;
         updatedConfig.client_secret = undefined;
+        updatedConfig.username = undefined;
+        updatedConfig.password = undefined;
         // Set access token if authenticated
         if (accessToken) {
           updatedConfig.access_token = accessToken;
         }
-      } else {
+      } else if (newMethod === 'service_principal') {
         updatedConfig.access_token = undefined;
+        updatedConfig.username = undefined;
+        updatedConfig.password = undefined;
+      } else if (newMethod === 'service_account') {
+        updatedConfig.access_token = undefined;
+        updatedConfig.client_secret = undefined;
       }
 
       onChange(updatedConfig);
@@ -288,22 +300,26 @@ export const MQueryConverterConfigSelector: React.FC<MQueryConverterConfigSelect
             size="small"
           >
             <ToggleButton value="service_principal">
-              <Box sx={{ textAlign: 'center', py: 0.5 }}>
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 0.5 }}>
+                <SecurityIcon sx={{ fontSize: 18, mb: 0.5 }} />
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>
                   Service Principal
                 </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  App registration credentials
+              </Box>
+            </ToggleButton>
+            <ToggleButton value="service_account">
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 0.5 }}>
+                <PersonIcon sx={{ fontSize: 18, mb: 0.5 }} />
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                  Service Account
                 </Typography>
               </Box>
             </ToggleButton>
             <ToggleButton value="user_oauth">
-              <Box sx={{ textAlign: 'center', py: 0.5 }}>
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 0.5 }}>
+                <LoginIcon sx={{ fontSize: 18, mb: 0.5 }} />
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>
                   User OAuth
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  Sign in with Microsoft
                 </Typography>
               </Box>
             </ToggleButton>
@@ -344,6 +360,63 @@ export const MQueryConverterConfigSelector: React.FC<MQueryConverterConfigSelect
                 size="small"
               />
             </Box>
+          )}
+
+          {/* Service Account Authentication Fields */}
+          {authMethod === 'service_account' && (
+            <>
+              <Alert severity="info" variant="outlined" sx={{ mb: 1 }}>
+                <Typography variant="caption">
+                  <strong>Service Account:</strong> Use a user account (username + password) instead of Service Principal.
+                  This is useful when Service Principal doesn't have sufficient permissions to access Power BI Admin API.
+                  Requires an Azure AD app with delegated permissions.
+                </Typography>
+              </Alert>
+
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <TextField
+                  label="Tenant ID"
+                  value={value.tenant_id || ''}
+                  onChange={(e) => handleFieldChange('tenant_id', e.target.value)}
+                  disabled={disabled}
+                  required
+                  fullWidth
+                  helperText="Azure AD tenant ID"
+                  size="small"
+                />
+                <TextField
+                  label="Client ID"
+                  value={value.client_id || ''}
+                  onChange={(e) => handleFieldChange('client_id', e.target.value)}
+                  disabled={disabled}
+                  required
+                  fullWidth
+                  helperText="Azure AD application Client ID (with delegated permissions)"
+                  size="small"
+                />
+                <TextField
+                  label="Username (UPN)"
+                  value={value.username || ''}
+                  onChange={(e) => handleFieldChange('username', e.target.value)}
+                  disabled={disabled}
+                  required
+                  fullWidth
+                  helperText="Service account email/UPN (e.g., user@domain.com)"
+                  size="small"
+                />
+                <TextField
+                  label="Password"
+                  value={value.password || ''}
+                  onChange={(e) => handleFieldChange('password', e.target.value)}
+                  disabled={disabled}
+                  required
+                  type="password"
+                  fullWidth
+                  helperText="Service account password"
+                  size="small"
+                />
+              </Box>
+            </>
           )}
 
           {/* User OAuth Authentication */}
