@@ -369,7 +369,11 @@ class MQueryConversionConfig:
     tenant_id: Optional[str] = None
     client_id: Optional[str] = None
     client_secret: Optional[str] = None
-    # Option 2: User OAuth token (alternative to Service Principal)
+    # Option 2: Service Account (username/password)
+    username: Optional[str] = None
+    password: Optional[str] = None
+    auth_method: Optional[str] = None  # 'service_principal', 'service_account', or auto-detect
+    # Option 3: User OAuth token (alternative to Service Principal/Service Account)
     access_token: Optional[str] = None
 
     # Required

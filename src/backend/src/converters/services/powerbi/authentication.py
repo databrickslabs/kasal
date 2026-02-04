@@ -1,22 +1,29 @@
 """
 Azure AD Authentication Service for Power BI API
 
-Provides authentication using Azure Identity ClientSecretCredential
+Provides authentication using Azure Identity credentials
 for Power BI App Owns Data scenarios.
+
+Supports multiple authentication methods:
+1. Pre-obtained access token (OAuth flow from frontend)
+2. Service Principal (ClientSecretCredential) - App Owns Data
+3. Service Account (UsernamePasswordCredential) - User credentials
 
 Supports both direct credential parameters and database-stored credentials
 with project-specific and global fallback options.
 """
 
 import logging
+import os
 from typing import Dict, Optional
 
 # Optional azure.identity import
 try:
-    from azure.identity import ClientSecretCredential
+    from azure.identity import ClientSecretCredential, UsernamePasswordCredential
     AZURE_IDENTITY_AVAILABLE = True
 except ImportError:
     ClientSecretCredential = None  # type: ignore
+    UsernamePasswordCredential = None  # type: ignore
     AZURE_IDENTITY_AVAILABLE = False
     logging.warning("azure-identity not available. Install with: pip install azure-identity")
 
@@ -25,25 +32,47 @@ class AadService:
     """
     Azure Active Directory Authentication Service for Power BI.
 
-    Handles Service Principal authentication to obtain access tokens
+    Handles multiple authentication methods to obtain access tokens
     for Power BI REST API operations.
 
-    Authentication hierarchy:
-    1. Direct credentials (client_id, client_secret, tenant_id parameters)
-    2. Database credentials (future: project-specific with global fallback)
-    3. Pre-obtained access token (if provided)
+    Authentication methods:
+    1. Pre-obtained access token (OAuth flow from frontend) - highest priority
+    2. Service Principal (client_id + client_secret + tenant_id) - App Owns Data
+    3. Service Account (username + password + client_id + tenant_id) - User credentials
+    4. Database credentials (future: project-specific with global fallback)
 
     Example usage:
-        # Direct credentials
+        # Pre-obtained token
+        service = AadService(access_token="eyJ...")
+        token = service.get_access_token()
+
+        # Service Principal credentials
         service = AadService(
             client_id="abc123",
             client_secret="secret",
-            tenant_id="tenant789"
+            tenant_id="tenant789",
+            auth_method="service_principal"
         )
         token = service.get_access_token()
 
-        # Pre-obtained token
-        service = AadService(access_token="eyJ...")
+        # Service Account credentials
+        service = AadService(
+            client_id="abc123",
+            tenant_id="tenant789",
+            username="user@domain.com",
+            password="password",
+            auth_method="service_account"
+        )
+        token = service.get_access_token()
+
+        # Service Account with env var names
+        service = AadService(
+            client_id="abc123",
+            tenant_id="tenant789",
+            username_env="POWERBI_USERNAME",
+            password_env="POWERBI_PASSWORD",
+            auth_method="service_account"
+        )
         token = service.get_access_token()
 
         # Database credentials (future)
@@ -57,12 +86,22 @@ class AadService:
     # Microsoft login authority base URL
     AUTHORITY_BASE = "https://login.microsoftonline.com"
 
+    # Valid authentication methods
+    AUTH_METHOD_SERVICE_PRINCIPAL = "service_principal"
+    AUTH_METHOD_SERVICE_ACCOUNT = "service_account"
+    AUTH_METHOD_TOKEN = "token"
+
     def __init__(
         self,
         client_id: Optional[str] = None,
         client_secret: Optional[str] = None,
         tenant_id: Optional[str] = None,
         access_token: Optional[str] = None,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+        username_env: Optional[str] = None,
+        password_env: Optional[str] = None,
+        auth_method: Optional[str] = None,
         project_id: Optional[str] = None,
         use_database: bool = False,
         logger: Optional[logging.Logger] = None,
@@ -72,9 +111,15 @@ class AadService:
 
         Args:
             client_id: Azure AD application (client) ID
-            client_secret: Azure AD application client secret
+            client_secret: Azure AD application client secret (for service principal)
             tenant_id: Azure AD tenant ID
             access_token: Pre-obtained access token (bypasses authentication)
+            username: Service account username/UPN (for service account auth)
+            password: Service account password (for service account auth)
+            username_env: Environment variable name containing username (for service account)
+            password_env: Environment variable name containing password (for service account)
+            auth_method: Authentication method: 'service_principal', 'service_account', or 'token'
+                        If not specified, auto-detected based on provided credentials
             project_id: Project ID for database credential lookup (future)
             use_database: Enable database credential lookup (future)
             logger: Optional logger instance
@@ -83,6 +128,11 @@ class AadService:
         self.client_secret = client_secret
         self.tenant_id = tenant_id
         self._access_token = access_token
+        self.username = username
+        self.password = password
+        self.username_env = username_env
+        self.password_env = password_env
+        self.auth_method = auth_method
         self.project_id = project_id
         self.use_database = use_database
         self.logger = logger or logging.getLogger(__name__)
@@ -93,9 +143,12 @@ class AadService:
 
         Authentication priority:
         1. Use pre-obtained token if provided
-        2. Use direct credentials if provided
-        3. Fetch credentials from database if enabled
-        4. Raise error if no valid credentials found
+        2. Use specified auth_method if set:
+           - 'service_principal': ClientSecretCredential (client_id, client_secret, tenant_id)
+           - 'service_account': UsernamePasswordCredential (username, password, client_id, tenant_id)
+        3. Auto-detect based on available credentials
+        4. Fetch credentials from database if enabled
+        5. Raise error if no valid credentials found
 
         Returns:
             str: Access token for Power BI API
@@ -117,31 +170,90 @@ class AadService:
                 "Install with: pip install azure-identity"
             )
 
-        # Priority 2: Use direct credentials
-        credentials = None
-        if self.client_id and self.client_secret and self.tenant_id:
-            self.logger.info("Using direct credential parameters")
-            credentials = {
-                "client_id": self.client_id,
-                "client_secret": self.client_secret,
-                "tenant_id": self.tenant_id,
-            }
-        # Priority 3: Database credentials (future implementation)
-        elif self.use_database:
+        # Determine authentication method
+        effective_auth_method = self._determine_auth_method()
+        self.logger.info(f"Using authentication method: {effective_auth_method}")
+
+        # Priority 2: Service Account authentication (username/password)
+        if effective_auth_method == self.AUTH_METHOD_SERVICE_ACCOUNT:
+            return self._acquire_token_with_username_password()
+
+        # Priority 3: Service Principal authentication (client credentials)
+        if effective_auth_method == self.AUTH_METHOD_SERVICE_PRINCIPAL:
+            credentials = self._get_service_principal_credentials()
+            return self._acquire_token_with_client_credential(credentials)
+
+        # Priority 4: Database credentials (future implementation)
+        if self.use_database:
             self.logger.info("Fetching credentials from database")
             credentials = self._get_credentials_from_database()
+            return self._acquire_token_with_client_credential(credentials)
 
-        # Validate credentials exist
-        if not credentials:
+        # No valid authentication method found
+        raise ValueError(
+            "No credentials available. Provide either:\n"
+            "1. Pre-obtained access_token\n"
+            "2. Service Principal credentials (client_id, client_secret, tenant_id)\n"
+            "3. Service Account credentials (username, password, client_id, tenant_id)\n"
+            "4. Enable use_database with project_id"
+        )
+
+    def _determine_auth_method(self) -> Optional[str]:
+        """
+        Determine the authentication method to use based on explicit setting or available credentials.
+
+        Returns:
+            str: Authentication method ('service_principal', 'service_account', or None)
+        """
+        # If auth_method is explicitly set, use it
+        if self.auth_method:
+            return self.auth_method
+
+        # Auto-detect based on available credentials
+        # Check for service principal credentials first (more specific)
+        if self.client_id and self.client_secret and self.tenant_id:
+            return self.AUTH_METHOD_SERVICE_PRINCIPAL
+
+        # Check for service account credentials
+        username = self._resolve_username()
+        password = self._resolve_password()
+        if username and password and self.client_id and self.tenant_id:
+            return self.AUTH_METHOD_SERVICE_ACCOUNT
+
+        return None
+
+    def _resolve_username(self) -> Optional[str]:
+        """Resolve username from direct value or environment variable."""
+        if self.username:
+            return self.username
+        if self.username_env:
+            return os.getenv(self.username_env)
+        return None
+
+    def _resolve_password(self) -> Optional[str]:
+        """Resolve password from direct value or environment variable."""
+        if self.password:
+            return self.password
+        if self.password_env:
+            return os.getenv(self.password_env)
+        return None
+
+    def _get_service_principal_credentials(self) -> Dict[str, str]:
+        """Get service principal credentials from instance variables."""
+        if not all([self.client_id, self.client_secret, self.tenant_id]):
             raise ValueError(
-                "No credentials available. Provide either:\n"
-                "1. Direct credentials (client_id, client_secret, tenant_id)\n"
-                "2. Pre-obtained access_token\n"
-                "3. Enable use_database with project_id"
+                "Incomplete Service Principal credentials. "
+                "Required: client_id, client_secret, tenant_id"
             )
-
-        # Acquire token using ClientSecretCredential
-        return self._acquire_token_with_client_credential(credentials)
+        # Type assertions after validation
+        assert self.client_id is not None
+        assert self.client_secret is not None
+        assert self.tenant_id is not None
+        return {
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+            "tenant_id": self.tenant_id,
+        }
 
     def _get_credentials_from_database(self) -> Optional[Dict[str, str]]:
         """
@@ -231,6 +343,78 @@ class AadService:
         except Exception as ex:
             self.logger.error(f"Token acquisition failed: {str(ex)}")
             raise Exception(f"Error retrieving access token: {str(ex)}")
+
+    def _acquire_token_with_username_password(self) -> str:
+        """
+        Acquire access token using Azure Identity UsernamePasswordCredential.
+
+        Uses Service Account (ROPC) flow which authenticates with user credentials.
+        This is useful for scenarios where Service Principal doesn't have
+        sufficient permissions to read Power BI data.
+
+        Returns:
+            str: Access token
+
+        Raises:
+            ValueError: If credentials are incomplete
+            RuntimeError: If azure-identity not available
+            Exception: If token acquisition fails
+        """
+        # Resolve username and password
+        username = self._resolve_username()
+        password = self._resolve_password()
+
+        # Validate required credentials
+        if not all([username, password, self.client_id, self.tenant_id]):
+            missing = []
+            if not username:
+                missing.append("username")
+            if not password:
+                missing.append("password")
+            if not self.client_id:
+                missing.append("client_id")
+            if not self.tenant_id:
+                missing.append("tenant_id")
+            raise ValueError(
+                f"Incomplete Service Account credentials. Missing: {', '.join(missing)}"
+            )
+
+        # Type assertions after validation
+        assert username is not None
+        assert password is not None
+        assert self.client_id is not None
+        assert self.tenant_id is not None
+
+        try:
+            self.logger.info(f"[AUTH DEBUG] Acquiring token with service account:")
+            self.logger.info(f"[AUTH DEBUG]   tenant_id: '{self.tenant_id}'")
+            self.logger.info(f"[AUTH DEBUG]   client_id: '{self.client_id}'")
+            self.logger.info(f"[AUTH DEBUG]   username: '{username}'")
+            self.logger.info(f"[AUTH DEBUG]   password length: {len(password)}")
+
+            # Ensure UsernamePasswordCredential is available
+            if UsernamePasswordCredential is None:
+                raise RuntimeError("azure-identity library not available")
+
+            # Create UsernamePasswordCredential and get token
+            # Note: client_secret is optional for public client applications
+            credential = UsernamePasswordCredential(
+                client_id=self.client_id,
+                username=username,
+                password=password,
+                tenant_id=self.tenant_id,
+                client_secret=self.client_secret if self.client_secret else None,
+            )
+
+            # Acquire token for Power BI API
+            token_response = credential.get_token(self.POWERBI_SCOPE)
+
+            self.logger.info("Service account access token acquired successfully")
+            return token_response.token
+
+        except Exception as ex:
+            self.logger.error(f"Service account token acquisition failed: {str(ex)}")
+            raise Exception(f"Error retrieving access token with service account: {str(ex)}")
 
     def validate_token(self, token: Optional[str] = None) -> bool:
         """

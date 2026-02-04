@@ -64,24 +64,38 @@ class MqueryConversionPipelineSchema(BaseModel):
         description="[Power BI] Specific dataset/semantic model ID to filter (optional, scans all if not provided)"
     )
 
-    # Service Principal authentication for Admin API (required)
+    # Service Principal authentication for Admin API
     tenant_id: Optional[str] = Field(
         None,
-        description="[Power BI Auth] Azure AD tenant ID for Admin API (required)"
+        description="[Power BI Auth] Azure AD tenant ID (required for Service Principal or Service Account auth)"
     )
     client_id: Optional[str] = Field(
         None,
-        description="[Power BI Auth] Application/Client ID for Admin API (required)"
+        description="[Power BI Auth] Application/Client ID (required for Service Principal or Service Account auth)"
     )
     client_secret: Optional[str] = Field(
         None,
-        description="[Power BI Auth] Client secret for Admin API (required)"
+        description="[Power BI Auth] Client secret (required for Service Principal auth)"
     )
 
-    # User OAuth token (alternative to Service Principal)
+    # Service Account authentication (alternative to Service Principal)
+    username: Optional[str] = Field(
+        None,
+        description="[Power BI Auth] Service account username/UPN (for Service Account authentication)"
+    )
+    password: Optional[str] = Field(
+        None,
+        description="[Power BI Auth] Service account password (for Service Account authentication)"
+    )
+    auth_method: Optional[str] = Field(
+        None,
+        description="[Power BI Auth] Authentication method: 'service_principal', 'service_account', or auto-detect"
+    )
+
+    # User OAuth token (alternative to Service Principal/Service Account)
     access_token: Optional[str] = Field(
         None,
-        description="[Power BI Auth] Pre-obtained OAuth access token (alternative to Service Principal credentials). Use this when authenticating as a user instead of Service Principal."
+        description="[Power BI Auth] Pre-obtained OAuth access token (alternative to SP/Service Account credentials)."
     )
 
     # ===== LLM CONVERSION CONFIGURATION =====
@@ -218,11 +232,15 @@ class MqueryConversionPipelineTool(BaseTool):
             # Power BI Admin API
             "workspace_id": kwargs.get("workspace_id"),
             "dataset_id": kwargs.get("dataset_id"),
-            # Admin API Authentication (required)
+            # Admin API Authentication
             "tenant_id": kwargs.get("tenant_id"),
             "client_id": kwargs.get("client_id"),
             "client_secret": kwargs.get("client_secret"),
-            # User OAuth token (alternative to Service Principal)
+            # Service Account authentication
+            "username": kwargs.get("username"),
+            "password": kwargs.get("password"),
+            "auth_method": kwargs.get("auth_method"),
+            # User OAuth token (alternative to Service Principal/Service Account)
             "access_token": kwargs.get("access_token"),
             # LLM Configuration
             "llm_workspace_url": kwargs.get("llm_workspace_url"),
@@ -367,24 +385,27 @@ class MqueryConversionPipelineTool(BaseTool):
             # Extract parameters
             workspace_id = merged_kwargs.get("workspace_id")
             dataset_id = merged_kwargs.get("dataset_id")
-            tenant_id = merged_kwargs.get("tenant_id")
-            client_id = merged_kwargs.get("client_id")
-            client_secret = merged_kwargs.get("client_secret")
-            access_token = merged_kwargs.get("access_token")
+
+            # Build auth config for validation
+            auth_config = {
+                "tenant_id": merged_kwargs.get("tenant_id"),
+                "client_id": merged_kwargs.get("client_id"),
+                "client_secret": merged_kwargs.get("client_secret"),
+                "username": merged_kwargs.get("username"),
+                "password": merged_kwargs.get("password"),
+                "auth_method": merged_kwargs.get("auth_method"),
+                "access_token": merged_kwargs.get("access_token"),
+            }
 
             # Validate required parameters
             if not workspace_id:
                 return "Error: workspace_id is required"
 
-            # Check authentication - need either Service Principal OR access_token
-            has_spn_auth = all([tenant_id, client_id, client_secret])
-            has_token_auth = bool(access_token)
-
-            if not has_spn_auth and not has_token_auth:
-                return ("Error: Authentication required.\n"
-                        "Provide either:\n"
-                        "  - Service Principal: tenant_id + client_id + client_secret\n"
-                        "  - User OAuth: access_token")
+            # Validate authentication using shared utility
+            from src.engines.crewai.tools.custom.powerbi_auth_utils import validate_auth_config
+            is_valid, error_msg = validate_auth_config(auth_config)
+            if not is_valid:
+                return f"Error: {error_msg}"
 
             logger.info(f"[TOOL CALL] Instance {instance_id} - Executing M-Query extraction for workspace: {workspace_id}")
 
@@ -417,14 +438,18 @@ class MqueryConversionPipelineTool(BaseTool):
             logger.info(f"[TOOL CALL] LLM conversion enabled: {use_llm}")
 
             # Create configuration based on authentication method
-            logger.info(f"[TOOL CALL] Creating config with auth_method: {'access_token' if has_token_auth else 'service_principal'}")
+            has_token_auth = bool(auth_config.get("access_token"))
+            logger.info(f"[TOOL CALL] Creating config with auth_method: {'access_token' if has_token_auth else 'service_principal/service_account'}")
 
             config = MQueryConversionConfig(
-                # Authentication - pass based on method
-                tenant_id=tenant_id if has_spn_auth else None,
-                client_id=client_id if has_spn_auth else None,
-                client_secret=client_secret if has_spn_auth else None,
-                access_token=access_token if has_token_auth else None,
+                # Authentication - pass all auth params, let the config handle it
+                tenant_id=auth_config.get("tenant_id"),
+                client_id=auth_config.get("client_id"),
+                client_secret=auth_config.get("client_secret"),
+                username=auth_config.get("username"),
+                password=auth_config.get("password"),
+                auth_method=auth_config.get("auth_method"),
+                access_token=auth_config.get("access_token"),
                 # Required
                 workspace_id=workspace_id,
                 dataset_id=dataset_id,

@@ -38,21 +38,35 @@ class MeasureConversionPipelineSchema(BaseModel):
     # Service Principal authentication (required for Power BI)
     powerbi_tenant_id: Optional[str] = Field(
         None,
-        description="[Power BI Auth] Azure AD tenant ID (required for Service Principal auth)"
+        description="[Power BI Auth] Azure AD tenant ID (required for Service Principal or Service Account auth)"
     )
     powerbi_client_id: Optional[str] = Field(
         None,
-        description="[Power BI Auth] Application/Client ID (required for Service Principal auth)"
+        description="[Power BI Auth] Application/Client ID (required for Service Principal or Service Account auth)"
     )
     powerbi_client_secret: Optional[str] = Field(
         None,
         description="[Power BI Auth] Client secret (required for Service Principal auth)"
     )
 
-    # User OAuth token (alternative to Service Principal)
+    # Service Account authentication (alternative to Service Principal)
+    powerbi_username: Optional[str] = Field(
+        None,
+        description="[Power BI Auth] Service account username/UPN (for Service Account authentication)"
+    )
+    powerbi_password: Optional[str] = Field(
+        None,
+        description="[Power BI Auth] Service account password (for Service Account authentication)"
+    )
+    powerbi_auth_method: Optional[str] = Field(
+        None,
+        description="[Power BI Auth] Authentication method: 'service_principal', 'service_account', or auto-detect"
+    )
+
+    # User OAuth token (alternative to Service Principal/Service Account)
     powerbi_access_token: Optional[str] = Field(
         None,
-        description="[Power BI Auth] Pre-obtained OAuth access token (alternative to Service Principal credentials). Use this when authenticating as a user instead of Service Principal."
+        description="[Power BI Auth] Pre-obtained OAuth access token (alternative to SP/Service Account credentials)."
     )
 
     # Other Power BI settings
@@ -202,7 +216,11 @@ class MeasureConversionPipelineTool(BaseTool):
             "powerbi_tenant_id": kwargs.get("powerbi_tenant_id"),
             "powerbi_client_id": kwargs.get("powerbi_client_id"),
             "powerbi_client_secret": kwargs.get("powerbi_client_secret"),
-            # Power BI User OAuth token (alternative to Service Principal)
+            # Power BI Service Account authentication
+            "powerbi_username": kwargs.get("powerbi_username"),
+            "powerbi_password": kwargs.get("powerbi_password"),
+            "powerbi_auth_method": kwargs.get("powerbi_auth_method"),
+            # Power BI User OAuth token (alternative to Service Principal/Service Account)
             "powerbi_access_token": kwargs.get("powerbi_access_token"),
             # Power BI other settings
             "powerbi_info_table_name": kwargs.get("powerbi_info_table_name", "Info Measures"),
@@ -388,35 +406,34 @@ class MeasureConversionPipelineTool(BaseTool):
                 semantic_model_id = merged_kwargs.get("powerbi_semantic_model_id")
                 group_id = merged_kwargs.get("powerbi_group_id")
 
-                # Authentication options:
-                # Option 1: Service Principal (tenant_id + client_id + client_secret)
-                # Option 2: User OAuth token (access_token)
-                tenant_id = merged_kwargs.get("powerbi_tenant_id")
-                client_id = merged_kwargs.get("powerbi_client_id")
-                client_secret = merged_kwargs.get("powerbi_client_secret")
-                access_token = merged_kwargs.get("powerbi_access_token")
-
                 # Validate required parameters
                 if not semantic_model_id or not group_id:
                     return "Error: Power BI requires powerbi_semantic_model_id and powerbi_group_id"
 
-                # Check authentication - need either Service Principal OR access_token
-                has_spn_auth = all([tenant_id, client_id, client_secret])
-                has_token_auth = bool(access_token)
+                # Build auth config for validation
+                auth_config = {
+                    "tenant_id": merged_kwargs.get("powerbi_tenant_id"),
+                    "client_id": merged_kwargs.get("powerbi_client_id"),
+                    "client_secret": merged_kwargs.get("powerbi_client_secret"),
+                    "username": merged_kwargs.get("powerbi_username"),
+                    "password": merged_kwargs.get("powerbi_password"),
+                    "auth_method": merged_kwargs.get("powerbi_auth_method"),
+                    "access_token": merged_kwargs.get("powerbi_access_token"),
+                }
 
-                if not has_spn_auth and not has_token_auth:
-                    return ("Error: Power BI requires authentication.\n"
-                            "Provide either:\n"
-                            "  - Service Principal: powerbi_tenant_id + powerbi_client_id + powerbi_client_secret\n"
-                            "  - User OAuth: powerbi_access_token")
+                # Validate authentication using shared utility
+                from src.engines.crewai.tools.custom.powerbi_auth_utils import validate_auth_config
+                is_valid, error_msg = validate_auth_config(auth_config)
+                if not is_valid:
+                    return f"Error: {error_msg}"
 
                 # DEBUG: Log the actual credential values being used
                 logger.info(f"[TOOL DEBUG] PowerBI credentials being used:")
-                logger.info(f"[TOOL DEBUG]   auth_method: {'access_token' if has_token_auth else 'service_principal'}")
-                logger.info(f"[TOOL DEBUG]   tenant_id: '{tenant_id}'")
-                logger.info(f"[TOOL DEBUG]   client_id: '{client_id}'")
-                logger.info(f"[TOOL DEBUG]   client_secret length: {len(client_secret) if client_secret else 0}")
-                logger.info(f"[TOOL DEBUG]   access_token length: {len(access_token) if access_token else 0}")
+                logger.info(f"[TOOL DEBUG]   tenant_id: '{auth_config.get('tenant_id')}'")
+                logger.info(f"[TOOL DEBUG]   client_id: '{auth_config.get('client_id')}'")
+                logger.info(f"[TOOL DEBUG]   client_secret length: {len(auth_config.get('client_secret') or '')}")
+                logger.info(f"[TOOL DEBUG]   username: '{auth_config.get('username')}'")
+                logger.info(f"[TOOL DEBUG]   access_token length: {len(auth_config.get('access_token') or '')}")
                 logger.info(f"[TOOL DEBUG]   semantic_model_id: '{semantic_model_id}'")
                 logger.info(f"[TOOL DEBUG]   group_id: '{group_id}'")
 
@@ -426,15 +443,23 @@ class MeasureConversionPipelineTool(BaseTool):
                     "info_table_name": merged_kwargs.get("powerbi_info_table_name", "Info Measures")
                 }
 
-                # Add authentication parameters based on method
-                if has_token_auth:
-                    # User OAuth token takes precedence
-                    inbound_params["access_token"] = access_token
+                # Add authentication parameters based on what's available
+                if auth_config.get("access_token"):
+                    inbound_params["access_token"] = auth_config["access_token"]
                 else:
-                    # Service Principal credentials
-                    inbound_params["tenant_id"] = tenant_id
-                    inbound_params["client_id"] = client_id
-                    inbound_params["client_secret"] = client_secret
+                    # Pass all auth params - the connector will use what it needs
+                    if auth_config.get("tenant_id"):
+                        inbound_params["tenant_id"] = auth_config["tenant_id"]
+                    if auth_config.get("client_id"):
+                        inbound_params["client_id"] = auth_config["client_id"]
+                    if auth_config.get("client_secret"):
+                        inbound_params["client_secret"] = auth_config["client_secret"]
+                    if auth_config.get("username"):
+                        inbound_params["username"] = auth_config["username"]
+                    if auth_config.get("password"):
+                        inbound_params["password"] = auth_config["password"]
+                    if auth_config.get("auth_method"):
+                        inbound_params["auth_method"] = auth_config["auth_method"]
 
                 extract_params = {
                     "include_hidden": merged_kwargs.get("powerbi_include_hidden", False)

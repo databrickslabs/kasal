@@ -214,7 +214,10 @@ export interface SavedConfigurationListResponse {
 // ===== Tool Configuration Types =====
 
 // Authentication method for Power BI
-export type PowerBIAuthMethod = 'service_principal' | 'user_oauth';
+// - service_principal: App credentials (client_id + client_secret + tenant_id)
+// - service_account: User credentials (username + password + client_id + tenant_id)
+// - user_oauth: Interactive OAuth sign-in with Microsoft
+export type PowerBIAuthMethod = 'service_principal' | 'service_account' | 'user_oauth';
 
 export interface MeasureConversionConfig {
   // Inbound Selection
@@ -225,10 +228,14 @@ export interface MeasureConversionConfig {
   powerbi_group_id?: string;
   // Authentication method selector
   powerbi_auth_method?: PowerBIAuthMethod;
-  // Service Principal authentication
+  // Service Principal authentication (client_id + client_secret + tenant_id)
   powerbi_tenant_id?: string;
   powerbi_client_id?: string;
   powerbi_client_secret?: string;
+  // Service Account authentication (username + password + client_id + tenant_id)
+  // Used when Service Principal doesn't have sufficient permissions to read Power BI data
+  powerbi_username?: string;
+  powerbi_password?: string;
   // User OAuth authentication (alternative to Service Principal)
   powerbi_oauth_client_id?: string; // Azure AD app client ID for OAuth flow
   powerbi_access_token?: string;

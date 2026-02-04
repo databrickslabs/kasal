@@ -105,11 +105,14 @@ class MQueryConnector(BaseInboundConnector):
 
         logger.info("Connecting to Power BI Admin API...")
 
-        # Initialize auth service
+        # Initialize auth service with all auth options
         self._auth_service = AadService(
             tenant_id=self.config.tenant_id,
             client_id=self.config.client_id,
             client_secret=self.config.client_secret,
+            username=self.config.username,
+            password=self.config.password,
+            auth_method=self.config.auth_method,
             access_token=self._access_token
         )
 

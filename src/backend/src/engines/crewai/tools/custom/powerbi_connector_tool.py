@@ -24,9 +24,43 @@ class PowerBIConnectorToolSchema(BaseModel):
         ...,
         description="Power BI workspace ID (required)"
     )
-    access_token: str = Field(
-        ...,
-        description="OAuth access token for Power BI authentication (required)"
+    tenant_id: Optional[str] = Field(
+        None,
+        description="Azure AD tenant ID (required for service_principal or service_account auth)"
+    )
+    client_id: Optional[str] = Field(
+        None,
+        description="Azure AD application (client) ID (required for service_principal or service_account auth)"
+    )
+    client_secret: Optional[str] = Field(
+        None,
+        description="Azure AD application client secret (required for service_principal auth)"
+    )
+    access_token: Optional[str] = Field(
+        None,
+        description="OAuth access token for Power BI authentication (alternative to service_principal/service_account)"
+    )
+    auth_method: Optional[str] = Field(
+        None,
+        description="Authentication method: 'service_principal', 'service_account', or auto-detect. "
+                    "service_principal uses client_id+client_secret+tenant_id. "
+                    "service_account uses username+password+client_id+tenant_id."
+    )
+    username: Optional[str] = Field(
+        None,
+        description="Service account username/UPN (for service_account auth)"
+    )
+    password: Optional[str] = Field(
+        None,
+        description="Service account password (for service_account auth)"
+    )
+    username_env: Optional[str] = Field(
+        None,
+        description="Environment variable name containing service account username (alternative to direct username)"
+    )
+    password_env: Optional[str] = Field(
+        None,
+        description="Environment variable name containing service account password (alternative to direct password)"
     )
     outbound_format: str = Field(
         "dax",
@@ -71,18 +105,61 @@ class PowerBIConnectorTool(BaseTool):
     - Extracts measure metadata and DAX expressions
     - Parses DAX formulas to extract aggregations, filters, and source tables
     - Converts to multiple target formats (DAX, SQL, UC Metrics, YAML)
-    - Supports OAuth access token authentication
+    - Supports multiple authentication methods:
+      * OAuth access token (from frontend)
+      * Service Principal (client_id + client_secret + tenant_id)
+      * Service Account (username + password + client_id + tenant_id)
     - Configurable measure filtering and output formats
 
-    Example usage:
+    Example usage with access token:
     ```
     result = powerbi_connector_tool._run(
         semantic_model_id="abc123",
         group_id="workspace456",
         access_token="eyJ...",
         outbound_format="sql",
-        sql_dialect="databricks",
-        include_hidden=False
+        sql_dialect="databricks"
+    )
+    ```
+
+    Example usage with service principal:
+    ```
+    result = powerbi_connector_tool._run(
+        semantic_model_id="abc123",
+        group_id="workspace456",
+        tenant_id="tenant789",
+        client_id="client123",
+        client_secret="secret456",
+        auth_method="service_principal",
+        outbound_format="sql"
+    )
+    ```
+
+    Example usage with service account:
+    ```
+    result = powerbi_connector_tool._run(
+        semantic_model_id="abc123",
+        group_id="workspace456",
+        tenant_id="tenant789",
+        client_id="client123",
+        username="user@domain.com",
+        password="password",
+        auth_method="service_account",
+        outbound_format="sql"
+    )
+    ```
+
+    Example usage with service account (env vars):
+    ```
+    result = powerbi_connector_tool._run(
+        semantic_model_id="abc123",
+        group_id="workspace456",
+        tenant_id="tenant789",
+        client_id="client123",
+        username_env="POWERBI_USERNAME",
+        password_env="POWERBI_PASSWORD",
+        auth_method="service_account",
+        outbound_format="sql"
     )
     ```
 
@@ -96,9 +173,10 @@ class PowerBIConnectorTool(BaseTool):
     name: str = "Power BI Connector"
     description: str = (
         "Extract measures from Power BI datasets and convert them to DAX, SQL, UC Metrics, or YAML format. "
-        "Connects to Power BI via REST API using an OAuth access token, queries the Info Measures table, "
-        "parses DAX expressions, and converts to the target format. "
-        "Required parameters: semantic_model_id, group_id, access_token. "
+        "Connects to Power BI via REST API and supports multiple authentication methods: "
+        "(1) OAuth access_token, (2) Service Principal (client_id, client_secret, tenant_id), "
+        "(3) Service Account (username, password, client_id, tenant_id). "
+        "Required parameters: semantic_model_id, group_id, plus one authentication method. "
         "Optional: outbound_format (dax/sql/uc_metrics/yaml), include_hidden, filter_pattern, sql_dialect, uc_catalog, uc_schema."
     )
     args_schema: Type[BaseModel] = PowerBIConnectorToolSchema
@@ -118,7 +196,15 @@ class PowerBIConnectorTool(BaseTool):
         Args:
             semantic_model_id: Power BI dataset ID
             group_id: Power BI workspace ID
-            access_token: OAuth access token
+            tenant_id: Azure AD tenant ID (for service_principal/service_account auth)
+            client_id: Azure AD application ID (for service_principal/service_account auth)
+            client_secret: Azure AD client secret (for service_principal auth)
+            access_token: OAuth access token (alternative to credential-based auth)
+            auth_method: Authentication method: 'service_principal', 'service_account', or auto
+            username: Service account username (for service_account auth)
+            password: Service account password (for service_account auth)
+            username_env: Env var name for username (for service_account auth)
+            password_env: Env var name for password (for service_account auth)
             outbound_format: Target format (dax/sql/uc_metrics/yaml)
             include_hidden: Include hidden measures
             filter_pattern: Regex to filter measure names
@@ -134,7 +220,15 @@ class PowerBIConnectorTool(BaseTool):
             # Extract parameters
             semantic_model_id = kwargs.get("semantic_model_id")
             group_id = kwargs.get("group_id")
+            tenant_id = kwargs.get("tenant_id")
+            client_id = kwargs.get("client_id")
+            client_secret = kwargs.get("client_secret")
             access_token = kwargs.get("access_token")
+            auth_method = kwargs.get("auth_method")
+            username = kwargs.get("username")
+            password = kwargs.get("password")
+            username_env = kwargs.get("username_env")
+            password_env = kwargs.get("password_env")
             outbound_format = kwargs.get("outbound_format", "dax")
             include_hidden = kwargs.get("include_hidden", False)
             filter_pattern = kwargs.get("filter_pattern")
@@ -144,8 +238,23 @@ class PowerBIConnectorTool(BaseTool):
             info_table_name = kwargs.get("info_table_name", "Info Measures")
 
             # Validate required parameters
-            if not all([semantic_model_id, group_id, access_token]):
-                return "Error: Missing required parameters. semantic_model_id, group_id, and access_token are required."
+            if not semantic_model_id or not group_id:
+                return "Error: Missing required parameters. semantic_model_id and group_id are required."
+
+            # Validate authentication - need either access_token OR service_principal/service_account credentials
+            has_access_token = bool(access_token)
+            has_service_principal = bool(client_id and client_secret and tenant_id)
+            has_service_account = bool(client_id and tenant_id and (
+                (username and password) or (username_env and password_env)
+            ))
+
+            if not any([has_access_token, has_service_principal, has_service_account]):
+                return (
+                    "Error: Missing authentication. Provide one of:\n"
+                    "1. access_token (OAuth token)\n"
+                    "2. Service Principal: client_id, client_secret, tenant_id\n"
+                    "3. Service Account: client_id, tenant_id, and (username+password or username_env+password_env)"
+                )
 
             # Map outbound format string to enum
             format_map = {
@@ -158,16 +267,28 @@ class PowerBIConnectorTool(BaseTool):
             if not outbound_format_enum:
                 return f"Error: Invalid outbound_format '{outbound_format}'. Must be one of: dax, sql, uc_metrics, yaml"
 
+            # Determine auth method for logging
+            auth_type = "access_token" if has_access_token else (
+                "service_principal" if has_service_principal else "service_account"
+            )
             logger.info(
                 f"Executing Power BI conversion: dataset={semantic_model_id}, "
-                f"workspace={group_id}, format={outbound_format}"
+                f"workspace={group_id}, format={outbound_format}, auth={auth_type}"
             )
 
-            # Build inbound parameters
+            # Build inbound parameters with all authentication options
             inbound_params = {
                 "semantic_model_id": semantic_model_id,
                 "group_id": group_id,
+                "tenant_id": tenant_id,
+                "client_id": client_id,
+                "client_secret": client_secret,
                 "access_token": access_token,
+                "auth_method": auth_method,
+                "username": username,
+                "password": password,
+                "username_env": username_env,
+                "password_env": password_env,
                 "info_table_name": info_table_name
             }
 

@@ -26,10 +26,12 @@ import {
 } from '@mui/material';
 import LoginIcon from '@mui/icons-material/Login';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import SecurityIcon from '@mui/icons-material/Security';
+import PersonIcon from '@mui/icons-material/Person';
 import { usePowerBIOAuth } from '../../hooks/usePowerBIOAuth';
 
 // Authentication method type
-export type PowerBIAuthMethod = 'service_principal' | 'user_oauth';
+export type PowerBIAuthMethod = 'service_principal' | 'service_account' | 'user_oauth';
 
 export interface MeasureConverterConfig {
   // Configuration mode
@@ -45,6 +47,9 @@ export interface MeasureConverterConfig {
   powerbi_tenant_id?: string;
   powerbi_client_id?: string;
   powerbi_client_secret?: string;
+  // Power BI Service Account authentication
+  powerbi_username?: string;
+  powerbi_password?: string;
   // Power BI User OAuth authentication
   powerbi_oauth_client_id?: string; // Azure AD app client ID for OAuth
   powerbi_access_token?: string;
@@ -105,12 +110,19 @@ export const MeasureConverterConfigSelector: React.FC<MeasureConverterConfigSele
         updatedConfig.powerbi_tenant_id = undefined;
         updatedConfig.powerbi_client_id = undefined;
         updatedConfig.powerbi_client_secret = undefined;
+        updatedConfig.powerbi_username = undefined;
+        updatedConfig.powerbi_password = undefined;
         // Set access token if authenticated
         if (accessToken) {
           updatedConfig.powerbi_access_token = accessToken;
         }
-      } else {
+      } else if (newMethod === 'service_principal') {
         updatedConfig.powerbi_access_token = undefined;
+        updatedConfig.powerbi_username = undefined;
+        updatedConfig.powerbi_password = undefined;
+      } else if (newMethod === 'service_account') {
+        updatedConfig.powerbi_access_token = undefined;
+        updatedConfig.powerbi_client_secret = undefined;
       }
 
       onChange(updatedConfig);
@@ -418,22 +430,26 @@ export const MeasureConverterConfigSelector: React.FC<MeasureConverterConfigSele
                 size="small"
               >
                 <ToggleButton value="service_principal">
-                  <Box sx={{ textAlign: 'center', py: 0.5 }}>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 0.5 }}>
+                    <SecurityIcon sx={{ fontSize: 18, mb: 0.5 }} />
                     <Typography variant="body2" sx={{ fontWeight: 600 }}>
                       Service Principal
                     </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      App registration credentials
+                  </Box>
+                </ToggleButton>
+                <ToggleButton value="service_account">
+                  <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 0.5 }}>
+                    <PersonIcon sx={{ fontSize: 18, mb: 0.5 }} />
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      Service Account
                     </Typography>
                   </Box>
                 </ToggleButton>
                 <ToggleButton value="user_oauth">
-                  <Box sx={{ textAlign: 'center', py: 0.5 }}>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 0.5 }}>
+                    <LoginIcon sx={{ fontSize: 18, mb: 0.5 }} />
                     <Typography variant="body2" sx={{ fontWeight: 600 }}>
                       User OAuth
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Sign in with Microsoft
                     </Typography>
                   </Box>
                 </ToggleButton>
@@ -468,6 +484,55 @@ export const MeasureConverterConfigSelector: React.FC<MeasureConverterConfigSele
                     type="password"
                     fullWidth
                     helperText="Client secret for service principal"
+                    size="small"
+                  />
+                </>
+              )}
+
+              {/* Service Account Authentication Fields */}
+              {authMethod === 'service_account' && (
+                <>
+                  <Alert severity="info" variant="outlined" sx={{ mb: 1 }}>
+                    <Typography variant="caption">
+                      <strong>Service Account:</strong> Use a user account (username + password) instead of Service Principal.
+                      Useful when Service Principal doesn't have sufficient permissions.
+                    </Typography>
+                  </Alert>
+                  <TextField
+                    label="Tenant ID"
+                    value={value.powerbi_tenant_id || ''}
+                    onChange={(e) => handleFieldChange('powerbi_tenant_id', e.target.value)}
+                    disabled={disabled}
+                    fullWidth
+                    helperText="Azure AD tenant ID"
+                    size="small"
+                  />
+                  <TextField
+                    label="Client ID"
+                    value={value.powerbi_client_id || ''}
+                    onChange={(e) => handleFieldChange('powerbi_client_id', e.target.value)}
+                    disabled={disabled}
+                    fullWidth
+                    helperText="Azure AD application Client ID (with delegated permissions)"
+                    size="small"
+                  />
+                  <TextField
+                    label="Username (UPN)"
+                    value={value.powerbi_username || ''}
+                    onChange={(e) => handleFieldChange('powerbi_username', e.target.value)}
+                    disabled={disabled}
+                    fullWidth
+                    helperText="Service account email/UPN (e.g., user@domain.com)"
+                    size="small"
+                  />
+                  <TextField
+                    label="Password"
+                    value={value.powerbi_password || ''}
+                    onChange={(e) => handleFieldChange('powerbi_password', e.target.value)}
+                    disabled={disabled}
+                    type="password"
+                    fullWidth
+                    helperText="Service account password"
                     size="small"
                   />
                 </>

@@ -62,6 +62,11 @@ class PowerBIConnector(BaseInboundConnector):
         client_id: Optional[str] = None,
         client_secret: Optional[str] = None,
         access_token: Optional[str] = None,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+        username_env: Optional[str] = None,
+        password_env: Optional[str] = None,
+        auth_method: Optional[str] = None,
         project_id: Optional[str] = None,
         use_database: bool = False,
         use_system_schema: bool = True,
@@ -78,6 +83,11 @@ class PowerBIConnector(BaseInboundConnector):
             client_id: Client ID for authentication (optional if using access_token)
             client_secret: Client secret for Service Principal auth (optional)
             access_token: Pre-obtained access token from frontend OAuth
+            username: Service account username/UPN (for service_account auth)
+            password: Service account password (for service_account auth)
+            username_env: Environment variable name containing username
+            password_env: Environment variable name containing password
+            auth_method: Authentication method: 'service_principal', 'service_account', or auto-detect
             project_id: Project ID for database credential lookup (future)
             use_database: Enable database credential lookup (future)
             use_system_schema: Use $SYSTEM.MDSCHEMA_MEASURES (recommended, default True)
@@ -90,6 +100,11 @@ class PowerBIConnector(BaseInboundConnector):
             "client_id": client_id,
             "client_secret": client_secret,
             "access_token": access_token,
+            "username": username,
+            "password": password,
+            "username_env": username_env,
+            "password_env": password_env,
+            "auth_method": auth_method,
             "project_id": project_id,
             "use_database": use_database,
             "use_system_schema": use_system_schema,
@@ -110,11 +125,18 @@ class PowerBIConnector(BaseInboundConnector):
         self.logger.info(f"[POWERBI CONNECTOR DEBUG]   tenant_id: '{tenant_id}'")
         self.logger.info(f"[POWERBI CONNECTOR DEBUG]   client_id: '{client_id}'")
         self.logger.info(f"[POWERBI CONNECTOR DEBUG]   client_secret length: {len(client_secret) if client_secret else 0}")
+        self.logger.info(f"[POWERBI CONNECTOR DEBUG]   auth_method: '{auth_method}'")
+        self.logger.info(f"[POWERBI CONNECTOR DEBUG]   username: '{username or '(from env)' if username_env else 'None'}'")
         self.aad_service = AadService(
             client_id=client_id,
             client_secret=client_secret,
             tenant_id=tenant_id,
             access_token=access_token,
+            username=username,
+            password=password,
+            username_env=username_env,
+            password_env=password_env,
+            auth_method=auth_method,
             project_id=project_id,
             use_database=use_database,
             logger=self.logger,

@@ -48,21 +48,35 @@ class PowerBIReportReferencesSchema(BaseModel):
     # ===== SERVICE PRINCIPAL AUTHENTICATION =====
     tenant_id: Optional[str] = Field(
         None,
-        description="[Auth] Azure AD tenant ID for Service Principal authentication."
+        description="[Auth] Azure AD tenant ID for Service Principal or Service Account authentication."
     )
     client_id: Optional[str] = Field(
         None,
-        description="[Auth] Application/Client ID for Service Principal authentication."
+        description="[Auth] Application/Client ID for Service Principal or Service Account authentication."
     )
     client_secret: Optional[str] = Field(
         None,
         description="[Auth] Client secret for Service Principal authentication."
     )
 
-    # User OAuth token (alternative to Service Principal)
+    # ===== SERVICE ACCOUNT AUTHENTICATION =====
+    username: Optional[str] = Field(
+        None,
+        description="[Auth] Service account username/UPN (for Service Account authentication)"
+    )
+    password: Optional[str] = Field(
+        None,
+        description="[Auth] Service account password (for Service Account authentication)"
+    )
+    auth_method: Optional[str] = Field(
+        None,
+        description="[Auth] Authentication method: 'service_principal', 'service_account', or auto-detect"
+    )
+
+    # User OAuth token (alternative to Service Principal/Service Account)
     access_token: Optional[str] = Field(
         None,
-        description="[Auth] Pre-obtained OAuth access token (alternative to Service Principal)."
+        description="[Auth] Pre-obtained OAuth access token (alternative to SP/Service Account)."
     )
 
     # ===== OUTPUT OPTIONS =====
@@ -248,10 +262,17 @@ class PowerBIReportReferencesTool(BaseTool):
             workspace_id = merged_kwargs.get("workspace_id")
             dataset_id = merged_kwargs.get("dataset_id")
             report_id = merged_kwargs.get("report_id")
-            tenant_id = merged_kwargs.get("tenant_id")
-            client_id = merged_kwargs.get("client_id")
-            client_secret = merged_kwargs.get("client_secret")
-            access_token = merged_kwargs.get("access_token")
+
+            # Build auth config
+            auth_config = {
+                "tenant_id": merged_kwargs.get("tenant_id"),
+                "client_id": merged_kwargs.get("client_id"),
+                "client_secret": merged_kwargs.get("client_secret"),
+                "username": merged_kwargs.get("username"),
+                "password": merged_kwargs.get("password"),
+                "auth_method": merged_kwargs.get("auth_method"),
+                "access_token": merged_kwargs.get("access_token"),
+            }
 
             # Helper to check for unresolved placeholders
             def has_unresolved_placeholder(value: Any) -> bool:
@@ -265,10 +286,12 @@ class PowerBIReportReferencesTool(BaseTool):
                 ("workspace_id", workspace_id),
                 ("dataset_id", dataset_id),
                 ("report_id", report_id),
-                ("tenant_id", tenant_id),
-                ("client_id", client_id),
-                ("client_secret", client_secret),
-                ("access_token", access_token),
+                ("tenant_id", auth_config.get("tenant_id")),
+                ("client_id", auth_config.get("client_id")),
+                ("client_secret", auth_config.get("client_secret")),
+                ("username", auth_config.get("username")),
+                ("password", auth_config.get("password")),
+                ("access_token", auth_config.get("access_token")),
             ]:
                 if has_unresolved_placeholder(param_value):
                     unresolved.append(param_name)
@@ -295,32 +318,22 @@ class PowerBIReportReferencesTool(BaseTool):
                     "**Alternative**: Provide `report_id` to analyze a single specific report."
                 )
 
-            # Check authentication
-            has_spn_auth = all([
-                tenant_id and not has_unresolved_placeholder(tenant_id),
-                client_id and not has_unresolved_placeholder(client_id),
-                client_secret and not has_unresolved_placeholder(client_secret)
-            ])
-            has_token_auth = bool(access_token and not has_unresolved_placeholder(access_token))
-
-            if not has_spn_auth and not has_token_auth:
-                return (
-                    "Error: Authentication required.\n\n"
-                    "Provide either:\n"
-                    "- **Service Principal**: tenant_id + client_id + client_secret\n"
-                    "- **User OAuth**: access_token\n\n"
-                    "Service Principal requires Report.ReadWrite.All permission."
-                )
+            # Validate authentication using shared utility (filters out placeholders)
+            clean_auth_config = {
+                k: v for k, v in auth_config.items()
+                if v and not has_unresolved_placeholder(v)
+            }
+            from src.engines.crewai.tools.custom.powerbi_auth_utils import validate_auth_config
+            is_valid, error_msg = validate_auth_config(clean_auth_config)
+            if not is_valid:
+                return f"Error: {error_msg}\n\nService Principal requires Report.ReadWrite.All permission."
 
             # Run async extraction
             result = self._run_sync(self._extract_report_references(
                 workspace_id=workspace_id,
                 dataset_id=dataset_id,
                 report_id=report_id,
-                tenant_id=tenant_id if has_spn_auth else None,
-                client_id=client_id if has_spn_auth else None,
-                client_secret=client_secret if has_spn_auth else None,
-                access_token=access_token if has_token_auth else None,
+                auth_config=clean_auth_config,
                 output_format=merged_kwargs.get("output_format", "markdown"),
                 include_visual_details=merged_kwargs.get("include_visual_details", True),
                 group_by=merged_kwargs.get("group_by", "page"),
@@ -353,26 +366,19 @@ class PowerBIReportReferencesTool(BaseTool):
         workspace_id: str,
         dataset_id: Optional[str],
         report_id: Optional[str],
-        tenant_id: Optional[str],
-        client_id: Optional[str],
-        client_secret: Optional[str],
-        access_token: Optional[str],
+        auth_config: Dict[str, Any],
         output_format: str,
         include_visual_details: bool,
         group_by: str,
     ) -> str:
         """Main extraction logic for report references."""
+        from src.engines.crewai.tools.custom.powerbi_auth_utils import (
+            get_fabric_access_token_from_config,
+        )
 
-        # Step 1: Get access token
-        if access_token:
-            token = access_token
-            logger.info("Using provided access token")
-        else:
-            logger.info("Obtaining access token via Service Principal")
-            assert tenant_id is not None
-            assert client_id is not None
-            assert client_secret is not None
-            token = await self._get_access_token(tenant_id, client_id, client_secret)
+        # Step 1: Get Fabric API access token
+        logger.info("Obtaining Fabric API access token")
+        token = await get_fabric_access_token_from_config(auth_config)
 
         # Step 2: Determine which reports to analyze
         reports_to_analyze: List[Dict[str, Any]] = []
@@ -544,26 +550,6 @@ class PowerBIReportReferencesTool(BaseTool):
             except Exception as e:
                 logger.error(f"Error listing workspace reports: {e}")
                 return []
-
-    async def _get_access_token(
-        self,
-        tenant_id: str,
-        client_id: str,
-        client_secret: str,
-    ) -> str:
-        """Get OAuth access token using Service Principal."""
-        url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
-        data = {
-            "grant_type": "client_credentials",
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "scope": "https://api.fabric.microsoft.com/.default"
-        }
-
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(url, data=data)
-            response.raise_for_status()
-            return response.json()["access_token"]
 
     async def _fetch_report_definition(
         self,
