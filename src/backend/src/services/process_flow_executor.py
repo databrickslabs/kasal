@@ -383,7 +383,26 @@ def run_flow_in_process(
         try:
             # Run the flow
             result = loop.run_until_complete(run_async_flow())
-            async_logger.info(f"[FLOW_SUBPROCESS] Flow completed successfully")
+
+            # Check if the result indicates failure BEFORE logging success
+            flow_failed = False
+            flow_error = None
+            if isinstance(result, dict):
+                # Check for explicit failure indicators
+                if result.get('success') is False:
+                    flow_failed = True
+                    flow_error = result.get('error', 'Flow execution failed')
+                elif result.get('error'):
+                    flow_failed = True
+                    flow_error = result.get('error')
+                elif result.get('status') == 'FAILED':
+                    flow_failed = True
+                    flow_error = result.get('error', result.get('message', 'Flow execution failed'))
+
+            if flow_failed:
+                async_logger.error(f"[FLOW_SUBPROCESS] Flow execution failed: {flow_error}")
+            else:
+                async_logger.info(f"[FLOW_SUBPROCESS] Flow completed successfully")
 
             # Process result - extract actual content like ProcessCrewExecutor does
             processed_result = None
@@ -448,12 +467,23 @@ def run_flow_in_process(
                 return return_dict
 
             # Build return dict with flow_uuid for checkpoint/resume functionality
-            return_dict = {
-                "status": "COMPLETED",
-                "execution_id": execution_id,
-                "result": processed_result,
-                "process_id": os.getpid()
-            }
+            # CRITICAL: Check if flow failed and set status accordingly
+            if flow_failed:
+                return_dict = {
+                    "status": "FAILED",
+                    "execution_id": execution_id,
+                    "error": flow_error,
+                    "result": processed_result,
+                    "process_id": os.getpid()
+                }
+                async_logger.info(f"[FLOW_SUBPROCESS] Returning FAILED status due to flow error: {flow_error}")
+            else:
+                return_dict = {
+                    "status": "COMPLETED",
+                    "execution_id": execution_id,
+                    "result": processed_result,
+                    "process_id": os.getpid()
+                }
             # Include flow_uuid if available (from @persist)
             if isinstance(result, dict) and result.get("flow_uuid"):
                 return_dict["flow_uuid"] = result.get("flow_uuid")
