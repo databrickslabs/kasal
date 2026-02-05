@@ -288,19 +288,30 @@ class DatabricksGPTOSSLLM(LLM):
         
         return filtered_params
     
-    def call(self, messages, callbacks=None, **kwargs):
+    def call(self, messages, tools=None, callbacks=None, available_functions=None,
+             from_task=None, from_agent=None, **kwargs):
         """
         Override the call method to handle GPT-OSS specific requirements.
+
+        Note: Signature updated for CrewAI 1.9.x compatibility with response_model support.
         """
         logger.info(f"DatabricksGPTOSSLLM.call() invoked with {len(messages)} messages")
-        
+
         # Filter out unsupported parameters
         kwargs = DatabricksGPTOSSHandler.filter_unsupported_params(kwargs)
-        
+
         # Call the parent class method
         try:
             logger.info("Calling parent LLM.call()...")
-            result = super().call(messages, callbacks=callbacks, **kwargs)
+            result = super().call(
+                messages,
+                tools=tools,
+                callbacks=callbacks,
+                available_functions=available_functions,
+                from_task=from_task,
+                from_agent=from_agent,
+                **kwargs
+            )
             
             # Log the response for debugging
             logger.info(f"Parent call returned, result type: {type(result)}, empty: {result is None or result == ''}")
@@ -320,16 +331,26 @@ class DatabricksGPTOSSLLM(LLM):
             logger.error(f"Error in GPT-OSS call: {e}")
             raise
     
-    def _handle_non_streaming_response(self, params, callbacks=None, available_functions=None, from_task=None, from_agent=None):
+    def _handle_non_streaming_response(
+        self,
+        params,
+        callbacks=None,
+        available_functions=None,
+        from_task=None,
+        from_agent=None,
+        **kwargs,  # Accept additional kwargs for CrewAI 1.9.x compatibility (e.g., response_model)
+    ):
         """
         Override to filter parameters and handle GPT-OSS response format.
+
+        Note: Signature updated for CrewAI 1.9.x compatibility with response_model support.
         """
         # Filter out unsupported parameters
         if isinstance(params, dict):
             params = DatabricksGPTOSSHandler.filter_unsupported_params(params)
             logger.info(f"[_handle_non_streaming_response] Filtered params for GPT-OSS")
             logger.info(f"[_handle_non_streaming_response] Model in params: {params.get('model', 'NOT SET')}")
-            
+
             # Add system instruction for better responses if missing
             if 'messages' in params and params['messages']:
                 # Check if first message is system message
@@ -341,44 +362,32 @@ class DatabricksGPTOSSLLM(LLM):
                     }
                     params['messages'].insert(0, system_msg)
                     logger.info("Added system message for GPT-OSS guidance")
-        
+
         # Call parent method
         try:
             logger.info("[_handle_non_streaming_response] Calling parent method...")
-            
-            # Debug: Check what we're about to call
-            logger.info(f"[DEBUG] About to call parent with: params type={type(params)}, callbacks={callbacks is not None}, available_functions={available_functions is not None}, from_task={from_task is not None}, from_agent={from_agent is not None}")
-            
-            # Try calling with just the first 3 arguments that parent might expect
-            try:
-                response = super()._handle_non_streaming_response(
-                    params,
-                    callbacks,
-                    available_functions
-                )
-                logger.info("[DEBUG] Successfully called with 3 arguments")
-            except TypeError as e:
-                logger.info(f"[DEBUG] Failed with 3 args: {e}, trying with 5")
-                # Try with all 5 arguments
-                response = super()._handle_non_streaming_response(
-                    params,
-                    callbacks,
-                    available_functions,
-                    from_task,
-                    from_agent
-                )
-            
+            logger.debug(f"[DEBUG] kwargs for parent: {list(kwargs.keys())}")
+
+            response = super()._handle_non_streaming_response(
+                params,
+                callbacks,
+                available_functions,
+                from_task,
+                from_agent,
+                **kwargs,
+            )
+
             logger.info(f"[_handle_non_streaming_response] Parent returned: type={type(response)}, empty={not response}")
-            
+
             # If response is None or empty, don't use fallback - let it fail properly
             if response is None or response == "":
                 logger.warning("GPT-OSS model returned empty response in _handle_non_streaming_response")
                 return ""
-            
+
             # Log the actual response for debugging
             logger.info(f"[_handle_non_streaming_response] Response preview: {str(response)[:100]}...")
             return response
-            
+
         except Exception as e:
             logger.error(f"Error in GPT-OSS _handle_non_streaming_response: {e}")
             import traceback
@@ -534,6 +543,7 @@ class DatabricksRetryLLM(LLM):
         available_functions=None,
         from_task=None,
         from_agent=None,
+        **kwargs,  # Accept additional kwargs for CrewAI 1.9.x compatibility (e.g., response_model)
     ):
         """
         Override the call method to add retry logic for empty responses.
@@ -544,6 +554,8 @@ class DatabricksRetryLLM(LLM):
 
         Rate limit errors get special treatment with longer backoffs (30s, 60s, 120s)
         and more retries (5 vs 3) since they just need time for quota to reset.
+
+        Note: kwargs accepts additional parameters like response_model (CrewAI 1.9.x structured outputs)
         """
         import time
 
@@ -565,7 +577,7 @@ class DatabricksRetryLLM(LLM):
             try:
                 crew_log.info(f"[DatabricksRetryLLM] call() attempt {attempt + 1}/{max_retries} with {msg_count} messages")
 
-                # Call the parent class method with all arguments
+                # Call the parent class method with all arguments (including new kwargs like response_model)
                 result = super().call(
                     fixed_messages,
                     tools=tools,
@@ -573,6 +585,7 @@ class DatabricksRetryLLM(LLM):
                     available_functions=available_functions,
                     from_task=from_task,
                     from_agent=from_agent,
+                    **kwargs,
                 )
 
                 # Check if response is empty
@@ -624,12 +637,22 @@ class DatabricksRetryLLM(LLM):
             raise last_error
         return ""
 
-    def _handle_non_streaming_response(self, params, callbacks=None, available_functions=None, from_task=None, from_agent=None):
+    def _handle_non_streaming_response(
+        self,
+        params,
+        callbacks=None,
+        available_functions=None,
+        from_task=None,
+        from_agent=None,
+        **kwargs,  # Accept additional kwargs for CrewAI 1.9.x compatibility (e.g., response_model)
+    ):
         """
         Override to add retry logic for empty responses in non-streaming mode.
 
         Rate limit errors get special treatment with longer backoffs (30s, 60s, 120s)
         and more retries (5 vs 3) since they just need time for quota to reset.
+
+        Note: Signature updated for CrewAI 1.9.x compatibility with response_model support.
         """
         import time
 
@@ -645,22 +668,15 @@ class DatabricksRetryLLM(LLM):
                 break
 
             try:
-                # Try calling with appropriate arguments
-                try:
-                    response = super()._handle_non_streaming_response(
-                        params,
-                        callbacks,
-                        available_functions
-                    )
-                except TypeError:
-                    # Try with all 5 arguments
-                    response = super()._handle_non_streaming_response(
-                        params,
-                        callbacks,
-                        available_functions,
-                        from_task,
-                        from_agent
-                    )
+                # Call parent with all arguments including kwargs (for response_model, etc.)
+                response = super()._handle_non_streaming_response(
+                    params,
+                    callbacks,
+                    available_functions,
+                    from_task,
+                    from_agent,
+                    **kwargs,
+                )
 
                 # Check if response is empty
                 if response is None or response == "":

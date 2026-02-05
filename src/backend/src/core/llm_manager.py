@@ -504,11 +504,43 @@ class MLflowTrackedLLM:
         try:
             result = self.llm(input_data, **kwargs)
             duration = time.time() - start_time
-            self._log_llm_call("call", input_data, result, duration)
+            self._log_llm_call("__call__", input_data, result, duration)
             return result
         except Exception as e:
             duration = time.time() - start_time
-            self._log_llm_call("call_error", input_data, str(e), duration)
+            self._log_llm_call("__call___error", input_data, str(e), duration)
+            raise
+
+    def call(
+        self,
+        messages,
+        tools=None,
+        callbacks=None,
+        available_functions=None,
+        from_task=None,
+        from_agent=None,
+        **kwargs,  # Accept additional kwargs for CrewAI 1.9.x compatibility (e.g., response_model)
+    ):
+        """Tracked version of LLM call method for CrewAI 1.9.x compatibility"""
+        import time
+        start_time = time.time()
+
+        try:
+            result = self.llm.call(
+                messages,
+                tools=tools,
+                callbacks=callbacks,
+                available_functions=available_functions,
+                from_task=from_task,
+                from_agent=from_agent,
+                **kwargs,
+            )
+            duration = time.time() - start_time
+            self._log_llm_call("call", messages, result, duration)
+            return result
+        except Exception as e:
+            duration = time.time() - start_time
+            self._log_llm_call("call_error", messages, str(e), duration)
             raise
 
     def __getattr__(self, name):
