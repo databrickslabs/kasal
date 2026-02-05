@@ -798,15 +798,25 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
                 {crews.map((crew, index) => (
                   <React.Fragment key={crew.id}>
                     <ListItem disablePadding>
-                      <ListItemButton onClick={() => handleAddCrewToCanvas(crew)}>
-                        <IconButton size="small" sx={{ mr: 1, pointerEvents: 'none' }}>
-                          <AddIcon fontSize="small" />
-                        </IconButton>
-                        <ListItemText
-                          primary={crew.name}
-                          primaryTypographyProps={{ fontSize: '0.875rem' }}
-                        />
-                      </ListItemButton>
+                      <Tooltip title={crew.name} placement="right" enterDelay={500}>
+                        <ListItemButton onClick={() => handleAddCrewToCanvas(crew)}>
+                          <IconButton size="small" sx={{ mr: 1, pointerEvents: 'none', flexShrink: 0 }}>
+                            <AddIcon fontSize="small" />
+                          </IconButton>
+                          <ListItemText
+                            primary={crew.name}
+                            primaryTypographyProps={{
+                              fontSize: '0.875rem',
+                              noWrap: true,
+                              sx: {
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis'
+                              }
+                            }}
+                            sx={{ overflow: 'hidden' }}
+                          />
+                        </ListItemButton>
+                      </Tooltip>
                     </ListItem>
                     {index < crews.length - 1 && <Divider />}
                   </React.Fragment>
