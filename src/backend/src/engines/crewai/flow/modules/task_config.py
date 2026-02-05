@@ -97,7 +97,43 @@ class TaskConfig:
                 
             # Note: We're deliberately NOT setting context here because that's causing problems
 
+            # Handle code-based guardrail if present in task configuration
+            # This uses custom guardrails from GuardrailFactory (e.g., CompanyCountGuardrail)
+            try:
+                guardrail_config = getattr(task_data, 'guardrail', None)
+
+                if guardrail_config:
+                    logger.info(f"Task {task_data.name} has code-based guardrail configuration: {guardrail_config}")
+
+                    from src.engines.crewai.guardrails.guardrail_factory import GuardrailFactory
+                    from src.engines.crewai.guardrails.guardrail_wrapper import GuardrailWrapper
+
+                    # Convert guardrail config to JSON string if it's a dictionary
+                    if isinstance(guardrail_config, dict):
+                        guardrail_config = json.dumps(guardrail_config)
+
+                    # Create the guardrail instance
+                    guardrail = GuardrailFactory.create_guardrail(guardrail_config)
+                    if guardrail:
+                        # Create a callable wrapper for this guardrail
+                        # Using GuardrailWrapper class instead of a closure because:
+                        # CrewAI's LLMGuardrailStartedEvent.__init__ calls inspect.getsource()
+                        # on the guardrail function, which fails for closures with
+                        # "OSError: could not get source code". The wrapper class is defined
+                        # in a source file, so getsource() can inspect it properly.
+                        guardrail_wrapper = GuardrailWrapper(guardrail, task_data.name)
+
+                        task.guardrail = guardrail_wrapper
+                        task.retry_on_fail = True
+                        logger.info(f"Applied code-based guardrail to task {task_data.name}")
+                    else:
+                        logger.warning(f"Failed to create guardrail for task {task_data.name}, guardrail will not be applied")
+            except Exception as guardrail_error:
+                logger.warning(f"Error setting up code-based guardrail for task {task_data.name}: {guardrail_error}")
+                # Continue without guardrail - task is still valid
+
             # Handle LLM guardrail if present in task configuration
+            # NOTE: LLM guardrail takes priority over code-based guardrail if both exist
             # Access llm_guardrail directly from task_data (it's a dedicated column in the Task model)
             try:
                 llm_guardrail_config = getattr(task_data, 'llm_guardrail', None)

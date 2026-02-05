@@ -140,21 +140,26 @@ class CrewConfigBuilder:
         if 'planning' in crew_config:
             crew_kwargs['planning'] = crew_config['planning']
 
-        # Reasoning
-        if 'reasoning' in crew_config:
-            crew_kwargs['reasoning'] = crew_config['reasoning']
+        # NOTE: 'reasoning' is an Agent-level parameter in CrewAI, NOT a Crew-level parameter
+        # The reasoning config is propagated to agents in CrewPreparation._create_agents()
+        # Do NOT add 'reasoning' to crew_kwargs as Crew doesn't accept this parameter
 
         return crew_kwargs
 
     async def add_llm_parameters(self, crew_kwargs: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Add planning_llm and reasoning_llm if specified
+        Add planning_llm if specified
 
         Args:
             crew_kwargs: Base crew kwargs
 
         Returns:
             Updated crew kwargs
+
+        Note:
+            'reasoning_llm' is NOT a valid CrewAI Crew parameter. In CrewAI, reasoning
+            is an Agent-level feature that uses the agent's own LLM for reasoning.
+            The agent's reasoning capability is enabled via Agent(reasoning=True).
         """
         from src.core.llm_manager import LLMManager
 
@@ -183,27 +188,14 @@ class CrewConfigBuilder:
                 except Exception as llm_error:
                     logger.warning(f"Could not create default planning LLM for model {default_model}: {llm_error}")
 
-        # Reasoning LLM
+        # NOTE: 'reasoning_llm' is NOT a valid CrewAI parameter
+        # In CrewAI, reasoning is enabled per-agent via Agent(reasoning=True)
+        # and uses the agent's own LLM for reasoning. There is no separate reasoning_llm.
         if 'reasoning_llm' in crew_config:
-            try:
-                if group_id:
-                    reasoning_llm = await LLMManager.configure_crewai_llm(crew_config['reasoning_llm'], group_id)
-                else:
-                    reasoning_llm = await LLMManager.get_llm(crew_config['reasoning_llm'])
-                crew_kwargs['reasoning_llm'] = reasoning_llm
-                logger.info(f"Set crew reasoning LLM to: {crew_config['reasoning_llm']}")
-            except Exception as llm_error:
-                logger.warning(f"Could not create reasoning LLM for model {crew_config['reasoning_llm']}: {llm_error}")
-        elif crew_config.get('reasoning', False):
-            # If reasoning is enabled but no reasoning_llm specified, use the default model
-            default_model = self.config.get('model')
-            if default_model and group_id:
-                try:
-                    reasoning_llm = await LLMManager.configure_crewai_llm(default_model, group_id)
-                    crew_kwargs['reasoning_llm'] = reasoning_llm
-                    logger.info(f"Set crew reasoning LLM to default model: {default_model}")
-                except Exception as llm_error:
-                    logger.warning(f"Could not create default reasoning LLM for model {default_model}: {llm_error}")
+            logger.warning(
+                f"'reasoning_llm' is not a valid CrewAI Crew parameter. "
+                f"Reasoning uses each agent's own LLM. Enable reasoning via the agent's 'reasoning' flag."
+            )
 
         return crew_kwargs
 
