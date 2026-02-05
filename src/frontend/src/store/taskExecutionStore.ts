@@ -27,11 +27,9 @@ export const useTaskExecutionStore = create<TaskExecutionState>((set, get) => ({
   seenTasks: new Set(),
   
   setTaskState: (taskId: string, state: TaskState) => {
-    console.log(`[TaskExecutionStore] setTaskState called - taskId: "${taskId}", state:`, state);
     set((store) => {
       const newStates = new Map(store.taskStates);
       newStates.set(taskId, state);
-      console.log(`[TaskExecutionStore] After update - total states: ${newStates.size}, keys:`, Array.from(newStates.keys()).slice(0, 5));
       return { taskStates: newStates };
     });
   },
@@ -51,33 +49,44 @@ export const useTaskExecutionStore = create<TaskExecutionState>((set, get) => ({
   loadTaskStates: async (jobId: string) => {
     try {
       const response = await apiClient.get(`/traces/job/${jobId}/task-states`);
-      
+
       // Merge with existing states instead of replacing them
       set((store) => {
         const newStates = new Map(store.taskStates);
-        
+
         Object.entries(response.data).forEach(([taskId, state]) => {
+          const typedState = state as TaskState;
+
           // Handle different task ID formats
           // Backend might return: task_task-UUID, task_UUID, or just UUID
           let normalizedTaskId = taskId;
-          
+
           // Remove "task_" prefix if present
           if (normalizedTaskId.startsWith('task_')) {
             normalizedTaskId = normalizedTaskId.substring(5);
           }
-          
+
           // Remove "task-" prefix if present
           if (normalizedTaskId.startsWith('task-')) {
             normalizedTaskId = normalizedTaskId.substring(5);
           }
-          
-          newStates.set(normalizedTaskId, state as TaskState);
+
+          // Store by normalized task ID
+          newStates.set(normalizedTaskId, typedState);
+
+          // Also store by task_name for easier lookup by TaskNode
+          // TaskNode primarily looks up by data.label which is the task name
+          if (typedState.task_name) {
+            newStates.set(typedState.task_name, typedState);
+            // Also store lowercase version for case-insensitive matching
+            newStates.set(typedState.task_name.toLowerCase(), typedState);
+          }
         });
-        
+
         return { taskStates: newStates };
       });
     } catch (error) {
-      console.error('Failed to load task states:', error);
+      console.error('[TaskExecutionStore] Failed to load task states:', error);
     }
   },
   
