@@ -45,18 +45,20 @@ class DatabricksIndexService:
             "entity": entity_logger
         }
     
-    def _get_index_repository(self, workspace_url: str) -> DatabricksVectorIndexRepository:
+    def _get_index_repository(self, workspace_url: str, group_id: Optional[str] = None) -> DatabricksVectorIndexRepository:
         """
         Get or create index repository.
-        
+
         Args:
             workspace_url: Databricks workspace URL
-            
+            group_id: Optional group_id for PAT authentication lookup in background threads
+
         Returns:
             DatabricksVectorIndexRepository instance
         """
-        if not self._index_repo or self._index_repo.workspace_url != workspace_url:
-            self._index_repo = DatabricksVectorIndexRepository(workspace_url)
+        # Include group_id in cache check to support background thread authentication
+        if not self._index_repo or self._index_repo.workspace_url != workspace_url or self._index_repo.group_id != group_id:
+            self._index_repo = DatabricksVectorIndexRepository(workspace_url, group_id=group_id)
         return self._index_repo
     
     def _get_endpoint_repository(self, workspace_url: str) -> DatabricksVectorEndpointRepository:
@@ -1144,11 +1146,12 @@ class DatabricksIndexService:
         memory_type: str,
         k: int = 5,
         filters: Optional[Dict[str, Any]] = None,
-        user_token: Optional[str] = None
+        user_token: Optional[str] = None,
+        group_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Search for similar vectors in a Databricks Vector Search index.
-        
+
         Args:
             workspace_url: Databricks workspace URL
             index_name: Full index name (catalog.schema.table)
@@ -1158,13 +1161,14 @@ class DatabricksIndexService:
             k: Number of results to return
             filters: Optional filters to apply
             user_token: Optional user access token for OBO authentication
-            
+            group_id: Optional group_id for PAT authentication in background threads
+
         Returns:
             List of search results
         """
         try:
-            # Get repository
-            repo = self._get_index_repository(workspace_url)
+            # Get repository with group_id for background thread authentication
+            repo = self._get_index_repository(workspace_url, group_id=group_id)
             
             # Get search columns for the specific memory type
             from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
@@ -1219,10 +1223,10 @@ class DatabricksIndexService:
                 
                 for idx, row in enumerate(data_array):
                     if row:
-                        # Databricks Vector Search may add a score column at the end
-                        # We only process the expected columns and ignore any extra columns
+                        # Databricks Vector Search returns: [col1, col2, ..., colN, score]
+                        # The score is appended at the end of each row
                         memory_logger.debug(f"[_process_search_results] Row {idx}: length={len(row)}, expected={len(columns)}")
-                        
+
                         # Map row data to column names (only process expected columns)
                         result_dict = {}
                         for i, column in enumerate(columns):
@@ -1239,9 +1243,16 @@ class DatabricksIndexService:
                                 result_dict[column] = value
                             else:
                                 result_dict[column] = None
-                        
-                        # Ignore any extra columns (like score) - we don't need them
-                        
+
+                        # Extract score from the last column if present
+                        # Databricks Vector Search appends score at position len(columns)
+                        if len(row) > len(columns):
+                            score = row[len(columns)]
+                            result_dict['score'] = score if score is not None else 0.0
+                            memory_logger.debug(f"[_process_search_results] Row {idx} score: {score}")
+                        else:
+                            result_dict['score'] = 0.0
+
                         processed_results.append(result_dict)
                     else:
                         memory_logger.warning(f"[_process_search_results] Empty row at index {idx}")

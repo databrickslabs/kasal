@@ -26,14 +26,19 @@ logger = LoggerManager.get_instance().databricks_vector_search
 
 class DatabricksVectorIndexRepository:
     """Repository for managing Databricks Vector Search indexes."""
-    
-    def __init__(self, workspace_url: str):
+
+    def __init__(self, workspace_url: str, group_id: Optional[str] = None):
         """
         Initialize the repository.
-        
+
         Args:
             workspace_url: Databricks workspace URL
+            group_id: Optional group_id for PAT authentication lookup.
+                     Useful for background threads where UserContext is not available.
         """
+        # Store group_id for PAT authentication in background threads
+        self.group_id = group_id
+
         # Clean up workspace URL and validate
         if workspace_url:
             self.workspace_url = workspace_url.rstrip('/')
@@ -42,7 +47,7 @@ class DatabricksVectorIndexRepository:
             try:
                 from src.utils.databricks_auth import get_auth_context
                 import asyncio
-                auth = asyncio.run(get_auth_context())
+                auth = asyncio.run(get_auth_context(group_id=group_id))
                 if auth:
                     self.workspace_url = auth.workspace_url.rstrip('/')
                     logger.debug(f"Using workspace URL from unified {auth.auth_method} auth: {self.workspace_url}")
@@ -56,23 +61,24 @@ class DatabricksVectorIndexRepository:
     async def _get_auth_token(self, user_token: Optional[str] = None) -> str:
         """
         Get authentication token for REST API calls.
-        
+
         Follows authentication priority:
         1. OBO (On-Behalf-Of) with user token
-        2. PAT from database (encrypted storage)
-        3. PAT from environment variables
-        
+        2. PAT from database (encrypted storage) with group_id
+        3. SPN (Service Principal) OAuth
+
         Args:
             user_token: Optional user token for OBO authentication
-            
+
         Returns:
             Authentication token
-            
+
         Raises:
             Exception: If no authentication token can be obtained
         """
         # Use unified authentication system
-        auth = await get_auth_context(user_token=user_token)
+        # Pass group_id for PAT lookup in background threads where UserContext is unavailable
+        auth = await get_auth_context(user_token=user_token, group_id=self.group_id)
         if not auth:
             raise Exception("Failed to get authentication context")
         return auth.token
@@ -213,24 +219,48 @@ class DatabricksVectorIndexRepository:
                         logger.debug(f"Raw ready value: {repr(index_status.get('ready'))}")
                         
                         # Parse state with proper handling
+                        # Databricks API can return state or detailed_state - handle both
                         raw_state = index_status.get("state")
-                        if raw_state is None:
-                            raw_detailed_state = index_status.get("detailed_state")
+                        raw_detailed_state = index_status.get("detailed_state")
+
+                        # STATE MAPPING: Map Databricks API states to our IndexState enum
+                        # - "ONLINE" = Index is ready and serving queries
+                        # - "ONLINE_DIRECT_ACCESS" = Direct access index is ready
+                        # - "READY" = Index is ready (legacy/alternative)
+                        STATE_TO_READY = ["ONLINE", "ONLINE_DIRECT_ACCESS", "READY"]
+                        STATE_TO_PROVISIONING = ["PROVISIONING", "INITIALIZING", "PENDING", "CREATING"]
+                        STATE_TO_OFFLINE = ["OFFLINE", "STOPPING", "STOPPED"]
+                        STATE_TO_FAILED = ["FAILED", "ERROR"]
+
+                        # First check if raw_state matches known ready states
+                        if raw_state and raw_state.upper() in STATE_TO_READY:
+                            raw_state = "READY"
+                        elif raw_state and raw_state.upper() in STATE_TO_PROVISIONING:
+                            raw_state = "PROVISIONING"
+                        elif raw_state and raw_state.upper() in STATE_TO_OFFLINE:
+                            raw_state = "OFFLINE"
+                        elif raw_state and raw_state.upper() in STATE_TO_FAILED:
+                            raw_state = "FAILED"
+                        elif raw_state is None or raw_state.upper() == "UNKNOWN":
+                            # If no state, check detailed_state
                             if raw_detailed_state:
-                                if raw_detailed_state == "ONLINE_DIRECT_ACCESS":
+                                if raw_detailed_state.upper() in STATE_TO_READY:
                                     raw_state = "READY"
-                                elif raw_detailed_state in ["PROVISIONING", "INITIALIZING"]:
+                                elif raw_detailed_state.upper() in STATE_TO_PROVISIONING:
                                     raw_state = "PROVISIONING"
-                                elif raw_detailed_state in ["OFFLINE", "STOPPING", "STOPPED"]:
+                                elif raw_detailed_state.upper() in STATE_TO_OFFLINE:
                                     raw_state = "OFFLINE"
-                                elif raw_detailed_state in ["FAILED", "ERROR"]:
+                                elif raw_detailed_state.upper() in STATE_TO_FAILED:
                                     raw_state = "FAILED"
                                 else:
                                     logger.info(f"Unknown detailed_state '{raw_detailed_state}', will determine from ready flag")
                                     raw_state = "READY" if index_status.get("ready", False) else "UNKNOWN"
                             else:
+                                # No state info available - use ready flag as last resort
                                 raw_state = "READY" if index_status.get("ready", False) else "UNKNOWN"
-                        
+
+                        logger.debug(f"State mapping: API state='{index_status.get('state')}', detailed_state='{raw_detailed_state}' -> mapped to '{raw_state}'")
+
                         try:
                             state = IndexState(raw_state)
                         except ValueError:
@@ -342,25 +372,40 @@ class DatabricksVectorIndexRepository:
                         indexes = []
                         for idx_data in indexes_data:
                             index_status = idx_data.get("status", {})
-                            
+
                             # Parse state with same logic as get_index method
                             raw_state = index_status.get("state")
-                            if raw_state is None:
-                                raw_detailed_state = index_status.get("detailed_state")
+                            raw_detailed_state = index_status.get("detailed_state")
+
+                            # STATE MAPPING: Map Databricks API states to our IndexState enum
+                            STATE_TO_READY = ["ONLINE", "ONLINE_DIRECT_ACCESS", "READY"]
+                            STATE_TO_PROVISIONING = ["PROVISIONING", "INITIALIZING", "PENDING", "CREATING"]
+                            STATE_TO_OFFLINE = ["OFFLINE", "STOPPING", "STOPPED"]
+                            STATE_TO_FAILED = ["FAILED", "ERROR"]
+
+                            if raw_state and raw_state.upper() in STATE_TO_READY:
+                                raw_state = "READY"
+                            elif raw_state and raw_state.upper() in STATE_TO_PROVISIONING:
+                                raw_state = "PROVISIONING"
+                            elif raw_state and raw_state.upper() in STATE_TO_OFFLINE:
+                                raw_state = "OFFLINE"
+                            elif raw_state and raw_state.upper() in STATE_TO_FAILED:
+                                raw_state = "FAILED"
+                            elif raw_state is None or raw_state.upper() == "UNKNOWN":
                                 if raw_detailed_state:
-                                    if raw_detailed_state == "ONLINE_DIRECT_ACCESS":
+                                    if raw_detailed_state.upper() in STATE_TO_READY:
                                         raw_state = "READY"
-                                    elif raw_detailed_state in ["PROVISIONING", "INITIALIZING"]:
+                                    elif raw_detailed_state.upper() in STATE_TO_PROVISIONING:
                                         raw_state = "PROVISIONING"
-                                    elif raw_detailed_state in ["OFFLINE", "STOPPING", "STOPPED"]:
+                                    elif raw_detailed_state.upper() in STATE_TO_OFFLINE:
                                         raw_state = "OFFLINE"
-                                    elif raw_detailed_state in ["FAILED", "ERROR"]:
+                                    elif raw_detailed_state.upper() in STATE_TO_FAILED:
                                         raw_state = "FAILED"
                                     else:
                                         raw_state = "READY" if index_status.get("ready", False) else "UNKNOWN"
                                 else:
                                     raw_state = "READY" if index_status.get("ready", False) else "UNKNOWN"
-                            
+
                             try:
                                 state = IndexState(raw_state)
                             except ValueError:
@@ -770,17 +815,34 @@ class DatabricksVectorIndexRepository:
                             if len(data_array) == 0 and filters:
                                 logger.warning(f"[similarity_search] No results found with filters: {filters}")
                                 # Try without filters to debug
-                                logger.debug("[similarity_search] Trying search without filters for debugging...")
+                                logger.info("[similarity_search] DEBUG: Trying search WITHOUT filters to diagnose...")
+                                # Request crew_id column to see what values exist in the index
+                                debug_columns = list(set(columns + ['crew_id']))
                                 debug_payload = {
                                     "query_vector": query_vector,
-                                    "columns": columns,
+                                    "columns": debug_columns,
                                     "num_results": num_results
                                 }
                                 async with session.post(url, headers=headers, json=debug_payload) as debug_response:
                                     if debug_response.status == 200:
                                         debug_results = await debug_response.json()
                                         debug_data = debug_results.get('result', {}).get('data_array', [])
-                                        logger.debug(f"[similarity_search] Debug search without filters returned {len(debug_data)} results")
+                                        logger.info(f"[similarity_search] DEBUG: Search WITHOUT filters returned {len(debug_data)} results")
+                                        if debug_data:
+                                            # Log the crew_ids from the results to help diagnose filter mismatch
+                                            crew_id_col_index = debug_columns.index('crew_id') if 'crew_id' in debug_columns else -1
+                                            if crew_id_col_index >= 0:
+                                                found_crew_ids = set()
+                                                for row in debug_data[:10]:  # Check first 10 results
+                                                    if len(row) > crew_id_col_index:
+                                                        found_crew_ids.add(row[crew_id_col_index])
+                                                logger.info(f"[similarity_search] DEBUG: crew_ids found in index (sample): {found_crew_ids}")
+                                                logger.info(f"[similarity_search] DEBUG: filter crew_id was: {filters.get('crew_id', 'NOT_SET')}")
+                                                if filters.get('crew_id') not in found_crew_ids:
+                                                    logger.error(f"[similarity_search] MISMATCH! Filter crew_id '{filters.get('crew_id')}' not found in index crew_ids: {found_crew_ids}")
+                                    else:
+                                        debug_error = await debug_response.text()
+                                        logger.warning(f"[similarity_search] DEBUG: Search without filters failed: {debug_error}")
                         else:
                             logger.debug(f"[similarity_search] Returned {len(results.get('result', {}).get('data_array', []))} results")
                         
