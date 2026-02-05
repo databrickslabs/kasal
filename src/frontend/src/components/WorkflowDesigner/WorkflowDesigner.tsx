@@ -117,8 +117,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     updateTabExecutionStatus
   } = useTabManagerStore();
 
-  // Use run status store for fallback job monitoring
-  const { runHistory, startPolling: startRunStatusPolling, stopPolling: stopRunStatusPolling } = useRunStatusStore();
+  // Use run status store for job monitoring (SSE-based, no polling needed)
+  const { runHistory } = useRunStatusStore();
 
   // Use flow store for node/edge management (crew canvas)
   const {
@@ -500,31 +500,49 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
   // Sync nodes and edges with crew execution store
   // For crew canvas (agentNode/taskNode)
+  // Uses ID comparison to prevent infinite render loops
   useEffect(() => {
     if (!areFlowsVisible) {
-      setCrewExecutionNodes(nodes);
+      const currentIds = nodes.map(n => n.id).sort().join(',');
+      if (currentIds !== prevCrewNodeIdsRef.current) {
+        setCrewExecutionNodes(nodes);
+        prevCrewNodeIdsRef.current = currentIds;
+      }
     }
   }, [nodes, setCrewExecutionNodes, areFlowsVisible]);
 
   useEffect(() => {
     if (!areFlowsVisible) {
-      setCrewExecutionEdges(edges);
+      const currentIds = edges.map(e => e.id).sort().join(',');
+      if (currentIds !== prevCrewEdgeIdsRef.current) {
+        setCrewExecutionEdges(edges);
+        prevCrewEdgeIdsRef.current = currentIds;
+      }
     }
   }, [edges, setCrewExecutionEdges, areFlowsVisible]);
 
   // CRITICAL: Sync flow canvas nodes/edges with crew execution store
   // For flow canvas (crewNode) - this enables flow execution to work
+  // Uses ID comparison to prevent infinite render loops during node deletion
   useEffect(() => {
     if (areFlowsVisible) {
-      console.log('[WorkflowDesigner] Syncing flowNodes to execution store:', flowNodes.length);
-      setCrewExecutionNodes(flowNodes);
+      const currentIds = flowNodes.map(n => n.id).sort().join(',');
+      if (currentIds !== prevFlowNodeIdsRef.current) {
+        console.log('[WorkflowDesigner] Syncing flowNodes to execution store:', flowNodes.length);
+        setCrewExecutionNodes(flowNodes);
+        prevFlowNodeIdsRef.current = currentIds;
+      }
     }
   }, [flowNodes, setCrewExecutionNodes, areFlowsVisible]);
 
   useEffect(() => {
     if (areFlowsVisible) {
-      console.log('[WorkflowDesigner] Syncing flowEdges to execution store:', flowEdges.length);
-      setCrewExecutionEdges(flowEdges);
+      const currentIds = flowEdges.map(e => e.id).sort().join(',');
+      if (currentIds !== prevFlowEdgeIdsRef.current) {
+        console.log('[WorkflowDesigner] Syncing flowEdges to execution store:', flowEdges.length);
+        setCrewExecutionEdges(flowEdges);
+        prevFlowEdgeIdsRef.current = currentIds;
+      }
     }
   }, [flowEdges, setCrewExecutionEdges, areFlowsVisible]);
 
@@ -559,6 +577,12 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   const runningTabTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   const taskStatusPollingInterval = React.useRef<NodeJS.Timeout | null>(null);
 
+  // Track previous flow nodes to prevent infinite loop during sync
+  const prevFlowNodeIdsRef = React.useRef<string>('');
+  const prevFlowEdgeIdsRef = React.useRef<string>('');
+  const prevCrewNodeIdsRef = React.useRef<string>('');
+  const prevCrewEdgeIdsRef = React.useRef<string>('');
+
   // Get task execution store methods
   const { loadTaskStates, clearTaskStates } = useTaskExecutionStore();
 
@@ -587,15 +611,14 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
       // Also load immediately
       loadTaskStates(jobId);
 
-      // Ensure polling is running to monitor job status
-      startRunStatusPolling();
+      // SSE will handle job status monitoring automatically
     };
 
     window.addEventListener('jobCreated', handleJobCreated as EventListener);
     return () => {
       window.removeEventListener('jobCreated', handleJobCreated as EventListener);
     };
-  }, [startRunStatusPolling, loadTaskStates, clearTaskStates, executingJobId]);
+  }, [loadTaskStates, clearTaskStates, executingJobId]);
 
   // Listen for job completion events to clear running tab and update status
   useEffect(() => {
@@ -798,17 +821,16 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     return () => {
       // Component unmount
       unmountedRef.current = true;
-      // Clean up polling when component unmounts
-      stopRunStatusPolling();
+      // SSE cleanup is handled by SSEConnectionManager
     };
-  }, [stopRunStatusPolling]);
+  }, []);
 
   // Check for running jobs on component mount and start polling if found
   useEffect(() => {
     const checkForRunningJobs = async () => {
       // Get fresh data from stores
       const { tabs: currentTabs } = useTabManagerStore.getState();
-      const { fetchRunHistory: fetchHistory } = useRunStatusStore.getState();
+      const { fetchInitialRunHistory: fetchHistory } = useRunStatusStore.getState();
       const { loadTaskStates: loadStates, clearTaskStates: clearStates } = useTaskExecutionStore.getState();
 
       // First check the tabs for any running status
