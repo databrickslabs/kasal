@@ -141,5 +141,256 @@ class TestTerminateNonexistent:
         assert isinstance(result, bool)
 
 
+class TestProcessFlowExecutorExecutionIdHandling:
+    """Test execution_id handling in ProcessFlowExecutor."""
+
+    @pytest.fixture
+    def executor(self):
+        """Create a ProcessFlowExecutor instance."""
+        from src.services.process_flow_executor import ProcessFlowExecutor
+        executor = ProcessFlowExecutor()
+        return executor
+
+    @pytest.fixture
+    def mock_group_context(self):
+        """Create a mock group context."""
+        context = MagicMock()
+        context.primary_group_id = "test_group_flow_123"
+        context.access_token = "test_token_flow_abc"
+        return context
+
+    @pytest.mark.asyncio
+    async def test_execution_id_added_to_flow_config_with_group_context(self, executor, mock_group_context):
+        """Test that execution_id is added to flow_config when group_context is provided."""
+        execution_id = "flow_exec_test_123"
+        flow_config = {"nodes": [], "edges": [], "flow_config": {}}
+
+        # Mock the Process creation
+        mock_process = MagicMock()
+        mock_process.pid = 22345
+        mock_process.start = MagicMock()
+        mock_process.join = MagicMock()
+        mock_process.exitcode = 0
+        mock_process.is_alive = MagicMock(return_value=False)
+
+        executor._ctx.Process = MagicMock(return_value=mock_process)
+
+        # Mock the result queue
+        mock_result_queue = MagicMock()
+        mock_result_queue.empty = MagicMock(return_value=False)
+        mock_result_queue.get_nowait = MagicMock(return_value={
+            "status": "COMPLETED",
+            "result": "flow_result"
+        })
+
+        executor._ctx.Queue = MagicMock(return_value=mock_result_queue)
+
+        # Mock log queue processing and _wait_for_result
+        with patch.object(executor, '_process_log_queue', new_callable=AsyncMock):
+            with patch.object(executor, '_wait_for_result', return_value={
+                "status": "COMPLETED",
+                "result": "flow_result"
+            }):
+                try:
+                    await executor.run_flow_isolated(
+                        execution_id=execution_id,
+                        flow_config=flow_config,
+                        group_context=mock_group_context,
+                        inputs={}
+                    )
+                except Exception:
+                    pass  # We just want to verify the config
+
+        # Verify execution_id was added to flow_config
+        assert flow_config.get('execution_id') == execution_id
+
+    @pytest.mark.asyncio
+    async def test_execution_id_added_to_flow_config_without_group_context(self, executor):
+        """Test that execution_id is added to flow_config as fallback without group_context."""
+        execution_id = "flow_exec_fallback_456"
+        flow_config = {"nodes": [], "edges": [], "flow_config": {}}
+
+        # Mock the Process creation
+        mock_process = MagicMock()
+        mock_process.pid = 22346
+        mock_process.start = MagicMock()
+        mock_process.join = MagicMock()
+        mock_process.exitcode = 0
+        mock_process.is_alive = MagicMock(return_value=False)
+
+        executor._ctx.Process = MagicMock(return_value=mock_process)
+
+        # Mock the result queue
+        mock_result_queue = MagicMock()
+        mock_result_queue.empty = MagicMock(return_value=False)
+        mock_result_queue.get_nowait = MagicMock(return_value={
+            "status": "COMPLETED",
+            "result": "flow_result"
+        })
+
+        executor._ctx.Queue = MagicMock(return_value=mock_result_queue)
+
+        # Mock log queue processing and _wait_for_result
+        with patch.object(executor, '_process_log_queue', new_callable=AsyncMock):
+            with patch.object(executor, '_wait_for_result', return_value={
+                "status": "COMPLETED",
+                "result": "flow_result"
+            }):
+                try:
+                    await executor.run_flow_isolated(
+                        execution_id=execution_id,
+                        flow_config=flow_config,
+                        group_context=None,  # No group context
+                        inputs={}
+                    )
+                except Exception:
+                    pass  # We just want to verify the config
+
+        # Verify execution_id was added via fallback
+        assert flow_config.get('execution_id') == execution_id
+
+    @pytest.mark.asyncio
+    async def test_execution_id_overwrites_when_group_context_provided(self, executor, mock_group_context):
+        """Test that execution_id is set when group_context is provided."""
+        execution_id = "flow_exec_new_789"
+        existing_execution_id = "flow_exec_existing_000"
+        flow_config = {"nodes": [], "edges": [], "execution_id": existing_execution_id}
+
+        # Mock the Process creation
+        mock_process = MagicMock()
+        mock_process.pid = 22347
+        mock_process.start = MagicMock()
+        mock_process.join = MagicMock()
+        mock_process.exitcode = 0
+        mock_process.is_alive = MagicMock(return_value=False)
+
+        executor._ctx.Process = MagicMock(return_value=mock_process)
+
+        # Mock the result queue
+        mock_result_queue = MagicMock()
+        mock_result_queue.empty = MagicMock(return_value=False)
+        mock_result_queue.get_nowait = MagicMock(return_value={
+            "status": "COMPLETED",
+            "result": "flow_result"
+        })
+
+        executor._ctx.Queue = MagicMock(return_value=mock_result_queue)
+
+        # Mock log queue processing and _wait_for_result
+        with patch.object(executor, '_process_log_queue', new_callable=AsyncMock):
+            with patch.object(executor, '_wait_for_result', return_value={
+                "status": "COMPLETED",
+                "result": "flow_result"
+            }):
+                try:
+                    await executor.run_flow_isolated(
+                        execution_id=execution_id,
+                        flow_config=flow_config,
+                        group_context=mock_group_context,
+                        inputs={}
+                    )
+                except Exception:
+                    pass
+
+        # The execution_id SHOULD be the new one
+        assert flow_config.get('execution_id') == execution_id
+
+    @pytest.mark.asyncio
+    async def test_kasal_execution_id_env_var_set_and_restored(self, executor, mock_group_context):
+        """Test that KASAL_EXECUTION_ID environment variable is set and restored."""
+        execution_id = "flow_exec_env_test_111"
+        flow_config = {"nodes": [], "edges": []}
+
+        # Mock the Process creation
+        mock_process = MagicMock()
+        mock_process.pid = 22348
+        mock_process.start = MagicMock()
+        mock_process.join = MagicMock()
+        mock_process.exitcode = 0
+        mock_process.is_alive = MagicMock(return_value=False)
+
+        executor._ctx.Process = MagicMock(return_value=mock_process)
+
+        # Mock the result queue
+        mock_result_queue = MagicMock()
+        mock_result_queue.empty = MagicMock(return_value=False)
+        mock_result_queue.get_nowait = MagicMock(return_value={
+            "status": "COMPLETED",
+            "result": "flow_result"
+        })
+
+        executor._ctx.Queue = MagicMock(return_value=mock_result_queue)
+
+        # Store original env var value
+        original_value = os.environ.get('KASAL_EXECUTION_ID')
+
+        # Mock log queue processing and _wait_for_result
+        with patch.object(executor, '_process_log_queue', new_callable=AsyncMock):
+            with patch.object(executor, '_wait_for_result', return_value={
+                "status": "COMPLETED",
+                "result": "flow_result"
+            }):
+                try:
+                    await executor.run_flow_isolated(
+                        execution_id=execution_id,
+                        flow_config=flow_config,
+                        group_context=mock_group_context,
+                        inputs={}
+                    )
+                except Exception:
+                    pass
+
+        # After execution, the env var should be restored to original state
+        current_value = os.environ.get('KASAL_EXECUTION_ID')
+        assert current_value == original_value
+
+    @pytest.mark.asyncio
+    async def test_group_id_and_user_token_added_with_group_context(self, executor, mock_group_context):
+        """Test that group_id and user_token are added to flow_config with group_context."""
+        execution_id = "flow_exec_context_test_222"
+        flow_config = {"nodes": [], "edges": []}
+
+        # Mock the Process creation
+        mock_process = MagicMock()
+        mock_process.pid = 22349
+        mock_process.start = MagicMock()
+        mock_process.join = MagicMock()
+        mock_process.exitcode = 0
+        mock_process.is_alive = MagicMock(return_value=False)
+
+        executor._ctx.Process = MagicMock(return_value=mock_process)
+
+        # Mock the result queue
+        mock_result_queue = MagicMock()
+        mock_result_queue.empty = MagicMock(return_value=False)
+        mock_result_queue.get_nowait = MagicMock(return_value={
+            "status": "COMPLETED",
+            "result": "flow_result"
+        })
+
+        executor._ctx.Queue = MagicMock(return_value=mock_result_queue)
+
+        # Mock log queue processing and _wait_for_result
+        with patch.object(executor, '_process_log_queue', new_callable=AsyncMock):
+            with patch.object(executor, '_wait_for_result', return_value={
+                "status": "COMPLETED",
+                "result": "flow_result"
+            }):
+                try:
+                    await executor.run_flow_isolated(
+                        execution_id=execution_id,
+                        flow_config=flow_config,
+                        group_context=mock_group_context,
+                        inputs={}
+                    )
+                except Exception:
+                    pass
+
+        # Verify group_id, user_token, and execution_id were added
+        assert flow_config.get('group_id') == mock_group_context.primary_group_id
+        assert flow_config.get('user_token') == mock_group_context.access_token
+        assert flow_config.get('execution_id') == execution_id
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

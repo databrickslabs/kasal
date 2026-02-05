@@ -256,7 +256,10 @@ class TestGroupAuthorizationSecurity:
             # Should default to first group
             assert context.primary_group_id == "marketing_abc123"
             assert context.user_role == "editor"
-            assert set(context.group_ids) == {"marketing_abc123", "sales_def456"}
+            # group_ids includes user's groups PLUS their personal workspace
+            personal_workspace_id = GroupContext.generate_individual_group_id("user@company.com")
+            expected_group_ids = {"marketing_abc123", "sales_def456", personal_workspace_id}
+            assert set(context.group_ids) == expected_group_ids
 
 
 class TestSecurityLogging:
