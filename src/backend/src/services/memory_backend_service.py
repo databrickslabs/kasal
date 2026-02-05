@@ -249,11 +249,12 @@ class MemoryBackendService:
         memory_type: str,
         k: int = 5,
         filters: Optional[Dict[str, Any]] = None,
-        user_token: Optional[str] = None
+        user_token: Optional[str] = None,
+        group_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Search for similar vectors in a Databricks Vector Search index.
-        
+
         Args:
             workspace_url: Databricks workspace URL
             index_name: Full index name (catalog.schema.table)
@@ -263,15 +264,16 @@ class MemoryBackendService:
             k: Number of results to return
             filters: Optional filters to apply
             user_token: Optional user access token for OBO authentication
-            
+            group_id: Optional group_id for PAT authentication in background threads
+
         Returns:
             List of search results
         """
         try:
             # Delegate to the index service for vector search operations
             return await self._index_service.search_vectors(
-                workspace_url, index_name, endpoint_name, query_embedding, 
-                memory_type, k, filters, user_token
+                workspace_url, index_name, endpoint_name, query_embedding,
+                memory_type, k, filters, user_token, group_id
             )
         except Exception as e:
             logger.error(f"Failed to search vectors in {index_name}: {e}")
