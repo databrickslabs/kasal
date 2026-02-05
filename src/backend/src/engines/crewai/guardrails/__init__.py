@@ -9,6 +9,7 @@ from src.engines.crewai.guardrails.empty_data_processing_guardrail import EmptyD
 from src.engines.crewai.guardrails.data_processing_count_guardrail import DataProcessingCountGuardrail
 from src.engines.crewai.guardrails.company_name_not_null_guardrail import CompanyNameNotNullGuardrail
 from src.engines.crewai.guardrails.guardrail_factory import GuardrailFactory
+from src.engines.crewai.guardrails.guardrail_wrapper import GuardrailWrapper
 
 __all__ = [
     'BaseGuardrail',
@@ -17,5 +18,6 @@ __all__ = [
     'EmptyDataProcessingGuardrail',
     'DataProcessingCountGuardrail',
     'CompanyNameNotNullGuardrail',
-    'GuardrailFactory'
+    'GuardrailFactory',
+    'GuardrailWrapper',
 ]
