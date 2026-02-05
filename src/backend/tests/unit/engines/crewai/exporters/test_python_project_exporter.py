@@ -277,10 +277,11 @@ class TestGenerateRequirements:
         assert 'crewai' in result
 
     def test_requirements_includes_crewai_tools(self, exporter):
-        """Test that requirements includes crewai-tools."""
+        """Test that requirements includes crewai[tools] extra."""
         result = exporter._generate_requirements([])
 
-        assert 'crewai-tools' in result
+        # crewai[tools] installs the crewai-tools package
+        assert 'crewai[tools]>=1.9.3' in result
 
     def test_requirements_includes_pydantic(self, exporter):
         """Test that requirements includes pydantic."""
