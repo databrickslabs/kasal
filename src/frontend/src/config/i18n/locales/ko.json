@@ -101,7 +101,8 @@
       "connectionError": "로그 스트림 연결에 실패했습니다. 다시 시도해 주세요.",
       "autoScrollOn": "자동 스크롤 켜짐",
       "autoScrollOff": "자동 스크롤 꺼짐",
-      "refreshLogs": "로그 새로고침"
+      "refreshLogs": "로그 새로고침",
+      "downloadLogs": "로그 다운로드"
     }
   },
   "tools": {

@@ -101,7 +101,8 @@
       "connectionError": "Günlük akışına bağlanılamadı. Lütfen tekrar deneyin.",
       "autoScrollOn": "Otomatik kaydırma AÇIK",
       "autoScrollOff": "Otomatik kaydırma KAPALI",
-      "refreshLogs": "Günlükleri Yenile"
+      "refreshLogs": "Günlükleri Yenile",
+      "downloadLogs": "Günlükleri İndir"
     }
   },
   "tools": {

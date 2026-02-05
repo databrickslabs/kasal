@@ -101,7 +101,8 @@
       "connectionError": "ログストリームへの接続に失敗しました。もう一度お試しください。",
       "autoScrollOn": "自動スクロール オン",
       "autoScrollOff": "自動スクロール オフ",
-      "refreshLogs": "ログを更新"
+      "refreshLogs": "ログを更新",
+      "downloadLogs": "ログをダウンロード"
     }
   },
   "tools": {

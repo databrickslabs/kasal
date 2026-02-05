@@ -105,7 +105,8 @@
       "connectionError": "Verbindung zum Protokollstream fehlgeschlagen. Bitte versuchen Sie es erneut.",
       "autoScrollOn": "Automatisches Scrollen EIN",
       "autoScrollOff": "Automatisches Scrollen AUS",
-      "refreshLogs": "Protokolle aktualisieren"
+      "refreshLogs": "Protokolle aktualisieren",
+      "downloadLogs": "Protokolle herunterladen"
     }
   },
   "tools": {

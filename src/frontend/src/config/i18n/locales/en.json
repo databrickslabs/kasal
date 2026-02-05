@@ -166,7 +166,8 @@
       "connectionError": "Failed to connect to log stream. Please try again.",
       "autoScrollOn": "Auto-scroll ON",
       "autoScrollOff": "Auto-scroll OFF",
-      "refreshLogs": "Refresh Logs"
+      "refreshLogs": "Refresh Logs",
+      "downloadLogs": "Download Logs"
     }
   },
   "tools": {
