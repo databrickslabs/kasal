@@ -10,15 +10,20 @@ export interface ShowTraceProps {
 }
 
 export interface Trace {
-  id: string;
+  id: number;
+  run_id?: number;
+  job_id?: string;
   event_source: string;
   event_context: string;
   event_type: string;
-  task_id?: string;
+  output: any;
+  trace_metadata?: any;
   created_at: string;
-  output: string | Record<string, unknown>;
+  group_id?: string;
+  group_email?: string;
+  // Frontend-only fields from extra_data
+  task_id?: string;
   extra_data?: Record<string, unknown>;
-  trace_metadata?: Record<string, unknown>;
 }
 
 export interface TaskDetails {
