@@ -833,6 +833,7 @@ class ExecutionService:
                 "tasks_yaml": config.tasks_yaml,
                 "inputs": config.inputs,
                 "planning": config.planning,
+                "reasoning": config.reasoning if hasattr(config, 'reasoning') else False,
                 "model": config.model,
                 "execution_type": execution_type,
                 "schema_detection_enabled": config.schema_detection_enabled
