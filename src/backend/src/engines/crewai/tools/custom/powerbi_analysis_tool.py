@@ -13,6 +13,7 @@ Date: 2026
 
 import asyncio
 import base64
+import contextvars
 import logging
 import json
 import re
@@ -25,6 +26,9 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# Ensure logger level is set to DEBUG to capture all DAX Generation logs
+logger.setLevel(logging.DEBUG)
+
 # Thread pool executor for running async operations from sync context
 _EXECUTOR = ThreadPoolExecutor(max_workers=5)
 
@@ -33,10 +37,14 @@ def _run_async_in_sync_context(coro):
     """
     Safely run an async coroutine from a synchronous context.
     Handles nested event loop scenarios (e.g., FastAPI).
+    Propagates contextvars (like execution_id) to worker threads.
     """
     try:
         loop = asyncio.get_running_loop()
-        future = _EXECUTOR.submit(asyncio.run, coro)
+        # Copy the current context to propagate to the worker thread
+        ctx = contextvars.copy_context()
+        # Run asyncio.run in the copied context
+        future = _EXECUTOR.submit(ctx.run, asyncio.run, coro)
         return future.result()
     except RuntimeError:
         loop = asyncio.new_event_loop()
