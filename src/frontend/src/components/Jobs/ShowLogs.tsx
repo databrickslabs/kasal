@@ -15,6 +15,7 @@ import {
   Paper,
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import DownloadIcon from '@mui/icons-material/Download';
 import { LogEntry } from '../../api/ExecutionLogs';
 import { executionLogService } from '../../api/ExecutionLogs';
 import { ShowLogsProps } from '../../types/common';
@@ -823,6 +824,33 @@ const ShowLogs: React.FC<ShowLogsProps> = ({
     }
   };
 
+  const handleDownload = () => {
+    // Convert logs to plain text format
+    const logText = processedLogs.map(log => {
+      const timestamp = log.timestamp ? new Date(log.timestamp).toISOString() : '';
+      const content = stripAnsiEscapes(log.output || log.content || '');
+      const logType = log.logType || 'INFO';
+      return `[${timestamp}] [${logType}] ${content}`;
+    }).join('\n');
+
+    // Create blob and download link
+    const blob = new Blob([logText], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+
+    // Generate filename with job ID and timestamp
+    const now = new Date();
+    const dateStr = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    link.download = `execution-logs-${jobId}-${dateStr}.txt`;
+
+    // Trigger download
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   // Render logs with badges only when the log type changes
   const renderLogs = () => {
     let previousLogType: string | null = null;
@@ -905,8 +933,16 @@ const ShowLogs: React.FC<ShowLogsProps> = ({
                 {autoScroll ? t('logs.executionLogs.autoScrollOn') : t('logs.executionLogs.autoScrollOff')}
               </Typography>
             </Tooltip>
+            <Tooltip title={t('logs.executionLogs.downloadLogs')}>
+              <IconButton
+                onClick={handleDownload}
+                disabled={processedLogs.length === 0}
+              >
+                <DownloadIcon />
+              </IconButton>
+            </Tooltip>
             <Tooltip title={t('logs.executionLogs.refreshLogs')}>
-              <IconButton 
+              <IconButton
                 onClick={handleRefresh}
                 disabled={isRefreshing}
               >
