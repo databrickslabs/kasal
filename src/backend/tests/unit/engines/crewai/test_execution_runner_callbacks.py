@@ -160,43 +160,51 @@ class TestExecutionRunnerCallbackIntegration:
     def test_callback_isolation_between_instances(self):
         """Test that different callback instances are isolated."""
         from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
-        
+
         job_id_1 = "execution_1"
         job_id_2 = "execution_2"
         config = {"model": "test-model"}
-        
+
         with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_get_queue, \
              patch("src.engines.crewai.callbacks.execution_callback.enqueue_log") as mock_enqueue:
-            
+
             mock_queue = MagicMock()
             mock_get_queue.return_value = mock_queue
-            
+
             # Create callbacks for two different executions
             step_1, task_1 = create_execution_callbacks(job_id_1, config, None)
             step_2, task_2 = create_execution_callbacks(job_id_2, config, None)
-            
+
             # Verify callbacks are different instances
             assert step_1 is not step_2
             assert task_1 is not task_2
-            
-            # Test that callbacks produce different traces
-            mock_output = MagicMock()
-            mock_output.output = "test output"
-            mock_output.agent = MagicMock()
-            mock_output.agent.role = "Test Agent"
-            
-            # Call both step callbacks
-            step_1(mock_output)
-            step_2(mock_output)
-            
+
+            # Test that callbacks produce different traces using "Final Answer:" pattern
+            # (step_callback only creates traces for "Final Answer:" patterns)
+            mock_output_1 = MagicMock()
+            mock_output_1.__class__.__name__ = "AgentFinish"
+            mock_output_1.output = "Final Answer: Test output from job 1"
+            mock_output_1.agent = MagicMock()
+            mock_output_1.agent.role = "Test Agent"
+
+            mock_output_2 = MagicMock()
+            mock_output_2.__class__.__name__ = "AgentFinish"
+            mock_output_2.output = "Final Answer: Test output from job 2"
+            mock_output_2.agent = MagicMock()
+            mock_output_2.agent.role = "Test Agent"
+
+            # Call both step callbacks with Final Answer pattern
+            step_1(mock_output_1)
+            step_2(mock_output_2)
+
             # Verify separate traces were created
             assert mock_queue.put_nowait.call_count == 2
-            
+
             # Get the trace data from both calls
             calls = mock_queue.put_nowait.call_args_list
             trace_1 = calls[0][0][0]
             trace_2 = calls[1][0][0]
-            
+
             # Verify traces have different job IDs
             assert trace_1["job_id"] == job_id_1
             assert trace_2["job_id"] == job_id_2
@@ -205,70 +213,96 @@ class TestExecutionRunnerCallbackIntegration:
 
 class TestCallbackFunctionality:
     """Test core callback functionality without complex execution runner mocking."""
-    
-    def test_step_callback_creates_correct_trace(self):
-        """Test that step callback creates correct trace data."""
+
+    def test_step_callback_creates_trace_for_final_answer(self):
+        """Test that step callback creates trace for Final Answer pattern."""
         from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
-        
+
         job_id = "test_job"
         config = {"model": "test"}
-        
+
         with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_get_queue, \
              patch("src.engines.crewai.callbacks.execution_callback.enqueue_log") as mock_enqueue:
-            
+
             mock_queue = MagicMock()
             mock_get_queue.return_value = mock_queue
-            
+
             step_callback, _ = create_execution_callbacks(job_id, config, None)
-            
-            # Create mock step output
+
+            # Create mock step output with "Final Answer:" pattern (triggers trace creation)
             mock_step_output = MagicMock()
-            mock_step_output.output = "Test step output"
+            mock_step_output.__class__.__name__ = "AgentFinish"
+            mock_step_output.output = "Final Answer: This is the final answer"
             mock_step_output.agent = MagicMock()
             mock_step_output.agent.role = "Test Agent"
-            
+
             # Call the step callback
             step_callback(mock_step_output)
-            
+
             # Verify trace was created with correct data
             mock_queue.put_nowait.assert_called_once()
             trace_data = mock_queue.put_nowait.call_args[0][0]
-            
+
             assert trace_data["job_id"] == job_id
-            assert trace_data["event_type"] == "agent_execution"
+            assert trace_data["event_type"] == "agent_final_answer"
             assert trace_data["event_source"] == "Test Agent"
-            assert trace_data["output_content"] == "Test step output"
-    
-    def test_task_callback_creates_correct_trace(self):
-        """Test that task callback creates correct trace data."""
+            assert "Final Answer:" in trace_data["output_content"]
+
+    def test_step_callback_skips_trace_for_regular_output(self):
+        """Test that step callback skips trace for regular output (not Final Answer)."""
         from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
-        
+
         job_id = "test_job"
         config = {"model": "test"}
-        
+
         with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_get_queue, \
              patch("src.engines.crewai.callbacks.execution_callback.enqueue_log") as mock_enqueue:
-            
+
             mock_queue = MagicMock()
             mock_get_queue.return_value = mock_queue
-            
+
+            step_callback, _ = create_execution_callbacks(job_id, config, None)
+
+            # Create mock step output WITHOUT "Final Answer:" pattern
+            mock_step_output = MagicMock()
+            mock_step_output.output = "Regular step output without final answer"
+            mock_step_output.agent = MagicMock()
+            mock_step_output.agent.role = "Test Agent"
+
+            # Call the step callback
+            step_callback(mock_step_output)
+
+            # Verify NO trace was created (regular output handled by event bus)
+            mock_queue.put_nowait.assert_not_called()
+            # But execution log should still be created
+            mock_enqueue.assert_called_once()
+
+    def test_task_callback_creates_execution_log(self):
+        """Test that task callback creates execution log (trace handled by event bus)."""
+        from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
+
+        job_id = "test_job"
+        config = {"model": "test"}
+
+        with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_get_queue, \
+             patch("src.engines.crewai.callbacks.execution_callback.enqueue_log") as mock_enqueue:
+
+            mock_queue = MagicMock()
+            mock_get_queue.return_value = mock_queue
+
             _, task_callback = create_execution_callbacks(job_id, config, None)
-            
+
             # Create mock task output
             mock_task_output = MagicMock()
             mock_task_output.raw = "Test task result"
             mock_task_output.description = "Test task description"
             mock_task_output.agent = MagicMock()
             mock_task_output.agent.role = "Test Agent"
-            
+
             # Call the task callback
             task_callback(mock_task_output)
-            
-            # Verify trace was created with correct data
-            mock_queue.put_nowait.assert_called_once()
-            trace_data = mock_queue.put_nowait.call_args[0][0]
-            
-            assert trace_data["job_id"] == job_id
-            assert trace_data["event_type"] == "task_completed"
-            assert trace_data["event_source"] == "task"
-            assert trace_data["output_content"] == "Test task result"
+
+            # Verify NO trace was created (task traces handled by event bus)
+            mock_queue.put_nowait.assert_not_called()
+            # But execution log should still be created
+            mock_enqueue.assert_called_once()
