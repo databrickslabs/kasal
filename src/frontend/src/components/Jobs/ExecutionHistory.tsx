@@ -182,11 +182,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
     handleSort,
   } = useRunHistory();
 
-  // Use selector pattern to only subscribe to specific functions
-  const startPolling = useRunStatusStore(state => state.startPolling);
-  const stopPolling = useRunStatusStore(state => state.stopPolling);
-  const setUserActive = useRunStatusStore(state => state.setUserActive);
-  const cleanupStore = useRunStatusStore(state => state.cleanup);
+  // SSE handles all updates automatically - no polling needed
 
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedRunForTrace, setSelectedRunForTrace] = useState<Run | null>(null);
@@ -267,42 +263,10 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
         console.error('[RunHistory] Error in initial fetch:', err);
       }
 
-      // Track user activity
-      const handleUserActivity = () => {
-        setUserActive(true);
-        if (userActivityTimeoutRef.current) {
-          clearTimeout(userActivityTimeoutRef.current);
-        }
-        
-        // Set user as inactive after 5 minutes of no activity
-        userActivityTimeoutRef.current = setTimeout(() => {
-          setUserActive(false);
-        }, 5 * 60 * 1000);
-      };
-      
-      // Set up event listeners for user activity
-      window.addEventListener('mousemove', handleUserActivity);
-      window.addEventListener('keydown', handleUserActivity);
-      window.addEventListener('click', handleUserActivity);
-      
-      // Initialize the activity timeout
-      handleUserActivity();
-      
-      // Start polling
-      startPolling();
-
-      // Return cleanup function
+      // SSE handles all updates automatically - no polling or user activity tracking needed
+      // Just return empty cleanup function
       return () => {
-        if (userActivityTimeoutRef.current) {
-          clearTimeout(userActivityTimeoutRef.current);
-        }
-        
-        window.removeEventListener('mousemove', handleUserActivity);
-        window.removeEventListener('keydown', handleUserActivity);
-        window.removeEventListener('click', handleUserActivity);
-        
-        stopPolling();
-        cleanupStore();
+        // Cleanup handled by SSE connection manager
       };
     };
 
@@ -314,7 +278,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
       console.log('=== DEBUG: RunHistory useEffect cleanup running ===');
       cleanup.then(cleanupFn => cleanupFn());
     };
-  }, [fetchRuns, startPolling, stopPolling, setUserActive, cleanupStore]);
+  }, [fetchRuns]);
 
   // Effect for handling dialog state changes
   useEffect(() => {
