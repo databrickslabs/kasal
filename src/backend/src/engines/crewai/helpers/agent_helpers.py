@@ -358,7 +358,9 @@ async def create_agent(
     additional_params = [
         'max_iter', 'max_rpm', 'memory', 'code_execution_mode',
         'max_context_window_size', 'max_tokens',
-        'reasoning', 'max_reasoning_attempts'
+        'reasoning', 'max_reasoning_attempts',
+        # Date awareness settings (CrewAI 1.9+) - inject current date into agent context
+        'inject_date', 'date_format'
         # Note: knowledge_sources removed - use DatabricksKnowledgeSearchTool instead
     ]
     
