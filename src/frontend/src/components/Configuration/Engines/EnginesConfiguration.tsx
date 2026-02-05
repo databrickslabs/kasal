@@ -31,20 +31,14 @@ const EnginesConfiguration: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
-  const [debugSyncing, setDebugSyncing] = useState(false);
-  const [debugTracingEnabled, setDebugTracingEnabled] = useState<boolean>(false);
 
   // Load initial state from backend
   useEffect(() => {
     const loadConfig = async () => {
       try {
         setLoading(true);
-        const [flowResp, debugResp] = await Promise.all([
-          EngineConfigService.getCrewAIFlowEnabled(),
-          EngineConfigService.getCrewAIDebugTracing(),
-        ]);
+        const flowResp = await EngineConfigService.getCrewAIFlowEnabled();
         setCrewAIFlowEnabled(flowResp.flow_enabled);
-        setDebugTracingEnabled(debugResp.debug_tracing);
       } catch (err) {
         console.error('Failed to load engine configuration:', err);
         setError('Failed to load configuration from server');
@@ -75,22 +69,6 @@ const EnginesConfiguration: React.FC = () => {
       event.target.checked = !newValue;
     } finally {
       setSyncing(false);
-    }
-  };
-
-  const handleDebugToggle = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const newValue = event.target.checked;
-    try {
-      setDebugSyncing(true);
-      setError(null);
-      await EngineConfigService.setCrewAIDebugTracing(newValue);
-      setDebugTracingEnabled(newValue);
-    } catch (err) {
-      console.error('Failed to update debug tracing configuration:', err);
-      setError('Failed to save configuration to server');
-      event.target.checked = !newValue;
-    } finally {
-      setDebugSyncing(false);
     }
   };
 
@@ -185,34 +163,6 @@ const EnginesConfiguration: React.FC = () => {
               </ul>
             </Alert>
           )}
-
-          <Box>
-            <FormControlLabel
-              control={
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                  <Switch
-                    checked={debugTracingEnabled}
-                    onChange={handleDebugToggle}
-                    color="primary"
-                    disabled={debugSyncing}
-                  />
-                  {debugSyncing && (
-                    <CircularProgress size={16} sx={{ ml: 1 }} />
-                  )}
-                </Box>
-              }
-              label={
-                <Box>
-                  <Typography variant="body2" fontWeight="medium">
-                    Enable Debug Tracing
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    When enabled, store detailed trace events (memory, knowledge, reasoning, guardrails). When disabled, only essential events are stored.
-                  </Typography>
-                </Box>
-              }
-            />
-          </Box>
 
         </Stack>
       </Paper>

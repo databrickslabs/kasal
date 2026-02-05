@@ -18,6 +18,7 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import CheckIcon from '@mui/icons-material/Check';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import PlanningOutputFormatter, { isPlanningOutput } from './PlanningOutputFormatter';
 
 // Size thresholds in characters
 const SIZE_THRESHOLDS = {
@@ -42,6 +43,8 @@ interface PaginatedOutputProps {
   maxHeight?: string;
   /** Custom styling for the paper container */
   paperSx?: Record<string, unknown>;
+  /** Event type - used to control special formatting (e.g., planning output) */
+  eventType?: string;
 }
 
 /**
@@ -114,6 +117,16 @@ const formatSize = (bytes: number): string => {
  * Displays large content with pagination to prevent browser crashes.
  * Supports markdown rendering, copy functionality, and "show all" option.
  */
+// Event types where planning formatting should NOT be applied
+const EXCLUDED_EVENT_TYPES_FOR_PLANNING = [
+  'llm_request',
+  'llm_response',
+  'llm_call',
+  'llm_guardrail',
+  'agent_reasoning',
+  'agent_reasoning_error',
+];
+
 const PaginatedOutput: React.FC<PaginatedOutputProps> = ({
   content,
   pageSize = DEFAULT_PAGE_SIZE,
@@ -121,6 +134,7 @@ const PaginatedOutput: React.FC<PaginatedOutputProps> = ({
   showCopyButton = true,
   maxHeight = '60vh',
   paperSx = {},
+  eventType,
 }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [showAll, setShowAll] = useState(false);
@@ -129,6 +143,18 @@ const PaginatedOutput: React.FC<PaginatedOutputProps> = ({
   // Format and memoize the content
   const formattedContent = useMemo(() => formatContent(content), [content]);
   const contentSize = formattedContent.length;
+
+  // Check if content is planning output that needs special formatting
+  // Only apply planning formatting if:
+  // 1. The content matches planning output patterns
+  // 2. The event type is NOT in the excluded list (e.g., not an LLM request/response)
+  const isPlanningContent = useMemo(() => {
+    // Don't apply planning formatting to excluded event types
+    if (eventType && EXCLUDED_EVENT_TYPES_FOR_PLANNING.includes(eventType)) {
+      return false;
+    }
+    return isPlanningOutput(formattedContent);
+  }, [formattedContent, eventType]);
 
   // Split content into pages
   const pages = useMemo(
@@ -275,7 +301,7 @@ const PaginatedOutput: React.FC<PaginatedOutputProps> = ({
             variant="outlined"
             color={isHugeContent ? 'error' : isLargeContent ? 'warning' : 'default'}
           />
-          {needsPagination && !showAll && (
+          {needsPagination && !showAll && !isPlanningContent && (
             <Chip
               size="small"
               label={`Page ${currentPage} of ${totalPages}`}
@@ -283,7 +309,15 @@ const PaginatedOutput: React.FC<PaginatedOutputProps> = ({
               variant="outlined"
             />
           )}
-          {showAll && needsPagination && (
+          {isPlanningContent && (
+            <Chip
+              size="small"
+              label="Planning Summary"
+              color="primary"
+              variant="filled"
+            />
+          )}
+          {showAll && needsPagination && !isPlanningContent && (
             <Chip
               size="small"
               label="Showing All"
@@ -323,8 +357,8 @@ const PaginatedOutput: React.FC<PaginatedOutputProps> = ({
         )}
       </Box>
 
-      {/* Warning for large content */}
-      {showAll && isLargeContent && (
+      {/* Warning for large content (hidden for planning content) */}
+      {showAll && isLargeContent && !isPlanningContent && (
         <Alert
           severity={isHugeContent ? 'error' : 'warning'}
           icon={<WarningAmberIcon />}
@@ -340,8 +374,8 @@ const PaginatedOutput: React.FC<PaginatedOutputProps> = ({
         </Alert>
       )}
 
-      {/* Pagination controls - top */}
-      {needsPagination && !showAll && (
+      {/* Pagination controls - top (hidden for planning content) */}
+      {needsPagination && !showAll && !isPlanningContent && (
         <Box
           sx={{
             display: 'flex',
@@ -418,11 +452,13 @@ const PaginatedOutput: React.FC<PaginatedOutputProps> = ({
             theme.palette.mode === 'dark' ? 'grey.900' : 'grey.50',
           maxHeight: maxHeight,
           overflow: 'auto',
-          ...(enableMarkdown ? markdownStyles : {}),
+          ...(enableMarkdown && !isPlanningContent ? markdownStyles : {}),
           ...paperSx,
         }}
       >
-        {enableMarkdown ? (
+        {isPlanningContent ? (
+          <PlanningOutputFormatter content={formattedContent} />
+        ) : enableMarkdown ? (
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
         ) : (
           <Typography
@@ -440,8 +476,8 @@ const PaginatedOutput: React.FC<PaginatedOutputProps> = ({
         )}
       </Paper>
 
-      {/* Pagination controls - bottom (for long content) */}
-      {needsPagination && !showAll && (
+      {/* Pagination controls - bottom (for long content, hidden for planning) */}
+      {needsPagination && !showAll && !isPlanningContent && (
         <Box
           sx={{
             display: 'flex',
@@ -462,8 +498,8 @@ const PaginatedOutput: React.FC<PaginatedOutputProps> = ({
         </Box>
       )}
 
-      {/* Show paginated button when showing all */}
-      {showAll && needsPagination && (
+      {/* Show paginated button when showing all (hidden for planning) */}
+      {showAll && needsPagination && !isPlanningContent && (
         <Box sx={{ display: 'flex', justifyContent: 'center', pt: 1 }}>
           <Button
             size="small"
