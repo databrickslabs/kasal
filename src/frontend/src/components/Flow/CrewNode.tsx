@@ -230,7 +230,7 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
         )}
 
           <Typography
-            variant="subtitle1"
+            variant="subtitle2"
             textAlign="center"
             fontWeight="bold"
             sx={{
@@ -241,8 +241,16 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
                   : executionState?.status === 'failed'
                     ? theme.palette.error.main
                     : theme.palette.primary.main,
-              wordBreak: 'break-word',
-              padding: '0 5px',
+              padding: '0 8px',
+              width: '100%',
+              // Truncate long names with ellipsis (max 2 lines)
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              lineHeight: 1.3,
+              fontSize: '0.8rem',
             }}
           >
             {data.label || 'Unnamed Crew'}

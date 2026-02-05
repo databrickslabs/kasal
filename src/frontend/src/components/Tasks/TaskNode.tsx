@@ -611,15 +611,21 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
             </IconButton>
           </Tooltip>
         </div>
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, width: '100%', overflow: 'hidden' }}>
           {getTaskIcon()}
-          <Typography variant="body2" sx={{
-            fontWeight: 500,
-            color: (theme: Theme) => theme.palette.primary.main,
-            fontSize: '0.9rem'
-          }}>
-            {data.label}
-          </Typography>
+          <Tooltip title={data.label} placement="top" arrow>
+            <Typography variant="body2" sx={{
+              fontWeight: 500,
+              color: (theme: Theme) => theme.palette.primary.main,
+              fontSize: '0.9rem',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              flex: 1,
+            }}>
+              {data.label}
+            </Typography>
+          </Tooltip>
         </Box>
 
         <Typography
