@@ -244,6 +244,32 @@ async def lifespan(app: FastAPI):
             system_logger.error(f"Failed to start HITL timeout service: {e}")
             # Don't raise - allow app to start without HITL timeout service
 
+    # Start trace broadcast service for real-time SSE updates
+    # This polls the database for new traces and broadcasts them to SSE clients
+    # Required because subprocess executions can't broadcast SSE directly
+    trace_broadcast_started = False
+    try:
+        from src.services.trace_broadcast_service import trace_broadcast_service
+        trace_broadcast_service.start()
+        trace_broadcast_started = True
+        system_logger.info("Trace broadcast service started successfully")
+    except Exception as e:
+        system_logger.error(f"Failed to start trace broadcast service: {e}")
+        # Don't raise - allow app to start without trace broadcast service
+
+    # Start execution broadcast service for real-time execution status updates
+    # This polls the database for status changes and broadcasts them to SSE clients
+    # Required because subprocess executions can't broadcast SSE directly
+    execution_broadcast_started = False
+    try:
+        from src.services.execution_broadcast_service import execution_broadcast_service
+        execution_broadcast_service.start()
+        execution_broadcast_started = True
+        system_logger.info("Execution broadcast service started successfully")
+    except Exception as e:
+        system_logger.error(f"Failed to start execution broadcast service: {e}")
+        # Don't raise - allow app to start without execution broadcast service
+
     system_logger.info("Application startup complete")
 
     try:
@@ -258,6 +284,26 @@ async def lifespan(app: FastAPI):
                     system_logger.info(f"Cleaned up {cleaned_jobs} running jobs during shutdown")
             except Exception as e:
                 system_logger.error(f"Error cleaning up jobs during shutdown: {e}")
+
+        # Stop trace broadcast service if it was started
+        if 'trace_broadcast_started' in locals() and trace_broadcast_started:
+            system_logger.info("Stopping trace broadcast service...")
+            try:
+                from src.services.trace_broadcast_service import trace_broadcast_service
+                trace_broadcast_service.stop()
+                system_logger.info("Trace broadcast service stopped successfully.")
+            except Exception as e:
+                system_logger.error(f"Error stopping trace broadcast service: {e}")
+
+        # Stop execution broadcast service if it was started
+        if 'execution_broadcast_started' in locals() and execution_broadcast_started:
+            system_logger.info("Stopping execution broadcast service...")
+            try:
+                from src.services.execution_broadcast_service import execution_broadcast_service
+                execution_broadcast_service.stop()
+                system_logger.info("Execution broadcast service stopped successfully.")
+            except Exception as e:
+                system_logger.error(f"Error stopping execution broadcast service: {e}")
 
         # Stop HITL timeout service if it was started
         if 'hitl_timeout_started' in locals() and hitl_timeout_started:

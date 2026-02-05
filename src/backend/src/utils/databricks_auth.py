@@ -905,7 +905,8 @@ def extract_user_token_from_request(request) -> Optional[str]:
 
 
 async def get_auth_context(
-    user_token: Optional[str] = None
+    user_token: Optional[str] = None,
+    group_id: Optional[str] = None
 ) -> Optional[AuthContext]:
     """
     Get authentication context with token, headers, and environment.
@@ -919,6 +920,9 @@ async def get_auth_context(
     Args:
         user_token: Optional user access token for OBO authentication.
                    If None, skips OBO and uses PAT/SPN (service-level auth).
+        group_id: Optional group_id for PAT lookup. If not provided, will try
+                 to get from UserContext. Useful for background threads where
+                 UserContext is not available.
 
     Returns:
         AuthContext with all authentication artifacts, or None if auth failed
@@ -931,6 +935,10 @@ async def get_auth_context(
         # Service-level (no OBO, uses PAT/SPN)
         auth = await get_auth_context(user_token=None)
         client = auth.get_workspace_client()
+
+        # Background thread with explicit group_id
+        auth = await get_auth_context(user_token=None, group_id="my_group_id")
+        headers = auth.get_headers()
 
         # liteLLM integration (thread-safe)
         auth = await get_auth_context(user_token=user_token)
@@ -991,25 +999,30 @@ async def get_auth_context(
             from src.db.session import async_session_factory
             from src.utils.user_context import UserContext
 
-            # Get group_id from UserContext for multi-tenant isolation
-            group_id = None
-            try:
-                group_context = UserContext.get_group_context()
-                logger.info(f"[AUTH PAT] Retrieved group_context: {group_context}")
-                if group_context and hasattr(group_context, 'primary_group_id'):
-                    group_id = group_context.primary_group_id
-                    logger.info(f"[AUTH PAT] ✓ Using group_id from UserContext: {group_id}")
-                else:
-                    logger.warning(f"[AUTH PAT] ✗ No group_context or primary_group_id. group_context={group_context}")
-            except Exception as e:
-                logger.warning(f"[AUTH PAT] ✗ Could not get group_id from UserContext: {e}")
+            # Get group_id for multi-tenant isolation
+            # Priority: 1. Passed group_id parameter (for background threads)
+            #           2. UserContext (for request context)
+            effective_group_id = group_id  # Use passed group_id if available
+            if not effective_group_id:
+                try:
+                    group_context = UserContext.get_group_context()
+                    logger.info(f"[AUTH PAT] Retrieved group_context: {group_context}")
+                    if group_context and hasattr(group_context, 'primary_group_id'):
+                        effective_group_id = group_context.primary_group_id
+                        logger.info(f"[AUTH PAT] ✓ Using group_id from UserContext: {effective_group_id}")
+                    else:
+                        logger.warning(f"[AUTH PAT] ✗ No group_context or primary_group_id. group_context={group_context}")
+                except Exception as e:
+                    logger.warning(f"[AUTH PAT] ✗ Could not get group_id from UserContext: {e}")
+            else:
+                logger.info(f"[AUTH PAT] ✓ Using passed group_id parameter: {effective_group_id}")
 
-            if group_id:
-                logger.info(f"[AUTH PAT] Attempting to load PAT from database with group_id={group_id}")
+            if effective_group_id:
+                logger.info(f"[AUTH PAT] Attempting to load PAT from database with group_id={effective_group_id}")
                 logger.info("[AUTH PAT] ABOUT TO CREATE async_session_factory() - if hang occurs, it's here")
                 async with async_session_factory() as session:
                     logger.info("[AUTH PAT] async_session_factory() created successfully")
-                    api_service = ApiKeysService(session, group_id=group_id)
+                    api_service = ApiKeysService(session, group_id=effective_group_id)
 
                     for key_name in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY"]:
                         try:
@@ -1019,15 +1032,15 @@ async def get_auth_context(
                             if api_key and api_key.encrypted_value:
                                 from src.utils.encryption_utils import EncryptionUtils
                                 pat_token = EncryptionUtils.decrypt_value(api_key.encrypted_value)
-                                logger.info(f"[AUTH] Priority 2: ✓ PAT loaded from database ({key_name}) with group_id={group_id}")
+                                logger.info(f"[AUTH] Priority 2: ✓ PAT loaded from database ({key_name}) with group_id={effective_group_id}")
                                 break
                         except Exception as e:
                             logger.warning(f"[AUTH PAT] Error loading {key_name}: {e}")
 
                 if not pat_token:
-                    logger.warning(f"[AUTH] Priority 2: ✗ No PAT found in database with group_id={group_id}")
+                    logger.warning(f"[AUTH] Priority 2: ✗ No PAT found in database with group_id={effective_group_id}")
             else:
-                logger.warning("[AUTH] Priority 2: ✗ No group_id available for PAT lookup")
+                logger.warning("[AUTH] Priority 2: ✗ No group_id available for PAT lookup (neither passed nor from UserContext)")
 
         except Exception as e:
             logger.error(f"[AUTH PAT] Error during PAT lookup: {e}")
