@@ -101,7 +101,8 @@
       "connectionError": "فشل الاتصال بتدفق السجلات. يرجى المحاولة مرة أخرى.",
       "autoScrollOn": "التمرير التلقائي مفعل",
       "autoScrollOff": "التمرير التلقائي معطل",
-      "refreshLogs": "تحديث السجلات"
+      "refreshLogs": "تحديث السجلات",
+      "downloadLogs": "تحميل السجلات"
     }
   },
   "tools": {

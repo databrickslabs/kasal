@@ -101,7 +101,8 @@
       "connectionError": "连接到日志流失败。请重试。",
       "autoScrollOn": "自动滚动开启",
       "autoScrollOff": "自动滚动关闭",
-      "refreshLogs": "刷新日志"
+      "refreshLogs": "刷新日志",
+      "downloadLogs": "下载日志"
     }
   },
   "tools": {

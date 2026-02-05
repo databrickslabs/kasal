@@ -107,7 +107,8 @@
       "connectionError": "Error al conectar al flujo de registros. Por favor, inténtelo de nuevo.",
       "autoScrollOn": "Desplazamiento automático ACTIVADO",
       "autoScrollOff": "Desplazamiento automático DESACTIVADO",
-      "refreshLogs": "Actualizar Registros"
+      "refreshLogs": "Actualizar Registros",
+      "downloadLogs": "Descargar Registros"
     }
   },
   "tools": {

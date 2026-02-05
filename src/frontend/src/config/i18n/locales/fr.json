@@ -107,7 +107,8 @@
       "connectionError": "Échec de la connexion au flux de journaux. Veuillez réessayer.",
       "autoScrollOn": "Défilement automatique ACTIVÉ",
       "autoScrollOff": "Défilement automatique DÉSACTIVÉ",
-      "refreshLogs": "Actualiser les journaux"
+      "refreshLogs": "Actualiser les journaux",
+      "downloadLogs": "Télécharger les journaux"
     }
   },
   "tools": {
