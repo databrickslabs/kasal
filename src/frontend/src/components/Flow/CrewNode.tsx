@@ -37,8 +37,26 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
   const isExecuting = useFlowExecutionStore(state => state.isExecuting);
 
   // Find the execution state for this crew node by matching crew name
+  // Try multiple key formats for robust matching
   const nodeLabel = data.label || crewName || '';
-  const executionState = crewNodeStates.get(nodeLabel) || crewNodeStates.get(crewName);
+  let executionState = crewNodeStates.get(nodeLabel)
+    || crewNodeStates.get(crewName)
+    || crewNodeStates.get(nodeLabel.toLowerCase())
+    || crewNodeStates.get(crewName.toLowerCase());
+
+  // If still not found, search through all keys for a case-insensitive match
+  if (!executionState && crewNodeStates.size > 0) {
+    const nodeLabelLower = nodeLabel.toLowerCase();
+    const crewNameLower = crewName.toLowerCase();
+    for (const [key, state] of crewNodeStates.entries()) {
+      const keyLower = key.toLowerCase();
+      if (keyLower === nodeLabelLower || keyLower === crewNameLower ||
+          keyLower.includes(nodeLabelLower) || nodeLabelLower.includes(keyLower)) {
+        executionState = state;
+        break;
+      }
+    }
+  }
 
   const { deleteElements } = useReactFlow();
 
@@ -53,19 +71,22 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
     switch (status) {
       case 'running':
         return {
-          borderColor: theme.palette.primary.main,
-          boxShadow: `0 0 0 2px ${theme.palette.primary.main}, 0 0 12px ${theme.palette.primary.main}40`,
+          borderColor: theme.palette.info.main,
+          boxShadow: `0 0 0 2px ${theme.palette.info.main}, 0 0 12px ${theme.palette.info.main}40`,
+          background: `linear-gradient(135deg, ${theme.palette.info.light}15, ${theme.palette.info.main}10)`,
           animation: 'pulse 2s infinite',
         };
       case 'completed':
         return {
           borderColor: theme.palette.success.main,
           boxShadow: `0 0 0 2px ${theme.palette.success.main}`,
+          background: `linear-gradient(135deg, ${theme.palette.success.light}15, ${theme.palette.success.main}10)`,
         };
       case 'failed':
         return {
           borderColor: theme.palette.error.main,
           boxShadow: `0 0 0 2px ${theme.palette.error.main}`,
+          background: `linear-gradient(135deg, ${theme.palette.error.light}15, ${theme.palette.error.main}10)`,
         };
       case 'pending':
         return {
@@ -85,7 +106,7 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
 
     switch (status) {
       case 'running':
-        return <CircularProgress size={14} sx={{ color: theme.palette.primary.main }} />;
+        return <CircularProgress size={14} sx={{ color: theme.palette.info.main }} />;
       case 'completed':
         return <CheckCircleIcon sx={{ ...iconStyle, color: theme.palette.success.main }} />;
       case 'failed':
@@ -122,9 +143,9 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
           alignItems: 'center',
           borderRadius: '12px',
           border: `1px solid ${statusStyles.borderColor || theme.palette.divider}`,
-          background: selected
+          background: statusStyles.background || (selected
             ? `${theme.palette.primary.light}20`
-            : theme.palette.background.paper,
+            : theme.palette.background.paper),
           boxShadow: statusStyles.boxShadow || (selected
             ? `0 0 0 2px ${theme.palette.primary.main}`
             : 1),
@@ -235,7 +256,7 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
             fontWeight="bold"
             sx={{
               color: executionState?.status === 'running'
-                ? theme.palette.primary.main
+                ? theme.palette.info.main
                 : executionState?.status === 'completed'
                   ? theme.palette.success.main
                   : executionState?.status === 'failed'
