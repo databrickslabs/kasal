@@ -61,7 +61,11 @@ class Agent(Base):
     
     # Knowledge sources
     knowledge_sources = Column(JSON, default=list)
-    
+
+    # Date awareness settings (CrewAI 1.9+)
+    inject_date = Column(Boolean, default=True)  # Injects current date into agent's context (enabled by default)
+    date_format = Column(String, nullable=True)  # Custom date format (e.g., '%B %d, %Y')
+
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
