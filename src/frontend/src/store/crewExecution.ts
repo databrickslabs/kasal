@@ -533,7 +533,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           jobId: response.execution_id || response.job_id,
           jobName: `Flow Execution (${new Date().toLocaleTimeString()})`,
           status: 'running',
-          groupId: localStorage.getItem('selectedGroupId') // Include the group ID for security filtering
+          groupId: localStorage.getItem('selectedGroupId'), // Include the group ID for security filtering
+          isFlow: true // Flag to indicate this is a flow execution
         }
       });
       console.log('[FlowExecution] Dispatching jobCreated event:', jobCreatedEvent.detail);
