@@ -201,10 +201,8 @@ export const useSSE = <T = any>(
     });
 
     eventSource.addEventListener('trace', (event: any) => {
-      console.log('[SSE Hook] Raw trace event received:', event);
       try {
         const data = JSON.parse(event.data);
-        console.log('[SSE Hook] Parsed trace data:', data);
         onMessageRef.current({
           data,
           event: 'trace',

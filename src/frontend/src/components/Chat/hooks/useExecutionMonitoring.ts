@@ -42,15 +42,6 @@ export const useExecutionMonitoring = (
         relevantTraces.forEach((trace) => {
           // Extract task status from trace events
           if (trace.event_type) {
-            // DEBUG: Log all traces
-            console.log(`[DEBUG useExecutionMonitoring] Processing trace:`, {
-              event_type: trace.event_type,
-              event_context: trace.event_context,
-              event_source: trace.event_source,
-              trace_metadata: trace.trace_metadata,
-              created_at: trace.created_at
-            });
-            
             // Check for task-related events
             const isTaskEvent = trace.event_type === 'task_started' || 
                                trace.event_type === 'task_completed' || 
@@ -62,33 +53,25 @@ export const useExecutionMonitoring = (
               // Agent execution events are handled below
             }
             
-            if (isTaskEvent) {
-              console.log(`[DEBUG useExecutionMonitoring] Task event detected: ${trace.event_type}, context: "${trace.event_context}"`);
-            }
-            
             if (isTaskEvent && trace.event_context) {
               // Extract task name from event_context
               let taskName = trace.event_context;
-              
+
+              // Track if this is a completion event based on original event_context
+              // We need to remember this because taskName gets replaced with actual task name
+              const isCompletionEventFromContext = taskName === 'completing_task' || taskName === 'task_completion';
+              const isStartEventFromContext = taskName === 'starting_task';
+
               // Handle different event_context formats based on backend patterns
-              if (taskName === 'starting_task' || taskName === 'completing_task') {
-                console.log(`[DEBUG useExecutionMonitoring] Generic context "${taskName}" - checking metadata`);
-                console.log(`[DEBUG useExecutionMonitoring] Full trace_metadata:`, trace.trace_metadata);
-                
+              // Note: Backend sends 'task_completion' via AgentExecutionCompletedEvent
+              if (taskName === 'starting_task' || taskName === 'completing_task' || taskName === 'task_completion') {
                 // These are generic contexts used by logging_callbacks.py
                 // The actual task name should be in trace_metadata or output
                 if (trace.trace_metadata && typeof trace.trace_metadata === 'object') {
                   const metadata = trace.trace_metadata as Record<string, unknown>;
-                  console.log(`[DEBUG useExecutionMonitoring] Metadata keys:`, Object.keys(metadata));
-                  
                   if (metadata.task_name) {
                     taskName = String(metadata.task_name);
-                    console.log(`[DEBUG useExecutionMonitoring] Extracted task_name from metadata: "${taskName}"`);
-                  } else {
-                    console.log(`[DEBUG useExecutionMonitoring] No task_name in metadata, taskName remains: "${taskName}"`);
                   }
-                } else {
-                  console.log(`[DEBUG useExecutionMonitoring] No metadata object available`);
                 }
               } else if (taskName.includes('task:')) {
                 // Extract task name after "task:" for execution_callback.py format
@@ -98,21 +81,30 @@ export const useExecutionMonitoring = (
               
               // Skip if it's not a real task name
               let skipTrace = false;
-              if (!taskName || 
-                  taskName === 'task_completion' || 
-                  taskName === 'starting_task' || 
+              if (!taskName ||
+                  taskName === 'task_completion' ||
+                  taskName === 'starting_task' ||
                   taskName === 'completing_task' ||
                   taskName.length < 5) { // Too short to be a real task
-                // Try to extract from output if available
-                if (typeof trace.output === 'object' && trace.output !== null && 'extra_data' in trace.output) {
+                // First try trace_metadata (where backend puts task_name)
+                if (trace.trace_metadata && typeof trace.trace_metadata === 'object') {
+                  const metadata = trace.trace_metadata as Record<string, unknown>;
+                  if (metadata.task_name) {
+                    taskName = String(metadata.task_name);
+                    skipTrace = false;
+                  }
+                }
+                // Fallback: Try to extract from output.extra_data if still not found
+                if (skipTrace !== false && typeof trace.output === 'object' && trace.output !== null && 'extra_data' in trace.output) {
                   const extraData = trace.output.extra_data as Record<string, unknown>;
                   if (extraData?.task_name) {
                     taskName = String(extraData.task_name);
+                    skipTrace = false;
                   } else {
                     // Skip this trace as it doesn't have a valid task name
                     skipTrace = true;
                   }
-                } else {
+                } else if (skipTrace !== false) {
                   // Skip this trace as it doesn't have a valid task name
                   skipTrace = true;
                 }
@@ -132,14 +124,11 @@ export const useExecutionMonitoring = (
                 const metadata = trace.trace_metadata as Record<string, unknown>;
                 if (metadata.task_id && typeof metadata.task_id === 'string') {
                   taskIds.push(metadata.task_id);
-                  console.log(`[DEBUG useExecutionMonitoring] Found task_id in metadata: ${metadata.task_id}`);
                 }
                 // CRITICAL: Add the frontend_task_id if available
                 // This is the original task ID from the workflow designer
                 if (metadata.frontend_task_id && typeof metadata.frontend_task_id === 'string') {
-                  console.log(`[DEBUG useExecutionMonitoring] Raw frontend_task_id from metadata: "${metadata.frontend_task_id}"`);
                   taskIds.push(metadata.frontend_task_id);
-                  console.log(`[DEBUG useExecutionMonitoring] Added frontend_task_id to taskIds: ${metadata.frontend_task_id}`);
                 }
               }
               
@@ -203,18 +192,19 @@ export const useExecutionMonitoring = (
               // Remove duplicates
               const uniqueTaskIds = Array.from(new Set(taskIds));
               
-              // Determine status
+              // Determine status - check both event_type AND event_context
               let status: 'running' | 'completed' | 'failed' = 'running';
-              if (trace.event_type === 'task_completed') {
+              if (trace.event_type === 'task_completed' || isCompletionEventFromContext) {
+                // Mark as completed if event_type is task_completed OR if event_context was 'task_completion'/'completing_task'
                 status = 'completed';
               } else if (trace.event_type === 'task_failed') {
                 status = 'failed';
-              } else if (trace.event_type === 'task_started') {
+              } else if (trace.event_type === 'task_started' || isStartEventFromContext) {
                 status = 'running';
               } else if (trace.event_type === 'agent_execution') {
                 // For agent_execution, check if it contains Final Answer (task completion)
                 status = 'running'; // Default to running
-                
+
                 // Check various output formats for Final Answer
                 if (typeof trace.output === 'object' && trace.output !== null) {
                   let outputText = '';
@@ -228,7 +218,7 @@ export const useExecutionMonitoring = (
                     // Try to stringify the entire output
                     outputText = JSON.stringify(trace.output);
                   }
-                  
+
                   if (outputText.includes('Final Answer:') || outputText.includes('## Final Answer')) {
                     status = 'completed';
                   }
@@ -239,21 +229,14 @@ export const useExecutionMonitoring = (
                   }
                 }
               }
-              
-              
+
               // Update state for all possible task ID formats
-              console.log(`[DEBUG useExecutionMonitoring] About to update task states for ${uniqueTaskIds.length} IDs`);
-              console.log(`[DEBUG useExecutionMonitoring] Task IDs to update:`, uniqueTaskIds.slice(0, 5));
-              
               uniqueTaskIds.forEach(id => {
                 // Get existing state to preserve previous status if needed
                 const existingState = useTaskExecutionStore.getState().getTaskStatus(id);
-                
-                console.log(`[DEBUG useExecutionMonitoring] Storing task state for ID: "${id}" - existing state:`, existingState, 'new status:', status);
-                
+
                 // Only update if status has changed or if it's a new task
                 if (!existingState || existingState.status !== status) {
-                  console.log(`[DEBUG useExecutionMonitoring] Actually calling setTaskState for "${id}" with status:`, status);
                   setTaskState(id, {
                     status,
                     task_name: taskName,
@@ -282,10 +265,9 @@ export const useExecutionMonitoring = (
                 const taskIds = [taskId, taskName];  // Include task name itself
                 
                 // CRITICAL: Add the frontend_task_id if available
-                // This is the original task ID from the workflow designer  
+                // This is the original task ID from the workflow designer
                 if (extraData.frontend_task_id && typeof extraData.frontend_task_id === 'string') {
                   taskIds.push(String(extraData.frontend_task_id));
-                  console.log(`[DEBUG useExecutionMonitoring] Found frontend_task_id in extra_data: ${extraData.frontend_task_id}`);
                 }
                 
                 // Add lowercase version
@@ -516,15 +498,130 @@ export const useExecutionMonitoring = (
 
     const handleTraceUpdate = (event: CustomEvent) => {
       const { jobId, trace } = event.detail;
+
       if (jobId === executingJobId && trace) {
         // Generate consistent trace ID
         const traceId = `${trace.id}-${trace.created_at}`;
-        
+
         // Check if this trace has already been processed
         if (processedTraceIds.has(traceId)) {
           return;
         }
-        
+
+        // Extract task status from trace events (same logic as monitorTraces)
+        if (trace.event_type) {
+          const isTaskEvent = trace.event_type === 'task_started' ||
+                             trace.event_type === 'task_completed' ||
+                             trace.event_type === 'task_failed' ||
+                             trace.event_type === 'task_status';
+
+          if (isTaskEvent && trace.event_context) {
+            let taskName = trace.event_context;
+
+            // Track if this is a completion event based on original event_context
+            // We need to remember this because taskName gets replaced with actual task name
+            const isCompletionEventFromContext = taskName === 'completing_task' || taskName === 'task_completion';
+            const isStartEventFromContext = taskName === 'starting_task';
+
+            // Handle generic context formats (including 'task_completion' from AgentExecutionCompletedEvent)
+            if (taskName === 'starting_task' || taskName === 'completing_task' || taskName === 'task_completion') {
+              if (trace.trace_metadata && typeof trace.trace_metadata === 'object') {
+                const metadata = trace.trace_metadata as Record<string, unknown>;
+                if (metadata.task_name) {
+                  taskName = String(metadata.task_name);
+                }
+              }
+            } else if (taskName.includes('task:')) {
+              taskName = taskName.split('task:')[1]?.trim() || taskName;
+            }
+
+            // Skip if not a valid task name
+            let skipTrace = false;
+            if (!taskName ||
+                taskName === 'task_completion' ||
+                taskName === 'starting_task' ||
+                taskName === 'completing_task' ||
+                taskName.length < 5) {
+              // First try trace_metadata (where backend puts task_name)
+              if (trace.trace_metadata && typeof trace.trace_metadata === 'object') {
+                const metadata = trace.trace_metadata as Record<string, unknown>;
+                if (metadata.task_name) {
+                  taskName = String(metadata.task_name);
+                  skipTrace = false;
+                }
+              }
+              // Fallback to output.extra_data for legacy format
+              if (skipTrace !== false && typeof trace.output === 'object' && trace.output !== null && 'extra_data' in trace.output) {
+                const extraData = trace.output.extra_data as Record<string, unknown>;
+                if (extraData?.task_name) {
+                  taskName = String(extraData.task_name);
+                } else {
+                  skipTrace = true;
+                }
+              } else if (skipTrace !== false) {
+                skipTrace = true;
+              }
+            }
+
+            if (!skipTrace) {
+              // Generate multiple possible task IDs for matching
+              const taskIds: string[] = [taskName];
+
+              // Add task_id from metadata if available
+              if (trace.trace_metadata && typeof trace.trace_metadata === 'object') {
+                const metadata = trace.trace_metadata as Record<string, unknown>;
+                if (metadata.task_id && typeof metadata.task_id === 'string') {
+                  taskIds.push(metadata.task_id);
+                }
+                if (metadata.frontend_task_id && typeof metadata.frontend_task_id === 'string') {
+                  taskIds.push(String(metadata.frontend_task_id));
+                }
+              }
+
+              // Add variations for better matching
+              const words = taskName.split(/\s+/).filter((w: string) => w.length > 0);
+              for (let i = 1; i <= Math.min(5, words.length); i++) {
+                const shortLabel = words.slice(0, i).join(' ');
+                taskIds.push(shortLabel);
+                taskIds.push(shortLabel.toLowerCase());
+              }
+
+              const labelBasedId = `task_${taskName.replace(/\s+/g, '_').toLowerCase()}`;
+              taskIds.push(labelBasedId);
+              taskIds.push(taskName.toLowerCase());
+              taskIds.push(taskName.replace(/_/g, ' '));
+
+              // Determine status - check both event_type AND event_context
+              let status: 'running' | 'completed' | 'failed' = 'running';
+              if (trace.event_type === 'task_completed' || isCompletionEventFromContext) {
+                status = 'completed';
+              } else if (trace.event_type === 'task_failed') {
+                status = 'failed';
+              } else if (trace.event_type === 'task_started' || isStartEventFromContext) {
+                status = 'running';
+              }
+
+              // Update state for all possible task ID formats
+              const uniqueTaskIds = Array.from(new Set(taskIds));
+              uniqueTaskIds.forEach(id => {
+                const existingState = useTaskExecutionStore.getState().getTaskStatus(id);
+                if (!existingState || existingState.status !== status) {
+                  setTaskState(id, {
+                    status,
+                    task_name: taskName,
+                    ...(status === 'running' && { started_at: trace.created_at }),
+                    ...(status === 'completed' && { completed_at: trace.created_at }),
+                    ...(status === 'failed' && { failed_at: trace.created_at }),
+                    ...(existingState && {
+                      ...(existingState.started_at && { started_at: existingState.started_at }),
+                    })
+                  });
+                }
+              });
+            }
+          }
+        }
+
         const traceMessage: ChatMessage = {
           id: `trace-${traceId}`,
           type: 'trace',
@@ -536,10 +633,10 @@ export const useExecutionMonitoring = (
           eventType: trace.event_type,
           jobId
         };
-        
+
         addMessage(sessionId, traceMessage);
         saveMessageToBackend(traceMessage);
-        
+
         // Mark this trace as processed
         setProcessedTraceIds(prev => {
           const newSet = new Set(prev);
