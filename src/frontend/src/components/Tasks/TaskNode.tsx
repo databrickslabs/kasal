@@ -104,8 +104,6 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
 
   // Task execution state - try multiple ID formats for compatibility
   const taskStatus = useTaskExecutionStore(state => {
-    // DEBUG: Log what we're looking for
-
     let status = null;
 
     // Try with the label first (most reliable match with backend task names)
@@ -616,7 +614,13 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
           <Tooltip title={data.label} placement="top" arrow>
             <Typography variant="body2" sx={{
               fontWeight: 500,
-              color: (theme: Theme) => theme.palette.primary.main,
+              color: (theme: Theme) => {
+                // Match CrewNode's status-based text color
+                if (taskStatus?.status === 'running') return theme.palette.info.main;
+                if (taskStatus?.status === 'completed') return theme.palette.success.main;
+                if (taskStatus?.status === 'failed') return theme.palette.error.main;
+                return theme.palette.primary.main;
+              },
               fontSize: '0.9rem',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
