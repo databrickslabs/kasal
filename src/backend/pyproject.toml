@@ -45,10 +45,9 @@ dependencies = [
 
     # AI/ML
     "litellm==1.74.9",
-    "crewai[tools]>=0.193.2",
-    "crewai_tools>=0.73.1",
+    "crewai[tools]>=1.9.3",  # [tools] extra installs crewai-tools package
     "langchain",
-    "mcp==1.9.0",
+    "mcp>=1.23.1,<1.24.0",  # Required by crewai>=1.9.3
     "mcpadapt",
 
     # DSPy

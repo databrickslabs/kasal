@@ -10,21 +10,20 @@ databricks
 databricks-sdk>=0.65.0  # Latest version - Lakebase features may require additional setup
 databricks-vectorsearch
 croniter
-crewai[tools]>=0.193.2
+crewai[tools]>=1.9.3  # [tools] extra installs crewai-tools package
 pydantic[email]
 passlib
 email-validator
 google-api-python-client
 pysendpulse
 langchain
-crewai_tools>=0.73.1
 nixtla
 greenlet
 wheel
 selenium
 python-pptx
 urllib3>=1.26.6
-mcp==1.9.0
+mcp>=1.23.1,<1.24.0  # Required by crewai>=1.9.3
 mcpadapt
 pytest
 pytest-asyncio
