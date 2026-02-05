@@ -71,6 +71,10 @@ export interface AgentYaml {
   knowledge_sources?: any[];
   max_context_window_size?: number;
   max_tokens?: number;
+  /** Injects current date into agent's context for time-sensitive tasks */
+  inject_date?: boolean;
+  /** Custom date format string (e.g., '%B %d, %Y') */
+  date_format?: string;
 }
 
 export interface TaskYaml {
@@ -227,6 +231,10 @@ export interface AgentNodeData {
   knowledge_sources?: KnowledgeSource[];
   tools?: string[];
   tool_configs?: Record<string, unknown>;  // User-specific tool configuration overrides
+  /** Injects current date into agent's context for time-sensitive tasks */
+  inject_date?: boolean;
+  /** Custom date format string (e.g., '%B %d, %Y') */
+  date_format?: string;
   onEdit?: (agent: FormAgent) => void;
 }
 

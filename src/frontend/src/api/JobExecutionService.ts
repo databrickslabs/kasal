@@ -207,6 +207,9 @@ export class JobExecutionService {
               max_reasoning_attempts: agentData.max_reasoning_attempts,
               embedder_config: agentData.embedder_config,
               knowledge_sources: agentData.knowledge_sources || [],
+              // Date awareness settings (CrewAI 1.9+) - inject current date into agent context
+              inject_date: agentData.inject_date ?? true,  // Default to true for date awareness
+              date_format: agentData.date_format,
             };
             
             console.log(`[DEBUG] AgentConfig for ${agentName} knowledge_sources:`, agentConfig.knowledge_sources);
