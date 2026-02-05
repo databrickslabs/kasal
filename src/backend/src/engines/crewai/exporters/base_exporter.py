@@ -170,7 +170,7 @@ class BaseExporter(ABC):
         """
         imports = []
 
-        # Standard CrewAI tools
+        # Standard CrewAI tools (crewai.tools since v1.0.0)
         standard_tools = {
             'SerperDevTool': 'from crewai_tools import SerperDevTool',
             'ScrapeWebsiteTool': 'from crewai_tools import ScrapeWebsiteTool',

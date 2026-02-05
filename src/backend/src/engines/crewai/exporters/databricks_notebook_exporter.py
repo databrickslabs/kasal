@@ -731,7 +731,7 @@ The following custom tools are used in this crew: {', '.join(custom_tools)}
 TODO: Add custom tool implementations here
 """
 
-from crewai.tools import BaseTool
+from crewai_tools import BaseTool
 from typing import Type
 from pydantic import BaseModel, Field
 
