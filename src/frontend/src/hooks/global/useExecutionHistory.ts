@@ -25,7 +25,7 @@ export const useRunHistory = () => {
     runHistory,
     isLoading,
     error,
-    fetchRunHistory,
+    fetchInitialRunHistory,
     setError
   } = useRunStatusStore();
 
@@ -54,15 +54,15 @@ export const useRunHistory = () => {
   const fetchRuns = useCallback(async () => {
     try {
       historyLogger.debug('fetchRuns called, updating via store...');
-      // Use the store's built-in fetchRunHistory method
-      await fetchRunHistory();
-      
+      // Use the store's built-in fetchInitialRunHistory method
+      await fetchInitialRunHistory();
+
       // Get the latest state from the store after fetching
       const storeState = useRunStatusStore.getState();
-      
+
       // Log the result
-      historyLogger.debug(`fetchRunHistory completed with ${storeState.runHistory.length} items`);
-      
+      historyLogger.debug(`fetchInitialRunHistory completed with ${storeState.runHistory.length} items`);
+
       // Return a properly structured response using the store's data
       return {
         runs: storeState.runHistory,
@@ -73,7 +73,7 @@ export const useRunHistory = () => {
     } catch (err) {
       historyLogger.error('Error in fetchRuns:', err);
       toast.error(t('runHistory.fetchRunsError'));
-      
+
       // Even on error, return the current state
       const currentState = useRunStatusStore.getState();
       return {
@@ -83,7 +83,7 @@ export const useRunHistory = () => {
         offset: 0
       };
     }
-  }, [fetchRunHistory, t]);
+  }, [fetchInitialRunHistory, t]);
 
   const handlePageChange = (_event: React.ChangeEvent<unknown>, value: number) => {
     setPage(value);
@@ -114,7 +114,7 @@ export const useRunHistory = () => {
       });
       
       // Then fetch from scratch to ensure we have the latest data
-      await fetchRunHistory();
+      await fetchInitialRunHistory();
     } catch (err) {
       historyLogger.error('Error deleting run:', err);
       toast.error(t('runHistory.deleteRunError'));
@@ -139,7 +139,7 @@ export const useRunHistory = () => {
       });
       
       // Then fetch from scratch to ensure we have the latest data
-      await fetchRunHistory();
+      await fetchInitialRunHistory();
       
       toast.success(t('runHistory.deleteAllSuccess'));
     } catch (err) {
@@ -328,7 +328,7 @@ export const useRunHistory = () => {
     handleDeleteRun,
     getCurrentPageJobs,
     handleSort,
-    refresh: fetchRunHistory,
+    refresh: fetchInitialRunHistory,
     setError
   };
 }; 
