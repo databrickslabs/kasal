@@ -17,6 +17,7 @@ from crewai.tasks.task_output import TaskOutput
 from src.core.logger import LoggerManager
 from src.engines.crewai.helpers.tool_helpers import resolve_tool_ids_to_names
 from src.core.unit_of_work import UnitOfWork
+from src.engines.crewai.guardrails.guardrail_wrapper import GuardrailWrapper
 
 
 # Get loggers from the centralized logging system
@@ -501,73 +502,17 @@ async def create_task(
             # Create the guardrail instance
             guardrail = GuardrailFactory.create_guardrail(guardrail_config)
             if guardrail:
-                # Create a validation callback for this guardrail that returns tuple format
-                # compatible with CrewAI's native guardrail mechanism
-                def validate_with_guardrail(output, guardrail=guardrail):
-                    """Validate task output with the specified guardrail"""
-                    # Direct file writing for debugging
-                    import datetime
-                    import os
-                    import traceback
-                    
-                    # Get log directory from the logger manager instead of hardcoding
-                    logger_manager = LoggerManager.get_instance()
-                    log_dir = logger_manager._log_dir
-                    os.makedirs(log_dir, exist_ok=True)
-                    
-                    # Write to debug log
-                    with open(os.path.join(log_dir, "guardrail_debug.log"), "a") as f:
-                        f.write(f"\n\n{'='*50}\n")
-                        f.write(f"VALIDATION CALLBACK CALLED at {datetime.datetime.now().isoformat()}\n")
-                        f.write(f"Task: {task_key}\n")
-                        f.write(f"Output type: {type(output)}\n")
-                        f.write(f"Output: {str(output)[:1000]}\n")
-                        f.write(f"{'='*50}\n")
-                    
-                    guardrail_logger.info("=" * 80)
-                    guardrail_logger.info(f"VALIDATING TASK {task_key} OUTPUT WITH GUARDRAIL")
-                    guardrail_logger.info("=" * 80)
-                    guardrail_logger.info(f"Task output type: {type(output)}")
-                    guardrail_logger.info(f"Task output: {output}")
-                    
-                    # Call the guardrail's validate method
-                    try:
-                        result = guardrail.validate(output)
-                        
-                        if result.get("valid", False):
-                            guardrail_logger.info(f"Task {task_key} output passed guardrail validation")
-                            guardrail_logger.info(f"Validation result: {result}")
-                            # Direct file writing for debugging
-                            with open(os.path.join(log_dir, "guardrail_debug.log"), "a") as f:
-                                f.write(f"Validation PASSED\n")
-                            
-                            # Return a tuple indicating success (True, output)
-                            return (True, output)
-                        else:
-                            # If validation fails, return a tuple for CrewAI guardrail mechanism
-                            feedback = result.get("feedback", "Output does not meet requirements. Please try again.")
-                            guardrail_logger.warning(f"Task {task_key} output failed guardrail validation")
-                            guardrail_logger.warning(f"Validation feedback: {feedback}")
-                            guardrail_logger.info(f"Full validation result: {result}")
-                            # Direct file writing for debugging
-                            with open(os.path.join(log_dir, "guardrail_debug.log"), "a") as f:
-                                f.write(f"Validation FAILED: {feedback}\n")
-                            
-                            # Return a tuple indicating failure (False, error_message)
-                            return (False, feedback)
-                    except Exception as e:
-                        guardrail_logger.error(f"Exception during guardrail validation: {str(e)}")
-                        guardrail_logger.error(f"Stack trace: {traceback.format_exc()}")
-                        # Direct file writing for debugging
-                        with open(os.path.join(log_dir, "guardrail_debug.log"), "a") as f:
-                            f.write(f"Validation ERROR: {str(e)}\n")
-                        
-                        # Return a tuple indicating failure (False, error_message)
-                        return (False, f"Validation error: {str(e)}")
-                
+                # Create a callable wrapper for this guardrail
+                # Using GuardrailWrapper class instead of a closure because:
+                # CrewAI's LLMGuardrailStartedEvent.__init__ calls inspect.getsource()
+                # on the guardrail function, which fails for closures with
+                # "OSError: could not get source code". The wrapper class is defined
+                # in a source file, so getsource() can inspect it properly.
+                guardrail_wrapper = GuardrailWrapper(guardrail, task_key)
+
                 # Instead of setting as callback, set as guardrail function
                 # This integrates with CrewAI's native retry mechanism
-                task_args['guardrail'] = validate_with_guardrail
+                task_args['guardrail'] = guardrail_wrapper
                 
                 # Make sure retry_on_fail is set to True
                 if 'retry_on_fail' not in task_config:
