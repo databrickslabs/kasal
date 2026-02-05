@@ -45,6 +45,7 @@ import { useUILayoutStore } from '../../store/uiLayout';
 import { useUIFitView } from '../../hooks/workflow/useUIFitView';
 import { useWorkflowLayoutEvents } from '../../hooks/workflow/useWorkflowLayoutEvents';
 import { useTaskExecutionStore } from '../../store/taskExecutionStore';
+import { useFlowExecutionStore } from '../../store/flowExecutionStore';
 
 // Dialog Imports
 import AgentDialog from '../Agents/AgentDialog';
@@ -114,7 +115,10 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   const {
     tabs,
     getActiveTab,
-    updateTabExecutionStatus
+    updateTabExecutionStatus,
+    updateTabFlowNodes,
+    updateTabFlowEdges,
+    updateTabViewMode
   } = useTabManagerStore();
 
   // Use run status store for job monitoring (SSE-based, no polling needed)
@@ -135,9 +139,32 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     manuallyPositionedNodes
   } = useFlowManager({ showErrorMessage });
 
-  // CRITICAL: Separate state for Flow Canvas (completely independent from crew tabs)
-  const [flowNodes, setFlowNodes] = useState<_Node[]>([]);
-  const [flowEdges, setFlowEdges] = useState<_Edge[]>([]);
+  // CRITICAL: Flow Canvas state from tab manager (persisted per tab)
+  // Get the active tab's flow nodes/edges
+  const activeTab = getActiveTab();
+  const flowNodes = activeTab?.flowNodes || [];
+  const flowEdges = activeTab?.flowEdges || [];
+
+  // Wrappers to update flow nodes/edges in the tab manager
+  const setFlowNodes = useCallback((nodesOrUpdater: _Node[] | ((prev: _Node[]) => _Node[])) => {
+    const tab = getActiveTab();
+    if (!tab) return;
+
+    const newNodes = typeof nodesOrUpdater === 'function'
+      ? nodesOrUpdater(tab.flowNodes || [])
+      : nodesOrUpdater;
+    updateTabFlowNodes(tab.id, newNodes);
+  }, [getActiveTab, updateTabFlowNodes]);
+
+  const setFlowEdges = useCallback((edgesOrUpdater: _Edge[] | ((prev: _Edge[]) => _Edge[])) => {
+    const tab = getActiveTab();
+    if (!tab) return;
+
+    const newEdges = typeof edgesOrUpdater === 'function'
+      ? edgesOrUpdater(tab.flowEdges || [])
+      : edgesOrUpdater;
+    updateTabFlowEdges(tab.id, newEdges);
+  }, [getActiveTab, updateTabFlowEdges]);
 
   // Flow canvas change handlers
   const onFlowNodesChange = useCallback((changes: NodeChange[]) => {
@@ -232,6 +259,17 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   // Use tab sync to keep tabs and flow manager in sync
   const { activeTabId: _activeTabId } = useTabSync({ nodes, edges, setNodes, setEdges });
 
+  // Restore view mode when switching tabs
+  React.useEffect(() => {
+    const tab = getActiveTab();
+    if (tab && tab.viewMode) {
+      const shouldShowFlows = tab.viewMode === 'flow';
+      if (areFlowsVisible !== shouldShowFlows) {
+        setUIStoreAreFlowsVisible(shouldShowFlows);
+      }
+    }
+  }, [activeTab?.id]); // Only trigger when tab ID changes
+
   // Use tab execution sync to keep execution config (process type, planning, etc.) in sync per tab
   useTabExecutionSync();
 
@@ -303,8 +341,14 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
   // Sync panel manager with UI store
   const toggleFlowsVisibility = React.useCallback(() => {
+    const newViewMode = areFlowsVisible ? 'crew' : 'flow';
     setUIStoreAreFlowsVisible(!areFlowsVisible);
-  }, [areFlowsVisible, setUIStoreAreFlowsVisible]);
+    // Save view mode to the current tab
+    const tab = getActiveTab();
+    if (tab) {
+      updateTabViewMode(tab.id, newViewMode);
+    }
+  }, [areFlowsVisible, setUIStoreAreFlowsVisible, getActiveTab, updateTabViewMode]);
 
   const toggleChatPanel = React.useCallback(() => {
     setChatPanelVisible(!showChatPanel);
@@ -575,7 +619,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   // Track the currently executing job ID
   const [executingJobId, setExecutingJobId] = React.useState<string | null>(null);
   const runningTabTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
-  const taskStatusPollingInterval = React.useRef<NodeJS.Timeout | null>(null);
 
   // Track previous flow nodes to prevent infinite loop during sync
   const prevFlowNodeIdsRef = React.useRef<string>('');
@@ -598,20 +641,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
       setExecutingJobId(jobId);
 
-      // Clear any existing polling interval
-      if (taskStatusPollingInterval.current) {
-        clearInterval(taskStatusPollingInterval.current);
-      }
-
-      // Start polling every 2 seconds
-      taskStatusPollingInterval.current = setInterval(() => {
-        loadTaskStates(jobId);
-      }, 2000);
-
-      // Also load immediately
+      // Load task states once - SSE handles real-time updates after this
       loadTaskStates(jobId);
-
-      // SSE will handle job status monitoring automatically
     };
 
     window.addEventListener('jobCreated', handleJobCreated as EventListener);
@@ -623,18 +654,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   // Listen for job completion events to clear running tab and update status
   useEffect(() => {
     const handleJobCompleted = () => {
-
-      // Stop task status polling
-      if (taskStatusPollingInterval.current) {
-        clearInterval(taskStatusPollingInterval.current);
-        taskStatusPollingInterval.current = null;
-      }
-
-      // Clear task states after a longer delay to show final states
-      // Increased from 3 seconds to 10 seconds to give users time to see the final status
-      setTimeout(() => {
-        clearTaskStates();
-      }, 10000);
+      // DON'T clear task states on completion - keep them visible until next run starts
+      // Task states will be cleared when a new job is created (in handleJobCreated)
 
       // Get the active tab to ensure we clear the right one
       const activeTab = getActiveTab();
@@ -667,18 +688,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     };
 
     const handleJobFailed = () => {
-
-      // Stop task status polling
-      if (taskStatusPollingInterval.current) {
-        clearInterval(taskStatusPollingInterval.current);
-        taskStatusPollingInterval.current = null;
-      }
-
-      // Clear task states after a longer delay to show final states
-      // Increased from 3 seconds to 10 seconds to give users time to see the final status
-      setTimeout(() => {
-        clearTaskStates();
-      }, 10000);
+      // DON'T clear task states on failure - keep them visible until next run starts
+      // Task states will be cleared when a new job is created (in handleJobCreated)
 
       // Get the active tab to ensure we clear the right one
       const activeTab = getActiveTab();
@@ -718,12 +729,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     return () => {
       window.removeEventListener('jobCompleted', handleJobCompleted as EventListener);
       window.removeEventListener('jobFailed', handleJobFailed as EventListener);
-
-      // Clean up polling interval if component unmounts
-      if (taskStatusPollingInterval.current) {
-        clearInterval(taskStatusPollingInterval.current);
-        taskStatusPollingInterval.current = null;
-      }
     };
   }, [runningTabId, getActiveTab, clearTaskStates]);
 
@@ -825,13 +830,14 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     };
   }, []);
 
-  // Check for running jobs on component mount and start polling if found
+  // Check for jobs on component mount and restore visual indicator states
   useEffect(() => {
-    const checkForRunningJobs = async () => {
+    const restoreExecutionStates = async () => {
       // Get fresh data from stores
       const { tabs: currentTabs } = useTabManagerStore.getState();
       const { fetchInitialRunHistory: fetchHistory } = useRunStatusStore.getState();
-      const { loadTaskStates: loadStates, clearTaskStates: clearStates } = useTaskExecutionStore.getState();
+      const { loadTaskStates: loadStates } = useTaskExecutionStore.getState();
+      const { loadCrewStates } = useFlowExecutionStore.getState();
 
       // First check the tabs for any running status
       const runningTab = currentTabs.find(tab => tab.executionStatus === 'running');
@@ -845,8 +851,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
       // Get updated run history after fetch
       const { runHistory: updatedRunHistory } = useRunStatusStore.getState();
 
-      // Check the runHistory for any running jobs
       if (updatedRunHistory.length > 0) {
+        // Check for running jobs first
         const runningJobs = updatedRunHistory.filter(run =>
           run.status.toLowerCase() === 'running' ||
           run.status.toLowerCase() === 'queued'
@@ -857,34 +863,44 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           const mostRecentJob = runningJobs[0];
           setExecutingJobId(mostRecentJob.job_id);
 
-          // Clear any existing task states
-          clearStates();
-
-          // Clear any existing polling interval
-          if (taskStatusPollingInterval.current) {
-            clearInterval(taskStatusPollingInterval.current);
-          }
-
-          // Start polling every 2 seconds
-          taskStatusPollingInterval.current = setInterval(() => {
-            loadStates(mostRecentJob.job_id);
-          }, 2000);
-
-          // Do initial load immediately
+          // Load task states for running job (SSE handles real-time updates after this)
+          console.log('[WorkflowDesigner] Loading task states for running job:', mostRecentJob.job_id);
           loadStates(mostRecentJob.job_id);
+
+          // Check if this is a flow execution and load crew states
+          const isFlowExecution = mostRecentJob.execution_type === 'flow' ||
+            mostRecentJob.run_name?.toLowerCase().includes('flow');
+          if (isFlowExecution) {
+            console.log('[WorkflowDesigner] Detected running flow execution, loading crew states');
+            loadCrewStates(mostRecentJob.job_id);
+          }
+        } else {
+          // No running jobs - load states from the most recent completed/failed job
+          // This preserves visual indicators across page refreshes
+          const mostRecentJob = updatedRunHistory[0];
+          const status = mostRecentJob.status.toLowerCase();
+
+          if (status === 'completed' || status === 'failed') {
+            console.log('[WorkflowDesigner] Loading task states for most recent job:', mostRecentJob.job_id, 'status:', status);
+            loadStates(mostRecentJob.job_id);
+
+            // Check if this was a flow execution and load crew states
+            const isFlowExecution = mostRecentJob.execution_type === 'flow' ||
+              mostRecentJob.run_name?.toLowerCase().includes('flow');
+            if (isFlowExecution) {
+              console.log('[WorkflowDesigner] Loading crew states for completed/failed flow:', mostRecentJob.job_id);
+              loadCrewStates(mostRecentJob.job_id);
+            }
+          }
         }
       }
     };
 
     // Run the check after a short delay to ensure stores are initialized
-    const timer = setTimeout(checkForRunningJobs, 100);
+    const timer = setTimeout(restoreExecutionStates, 100);
 
     return () => {
       clearTimeout(timer);
-      // Clean up polling interval if it exists
-      if (taskStatusPollingInterval.current) {
-        clearInterval(taskStatusPollingInterval.current);
-      }
     };
   }, []); // Run only once on mount
 
@@ -1114,7 +1130,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             setIsCrewFlowDialogOpen(true);
           }}
           disabled={isChatProcessing || !!runningTabId}
-          hideTabsAndButtons={areFlowsVisible}
+          hideTabsAndButtons={false}
         />
 
         <Box sx={{
