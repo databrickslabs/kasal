@@ -124,6 +124,8 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
       },
       knowledge_sources: initialData?.knowledge_sources || [],
       memory_backend_config: initialData?.memory_backend_config || defaultMemoryBackend || undefined,
+      inject_date: initialData?.inject_date ?? true,  // Default to true for date awareness
+      date_format: initialData?.date_format || undefined,
     };
     
     if (initialData?.id) {
@@ -1324,6 +1326,48 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                       }}
                     />
                   </Grid>
+                  <Grid item xs={12} md={6}>
+                    <Tooltip title="When enabled, the agent will know the current date. This helps with time-sensitive tasks and prevents the agent from thinking past dates are in the future." arrow>
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={formData.inject_date ?? true}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              handleInputChange('inject_date', !(formData.inject_date ?? true));
+                            }}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                            }}
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                            }}
+                            onTouchStart={(e) => {
+                              e.stopPropagation();
+                            }}
+                          />
+                        }
+                        label="Inject Current Date"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                        }}
+                      />
+                    </Tooltip>
+                  </Grid>
+                  {(formData.inject_date ?? true) && (
+                    <Grid item xs={12} md={6}>
+                      <TextField
+                        fullWidth
+                        label="Date Format (Optional)"
+                        value={formData.date_format || ''}
+                        onChange={(e) => handleInputChange('date_format', e.target.value || undefined)}
+                        placeholder="%B %d, %Y"
+                        helperText="Custom date format (e.g., %B %d, %Y for 'February 05, 2026'). Leave empty for ISO format."
+                        size="small"
+                      />
+                    </Grid>
+                  )}
                 </Grid>
               </AccordionDetails>
             </Accordion>

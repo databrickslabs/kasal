@@ -92,6 +92,10 @@ export interface Agent {
   max_reasoning_attempts?: number;
   max_tokens?: number;
   max_context_window_size?: number;
+  /** Injects current date into agent's context for time-sensitive tasks (default: true) */
+  inject_date?: boolean;
+  /** Custom date format string (e.g., '%B %d, %Y' for 'February 05, 2026') */
+  date_format?: string;
   /**
    * Configuration for embedding models used by memory systems
    * Used for short-term and entity memory with RAG
