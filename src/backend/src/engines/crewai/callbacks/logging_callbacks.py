@@ -1863,6 +1863,13 @@ class AgentTraceEventListener(BaseEventListener):
                         "frontend_task_id": frontend_task_id,  # Add frontend task ID
                     }
 
+                    # Include crew_name from active context for flow execution tracking
+                    active_crew = AgentTraceEventListener._active_crew_name.get(
+                        self.job_id
+                    )
+                    if active_crew:
+                        extra_data["crew_name"] = active_crew
+
                     self._enqueue_trace(
                         event_source=agent_name,
                         event_context="starting_task",
@@ -1893,21 +1900,9 @@ class AgentTraceEventListener(BaseEventListener):
                         else "Task completed"
                     )
 
-                    # Check if this task already has an execution completion trace (llm_response, agent_execution)
-                    # to avoid duplicate task_completed traces
-                    task_key = task_id or task_name
-                    if (
-                        self.job_id
-                        in AgentTraceEventListener._tasks_with_execution_trace
-                        and task_key
-                        in AgentTraceEventListener._tasks_with_execution_trace[
-                            self.job_id
-                        ]
-                    ):
-                        logger.debug(
-                            f"{log_prefix} Skipping duplicate task_completed - task {task_key} already has execution trace"
-                        )
-                        return
+                    # NOTE: We no longer skip task_completed events based on execution traces.
+                    # task_completed events are needed for SSE broadcasting to update frontend UI
+                    # even though they won't be stored in the database.
 
                     # Extract the frontend task ID if available
                     frontend_task_id = None
@@ -1943,6 +1938,13 @@ class AgentTraceEventListener(BaseEventListener):
                         "agent_task": f"{agent_name} → {task_name}",  # Clear hierarchy
                         "frontend_task_id": frontend_task_id,  # Add frontend task ID
                     }
+
+                    # Include crew_name from active context for flow execution tracking
+                    active_crew = AgentTraceEventListener._active_crew_name.get(
+                        self.job_id
+                    )
+                    if active_crew:
+                        extra_data["crew_name"] = active_crew
 
                     self._enqueue_trace(
                         event_source=agent_name,
@@ -1991,6 +1993,13 @@ class AgentTraceEventListener(BaseEventListener):
                         "operation": "task_failed",
                         "agent_task": f"{agent_name} → {task_name}",  # Clear hierarchy
                     }
+
+                    # Include crew_name from active context for flow execution tracking
+                    active_crew = AgentTraceEventListener._active_crew_name.get(
+                        self.job_id
+                    )
+                    if active_crew:
+                        extra_data["crew_name"] = active_crew
 
                     self._enqueue_trace(
                         event_source=agent_name,

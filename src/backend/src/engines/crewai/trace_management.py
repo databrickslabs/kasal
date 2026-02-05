@@ -158,7 +158,7 @@ class TraceManager:
                                     if event_type in ["TASK_STARTED", "TASK_COMPLETED", "TASK_FAILED"]:
                                         from src.services.execution_logs_service import execution_logs_service
                                         import json
-                                        
+
                                         task_status_msg = json.dumps({
                                             "type": "task_status_update",
                                             "event_type": event_type,
@@ -167,10 +167,10 @@ class TraceManager:
                                             "timestamp": trace_data.get("created_at", datetime.now().isoformat()) if isinstance(trace_data.get("created_at"), str) else datetime.now().isoformat(),
                                             "output": trace_data.get("output")
                                         })
-                                        
+
                                         # Extract group context if available
                                         group_context = trace_data.get("group_context")
-                                        
+
                                         # Broadcast the task status update
                                         await execution_logs_service.broadcast_to_execution(
                                             job_id,
@@ -178,13 +178,49 @@ class TraceManager:
                                             group_context
                                         )
                                         logger.debug(f"[TraceManager._trace_writer_loop] Broadcast task status update for {event_type} - task: {trace_data.get('event_context')}")
+
+                                    # Broadcast task_completed via SSE for real-time UI updates
+                                    # This is needed for TaskNode/CrewNode to update their visual status
+                                    if event_type == "task_completed":
+                                        from src.services.sse_manager import sse_manager, SSEEvent
+
+                                        # Build trace data for SSE broadcast
+                                        extra_data = trace_data.get("extra_data", {})
+                                        trace_metadata = trace_data.get("trace_metadata", extra_data)
+
+                                        sse_trace_data = {
+                                            "job_id": job_id,
+                                            "event_type": event_type,
+                                            "event_context": trace_data.get("event_context", ""),
+                                            "trace_metadata": {
+                                                "task_name": extra_data.get("task_name") or trace_data.get("event_context"),
+                                                "task_id": extra_data.get("task_id"),
+                                                "agent_role": extra_data.get("agent_role"),
+                                                "crew_name": extra_data.get("crew_name"),
+                                                "frontend_task_id": extra_data.get("frontend_task_id"),
+                                                **trace_metadata
+                                            },
+                                            "created_at": trace_data.get("created_at", datetime.now().isoformat()) if isinstance(trace_data.get("created_at"), str) else datetime.now().isoformat()
+                                        }
+
+                                        try:
+                                            event = SSEEvent(
+                                                data=sse_trace_data,
+                                                event="trace",
+                                                id=f"{job_id}_task_completed_{datetime.now().timestamp()}"
+                                            )
+                                            sent_count = await sse_manager.broadcast_to_job(job_id, event)
+                                            logger.info(f"[TraceManager._trace_writer_loop] Broadcasted task_completed SSE to {sent_count} clients for job {job_id}")
+                                        except Exception as sse_error:
+                                            logger.warning(f"[TraceManager._trace_writer_loop] Failed to broadcast task_completed SSE: {sse_error}")
                                     
-                                    # FILTER: Store important events in execution_trace
-                                    # Include agent_execution, tool_usage, crew_started, crew_completed, task_started, task_completed
+                                    # FILTER: Store important events in execution_trace (Execution Trace Timeline)
+                                    # NOTE: task_completed is excluded - it's broadcast via SSE for UI updates
+                                    # but not stored in the timeline to avoid clutter
                                     important_event_types = [
                                         "agent_execution", "tool_usage", "tool_error",
                                         "crew_started", "crew_completed",
-                                        "task_started", "task_completed", "task_failed",
+                                        "task_started", "task_failed",  # task_completed excluded - SSE only
                                         "llm_call", "llm_guardrail",
                                         "memory_write", "memory_retrieval",
                                         "memory_write_started", "memory_retrieval_started",
