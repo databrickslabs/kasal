@@ -8,12 +8,14 @@ ensuring that logs go to the appropriate files with execution context.
 import logging
 import sys
 import os
-import threading
+import contextvars
 from typing import Optional, Any
 from contextlib import contextmanager
 
-# Thread-local storage for execution context
-_execution_context = threading.local()
+# Context variable for execution context (works with async/await)
+_execution_context: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    'execution_id', default=None
+)
 
 
 class ExecutionContextFormatter(logging.Formatter):
@@ -32,8 +34,8 @@ class ExecutionContextFormatter(logging.Formatter):
         self._prefix = match.group(1) if match else '[CREW]'
 
     def format(self, record):
-        # Get execution ID from thread-local storage
-        execution_id = getattr(_execution_context, 'execution_id', None)
+        # Get execution ID from context variable (works with async/await)
+        execution_id = _execution_context.get()
 
         if execution_id:
             # Add execution ID to the format
@@ -52,12 +54,12 @@ class ExecutionContextFormatter(logging.Formatter):
 
 def set_execution_context(execution_id: str):
     """
-    Set the execution ID for the current thread.
+    Set the execution ID for the current context (works with async/await).
 
     Args:
         execution_id: The execution ID to associate with logs
     """
-    _execution_context.execution_id = execution_id
+    _execution_context.set(execution_id)
 
 
 class ExecutionLogsDatabaseHandler(logging.Handler):
@@ -380,10 +382,9 @@ class ExecutionLogsDatabaseHandler(logging.Handler):
 
 def clear_execution_context():
     """
-    Clear the execution context for the current thread.
+    Clear the execution context for the current context (works with async/await).
     """
-    if hasattr(_execution_context, 'execution_id'):
-        del _execution_context.execution_id
+    _execution_context.set(None)
 
 
 @contextmanager
@@ -580,7 +581,11 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
         module_logger = get_logger(logger_name)
         module_logger.handlers = []  # Clear existing handlers
         module_logger.addHandler(file_handler)
-        module_logger.setLevel(log_level)
+        # IMPORTANT: Set to DEBUG for tool loggers to capture all DAX Generation logs
+        if 'powerbi_analysis_tool' in logger_name or 'databricks_jobs_tool' in logger_name:
+            module_logger.setLevel(logging.DEBUG)
+        else:
+            module_logger.setLevel(log_level)
         module_logger.propagate = False
 
     # Capture MLflow errors (suppress warnings) explicitly

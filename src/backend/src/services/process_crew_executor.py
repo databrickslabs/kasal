@@ -398,6 +398,11 @@ def run_crew_in_process(
             from src.services.tool_service import ToolService
             from src.services.api_keys_service import ApiKeysService
             from src.engines.crewai.tools.tool_factory import ToolFactory
+            from src.engines.crewai.logging_config import set_execution_context
+
+            # CRITICAL: Set execution context in async context for proper log formatting
+            # This ensures all logs from async functions (like PowerBI tool) have execution ID
+            set_execution_context(execution_id)
 
             # Suppress any stdout/stderr from CrewAI
             import warnings
@@ -2018,17 +2023,42 @@ class ProcessCrewExecutor:
             })
 
             # Read crew.log and extract relevant logs
+            # Handle multi-line log entries by capturing continuation lines
             with open(crew_log_path, 'r') as f:
+                capturing = False  # Track if we're capturing continuation lines
+                current_log = None  # Current log entry being built
+
                 for line in f:
-                    if exec_id_short in line:
-                        # This log belongs to our execution
-                        logs_to_write.append({
+                    # Check if this is a new log line (starts with [CREW])
+                    is_log_line = line.startswith('[CREW]')
+
+                    if is_log_line and exec_id_short in line:
+                        # Save previous log if any
+                        if current_log:
+                            logs_to_write.append(current_log)
+
+                        # Start new log entry for our execution
+                        current_log = {
                             'execution_id': execution_id,
                             'content': line.strip(),
                             'timestamp': datetime.utcnow(),  # Use timezone-naive UTC datetime for database consistency
                             'group_id': getattr(group_context, 'primary_group_id', None) if group_context else None,
                             'group_email': getattr(group_context, 'group_email', None) if group_context else None
-                        })
+                        }
+                        capturing = True
+                    elif is_log_line:
+                        # New log line from different execution - stop capturing
+                        if current_log:
+                            logs_to_write.append(current_log)
+                            current_log = None
+                        capturing = False
+                    elif capturing and current_log:
+                        # Continuation line - append to current log
+                        current_log['content'] += '\n' + line.rstrip()
+
+                # Don't forget the last log entry
+                if current_log:
+                    logs_to_write.append(current_log)
 
             if len(logs_to_write) <= 1:  # Only has JobConfiguration
                 logger.info(f"No logs found for execution {exec_id_short} in crew.log")

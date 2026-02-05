@@ -88,13 +88,14 @@ const cleanLogContent = (content: string): { content: string, type: string } => 
   // Determine log type
   let type = 'INFO';
   if (content.includes('[LLM-CALL-START]')) type = 'LLM-CALL';
+  else if (content.includes('[DAX Generation]')) type = 'DAX-GEN'; // Add specific type for DAX Generation logs
   else if (content.includes('Error') || content.includes('ERROR') || content.includes('Failed') || content.includes('❌')) type = 'ERROR';
   else if (content.includes('STDOUT')) type = 'INFO'; // Change STDOUT to INFO to avoid redundant display
   else if (content.includes('CREWAI-LOG:')) type = 'API';
   else if (content.includes('EVENT-')) type = 'EVENT';
   else if (content.includes('[CREW]')) type = 'CREW';
   else if (content.includes('🚀 Crew:')) type = 'CREW';
-  
+
   return { content: cleanedContent, type };
 };
 
@@ -103,6 +104,7 @@ const getLogTypeColor = (type: string): string => {
   switch(type) {
     case 'ERROR': return '#ff5252';
     case 'LLM-CALL': return '#ffab40';
+    case 'DAX-GEN': return '#ab47bc'; // Purple for DAX Generation logs
     case 'CREW': return '#42a5f5';
     case 'STDOUT': return '#66bb6a';
     case 'API': return '#7986cb';
@@ -865,11 +867,12 @@ const ShowLogs: React.FC<ShowLogsProps> = ({
             />
           )}
           
-          <Box 
-            sx={{ 
-              color: logType === 'INFO' ? '#e0e0e0' : 
-                     logType === 'ERROR' ? '#ff8a80' : 
-                     logType === 'STDOUT' ? '#b9f6ca' : 
+          <Box
+            sx={{
+              color: logType === 'INFO' ? '#e0e0e0' :
+                     logType === 'ERROR' ? '#ff8a80' :
+                     logType === 'DAX-GEN' ? '#ce93d8' : // Light purple for DAX Generation
+                     logType === 'STDOUT' ? '#b9f6ca' :
                      logType === 'API' ? '#c5cae9' :
                      logType === 'EVENT' ? '#e1bee7' :
                      '#e1f5fe',
