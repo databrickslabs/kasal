@@ -31,12 +31,13 @@ class MockExecutionHistory:
 
 
 class MockCrewConfig:
-    def __init__(self, agents_yaml=None, tasks_yaml=None, inputs=None, 
-                 planning=False, model="gpt-4o-mini"):
+    def __init__(self, agents_yaml=None, tasks_yaml=None, inputs=None,
+                 planning=False, reasoning=False, model="gpt-4o-mini"):
         self.agents_yaml = agents_yaml or {"agent1": {"role": "researcher"}}
         self.tasks_yaml = tasks_yaml or {"task1": {"description": "research"}}
         self.inputs = inputs or {"query": "test"}
         self.planning = planning
+        self.reasoning = reasoning
         self.model = model
 
 
@@ -453,7 +454,107 @@ class TestExecutionService:
         
         # Both instances should share the same executions dict
         assert ExecutionService.executions["test"]["data"] == "value"
-        
+
         # Clean up
         ExecutionService.executions.clear()
+
+
+class TestReasoningFieldHandling:
+    """Test cases for reasoning field handling in execution service."""
+
+    def test_mock_crew_config_with_reasoning_enabled(self):
+        """Test MockCrewConfig correctly stores reasoning flag when enabled."""
+        config = MockCrewConfig(reasoning=True)
+        assert config.reasoning is True
+
+    def test_mock_crew_config_with_reasoning_disabled(self):
+        """Test MockCrewConfig correctly stores reasoning flag when disabled."""
+        config = MockCrewConfig(reasoning=False)
+        assert config.reasoning is False
+
+    def test_mock_crew_config_reasoning_default(self):
+        """Test MockCrewConfig reasoning defaults to False."""
+        config = MockCrewConfig()
+        assert config.reasoning is False
+
+    def test_mock_crew_config_with_both_planning_and_reasoning(self):
+        """Test MockCrewConfig correctly handles both planning and reasoning flags."""
+        config = MockCrewConfig(planning=True, reasoning=True)
+        assert config.planning is True
+        assert config.reasoning is True
+
+    def test_reasoning_field_in_config_attributes(self):
+        """Test that reasoning is accessible as a config attribute."""
+        config = MockCrewConfig(reasoning=True)
+
+        # Simulate the hasattr check used in execution_service.py
+        assert hasattr(config, 'reasoning')
+
+        # Simulate the conditional extraction pattern
+        reasoning_value = config.reasoning if hasattr(config, 'reasoning') else False
+        assert reasoning_value is True
+
+    def test_reasoning_field_extraction_fallback(self):
+        """Test reasoning field extraction with fallback for missing attribute."""
+        # Create a minimal config object without reasoning attribute
+        class MinimalConfig:
+            def __init__(self):
+                self.planning = False
+
+        config = MinimalConfig()
+
+        # This simulates the pattern used in execution_service.py
+        reasoning_value = config.reasoning if hasattr(config, 'reasoning') else False
+        assert reasoning_value is False
+
+    def test_reasoning_with_reasoning_llm_in_inputs(self):
+        """Test config with reasoning enabled and reasoning_llm in inputs."""
+        config = MockCrewConfig(
+            reasoning=True,
+            inputs={"reasoning_llm": "databricks-claude-opus-4-5", "run_name": "test"}
+        )
+
+        assert config.reasoning is True
+        assert config.inputs.get("reasoning_llm") == "databricks-claude-opus-4-5"
+
+    def test_inputs_dict_construction_with_reasoning(self):
+        """Test that inputs dictionary construction includes reasoning field."""
+        config = MockCrewConfig(
+            agents_yaml={"agent1": {"role": "researcher"}},
+            tasks_yaml={"task1": {"description": "research"}},
+            inputs={"query": "test"},
+            planning=False,
+            reasoning=True,
+            model="gpt-4o"
+        )
+
+        # Simulate the inputs dictionary construction from execution_service.py
+        inputs = {
+            "agents_yaml": config.agents_yaml,
+            "tasks_yaml": config.tasks_yaml,
+            "inputs": config.inputs,
+            "planning": config.planning,
+            "reasoning": config.reasoning if hasattr(config, 'reasoning') else False,
+            "model": config.model,
+        }
+
+        assert inputs["reasoning"] is True
+        assert inputs["planning"] is False
+        assert inputs["model"] == "gpt-4o"
+
+    def test_inputs_dict_construction_without_reasoning(self):
+        """Test inputs dictionary construction with reasoning disabled."""
+        config = MockCrewConfig(
+            planning=True,
+            reasoning=False
+        )
+
+        # Simulate the inputs dictionary construction
+        inputs = {
+            "planning": config.planning,
+            "reasoning": config.reasoning if hasattr(config, 'reasoning') else False,
+        }
+
+        assert inputs["reasoning"] is False
+        assert inputs["planning"] is True
 

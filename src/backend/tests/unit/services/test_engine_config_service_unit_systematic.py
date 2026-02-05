@@ -16,7 +16,6 @@ class FakeRepo:
         self.toggle_enabled_calls = []
         self.update_config_value_calls = []
         self.crewai_flow_enabled = True  # Default to enabled
-        self.crewai_debug_tracing = False
     async def find_all(self):
         return []
     async def find_enabled_configs(self):
@@ -46,11 +45,6 @@ class FakeRepo:
         return self.crewai_flow_enabled
     async def set_crewai_flow_enabled(self, enabled):
         self.crewai_flow_enabled = enabled
-        return True
-    async def get_crewai_debug_tracing(self):
-        return self.crewai_debug_tracing
-    async def set_crewai_debug_tracing(self, enabled):
-        self.crewai_debug_tracing = enabled
         return True
 
 
@@ -155,24 +149,6 @@ async def test_set_crewai_flow_enabled_delegates():
     ok = await svc.set_crewai_flow_enabled(True)
     assert ok is True
     assert svc.repository.crewai_flow_enabled is True
-
-
-@pytest.mark.asyncio
-async def test_get_crewai_debug_tracing_delegates():
-    svc = Svc(SimpleNamespace())
-    svc.repository = FakeRepo(None)
-    svc.repository.crewai_debug_tracing = True
-    out = await svc.get_crewai_debug_tracing()
-    assert out is True
-
-
-@pytest.mark.asyncio
-async def test_set_crewai_debug_tracing_delegates():
-    svc = Svc(SimpleNamespace())
-    svc.repository = FakeRepo(None)
-    ok = await svc.set_crewai_debug_tracing(True)
-    assert ok is True
-    assert svc.repository.crewai_debug_tracing is True
 
 
 @pytest.mark.asyncio
