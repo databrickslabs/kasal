@@ -305,6 +305,24 @@ class PowerBIAnalysisTool(BaseTool):
             if not dataset_id:
                 return "Error: dataset_id is required."
 
+            # DEBUG: Log authentication parameters to diagnose Service Account issue
+            logger.info("=" * 80)
+            logger.info("[AUTH DEBUG] Checking authentication credentials:")
+            logger.info(f"[AUTH DEBUG]   tenant_id: {'✓ SET' if merged_config.get('tenant_id') else '✗ MISSING'}")
+            logger.info(f"[AUTH DEBUG]   client_id: {'✓ SET' if merged_config.get('client_id') else '✗ MISSING'}")
+            logger.info(f"[AUTH DEBUG]   client_secret: {'✓ SET' if merged_config.get('client_secret') else '✗ MISSING'}")
+            logger.info(f"[AUTH DEBUG]   username: {'✓ SET' if merged_config.get('username') else '✗ MISSING'}")
+            logger.info(f"[AUTH DEBUG]   password: {'✓ SET' if merged_config.get('password') else '✗ MISSING'}")
+            logger.info(f"[AUTH DEBUG]   access_token: {'✓ SET' if merged_config.get('access_token') else '✗ MISSING'}")
+            logger.info(f"[AUTH DEBUG]   auth_method: {merged_config.get('auth_method', 'NOT SET')}")
+
+            # Show actual values (masked) to help diagnose
+            if merged_config.get('username'):
+                logger.info(f"[AUTH DEBUG]   username value: {merged_config.get('username')}")
+            if merged_config.get('password'):
+                logger.info(f"[AUTH DEBUG]   password length: {len(merged_config.get('password', ''))}")
+            logger.info("=" * 80)
+
             # Validate authentication
             has_sp_auth = all([
                 merged_config.get("tenant_id"),
