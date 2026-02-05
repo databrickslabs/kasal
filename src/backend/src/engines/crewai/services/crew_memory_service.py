@@ -18,7 +18,10 @@ from pathlib import Path
 
 from src.core.logger import LoggerManager
 from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
-from src.engines.crewai.memory.memory_backend_factory import MemoryBackendFactory
+from src.engines.crewai.memory.memory_backend_factory import (
+    MemoryBackendFactory,
+    DatabricksIndexValidationError
+)
 
 logger = LoggerManager.get_instance().crew
 
@@ -45,6 +48,9 @@ class CrewMemoryService:
         Returns:
             Memory backend configuration dict or None
         """
+        logger.info("=" * 80)
+        logger.info("FETCH_MEMORY_BACKEND_CONFIG CALLED")
+        logger.info("=" * 80)
         try:
             from src.services.memory_backend_service import MemoryBackendService
             from src.db.session import async_session_factory
@@ -52,7 +58,7 @@ class CrewMemoryService:
             async with async_session_factory() as session:
                 service = MemoryBackendService(session)
                 group_id = self.config.get('group_id')
-                logger.info(f"Fetching memory backend config for group_id: {group_id}")
+                logger.info(f"[fetch_memory_backend_config] Fetching config for group_id: {group_id}")
 
                 active_config = await service.get_active_config(group_id)
                 if not active_config:
@@ -95,20 +101,35 @@ class CrewMemoryService:
 
     def generate_crew_id(self) -> str:
         """
-        Generate a deterministic crew ID based on crew configuration
+        Generate a deterministic crew ID based on crew configuration.
+
+        SECURITY: All crew_ids are prefixed with group_id to ensure complete
+        tenant isolation. Group A cannot access Group B's memory even if they
+        have identical crew configurations.
 
         Returns:
-            Crew ID string
+            Crew ID string (always prefixed with group_id for isolation)
         """
-        # Use provided crew_id if available
-        if self.config.get('crew_id'):
-            return self.config.get('crew_id')
+        # SECURITY: Always get group_id first for tenant isolation
+        group_id = self.config.get('group_id') or 'default'
 
-        # Check for database crew_id
+        # Use provided crew_id if available (but always prefix with group_id for isolation)
+        if self.config.get('crew_id'):
+            provided_crew_id = self.config.get('crew_id')
+            # SECURITY: Ensure group_id prefix for tenant isolation
+            if not provided_crew_id.startswith(f"{group_id}_"):
+                crew_id = f"{group_id}_{provided_crew_id}"
+                logger.info(f"Added group_id prefix to provided crew_id for tenant isolation: {crew_id}")
+            else:
+                crew_id = provided_crew_id
+            return crew_id
+
+        # Check for database crew_id (always prefix with group_id for isolation)
         db_crew_id = self.config.get('database_crew_id')
         if db_crew_id:
-            crew_id = f"crew_db_{db_crew_id}"
-            logger.info(f"Using database crew_id: {crew_id} for consistent memory across runs")
+            # SECURITY: Include group_id to prevent cross-tenant memory access
+            crew_id = f"{group_id}_crew_db_{db_crew_id}"
+            logger.info(f"Using database crew_id with group isolation: {crew_id}")
             return crew_id
 
         # Generate hash-based crew_id from configuration
@@ -119,44 +140,46 @@ class CrewMemoryService:
         agent_roles = sorted([agent.get('role', '') for agent in agents if isinstance(agent, dict)])
         task_names = sorted([task.get('name', task.get('description', '')[:50]) for task in tasks if isinstance(task, dict)])
 
-        # Get run_name and group_id
-        run_name = self.config.get('run_name') or self.config.get('inputs', {}).get('run_name')
-        group_id = self.config.get('group_id')
+        # NOTE: run_name is intentionally NOT used for crew_id generation
+        # run_name was previously included in the hash but this caused a bug where
+        # each execution got a different crew_id (because run_name is auto-generated
+        # uniquely for each execution). This meant Long-Term Memory was stored in different
+        # directories and couldn't be found on subsequent runs.
+        # The crew_id should be deterministic based on the CREW STRUCTURE (agents, tasks,
+        # crew_name, model, group_id), not the execution instance (run_name).
 
-        if not group_id:
-            logger.warning("No group_id found in config - crew memory may not be properly isolated between tenants")
-
-        # Create stable identifier
+        # Create stable identifier for hashing
+        # SECURITY: group_id is included to ensure tenant isolation
         crew_identifier = {
             'agent_roles': agent_roles,
             'task_names': task_names,
             'crew_name': self.config.get('name', self.config.get('crew', {}).get('name', 'unnamed_crew')),
             'model': self.config.get('model', 'default'),
-            'run_name': run_name,
-            'group_id': group_id or 'default'
+            'group_id': group_id  # Already defaults to 'default' at top of function
         }
 
-        # Create hash
+        # Create hash and prefix with group_id for guaranteed tenant isolation
         crew_identifier_json = json.dumps(crew_identifier, sort_keys=True)
         crew_hash = hashlib.md5(crew_identifier_json.encode()).hexdigest()[:8]
-        crew_id = f"{group_id or 'default'}_crew_{crew_hash}"
+        crew_id = f"{group_id}_crew_{crew_hash}"
 
         # Detailed logging
         logger.info("=" * 80)
         logger.info("CREW_ID GENERATION - DETAILED DEBUG INFO")
         logger.info("=" * 80)
-        logger.info(f"Crew Identifier Components:")
+        logger.info(f"Crew Identifier Components (used for memory persistence):")
         logger.info(f"  - Agent Roles: {agent_roles}")
         logger.info(f"  - Task Names: {task_names}")
         logger.info(f"  - Crew Name: {crew_identifier['crew_name']}")
         logger.info(f"  - Model: {crew_identifier['model']}")
-        logger.info(f"  - Run Name: {run_name}")
-        logger.info(f"  - Group ID: {group_id or 'default'}")
+        logger.info(f"  - Group ID: {group_id} (SECURITY: ensures tenant isolation)")
+        logger.info(f"  NOTE: run_name is NOT included - memory persists across runs with same crew structure")
         logger.info(f"JSON for hashing (sorted): {crew_identifier_json}")
         logger.info(f"MD5 Hash: {hashlib.md5(crew_identifier_json.encode()).hexdigest()}")
         logger.info(f"Hash (first 8 chars): {crew_hash}")
         logger.info(f"Generated crew_id: {crew_id}")
-        logger.info(f"This crew_id will persist across runs with the SAME configuration")
+        logger.info(f"SECURITY: Memory is isolated by group_id - {group_id} cannot access other groups' memory")
+        logger.info(f"This crew_id will persist across ALL runs with the SAME crew configuration")
         logger.info("=" * 80)
 
         return crew_id
@@ -231,6 +254,9 @@ class CrewMemoryService:
 
         Returns:
             Dictionary of memory backends
+
+        Raises:
+            DatabricksIndexValidationError: If Databricks indexes are missing or provisioning
         """
         # Convert databricks_config dict to object if needed
         if 'databricks_config' in memory_backend_config and isinstance(memory_backend_config['databricks_config'], dict):
@@ -242,16 +268,124 @@ class CrewMemoryService:
 
         logger.info(f"Creating memory backends for crew {crew_id} with backend type: {memory_config.backend_type}")
 
-        # Create backends
-        memory_backends = await MemoryBackendFactory.create_memory_backends(
-            config=memory_config,
-            crew_id=crew_id,
-            embedder=embedder,
-            user_token=self.user_token
-        )
-        logger.info(f"Created memory backends: {list(memory_backends.keys())}")
+        # Get job_id from config for short-term memory session scoping
+        # Short-term memory should only return results from the current run
+        job_id = self.config.get('execution_id') or self.config.get('job_id')
+        if job_id:
+            logger.info(f"Using job_id for short-term memory session scoping: {job_id}")
 
-        return memory_backends
+        try:
+            # Create backends
+            memory_backends = await MemoryBackendFactory.create_memory_backends(
+                config=memory_config,
+                crew_id=crew_id,
+                embedder=embedder,
+                user_token=self.user_token,
+                job_id=job_id
+            )
+            logger.info(f"Created memory backends: {list(memory_backends.keys())}")
+            return memory_backends
+
+        except DatabricksIndexValidationError as e:
+            # Emit trace event for UI visibility before re-raising
+            await self._emit_index_validation_trace(e)
+            raise
+
+    async def _emit_index_validation_trace(self, error: DatabricksIndexValidationError) -> None:
+        """
+        Emit a trace event for Databricks index validation errors.
+
+        This makes the error visible in the UI trace view.
+        """
+        try:
+            from src.services.execution_trace_service import ExecutionTraceService
+            from src.db.session import async_session_factory
+            from datetime import datetime, timezone
+
+            # Get job_id from config
+            job_id = self.config.get('execution_id') or self.config.get('job_id')
+            if not job_id:
+                logger.warning("No job_id available for trace emission, skipping trace event")
+                return
+
+            # Build the trace content based on error type
+            if error.error_type == "missing_indexes":
+                title = "⚠️ DATABRICKS MEMORY ERROR: Indexes Not Found"
+                content_lines = [
+                    "The following Databricks Vector Search indexes are configured but do not exist:",
+                    "",
+                ]
+                for idx in error.missing_indexes:
+                    content_lines.append(f"  ✗ {idx}")
+                content_lines.extend([
+                    "",
+                    "RECOMMENDATION:",
+                    "  1. Create the missing indexes in Databricks",
+                    "  2. OR disable Databricks memory backend in settings",
+                    "  3. OR use default CrewAI memory (ChromaDB + SQLite)",
+                ])
+            elif error.error_type == "provisioning_indexes":
+                title = "⏳ DATABRICKS MEMORY ERROR: Indexes Still Provisioning"
+                content_lines = [
+                    "The following Databricks Vector Search indexes are still being provisioned:",
+                    "",
+                ]
+                for idx in error.provisioning_indexes:
+                    content_lines.append(f"  ⏳ {idx}")
+                content_lines.extend([
+                    "",
+                    "Memory operations will FAIL until indexes are ready.",
+                    "",
+                    "RECOMMENDATION:",
+                    "  1. Wait for indexes to finish provisioning (check Databricks UI)",
+                    "  2. OR disable Databricks memory backend in settings temporarily",
+                    "  3. OR disable memory on all agents until indexes are ready",
+                ])
+            else:
+                title = "⚠️ DATABRICKS MEMORY ERROR"
+                content_lines = [str(error)]
+
+            content = "\n".join(content_lines)
+
+            # Create trace data
+            trace_data = {
+                "job_id": job_id,
+                "event_source": "Memory Backend",
+                "event_context": "databricks_index_validation",
+                "event_type": "memory_backend_error",
+                "created_at": datetime.now(timezone.utc).replace(tzinfo=None),
+                "output": {
+                    "content": content,
+                    "extra_data": {
+                        "error_type": error.error_type,
+                        "validation_result": error.validation_result,
+                        "title": title,
+                        "severity": "error"
+                    }
+                },
+                "trace_metadata": {
+                    "error_type": error.error_type,
+                    "missing_indexes": error.missing_indexes,
+                    "provisioning_indexes": error.provisioning_indexes,
+                    "title": title,
+                    "severity": "error"
+                }
+            }
+
+            # Add group context if available
+            group_id = self.config.get('group_id')
+            if group_id:
+                trace_data["group_id"] = group_id
+
+            # Create the trace
+            async with async_session_factory() as session:
+                trace_service = ExecutionTraceService(session)
+                await trace_service.create_trace(trace_data)
+                logger.info(f"Emitted memory backend validation error trace for job {job_id}")
+
+        except Exception as trace_error:
+            # Don't fail the main operation if trace emission fails
+            logger.warning(f"Failed to emit index validation trace: {trace_error}")
 
     def configure_crew_memory_components(
         self,
@@ -287,13 +421,20 @@ class CrewMemoryService:
 
                 storage_path = Path(db_storage_path())
 
+                # Get job_id from config for short-term memory session scoping
+                # Short-term memory should only return results from the current run
+                job_id = self.config.get('execution_id') or self.config.get('job_id')
+                if job_id:
+                    logger.info(f"Using job_id for ChromaDB short-term memory session scoping: {job_id}")
+
                 # Configure short-term memory
                 if memory_config.enable_short_term:
                     storage_st = ChromaDBDatabricksStorage(
                         storage_path=storage_path,
                         collection_name=f"{crew_id}_short_term",
                         embedding_function=custom_embedder,
-                        memory_type="short_term"
+                        memory_type="short_term",
+                        job_id=job_id  # Session scoping for short-term memory
                     )
                     crew_kwargs['short_term_memory'] = ShortTermMemory(storage=storage_st)
                     logger.info("Configured short-term memory with Databricks embedder")
@@ -406,95 +547,13 @@ class CrewMemoryService:
             set_trace_ctx(getattr(crew, '_long_term_memory', None))
             set_trace_ctx(getattr(crew, '_entity_memory', None))
 
-            # For DEFAULT backend, monkeypatch save/search to emit traces
-            backend_type = (memory_backend_config or {}).get('backend_type') if isinstance(memory_backend_config, dict) else (memory_backend_config.backend_type.value if memory_backend_config else 'default')
-            is_default_backend = (not memory_backend_config) or (str(backend_type).lower() == 'default')
-
-            if is_default_backend and crew_kwargs.get('memory', False):
-                self._patch_default_memory_tracing(crew, exec_id, grp_id)
+            # NOTE: Direct memory tracing removed - memory events are now captured
+            # by the CrewAI event bus in logging_callbacks.py with proper agent attribution.
+            # The _patch_default_memory_tracing method was causing duplicate events appearing
+            # under "Memory[...]" as separate agents instead of being grouped with the correct task/agent.
 
         except Exception as trace_ctx_err:
             logger.debug(f"Could not attach memory trace context: {trace_ctx_err}")
-
-    def _patch_default_memory_tracing(self, crew: Any, exec_id: str, grp_id: str) -> None:
-        """Patch default memory methods for tracing"""
-        from src.services.trace_queue import get_trace_queue
-
-        def patch_memory(mem_attr_name: str):
-            mem_obj = getattr(crew, mem_attr_name, None)
-            if not mem_obj:
-                return
-
-            storage = getattr(mem_obj, 'storage', None)
-            target = storage or mem_obj
-            mt = 'short_term' if 'short' in mem_attr_name else ('long_term' if 'long' in mem_attr_name else 'entity')
-
-            # Patch save
-            if hasattr(target, 'save') and callable(getattr(target, 'save')):
-                original_save = target.save
-                def traced_save(*args, **kwargs):
-                    result = original_save(*args, **kwargs)
-                    try:
-                        q = get_trace_queue()
-                        payload = {'backend': 'default', 'memory_type': mt}
-                        if args and isinstance(args[0], str):
-                            val = args[0]
-                            payload['value_snippet'] = (val[:200] + '...') if len(val) > 200 else val
-                        q.put_nowait({
-                            'job_id': exec_id,
-                            'event_type': 'memory_write',
-                            'event_source': f"Memory[{mt}:default]",
-                            'event_context': 'chroma/sqlite',
-                            'output': payload,
-                            'group_context': {'primary_group_id': grp_id}
-                        })
-                    except Exception:
-                        pass
-                    return result
-                try:
-                    setattr(target, 'save', traced_save)
-                except Exception:
-                    pass
-
-            # Patch search
-            if hasattr(target, 'search') and callable(getattr(target, 'search')):
-                original_search = target.search
-                def traced_search(query, *args, **kwargs):
-                    results = original_search(query, *args, **kwargs)
-                    try:
-                        q = get_trace_queue()
-                        def summarize(item):
-                            text = None
-                            if isinstance(item, dict):
-                                text = item.get('content') or item.get('context')
-                            if not text:
-                                text = str(item)
-                            return (text[:200] + '...') if isinstance(text, str) and len(text) > 200 else text
-                        summary = [summarize(r) for r in (results or [])][:5] if results else []
-                        q.put_nowait({
-                            'job_id': exec_id,
-                            'event_type': 'memory_retrieval',
-                            'event_source': f"Memory[{mt}:default]",
-                            'event_context': 'chroma/sqlite',
-                            'output': {
-                                'backend': 'default',
-                                'memory_type': mt,
-                                'query': query if isinstance(query, str) else '[embedding]',
-                                'results': summary
-                            },
-                            'group_context': {'primary_group_id': grp_id}
-                        })
-                    except Exception:
-                        pass
-                    return results
-                try:
-                    setattr(target, 'search', traced_search)
-                except Exception:
-                    pass
-
-        patch_memory('_short_term_memory')
-        patch_memory('_long_term_memory')
-        patch_memory('_entity_memory')
 
     def set_crew_reference_on_memory(self, crew: Any) -> None:
         """
