@@ -940,56 +940,68 @@ class PowerBIAnalysisTool(BaseTool):
         try:
             # Check if trace_context was injected (happens during crew preparation)
             trace_ctx = getattr(self, 'trace_context', None)
+
+            # Use logger.info instead of debug to ensure visibility
+            logger.info(f"[PowerBIAnalysisTool] TRACE EMISSION DEBUG - trace_context present: {trace_ctx is not None}")
+
             if not trace_ctx:
-                logger.debug("[PowerBIAnalysisTool] No trace_context available, skipping llm_call trace emission")
+                logger.info("[PowerBIAnalysisTool] No trace_context available, skipping llm_call trace emission")
                 return
 
+            logger.info(f"[PowerBIAnalysisTool] TRACE EMISSION DEBUG - job_id: {trace_ctx.get('job_id')}")
+
             if not trace_ctx.get('job_id'):
-                logger.debug("[PowerBIAnalysisTool] trace_context missing job_id, skipping llm_call trace emission")
+                logger.info("[PowerBIAnalysisTool] trace_context missing job_id, skipping llm_call trace emission")
                 return
 
             # Get the trace queue
             from src.services.trace_queue import get_trace_queue
             queue = get_trace_queue()
 
-            # Truncate prompt and response for trace storage (avoid huge payloads)
-            prompt_preview = (prompt[:500] + '...[truncated]') if len(prompt) > 500 else prompt
-            response_preview = None
-            if response:
-                response_preview = (response[:500] + '...[truncated]') if len(response) > 500 else response
+            # Build trace data with prompt and response (limit size to avoid issues)
+            # Use up to 3000 chars which is enough to see the content but not too large for storage
+            max_display_length = 3000
 
-            # Build trace data
             trace_output = {
                 'operation': operation,
                 'model': model,
                 'prompt_length': len(prompt),
-                'prompt_preview': prompt_preview
+                'prompt': prompt[:max_display_length] + ('...[truncated]' if len(prompt) > max_display_length else ''),
+                'prompt_preview': prompt[:200] if len(prompt) > 200 else prompt
             }
 
-            if response and response_preview:
+            if response:
                 trace_output['response_length'] = len(response)
-                trace_output['response_preview'] = response_preview
+                trace_output['response'] = response[:max_display_length] + ('...[truncated]' if len(response) > max_display_length else '')
+                trace_output['response_preview'] = response[:200] if len(response) > 200 else response
 
             # Emit the trace event
-            queue.put_nowait({
+            # Note: Frontend expects agent_role and model in extra_data for llm_call events
+            trace_event = {
                 'job_id': trace_ctx.get('job_id'),
                 'event_type': 'llm_call',
                 'event_source': 'PowerBI Analysis Tool',
                 'event_context': event_context,
                 'output': trace_output,
+                'extra_data': {
+                    'agent_role': 'PowerBI Analysis Tool',  # Frontend uses this for display
+                    'model': model  # Frontend uses this for display
+                },
                 'trace_metadata': {
                     'tool_name': 'PowerBIAnalysisTool',
                     'operation': operation,
                     'model': model
                 },
                 'group_context': trace_ctx.get('group_context')
-            })
+            }
 
-            logger.debug(f"[PowerBIAnalysisTool] Emitted llm_call trace event: {event_context}")
+            logger.info(f"[PowerBIAnalysisTool] TRACE EMISSION DEBUG - About to emit trace event: {event_context}")
+            queue.put_nowait(trace_event)
+            logger.info(f"[PowerBIAnalysisTool] TRACE EMISSION DEBUG - Successfully emitted llm_call trace event: {event_context}")
 
         except Exception as e:
             # Don't fail the tool execution if trace emission fails
-            logger.debug(f"[PowerBIAnalysisTool] Failed to emit llm_call trace: {e}")
+            logger.error(f"[PowerBIAnalysisTool] TRACE EMISSION DEBUG - Failed to emit llm_call trace: {e}", exc_info=True)
 
     def _extract_dax_from_llm_response(self, content: str) -> str:
         """Extract clean DAX query from LLM response."""

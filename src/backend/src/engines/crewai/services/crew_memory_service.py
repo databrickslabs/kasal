@@ -438,8 +438,9 @@ class CrewMemoryService:
             }
 
             # Iterate through all agents and their tools
+            tools_attached = 0
+
             if hasattr(crew, 'agents') and crew.agents:
-                tools_attached = 0
                 for agent in crew.agents:
                     if hasattr(agent, 'tools') and agent.tools:
                         agent_role = getattr(agent, 'role', 'Unknown Agent')
@@ -449,14 +450,29 @@ class CrewMemoryService:
                                 if hasattr(tool, '__dict__'):  # Check if tool can have attributes set
                                     setattr(tool, 'trace_context', trace_ctx)
                                     tools_attached += 1
-                                    logger.debug(f"Attached trace context to tool '{getattr(tool, 'name', type(tool).__name__)}' for agent '{agent_role}'")
+                                    logger.debug(f"Attached trace context to tool '{getattr(tool, 'name', type(tool).__name__)}' on agent '{agent_role}'")
                             except Exception as tool_err:
-                                logger.debug(f"Could not attach trace context to tool: {tool_err}")
+                                logger.debug(f"Could not attach trace context to tool on agent: {tool_err}")
 
-                if tools_attached > 0:
-                    logger.info(f"Attached trace context to {tools_attached} tools across {len(crew.agents)} agents")
+            # Also attach trace_context to tools on tasks (CrewAI allows tools on tasks)
+            if hasattr(crew, 'tasks') and crew.tasks:
+                for task in crew.tasks:
+                    if hasattr(task, 'tools') and task.tools:
+                        task_desc = getattr(task, 'description', 'Unknown Task')[:50]
+                        for tool in task.tools:
+                            try:
+                                # Attach trace_context to the tool instance
+                                if hasattr(tool, '__dict__'):  # Check if tool can have attributes set
+                                    setattr(tool, 'trace_context', trace_ctx)
+                                    tools_attached += 1
+                                    logger.info(f"Attached trace context to tool '{getattr(tool, 'name', type(tool).__name__)}' on task '{task_desc}...'")
+                            except Exception as tool_err:
+                                logger.debug(f"Could not attach trace context to tool on task: {tool_err}")
+
+            if tools_attached > 0:
+                logger.info(f"Attached trace context to {tools_attached} tool(s) total")
             else:
-                logger.debug("No agents found in crew, skipping tool trace context attachment")
+                logger.debug("No tools found in crew, skipping tool trace context attachment")
 
         except Exception as trace_ctx_err:
             logger.debug(f"Could not attach tools trace context: {trace_ctx_err}")
