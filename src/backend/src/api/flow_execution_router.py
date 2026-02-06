@@ -1,18 +1,16 @@
 """
 API endpoints for flow executions.
 """
-import logging
 import uuid
-from typing import Dict, Any, Optional, Union
+from typing import Any, Dict, Optional, Union
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
+
+from src.core.exceptions import BadRequestError, NotFoundError
 from pydantic import BaseModel
 
-from src.core.dependencies import get_db, GroupContextDep
+from src.core.dependencies import GroupContextDep, get_db
 from src.engines.crewai.crewai_flow_service import CrewAIFlowService
-
-# Configure logger
-logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/flow-executions",
@@ -23,20 +21,21 @@ router = APIRouter(
 
 class FlowExecutionRequest(BaseModel):
     """Request model for flow execution"""
+
     flow_id: Union[str, int, uuid.UUID]
     job_id: str
     run_name: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
     # Checkpoint resume fields
     resume_from_flow_uuid: Optional[str] = None  # CrewAI state.id to resume from
-    resume_from_execution_id: Optional[int] = None  # Execution ID of checkpoint to resume
+    resume_from_execution_id: Optional[
+        int
+    ] = None  # Execution ID of checkpoint to resume
 
 
 @router.post("", status_code=status.HTTP_202_ACCEPTED)
 async def execute_flow(
-    request: FlowExecutionRequest,
-    group_context: GroupContextDep,
-    db=Depends(get_db)
+    request: FlowExecutionRequest, group_context: GroupContextDep, db=Depends(get_db)
 ):
     """
     Start a flow execution asynchronously.
@@ -47,41 +46,29 @@ async def execute_flow(
     Returns:
         Flow execution details
     """
-    try:
-        # Use the CrewAIFlowService with database session
-        service = CrewAIFlowService(db)
-        
-        result = await service.run_flow(
-            flow_id=request.flow_id,
-            job_id=request.job_id,
-            run_name=request.run_name,
-            config=request.config,
-            resume_from_flow_uuid=request.resume_from_flow_uuid,
-            resume_from_execution_id=request.resume_from_execution_id
-        )
-        
-        if not result.get("success", True) is False:  # Assume success unless explicitly False
-            return result
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=result.get("error", "Flow execution failed")
-            )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error executing flow: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail=str(e)
-        )
+    # Use the CrewAIFlowService with database session
+    service = CrewAIFlowService(db)
+
+    result = await service.run_flow(
+        flow_id=request.flow_id,
+        job_id=request.job_id,
+        run_name=request.run_name,
+        config=request.config,
+        resume_from_flow_uuid=request.resume_from_flow_uuid,
+        resume_from_execution_id=request.resume_from_execution_id,
+    )
+
+    if (
+        not result.get("success", True) is False
+    ):  # Assume success unless explicitly False
+        return result
+    else:
+        raise BadRequestError(result.get("error", "Flow execution failed"))
 
 
 @router.get("/{execution_id}")
 async def get_flow_execution(
-    execution_id: int,
-    group_context: GroupContextDep,
-    db=Depends(get_db)
+    execution_id: int, group_context: GroupContextDep, db=Depends(get_db)
 ):
     """
     Get details of a flow execution.
@@ -92,35 +79,23 @@ async def get_flow_execution(
     Returns:
         Flow execution details
     """
-    try:
-        # Use the CrewAIFlowService with database session
-        service = CrewAIFlowService(db)
-        
-        result = await service.get_flow_execution(execution_id)
-        
-        if not result.get("success", True) is False:  # Assume success unless explicitly False
-            # If result contains an 'execution' key, return that, otherwise return the whole result
-            return result.get("execution", result)
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=result.get("error", "Flow execution not found")
-            )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting flow execution: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail=str(e)
-        )
+    # Use the CrewAIFlowService with database session
+    service = CrewAIFlowService(db)
+
+    result = await service.get_flow_execution(execution_id)
+
+    if (
+        not result.get("success", True) is False
+    ):  # Assume success unless explicitly False
+        # If result contains an 'execution' key, return that, otherwise return the whole result
+        return result.get("execution", result)
+    else:
+        raise NotFoundError(result.get("error", "Flow execution not found"))
 
 
 @router.get("/by-flow/{flow_id}")
 async def get_flow_executions_by_flow(
-    flow_id: str,
-    group_context: GroupContextDep,
-    db=Depends(get_db)
+    flow_id: str, group_context: GroupContextDep, db=Depends(get_db)
 ):
     """
     Get all executions for a specific flow.
@@ -131,25 +106,15 @@ async def get_flow_executions_by_flow(
     Returns:
         List of flow executions
     """
-    try:
-        # Use the CrewAIFlowService with database session
-        service = CrewAIFlowService(db)
-        
-        result = await service.get_flow_executions_by_flow(flow_id)
-        
-        if not result.get("success", True) is False:  # Assume success unless explicitly False
-            # If result contains an 'executions' key, return that, otherwise return the whole result
-            return result.get("executions", result)
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=result.get("error", "Flow not found")
-            )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting flow executions: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail=str(e)
-        ) 
+    # Use the CrewAIFlowService with database session
+    service = CrewAIFlowService(db)
+
+    result = await service.get_flow_executions_by_flow(flow_id)
+
+    if (
+        not result.get("success", True) is False
+    ):  # Assume success unless explicitly False
+        # If result contains an 'executions' key, return that, otherwise return the whole result
+        return result.get("executions", result)
+    else:
+        raise NotFoundError(result.get("error", "Flow not found"))

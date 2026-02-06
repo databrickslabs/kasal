@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, patch
-from fastapi import HTTPException
+
+from src.core.exceptions import NotFoundError
 
 from src.api.engine_config_router import (
     get_engine_configs,
@@ -60,7 +61,7 @@ async def test_get_engine_config_found_and_not_found():
     assert out['engine_name'] == 'e1'
     # Not found path
     svc.find_by_engine_name = AsyncMock(return_value=None)
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(NotFoundError) as ei:
         await get_engine_config('e2', service=svc, group_context=group_ctx)
     assert ei.value.status_code == 404
 
@@ -83,13 +84,13 @@ async def test_create_toggle_update_value_permission_and_404s(monkeypatch):
 
     # Toggle 404
     svc.toggle_engine_enabled = AsyncMock(return_value=None)
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(NotFoundError) as ei:
         await toggle_engine_config('e', EngineConfigToggleUpdate(enabled=True), service=svc, group_context=group_ctx)
     assert ei.value.status_code == 404
 
     # Update value 404
     svc.update_config_value = AsyncMock(return_value=None)
-    with pytest.raises(HTTPException) as ei2:
+    with pytest.raises(NotFoundError) as ei2:
         await update_config_value('e', 'k', EngineConfigValueUpdate(config_value='x'), service=svc, group_context=group_ctx)
     assert ei2.value.status_code == 404
 

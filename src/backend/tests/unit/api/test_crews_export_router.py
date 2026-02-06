@@ -4,8 +4,9 @@ Unit tests for crews export router.
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from fastapi import HTTPException
 import io
+
+from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 import zipfile
 
 from src.api.crews_export_router import (
@@ -134,7 +135,7 @@ class TestExportCrew:
         )
 
         with patch('src.api.crews_export_router.check_role_in_context', return_value=False):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(ForbiddenError) as exc_info:
                 await export_crew(
                     crew_id=crew_id,
                     request=request,
@@ -158,7 +159,7 @@ class TestExportCrew:
         invalid_context.is_valid.return_value = False
 
         with patch('src.api.crews_export_router.check_role_in_context', return_value=True):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(BadRequestError) as exc_info:
                 await export_crew(
                     crew_id=crew_id,
                     request=request,
@@ -181,7 +182,7 @@ class TestExportCrew:
         mock_service.export_crew.side_effect = ValueError("Crew not found")
 
         with patch('src.api.crews_export_router.check_role_in_context', return_value=True):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(NotFoundError) as exc_info:
                 await export_crew(
                     crew_id=crew_id,
                     request=request,
@@ -328,7 +329,7 @@ class TestDeployCrew:
         )
 
         with patch('src.api.crews_export_router.check_role_in_context', return_value=False):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(ForbiddenError) as exc_info:
                 await deploy_crew(
                     crew_id=crew_id,
                     request=request,
@@ -424,7 +425,7 @@ class TestDeleteDeployment:
         endpoint_name = "test-endpoint"
 
         with patch('src.api.crews_export_router.check_role_in_context', return_value=False):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(ForbiddenError) as exc_info:
                 await delete_deployment(
                     crew_id=crew_id,
                     endpoint_name=endpoint_name,

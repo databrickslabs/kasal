@@ -1,6 +1,5 @@
 import pytest
 from unittest.mock import AsyncMock, patch, Mock
-from fastapi import HTTPException
 from src.api.dspy_router import (
     get_dspy_enabled,
     set_dspy_enabled,
@@ -73,11 +72,10 @@ class TestGetDSPyEnabled:
             mock_service.is_enabled = AsyncMock(side_effect=Exception("Database error"))
             mock_service_class.return_value = mock_service
             
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(Exception) as exc_info:
                 await get_dspy_enabled(session=session, group_context=group_context)
-            
-            assert exc_info.value.status_code == 500
-            assert "Database error" in str(exc_info.value.detail)
+
+            assert "Database error" in str(exc_info.value)
 
 
 class TestSetDSPyEnabled:
@@ -149,11 +147,10 @@ class TestSetDSPyEnabled:
             mock_service.set_enabled = AsyncMock(side_effect=Exception("Database error"))
             mock_service_class.return_value = mock_service
             
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(Exception) as exc_info:
                 await set_dspy_enabled(payload=payload, session=session, group_context=group_context)
-            
-            assert exc_info.value.status_code == 500
-            assert "Database error" in str(exc_info.value.detail)
+
+            assert "Database error" in str(exc_info.value)
 
 
 class TestGetDSPyStats:
@@ -223,9 +220,8 @@ class TestGetDSPyStats:
             mock_service.is_enabled = AsyncMock(side_effect=Exception("Database error"))
             mock_service_class.return_value = mock_service
             
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(Exception) as exc_info:
                 await get_dspy_stats(session=session, group_context=group_context)
-            
-            assert exc_info.value.status_code == 500
-            assert "Database error" in str(exc_info.value.detail)
+
+            assert "Database error" in str(exc_info.value)
 

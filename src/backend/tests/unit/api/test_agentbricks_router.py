@@ -4,7 +4,8 @@ Unit tests for AgentBricks API router.
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from fastapi import HTTPException
+
+from src.core.exceptions import NotFoundError
 
 from src.api.agentbricks_router import (
     router,
@@ -176,7 +177,7 @@ class TestGetAgentBricksEndpoints:
                 mock_service_class.return_value = mock_service
 
                 with patch('src.api.agentbricks_router.UserContext.set_group_context'):
-                    with pytest.raises(HTTPException) as exc_info:
+                    with pytest.raises(Exception) as exc_info:
                         await get_agentbricks_endpoints(
                             request=mock_request,
                             ready_only=True,
@@ -184,8 +185,7 @@ class TestGetAgentBricksEndpoints:
                             group_context=mock_group_context
                         )
 
-        assert exc_info.value.status_code == 500
-        assert "Failed to fetch AgentBricks endpoints" in exc_info.value.detail
+        assert "Service error" in str(exc_info.value)
 
 
 class TestSearchAgentBricksEndpoints:
@@ -279,15 +279,14 @@ class TestSearchAgentBricksEndpoints:
                 mock_service_class.return_value = mock_service
 
                 with patch('src.api.agentbricks_router.UserContext.set_group_context'):
-                    with pytest.raises(HTTPException) as exc_info:
+                    with pytest.raises(Exception) as exc_info:
                         await search_agentbricks_endpoints(
                             request=mock_request,
                             endpoints_request=search_request,
                             group_context=mock_group_context
                         )
 
-        assert exc_info.value.status_code == 500
-        assert "Failed to search AgentBricks endpoints" in exc_info.value.detail
+        assert "Search error" in str(exc_info.value)
 
 
 class TestGetAgentBricksEndpointDetails:
@@ -348,7 +347,7 @@ class TestGetAgentBricksEndpointDetails:
                 mock_service_class.return_value = mock_service
 
                 with patch('src.api.agentbricks_router.UserContext.set_group_context'):
-                    with pytest.raises(HTTPException) as exc_info:
+                    with pytest.raises(NotFoundError) as exc_info:
                         await get_agentbricks_endpoint_details(
                             endpoint_name=endpoint_name,
                             request=mock_request,
@@ -371,15 +370,14 @@ class TestGetAgentBricksEndpointDetails:
                 mock_service_class.return_value = mock_service
 
                 with patch('src.api.agentbricks_router.UserContext.set_group_context'):
-                    with pytest.raises(HTTPException) as exc_info:
+                    with pytest.raises(Exception) as exc_info:
                         await get_agentbricks_endpoint_details(
                             endpoint_name=endpoint_name,
                             request=mock_request,
                             group_context=mock_group_context
                         )
 
-        assert exc_info.value.status_code == 500
-        assert "Failed to fetch endpoint details" in exc_info.value.detail
+        assert "Service error" in str(exc_info.value)
 
 
 class TestQueryAgentBricksEndpoint:
@@ -475,15 +473,14 @@ class TestQueryAgentBricksEndpoint:
                 mock_service_class.return_value = mock_service
 
                 with patch('src.api.agentbricks_router.UserContext.set_group_context'):
-                    with pytest.raises(HTTPException) as exc_info:
+                    with pytest.raises(Exception) as exc_info:
                         await query_agentbricks_endpoint(
                             request=mock_request,
                             query_request=query_request,
                             group_context=mock_group_context
                         )
 
-        assert exc_info.value.status_code == 500
-        assert "Failed to query endpoint" in exc_info.value.detail
+        assert "Query error" in str(exc_info.value)
 
 
 class TestExecuteAgentBricksQuery:
@@ -621,15 +618,14 @@ class TestExecuteAgentBricksQuery:
                 mock_service_class.return_value = mock_service
 
                 with patch('src.api.agentbricks_router.UserContext.set_group_context'):
-                    with pytest.raises(HTTPException) as exc_info:
+                    with pytest.raises(Exception) as exc_info:
                         await execute_agentbricks_query(
                             request=mock_request,
                             execution_request=execution_request,
                             group_context=mock_group_context
                         )
 
-        assert exc_info.value.status_code == 500
-        assert "Failed to execute query" in exc_info.value.detail
+        assert "Execution error" in str(exc_info.value)
 
 
 class TestAuthConfigCreation:
