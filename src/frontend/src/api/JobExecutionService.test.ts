@@ -611,6 +611,145 @@ describe('JobExecutionService', () => {
     });
   });
 
+  // ===========================================================================
+  // LLM Guardrail Execution Config Tests
+  // ===========================================================================
+
+  describe('llm_guardrail execution config', () => {
+    it('should include llm_guardrail in tasks_yaml when toggle is ON', async () => {
+      const agentNode = createMockAgentNode('agent-gr-1', {
+        role: 'Researcher',
+        goal: 'Research topics',
+        backstory: 'Expert researcher',
+      });
+      const taskNode = createMockTaskNode('task-gr-1', {
+        description: 'Research AI trends',
+        expected_output: 'A report with 5 sources',
+        config: {
+          llm_guardrail: {
+            description: 'Validate output contains at least 5 sources',
+            llm_model: 'databricks-claude-sonnet-4-5'
+          }
+        }
+      });
+      const edge = createMockEdge('agent-gr-1', 'task-gr-1');
+
+      const mockResponse = createMockJobResponse();
+      (apiClient.post as Mock).mockResolvedValue({ data: mockResponse });
+
+      await service.executeJob([agentNode, taskNode], [edge]);
+
+      expect(apiClient.post).toHaveBeenCalledTimes(1);
+      const callArgs = (apiClient.post as Mock).mock.calls[0];
+      const config = callArgs[1];
+      const taskName = Object.keys(config.tasks_yaml).find(k => k.includes('task-gr-1') || k.includes('task_gr'));
+
+      expect(taskName).toBeDefined();
+      expect(config.tasks_yaml[taskName!].llm_guardrail).toEqual({
+        description: 'Validate output contains at least 5 sources',
+        llm_model: 'databricks-claude-sonnet-4-5'
+      });
+    });
+
+    it('should NOT include llm_guardrail when toggle is OFF (null in config)', async () => {
+      const agentNode = createMockAgentNode('agent-gr-2', {
+        role: 'Writer',
+        goal: 'Write content',
+        backstory: 'Content writer',
+      });
+      const taskNode = createMockTaskNode('task-gr-2', {
+        description: 'Write an article',
+        expected_output: 'A well-written article',
+        config: {
+          llm_guardrail: null
+        }
+      });
+      const edge = createMockEdge('agent-gr-2', 'task-gr-2');
+
+      const mockResponse = createMockJobResponse();
+      (apiClient.post as Mock).mockResolvedValue({ data: mockResponse });
+
+      await service.executeJob([agentNode, taskNode], [edge]);
+
+      const callArgs = (apiClient.post as Mock).mock.calls[0];
+      const config = callArgs[1];
+      const taskName = Object.keys(config.tasks_yaml).find(k => k.includes('task-gr-2') || k.includes('task_gr'));
+
+      expect(taskName).toBeDefined();
+      expect(config.tasks_yaml[taskName!].llm_guardrail).toBeUndefined();
+    });
+
+    it('should NOT include llm_guardrail when config has no llm_guardrail key', async () => {
+      const agentNode = createMockAgentNode('agent-gr-3', {
+        role: 'Analyst',
+        goal: 'Analyze data',
+        backstory: 'Data analyst',
+      });
+      const taskNode = createMockTaskNode('task-gr-3', {
+        description: 'Analyze market trends',
+        expected_output: 'Analysis report',
+        config: {
+          cache_response: false,
+          retry_on_fail: true
+          // No llm_guardrail key at all
+        }
+      });
+      const edge = createMockEdge('agent-gr-3', 'task-gr-3');
+
+      const mockResponse = createMockJobResponse();
+      (apiClient.post as Mock).mockResolvedValue({ data: mockResponse });
+
+      await service.executeJob([agentNode, taskNode], [edge]);
+
+      const callArgs = (apiClient.post as Mock).mock.calls[0];
+      const config = callArgs[1];
+      const taskName = Object.keys(config.tasks_yaml).find(k => k.includes('task-gr-3') || k.includes('task_gr'));
+
+      expect(taskName).toBeDefined();
+      expect(config.tasks_yaml[taskName!].llm_guardrail).toBeUndefined();
+    });
+
+    it('should handle tasks with code guardrail and llm_guardrail independently', async () => {
+      const agentNode = createMockAgentNode('agent-gr-4', {
+        role: 'Validator',
+        goal: 'Validate data',
+        backstory: 'Data validator',
+      });
+      const taskNode = createMockTaskNode('task-gr-4', {
+        description: 'Validate customer data',
+        expected_output: 'Validation report',
+        config: {
+          guardrail: '{"type": "data_quality", "checks": ["completeness"]}',
+          llm_guardrail: {
+            description: 'Validate report is comprehensive',
+            llm_model: 'databricks-claude-sonnet-4-5'
+          }
+        }
+      });
+      const edge = createMockEdge('agent-gr-4', 'task-gr-4');
+
+      const mockResponse = createMockJobResponse();
+      (apiClient.post as Mock).mockResolvedValue({ data: mockResponse });
+
+      await service.executeJob([agentNode, taskNode], [edge]);
+
+      const callArgs = (apiClient.post as Mock).mock.calls[0];
+      const config = callArgs[1];
+      const taskName = Object.keys(config.tasks_yaml).find(k => k.includes('task-gr-4') || k.includes('task_gr'));
+
+      expect(taskName).toBeDefined();
+      // Both guardrails should be present
+      expect(config.tasks_yaml[taskName!].guardrail).toEqual({
+        type: 'data_quality',
+        checks: ['completeness']
+      });
+      expect(config.tasks_yaml[taskName!].llm_guardrail).toEqual({
+        description: 'Validate report is comprehensive',
+        llm_model: 'databricks-claude-sonnet-4-5'
+      });
+    });
+  });
+
   describe('getJobStatus', () => {
     it('should fetch job status correctly', async () => {
       const mockResponse = createMockJobResponse({

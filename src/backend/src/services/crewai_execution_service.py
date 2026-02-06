@@ -251,15 +251,10 @@ class CrewAIExecutionService:
                                         if 'tool_configs' not in task_config:
                                             task_config['tool_configs'] = {}
 
-                                    # Also fetch llm_guardrail from database if present
-                                    if hasattr(db_task, 'llm_guardrail') and db_task.llm_guardrail:
-                                        task_config['llm_guardrail'] = db_task.llm_guardrail
-                                        crew_logger.info(f"Added llm_guardrail from database for task {task_id}: {db_task.llm_guardrail}")
-                                    # Also check config field for llm_guardrail
-                                    elif hasattr(db_task, 'config') and db_task.config:
-                                        if 'llm_guardrail' in db_task.config and db_task.config['llm_guardrail']:
-                                            task_config['llm_guardrail'] = db_task.config['llm_guardrail']
-                                            crew_logger.info(f"Added llm_guardrail from config for task {task_id}: {db_task.config['llm_guardrail']}")
+                                    # llm_guardrail is NOT injected from the database here.
+                                    # The frontend controls whether llm_guardrail is active via
+                                    # the user's toggle. If enabled, it's sent in tasks_yaml.
+                                    # The DB stores it as a suggestion for the UI only.
                                 else:
                                     crew_logger.warning(f"Task {task_id} not found in database")
                             except Exception as e:

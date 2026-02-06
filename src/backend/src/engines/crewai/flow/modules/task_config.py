@@ -132,11 +132,13 @@ class TaskConfig:
                 logger.warning(f"Error setting up code-based guardrail for task {task_data.name}: {guardrail_error}")
                 # Continue without guardrail - task is still valid
 
-            # Handle LLM guardrail if present in task configuration
+            # Handle LLM guardrail if explicitly enabled by the user in config
             # NOTE: LLM guardrail takes priority over code-based guardrail if both exist
-            # Access llm_guardrail directly from task_data (it's a dedicated column in the Task model)
+            # Read from config (user's explicit choice), not from the column (which
+            # stores the LLM-generated suggestion and may not reflect the toggle state)
             try:
-                llm_guardrail_config = getattr(task_data, 'llm_guardrail', None)
+                task_config_dict = getattr(task_data, 'config', None) or {}
+                llm_guardrail_config = task_config_dict.get('llm_guardrail') if isinstance(task_config_dict, dict) else None
 
                 if llm_guardrail_config:
                     logger.info(f"Task {task_data.name} has LLM guardrail configuration: {llm_guardrail_config}")
