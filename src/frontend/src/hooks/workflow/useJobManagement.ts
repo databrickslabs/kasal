@@ -1,6 +1,5 @@
 import { useState, useCallback } from 'react';
 import { useCrewExecutionStore } from '../../store/crewExecution';
-import { useRunStatus } from '../global/useExecutionStatus';
 import { RunService } from '../../api/ExecutionHistoryService';
 
 interface UseJobManagementProps {
@@ -20,8 +19,8 @@ export const useJobManagement = ({ onJobStatusChanged }: UseJobManagementProps =
     cleanup: cleanupStore
   } = useCrewExecutionStore();
 
-  const { startTracking, stopTracking } = useRunStatus(jobId || '');
-
+  // Job status updates are handled via SSE (SSEConnectionManager)
+  // No polling needed - updates flow through the global SSE stream
 
   const executeJob = useCallback(async (agentsYaml: string, tasksYaml: string) => {
     setIsLoading(true);
@@ -30,21 +29,19 @@ export const useJobManagement = ({ onJobStatusChanged }: UseJobManagementProps =
       const response = await RunService.getInstance().executeJob(agentsYaml, tasksYaml);
       if (response?.job_id) {
         setJobId(response.job_id);
-        startTracking();
       }
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Failed to execute job');
     } finally {
       setIsLoading(false);
     }
-  }, [startTracking]);
+  }, []);
 
   const stopJob = useCallback(() => {
     if (jobId) {
-      stopTracking();
       setJobId(null);
     }
-  }, [jobId, stopTracking]);
+  }, [jobId]);
 
   const cleanup = useCallback(() => {
     stopJob();
