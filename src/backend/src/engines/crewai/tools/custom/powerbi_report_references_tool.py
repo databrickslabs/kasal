@@ -171,10 +171,15 @@ class PowerBIReportReferencesTool(BaseTool):
             "workspace_id": get_filtered_value("workspace_id"),
             "dataset_id": get_filtered_value("dataset_id"),
             "report_id": get_filtered_value("report_id"),
+            # Authentication credentials
             "tenant_id": get_filtered_value("tenant_id"),
             "client_id": get_filtered_value("client_id"),
             "client_secret": get_filtered_value("client_secret"),
+            "username": get_filtered_value("username"),
+            "password": get_filtered_value("password"),
+            "auth_method": get_filtered_value("auth_method"),
             "access_token": get_filtered_value("access_token"),
+            # Output options
             "output_format": get_filtered_value("output_format", "markdown"),
             "include_visual_details": get_filtered_value("include_visual_details", True),
             "group_by": get_filtered_value("group_by", "page"),
@@ -248,8 +253,8 @@ class PowerBIReportReferencesTool(BaseTool):
             if filtered_out:
                 logger.info(f"[PowerBIReportReferencesTool] Filtered out placeholder kwargs: {list(filtered_out.keys())}")
 
-            # Merge with defaults
-            merged_kwargs = {**self._default_config, **filtered_kwargs}
+            # Merge with defaults - IMPORTANT: default_config must be second to override agent's values
+            merged_kwargs = {**filtered_kwargs, **self._default_config}
 
             # Resolve dynamic parameters
             if execution_inputs:
@@ -273,6 +278,40 @@ class PowerBIReportReferencesTool(BaseTool):
                 "auth_method": merged_kwargs.get("auth_method"),
                 "access_token": merged_kwargs.get("access_token"),
             }
+
+            # DEBUG: Log auth config being used
+            logger.info("=" * 80)
+            logger.info("[PowerBIReportReferencesTool] AUTH CONFIG DEBUG")
+            logger.info("=" * 80)
+            logger.info(f"  tenant_id: {auth_config.get('tenant_id')}")
+            logger.info(f"  client_id: {auth_config.get('client_id')}")
+            logger.info(f"  client_secret: {'*' * len(auth_config.get('client_secret') or '') if auth_config.get('client_secret') else 'None'}")
+            logger.info(f"  username: {auth_config.get('username')}")
+            logger.info(f"  password: {'*' * len(auth_config.get('password') or '') if auth_config.get('password') else 'None'}")
+            logger.info(f"  auth_method: {auth_config.get('auth_method')} (type: {type(auth_config.get('auth_method'))})")
+            logger.info(f"  access_token: {'*' * 10 if auth_config.get('access_token') else 'None'}")
+            logger.info("=" * 80)
+
+            # Log which authentication method will be used (auto-detect if not specified)
+            detected_auth_method = auth_config.get("auth_method")
+            if not detected_auth_method:
+                # Replicate AadService._determine_auth_method() logic
+                if auth_config.get("access_token"):
+                    detected_auth_method = "user_oauth (pre-obtained token)"
+                elif (auth_config.get("client_id") and auth_config.get("client_secret") and
+                      auth_config.get("tenant_id")):
+                    detected_auth_method = "service_principal (auto-detected)"
+                elif (auth_config.get("username") and auth_config.get("password") and
+                      auth_config.get("client_id") and auth_config.get("tenant_id")):
+                    detected_auth_method = "service_account (auto-detected)"
+                else:
+                    detected_auth_method = "UNKNOWN - insufficient credentials"
+
+            logger.info("=" * 80)
+            logger.info("[PowerBIReportReferencesTool] 🔑 AUTHENTICATION METHOD DETECTION")
+            logger.info("=" * 80)
+            logger.info(f"  Detected auth method: {detected_auth_method}")
+            logger.info("=" * 80)
 
             # Helper to check for unresolved placeholders
             def has_unresolved_placeholder(value: Any) -> bool:
