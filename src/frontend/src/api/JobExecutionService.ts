@@ -412,7 +412,7 @@ export class JobExecutionService {
               try {
                 // Parse the guardrail JSON string
                 const guardrailConfig = JSON.parse(taskData.config.guardrail);
-                
+
                 // Set the guardrail in the task YAML
                 if (config.tasks_yaml[taskName]) {
                   config.tasks_yaml[taskName].guardrail = guardrailConfig;
@@ -421,6 +421,12 @@ export class JobExecutionService {
               } catch (error) {
                 console.error(`Error parsing guardrail for task ${taskName}:`, error);
               }
+            }
+
+            // Process LLM guardrail if explicitly enabled by the user (toggle ON)
+            if (taskData.config?.llm_guardrail && config.tasks_yaml[taskName]) {
+              config.tasks_yaml[taskName].llm_guardrail = taskData.config.llm_guardrail;
+              console.log(`Set llm_guardrail for task ${taskName}:`, taskData.config.llm_guardrail);
             }
           }
         });
