@@ -709,6 +709,25 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     console.log('[CrewExecution] handleRunClick called with type:', type);
     console.log('[CrewExecution] Current nodes:', state.nodes);
 
+    // Resolve correct nodes/edges based on execution type from tab manager
+    // The crewExecution store has a single nodes/edges property that gets overwritten
+    // when switching between crew and flow canvases. Read directly from tab state instead.
+    const tabState = useTabManagerStore.getState();
+    const activeTab = tabState.tabs.find(t => t.id === tabState.activeTabId);
+    let resolvedNodes: Node[];
+    let resolvedEdges: Edge[];
+    if (type === 'crew' && activeTab) {
+      resolvedNodes = activeTab.nodes;
+      resolvedEdges = activeTab.edges;
+    } else if (type === 'flow' && activeTab) {
+      resolvedNodes = activeTab.flowNodes;
+      resolvedEdges = activeTab.flowEdges;
+    } else {
+      resolvedNodes = state.nodes;
+      resolvedEdges = state.edges;
+    }
+    console.log('[CrewExecution] Resolved nodes for', type, ':', resolvedNodes.length);
+
     // Helper function to check for checkpoints and handle flow execution
     const checkForCheckpointsAndExecuteFlow = async (nodes: Node[], edges: Edge[]) => {
       console.log('[CrewExecution] Checking for checkpoints before flow execution');
@@ -768,7 +787,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     // Check if we need to show input variables dialog
     // Only check for variables in the nodes relevant to the execution type
     const variablePattern = /\{([^}]+)\}/g;
-    const hasVariables = state.nodes.some(node => {
+    const hasVariables = resolvedNodes.some(node => {
       // For crew execution, check agent and task nodes
       // For flow execution, we don't check for input variables (flows use crew configurations)
       if (type === 'crew' && (node.type === 'agentNode' || node.type === 'taskNode')) {
@@ -824,10 +843,10 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
         set({ isExecuting: true });
         try {
           if (type === 'crew') {
-            await state.executeCrew(state.nodes, state.edges);
+            await state.executeCrew(resolvedNodes, resolvedEdges);
           } else {
             // Check for checkpoints before executing flow
-            await checkForCheckpointsAndExecuteFlow(state.nodes, state.edges);
+            await checkForCheckpointsAndExecuteFlow(resolvedNodes, resolvedEdges);
           }
         } catch (error) {
           set({
@@ -846,11 +865,11 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
         console.log('[CrewExecution] Type check - type:', type, 'comparison result:', type === 'crew');
         if (type === 'crew') {
           console.log('[CrewExecution] Executing CREW path');
-          await state.executeCrew(state.nodes, state.edges);
+          await state.executeCrew(resolvedNodes, resolvedEdges);
         } else {
           console.log('[CrewExecution] Executing FLOW path');
           // Check for checkpoints before executing flow
-          await checkForCheckpointsAndExecuteFlow(state.nodes, state.edges);
+          await checkForCheckpointsAndExecuteFlow(resolvedNodes, resolvedEdges);
         }
       } catch (error) {
         set({

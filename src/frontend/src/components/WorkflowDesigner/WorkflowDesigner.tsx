@@ -542,6 +542,18 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     };
   }, []); // Empty dependency array - only run once
 
+  // Reset sync refs when switching canvases so the sync effects
+  // detect "new" nodes when switching back and re-sync to the store
+  useEffect(() => {
+    if (areFlowsVisible) {
+      prevCrewNodeIdsRef.current = '';
+      prevCrewEdgeIdsRef.current = '';
+    } else {
+      prevFlowNodeIdsRef.current = '';
+      prevFlowEdgeIdsRef.current = '';
+    }
+  }, [areFlowsVisible]);
+
   // Sync nodes and edges with crew execution store
   // For crew canvas (agentNode/taskNode)
   // Uses ID comparison to prevent infinite render loops

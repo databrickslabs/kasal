@@ -201,6 +201,168 @@ describe('WorkflowDesigner Node Sync Logic', () => {
     });
   });
 
+  describe('Sync ref reset on canvas switch', () => {
+    /**
+     * Tests the fix for the bug where switching from crew to flow canvas and back
+     * would leave stale nodes in the store because the ID comparison refs
+     * weren't reset, causing the sync effects to skip re-syncing.
+     */
+
+    it('should reset crew refs when switching to flow view', () => {
+      const refs = {
+        prevCrewNodeIds: 'agent-1,task-1',
+        prevCrewEdgeIds: 'edge-1',
+        prevFlowNodeIds: '',
+        prevFlowEdgeIds: '',
+      };
+
+      // Simulate the useEffect that resets refs on canvas switch
+      const resetRefs = (areFlowsVisible: boolean) => {
+        if (areFlowsVisible) {
+          refs.prevCrewNodeIds = '';
+          refs.prevCrewEdgeIds = '';
+        } else {
+          refs.prevFlowNodeIds = '';
+          refs.prevFlowEdgeIds = '';
+        }
+      };
+
+      // Switch to flow view
+      resetRefs(true);
+
+      expect(refs.prevCrewNodeIds).toBe('');
+      expect(refs.prevCrewEdgeIds).toBe('');
+      // Flow refs should be untouched
+      expect(refs.prevFlowNodeIds).toBe('');
+      expect(refs.prevFlowEdgeIds).toBe('');
+    });
+
+    it('should reset flow refs when switching to crew view', () => {
+      const refs = {
+        prevCrewNodeIds: '',
+        prevCrewEdgeIds: '',
+        prevFlowNodeIds: 'crew-1,crew-2',
+        prevFlowEdgeIds: 'flow-edge-1',
+      };
+
+      const resetRefs = (areFlowsVisible: boolean) => {
+        if (areFlowsVisible) {
+          refs.prevCrewNodeIds = '';
+          refs.prevCrewEdgeIds = '';
+        } else {
+          refs.prevFlowNodeIds = '';
+          refs.prevFlowEdgeIds = '';
+        }
+      };
+
+      // Switch to crew view
+      resetRefs(false);
+
+      expect(refs.prevFlowNodeIds).toBe('');
+      expect(refs.prevFlowEdgeIds).toBe('');
+      // Crew refs should be untouched
+      expect(refs.prevCrewNodeIds).toBe('');
+    });
+
+    it('should cause sync effect to re-sync after canvas switch back', () => {
+      const mockSetNodes = vi.fn();
+      let prevCrewNodeIdsRef = '';
+      let prevFlowNodeIdsRef = '';
+
+      const syncCrewNodes = (crewNodes: Array<{ id: string }>) => {
+        const currentIds = crewNodes.map(n => n.id).sort().join(',');
+        if (currentIds !== prevCrewNodeIdsRef) {
+          mockSetNodes(crewNodes);
+          prevCrewNodeIdsRef = currentIds;
+        }
+      };
+
+      const resetRefs = (areFlowsVisible: boolean) => {
+        if (areFlowsVisible) {
+          prevCrewNodeIdsRef = '';
+        } else {
+          prevFlowNodeIdsRef = '';
+        }
+      };
+
+      const crewNodes = [{ id: 'agent-1' }, { id: 'task-1' }];
+
+      // 1. Initial sync - should trigger setter
+      syncCrewNodes(crewNodes);
+      expect(mockSetNodes).toHaveBeenCalledTimes(1);
+
+      // 2. Same nodes again - should NOT trigger setter (IDs match)
+      syncCrewNodes(crewNodes);
+      expect(mockSetNodes).toHaveBeenCalledTimes(1);
+
+      // 3. Switch to flow view (resets crew refs)
+      resetRefs(true);
+      expect(prevCrewNodeIdsRef).toBe('');
+
+      // 4. Switch back to crew view and sync same nodes
+      // Because refs were reset, this should trigger setter again
+      resetRefs(false);
+      expect(prevFlowNodeIdsRef).toBe(''); // Flow ref was reset
+      syncCrewNodes(crewNodes);
+      expect(mockSetNodes).toHaveBeenCalledTimes(2);
+    });
+
+    it('should handle multiple rapid canvas switches correctly', () => {
+      const mockSetCrewNodes = vi.fn();
+      const mockSetFlowNodes = vi.fn();
+      let prevCrewNodeIdsRef = '';
+      let prevFlowNodeIdsRef = '';
+
+      const resetRefs = (areFlowsVisible: boolean) => {
+        if (areFlowsVisible) {
+          prevCrewNodeIdsRef = '';
+        } else {
+          prevFlowNodeIdsRef = '';
+        }
+      };
+
+      const syncCrewNodes = (crewNodes: Array<{ id: string }>) => {
+        const currentIds = crewNodes.map(n => n.id).sort().join(',');
+        if (currentIds !== prevCrewNodeIdsRef) {
+          mockSetCrewNodes(crewNodes);
+          prevCrewNodeIdsRef = currentIds;
+        }
+      };
+
+      const syncFlowNodes = (flowNodes: Array<{ id: string }>) => {
+        const currentIds = flowNodes.map(n => n.id).sort().join(',');
+        if (currentIds !== prevFlowNodeIdsRef) {
+          mockSetFlowNodes(flowNodes);
+          prevFlowNodeIdsRef = currentIds;
+        }
+      };
+
+      const crewNodes = [{ id: 'agent-1' }];
+      const flowNodes = [{ id: 'crew-1' }];
+
+      // Initial sync on crew view
+      syncCrewNodes(crewNodes);
+      expect(mockSetCrewNodes).toHaveBeenCalledTimes(1);
+
+      // Switch to flow → crew → flow → crew rapidly
+      resetRefs(true); // to flow
+      syncFlowNodes(flowNodes);
+      expect(mockSetFlowNodes).toHaveBeenCalledTimes(1);
+
+      resetRefs(false); // to crew
+      syncCrewNodes(crewNodes);
+      expect(mockSetCrewNodes).toHaveBeenCalledTimes(2); // Re-synced!
+
+      resetRefs(true); // to flow
+      syncFlowNodes(flowNodes);
+      expect(mockSetFlowNodes).toHaveBeenCalledTimes(2); // Re-synced!
+
+      resetRefs(false); // to crew
+      syncCrewNodes(crewNodes);
+      expect(mockSetCrewNodes).toHaveBeenCalledTimes(3); // Re-synced!
+    });
+  });
+
   describe('areFlowsVisible flag behavior', () => {
     it('should sync flow nodes only when areFlowsVisible is true', () => {
       const mockSetCrewExecutionNodes = vi.fn();
