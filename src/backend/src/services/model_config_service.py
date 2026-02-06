@@ -3,6 +3,9 @@ Service for model configuration operations.
 
 This module provides business logic for model configuration operations,
 including retrieving and managing model configurations.
+
+PERFORMANCE: Uses TTL caching for group-scoped model queries with automatic
+invalidation on mutations. See src/core/cache.py for cache implementation.
 """
 
 import logging
@@ -11,6 +14,7 @@ from fastapi import HTTPException, status
 
 from src.utils.model_config import get_model_config
 from src.core.logger import LoggerManager
+from src.core.cache import model_config_cache
 from src.services.api_keys_service import ApiKeysService
 from src.repositories.model_config_repository import ModelConfigRepository
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -71,12 +75,13 @@ class ModelConfigService:
         """
         return await self.repository.find_by_key(key)
 
-    async def create_model_config(self, model_data):
+    async def create_model_config(self, model_data, group_id: Optional[str] = None):
         """
         Create a new model configuration.
 
         Args:
             model_data: Data for the new model configuration
+            group_id: Optional group ID for cache invalidation
 
         Returns:
             Created model configuration
@@ -98,15 +103,24 @@ class ModelConfigService:
             model_dict = dict(model_data)
 
         # Create new model
-        return await self.repository.create(model_dict)
+        result = await self.repository.create(model_dict)
 
-    async def update_model_config(self, key: str, model_data):
+        # Invalidate cache - both default and group-specific if provided
+        await model_config_cache.invalidate("__default__", "models")
+        if group_id:
+            await model_config_cache.invalidate(group_id, "models")
+        logger.info(f"[CACHE INVALIDATE] Model config cache invalidated after create")
+
+        return result
+
+    async def update_model_config(self, key: str, model_data, group_id: Optional[str] = None):
         """
         Update an existing model configuration.
 
         Args:
             key: Key of the model to update
             model_data: Updated model data
+            group_id: Optional group ID for cache invalidation
 
         Returns:
             Updated model configuration, or None if not found
@@ -125,15 +139,27 @@ class ModelConfigService:
             model_dict = dict(model_data)
 
         # Update model
-        return await self.repository.update(existing_model.id, model_dict)
+        result = await self.repository.update(existing_model.id, model_dict)
 
-    async def toggle_model_enabled(self, key: str, enabled: bool) -> Optional[ModelConfig]:
+        # Invalidate cache - both default and group-specific if provided
+        await model_config_cache.invalidate("__default__", "models")
+        if group_id:
+            await model_config_cache.invalidate(group_id, "models")
+        # Also invalidate the model's own group if it has one
+        if existing_model.group_id:
+            await model_config_cache.invalidate(existing_model.group_id, "models")
+        logger.info(f"[CACHE INVALIDATE] Model config cache invalidated after update")
+
+        return result
+
+    async def toggle_model_enabled(self, key: str, enabled: bool, group_id: Optional[str] = None) -> Optional[ModelConfig]:
         """
         Toggle the enabled status of a model configuration.
 
         Args:
             key: Key of the model to toggle
             enabled: New enabled status
+            group_id: Optional group ID for cache invalidation
 
         Returns:
             Updated model configuration, or None if not found
@@ -146,27 +172,53 @@ class ModelConfigService:
                 return None
 
             # Get the updated model
-            return await self.repository.find_by_key(key)
+            result = await self.repository.find_by_key(key)
+
+            # Invalidate cache
+            await model_config_cache.invalidate("__default__", "models")
+            if group_id:
+                await model_config_cache.invalidate(group_id, "models")
+            if result and result.group_id:
+                await model_config_cache.invalidate(result.group_id, "models")
+            logger.info(f"[CACHE INVALIDATE] Model config cache invalidated after toggle")
+
+            return result
         except Exception as e:
             # Log the error at service level but don't expose internal details
             logger.error(f"Error in toggle_model_enabled for key={key}: {str(e)}")
             # Re-raise for controller layer to handle
             raise
 
-    async def delete_model_config(self, key: str) -> bool:
+    async def delete_model_config(self, key: str, group_id: Optional[str] = None) -> bool:
         """
         Delete a model configuration.
 
         Args:
             key: Key of the model to delete
+            group_id: Optional group ID for cache invalidation
 
         Returns:
             True if deleted, False if not found
         """
         logger.info(f"Service: Attempting to delete model with key: {key}")
 
+        # Get the model first to know its group_id for cache invalidation
+        existing_model = await self.repository.find_by_key(key)
+        model_group_id = existing_model.group_id if existing_model else None
+
         # Use the dedicated repository method for deletion by key
-        return await self.repository.delete_by_key(key)
+        result = await self.repository.delete_by_key(key)
+
+        if result:
+            # Invalidate cache
+            await model_config_cache.invalidate("__default__", "models")
+            if group_id:
+                await model_config_cache.invalidate(group_id, "models")
+            if model_group_id:
+                await model_config_cache.invalidate(model_group_id, "models")
+            logger.info(f"[CACHE INVALIDATE] Model config cache invalidated after delete")
+
+        return result
 
     async def enable_all_models(self) -> List[ModelConfig]:
         """
@@ -180,6 +232,10 @@ class ModelConfigService:
             success = await self.repository.enable_all_models()
             if not success:
                 logger.warning("Failed to enable all models")
+
+            # Invalidate entire cache (affects all groups)
+            await model_config_cache.clear()
+            logger.info(f"[CACHE INVALIDATE] Model config cache cleared after enable_all")
 
             # Return all models
             return await self.find_all()
@@ -199,6 +255,10 @@ class ModelConfigService:
             success = await self.repository.disable_all_models()
             if not success:
                 logger.warning("Failed to disable all models")
+
+            # Invalidate entire cache (affects all groups)
+            await model_config_cache.clear()
+            logger.info(f"[CACHE INVALIDATE] Model config cache cleared after disable_all")
 
             # Return all models
             return await self.find_all()
@@ -288,6 +348,9 @@ class ModelConfigService:
         """
         Get all model configurations for a specific group.
 
+        PERFORMANCE: Uses TTL cache (5 min) to reduce database queries.
+        Cache is automatically invalidated when model configs are mutated.
+
         Shows:
         1. Default models (group_id = null) - visible to everyone
         2. Group-specific models - visible only to members of that group
@@ -299,6 +362,19 @@ class ModelConfigService:
         Returns:
             List of model configurations for the group
         """
+        # Determine cache key based on group context
+        cache_group_id = group_context.primary_group_id if group_context and group_context.group_ids else "__default__"
+
+        # =========================================================================
+        # TTL CACHE: Check cache first
+        # =========================================================================
+        cached_models = await model_config_cache.get(cache_group_id, "models")
+        if cached_models is not None:
+            logger.info(f"[CACHE HIT] Returning {len(cached_models)} cached models for group {cache_group_id}")
+            return cached_models
+
+        # Cache miss - fetch from database
+        logger.info(f"[CACHE MISS] Fetching models from database for group {cache_group_id}")
         all_models = await self.repository.find_all()
 
         # If no group context, show only default models
@@ -307,6 +383,8 @@ class ModelConfigService:
                 model for model in all_models
                 if model.group_id is None
             ]
+            # Cache and return
+            await model_config_cache.set(cache_group_id, "models", default_models)
             return default_models
 
         # Build a dictionary to handle overrides: model_key -> model
@@ -324,7 +402,15 @@ class ModelConfigService:
                 models_by_key[model.key] = model
 
         # Convert back to list
-        return list(models_by_key.values())
+        result = list(models_by_key.values())
+
+        # =========================================================================
+        # CACHE: Store result for future requests
+        # =========================================================================
+        await model_config_cache.set(cache_group_id, "models", result)
+        logger.info(f"[CACHE SET] Cached {len(result)} models for group {cache_group_id}")
+
+        return result
 
     async def find_enabled_models_for_group(self, group_context: GroupContext) -> List[ModelConfig]:
         """
@@ -355,6 +441,11 @@ class ModelConfigService:
         updated = await self.repository.toggle_global_enabled(key, enabled)
         if not updated:
             return None
+
+        # Invalidate entire cache since global models affect all groups
+        await model_config_cache.clear()
+        logger.info(f"[CACHE INVALIDATE] Model config cache cleared after toggle_global")
+
         return await self.repository.find_global_by_key(key)
 
 
@@ -414,6 +505,12 @@ class ModelConfigService:
 
             primary_group_id = group_context.primary_group_id
 
+            # Helper to invalidate cache after mutation
+            async def _invalidate_cache():
+                await model_config_cache.invalidate(primary_group_id, "models")
+                await model_config_cache.invalidate("__default__", "models")
+                logger.info(f"[CACHE INVALIDATE] Model config cache invalidated for group {primary_group_id}")
+
             # If it's a default model (group_id = null), create a group-specific copy
             if target_model.group_id is None:
                 # Check if a group-specific version already exists
@@ -425,6 +522,7 @@ class ModelConfigService:
                 if existing_group_model:
                     # Toggle the existing group-specific model in its group scope
                     await self.repository.toggle_enabled_in_group(existing_group_model.key, primary_group_id, enabled)
+                    await _invalidate_cache()
                     return await self.repository.find_by_key_and_group(key, primary_group_id)
                 else:
                     # Create a new group-specific copy with toggled state
@@ -440,7 +538,9 @@ class ModelConfigService:
                         'group_id': primary_group_id,
                         'created_by_email': group_context.group_email
                     }
-                    return await self.repository.create(model_data)
+                    result = await self.repository.create(model_data)
+                    await _invalidate_cache()
+                    return result
 
             # For group-specific models, check authorization
             if target_model.group_id not in group_context.group_ids:
@@ -452,6 +552,7 @@ class ModelConfigService:
 
             # Toggle the group-specific model in its group scope
             await self.repository.toggle_enabled_in_group(target_model.key, target_model.group_id, enabled)
+            await _invalidate_cache()
             return await self.repository.find_by_key_and_group(key, target_model.group_id)
 
         except HTTPException:

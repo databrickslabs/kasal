@@ -79,7 +79,135 @@ def mock_session():
 
 class TestGetGroupContext:
     """Test cases for get_group_context dependency."""
-    
+
+    @pytest.mark.asyncio
+    async def test_get_group_context_request_scoped_cache_hit(self, mock_request):
+        """Test that GroupContext is cached per request and reused."""
+        # Setup mock with cache already populated
+        mock_group_context = MagicMock(spec=GroupContext)
+        mock_group_context.primary_group_id = "cached-group"
+        mock_group_context.group_ids = ["cached-group"]
+        mock_group_context.group_email = "cached@example.com"
+
+        # Pre-populate the request state cache
+        mock_request.state = MagicMock()
+        mock_request.state._group_context_cache = {
+            "group_context:cached@example.com:None": mock_group_context
+        }
+
+        # Call get_group_context - should return cached value without DB query
+        with patch('src.utils.user_context.GroupContext.from_email') as mock_from_email:
+            result = await get_group_context(
+                request=mock_request,
+                x_forwarded_email=None,
+                x_forwarded_access_token=None,
+                x_auth_request_email="cached@example.com",
+                x_auth_request_user=None,
+                x_auth_request_access_token=None,
+                x_group_id=None,
+                x_group_domain=None
+            )
+
+            # Should NOT call from_email - should use cached value
+            mock_from_email.assert_not_called()
+            assert result == mock_group_context
+
+    @pytest.mark.asyncio
+    async def test_get_group_context_request_scoped_cache_miss_then_set(self, mock_request):
+        """Test that GroupContext is cached in request state after first fetch."""
+        mock_group_context = MagicMock(spec=GroupContext)
+        mock_group_context.primary_group_id = "new-group"
+        mock_group_context.group_ids = ["new-group"]
+        mock_group_context.group_email = "new@example.com"
+
+        # Setup mock request without cache
+        mock_request.state = MagicMock(spec=[])  # No _group_context_cache attribute
+
+        with patch('src.utils.user_context.GroupContext.from_email',
+                   return_value=mock_group_context) as mock_from_email:
+            result = await get_group_context(
+                request=mock_request,
+                x_forwarded_email=None,
+                x_forwarded_access_token=None,
+                x_auth_request_email="new@example.com",
+                x_auth_request_user=None,
+                x_auth_request_access_token=None,
+                x_group_id=None,
+                x_group_domain=None
+            )
+
+            # Should call from_email for cache miss
+            mock_from_email.assert_called_once()
+            assert result == mock_group_context
+
+            # Verify cache was set on request.state
+            assert hasattr(mock_request.state, '_group_context_cache')
+            cache_key = "group_context:new@example.com:None"
+            assert mock_request.state._group_context_cache[cache_key] == mock_group_context
+
+    @pytest.mark.asyncio
+    async def test_get_group_context_cache_key_includes_group_id(self, mock_request):
+        """Test that cache key includes group_id for group switching support."""
+        mock_group_context1 = MagicMock(spec=GroupContext)
+        mock_group_context1.primary_group_id = "group-1"
+        mock_group_context2 = MagicMock(spec=GroupContext)
+        mock_group_context2.primary_group_id = "group-2"
+
+        # Setup mock request with cache containing group-1 context
+        mock_request.state = MagicMock()
+        mock_request.state._group_context_cache = {
+            "group_context:user@example.com:group-1": mock_group_context1
+        }
+
+        # Request with different group_id should miss cache
+        with patch('src.utils.user_context.GroupContext.from_email',
+                   return_value=mock_group_context2) as mock_from_email:
+            result = await get_group_context(
+                request=mock_request,
+                x_forwarded_email=None,
+                x_forwarded_access_token=None,
+                x_auth_request_email="user@example.com",
+                x_auth_request_user=None,
+                x_auth_request_access_token=None,
+                x_group_id="group-2",  # Different group
+                x_group_domain=None
+            )
+
+            # Should call from_email because group_id is different
+            mock_from_email.assert_called_once()
+            assert result == mock_group_context2
+
+    @pytest.mark.asyncio
+    async def test_get_group_context_cache_different_emails(self, mock_request):
+        """Test that different emails have separate cache entries."""
+        mock_group_context1 = MagicMock(spec=GroupContext)
+        mock_group_context1.group_email = "user1@example.com"
+        mock_group_context2 = MagicMock(spec=GroupContext)
+        mock_group_context2.group_email = "user2@example.com"
+
+        # Setup cache with user1
+        mock_request.state = MagicMock()
+        mock_request.state._group_context_cache = {
+            "group_context:user1@example.com:None": mock_group_context1
+        }
+
+        # Request for user2 should miss and fetch
+        with patch('src.utils.user_context.GroupContext.from_email',
+                   return_value=mock_group_context2) as mock_from_email:
+            result = await get_group_context(
+                request=mock_request,
+                x_forwarded_email=None,
+                x_forwarded_access_token=None,
+                x_auth_request_email="user2@example.com",
+                x_auth_request_user=None,
+                x_auth_request_access_token=None,
+                x_group_id=None,
+                x_group_domain=None
+            )
+
+            mock_from_email.assert_called_once()
+            assert result == mock_group_context2
+
     @pytest.mark.asyncio
     async def test_get_group_context_with_auth_request_email(self, mock_request):
         """Test group context extraction with OAuth2-Proxy headers."""
