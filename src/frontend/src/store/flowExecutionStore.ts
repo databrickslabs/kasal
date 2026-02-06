@@ -380,12 +380,37 @@ if (typeof window !== 'undefined') {
 
   window.addEventListener('jobCompleted', ((event: CustomEvent) => {
     const detail = event.detail;
-    const state = useFlowExecutionStore.getState();
-    if (detail && detail.jobId === state.currentJobId) {
+    const store = useFlowExecutionStore.getState();
+    if (detail && detail.jobId === store.currentJobId) {
       console.log('[FlowExecutionStore] Flow execution completed:', detail.jobId);
+
+      // Mark all still-running crew nodes as completed.
+      // Due to a race condition, the per-job SSE connection may close before the
+      // TraceBroadcastService polls the final task_completed traces from the DB.
+      // Since the job completed successfully, all crews must have finished.
+      const { crewNodeStates } = store;
+      if (crewNodeStates.size > 0) {
+        const updatedStates = new Map(crewNodeStates);
+        let updated = false;
+        for (const [key, crewState] of updatedStates.entries()) {
+          if (crewState.status === 'running' || crewState.status === 'pending') {
+            updatedStates.set(key, {
+              ...crewState,
+              status: 'completed',
+              completed_at: new Date().toISOString(),
+            });
+            updated = true;
+            console.log('[FlowExecutionStore] Marked crew as completed on job finish:', key);
+          }
+        }
+        if (updated) {
+          useFlowExecutionStore.setState({ crewNodeStates: updatedStates });
+        }
+      }
+
       // Give time for final state update before stopping tracking
       setTimeout(() => {
-        state.stopTracking();
+        store.stopTracking();
       }, 1000);
 
       // DON'T clear crew node states on completion - keep them visible until next run starts
@@ -395,10 +420,32 @@ if (typeof window !== 'undefined') {
 
   window.addEventListener('jobFailed', ((event: CustomEvent) => {
     const detail = event.detail;
-    const state = useFlowExecutionStore.getState();
-    if (detail && detail.jobId === state.currentJobId) {
+    const store = useFlowExecutionStore.getState();
+    if (detail && detail.jobId === store.currentJobId) {
       console.log('[FlowExecutionStore] Flow execution failed:', detail.jobId);
-      state.stopTracking();
+
+      // Mark all still-running crew nodes as failed since the job failed
+      const { crewNodeStates } = store;
+      if (crewNodeStates.size > 0) {
+        const updatedStates = new Map(crewNodeStates);
+        let updated = false;
+        for (const [key, crewState] of updatedStates.entries()) {
+          if (crewState.status === 'running' || crewState.status === 'pending') {
+            updatedStates.set(key, {
+              ...crewState,
+              status: 'failed',
+              failed_at: new Date().toISOString(),
+            });
+            updated = true;
+            console.log('[FlowExecutionStore] Marked crew as failed on job failure:', key);
+          }
+        }
+        if (updated) {
+          useFlowExecutionStore.setState({ crewNodeStates: updatedStates });
+        }
+      }
+
+      store.stopTracking();
 
       // DON'T clear crew node states on failure - keep them visible until next run starts
       // Crew node states will be cleared when a new job is created (in jobCreated event handler)
