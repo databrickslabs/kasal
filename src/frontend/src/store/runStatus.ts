@@ -1,18 +1,10 @@
 import { create } from 'zustand';
 import { ExtendedRun } from '../types/run';
 import { runService } from '../api/ExecutionHistoryService';
+import { Trace } from '../types/trace';
 
-// Constants for polling intervals
-const INTERVALS = {
-  CHECK_INTERVAL: 5000,        // Base check interval
-  RUNNING_JOBS: 5000,          // Poll every 5 seconds for running jobs
-  USER_INACTIVE: 10 * 60 * 1000, // Consider user inactive after 10 minutes
-  NEW_JOB_POLLING: 3000,       // Poll every 3 seconds for the first minute after job creation
-  DEBOUNCE_THRESHOLD: 1000     // Minimum time between API calls (1 second)
-} as const;
-
-// Exponential backoff steps used when no jobs are running
-const BACKOFF_STEPS = [5000, 10000, 30000, 60000] as const;
+// Re-export Trace type to ensure consistency across the app
+export type { Trace };
 
 interface RunStatusState {
   currentRun: ExtendedRun | null;
@@ -22,15 +14,17 @@ interface RunStatusState {
   runHistory: ExtendedRun[];
   activeRuns: Record<string, ExtendedRun>;
   lastFetchTime: number;
-  lastFetchAttempt: number;
-  lastNewJobTimestamp: number;
   hasRunningJobs: boolean;
-  consecutiveEmptyFetches: number;
-  backoffInterval: number;
-  backoffStep: number;
-  isUserActive: boolean;
-  pollingInterval: NodeJS.Timeout | null;
   processedCompletions: Set<string>; // Track which jobs we've already sent completion events for
+
+  // SSE state (primary and only communication method)
+  sseEnabled: boolean; // Whether SSE is available (always true unless manually disabled)
+  sseConnected: boolean; // Whether SSE is currently connected
+  activeSSEConnections: Map<string, boolean>; // Track SSE connections per job
+  sseError: string | null; // Track SSE connection errors
+
+  // Traces state - accumulates traces from SSE
+  traces: Map<string, Trace[]>; // jobId -> traces array
 
   // Actions
   addRun: (run: ExtendedRun) => void;
@@ -41,17 +35,21 @@ interface RunStatusState {
   updateRunStatus: (jobId: string, status: string, error?: string) => void;
   addActiveRun: (run: ExtendedRun) => void;
   removeActiveRun: (jobId: string) => void;
-  fetchRunHistory: () => Promise<void>;
-  refreshRunHistory: () => Promise<void>;
-  startPolling: () => void;
-  stopPolling: () => void;
-  setUserActive: (active: boolean) => void;
-  cleanup: () => void;
+  fetchInitialRunHistory: () => Promise<void>; // One-time fetch on app load
   clearRunHistory: () => void;
+  handleSSEUpdate: (data: any) => void; // Handle SSE events
+  setSSEConnected: (connected: boolean) => void; // Update SSE connection state
+  setSSEError: (error: string | null) => void; // Update SSE error state
+  registerSSEConnection: (jobId: string) => void; // Register SSE connection for a job
+  unregisterSSEConnection: (jobId: string) => void; // Unregister SSE connection
+  addTrace: (jobId: string, trace: Trace) => void; // Add trace from SSE
+  setTracesForJob: (jobId: string, traces: Trace[]) => void; // Set all traces for a job (initial load)
+  getTracesForJob: (jobId: string) => Trace[]; // Get traces for a specific job
+  clearTracesForJob: (jobId: string) => void; // Clear traces when job is removed
 }
 
 export const useRunStatusStore = create<RunStatusState>((set, get) => {
-  // Set up refreshRunHistory event listener for the store
+  // Set up event listeners for the store
   const setupEventListeners = () => {
     // Create a function that will be called when a new job is created
     const jobCreatedHandler = (event: CustomEvent) => {
@@ -84,27 +82,18 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
           tasks_yaml: ''
         };
 
-
         // Add the placeholder run and start tracking it
         const store = get();
         store.addRun(newRun);
         store.addActiveRun(newRun);
-        
-        // Create timestamp for this new job
-        const newJobTimestamp = Date.now();
-        set({ lastNewJobTimestamp: newJobTimestamp });
-        
-        // Force an immediate poll to get latest status
-        store.fetchRunHistory();
-        
-        // Start more aggressive polling for new jobs
-        store.startPolling();
+
+        // SSE will handle updates automatically - no polling needed
       }
     };
 
     // Listen for job created events
     window.addEventListener('jobCreated', jobCreatedHandler as EventListener);
-    
+
     // Return cleanup function
     return () => {
       window.removeEventListener('jobCreated', jobCreatedHandler as EventListener);
@@ -112,7 +101,8 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
   };
 
   // Set up event listeners immediately
-  const cleanupListeners = setupEventListeners();
+  // Note: Event listeners persist for the lifetime of the store (entire app lifecycle)
+  setupEventListeners();
 
   // Return the actual store
   return {
@@ -123,21 +113,23 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
     runHistory: [],
     activeRuns: {},
     lastFetchTime: Date.now(),
-    lastFetchAttempt: 0,
-    lastNewJobTimestamp: 0,
     hasRunningJobs: false,
-    consecutiveEmptyFetches: 0,
-    backoffInterval: BACKOFF_STEPS[0],
-    backoffStep: 0,
-    isUserActive: true,
-    pollingInterval: null,
     processedCompletions: new Set<string>(),
+
+    // SSE state (primary and only communication method)
+    sseEnabled: true, // Always enabled - SSE is the only approach
+    sseConnected: false,
+    activeSSEConnections: new Map<string, boolean>(),
+    sseError: null,
+
+    // Traces state
+    traces: new Map<string, Trace[]>(),
 
     addRun: (run) => {
       set((state) => {
         // Filter out any existing run with the same job_id to avoid duplicates
         const filteredHistory = state.runHistory.filter(r => r.job_id !== run.job_id);
-        
+
         return {
           runHistory: [run, ...filteredHistory], // Add new run at the beginning for visibility
           hasRunningJobs: state.hasRunningJobs || run.status.toLowerCase() === 'running' || run.status.toLowerCase() === 'queued'
@@ -167,11 +159,10 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
         if (!currentRun) return state;
 
         const now = new Date().toISOString();
-        
+
         // For completed or failed jobs, make sure we set the completed_at time
         let completedAt = currentRun.completed_at;
         if ((status.toLowerCase() === 'completed' || status.toLowerCase() === 'failed') && !completedAt) {
-
           completedAt = now;
         }
 
@@ -188,11 +179,11 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
         };
 
         // Also update the run in runHistory if it exists
-        const updatedHistory = state.runHistory.map(run => 
+        const updatedHistory = state.runHistory.map(run =>
           run.job_id === jobId ? {
-            ...run, 
-            status, 
-            error, 
+            ...run,
+            status,
+            error,
             updated_at: now,
             completed_at: completedAt || run.completed_at
           } : run
@@ -226,102 +217,67 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
       });
     },
 
-    fetchRunHistory: async () => {
-      const state = get();
-      const now = Date.now();
-      
-      // Add debounce to prevent too many API calls in quick succession
-      if (now - state.lastFetchAttempt < INTERVALS.DEBOUNCE_THRESHOLD) {
-        return;
-      }
-      
-      // Mark attempt time immediately to prevent parallel calls
-      set({ lastFetchAttempt: now, isLoading: true, error: null });
-      
+    fetchInitialRunHistory: async () => {
+      // One-time fetch on app initialization
+      // After this, all updates come via SSE only
+      set({ isLoading: true, error: null });
+
       try {
-        // Simplified approach: always fetch all recent runs from scratch
+        // Fetch recent runs from the backend
         const response = await runService.getRuns(50, 0);
-        
-        // Get current processedCompletions set
-        const currentProcessedCompletions = new Set(state.processedCompletions);
 
         // SECURITY: Filter runs by group_id before processing
         const selectedGroupId = localStorage.getItem('selectedGroupId');
         const securityFilteredRuns = response.runs.filter(run => {
           // Only include runs that belong to the selected group
-          if (!selectedGroupId) {
-
-            return false;
-          }
-          if (!run.group_id) {
-
+          if (!selectedGroupId || !run.group_id) {
             return false;
           }
           if (run.group_id !== selectedGroupId) {
-
             return false;
           }
           return true;
         });
 
-
-
         // Process the response data to ensure we have proper status information
+        const currentProcessedCompletions = new Set(get().processedCompletions);
+
         const processedRuns = securityFilteredRuns.map(run => {
           // Check if this run's status has changed from running to completed/failed
-          const currentActiveRun = state.activeRuns[run.job_id];
-          
+          const currentState = get();
+          const currentActiveRun = currentState.activeRuns[run.job_id];
+
           // Also check runHistory for the previous status
-          const previousRun = state.runHistory.find(r => r.job_id === run.job_id);
-          const wasRunning = currentActiveRun?.status?.toLowerCase() === 'running' || 
+          const previousRun = currentState.runHistory.find((r: ExtendedRun) => r.job_id === run.job_id);
+          const wasRunning = currentActiveRun?.status?.toLowerCase() === 'running' ||
                             currentActiveRun?.status?.toLowerCase() === 'queued' ||
                             previousRun?.status?.toLowerCase() === 'running' ||
                             previousRun?.status?.toLowerCase() === 'queued';
-          
+
           if (wasRunning && (run.status.toLowerCase() === 'completed' || run.status.toLowerCase() === 'failed')) {
             // Check if we've already processed this completion to avoid duplicate events
             const completionKey = `${run.job_id}-${run.status.toLowerCase()}`;
             const alreadyProcessed = currentProcessedCompletions.has(completionKey);
-            
-            if (alreadyProcessed) {
 
-              // Don't return here! We still need to update the run data in the store
-              // Just skip the event dispatch below
-            }
-            
-            // Dispatch appropriate event for status change
-
-
-            
-            // Check if status is COMPLETED but there's an error field
-            if (run.status.toLowerCase() === 'completed' && run.error) {
-
-              // If status is COMPLETED, ignore the error field and treat as success
-            }
-            
             // Only dispatch events if we haven't already processed this completion
             if (!alreadyProcessed) {
               // Only dispatch ONE event based on status, ignoring error field if status is completed
               if (run.status.toLowerCase() === 'completed') {
-
-                
                 // Mark as processed before dispatching
                 currentProcessedCompletions.add(completionKey);
-                
-                window.dispatchEvent(new CustomEvent('jobCompleted', { 
-                  detail: { 
+
+                window.dispatchEvent(new CustomEvent('jobCompleted', {
+                  detail: {
                     jobId: run.job_id,
                     result: run.result
                   }
                 }));
               } else if (run.status.toLowerCase() === 'failed') {
-
-                
                 // Mark as processed before dispatching
                 currentProcessedCompletions.add(completionKey);
-                
-                window.dispatchEvent(new CustomEvent('jobFailed', { 
-                  detail: { 
+
+                window.dispatchEvent(new CustomEvent('jobFailed', {
+                  detail: {
                     jobId: run.job_id,
                     error: run.error || 'Job execution failed'
                   }
@@ -329,9 +285,9 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
               }
             }
           }
-          
+
           // Ensure status is properly set from the database
-          // If it's completed or failed, make sure updated_at is set
+          // If it's completed or failed, make sure completed_at is set
           if ((run.status.toLowerCase() === 'completed' || run.status.toLowerCase() === 'failed')) {
             // Ensure the completed job has a completed_at timestamp
             if (!run.completed_at) {
@@ -343,9 +299,8 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
             // If completed_at is equal to created_at, adjust it to ensure positive duration
             const createdTime = new Date(run.created_at).getTime();
             const completedTime = new Date(run.completed_at).getTime();
-            
-            if (completedTime <= createdTime) {
 
+            if (completedTime <= createdTime) {
               // Add at least 1 second for duration
               const adjustedCompletedTime = new Date(createdTime + 1000).toISOString();
               return {
@@ -357,41 +312,14 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
           return run;
         });
 
-        // Update the running jobs flag and reset counters if we got data
+        // Update the running jobs flag
         const hasActiveJobs = processedRuns.some(run =>
           run.status.toLowerCase() === 'running' || run.status.toLowerCase() === 'queued' || run.status.toLowerCase() === 'pending'
         );
 
-        // Reset counters if we got data with active jobs
-        if (hasActiveJobs) {
-          set({
-            consecutiveEmptyFetches: 0,
-            backoffInterval: BACKOFF_STEPS[0],
-            backoffStep: 0,
-            hasRunningJobs: true
-          });
-        } else {
-          set((state) => {
-            const nextStep = Math.min(state.backoffStep + 1, BACKOFF_STEPS.length - 1);
-            return {
-              hasRunningJobs: false,
-              consecutiveEmptyFetches: state.consecutiveEmptyFetches + 1,
-              backoffStep: nextStep,
-              backoffInterval: BACKOFF_STEPS[nextStep]
-            };
-          });
-        }
-
-        // Always update the fetch time and processed completions
-        set({ 
-          lastFetchTime: Date.now(),
-          processedCompletions: currentProcessedCompletions,
-          lastFetchAttempt: Date.now()
-        });
-
         // Process runs into active runs
         const updatedActiveRuns: Record<string, ExtendedRun> = {};
-        
+
         // Only keep truly active runs (running, queued, or pending)
         processedRuns.forEach(run => {
           // Add to active runs if it's running, queued, or pending
@@ -405,102 +333,23 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
           runHistory: processedRuns,
           activeRuns: updatedActiveRuns,
           isLoading: false,
-          error: null
+          error: null,
+          lastFetchTime: Date.now(),
+          hasRunningJobs: hasActiveJobs,
+          processedCompletions: currentProcessedCompletions
         });
 
       } catch (error) {
-
         // Capture and format the error message
         const errorMessage = error instanceof Error ? error.message : String(error);
-        set({ 
-          error: `Failed to fetch run history: ${errorMessage}`, 
-          isLoading: false,
-          lastFetchAttempt: Date.now()
+        set({
+          error: `Failed to fetch run history: ${errorMessage}`,
+          isLoading: false
         });
       }
     },
 
-    refreshRunHistory: async () => {
-      const { fetchRunHistory } = get();
-      await fetchRunHistory();
-    },
-
-    startPolling: () => {
-      const state = get();
-
-      // Clear any existing timer first
-      if (state.pollingInterval) {
-        clearTimeout(state.pollingInterval as unknown as number);
-      }
-
-      const poll = async () => {
-        const currentState = get();
-
-        // Decide whether to fetch now
-        const shouldFetch =
-          currentState.hasRunningJobs ||
-          (Date.now() - currentState.lastNewJobTimestamp < 60000) ||
-          currentState.isUserActive;
-
-        if (shouldFetch) {
-          try {
-            await currentState.fetchRunHistory();
-          } catch (_err) {
-            // fetchRunHistory handles error state
-          }
-        }
-
-        // Compute next delay based on state AFTER fetch
-        const afterState = get();
-        let nextDelay: number;
-
-        if (Date.now() - afterState.lastNewJobTimestamp < 60000) {
-          nextDelay = Math.max(INTERVALS.NEW_JOB_POLLING, INTERVALS.DEBOUNCE_THRESHOLD);
-        } else if (afterState.hasRunningJobs) {
-          nextDelay = Math.max(INTERVALS.RUNNING_JOBS, INTERVALS.DEBOUNCE_THRESHOLD);
-        } else {
-          nextDelay = afterState.backoffInterval; // 5s -> 10s -> 30s -> 60s
-        }
-
-        const t = setTimeout(poll, nextDelay);
-        set({ pollingInterval: t });
-      };
-
-      // Kick off the loop immediately
-      const t = setTimeout(poll, 0);
-      set({ pollingInterval: t });
-    },
-
-    stopPolling: () => {
-      const { pollingInterval } = get();
-      if (pollingInterval) {
-        clearTimeout(pollingInterval as unknown as number);
-        set({ pollingInterval: null });
-      }
-    },
-
-    setUserActive: (active) => {
-      set({ isUserActive: active });
-      
-      // If user became active, force a refresh
-      if (active) {
-        const { refreshRunHistory, startPolling } = get();
-        void refreshRunHistory();
-
-        // Reset backoff and restart polling
-        set({ backoffInterval: BACKOFF_STEPS[0], backoffStep: 0 });
-        startPolling();
-      }
-    },
-
-    cleanup: () => {
-      const { stopPolling } = get();
-      stopPolling();
-      cleanupListeners();
-    },
-
     clearRunHistory: () => {
-
       set({
         runHistory: [],
         activeRuns: {},
@@ -509,9 +358,160 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
         error: null,
         isLoading: false,
         lastFetchTime: Date.now(),
-        lastFetchAttempt: Date.now(),
-        consecutiveEmptyFetches: 0
+        hasRunningJobs: false
+      });
+    },
+
+    handleSSEUpdate: (data: any) => {
+      const state = get();
+
+      // Handle execution status update
+      if (data.job_id && data.status) {
+        const jobId = data.job_id;
+        const status = data.status;
+        const message = data.message || data.error;
+        const result = data.result;
+
+        // Update the run in history
+        const updatedHistory = state.runHistory.map(run => {
+          if (run.job_id === jobId) {
+            return {
+              ...run,
+              status,
+              error: message,
+              result: result || run.result,
+              updated_at: data.updated_at || new Date().toISOString(),
+              completed_at: data.completed_at || run.completed_at
+            };
+          }
+          return run;
+        });
+
+        // Update active runs
+        const updatedActiveRuns = { ...state.activeRuns };
+        if (status === 'running' || status === 'queued' || status === 'pending') {
+          updatedActiveRuns[jobId] = {
+            ...state.activeRuns[jobId],
+            job_id: jobId,
+            id: jobId,
+            status,
+            error: message,
+            result,
+            updated_at: data.updated_at || new Date().toISOString(),
+            created_at: state.activeRuns[jobId]?.created_at || new Date().toISOString(),
+            run_name: state.activeRuns[jobId]?.run_name || `Run ${jobId}`,
+            agents_yaml: state.activeRuns[jobId]?.agents_yaml || '',
+            tasks_yaml: state.activeRuns[jobId]?.tasks_yaml || ''
+          };
+        } else {
+          // Remove from active runs if completed/failed
+          delete updatedActiveRuns[jobId];
+        }
+
+        // Check if this is a completion event we haven't processed yet
+        const completionKey = `${jobId}-${status}`;
+        const alreadyProcessed = state.processedCompletions.has(completionKey);
+
+        if (!alreadyProcessed && (status === 'completed' || status === 'failed')) {
+          // Mark as processed
+          const newProcessedCompletions = new Set(state.processedCompletions);
+          newProcessedCompletions.add(completionKey);
+
+          // Dispatch appropriate event
+          if (status === 'completed') {
+            window.dispatchEvent(new CustomEvent('jobCompleted', {
+              detail: { jobId, result }
+            }));
+          } else if (status === 'failed') {
+            window.dispatchEvent(new CustomEvent('jobFailed', {
+              detail: { jobId, error: message || 'Job execution failed' }
+            }));
+          }
+
+          set({
+            runHistory: updatedHistory,
+            activeRuns: updatedActiveRuns,
+            processedCompletions: newProcessedCompletions,
+            hasRunningJobs: Object.keys(updatedActiveRuns).length > 0
+          });
+        } else {
+          set({
+            runHistory: updatedHistory,
+            activeRuns: updatedActiveRuns,
+            hasRunningJobs: Object.keys(updatedActiveRuns).length > 0
+          });
+        }
+      }
+    },
+
+    setSSEConnected: (connected: boolean) => {
+      set({
+        sseConnected: connected,
+        // Clear error on connection, keep existing error on disconnect (will be set by SSEConnectionManager)
+        sseError: connected ? null : get().sseError
+      });
+    },
+
+    setSSEError: (error: string | null) => {
+      set({ sseError: error });
+    },
+
+    registerSSEConnection: (jobId: string) => {
+      set((state) => {
+        const newConnections = new Map(state.activeSSEConnections);
+        newConnections.set(jobId, true);
+        return { activeSSEConnections: newConnections };
+      });
+    },
+
+    unregisterSSEConnection: (jobId: string) => {
+      set((state) => {
+        const newConnections = new Map(state.activeSSEConnections);
+        newConnections.delete(jobId);
+        return { activeSSEConnections: newConnections };
+      });
+    },
+
+    // Trace management methods
+    addTrace: (jobId: string, trace: Trace) => {
+      set((state) => {
+        const newTraces = new Map(state.traces);
+        const existingTraces = newTraces.get(jobId) || [];
+
+        // Check if trace already exists (avoid duplicates)
+        const exists = existingTraces.some(
+          t => t.created_at === trace.created_at &&
+               t.event_type === trace.event_type &&
+               t.event_source === trace.event_source
+        );
+
+        if (!exists) {
+          newTraces.set(jobId, [...existingTraces, trace]);
+        }
+
+        return { traces: newTraces };
+      });
+    },
+
+    setTracesForJob: (jobId: string, traces: Trace[]) => {
+      set((state) => {
+        const newTraces = new Map(state.traces);
+        newTraces.set(jobId, traces);
+        return { traces: newTraces };
+      });
+    },
+
+    getTracesForJob: (jobId: string) => {
+      const state = get();
+      return state.traces.get(jobId) || [];
+    },
+
+    clearTracesForJob: (jobId: string) => {
+      set((state) => {
+        const newTraces = new Map(state.traces);
+        newTraces.delete(jobId);
+        return { traces: newTraces };
       });
     }
   };
-}); 
+});

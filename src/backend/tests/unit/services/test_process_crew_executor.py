@@ -65,7 +65,6 @@ async def test_run_crew_isolated_completed_no_result(monkeypatch):
             group_context=group_context,
             inputs=None,
             timeout=None,
-            debug_tracing_enabled=False,
         )
 
         assert result['status'] in ('COMPLETED', 'FAILED', 'STOPPED')

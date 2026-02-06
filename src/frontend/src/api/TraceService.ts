@@ -1,5 +1,6 @@
 import apiClient from '../config/api/ApiConfig';
-import { Trace, TaskDetails } from '../types/trace';
+import { Trace } from '../store/runStatus';
+import { TaskDetails } from '../types/trace';
 
 // List of known run IDs for development/testing - this should be removed in production
 const KNOWN_RUN_IDS = [1]; // Based on the database, we only have run ID 1
@@ -36,12 +37,17 @@ interface BackendTraceData {
   job_id?: string;
   event_source?: string;
   event_context?: string;
-  task_id?: string;
   event_type?: string;
+  output?: any;
+  trace_metadata?: any;
   created_at?: string;
+  group_id?: string;
+  group_email?: string;
+  // Legacy/extra fields
+  task_id?: string;
   timestamp?: string;
-  output?: string | Record<string, unknown>;
   output_data?: string | Record<string, unknown>;
+  extra_data?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
@@ -217,18 +223,20 @@ export const TraceService = {
         return response.data.traces.map((trace: BackendTraceData) => {
           // Map the backend trace model to the frontend Trace interface
           return {
-            id: trace.id.toString(),
+            id: trace.id,
+            run_id: trace.run_id,
+            job_id: trace.job_id,
             event_source: trace.event_source || '',
             event_context: trace.event_context || '',
             event_type: trace.event_type || '',
-            task_id: trace.task_id || undefined,
-            created_at: trace.created_at || trace.timestamp || new Date().toISOString(),
-            // Handle the case where the output might be in output_data, output, or directly in the trace
             output: trace.output || trace.output_data || '',
-            // Include extra_data if present
-            extra_data: trace.extra_data || undefined,
-            // Include trace_metadata if present
-            trace_metadata: trace.trace_metadata || undefined
+            trace_metadata: trace.trace_metadata || undefined,
+            created_at: trace.created_at || trace.timestamp || new Date().toISOString(),
+            group_id: trace.group_id,
+            group_email: trace.group_email,
+            // Frontend-only fields
+            task_id: trace.task_id || undefined,
+            extra_data: trace.extra_data || undefined
           } as Trace;
         });
       } else {
@@ -236,15 +244,20 @@ export const TraceService = {
         if (Array.isArray(response.data)) {
           // Map array items to match Trace interface
           return response.data.map((item: BackendTraceData) => ({
-            id: item.id.toString(),
+            id: item.id,
+            run_id: item.run_id,
+            job_id: item.job_id,
             event_source: item.event_source || '',
             event_context: item.event_context || '',
             event_type: item.event_type || '',
-            task_id: item.task_id || undefined,
-            created_at: item.created_at || item.timestamp || new Date().toISOString(),
             output: item.output || item.output_data || '',
-            extra_data: item.extra_data || undefined,
-            trace_metadata: item.trace_metadata || undefined
+            trace_metadata: item.trace_metadata || undefined,
+            created_at: item.created_at || item.timestamp || new Date().toISOString(),
+            group_id: item.group_id,
+            group_email: item.group_email,
+            // Frontend-only fields
+            task_id: item.task_id || undefined,
+            extra_data: item.extra_data || undefined
           } as Trace));
         }
         // Return empty array if no traces or invalid format

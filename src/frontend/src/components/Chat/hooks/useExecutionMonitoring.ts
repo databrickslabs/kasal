@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import TraceService from '../../../api/TraceService';
 import { ChatMessage } from '../types';
 import { stripAnsiEscapes } from '../utils/textProcessing';
@@ -16,6 +16,10 @@ export const useExecutionMonitoring = (
   const [lastExecutionJobId, setLastExecutionJobId] = useState<string | null>(null);
   const [processedTraceIds, setProcessedTraceIds] = useState<Set<string>>(new Set());
   const [executionStartTime, setExecutionStartTime] = useState<Date | null>(null);
+
+  // Ref to track which jobId has had its initial trace fetch done
+  // This prevents the continuous polling loop caused by monitorTraces recreation
+  const initialFetchDoneForJobRef = useRef<string | null>(null);
 
   // Get task execution store methods
   const { setTaskState, clearTaskStates } = useTaskExecutionStore();
@@ -565,6 +569,8 @@ export const useExecutionMonitoring = (
       setExecutingJobId(null);
       setExecutionStartTime(null);
       setProcessedTraceIds(new Set());
+      // Reset initial fetch ref so next execution can do its initial fetch
+      initialFetchDoneForJobRef.current = null;
     };
 
     const handleJobStopped = (event: CustomEvent) => {
@@ -612,24 +618,25 @@ export const useExecutionMonitoring = (
     };
   }, [executingJobId, lastExecutionJobId, processedTraceIds, executionStartTime, saveMessageToBackend, sessionId, addMessage, clearTaskStates]);
 
-  // Start trace monitoring when execution begins
+  // Initial trace fetch when execution begins - SSE handles real-time updates
+  // CRITICAL: Only depends on executingJobId, NOT monitorTraces
+  // monitorTraces is called via ref pattern to avoid continuous polling loop
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
-    
-    if (executingJobId) {
+    if (executingJobId && initialFetchDoneForJobRef.current !== executingJobId) {
+      // Mark this jobId as having its initial fetch scheduled
+      // This prevents re-running if monitorTraces callback is recreated
+      initialFetchDoneForJobRef.current = executingJobId;
+
+      // Do a single initial fetch after a short delay to get any traces that might have been created
+      // before the SSE connection was established
       const initialTimeout = setTimeout(() => monitorTraces(executingJobId), 2000);
-      interval = setInterval(() => monitorTraces(executingJobId), 2000);
-      
+
       return () => {
         clearTimeout(initialTimeout);
-        if (interval) clearInterval(interval);
       };
     }
-    
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [executingJobId, monitorTraces]);
+  }, [executingJobId]);
 
   return {
     executingJobId,

@@ -135,9 +135,11 @@ Add new models in `src/seeds/model_configs.py`:
 - Default memory creates storage in `/Library/Application Support/kasal_default_[crew_id]/`
 
 ### Crew Memory Persistence
-- Crew ID generated from hash of: agent roles, task names, crew name, model, run_name, group_id
-- Same crew configuration gets same ID across runs
+- Crew ID generated from hash of: agent roles, task names, crew name, model, group_id
+- NOTE: run_name is NOT included - this ensures memory persists across all runs of the same crew structure
+- Same crew configuration (agents, tasks, model) gets same ID across ALL runs
 - Group_id ensures complete tenant isolation
+- Long-Term Memory uses EXACT TEXT MATCH on task_description (CrewAI design decision)
 
 ## Testing Requirements
 

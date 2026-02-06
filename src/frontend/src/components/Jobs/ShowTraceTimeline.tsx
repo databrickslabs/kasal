@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -15,6 +15,10 @@ import {
   Button,
   Tooltip,
   Divider,
+  Card,
+  CardContent,
+  Stack,
+  Alert,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
@@ -30,35 +34,46 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
-import { ShowTraceProps, Trace } from '../../types/trace';
+import StorageIcon from '@mui/icons-material/Storage';
+import AssignmentIcon from '@mui/icons-material/Assignment';
+import PersonIcon from '@mui/icons-material/Person';
+import BuildIcon from '@mui/icons-material/Build';
+import TargetIcon from '@mui/icons-material/TrackChanges';
+import { ShowTraceProps } from '../../types/trace';
 
 import apiClient from '../../config/api/ApiConfig';
 import TraceService from '../../api/TraceService';
 import { useUserPreferencesStore } from '../../store/userPreferencesStore';
+import { useRunStatusStore, Trace } from '../../store/runStatus';
 import { useTranslation } from 'react-i18next';
 import ShowLogs from './ShowLogs';
 import { executionLogService, LogEntry } from '../../api/ExecutionLogs';
 import { useRunResult } from '../../hooks/global/useExecutionResult';
 import { PaginatedOutput } from '../Common';
 
+interface TraceEvent {
+  type: string;
+  description: string;
+  timestamp: Date;
+  duration?: number;
+  output?: string | Record<string, unknown>;
+  extraData?: Record<string, unknown>;
+}
+
 interface GroupedTrace {
   agent: string;
   startTime: Date;
   endTime: Date;
   duration: number;
+  // Agent-level events (like reasoning/planning) that happen outside of specific tasks
+  agentEvents: TraceEvent[];
   tasks: {
     taskName: string;
     taskId?: string;
     startTime: Date;
     endTime: Date;
     duration: number;
-    events: Array<{
-      type: string;
-      description: string;
-      timestamp: Date;
-      duration?: number;
-      output?: string | Record<string, unknown>;
-    }>;
+    events: TraceEvent[];
   }[];
 }
 
@@ -71,7 +86,263 @@ interface ProcessedTraces {
     start: Trace[];
     end: Trace[];
   };
+  // Crew-level planning events (from "Task Execution Planner" agent)
+  crewPlanningEvents: TraceEvent[];
 }
+
+// Interface for parsed task data
+interface ParsedTask {
+  taskNumber: number;
+  taskTitle: string;
+  taskDescription: string;
+  expectedOutput: string;
+  agent: string;
+  agentGoal: string;
+  taskTools: string;
+  agentTools: string;
+}
+
+// Helper function to parse task description into structured data
+const parseTaskDescription = (description: string): { header: string; tasks: ParsedTask[]; footer: string } | null => {
+  if (!description) return null;
+
+  // Check if this is a structured task description
+  if (!description.includes('Task Number') && !description.includes('task_description')) {
+    return null;
+  }
+
+  const result: { header: string; tasks: ParsedTask[]; footer: string } = {
+    header: '',
+    tasks: [],
+    footer: ''
+  };
+
+  // Extract header (text before first Task Number)
+  const headerMatch = description.match(/^(.*?)(?=Task Number \d)/s);
+  if (headerMatch) {
+    result.header = headerMatch[1].trim();
+  }
+
+  // Extract footer (text after last task, typically "Create the most descriptive plan...")
+  const footerMatch = description.match(/Create the most descriptive plan.*$/s);
+  if (footerMatch) {
+    result.footer = footerMatch[0].trim();
+  }
+
+  // Split by Task Number pattern
+  const taskBlocks = description.split(/(?=Task Number \d+)/);
+
+  for (const block of taskBlocks) {
+    if (!block.trim() || !block.includes('Task Number')) continue;
+
+    const task: ParsedTask = {
+      taskNumber: 0,
+      taskTitle: '',
+      taskDescription: '',
+      expectedOutput: '',
+      agent: '',
+      agentGoal: '',
+      taskTools: '',
+      agentTools: ''
+    };
+
+    // Extract task number and title
+    const titleMatch = block.match(/Task Number (\d+)\s*-\s*([^\n"]+)/);
+    if (titleMatch) {
+      task.taskNumber = parseInt(titleMatch[1], 10);
+      task.taskTitle = titleMatch[2].trim();
+    }
+
+    // Extract task_description
+    const descMatch = block.match(/"task_description":\s*([^\n]*(?:\n(?!"task_expected_output")[^\n]*)*)/);
+    if (descMatch) {
+      task.taskDescription = descMatch[1].trim().replace(/^["']|["']$/g, '');
+    }
+
+    // Extract task_expected_output
+    const outputMatch = block.match(/"task_expected_output":\s*([^\n]*(?:\n(?!"agent":)[^\n]*)*)/);
+    if (outputMatch) {
+      task.expectedOutput = outputMatch[1].trim().replace(/^["']|["']$/g, '');
+    }
+
+    // Extract agent
+    const agentMatch = block.match(/"agent":\s*([^\n]+)/);
+    if (agentMatch) {
+      task.agent = agentMatch[1].trim().replace(/^["']|["']$/g, '');
+    }
+
+    // Extract agent_goal
+    const goalMatch = block.match(/"agent_goal":\s*([^\n]+)/);
+    if (goalMatch) {
+      task.agentGoal = goalMatch[1].trim().replace(/^["']|["']$/g, '');
+    }
+
+    // Extract task_tools - handle complex tool definitions
+    const toolsMatch = block.match(/"task_tools":\s*\[([^\]]*)\]/s);
+    if (toolsMatch) {
+      const toolsContent = toolsMatch[1].trim();
+      if (toolsContent) {
+        // Extract tool names from PerplexitySearchTool(name='ToolName', ...) pattern
+        const toolNameMatches = toolsContent.match(/name='([^']+)'/g);
+        if (toolNameMatches) {
+          task.taskTools = toolNameMatches.map(m => m.replace(/name='|'/g, '')).join(', ');
+        } else {
+          task.taskTools = toolsContent.length > 100 ? 'Custom Tools' : toolsContent;
+        }
+      } else {
+        task.taskTools = 'None';
+      }
+    }
+
+    // Extract agent_tools
+    const agentToolsMatch = block.match(/"agent_tools":\s*"?([^"\n]+)"?/);
+    if (agentToolsMatch) {
+      task.agentTools = agentToolsMatch[1].trim();
+    }
+
+    if (task.taskNumber > 0) {
+      result.tasks.push(task);
+    }
+  }
+
+  return result.tasks.length > 0 ? result : null;
+};
+
+// Component to render formatted task description
+const FormattedTaskDescription: React.FC<{ description: string }> = ({ description }) => {
+  const parsed = parseTaskDescription(description);
+
+  if (!parsed) {
+    // If parsing fails, show raw description
+    return (
+      <Typography
+        variant="body1"
+        sx={{
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          lineHeight: 1.6
+        }}
+      >
+        {description}
+      </Typography>
+    );
+  }
+
+  return (
+    <Box>
+      {/* Header */}
+      {parsed.header && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          <Typography variant="body2">{parsed.header}</Typography>
+        </Alert>
+      )}
+
+      {/* Tasks */}
+      <Stack spacing={2}>
+        {parsed.tasks.map((task) => (
+          <Card key={task.taskNumber} variant="outlined" sx={{ borderRadius: 2 }}>
+            <CardContent>
+              {/* Task Header */}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                <Chip
+                  label={`Task ${task.taskNumber}`}
+                  color="primary"
+                  size="small"
+                  icon={<AssignmentIcon />}
+                />
+                <Typography variant="subtitle1" fontWeight="bold" sx={{ flex: 1 }}>
+                  {task.taskTitle}
+                </Typography>
+              </Box>
+
+              {/* Task Description */}
+              {task.taskDescription && (
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
+                    <AssignmentIcon fontSize="inherit" /> Description
+                  </Typography>
+                  <Paper sx={{ p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
+                    <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                      {task.taskDescription}
+                    </Typography>
+                  </Paper>
+                </Box>
+              )}
+
+              {/* Expected Output */}
+              {task.expectedOutput && (
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
+                    <CheckCircleIcon fontSize="inherit" /> Expected Output
+                  </Typography>
+                  <Paper sx={{ p: 1.5, bgcolor: 'success.main', color: 'success.contrastText', borderRadius: 1, opacity: 0.9 }}>
+                    <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                      {task.expectedOutput}
+                    </Typography>
+                  </Paper>
+                </Box>
+              )}
+
+              {/* Agent & Tools Row */}
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+                {/* Agent Info */}
+                <Box sx={{ flex: '1 1 200px', minWidth: 0 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
+                    <PersonIcon fontSize="inherit" /> Agent
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                    <Chip
+                      label={task.agent}
+                      size="small"
+                      color="secondary"
+                      variant="outlined"
+                      icon={<PersonIcon />}
+                    />
+                    {task.agentGoal && (
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
+                        <TargetIcon fontSize="inherit" /> {task.agentGoal}
+                      </Typography>
+                    )}
+                  </Box>
+                </Box>
+
+                {/* Tools Info */}
+                <Box sx={{ flex: '1 1 200px', minWidth: 0 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
+                    <BuildIcon fontSize="inherit" /> Tools
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                    {task.taskTools && task.taskTools !== 'None' ? (
+                      task.taskTools.split(', ').map((tool, idx) => (
+                        <Chip
+                          key={idx}
+                          label={tool}
+                          size="small"
+                          color="info"
+                          variant="outlined"
+                          icon={<BuildIcon />}
+                        />
+                      ))
+                    ) : (
+                      <Chip label="No tools" size="small" variant="outlined" />
+                    )}
+                  </Box>
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
+        ))}
+      </Stack>
+
+      {/* Footer */}
+      {parsed.footer && (
+        <Alert severity="success" sx={{ mt: 2 }}>
+          <Typography variant="body2" fontWeight="medium">{parsed.footer}</Typography>
+        </Alert>
+      )}
+    </Box>
+  );
+};
 
 const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
   open,
@@ -84,8 +355,42 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
   const { t } = useTranslation();
   const { useNewExecutionUI } = useUserPreferencesStore();
   const { showRunResult } = useRunResult();
-  const [_traces, setTraces] = useState<Trace[]>([]);
+  const setTracesForJob = useRunStatusStore(state => state.setTracesForJob);
+  const getTracesForJob = useRunStatusStore(state => state.getTracesForJob);
+
+  // Subscribe to traces from Zustand store
+  // Use getTracesForJob which returns empty array from store (stable reference)
+  const storeTraces = useRunStatusStore(state =>
+    run?.job_id ? state.traces.get(run.job_id) : undefined
+  );
+
+  // CRITICAL: Use a stable empty array reference to prevent infinite re-renders
+  // Creating a new [] on each render causes reference inequality ([] !== [])
+  const _traces = useMemo(() => storeTraces ?? [], [storeTraces]);
   const [processedTraces, setProcessedTraces] = useState<ProcessedTraces | null>(null);
+
+  // Debug: Log when dialog opens and what job_id we're using
+  useEffect(() => {
+    if (open) {
+      console.log('[ShowTraceTimeline] Dialog opened');
+      console.log('[ShowTraceTimeline] runId:', runId);
+      console.log('[ShowTraceTimeline] run?.job_id:', run?.job_id);
+      console.log('[ShowTraceTimeline] run?.status:', run?.status);
+      console.log('[ShowTraceTimeline] Initial store traces count:', _traces.length);
+
+      // Also check what's in the store directly
+      if (run?.job_id) {
+        const storeTraces = getTracesForJob(run.job_id);
+        console.log('[ShowTraceTimeline] Direct store query traces count:', storeTraces.length);
+
+        // Check SSE connection status
+        const store = useRunStatusStore.getState();
+        const sseConnected = store.activeSSEConnections.has(run.job_id);
+        console.log('[ShowTraceTimeline] SSE connection active for job:', sseConnected);
+        console.log('[ShowTraceTimeline] All active SSE connections:', Array.from(store.activeSSEConnections.keys()));
+      }
+    }
+  }, [open, runId, run?.job_id, run?.status, _traces.length, getTracesForJob]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedAgents, setExpandedAgents] = useState<Set<number>>(new Set());
@@ -94,12 +399,12 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
     type: string;
     description: string;
     output?: string | Record<string, unknown>;
+    extraData?: Record<string, unknown>;
   } | null>(null);
   const [showLogsDialog, setShowLogsDialog] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const [logsError, setLogsError] = useState<string | null>(null);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [evaluationEnabled, setEvaluationEnabled] = useState<boolean>(false);
   const [isEvaluationRunning, setIsEvaluationRunning] = useState(false);
   const [selectedTaskDescription, setSelectedTaskDescription] = useState<{
@@ -288,6 +593,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
   // Process traces into hierarchical structure
   const processTraces = useCallback((rawTraces: Trace[]): ProcessedTraces => {
     // Filter out Task Orchestrator events before processing
+    // Note: agent_execution and task source events are now prevented at backend source
     const filteredTraces = rawTraces.filter(trace =>
       trace.event_source !== 'Task Orchestrator' &&
       trace.event_context !== 'task_management'
@@ -298,7 +604,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
     );
 
     if (sorted.length === 0) {
-      return { agents: [], globalEvents: { start: [], end: [] } };
+      return { agents: [], globalEvents: { start: [], end: [] }, crewPlanningEvents: [] };
     }
 
     const globalStart = new Date(sorted[0].created_at);
@@ -317,7 +623,58 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
       )
     };
 
-    // Group by agent
+    // Extract crew-level planning events (from "Task Execution Planner" agent)
+    // These should be displayed as a special section, not as a regular agent
+    const crewPlannerTraces = sorted.filter(t =>
+      t.event_source === 'Task Execution Planner'
+    );
+
+    // Process crew planner traces into events
+    const crewPlanningEvents: TraceEvent[] = crewPlannerTraces
+      .filter(trace => {
+        // Only show meaningful events (LLM response with the plan, or task completion)
+        // Skip task_started and llm_request as they're less informative
+        return trace.event_type === 'llm_response' ||
+               trace.event_type === 'task_completed';
+      })
+      .map((trace, idx, arr) => {
+        const timestamp = new Date(trace.created_at);
+        const nextTrace = arr[idx + 1];
+        const duration = nextTrace
+          ? new Date(nextTrace.created_at).getTime() - timestamp.getTime()
+          : undefined;
+
+        // Extract the plan content
+        let outputContent: string | Record<string, unknown> | undefined = trace.output;
+        if (trace.output && typeof trace.output === 'object' && 'content' in trace.output) {
+          const content = (trace.output as Record<string, unknown>).content;
+          if (typeof content === 'string' || (typeof content === 'object' && content !== null)) {
+            outputContent = content as string | Record<string, unknown>;
+          }
+        }
+
+        // Determine description
+        let description = 'Crew Planning';
+        if (trace.event_type === 'llm_response') {
+          const outputLen = typeof outputContent === 'string'
+            ? outputContent.length
+            : JSON.stringify(outputContent || '').length;
+          description = `Execution Plan (${outputLen.toLocaleString()} chars)`;
+        } else if (trace.event_type === 'task_completed') {
+          description = 'Planning Complete';
+        }
+
+        return {
+          type: 'crew_planning',
+          description,
+          timestamp,
+          duration,
+          output: outputContent,
+          extraData: trace.extra_data as Record<string, unknown> | undefined
+        };
+      });
+
+    // Group by agent (excluding Task Execution Planner which is handled separately)
     const agentMap = new Map<string, Trace[]>();
     const taskDescriptions = new Map<string, string>(); // Map to store task descriptions by context
     const agentTaskMap = new Map<string, string>(); // Map tasks to agents
@@ -370,6 +727,8 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
 
     // Build task_id -> task_name mapping for parallel task support
     const taskIdToName = new Map<string, string>();
+    // Build task_id -> agent mapping to fix agent attribution for events
+    const taskIdToAgent = new Map<string, string>();
     // Also build task time ranges for temporal matching (task_id -> {start, end})
     const taskTimeRanges = new Map<string, { start: number; end: number; name: string }>();
 
@@ -377,11 +736,16 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
       const taskId = getTaskId(trace);
       if (trace.event_type === 'task_started' && taskId) {
         let taskName: string | null = null;
-        // Extract task name from trace_metadata first
+        let agentRole: string | null = null;
+
+        // Extract task name and agent from trace_metadata first
         if (trace.trace_metadata && typeof trace.trace_metadata === 'object') {
           const metadata = trace.trace_metadata as Record<string, unknown>;
           if (metadata.task_name) {
             taskName = metadata.task_name as string;
+          }
+          if (metadata.agent_role) {
+            agentRole = metadata.agent_role as string;
           }
         }
         // Fallback to extra_data
@@ -390,7 +754,15 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
           if (extraData.task_name) {
             taskName = extraData.task_name as string;
           }
+          if (!agentRole && extraData.agent_role) {
+            agentRole = extraData.agent_role as string;
+          }
         }
+        // Also use event_source as agent (task_started events have correct agent)
+        if (!agentRole && trace.event_source && trace.event_source !== 'task' && trace.event_source !== 'Unknown Agent') {
+          agentRole = trace.event_source;
+        }
+
         if (taskName) {
           taskIdToName.set(taskId, taskName);
           // Initialize time range with start time
@@ -399,6 +771,9 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
             end: Infinity, // Will be set when task_completed is found
             name: taskName
           });
+        }
+        if (agentRole) {
+          taskIdToAgent.set(taskId, agentRole);
         }
       } else if (trace.event_type === 'task_completed' && taskId) {
         // Update end time for task time range
@@ -411,16 +786,24 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
 
     // Second pass: group traces by agent
     sorted.forEach(trace => {
-      // Skip global events (crew/flow), task orchestration events, and task events for agent grouping
+      // Skip global events (crew/flow), task orchestration events, task events, and Task Execution Planner for agent grouping
+      // Task Execution Planner is handled separately as crew-level planning
       if (trace.event_source === 'crew' ||
           trace.event_source === 'flow' ||
           trace.event_source === 'task' ||
           trace.event_source === 'Task Orchestrator' ||
+          trace.event_source === 'Task Execution Planner' ||
           trace.event_context === 'task_management') {
         return;
       }
 
       let agent = trace.event_source || 'Unknown Agent';
+
+      // Use task_id to determine correct agent (fixes misattributed events)
+      const traceTaskId = getTaskId(trace);
+      if (traceTaskId && taskIdToAgent.has(traceTaskId)) {
+        agent = taskIdToAgent.get(traceTaskId)!;
+      }
 
       // For LLM calls, extract agent from extra_data if available
       if (trace.event_type === 'llm_call' && trace.extra_data && typeof trace.extra_data === 'object') {
@@ -461,8 +844,42 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
       const taskMap = new Map<string, Trace[]>();
       const taskIdToUniqueKey = new Map<string, string>(); // Map task_id to unique task key
       let taskCounter = 0;
+      // Agent-level traces (reasoning, planning) that happen at the agent level, not task level
+      const agentLevelTraces: Trace[] = [];
 
       agentTraces.forEach(trace => {
+        // Check if this is an agent-level event (reasoning/planning)
+        // These events should be shown at the agent level, not nested under tasks
+        if (trace.event_type === 'agent_reasoning' || trace.event_type === 'agent_reasoning_error') {
+          // Check if this is a "reasoning_started" event (not very informative) vs "reasoning_completed" (valuable)
+          let metadata: Record<string, unknown> | null = null;
+          if (trace.trace_metadata) {
+            if (typeof trace.trace_metadata === 'string') {
+              try {
+                metadata = JSON.parse(trace.trace_metadata);
+              } catch {
+                metadata = null;
+              }
+            } else if (typeof trace.trace_metadata === 'object') {
+              metadata = trace.trace_metadata as Record<string, unknown>;
+            }
+          }
+          // Also check extra_data inside output
+          let extraData: Record<string, unknown> | null = null;
+          if (trace.output && typeof trace.output === 'object' && 'extra_data' in trace.output) {
+            extraData = (trace.output as Record<string, unknown>).extra_data as Record<string, unknown>;
+          }
+
+          const operation = metadata?.operation || extraData?.operation;
+
+          // Skip "reasoning_started" events - they just say "Agent X starting reasoning process"
+          // Only show "reasoning_completed" events which have the actual plan
+          if (operation !== 'reasoning_started') {
+            agentLevelTraces.push(trace);
+          }
+          return; // Don't add to task map
+        }
+
         let taskKey = 'Processing Task'; // Default fallback
         const traceTaskId = getTaskId(trace);
 
@@ -644,10 +1061,96 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
               description += ` - ${shortModelName}`;
             }
           } else if (trace.event_type === 'tool_usage') {
-            // Tool usage event - tool name is now in event_context
-            eventType = 'tool';
-            const toolName = trace.event_context || 'Tool';
-            description = toolName;
+            // Tool usage event - backend provides proper operation type and tool name
+            // Extract tool name from event_context (format: "tool:{tool_name}")
+            const toolName = trace.event_context?.replace('tool:', '') || 'Tool';
+
+            // Check operation type from trace_metadata (backend saves extra_data as trace_metadata)
+            const operation = trace.trace_metadata && typeof trace.trace_metadata === 'object'
+              ? (trace.trace_metadata as Record<string, unknown>).operation as string
+              : undefined;
+
+            if (operation === 'tool_started') {
+              eventType = 'tool';
+              description = `${toolName} (input)`;
+            } else if (operation === 'tool_finished') {
+              eventType = 'tool_result';
+              description = `${toolName} (output)`;
+            } else {
+              // Fallback if operation not specified
+              eventType = 'tool';
+              description = toolName;
+            }
+          } else if (trace.event_type === 'llm_response') {
+            // LLM response from agent execution - show with output length
+            eventType = 'llm_response';
+            let outputLen = 0;
+            if (trace.output) {
+              if (typeof trace.output === 'string') {
+                outputLen = trace.output.length;
+              } else if (typeof trace.output === 'object' && 'content' in trace.output) {
+                outputLen = String((trace.output as Record<string, unknown>).content || '').length;
+              }
+            }
+            // Also check trace_metadata for output_length from backend
+            if (trace.trace_metadata && typeof trace.trace_metadata === 'object') {
+              const metadata = trace.trace_metadata as Record<string, unknown>;
+              if (metadata.output_length) {
+                outputLen = metadata.output_length as number;
+              }
+            }
+            description = outputLen > 0 ? `LLM Response (${outputLen.toLocaleString()} chars)` : 'LLM Response';
+          } else if (trace.event_type === 'agent_reasoning' || trace.event_type === 'agent_reasoning_error') {
+            // Agent reasoning/thinking process - make clickable to show reasoning details
+            // Check if this is a "reasoning_started" event (not very informative) vs "reasoning_completed" (valuable)
+            let metadata: Record<string, unknown> | null = null;
+            if (trace.trace_metadata) {
+              if (typeof trace.trace_metadata === 'string') {
+                try {
+                  metadata = JSON.parse(trace.trace_metadata);
+                } catch {
+                  metadata = null;
+                }
+              } else if (typeof trace.trace_metadata === 'object') {
+                metadata = trace.trace_metadata as Record<string, unknown>;
+              }
+            }
+            // Also check extra_data inside output
+            let extraData: Record<string, unknown> | null = null;
+            if (trace.output && typeof trace.output === 'object' && 'extra_data' in trace.output) {
+              extraData = (trace.output as Record<string, unknown>).extra_data as Record<string, unknown>;
+            }
+
+            const operation = metadata?.operation || extraData?.operation;
+
+            // Skip "reasoning_started" events - they just say "Agent X starting reasoning process"
+            // Only show "reasoning_completed" events which have the actual plan
+            if (operation === 'reasoning_started') {
+              return null; // Filter out started events
+            }
+
+            eventType = 'agent_reasoning';
+            if (trace.event_type === 'agent_reasoning_error') {
+              description = 'Reasoning Failed';
+            } else {
+              // Get the actual content to determine description
+              const outputStr = typeof trace.output === 'string'
+                ? trace.output
+                : (typeof trace.output === 'object' && 'content' in trace.output)
+                  ? (trace.output as Record<string, unknown>).content as string
+                  : '';
+
+              // Check if it's a planning event
+              if (outputStr && outputStr.toLowerCase().includes('plan')) {
+                description = 'Agent Planning';
+              } else if (outputStr && outputStr.length > 100) {
+                // It's a detailed reasoning with content
+                description = 'Agent Reasoning';
+              } else {
+                // Fallback - show as reasoning
+                description = 'Agent Reasoning';
+              }
+            }
           } else if (trace.event_type === 'agent_execution' || trace.event_type === 'agent_step') {
             // Extract the actual content from the output JSON structure
             let outputStr = '';
@@ -660,26 +1163,21 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
             }
             const output = outputStr;
 
-            // Check extra_data for step type information
+            // Check trace_metadata (extra_data) for step type information
             let stepType = '';
-            if (trace.extra_data && typeof trace.extra_data === 'object') {
+            if (trace.trace_metadata && typeof trace.trace_metadata === 'object') {
+              const metadata = trace.trace_metadata as Record<string, unknown>;
+              stepType = (metadata.step_type as string) || '';
+            }
+            // Fallback to extra_data
+            if (!stepType && trace.extra_data && typeof trace.extra_data === 'object') {
               const extraData = trace.extra_data as Record<string, unknown>;
               stepType = (extraData.step_type as string) || '';
             }
 
-            if (output.includes('Tool:')) {
-              // Tool usage
-              const toolMatch = output.match(/Tool: ([^|]+)/);
-              eventType = 'tool';
-              description = toolMatch ? toolMatch[1].trim() : 'Tool Usage';
-            } else if (output.includes('ToolResult')) {
-              // Tool result
-              eventType = 'tool_result';
-              description = 'Tool Result';
-            } else if (output.toLowerCase().includes('llm')) {
-              eventType = 'llm';
-              description = 'LLM call';
-            } else if (stepType === 'AgentFinish') {
+            // Removed text parsing for "Tool:" and "ToolResult" - backend now sends proper tool_usage events
+            // This prevents duplicate/synthetic events with incorrect timestamps
+            if (stepType === 'AgentFinish') {
               eventType = 'agent_complete';
               description = 'Final Answer';
             } else if (stepType === 'AgentStart') {
@@ -688,7 +1186,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
             } else if (output && output.length > 100) {
               // Long output usually means the agent is providing results
               eventType = 'agent_output';
-              description = 'Task Output';
+              description = 'Agent Output';
             } else {
               eventType = 'agent_processing';
               description = 'Processing';
@@ -733,35 +1231,163 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
               }
             }
             description = `Completed: ${taskName}`;
+          } else if (trace.event_type === 'memory_write_started' || trace.event_type === 'memory_retrieval_started') {
+            // Skip started events - we'll show the completed events instead
+            // This prevents duplicate entries (started + completed)
+            return null;
+          } else if (trace.event_type === 'memory_write') {
+            // Memory write completed - extract memory type for display
+            eventType = 'memory_write';
+            // Helper to extract memory type from multiple sources
+            const extractMemoryType = (): string => {
+              // 1. Check trace_metadata
+              if (trace.trace_metadata && typeof trace.trace_metadata === 'object') {
+                const metadata = trace.trace_metadata as Record<string, unknown>;
+                if (metadata.memory_type && metadata.memory_type !== 'memory') {
+                  return metadata.memory_type as string;
+                }
+              }
+              // 2. Check extra_data
+              if (trace.extra_data && typeof trace.extra_data === 'object') {
+                const extraData = trace.extra_data as Record<string, unknown>;
+                if (extraData.memory_type && extraData.memory_type !== 'memory') {
+                  return extraData.memory_type as string;
+                }
+              }
+              // 3. Extract from event_context (e.g., "saved_long_term", "saving_short_term")
+              if (trace.event_context) {
+                const contextMatch = trace.event_context.match(/(?:saved_|saving_|retrieved_|memory_query\[)(\w+)/);
+                if (contextMatch) {
+                  return contextMatch[1];
+                }
+              }
+              return 'memory';
+            };
+            const memoryType = extractMemoryType();
+            // Format memory type for display (short_term -> Short-Term Memory)
+            const formatMemoryType = (type: string): string => {
+              if (type === 'short_term') return 'Short-Term Memory';
+              if (type === 'long_term') return 'Long-Term Memory';
+              if (type === 'entity') return 'Entity Memory';
+              return type;
+            };
+            description = `Memory Write (${formatMemoryType(memoryType)})`;
+          } else if (trace.event_type === 'memory_retrieval') {
+            // Memory retrieval completed - extract memory type and results count for display
+            eventType = 'memory_retrieval';
+            // Helper to extract memory type from multiple sources
+            const extractMemoryType = (): string => {
+              // 1. Check trace_metadata
+              if (trace.trace_metadata && typeof trace.trace_metadata === 'object') {
+                const metadata = trace.trace_metadata as Record<string, unknown>;
+                if (metadata.memory_type && metadata.memory_type !== 'memory') {
+                  return metadata.memory_type as string;
+                }
+              }
+              // 2. Check extra_data
+              if (trace.extra_data && typeof trace.extra_data === 'object') {
+                const extraData = trace.extra_data as Record<string, unknown>;
+                if (extraData.memory_type && extraData.memory_type !== 'memory') {
+                  return extraData.memory_type as string;
+                }
+              }
+              // 3. Extract from event_context (e.g., "memory_query[long_term]")
+              if (trace.event_context) {
+                const contextMatch = trace.event_context.match(/(?:saved_|saving_|retrieved_|memory_query\[)(\w+)/);
+                if (contextMatch) {
+                  return contextMatch[1];
+                }
+              }
+              return 'memory';
+            };
+            const memoryType = extractMemoryType();
+            // Format memory type for display
+            const formatMemoryType = (type: string): string => {
+              if (type === 'short_term') return 'Short-Term Memory';
+              if (type === 'long_term') return 'Long-Term Memory';
+              if (type === 'entity') return 'Entity Memory';
+              return type;
+            };
+            let resultsCount = 0;
+            if (trace.trace_metadata && typeof trace.trace_metadata === 'object') {
+              const metadata = trace.trace_metadata as Record<string, unknown>;
+              if (metadata.results_count) resultsCount = metadata.results_count as number;
+            } else if (trace.extra_data && typeof trace.extra_data === 'object') {
+              const extraData = trace.extra_data as Record<string, unknown>;
+              if (extraData.results_count) resultsCount = extraData.results_count as number;
+            }
+            description = resultsCount > 0
+              ? `Memory Read (${formatMemoryType(memoryType)}) - ${resultsCount} results`
+              : `Memory Read (${formatMemoryType(memoryType)})`;
+          } else if (trace.event_type === 'memory_retrieval_completed') {
+            // Skip this event - memory_retrieval already shows the read completed
+            // This prevents duplicate entries
+            return null;
+          } else if (trace.event_type === 'memory_context_retrieved') {
+            // Aggregated memory context - this is the ACTUAL memory content from all sources
+            eventType = 'memory_context';
+            let contentLength = 0;
+            if (trace.extra_data && typeof trace.extra_data === 'object') {
+              const extraData = trace.extra_data as Record<string, unknown>;
+              if (extraData.content_length) contentLength = extraData.content_length as number;
+            }
+            description = contentLength > 0
+              ? `Memory Context Retrieved (${contentLength} chars)`
+              : 'Memory Context Retrieved';
           } else if (trace.event_type === 'memory_operation') {
+            // Legacy/generic memory operation - try to extract details
             eventType = 'memory_operation';
-            // Extract operation type from context or output
-            if (trace.event_context) {
+            let memoryType = '';
+            let operation = '';
+            if (trace.trace_metadata && typeof trace.trace_metadata === 'object') {
+              const metadata = trace.trace_metadata as Record<string, unknown>;
+              if (metadata.memory_type) memoryType = metadata.memory_type as string;
+              if (metadata.operation) operation = metadata.operation as string;
+            } else if (trace.extra_data && typeof trace.extra_data === 'object') {
+              const extraData = trace.extra_data as Record<string, unknown>;
+              if (extraData.memory_type) memoryType = extraData.memory_type as string;
+              if (extraData.operation) operation = extraData.operation as string;
+            }
+            // Build description from available info
+            if (operation && memoryType) {
+              const opLabel = operation.includes('query') || operation.includes('retriev') ? 'Read' : 'Write';
+              description = `Memory ${opLabel} (${memoryType})`;
+            } else if (trace.event_context) {
               if (trace.event_context.includes('query')) {
-                description = 'Memory Query';
+                description = memoryType ? `Memory Query (${memoryType})` : 'Memory Query';
               } else if (trace.event_context.includes('sav')) {
-                description = 'Memory Save';
+                description = memoryType ? `Memory Save (${memoryType})` : 'Memory Save';
               } else {
-                description = 'Memory Operation';
+                description = memoryType ? `Memory Operation (${memoryType})` : 'Memory Operation';
               }
             } else {
-              description = 'Memory Operation';
+              description = memoryType ? `Memory Operation (${memoryType})` : 'Memory Operation';
+            }
+          } else if (trace.event_type === 'memory_backend_error') {
+            // Databricks index validation error - indexes missing or provisioning
+            eventType = 'memory_backend_error';
+            let title = 'Memory Backend Error';
+            let errorType = '';
+            if (trace.trace_metadata && typeof trace.trace_metadata === 'object') {
+              const metadata = trace.trace_metadata as Record<string, unknown>;
+              if (metadata.title) title = metadata.title as string;
+              if (metadata.error_type) errorType = metadata.error_type as string;
+            } else if (trace.extra_data && typeof trace.extra_data === 'object') {
+              const extraData = trace.extra_data as Record<string, unknown>;
+              if (extraData.title) title = extraData.title as string;
+              if (extraData.error_type) errorType = extraData.error_type as string;
+            }
+            // Provide descriptive message based on error type
+            if (errorType === 'missing_indexes') {
+              description = '⚠️ Databricks Indexes Not Found';
+            } else if (errorType === 'provisioning_indexes') {
+              description = '⏳ Databricks Indexes Still Provisioning';
+            } else {
+              description = title;
             }
           } else if (trace.event_type === 'knowledge_operation') {
             eventType = 'knowledge_operation';
             description = 'Knowledge Operation';
-          } else if (trace.event_type === 'agent_reasoning' || trace.event_type === 'agent_reasoning_error') {
-            eventType = 'reasoning';
-            // Extract reasoning details
-            if (trace.event_type === 'agent_reasoning_error') {
-              description = 'Reasoning Failed';
-            } else {
-              description = 'Agent Reasoning';
-              // Check if there's a plan in the output
-              if (trace.output && typeof trace.output === 'string' && trace.output.includes('plan')) {
-                description = 'Agent Planning';
-              }
-            }
           } else if (trace.event_type === 'llm_guardrail') {
             eventType = 'guardrail';
             description = 'LLM Guardrail Check';
@@ -810,6 +1436,42 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
               }
             }
             description = `❌ ${errorMsg}`;
+          } else if (trace.event_type === 'llm_request') {
+            eventType = 'llm_request';
+            // Extract prompt length for display
+            let promptLength = 0;
+            if (trace.output) {
+              const outputStr = typeof trace.output === 'string'
+                ? trace.output
+                : JSON.stringify(trace.output);
+              promptLength = outputStr.length;
+            }
+            // Check extra_data for prompt_length field
+            if (trace.extra_data && typeof trace.extra_data === 'object') {
+              const extraData = trace.extra_data as Record<string, unknown>;
+              if (typeof extraData.prompt_length === 'number') {
+                promptLength = extraData.prompt_length;
+              }
+            }
+            description = `LLM Request (${promptLength.toLocaleString()} chars)`;
+          } else if (trace.event_type === 'llm_response') {
+            eventType = 'llm_response';
+            // Extract response length for display
+            let responseLength = 0;
+            if (trace.output) {
+              const outputStr = typeof trace.output === 'string'
+                ? trace.output
+                : JSON.stringify(trace.output);
+              responseLength = outputStr.length;
+            }
+            // Check extra_data for output_length field
+            if (trace.extra_data && typeof trace.extra_data === 'object') {
+              const extraData = trace.extra_data as Record<string, unknown>;
+              if (typeof extraData.output_length === 'number') {
+                responseLength = extraData.output_length;
+              }
+            }
+            description = `LLM Response (${responseLength.toLocaleString()} chars)`;
           } else {
             eventType = trace.event_type;
             // Make the description more readable
@@ -829,14 +1491,20 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
             }
           }
 
+          // Extract extra_data for detailed event information (guardrails, etc.)
+          const extraData = trace.extra_data && typeof trace.extra_data === 'object'
+            ? trace.extra_data as Record<string, unknown>
+            : undefined;
+
           return {
             type: eventType,
             description,
             timestamp,
             duration,
-            output: outputContent
+            output: outputContent,
+            extraData
           };
-        });
+        }).filter((event): event is NonNullable<typeof event> => event !== null);
 
         return {
           taskName,
@@ -848,11 +1516,66 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
         };
       });
 
+      // Process agent-level traces into agentEvents
+      const agentEvents: TraceEvent[] = agentLevelTraces.map((trace, idx) => {
+        const timestamp = new Date(trace.created_at);
+        const nextTrace = agentLevelTraces[idx + 1];
+        const duration = nextTrace
+          ? new Date(nextTrace.created_at).getTime() - timestamp.getTime()
+          : undefined;
+
+        // Determine event type and description
+        let eventType = 'agent_reasoning';
+        let description = 'Agent Reasoning';
+
+        if (trace.event_type === 'agent_reasoning_error') {
+          description = 'Reasoning Failed';
+        } else {
+          // Get the actual content to determine description
+          const outputStr = typeof trace.output === 'string'
+            ? trace.output
+            : (typeof trace.output === 'object' && trace.output !== null && 'content' in trace.output)
+              ? (trace.output as Record<string, unknown>).content as string
+              : '';
+
+          // Check if it's a planning event
+          if (outputStr && outputStr.toLowerCase().includes('plan')) {
+            description = 'Agent Planning';
+          } else if (outputStr && outputStr.length > 100) {
+            description = 'Agent Reasoning';
+          }
+        }
+
+        // Extract the actual content from the output JSON structure
+        let outputContent: string | Record<string, unknown> | undefined = trace.output;
+        if (trace.output && typeof trace.output === 'object' && 'content' in trace.output) {
+          const content = (trace.output as Record<string, unknown>).content;
+          if (typeof content === 'string' || (typeof content === 'object' && content !== null)) {
+            outputContent = content as string | Record<string, unknown>;
+          }
+        }
+
+        // Extract extra_data for detailed event information
+        const extraData = trace.extra_data && typeof trace.extra_data === 'object'
+          ? trace.extra_data as Record<string, unknown>
+          : undefined;
+
+        return {
+          type: eventType,
+          description,
+          timestamp,
+          duration,
+          output: outputContent,
+          extraData
+        };
+      });
+
       agents.push({
         agent: agentName,
         startTime: agentStart,
         endTime: agentEnd,
         duration: agentEnd.getTime() - agentStart.getTime(),
+        agentEvents,
         tasks
       });
     });
@@ -862,26 +1585,26 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
       globalEnd,
       totalDuration,
       agents,
-      globalEvents
+      globalEvents,
+      crewPlanningEvents
     };
   }, []);
 
   const fetchTraceData = useCallback(async (isInitialLoad = true) => {
     if (!runId) return;
 
+    console.log('[ShowTraceTimeline] fetchTraceData called, isInitialLoad:', isInitialLoad);
+
     try {
-      // Use different loading states for initial load vs refresh
+      // Set loading state for initial load
       if (isInitialLoad) {
         setLoading(true);
-      } else {
-        setIsRefreshing(true);
       }
 
       const runExists = await TraceService.checkRunExists(runId);
       if (!runExists) {
         setError(`Run ID ${runId} does not exist or is no longer available.`);
         setLoading(false);
-        setIsRefreshing(false);
         return;
       }
 
@@ -890,19 +1613,43 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                       ? runData.job_id
                       : runId;
 
+      console.log('[ShowTraceTimeline] Fetching traces for traceId:', traceId);
       const traces = await TraceService.getTraces(traceId);
+      console.log('[ShowTraceTimeline] API returned traces count:', traces?.length || 0);
 
       if (!traces || !Array.isArray(traces) || traces.length === 0) {
-        setError('No trace data is available for this run.');
-        setTraces([]);
+        // Only show error if job is in terminal state (not running)
+        const isRunning = run?.status && ['running', 'queued', 'pending'].includes(run.status.toLowerCase());
+        console.log('[ShowTraceTimeline] No traces from API. Job status:', run?.status, 'isRunning:', isRunning);
+        if (!isRunning) {
+          setError('No trace data is available for this run.');
+        } else {
+          // Clear error for running jobs - traces will come via SSE
+          setError(null);
+          setLoading(false);
+        }
+        // DON'T overwrite store with empty array - SSE might have already added traces
+        // The store subscription will handle displaying any existing traces
       } else {
-        setTraces(traces);
+        // Store traces in Zustand store (only if we got data from API)
+        if (run?.job_id) {
+          console.log('[ShowTraceTimeline] Storing', traces.length, 'traces in store for job_id:', run.job_id);
+          setTracesForJob(run.job_id, traces);
+        }
         const processed = processTraces(traces);
         setProcessedTraces(processed);
 
         if (isInitialLoad) {
-          // Only expand all agents on initial load
+          // Expand all agents and tasks on initial load
           setExpandedAgents(new Set(processed.agents.map((_, idx) => idx)));
+          // Generate all task keys and expand them
+          const allTaskKeys = new Set<string>();
+          processed.agents.forEach((agent, agentIdx) => {
+            agent.tasks.forEach((_, taskIdx) => {
+              allTaskKeys.add(`${agentIdx}-${taskIdx}`);
+            });
+          });
+          setExpandedTasks(allTaskKeys);
         } else {
           // During refresh, preserve expanded state but auto-expand new tasks for expanded agents
           // We'll handle this outside the callback to avoid dependency issues
@@ -917,13 +1664,13 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      console.error('[ShowTraceTimeline] Error fetching traces:', errorMessage);
       setError(`Failed to load traces: ${errorMessage}`);
-      setTraces([]);
+      // DON'T overwrite store on error - SSE traces might already be there
     } finally {
       setLoading(false);
-      setIsRefreshing(false);
     }
-  }, [runId, processTraces]);
+  }, [runId, run?.status, run?.job_id, processTraces, setTracesForJob]);
 
   useEffect(() => {
     if (open) {
@@ -1001,53 +1748,37 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
     }
   };
 
-  // Auto-expand tasks for expanded agents when traces update
-  useEffect(() => {
-    if (!processedTraces || !isRefreshing) return;
-
-    setExpandedTasks(prevExpandedTasks => {
-      const newExpandedTasks = new Set(prevExpandedTasks);
-
-      // For each expanded agent, ensure all its tasks are in the expanded set
-      expandedAgents.forEach(agentIdx => {
-        if (processedTraces.agents[agentIdx]) {
-          processedTraces.agents[agentIdx].tasks.forEach((_, taskIdx) => {
-            const taskKey = `${agentIdx}-${taskIdx}`;
-            // Add new tasks to expanded set if the agent is expanded
-            newExpandedTasks.add(taskKey);
-          });
-        }
-      });
-
-      return newExpandedTasks;
-    });
-  }, [processedTraces, expandedAgents, isRefreshing]);
-
-  // Auto-refresh every 5 seconds while dialog is open and execution is not completed
+  // Automatically reprocess traces when they change in the store
   useEffect(() => {
     if (!open) return;
 
-    // Check if execution is in a terminal state (don't refresh if completed/failed/cancelled/stopped)
-    const isTerminalState = run?.status && [
-      'completed',
-      'failed',
-      'cancelled',
-      'stopped',
-      'error'
-    ].includes(run.status.toLowerCase());
+    console.log('[ShowTraceTimeline] Store traces updated:', _traces.length, 'traces for job', run?.job_id);
 
-    if (isTerminalState) {
-      return; // Don't set up refresh interval if execution is done
+    if (_traces && _traces.length > 0) {
+      const processed = processTraces(_traces);
+      setProcessedTraces(processed);
+
+      // Clear any error when traces arrive
+      setError(null);
+      setLoading(false);
+
+      // Auto-expand all agents and tasks when traces update
+      setExpandedAgents(new Set(processed.agents.map((_, idx) => idx)));
+      // Generate all task keys and expand them
+      const allTaskKeys = new Set<string>();
+      processed.agents.forEach((agent, agentIdx) => {
+        agent.tasks.forEach((_, taskIdx) => {
+          allTaskKeys.add(`${agentIdx}-${taskIdx}`);
+        });
+      });
+      setExpandedTasks(allTaskKeys);
+    } else {
+      // No traces yet - only show loading if we haven't finished initial fetch
+      // If initial fetch is done and still no traces, rely on error message
+      const processed = processTraces([]);
+      setProcessedTraces(processed);
     }
-
-    const refreshInterval = setInterval(() => {
-      fetchTraceData(false); // Refresh (not initial load)
-    }, 5000); // Refresh every 5 seconds
-
-    return () => {
-      clearInterval(refreshInterval);
-    };
-  }, [open, run?.status, fetchTraceData]);
+  }, [_traces, open, processTraces, run?.job_id]);
 
   const formatDuration = (ms: number): string => {
     if (ms < 1000) return `${ms}ms`;
@@ -1129,11 +1860,17 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
 
     switch (type) {
       case 'tool':
+        // Tool request (input) - blue to indicate outgoing call
+        return <TerminalIcon {...iconProps} color="primary" />;
       case 'tool_result':
+        // Tool response (output) - green to indicate received result
+        return <TerminalIcon {...iconProps} color="success" />;
       case 'tool_usage':
         return <TerminalIcon {...iconProps} color="action" />;
       case 'llm':
         return <PlayCircleIcon {...iconProps} color="primary" />;
+      case 'llm_response':
+        return <PlayCircleIcon {...iconProps} color="success" />;
       case 'agent_start':
       case 'task_start':
       case 'started':
@@ -1147,8 +1884,21 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
         return <PreviewIcon {...iconProps} color="action" />;
       case 'agent_processing':
         return <RefreshIcon {...iconProps} color="action" />;
+      case 'memory_write':
+        // Memory write events - use storage icon with primary color for write operations
+        return <StorageIcon {...iconProps} color="primary" />;
+      case 'memory_retrieval':
+        // Memory retrieval events - use storage icon with success color for read operations
+        return <StorageIcon {...iconProps} color="success" />;
+      case 'memory_context':
+        // Aggregated memory context - use storage icon with info color
+        return <StorageIcon {...iconProps} color="info" />;
       case 'memory_operation':
-        return <AccessTimeIcon {...iconProps} color="action" />;
+        // Legacy memory operation - use storage icon with action color
+        return <StorageIcon {...iconProps} color="action" />;
+      case 'memory_backend_error':
+        // Memory backend error (e.g., Databricks indexes missing or provisioning)
+        return <ErrorOutlineIcon {...iconProps} color="error" />;
       case 'knowledge_operation':
         return <TimelineIcon {...iconProps} color="action" />;
       case 'crew_started':
@@ -1169,7 +1919,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
     }
   };
 
-  const handleEventClick = (event: { type: string; description: string; output?: string | Record<string, unknown> }) => {
+  const handleEventClick = (event: { type: string; description: string; output?: string | Record<string, unknown>; extraData?: Record<string, unknown> }) => {
     setSelectedEvent(event);
   };
 
@@ -1191,40 +1941,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
     >
       <DialogTitle sx={{ m: 0, p: 2 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Typography variant="h6">Execution Trace Timeline</Typography>
-            {isRefreshing && (
-              <Tooltip title="Refreshing...">
-                <RefreshIcon
-                  sx={{
-                    fontSize: 20,
-
-
-                    color: 'primary.main',
-                    animation: 'spin 1s linear infinite',
-                    '@keyframes spin': {
-                      '0%': { transform: 'rotate(0deg)' },
-                      '100%': { transform: 'rotate(360deg)' }
-                    }
-                  }}
-                />
-              </Tooltip>
-            )}
-            <Tooltip title={
-              run?.status && ['completed', 'failed', 'cancelled', 'stopped', 'error'].includes(run.status.toLowerCase())
-                ? "Refresh now (auto-refresh disabled - execution completed)"
-                : "Refresh now (auto-refreshes every 5s)"
-            }>
-              <IconButton
-                size="small"
-                onClick={() => fetchTraceData(false)}
-                disabled={isRefreshing || loading}
-                sx={{ ml: 0.5 }}
-              >
-                <RefreshIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          </Box>
+          <Typography variant="h6">Execution Trace Timeline</Typography>
           <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
             {/* Show action buttons only in new UI mode and when we have the run data */}
             {useNewExecutionUI && run && (
@@ -1334,6 +2051,118 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
               </Box>
             ))}
 
+            {/* Crew-level Planning Section */}
+            {processedTraces.crewPlanningEvents && processedTraces.crewPlanningEvents.length > 0 && (
+              <Paper sx={{ mb: 2, overflow: 'hidden', borderLeft: '4px solid', borderLeftColor: 'secondary.main' }}>
+                <Box
+                  sx={{
+                    p: 2,
+                    bgcolor: 'secondary.50',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <AssignmentIcon sx={{ color: 'secondary.main' }} />
+                    <Typography variant="subtitle1" fontWeight="bold" color="secondary.main">
+                      Crew Planning
+                    </Typography>
+                    <Chip
+                      size="small"
+                      label={formatDuration(
+                        processedTraces.crewPlanningEvents.reduce((total, e) => total + (e.duration || 0), 0) ||
+                        (processedTraces.crewPlanningEvents.length > 0
+                          ? new Date(processedTraces.crewPlanningEvents[processedTraces.crewPlanningEvents.length - 1].timestamp).getTime() -
+                            new Date(processedTraces.crewPlanningEvents[0].timestamp).getTime()
+                          : 0)
+                      )}
+                      color="secondary"
+                    />
+                  </Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Task Execution Planner
+                  </Typography>
+                </Box>
+
+                <Box sx={{ pl: 6, pr: 2, py: 1 }}>
+                  {processedTraces.crewPlanningEvents.map((event, eventIdx) => {
+                    const hasOutput = !!event.output;
+                    const isClickable = hasOutput;
+
+                    return (
+                      <Box
+                        key={eventIdx}
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 1,
+                          py: 0.5,
+                          borderLeft: '2px solid',
+                          borderColor: 'secondary.200',
+                          pl: 2,
+                          ml: 1,
+                          position: 'relative',
+                          cursor: isClickable ? 'pointer' : 'default',
+                          '&:hover': {
+                            bgcolor: isClickable ? 'action.hover' : 'transparent',
+                            '& .output-hint': {
+                              opacity: 1
+                            }
+                          }
+                        }}
+                        onClick={() => isClickable && handleEventClick(event)}
+                      >
+                        <Typography variant="caption" sx={{ minWidth: 60 }}>
+                          {processedTraces.globalStart &&
+                            formatTimeDelta(processedTraces.globalStart, event.timestamp)}
+                        </Typography>
+                        <Box sx={{ minWidth: 20, display: 'flex', alignItems: 'center' }}>
+                          <AssignmentIcon sx={{ fontSize: 16, color: 'secondary.main' }} />
+                        </Box>
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            flex: 1,
+                            color: isClickable ? 'secondary.main' : 'text.primary',
+                            textDecoration: isClickable ? 'underline dotted' : 'none',
+                            textUnderlineOffset: '3px'
+                          }}
+                        >
+                          {event.description}
+                        </Typography>
+                        {event.duration && (
+                          <Chip
+                            size="small"
+                            label={formatDuration(event.duration)}
+                            sx={{ height: 20 }}
+                          />
+                        )}
+                        {isClickable && (
+                          <Chip
+                            className="output-hint"
+                            size="small"
+                            label="View Plan"
+                            sx={{
+                              height: 18,
+                              fontSize: '0.65rem',
+                              bgcolor: 'secondary.main',
+                              color: 'white',
+                              opacity: 0.7,
+                              transition: 'opacity 0.2s',
+                              '& .MuiChip-label': {
+                                px: 0.5
+                              }
+                            }}
+                          />
+                        )}
+                      </Box>
+                    );
+                  })}
+                </Box>
+              </Paper>
+            )}
+
             {/* Agents and Tasks */}
             {processedTraces.agents.map((agent, agentIdx) => (
               <Paper key={agentIdx} sx={{ mb: 2, overflow: 'hidden' }}>
@@ -1374,6 +2203,156 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
 
                 <Collapse in={expandedAgents.has(agentIdx)}>
                   <Box sx={{ pl: 6, pr: 2, py: 1 }}>
+                    {/* Agent-level events (reasoning/planning) shown before tasks */}
+                    {agent.agentEvents && agent.agentEvents.length > 0 && (
+                      <Box sx={{ mb: 2 }}>
+                        <Box
+                          sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 1,
+                            p: 1,
+                            bgcolor: 'primary.50',
+                            borderRadius: 1,
+                            borderLeft: '3px solid',
+                            borderLeftColor: 'primary.main',
+                          }}
+                        >
+                          <TargetIcon sx={{ color: 'primary.main', fontSize: 20 }} />
+                          <Typography
+                            variant="body2"
+                            fontWeight="medium"
+                            sx={{ color: 'primary.main' }}
+                          >
+                            Agent Planning & Reasoning
+                          </Typography>
+                          <Chip
+                            size="small"
+                            label={`${agent.agentEvents.length} event${agent.agentEvents.length !== 1 ? 's' : ''}`}
+                            variant="outlined"
+                            sx={{ borderColor: 'primary.main', color: 'primary.main' }}
+                          />
+                        </Box>
+                        <Box sx={{ pl: 4, mt: 1 }}>
+                          {agent.agentEvents.map((event, eventIdx) => {
+                            const hasOutput = !!event.output;
+                            const isClickable = hasOutput && (
+                              event.type === 'agent_reasoning' ||
+                              event.type.includes('reasoning')
+                            );
+
+                            return (
+                              <Box
+                                key={eventIdx}
+                                sx={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 1,
+                                  py: 0.5,
+                                  borderLeft: '2px solid',
+                                  borderColor: 'primary.200',
+                                  pl: 2,
+                                  ml: 1,
+                                  position: 'relative',
+                                  cursor: isClickable ? 'pointer' : 'default',
+                                  '&:hover': {
+                                    bgcolor: isClickable ? 'action.hover' : 'transparent',
+                                    '& .output-hint': {
+                                      opacity: 1
+                                    },
+                                    '& .click-hint': {
+                                      visibility: 'visible'
+                                    }
+                                  }
+                                }}
+                                onClick={() => isClickable && handleEventClick(event)}
+                              >
+                                <Typography variant="caption" sx={{ minWidth: 60 }}>
+                                  {processedTraces.globalStart &&
+                                    formatTimeDelta(processedTraces.globalStart, event.timestamp)}
+                                </Typography>
+                                <Box sx={{ minWidth: 20, display: 'flex', alignItems: 'center' }}>
+                                  {getEventIcon(event.type)}
+                                </Box>
+                                <Typography
+                                  variant="body2"
+                                  sx={{
+                                    flex: 1,
+                                    color: isClickable ? 'primary.main' : 'text.primary',
+                                    textDecoration: isClickable ? 'underline dotted' : 'none',
+                                    textUnderlineOffset: '3px'
+                                  }}
+                                >
+                                  {event.description}
+                                </Typography>
+                                {event.duration && (
+                                  <Chip
+                                    size="small"
+                                    label={formatDuration(event.duration)}
+                                    sx={{ height: 20 }}
+                                  />
+                                )}
+                                {isClickable && (
+                                  <>
+                                    <Chip
+                                      className="output-hint"
+                                      size="small"
+                                      label="View"
+                                      sx={{
+                                        height: 18,
+                                        fontSize: '0.65rem',
+                                        bgcolor: 'primary.main',
+                                        color: 'white',
+                                        opacity: 0.7,
+                                        transition: 'opacity 0.2s',
+                                        '& .MuiChip-label': {
+                                          px: 0.5
+                                        }
+                                      }}
+                                    />
+                                    <Typography
+                                      className="click-hint"
+                                      variant="caption"
+                                      sx={{
+                                        position: 'absolute',
+                                        right: -10,
+                                        top: '50%',
+                                        transform: 'translateY(-50%)',
+                                        bgcolor: 'grey.900',
+                                        color: 'white',
+                                        px: 1,
+                                        py: 0.5,
+                                        borderRadius: 1,
+                                        fontSize: '0.7rem',
+                                        visibility: 'hidden',
+                                        zIndex: 1000,
+                                        whiteSpace: 'nowrap',
+                                        '&::before': {
+                                          content: '""',
+                                          position: 'absolute',
+                                          left: -4,
+                                          top: '50%',
+                                          transform: 'translateY(-50%)',
+                                          width: 0,
+                                          height: 0,
+                                          borderTop: '4px solid transparent',
+                                          borderBottom: '4px solid transparent',
+                                          borderRight: '4px solid',
+                                          borderRightColor: 'grey.900'
+                                        }
+                                      }}
+                                    >
+                                      Click to view reasoning
+                                    </Typography>
+                                  </>
+                                )}
+                              </Box>
+                            );
+                          })}
+                        </Box>
+                      </Box>
+                    )}
+
                     {agent.tasks.map((task, taskIdx) => {
                       const taskKey = `${agentIdx}-${taskIdx}`;
                       return (
@@ -1429,21 +2408,29 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                             <Box sx={{ pl: 4, mt: 1 }}>
                               {task.events.map((event, eventIdx) => {
                                 const hasOutput = !!event.output;
-                                // Make all events with output clickable, including memory operations
+                                // Make all events with output clickable, including memory operations, guardrails, and reasoning
                                 const isClickable = hasOutput && (
                                   event.type === 'llm' ||
+                                  event.type === 'llm_request' ||
+                                  event.type === 'llm_response' ||
                                   event.type === 'agent_complete' ||
                                   event.type === 'agent_output' ||
                                   event.type === 'tool_result' ||
                                   event.type === 'task_complete' ||
                                   event.type === 'memory_operation' ||
+                                  event.type === 'memory_write' ||
+                                  event.type === 'memory_retrieval' ||
                                   event.type === 'tool_usage' ||
                                   event.type === 'knowledge_operation' ||
                                   event.type === 'agent_execution' ||
-                                  // Also check for underscore versions
+                                  event.type === 'guardrail' ||
+                                  event.type === 'agent_reasoning' ||
+                                  // Also check for underscore versions and partial matches
                                   event.type.includes('memory') ||
                                   event.type.includes('tool') ||
-                                  event.type.includes('knowledge')
+                                  event.type.includes('knowledge') ||
+                                  event.type.includes('guardrail') ||
+                                  event.type.includes('reasoning')
                                 );
 
                                 return (
@@ -1625,25 +2612,16 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                   </Typography>
                 </Box>
               ) : (
-                <Paper
+                <Box
                   sx={{
-                    p: 2,
-                    backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.50',
                     maxHeight: '60vh',
                     overflow: 'auto',
                   }}
                 >
-                  <Typography
-                    variant="body1"
-                    sx={{
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                      lineHeight: 1.6
-                    }}
-                  >
-                    {selectedTaskDescription.fullDescription || selectedTaskDescription.taskName}
-                  </Typography>
-                </Paper>
+                  <FormattedTaskDescription
+                    description={selectedTaskDescription.fullDescription || selectedTaskDescription.taskName}
+                  />
+                </Box>
               )}
             </DialogContent>
             <DialogActions>
@@ -1692,31 +2670,171 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
             <DialogContent dividers>
               <Box sx={{ position: 'relative' }}>
                 {/* Special formatting for memory operations */}
-                {selectedEvent.type === 'memory_operation' || selectedEvent.type.includes('memory') ? (
-                  <Box>
-                    <Typography variant="subtitle2" gutterBottom>
+                {selectedEvent.type === 'memory_operation' || selectedEvent.type === 'memory_write' || selectedEvent.type === 'memory_retrieval' || selectedEvent.type.includes('memory') ? (
+                  <Box sx={{ mb: 2 }}>
+                    <Typography variant="subtitle2" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <StorageIcon fontSize="small" />
                       Memory Operation Details
                     </Typography>
-                    {typeof selectedEvent.output === 'object' && selectedEvent.output && (
-                      <Box sx={{ mb: 2 }}>
-                        {('operation' in selectedEvent.output) && (
-                          <Chip
-                            label={`Operation: ${selectedEvent.output.operation as string}`}
-                            sx={{ mr: 1, mb: 1 }}
-                            size="small"
-                            color="primary"
-                          />
-                        )}
-                        {('memory_type' in selectedEvent.output) && (
-                          <Chip
-                            label={`Type: ${selectedEvent.output.memory_type as string}`}
-                            sx={{ mr: 1, mb: 1 }}
-                            size="small"
-                            color="secondary"
-                          />
-                        )}
-                      </Box>
-                    )}
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1 }}>
+                      {/* Show operation type based on event type */}
+                      {selectedEvent.type === 'memory_write' && (
+                        <Chip
+                          icon={<StorageIcon />}
+                          label="Write"
+                          size="small"
+                          color="primary"
+                          variant="filled"
+                        />
+                      )}
+                      {selectedEvent.type === 'memory_retrieval' && (
+                        <Chip
+                          icon={<StorageIcon />}
+                          label="Read"
+                          size="small"
+                          color="success"
+                          variant="filled"
+                        />
+                      )}
+                      {/* Extract memory type from description if present (format: "Memory Write (long_term)") */}
+                      {(() => {
+                        const memTypeMatch = selectedEvent.description.match(/\(([^)]+)\)/);
+                        if (memTypeMatch) {
+                          const memType = memTypeMatch[1];
+                          return (
+                            <Chip
+                              label={`Type: ${memType}`}
+                              size="small"
+                              color="secondary"
+                              variant="outlined"
+                            />
+                          );
+                        }
+                        return null;
+                      })()}
+                      {/* Extract extra_data from output object for additional details */}
+                      {(() => {
+                        // The trace output structure is: { content: ..., extra_data: {...} }
+                        // Memory info is in extra_data
+                        const output = selectedEvent.output;
+                        if (typeof output === 'object' && output !== null) {
+                          const outputObj = output as Record<string, unknown>;
+                          const extraData = outputObj.extra_data as Record<string, unknown> | undefined;
+
+                          const chips: JSX.Element[] = [];
+
+                          // Check extra_data for operation, memory_type, etc.
+                          if (extraData) {
+                            if (extraData.operation && !selectedEvent.description.includes('Write') && !selectedEvent.description.includes('Read')) {
+                              chips.push(
+                                <Chip
+                                  key="operation"
+                                  label={`Operation: ${extraData.operation as string}`}
+                                  size="small"
+                                  color="info"
+                                  variant="outlined"
+                                />
+                              );
+                            }
+                            if (extraData.memory_type && !selectedEvent.description.includes('(')) {
+                              chips.push(
+                                <Chip
+                                  key="memory_type"
+                                  label={`Type: ${extraData.memory_type as string}`}
+                                  size="small"
+                                  color="secondary"
+                                  variant="outlined"
+                                />
+                              );
+                            }
+                            if (extraData.results_count !== undefined) {
+                              chips.push(
+                                <Chip
+                                  key="results_count"
+                                  label={`Results: ${extraData.results_count as number}`}
+                                  size="small"
+                                  color="default"
+                                  variant="outlined"
+                                />
+                              );
+                            }
+                            if (extraData.query) {
+                              chips.push(
+                                <Chip
+                                  key="query"
+                                  label="Query included"
+                                  size="small"
+                                  color="default"
+                                  variant="outlined"
+                                />
+                              );
+                            }
+                            if (extraData.backend) {
+                              chips.push(
+                                <Chip
+                                  key="backend"
+                                  label={`Backend: ${extraData.backend as string}`}
+                                  size="small"
+                                  color="default"
+                                  variant="outlined"
+                                />
+                              );
+                            }
+                          }
+
+                          // Also check top-level fields on output if no extra_data
+                          if (chips.length === 0) {
+                            if ('operation' in outputObj && !selectedEvent.description.includes('Write') && !selectedEvent.description.includes('Read')) {
+                              chips.push(
+                                <Chip
+                                  key="operation"
+                                  label={`Operation: ${outputObj.operation as string}`}
+                                  size="small"
+                                  color="info"
+                                  variant="outlined"
+                                />
+                              );
+                            }
+                            if ('memory_type' in outputObj && !selectedEvent.description.includes('(')) {
+                              chips.push(
+                                <Chip
+                                  key="memory_type"
+                                  label={`Type: ${outputObj.memory_type as string}`}
+                                  size="small"
+                                  color="secondary"
+                                  variant="outlined"
+                                />
+                              );
+                            }
+                          }
+
+                          return chips.length > 0 ? <>{chips}</> : null;
+                        }
+                        return null;
+                      })()}
+                    </Box>
+                    {/* Show query if available for memory reads */}
+                    {(() => {
+                      const output = selectedEvent.output;
+                      if (typeof output === 'object' && output !== null) {
+                        const outputObj = output as Record<string, unknown>;
+                        const extraData = outputObj.extra_data as Record<string, unknown> | undefined;
+                        const query = extraData?.query || outputObj.query;
+                        if (query) {
+                          return (
+                            <Box sx={{ mb: 1, p: 1, bgcolor: 'action.hover', borderRadius: 1 }}>
+                              <Typography variant="caption" color="text.secondary" display="block">
+                                Query:
+                              </Typography>
+                              <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                                {String(query).substring(0, 200)}{String(query).length > 200 ? '...' : ''}
+                              </Typography>
+                            </Box>
+                          );
+                        }
+                      }
+                      return null;
+                    })()}
                   </Box>
                 ) : null}
 
@@ -1741,6 +2859,78 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                   </Box>
                 ) : null}
 
+                {/* Special formatting for guardrail events */}
+                {selectedEvent.type === 'guardrail' || selectedEvent.type.includes('guardrail') ? (
+                  <Box>
+                    <Typography variant="subtitle2" gutterBottom>
+                      Guardrail Validation Details
+                    </Typography>
+                    {selectedEvent.extraData && (
+                      <Box sx={{ mb: 2 }}>
+                        {(() => {
+                          const extraData = selectedEvent.extraData as Record<string, unknown>;
+                          const success = extraData.success;
+                          const validationValid = extraData.validation_valid;
+                          const validationMessage = extraData.validation_message;
+                          const guardrailDescription = extraData.guardrail_description;
+                          const taskName = extraData.task_name;
+                          const retryCount = extraData.retry_count;
+
+                          return (
+                            <>
+                              {/* Status chip */}
+                              <Chip
+                                label={success === true || validationValid === true ? 'Passed' : success === false || validationValid === false ? 'Failed' : 'Unknown'}
+                                sx={{ mr: 1, mb: 1 }}
+                                size="small"
+                                color={success === true || validationValid === true ? 'success' : success === false || validationValid === false ? 'error' : 'default'}
+                              />
+                              {taskName && (
+                                <Chip
+                                  label={`Task: ${taskName}`}
+                                  sx={{ mr: 1, mb: 1 }}
+                                  size="small"
+                                  color="info"
+                                />
+                              )}
+                              {retryCount !== undefined && Number(retryCount) > 0 && (
+                                <Chip
+                                  label={`Retries: ${retryCount}`}
+                                  sx={{ mr: 1, mb: 1 }}
+                                  size="small"
+                                  color="warning"
+                                />
+                              )}
+                              {/* Validation criteria */}
+                              {guardrailDescription && (
+                                <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
+                                  <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
+                                    Validation Criteria:
+                                  </Typography>
+                                  <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                                    {String(guardrailDescription)}
+                                  </Typography>
+                                </Box>
+                              )}
+                              {/* Validation result message */}
+                              {validationMessage && (
+                                <Box sx={{ mt: 2, p: 2, bgcolor: validationValid === true ? 'success.light' : validationValid === false ? 'error.light' : 'grey.100', borderRadius: 1 }}>
+                                  <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
+                                    Validation Result:
+                                  </Typography>
+                                  <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                                    {String(validationMessage)}
+                                  </Typography>
+                                </Box>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </Box>
+                    )}
+                  </Box>
+                ) : null}
+
                 {/* Paginated output display - prevents browser crash on large content */}
                 <PaginatedOutput
                   content={selectedEvent.output}
@@ -1748,6 +2938,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                   enableMarkdown={true}
                   showCopyButton={true}
                   maxHeight="55vh"
+                  eventType={selectedEvent.type}
                 />
               </Box>
             </DialogContent>

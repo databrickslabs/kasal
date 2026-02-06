@@ -14,7 +14,6 @@ from src.schemas.engine_config import (
     EngineConfigToggleUpdate,
     EngineConfigValueUpdate,
     CrewAIFlowConfigUpdate,
-    CrewAIDebugTracingUpdate
 )
 from src.services.engine_config_service import EngineConfigService
 
@@ -474,64 +473,6 @@ async def set_crewai_flow_enabled(
         raise
     except Exception as e:
         logger.error(f"Error setting CrewAI flow enabled status: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/crewai/debug-tracing")
-async def get_crewai_debug_tracing(
-    service: EngineConfigServiceDep,
-    group_context: GroupContextDep,
-):
-    """
-    Get the CrewAI debug tracing status.
-    Only system administrators can access engine configuration.
-    """
-    # Check permissions - only system admins can access engine configuration
-    if not is_system_admin(group_context):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only system administrators can access engine configuration"
-        )
-
-    try:
-        logger.info("API call: GET /engine-config/crewai/debug-tracing")
-        enabled = await service.get_crewai_debug_tracing()
-        return {"debug_tracing": enabled}
-    except Exception as e:
-        logger.error(f"Error getting CrewAI debug tracing status: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.patch("/crewai/debug-tracing")
-async def set_crewai_debug_tracing(
-    config_data: CrewAIDebugTracingUpdate,
-    service: EngineConfigServiceDep,
-    group_context: GroupContextDep,
-):
-    """
-    Set the CrewAI debug tracing enabled status.
-    Only system administrators can manage engine configuration.
-    """
-    # Check permissions - only system admins can manage engine configuration
-    if not is_system_admin(group_context):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only system administrators can manage engine configuration"
-        )
-
-    try:
-        logger.info(f"API call: PATCH /engine-config/crewai/debug-tracing - debug_tracing={config_data.debug_tracing}")
-        success = await service.set_crewai_debug_tracing(config_data.debug_tracing)
-        if not success:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to update CrewAI debug tracing configuration"
-            )
-        return {"success": True, "debug_tracing": config_data.debug_tracing}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error setting CrewAI debug tracing status: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

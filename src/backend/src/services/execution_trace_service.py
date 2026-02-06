@@ -8,6 +8,7 @@ masked when returning traces to prevent credential leakage.
 
 from typing import List, Optional, Dict, Any
 import logging
+import os
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.repositories.execution_trace_repository import ExecutionTraceRepository
@@ -21,6 +22,7 @@ from src.schemas.execution_trace import (
 )
 from src.utils.user_context import GroupContext
 from src.utils.sensitive_data_utils import mask_sensitive_fields
+from src.core.sse_manager import sse_manager, SSEEvent
 
 from src.core.logger import LoggerManager
 
@@ -163,18 +165,25 @@ class ExecutionTraceService:
         """
         try:
             # First check if the execution exists and belongs to the user's group
-            
+
             # Get group IDs from context for filtering
             group_ids = group_context.group_ids if group_context else None
-            
+            logger.info(f"[get_traces_by_job_id] job_id={job_id}, group_context.group_ids={group_ids}")
+
             # Check if the execution exists and the user has access to it
             execution = await self.execution_history_repository.get_execution_by_job_id(
-                job_id, 
+                job_id,
                 group_ids=group_ids
             )
-            
+
             if not execution:
                 # Either doesn't exist or user doesn't have access
+                # Try to get execution without group filter to diagnose
+                execution_no_filter = await self.execution_history_repository.get_execution_by_job_id(job_id, group_ids=None)
+                if execution_no_filter:
+                    logger.warning(f"[get_traces_by_job_id] Access denied: execution {job_id} has group_id={execution_no_filter.group_id}, but user group_ids={group_ids}")
+                else:
+                    logger.warning(f"[get_traces_by_job_id] Execution {job_id} not found in database")
                 return None
             
             # Get the run_id from the execution
@@ -395,9 +404,42 @@ class ExecutionTraceService:
             ValueError: If job_id doesn't exist in ExecutionHistory
         """
         try:
+            job_id = trace_data.get('job_id')
+            event_type = trace_data.get('event_type', 'unknown')
+            logger.info(f"[ExecutionTraceService] Creating trace for job_id={job_id}, event_type={event_type}")
+
             trace = await self.repository.create(trace_data)
 
-            return ExecutionTraceItem.model_validate(trace)
+            trace_item = ExecutionTraceItem.model_validate(trace)
+            logger.info(f"[ExecutionTraceService] Trace created successfully: id={trace.id}, job_id={job_id}")
+
+            # Broadcast SSE event for real-time trace updates
+            # CRITICAL: Skip SSE broadcast in subprocess mode because:
+            # 1. Subprocess has its own SSE manager instance with no connected clients
+            # 2. Clients connect to the main process's SSE manager
+            # 3. Broadcasting in subprocess is wasteful and produces misleading logs
+            is_subprocess = os.environ.get('CREW_SUBPROCESS_MODE') == 'true'
+
+            if is_subprocess:
+                logger.debug(f"[ExecutionTraceService] Skipping SSE broadcast in subprocess mode for job_id={job_id}")
+            elif job_id:
+                try:
+                    # Check SSE connection statistics before broadcast
+                    stats = sse_manager.get_statistics()
+                    logger.info(f"[ExecutionTraceService] SSE stats before broadcast: connections={stats['total_connections']}, active_jobs={stats['active_jobs']}")
+
+                    event = SSEEvent(
+                        data=trace_item.model_dump(),
+                        event="trace",
+                        id=f"{job_id}_trace_{trace.id}"
+                    )
+                    sent_count = await sse_manager.broadcast_to_job(job_id, event)
+                    logger.info(f"[ExecutionTraceService] Broadcasted SSE trace event for job_id={job_id}, sent to {sent_count} clients")
+                except Exception as sse_error:
+                    # Don't fail trace creation if SSE fails
+                    logger.warning(f"[ExecutionTraceService] Failed to broadcast SSE trace event: {sse_error}")
+
+            return trace_item
 
         except ValueError as e:
             # Log the error but don't re-raise for missing jobs

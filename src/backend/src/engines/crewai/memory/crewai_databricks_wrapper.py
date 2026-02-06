@@ -60,6 +60,9 @@ class CrewAIDatabricksWrapper:
         self.index_name = databricks_storage.index_name
         self.endpoint_name = databricks_storage.endpoint_name
         self.user_token = databricks_storage.user_token
+        self.group_id = databricks_storage.group_id  # For PAT auth in background threads
+        # job_id is used as session_id for short-term memory session scoping
+        self.job_id = getattr(databricks_storage, 'job_id', None)
         
         # Initialize relationship retriever if enabled for entity memory
         self.relationship_retriever = None
@@ -122,22 +125,35 @@ class CrewAIDatabricksWrapper:
             import asyncio
             from src.services.memory_backend_service import MemoryBackendService
             from src.core.unit_of_work import UnitOfWork
-            
+
+            # CRITICAL: Add crew_id filter for ALL memory types (not just entity)
+            # This ensures proper tenant isolation - memories from one crew_id
+            # are only returned for searches with the same crew_id
+            if self.storage and self.storage.crew_id:
+                if filters is None:
+                    filters = {}
+                if 'crew_id' not in filters:
+                    filters['crew_id'] = self.storage.crew_id
+                    logger.info(f"[_service_search] Added crew_id filter for {self.memory_type}: {self.storage.crew_id}")
+
+            # CRITICAL: Add session_id filter for SHORT-TERM memory only
+            # Short-term memory should only return results from the CURRENT run/session
+            # This prevents memories from previous runs leaking into current execution
+            if self.memory_type == "short_term" and self.job_id:
+                if filters is None:
+                    filters = {}
+                if 'session_id' not in filters:
+                    filters['session_id'] = self.job_id
+                    logger.info(f"[_service_search] Added session_id filter for short-term memory: {self.job_id}")
+
+            logger.info(f"[_service_search] {self.memory_type} memory search - index: {self.index_name}")
+            logger.info(f"[_service_search] CRITICAL DEBUG - crew_id from storage: '{self.storage.crew_id if self.storage else 'NO_STORAGE'}'")
+            logger.info(f"[_service_search] CRITICAL DEBUG - filters being used: {filters}")
+
             # Log search details for entity memory
             if self.memory_type == "entity":
                 entity_logger.debug(f"[_service_search] Performing embedding search on index: {self.index_name}")
                 entity_logger.debug(f"[_service_search] Endpoint: {self.endpoint_name}")
-                entity_logger.debug(f"[_service_search] Filters provided: {filters}")
-                entity_logger.debug(f"[_service_search] Storage crew_id: {self.storage.crew_id if self.storage else 'No storage'}")
-                
-                # Add crew_id filter if not already present and storage has crew_id
-                if self.storage and self.storage.crew_id:
-                    if filters is None:
-                        filters = {}
-                    if 'crew_id' not in filters:
-                        filters['crew_id'] = self.storage.crew_id
-                        entity_logger.debug(f"[_service_search] Added crew_id filter: {self.storage.crew_id}")
-
                 entity_logger.debug(f"[_service_search] Final filters: {filters}")
             
             async def _async_search():
@@ -152,7 +168,8 @@ class CrewAIDatabricksWrapper:
                         memory_type=self.memory_type,
                         k=k,
                         filters=filters,
-                        user_token=self.user_token
+                        user_token=self.user_token,
+                        group_id=self.group_id  # For PAT auth in background threads
                     )
             
             # Handle async service call from sync context
@@ -387,43 +404,10 @@ class CrewAIDatabricksWrapper:
             # Return original results as fallback
             return self._format_results_for_crewai(initial_results)
 
-    def _emit_retrieval_trace(self, query: Any, results: List[Dict[str, Any]], top_k: int) -> None:
-        """Emit an execution_trace event for memory retrieval if trace context is available."""
-        try:
-            if not getattr(self, 'trace_context', None) or not self.trace_context.get('job_id'):
-                return
-            from src.services.trace_queue import get_trace_queue
-            q = get_trace_queue()
-            # Summarize top results (avoid large payloads)
-            def summarize(item):
-                # Prefer content/context fields
-                text = item.get('content') or item.get('context') or str(item)[:200]
-                return {
-                    'id': item.get('id') or item.get('document_id') or item.get('entity_name') or 'unknown',
-                    'snippet': (text[:200] + '...') if isinstance(text, str) and len(text) > 200 else text
-                }
-            summary = [summarize(r) for r in (results or [])][:min(top_k, 5)]
-            q.put_nowait({
-                'job_id': self.trace_context.get('job_id'),
-                'event_type': 'memory_retrieval',
-                'event_source': f"Memory[{self.memory_type}:databricks]",
-                'event_context': f"index={self.index_name}",
-                'output': {
-                    'backend': 'databricks',
-                    'memory_type': self.memory_type,
-                    'query': query if isinstance(query, str) else '[embedding]',
-                    'top_k': top_k,
-                    'results': summary
-                },
-                'trace_metadata': {
-                    'crew_id': getattr(self.storage, 'crew_id', None),
-                    'endpoint': self.endpoint_name,
-                    'index': self.index_name
-                },
-                'group_context': self.trace_context.get('group_context')
-            })
-        except Exception as e:
-            logger.debug(f"Could not enqueue memory_retrieval trace: {e}")
+    # NOTE: _emit_retrieval_trace method removed - memory events are now captured
+    # by the CrewAI event bus in logging_callbacks.py with proper agent attribution.
+    # Direct trace emission was causing duplicate events appearing under "Memory[...]"
+    # as separate agents instead of being grouped with the correct task/agent.
     
     def _format_results_for_crewai(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -444,15 +428,34 @@ class CrewAIDatabricksWrapper:
             formatted_result = result.copy()
 
             # Determine the text value from available fields
+            # Priority order handles different memory type schemas:
+            # - short_term/long_term: 'data', 'content', 'context'
+            # - entity: 'description', 'entity_name'
+            # - document: 'content', 'title'
             text_value = None
-            if 'data' in formatted_result:
+            if 'data' in formatted_result and formatted_result['data']:
                 text_value = formatted_result['data']
-            elif 'content' in formatted_result:
+            elif 'content' in formatted_result and formatted_result['content']:
                 text_value = formatted_result['content']
-            elif 'context' in formatted_result:
+            elif 'context' in formatted_result and formatted_result['context']:
                 text_value = formatted_result['context']
+            elif 'description' in formatted_result and formatted_result['description']:
+                # Entity memory uses 'description' as main content
+                entity_name = formatted_result.get('entity_name', '')
+                entity_type = formatted_result.get('entity_type', '')
+                description = formatted_result['description']
+                if entity_name:
+                    text_value = f"{entity_name} ({entity_type}): {description}" if entity_type else f"{entity_name}: {description}"
+                else:
+                    text_value = description
+            elif 'entity_name' in formatted_result and formatted_result['entity_name']:
+                # Fallback for entity with name but no description
+                text_value = f"Entity: {formatted_result['entity_name']}"
+            elif 'title' in formatted_result and formatted_result['title']:
+                # Document memory fallback
+                text_value = formatted_result['title']
             else:
-                # Fallback - use a concatenation of available text fields
+                # Final fallback - use a concatenation of available text fields
                 text_parts = []
                 metadata = formatted_result.get('metadata', {})
                 if isinstance(metadata, dict):
@@ -981,7 +984,6 @@ class CrewAIDatabricksWrapper:
             # Check if memory is disabled for the current agent
             if not self._is_memory_enabled_for_current_agent():
                 logger.info(f"[search] Memory is disabled for current agent, skipping {self.memory_type} similarity search")
-                self._emit_retrieval_trace(query, [], top_k)
                 return []
             
             # Debug logging
@@ -1069,27 +1071,22 @@ class CrewAIDatabricksWrapper:
                                 )
                                 
                                 entity_logger.info(f"[search] Relationship retrieval returned {len(enhanced_results)} results")
-                                self._emit_retrieval_trace(query, enhanced_results, top_k)
                                 return enhanced_results
 
                             except Exception as e:
                                 entity_logger.error(f"[search] Relationship retrieval failed: {e}")
                                 entity_logger.info("[search] Falling back to standard semantic search")
                                 formatted = self._format_results_for_crewai(initial_results)
-                                self._emit_retrieval_trace(query, formatted, top_k)
                                 return formatted
                         else:
                             # Standard semantic search
                             formatted = self._format_results_for_crewai(initial_results)
-                            self._emit_retrieval_trace(query, formatted, top_k)
                             return formatted
                     else:
                         logger.warning("Failed to generate embedding for query")
-                        self._emit_retrieval_trace(query, [], top_k)
                         return []
                 else:
                     logger.warning("No embedder available for text query")
-                    self._emit_retrieval_trace(query, [], top_k)
                     return []
                     
             elif isinstance(query, dict) and 'embedding' in query:
@@ -1110,24 +1107,20 @@ class CrewAIDatabricksWrapper:
                         return self._format_results_for_crewai(results)
                     else:
                         logger.warning(f"Query vector length {query_len} doesn't match embedding dimension {self.storage.embedding_dimension}")
-                        self._emit_retrieval_trace(query, [], top_k)
                         return []
                 except Exception as e:
                     logger.error(f"Error processing vector query: {e}")
-                    self._emit_retrieval_trace(query, [], top_k)
                     return []
-                
+
             else:
                 logger.warning(f"Unsupported query type for search: {type(query)}")
-                self._emit_retrieval_trace(query, [], top_k)
                 return []
-                
+
         except Exception as e:
             logger.error(f"Error in CrewAI wrapper search: {e}")
             # Log the full traceback for debugging
             import traceback
             logger.error(f"Full traceback: {traceback.format_exc()}")
-            self._emit_retrieval_trace(query, [], top_k)
             return []
             
     def reset(self) -> None:

@@ -53,7 +53,3 @@ class EngineConfigListResponse(BaseModel):
 class CrewAIFlowConfigUpdate(BaseModel):
     """Schema for updating CrewAI flow configuration."""
     flow_enabled: bool = Field(..., description="Whether flow feature is enabled")
-
-class CrewAIDebugTracingUpdate(BaseModel):
-    """Schema for updating CrewAI debug tracing configuration."""
-    debug_tracing: bool = Field(..., description="Whether detailed debug tracing is enabled")

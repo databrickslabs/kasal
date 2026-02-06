@@ -39,9 +39,10 @@ export const useCrewExecution = (): UseCrewExecutionResult => {
         if (typeof setJobId === 'function') {
           setJobId(response.job_id);
         }
-        
-        runStatusStore.startPolling();
-        
+
+        // SSE will handle real-time updates automatically
+        // No polling needed
+
         return response;
       }
       return undefined;

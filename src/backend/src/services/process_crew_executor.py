@@ -954,14 +954,9 @@ def run_crew_in_process(
                     from crewai.events import crewai_event_bus
 
                     # Create and register the event listeners with group_context
-                    # Read debug tracing flag from environment variable (passed from parent process)
-                    # This avoids event loop issues when trying to access the database in subprocess
-                    debug_tracing_enabled = os.environ.get('CREWAI_DEBUG_TRACING', 'true').lower() == 'true'
-                    async_logger.info(f"Debug tracing flag from environment: {debug_tracing_enabled}")
-
-                    agent_trace_listener = AgentTraceEventListener(job_id=execution_id, group_context=group_context, debug_tracing=debug_tracing_enabled)
+                    agent_trace_listener = AgentTraceEventListener(job_id=execution_id, group_context=group_context)
                     agent_trace_listener.setup_listeners(crewai_event_bus)
-                    async_logger.info(f"Created and registered AgentTraceEventListener for {execution_id} (debug_tracing={debug_tracing_enabled})")
+                    async_logger.info(f"Created and registered AgentTraceEventListener for {execution_id}")
 
                     # Log that subprocess mode is enabled for direct DB writes
                     async_logger.info(f"CREW_SUBPROCESS_MODE={os.environ.get('CREW_SUBPROCESS_MODE')} - Direct DB writes enabled")
@@ -1664,7 +1659,6 @@ class ProcessCrewExecutor:
         group_context: Any,  # MANDATORY - for tenant isolation
         inputs: Optional[Dict[str, Any]] = None,
         timeout: Optional[float] = None,
-        debug_tracing_enabled: Optional[bool] = None  # Optional debug tracing flag
     ) -> Dict[str, Any]:
         """
         Run a crew in an isolated process using direct Process control.
@@ -1674,7 +1668,6 @@ class ProcessCrewExecutor:
             crew_config: Configuration to build the crew
             inputs: Optional inputs for the crew
             timeout: Optional timeout in seconds
-            debug_tracing_enabled: Optional debug tracing flag (defaults to True)
 
         Returns:
             Dictionary with execution results
@@ -1686,16 +1679,6 @@ class ProcessCrewExecutor:
         self._metrics['active_executions'] += 1
 
         start_time = datetime.now()
-
-        # Use provided debug tracing flag or default to False
-        if debug_tracing_enabled is None:
-            debug_tracing_enabled = False
-            logger.info(f"Debug tracing flag not provided, using default: {debug_tracing_enabled}")
-        else:
-            logger.info(f"Using provided debug tracing flag: {debug_tracing_enabled}")
-
-        # Set the debug tracing flag as environment variable for subprocess
-        os.environ['CREWAI_DEBUG_TRACING'] = 'true' if debug_tracing_enabled else 'false'
 
         # Use multiprocessing.Queue to get results from the subprocess
         result_queue = self._ctx.Queue()
@@ -1740,10 +1723,20 @@ class ProcessCrewExecutor:
                     logger.info(f"[ProcessCrewExecutor] Added user_token to crew_config for OBO authentication")
                 else:
                     logger.info("[ProcessCrewExecutor] No user_token - databricks_auth.py will use PAT or SPN fallback")
+
+                # Add execution_id for memory session scoping
+                # This is CRITICAL for short-term memory to only return results from the current run
+                crew_config['execution_id'] = execution_id
+                logger.info(f"[ProcessCrewExecutor] Added execution_id to crew_config: {execution_id}")
             else:
                 logger.warning("[ProcessCrewExecutor] Cannot add user_token/group_id to crew_config - not a dict")
         else:
             logger.error("[ProcessCrewExecutor] SECURITY: No group_context provided - multi-tenant isolation will fail")
+
+        # Also add execution_id outside of group_context block to ensure it's always available
+        if isinstance(crew_config, dict) and 'execution_id' not in crew_config:
+            crew_config['execution_id'] = execution_id
+            logger.info(f"[ProcessCrewExecutor] Added execution_id to crew_config (fallback): {execution_id}")
 
         # CRITICAL: Set KASAL_EXECUTION_ID in parent BEFORE spawning
         # This ensures the child process inherits it and psutil can see it

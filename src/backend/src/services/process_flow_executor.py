@@ -313,17 +313,12 @@ def run_flow_in_process(
                 async_logger.info(f"[FLOW_SUBPROCESS] TraceManager writer started for {execution_id}")
 
                 # Create and register event listeners
-                # Read debug tracing flag from environment variable
-                debug_tracing_enabled = os.environ.get('CREWAI_DEBUG_TRACING', 'true').lower() == 'true'
-                async_logger.info(f"[FLOW_SUBPROCESS] Debug tracing flag from environment: {debug_tracing_enabled}")
-
                 trace_listener = AgentTraceEventListener(
                     job_id=execution_id,
                     group_context=group_context,
-                    debug_tracing=debug_tracing_enabled
                 )
                 trace_listener.setup_listeners(crewai_event_bus)
-                async_logger.info(f"[FLOW_SUBPROCESS] AgentTraceEventListener registered for {execution_id} (debug_tracing={debug_tracing_enabled})")
+                async_logger.info(f"[FLOW_SUBPROCESS] AgentTraceEventListener registered for {execution_id}")
 
                 # Log that subprocess mode is enabled for direct DB writes
                 async_logger.info(f"[FLOW_SUBPROCESS] CREW_SUBPROCESS_MODE={os.environ.get('CREW_SUBPROCESS_MODE')} - Direct DB writes enabled")
@@ -765,6 +760,16 @@ class ProcessFlowExecutor:
                 if hasattr(group_context, 'access_token') and group_context.access_token:
                     flow_config['user_token'] = group_context.access_token
                     logger.info("[ProcessFlowExecutor] Added user_token to flow_config for OBO authentication")
+
+                # Add execution_id for memory session scoping
+                # This is CRITICAL for short-term memory to only return results from the current run
+                flow_config['execution_id'] = execution_id
+                logger.info(f"[ProcessFlowExecutor] Added execution_id to flow_config: {execution_id}")
+
+        # Also add execution_id outside of group_context block to ensure it's always available
+        if isinstance(flow_config, dict) and 'execution_id' not in flow_config:
+            flow_config['execution_id'] = execution_id
+            logger.info(f"[ProcessFlowExecutor] Added execution_id to flow_config (fallback): {execution_id}")
 
         # CRITICAL: Set KASAL_EXECUTION_ID in parent BEFORE spawning
         # This ensures the child process inherits it and psutil can see it

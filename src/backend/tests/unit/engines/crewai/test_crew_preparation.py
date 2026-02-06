@@ -512,19 +512,20 @@ class TestCrewPreparation:
             assert result is True
     
     @pytest.mark.asyncio
-    async def test_create_crew_with_planning_and_reasoning(self, crew_preparation):
-        """Test crew creation with planning and reasoning enabled."""
+    async def test_create_crew_with_planning_enabled(self, crew_preparation):
+        """Test crew creation with planning enabled.
+
+        Note: In CrewAI, 'reasoning' is an Agent-level parameter, NOT a Crew parameter.
+        The Crew only supports 'planning' and 'planning_llm'.
+        """
         crew_preparation.agents = {"agent1": MagicMock()}
         crew_preparation.tasks = [MagicMock()]
         crew_preparation.config["crew"]["planning"] = True
-        crew_preparation.config["crew"]["reasoning"] = True
         crew_preparation.config["crew"]["planning_llm"] = "gpt-3.5-turbo"
-        crew_preparation.config["crew"]["reasoning_llm"] = "gpt-4"
-        crew_preparation.config["group_id"] = "test_group_123"  # Required for planning/reasoning LLMs
+        crew_preparation.config["group_id"] = "test_group_123"
 
         mock_crew = MagicMock()
         mock_planning_llm = MagicMock()
-        mock_reasoning_llm = MagicMock()
         mock_manager_llm = MagicMock()
 
         with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
@@ -532,13 +533,9 @@ class TestCrewPreparation:
              patch('src.core.llm_manager.LLMManager.configure_crewai_llm') as mock_configure_llm, \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None):
 
-            # Configure LLMManager.configure_crewai_llm to return different LLMs based on model
-            # When group_id is present, configure_crewai_llm is called instead of get_llm
             def configure_llm_side_effect(model, group_id):
                 if model == "gpt-3.5-turbo":
                     return mock_planning_llm
-                elif model == "gpt-4":
-                    return mock_reasoning_llm
                 return mock_manager_llm
 
             mock_configure_llm.side_effect = configure_llm_side_effect
@@ -547,21 +544,13 @@ class TestCrewPreparation:
 
             assert result is True
 
-            # Verify LLMManager.configure_crewai_llm was called for planning, reasoning, and manager LLMs
-            # Since group_id is present, configure_crewai_llm is used instead of get_llm
-            assert mock_configure_llm.call_count == 3  # planning + reasoning + manager
-            mock_configure_llm.assert_any_call("gpt-3.5-turbo", "test_group_123")  # planning
-            mock_configure_llm.assert_any_call("gpt-4", "test_group_123")  # reasoning and manager
-
-            # Verify get_llm was NOT called (since group_id is present)
-            assert mock_get_llm.call_count == 0
-
-            # Verify crew was created with planning and reasoning LLM objects
+            # Verify crew was created with planning LLM
             call_kwargs = mock_crew_class.call_args[1]
             assert call_kwargs['planning'] is True
-            assert call_kwargs['reasoning'] is True
             assert call_kwargs['planning_llm'] is mock_planning_llm
-            assert call_kwargs['reasoning_llm'] is mock_reasoning_llm
+            # 'reasoning' should NOT be in crew_kwargs (it's an Agent-level param)
+            assert 'reasoning' not in call_kwargs
+            assert 'reasoning_llm' not in call_kwargs
     
     @pytest.mark.asyncio
     async def test_create_crew_with_max_rpm(self, crew_preparation):
@@ -857,82 +846,58 @@ class TestCrewPreparation:
             assert 'planning_llm' not in call_kwargs
     
     @pytest.mark.asyncio
-    async def test_create_crew_with_reasoning_llm_error(self, crew_preparation):
-        """Test crew creation when reasoning LLM creation fails."""
+    async def test_create_crew_reasoning_is_agent_level_not_crew(self, crew_preparation):
+        """Test that reasoning config is NOT passed to Crew (it's an Agent-level parameter).
+
+        In CrewAI, 'reasoning' is an Agent-level parameter, NOT a Crew parameter.
+        When reasoning is set in crew config, it should be propagated to agents,
+        not passed to the Crew constructor.
+        """
         crew_preparation.agents = {"agent1": MagicMock()}
         crew_preparation.tasks = [MagicMock()]
         crew_preparation.config["crew"]["reasoning"] = True
-        crew_preparation.config["crew"]["reasoning_llm"] = "invalid-model"
-        
-        mock_crew = MagicMock()
-        
-        with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
-             patch('src.core.llm_manager.LLMManager.get_llm', side_effect=Exception("Model not found")) as mock_get_llm, \
-             patch('src.engines.crewai.crew_preparation.logger') as mock_logger, \
-             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
-             patch('src.repositories.databricks_config_repository.DatabricksConfigRepository') as mock_databricks_repo:
-            
-            # Configure mock to return None for get_databricks_config
-            mock_databricks_instance = MagicMock()
-            mock_databricks_instance.get_databricks_config = AsyncMock(return_value=None)
-            mock_databricks_repo.return_value = mock_databricks_instance
-            
-            result = await crew_preparation._create_crew()
-            
-            assert result is True
-            
-            # Verify LLMManager.get_llm was called for reasoning LLM and manager LLM
-            # Note: Manager LLM is also created, so we expect 2 calls (assuming config has a model)
-            assert mock_get_llm.call_count >= 1  # At least one call for reasoning_llm
-            mock_get_llm.assert_any_call("invalid-model")
-            
-            # Verify error was logged
-            # Reasoning LLM error handling moved to CrewConfigBuilder.add_llm_parameters()
-            # Just verify crew creation succeeded despite the error
-            
-            # Verify crew was created without reasoning_llm in kwargs
-            call_kwargs = mock_crew_class.call_args[1]
-            assert call_kwargs['reasoning'] is True
-            assert 'reasoning_llm' not in call_kwargs
-    
-    @pytest.mark.asyncio
-    async def test_create_crew_with_both_planning_and_reasoning_llm_errors(self, crew_preparation):
-        """Test crew creation when both planning and reasoning LLM creation fail."""
-        crew_preparation.agents = {"agent1": MagicMock()}
-        crew_preparation.tasks = [MagicMock()]
-        crew_preparation.config["crew"]["planning"] = True
-        crew_preparation.config["crew"]["reasoning"] = True
-        crew_preparation.config["crew"]["planning_llm"] = "invalid-planning-model"
-        crew_preparation.config["crew"]["reasoning_llm"] = "invalid-reasoning-model"
+        crew_preparation.config["crew"]["memory"] = False  # Disable memory to avoid DB calls
 
         mock_crew = MagicMock()
 
         with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
-             patch('src.core.llm_manager.LLMManager.get_llm', side_effect=Exception("Model not found")) as mock_get_llm, \
-             patch('src.engines.crewai.crew_preparation.logger') as mock_logger, \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None):
 
             result = await crew_preparation._create_crew()
 
             assert result is True
 
-            # Verify LLMManager.get_llm was called for planning, reasoning, and manager LLMs
-            # Note: Manager LLM is also created, so we expect 3 calls total
-            assert mock_get_llm.call_count >= 2  # At least 2 calls for planning and reasoning LLMs
-            mock_get_llm.assert_any_call("invalid-planning-model")
-            mock_get_llm.assert_any_call("invalid-reasoning-model")
-
-            # Verify both errors were logged
-            # Planning/Reasoning LLM error handling moved to CrewConfigBuilder service
-            # Just verify crew creation succeeded
-            # Error handling moved to service layer
-
-            # Verify crew was created without planning_llm or reasoning_llm in kwargs
+            # Verify crew was created WITHOUT reasoning in kwargs
+            # (reasoning is an Agent-level param, not Crew-level)
             call_kwargs = mock_crew_class.call_args[1]
-            assert call_kwargs['planning'] is True
-            assert call_kwargs['reasoning'] is True
-            assert 'planning_llm' not in call_kwargs
+            assert 'reasoning' not in call_kwargs
             assert 'reasoning_llm' not in call_kwargs
+    
+    @pytest.mark.asyncio
+    async def test_reasoning_propagated_to_agents(self, crew_preparation):
+        """Test that reasoning config from crew level is propagated to agents.
+
+        When reasoning=True is set at the crew config level, it should be
+        propagated to each agent's config during agent creation.
+        """
+        crew_preparation.config["crew"]["reasoning"] = True
+        crew_preparation.config["crew"]["max_reasoning_attempts"] = 3
+
+        mock_agent1 = MagicMock()
+        mock_agent2 = MagicMock()
+
+        with patch('src.engines.crewai.crew_preparation.create_agent', side_effect=[mock_agent1, mock_agent2]) as mock_create:
+            result = await crew_preparation._create_agents()
+
+            assert result is True
+            assert len(crew_preparation.agents) == 2
+
+            # Verify create_agent was called with reasoning config propagated
+            for call in mock_create.call_args_list:
+                agent_config = call.kwargs['agent_config']
+                # Reasoning should be set on agent config
+                assert agent_config.get('reasoning') is True
+                assert agent_config.get('max_reasoning_attempts') == 3
 
     @pytest.mark.asyncio
     async def test_create_crew_hierarchical_minimal_kwargs_preserves_manager_llm(self, crew_preparation):

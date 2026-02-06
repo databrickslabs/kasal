@@ -357,32 +357,8 @@ class TestRunCrewIsolated:
         assert result["status"] == "COMPLETED"
         assert result["result"] == "Test result"
 
-    @pytest.mark.asyncio
-    async def test_run_crew_isolated_sets_debug_tracing_env(self, executor):
-        """Test that debug tracing environment variable is set."""
-        mock_process = MagicMock()
-        mock_process.pid = 12345
-        mock_process.exitcode = 0
-        mock_process.start = MagicMock()
-        mock_process.join = MagicMock()
-
-        mock_queue = MagicMock()
-        mock_queue.empty.return_value = True
-
-        executor._ctx.Process.return_value = mock_process
-        executor._ctx.Queue.return_value = mock_queue
-
-        crew_config = {"agents": [], "tasks": []}
-
-        with patch.object(executor, '_process_log_queue', new_callable=AsyncMock):
-            await executor.run_crew_isolated(
-                execution_id="test-exec-7",
-                crew_config=crew_config,
-                group_context=None,
-                debug_tracing_enabled=True
-            )
-
-        assert os.environ.get('CREWAI_DEBUG_TRACING') == 'true'
+    # NOTE: test_run_crew_isolated_sets_debug_tracing_env was removed because
+    # debug_tracing_enabled parameter was removed from run_crew_isolated()
 
     @pytest.mark.asyncio
     async def test_run_crew_isolated_tracks_process(self, executor):
