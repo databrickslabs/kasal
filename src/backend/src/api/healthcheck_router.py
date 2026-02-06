@@ -37,4 +37,4 @@ async def cache_stats():
     return {
         "status": "ok",
         "caches": get_all_cache_stats(),
-    } 
+    }

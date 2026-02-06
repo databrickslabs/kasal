@@ -1,21 +1,30 @@
 from datetime import datetime
-from typing import Optional, Dict, Any, List
-from typing import Annotated
-from fastapi import APIRouter, Depends, HTTPException, status, Cookie, Response, Request
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from typing import Annotated, Any, Dict, List, Optional
+
 import jwt
+from fastapi import APIRouter, Cookie, Depends, Request, Response, status
+
+from src.core.exceptions import UnauthorizedError
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jwt.exceptions import PyJWTError as JWTError
 
 from src.config import settings
 from src.core.dependencies import SessionDep
+from src.dependencies.auth import get_current_active_user, get_current_user
+from src.models.user import User
 from src.schemas.user import (
-    UserCreate, UserInDB, Token, UserLogin, PasswordReset, 
-    PasswordResetRequest, PasswordChange, OAuthAuthorize, OAuthCallback
+    OAuthAuthorize,
+    OAuthCallback,
+    PasswordChange,
+    PasswordReset,
+    PasswordResetRequest,
+    Token,
+    UserCreate,
+    UserInDB,
+    UserLogin,
 )
 from src.services.auth_service import AuthService, decode_token
 from src.services.user_service import UserService
-from src.models.user import User
-from src.dependencies.auth import get_current_user, get_current_active_user
 
 router = APIRouter(
     prefix="/auth",
@@ -24,6 +33,7 @@ router = APIRouter(
 )
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
+
 
 # Dependency to get AuthService
 def get_auth_service(session: SessionDep) -> AuthService:
@@ -41,24 +51,18 @@ def get_auth_service(session: SessionDep) -> AuthService:
     """
     return AuthService(session)
 
+
 # Type alias for cleaner function signatures
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 
+
 @router.post("/register", response_model=UserInDB, status_code=status.HTTP_201_CREATED)
-async def register_user(
-    user_data: UserCreate,
-    auth_service: AuthServiceDep
-):
+async def register_user(user_data: UserCreate, auth_service: AuthServiceDep):
     """Register a new user"""
-    
-    try:
-        user = await auth_service.register_user(user_data)
-        return user
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+
+    user = await auth_service.register_user(user_data)
+    return user
+
 
 @router.post("/login", response_model=Token)
 async def login_for_access_token(
@@ -67,17 +71,13 @@ async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(),
 ):
     """OAuth2 compatible token login, get an access token for future requests"""
-    
+
     user = await auth_service.authenticate_user(form_data.username, form_data.password)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
+        raise UnauthorizedError("Incorrect username or password")
+
     tokens = await auth_service.create_user_tokens(user)
-    
+
     # Set refresh token as httpOnly cookie if response is provided
     if response:
         cookie_max_age = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60  # in seconds
@@ -89,8 +89,9 @@ async def login_for_access_token(
             secure=settings.COOKIE_SECURE,  # True in production
             samesite="lax",
         )
-    
+
     return tokens
+
 
 @router.post("/login/alternative", response_model=Token)
 async def login_with_json(
@@ -99,17 +100,15 @@ async def login_with_json(
     response: Response = None,
 ):
     """JSON-based login endpoint, alternative to OAuth2 form-based login"""
-    
-    user = await auth_service.authenticate_user(login_data.username_or_email, login_data.password)
+
+    user = await auth_service.authenticate_user(
+        login_data.username_or_email, login_data.password
+    )
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
+        raise UnauthorizedError("Incorrect username or password")
+
     tokens = await auth_service.create_user_tokens(user)
-    
+
     # Set refresh token as httpOnly cookie if response is provided
     if response:
         cookie_max_age = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60  # in seconds
@@ -121,8 +120,9 @@ async def login_with_json(
             secure=settings.COOKIE_SECURE,  # True in production
             samesite="lax",
         )
-    
+
     return tokens
+
 
 @router.post("/refresh-token", response_model=Token)
 async def refresh_token(
@@ -136,27 +136,19 @@ async def refresh_token(
     token = refresh_token
     if not token and token_in_body:
         token = token_in_body.get("refresh_token")
-    
+
     if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Refresh token required",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
+        raise UnauthorizedError("Refresh token required")
+
     new_tokens = await auth_service.refresh_access_token(token)
-    
+
     if not new_tokens:
         # Clear invalid cookie if it exists
         if refresh_token and response:
             response.delete_cookie(key="refresh_token")
-            
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired refresh token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
+
+        raise UnauthorizedError("Invalid or expired refresh token")
+
     # Update cookie if needed
     if response:
         cookie_max_age = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60  # in seconds
@@ -168,8 +160,9 @@ async def refresh_token(
             secure=settings.COOKIE_SECURE,  # True in production
             samesite="lax",
         )
-    
+
     return new_tokens
+
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(
@@ -180,22 +173,23 @@ async def logout(
     response: Response = None,
 ):
     """Logout a user by revoking their refresh token"""
-    
+
     # Get refresh token from cookie or request body
     token = refresh_token
     if not token and token_in_body:
         token = token_in_body.get("refresh_token")
-    
+
     # If token exists, revoke it
     if token:
         await auth_service.revoke_refresh_token(token)
-    
+
     # In any case, clear the cookie
     if response:
         response.delete_cookie(key="refresh_token")
-    
+
     # Return no content
     return None
+
 
 @router.post("/password-reset-request", status_code=status.HTTP_202_ACCEPTED)
 async def request_password_reset(
@@ -205,7 +199,10 @@ async def request_password_reset(
     """Request a password reset token"""
     # This would normally send an email with a reset link
     # For now, just return accepted without doing anything
-    return {"message": "If the email is registered, a password reset link has been sent"}
+    return {
+        "message": "If the email is registered, a password reset link has been sent"
+    }
+
 
 @router.post("/password-reset", status_code=status.HTTP_200_OK)
 async def reset_password(
@@ -217,6 +214,7 @@ async def reset_password(
     # For now, just return a placeholder response
     return {"message": "Password has been reset"}
 
+
 @router.post("/password-change", status_code=status.HTTP_200_OK)
 async def change_password(
     password_data: PasswordChange,
@@ -226,22 +224,22 @@ async def change_password(
 ):
     """Change a user's password"""
     user_service = UserService(session)
-    
+
     # Verify current password
-    user = await auth_service.authenticate_user(current_user.username, password_data.current_password)
+    user = await auth_service.authenticate_user(
+        current_user.username, password_data.current_password
+    )
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Current password is incorrect",
-        )
-    
+        raise UnauthorizedError("Current password is incorrect")
+
     # Update password
     await user_service.update_password(current_user.id, password_data.new_password)
-    
+
     # Revoke all refresh tokens for security
     await auth_service.revoke_all_user_tokens(current_user.id)
-    
+
     return {"message": "Password has been changed"}
+
 
 @router.get("/oauth/{provider}/authorize")
 async def oauth_authorize(
@@ -254,6 +252,7 @@ async def oauth_authorize(
     # For simplicity, returning a placeholder response
     auth_url = f"https://{provider}.example.com/authorize?redirect_uri={redirect_uri or 'default'}"
     return {"auth_url": auth_url}
+
 
 @router.post("/oauth/{provider}/callback", response_model=Token)
 async def oauth_callback(
@@ -272,11 +271,11 @@ async def oauth_callback(
     # 2. Get user info from provider
     # 3. Create or log in user
     # 4. Generate our own tokens
-    
+
     # Placeholder for demo
     mock_access_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJvYXV0aC11c2VyLWlkIiwicm9sZSI6InJlZ3VsYXIifQ.signature"
     mock_refresh_token = "mock_refresh_token_for_oauth"
-    
+
     if response:
         cookie_max_age = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60  # in seconds
         response.set_cookie(
@@ -287,9 +286,9 @@ async def oauth_callback(
             secure=settings.COOKIE_SECURE,
             samesite="lax",
         )
-    
+
     return {
         "access_token": mock_access_token,
         "refresh_token": mock_refresh_token,
         "token_type": "bearer",
-    } 
+    }

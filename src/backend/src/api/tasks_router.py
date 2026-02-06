@@ -1,9 +1,10 @@
-from typing import Annotated, List, Dict, Any
-
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 import logging
+from typing import Annotated, Any, Dict, List
 
-from src.core.dependencies import SessionDep, GroupContextDep
+from fastapi import APIRouter, Depends, Path, Query, status
+
+from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.exceptions import ForbiddenError, NotFoundError
 from src.core.permissions import check_role_in_context
 from src.models.task import Task
 from src.schemas.task import Task as TaskSchema
@@ -18,6 +19,7 @@ router = APIRouter(
 
 # Set up logging
 logger = logging.getLogger(__name__)
+
 
 async def get_task_service(session: SessionDep) -> TaskService:
     """
@@ -34,9 +36,9 @@ async def get_task_service(session: SessionDep) -> TaskService:
     """
     return TaskService(session=session)
 
+
 # Type alias for cleaner function signatures
 TaskServiceDep = Annotated[TaskService, Depends(get_task_service)]
-
 
 
 @router.post("", response_model=TaskSchema, status_code=status.HTTP_201_CREATED)
@@ -59,16 +61,9 @@ async def create_task(
     """
     # Check permissions - only editors and admins can create tasks
     if not check_role_in_context(group_context, ["admin", "editor"]):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only editors and admins can create tasks"
-        )
+        raise ForbiddenError("Only editors and admins can create tasks")
 
-    try:
-        return await service.create_with_group(task_in, group_context)
-    except Exception as e:
-        logger.error(f"Error creating task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return await service.create_with_group(task_in, group_context)
 
 
 @router.get("", response_model=List[TaskSchema])
@@ -78,19 +73,15 @@ async def list_tasks(
 ):
     """
     Retrieve all tasks for the current group.
-    
+
     Args:
         service: Task service injected by dependency
         group_context: Group context from headers
-        
+
     Returns:
         List of tasks for the current group
     """
-    try:
-        return await service.find_by_group(group_context)
-    except Exception as e:
-        logger.error(f"Error listing tasks: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return await service.find_by_group(group_context)
 
 
 @router.get("/{task_id}", response_model=TaskSchema)
@@ -101,38 +92,29 @@ async def get_task(
 ):
     """
     Get a specific task by ID with group isolation.
-    
+
     Args:
         task_id: ID of the task to get
         service: Task service injected by dependency
         group_context: Group context from headers
-        
+
     Returns:
         Task if found and belongs to user's group
-        
+
     Raises:
         HTTPException: If task not found or not authorized
     """
-    try:
-        task = await service.get_with_group_check(task_id, group_context)
-        if not task:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Task not found",
-            )
-        
-        # Debug logging for tool_configs
-        if hasattr(task, 'tool_configs'):
-            logger.info(f"GET task {task_id} - tool_configs value: {task.tool_configs}")
-        else:
-            logger.warning(f"GET task {task_id} - no tool_configs attribute found")
-        
-        return task
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        logger.error(f"Error getting task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    task = await service.get_with_group_check(task_id, group_context)
+    if not task:
+        raise NotFoundError("Task not found")
+
+    # Debug logging for tool_configs
+    if hasattr(task, "tool_configs"):
+        logger.info(f"GET task {task_id} - tool_configs value: {task.tool_configs}")
+    else:
+        logger.warning(f"GET task {task_id} - no tool_configs attribute found")
+
+    return task
 
 
 @router.put("/{task_id}/full", response_model=TaskSchema)
@@ -160,25 +142,12 @@ async def update_task_full(
     """
     # Check permissions - only editors and admins can update tasks
     if not check_role_in_context(group_context, ["admin", "editor"]):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only editors and admins can update tasks"
-        )
+        raise ForbiddenError("Only editors and admins can update tasks")
 
-    try:
-        task = await service.update_full_with_group_check(task_id, task_in, group_context)
-        if not task:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Task not found",
-            )
-        return task
-    except HTTPException:
-        # Re-raise HTTP exceptions (like 404) without modification
-        raise
-    except Exception as e:
-        logger.error(f"Error updating task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    task = await service.update_full_with_group_check(task_id, task_in, group_context)
+    if not task:
+        raise NotFoundError("Task not found")
+    return task
 
 
 @router.put("/{task_id}", response_model=TaskSchema)
@@ -206,25 +175,12 @@ async def update_task(
     """
     # Check permissions - only editors and admins can update tasks
     if not check_role_in_context(group_context, ["admin", "editor"]):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only editors and admins can update tasks"
-        )
+        raise ForbiddenError("Only editors and admins can update tasks")
 
-    try:
-        task = await service.update_with_group_check(task_id, task_in, group_context)
-        if not task:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Task not found",
-            )
-        return task
-    except HTTPException:
-        # Re-raise HTTP exceptions (like 404) without modification
-        raise
-    except Exception as e:
-        logger.error(f"Error updating task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    task = await service.update_with_group_check(task_id, task_in, group_context)
+    if not task:
+        raise NotFoundError("Task not found")
+    return task
 
 
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -247,24 +203,11 @@ async def delete_task(
     """
     # Check permissions - only editors and admins can delete tasks
     if not check_role_in_context(group_context, ["admin", "editor"]):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only editors and admins can delete tasks"
-        )
+        raise ForbiddenError("Only editors and admins can delete tasks")
 
-    try:
-        deleted = await service.delete_with_group_check(task_id, group_context)
-        if not deleted:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Task not found",
-            )
-    except HTTPException:
-        # Re-raise HTTP exceptions (like 404) without modification
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    deleted = await service.delete_with_group_check(task_id, group_context)
+    if not deleted:
+        raise NotFoundError("Task not found")
 
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
@@ -282,13 +225,6 @@ async def delete_all_tasks(
     """
     # Check permissions - only admins can delete all tasks
     if not check_role_in_context(group_context, ["admin"]):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can delete all tasks"
-        )
+        raise ForbiddenError("Only admins can delete all tasks")
 
-    try:
-        await service.delete_all_for_group(group_context)
-    except Exception as e:
-        logger.error(f"Error deleting all tasks: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) 
+    await service.delete_all_for_group(group_context)

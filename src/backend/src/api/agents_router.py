@@ -1,14 +1,15 @@
+import logging
 from typing import Annotated, List
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
-import logging
+from fastapi import APIRouter, Depends, Path, status
 from sqlalchemy.exc import IntegrityError
 
-from src.core.dependencies import SessionDep, GroupContextDep
+from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.exceptions import BadRequestError, ConflictError, ForbiddenError, NotFoundError
 from src.core.permissions import check_role_in_context
 from src.models.agent import Agent
 from src.schemas.agent import Agent as AgentSchema
-from src.schemas.agent import AgentCreate, AgentUpdate, AgentLimitedUpdate
+from src.schemas.agent import AgentCreate, AgentLimitedUpdate, AgentUpdate
 from src.services.agent_service import AgentService
 
 router = APIRouter(
@@ -19,6 +20,7 @@ router = APIRouter(
 
 # Set up logging
 logger = logging.getLogger(__name__)
+
 
 async def get_agent_service(session: SessionDep) -> AgentService:
     """
@@ -35,9 +37,9 @@ async def get_agent_service(session: SessionDep) -> AgentService:
     """
     return AgentService(session=session)
 
+
 # Type alias for cleaner function signatures
 AgentServiceDep = Annotated[AgentService, Depends(get_agent_service)]
-
 
 
 @router.post("", response_model=AgentSchema, status_code=status.HTTP_201_CREATED)
@@ -60,19 +62,12 @@ async def create_agent(
     """
     # Check permissions - only editors and admins can create agents
     if not check_role_in_context(group_context, ["admin", "editor"]):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only editors and admins can create agents"
-        )
+        raise ForbiddenError("Only editors and admins can create agents")
 
-    try:
-        if group_context and group_context.is_valid():
-            return await service.create_with_group(agent_in, group_context)
-        else:
-            raise HTTPException(status_code=400, detail="No valid group context provided")
-    except Exception as e:
-        logger.error(f"Error creating agent: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    if group_context and group_context.is_valid():
+        return await service.create_with_group(agent_in, group_context)
+    else:
+        raise BadRequestError("No valid group context provided")
 
 
 @router.get("", response_model=List[AgentSchema])
@@ -82,23 +77,19 @@ async def list_agents(
 ):
     """
     Retrieve all agents for the current group.
-    
+
     Args:
         service: Agent service injected by dependency
         group_context: Group context from headers
-        
+
     Returns:
         List of agents for the current group
     """
-    try:
-        if group_context and group_context.is_valid():
-            return await service.find_by_group(group_context)
-        else:
-            # If no context available, return empty list for security
-            return []
-    except Exception as e:
-        logger.error(f"Error listing agents: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    if group_context and group_context.is_valid():
+        return await service.find_by_group(group_context)
+    else:
+        # If no context available, return empty list for security
+        return []
 
 
 @router.get("/{agent_id}", response_model=AgentSchema)
@@ -109,31 +100,22 @@ async def get_agent(
 ):
     """
     Get a specific agent by ID with group isolation.
-    
+
     Args:
         agent_id: ID of the agent to get
         service: Agent service injected by dependency
         group_context: Group context from headers
-        
+
     Returns:
         Agent if found and belongs to user's group
-        
+
     Raises:
         HTTPException: If agent not found or not authorized
     """
-    try:
-        agent = await service.get_with_group_check(agent_id, group_context)
-        if not agent:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Agent not found",
-            )
-        return agent
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        logger.error(f"Error getting agent: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    agent = await service.get_with_group_check(agent_id, group_context)
+    if not agent:
+        raise NotFoundError("Agent not found")
+    return agent
 
 
 @router.put("/{agent_id}/full", response_model=AgentSchema)
@@ -161,22 +143,12 @@ async def update_agent_full(
     """
     # Check permissions - only editors and admins can update agents
     if not check_role_in_context(group_context, ["admin", "editor"]):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only editors and admins can update agents"
-        )
+        raise ForbiddenError("Only editors and admins can update agents")
 
-    try:
-        agent = await service.update_with_group_check(agent_id, agent_in, group_context)
-        if not agent:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Agent not found",
-            )
-        return agent
-    except Exception as e:
-        logger.error(f"Error updating agent: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    agent = await service.update_with_group_check(agent_id, agent_in, group_context)
+    if not agent:
+        raise NotFoundError("Agent not found")
+    return agent
 
 
 @router.put("/{agent_id}", response_model=AgentSchema)
@@ -204,22 +176,14 @@ async def update_agent(
     """
     # Check permissions - only editors and admins can update agents
     if not check_role_in_context(group_context, ["admin", "editor"]):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only editors and admins can update agents"
-        )
+        raise ForbiddenError("Only editors and admins can update agents")
 
-    try:
-        agent = await service.update_limited_with_group_check(agent_id, agent_in, group_context)
-        if not agent:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Agent not found",
-            )
-        return agent
-    except Exception as e:
-        logger.error(f"Error updating agent: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    agent = await service.update_limited_with_group_check(
+        agent_id, agent_in, group_context
+    )
+    if not agent:
+        raise NotFoundError("Agent not found")
+    return agent
 
 
 @router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -236,27 +200,17 @@ async def delete_agent(
         agent_id: ID of the agent to delete
         service: Agent service injected by dependency
         group_context: Group context from headers
-        
+
     Raises:
         HTTPException: If agent not found or not authorized
     """
     # Check permissions - only editors and admins can delete agents
     if not check_role_in_context(group_context, ["admin", "editor"]):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only editors and admins can delete agents"
-        )
+        raise ForbiddenError("Only editors and admins can delete agents")
 
-    try:
-        deleted = await service.delete_with_group_check(agent_id, group_context)
-        if not deleted:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Agent not found",
-            )
-    except Exception as e:
-        logger.error(f"Error deleting agent: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    deleted = await service.delete_with_group_check(agent_id, group_context)
+    if not deleted:
+        raise NotFoundError("Agent not found")
 
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
@@ -274,19 +228,10 @@ async def delete_all_agents(
     """
     # Check permissions - only admins can delete all agents
     if not check_role_in_context(group_context, ["admin"]):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can delete all agents"
-        )
+        raise ForbiddenError("Only admins can delete all agents")
 
     try:
         await service.delete_all_for_group(group_context)
     except IntegrityError as ie:
         logger.warning(f"Attempted to delete agents referenced by tasks: {ie}")
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, 
-            detail="Cannot delete agents because some are still referenced by tasks. Please delete or reassign the associated tasks first."
-        )
-    except Exception as e:
-        logger.error(f"Error deleting all agents: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) 
+        raise ConflictError("Cannot delete agents because some are still referenced by tasks. Please delete or reassign the associated tasks first.")
