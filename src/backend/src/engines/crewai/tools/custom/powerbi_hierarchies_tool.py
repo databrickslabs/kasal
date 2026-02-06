@@ -169,6 +169,10 @@ class PowerBIHierarchiesTool(BaseTool):
             "tenant_id": kwargs.get("tenant_id"),
             "client_id": kwargs.get("client_id"),
             "client_secret": kwargs.get("client_secret"),
+            # Service Account Authentication
+            "username": kwargs.get("username"),
+            "password": kwargs.get("password"),
+            "auth_method": kwargs.get("auth_method"),
             # User OAuth token (alternative to Service Principal)
             "access_token": kwargs.get("access_token"),
             # Unity Catalog Target
@@ -259,8 +263,24 @@ class PowerBIHierarchiesTool(BaseTool):
                 if v is not None and not is_placeholder(v)
             }
 
-            # Merge with defaults
-            merged_kwargs = {**self._default_config, **filtered_kwargs}
+            # CRITICAL: Merge strategy for deterministic authentication
+            # - CREDENTIALS: Use pre-configured values (prevent agent placeholder overrides)
+            # - AUTH_METHOD: Use UI selection (deterministic, not auto-detected)
+            # - OTHER: Agent can override
+            credential_fields = ['tenant_id', 'client_id', 'client_secret', 'username', 'password', 'access_token']
+            selection_fields = ['auth_method']  # User selection - must be deterministic
+
+            merged_kwargs = {}
+            for key in set(list(self._default_config.keys()) + list(filtered_kwargs.keys())):
+                if key in credential_fields:
+                    # Credentials: use pre-configured value (protected from agent)
+                    merged_kwargs[key] = self._default_config.get(key, filtered_kwargs.get(key))
+                elif key in selection_fields:
+                    # User selections: UI value takes precedence for deterministic behavior
+                    merged_kwargs[key] = filtered_kwargs.get(key, self._default_config.get(key))
+                else:
+                    # Other fields: agent can override (filtered_kwargs takes precedence)
+                    merged_kwargs[key] = filtered_kwargs.get(key, self._default_config.get(key))
 
             # Dynamic parameter resolution
             if execution_inputs:

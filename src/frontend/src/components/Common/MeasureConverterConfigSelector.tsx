@@ -95,7 +95,20 @@ export const MeasureConverterConfigSelector: React.FC<MeasureConverterConfigSele
   };
 
   const handleSelectChange = (field: keyof MeasureConverterConfig) => (event: SelectChangeEvent) => {
-    handleFieldChange(field, event.target.value);
+    const newValue = event.target.value;
+
+    // Special handling for inbound_connector
+    if (field === 'inbound_connector' && newValue === 'powerbi') {
+      // When Power BI is selected, ensure auth_method has a default value
+      const updatedConfig = {
+        ...value,
+        [field]: newValue,
+        powerbi_auth_method: value.powerbi_auth_method || 'service_principal'
+      };
+      onChange(updatedConfig);
+    } else {
+      handleFieldChange(field, newValue);
+    }
   };
 
   const handleAuthMethodChange = (_event: React.MouseEvent<HTMLElement>, newMethod: PowerBIAuthMethod | null) => {
@@ -179,6 +192,18 @@ export const MeasureConverterConfigSelector: React.FC<MeasureConverterConfigSele
   const outboundFormat = value.outbound_format || '';
   const mode = value.mode || 'static';
   const authMethod = value.powerbi_auth_method || 'service_principal';
+
+  // CRITICAL: Initialize auth_method on component mount if Power BI is selected but auth_method is missing
+  // This handles existing crews that were created before auth_method was added
+  React.useEffect(() => {
+    if (inboundConnector === 'powerbi' && !value.powerbi_auth_method) {
+      // Only set default on mount, not on every render
+      onChange({
+        ...value,
+        powerbi_auth_method: 'service_principal'
+      });
+    }
+  }, []); // Empty deps = run once on mount
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>

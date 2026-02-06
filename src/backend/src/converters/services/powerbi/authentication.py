@@ -160,7 +160,9 @@ class AadService:
         """
         # Priority 1: Use pre-obtained token
         if self._access_token:
-            self.logger.info("Using pre-obtained access token")
+            self.logger.info("=" * 80)
+            self.logger.info("🔑 AUTHENTICATION METHOD: User OAuth (pre-obtained access token)")
+            self.logger.info("=" * 80)
             return self._access_token
 
         # Ensure azure-identity is available
@@ -318,6 +320,9 @@ class AadService:
         assert tenant_id is not None
 
         try:
+            self.logger.info("=" * 80)
+            self.logger.info("🔑 AUTHENTICATION METHOD: Service Principal (client credentials)")
+            self.logger.info("=" * 80)
             self.logger.info(f"[AUTH DEBUG] Acquiring token with:")
             self.logger.info(f"[AUTH DEBUG]   tenant_id: '{tenant_id}' (type: {type(tenant_id).__name__})")
             self.logger.info(f"[AUTH DEBUG]   client_id: '{client_id}' (type: {type(client_id).__name__})")
@@ -337,7 +342,7 @@ class AadService:
             # Acquire token for Power BI API
             token_response = credential.get_token(self.POWERBI_SCOPE)
 
-            self.logger.info("Access token acquired successfully")
+            self.logger.info("✅ Service Principal access token acquired successfully")
             return token_response.token
 
         except Exception as ex:
@@ -386,6 +391,9 @@ class AadService:
         assert self.tenant_id is not None
 
         try:
+            self.logger.info("=" * 80)
+            self.logger.info("🔑 AUTHENTICATION METHOD: Service Account (username/password)")
+            self.logger.info("=" * 80)
             self.logger.info(f"[AUTH DEBUG] Acquiring token with service account:")
             self.logger.info(f"[AUTH DEBUG]   tenant_id: '{self.tenant_id}'")
             self.logger.info(f"[AUTH DEBUG]   client_id: '{self.client_id}'")
@@ -409,7 +417,7 @@ class AadService:
             # Acquire token for Power BI API
             token_response = credential.get_token(self.POWERBI_SCOPE)
 
-            self.logger.info("Service account access token acquired successfully")
+            self.logger.info("✅ Service Account access token acquired successfully")
             return token_response.token
 
         except Exception as ex:
