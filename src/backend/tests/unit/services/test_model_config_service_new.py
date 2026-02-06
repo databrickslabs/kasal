@@ -2,7 +2,7 @@
 Comprehensive tests for ModelConfigService.
 """
 import pytest
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 from src.services.model_config_service import ModelConfigService
 from src.models.model_config import ModelConfig
 
@@ -253,11 +253,18 @@ class TestModelConfigServiceDeleteModelConfig:
         session = AsyncMock()
         service = ModelConfigService(session=session)
 
+        # Mock find_by_key (called first for cache invalidation)
+        mock_model = Mock()
+        mock_model.group_id = "test-group"
+        service.repository.find_by_key = AsyncMock(return_value=mock_model)
         service.repository.delete_by_key = AsyncMock(return_value=True)
 
-        result = await service.delete_model_config("gpt-4")
+        with patch('src.services.model_config_service.model_config_cache') as mock_cache:
+            mock_cache.invalidate = AsyncMock()
+            result = await service.delete_model_config("gpt-4")
 
         assert result is True
+        service.repository.find_by_key.assert_called_once_with("gpt-4")
         service.repository.delete_by_key.assert_called_once_with("gpt-4")
 
     @pytest.mark.asyncio
@@ -266,10 +273,15 @@ class TestModelConfigServiceDeleteModelConfig:
         session = AsyncMock()
         service = ModelConfigService(session=session)
 
+        # Mock find_by_key returning None (model doesn't exist)
+        service.repository.find_by_key = AsyncMock(return_value=None)
         service.repository.delete_by_key = AsyncMock(return_value=False)
 
-        result = await service.delete_model_config("nonexistent")
+        with patch('src.services.model_config_service.model_config_cache') as mock_cache:
+            mock_cache.invalidate = AsyncMock()
+            result = await service.delete_model_config("nonexistent")
 
         assert result is False
+        service.repository.find_by_key.assert_called_once_with("nonexistent")
         service.repository.delete_by_key.assert_called_once_with("nonexistent")
 
