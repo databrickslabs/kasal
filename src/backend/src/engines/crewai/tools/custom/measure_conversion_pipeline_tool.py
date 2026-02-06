@@ -201,6 +201,7 @@ class MeasureConversionPipelineTool(BaseTool):
         logger.info(f"[MeasureConversionPipelineTool.__init__] inbound_connector: {kwargs.get('inbound_connector', 'NOT PROVIDED')}")
         logger.info(f"[MeasureConversionPipelineTool.__init__] powerbi_semantic_model_id: {kwargs.get('powerbi_semantic_model_id', 'NOT PROVIDED')}")
         logger.info(f"[MeasureConversionPipelineTool.__init__] outbound_format: {kwargs.get('outbound_format', 'NOT PROVIDED')}")
+        logger.info(f"[MeasureConversionPipelineTool.__init__] 🔍 powerbi_auth_method FROM TOOL_FACTORY: {kwargs.get('powerbi_auth_method', 'NOT PROVIDED')}")
 
         # Extract execution_inputs if provided (for dynamic parameter resolution)
         execution_inputs = kwargs.get("execution_inputs", {})
@@ -333,6 +334,11 @@ class MeasureConversionPipelineTool(BaseTool):
             Formatted output in the target format
         """
         try:
+            # ===== PROMINENT EXECUTION LOG =====
+            logger.info("=" * 80)
+            logger.info("🔧 TOOL EXECUTION: MeasureConversionPipelineTool._run() STARTED")
+            logger.info("=" * 80)
+
             instance_id = getattr(self, '_instance_id', 'UNKNOWN')
             logger.info(f"[TOOL CALL] Instance {instance_id} - _run() called")
             logger.info(f"[TOOL CALL] Instance {instance_id} - Received kwargs: {list(kwargs.keys())}")
@@ -367,8 +373,60 @@ class MeasureConversionPipelineTool(BaseTool):
             }
             logger.info(f"[TOOL CALL] Instance {instance_id} - Filtered kwargs (removed None/placeholders): {list(filtered_kwargs.keys())}")
 
-            # Pre-configured values take precedence over agent-provided placeholders
-            merged_kwargs = {**self._default_config, **filtered_kwargs}
+            # DEBUG: Log actual values for auth fields from agent
+            logger.info(f"[MeasureConversionPipelineTool] DEBUG AGENT - powerbi_semantic_model_id value: {kwargs.get('powerbi_semantic_model_id')}")
+            logger.info(f"[MeasureConversionPipelineTool] DEBUG AGENT - powerbi_group_id value: {kwargs.get('powerbi_group_id')}")
+            logger.info(f"[MeasureConversionPipelineTool] DEBUG AGENT - powerbi_tenant_id value: {kwargs.get('powerbi_tenant_id')}")
+            logger.info(f"[MeasureConversionPipelineTool] DEBUG AGENT - powerbi_client_id value: {kwargs.get('powerbi_client_id')}")
+            logger.info(f"[MeasureConversionPipelineTool] DEBUG AGENT - powerbi_client_secret length: {len(kwargs.get('powerbi_client_secret') or '')}")
+            logger.info(f"[MeasureConversionPipelineTool] DEBUG AGENT - powerbi_username value: {kwargs.get('powerbi_username')}")
+            logger.info(f"[MeasureConversionPipelineTool] DEBUG AGENT - powerbi_auth_method value: {kwargs.get('powerbi_auth_method')}")
+
+            # CRITICAL: Merge strategy to prevent agent placeholder overrides while respecting UI selections
+            #
+            # For CREDENTIALS (tenant_id, client_id, etc.): Use pre-configured values
+            #   -> Prevents agent from passing placeholder values that override real credentials
+            #
+            # For AUTH_METHOD: Use UI-provided value if present, otherwise pre-configured
+            #   -> Allows user to explicitly select auth method in UI
+            #   -> Makes authentication DETERMINISTIC, not probabilistic
+            #
+            # For CONFIG (semantic_model_id, etc.): Use pre-configured values
+            #   -> Prevents agent from changing configured dataset/workspace IDs
+
+            credential_fields = [
+                'powerbi_tenant_id', 'powerbi_client_id', 'powerbi_client_secret',
+                'powerbi_username', 'powerbi_password', 'powerbi_access_token'
+            ]
+            config_fields = [
+                'powerbi_semantic_model_id', 'powerbi_group_id',
+                'inbound_connector', 'outbound_format'
+            ]
+            selection_fields = [
+                'powerbi_auth_method'  # User selection in UI - must be deterministic
+            ]
+
+            merged_kwargs = {}
+            for key in set(list(self._default_config.keys()) + list(filtered_kwargs.keys())):
+                if key in credential_fields or key in config_fields:
+                    # Credentials and config: use pre-configured value (protected from agent)
+                    merged_kwargs[key] = self._default_config.get(key, filtered_kwargs.get(key))
+                elif key in selection_fields:
+                    # User selections: UI value takes precedence for deterministic behavior
+                    merged_kwargs[key] = filtered_kwargs.get(key, self._default_config.get(key))
+                else:
+                    # Other fields: agent can override (filtered_kwargs takes precedence)
+                    merged_kwargs[key] = filtered_kwargs.get(key, self._default_config.get(key))
+
+            # DEBUG: Log merged auth values
+            logger.info(f"[MeasureConversionPipelineTool] DEBUG MERGED - powerbi_semantic_model_id: {merged_kwargs.get('powerbi_semantic_model_id')}")
+            logger.info(f"[MeasureConversionPipelineTool] DEBUG MERGED - powerbi_group_id: {merged_kwargs.get('powerbi_group_id')}")
+            logger.info(f"[MeasureConversionPipelineTool] DEBUG MERGED - powerbi_tenant_id: {merged_kwargs.get('powerbi_tenant_id')}")
+            logger.info(f"[MeasureConversionPipelineTool] DEBUG MERGED - powerbi_client_id: {merged_kwargs.get('powerbi_client_id')}")
+            logger.info(f"[MeasureConversionPipelineTool] DEBUG MERGED - powerbi_client_secret length: {len(merged_kwargs.get('powerbi_client_secret') or '')}")
+            logger.info(f"[MeasureConversionPipelineTool] DEBUG MERGED - powerbi_username: {merged_kwargs.get('powerbi_username')}")
+            logger.info(f"[MeasureConversionPipelineTool] DEBUG MERGED - powerbi_password length: {len(merged_kwargs.get('powerbi_password') or '')}")
+            logger.info(f"[MeasureConversionPipelineTool] DEBUG MERGED - powerbi_auth_method: {merged_kwargs.get('powerbi_auth_method')}")
 
             # DYNAMIC PARAMETER RESOLUTION: Resolve placeholders from execution inputs
             if execution_inputs:
@@ -421,21 +479,40 @@ class MeasureConversionPipelineTool(BaseTool):
                     "access_token": merged_kwargs.get("powerbi_access_token"),
                 }
 
-                # Validate authentication using shared utility
-                from src.engines.crewai.tools.custom.powerbi_auth_utils import validate_auth_config
-                is_valid, error_msg = validate_auth_config(auth_config)
-                if not is_valid:
-                    return f"Error: {error_msg}"
-
-                # DEBUG: Log the actual credential values being used
+                # DEBUG: Log the actual credential values being used BEFORE validation
                 logger.info(f"[TOOL DEBUG] PowerBI credentials being used:")
                 logger.info(f"[TOOL DEBUG]   tenant_id: '{auth_config.get('tenant_id')}'")
                 logger.info(f"[TOOL DEBUG]   client_id: '{auth_config.get('client_id')}'")
                 logger.info(f"[TOOL DEBUG]   client_secret length: {len(auth_config.get('client_secret') or '')}")
                 logger.info(f"[TOOL DEBUG]   username: '{auth_config.get('username')}'")
+                logger.info(f"[TOOL DEBUG]   password length: {len(auth_config.get('password') or '')}")
+                logger.info(f"[TOOL DEBUG]   auth_method (explicit): '{auth_config.get('auth_method')}'")
                 logger.info(f"[TOOL DEBUG]   access_token length: {len(auth_config.get('access_token') or '')}")
                 logger.info(f"[TOOL DEBUG]   semantic_model_id: '{semantic_model_id}'")
                 logger.info(f"[TOOL DEBUG]   group_id: '{group_id}'")
+
+                # Determine what auth method will be used
+                explicit_auth_method = auth_config.get("auth_method")
+                if explicit_auth_method:
+                    logger.info(f"[TOOL DEBUG] ✓ EXPLICIT AUTH METHOD (from UI): {explicit_auth_method}")
+                    logger.info(f"[TOOL DEBUG] Authentication will be DETERMINISTIC - only {explicit_auth_method} will be attempted")
+                else:
+                    # Auto-detect based on available credentials
+                    detected_method = "unknown"
+                    if auth_config.get("access_token"):
+                        detected_method = "user_oauth (access_token provided)"
+                    elif auth_config.get("username") and auth_config.get("password"):
+                        detected_method = "service_account (username + password)"
+                    elif auth_config.get("client_secret"):
+                        detected_method = "service_principal (client_secret)"
+                    logger.info(f"[TOOL DEBUG] ⚠️  AUTO-DETECTED AUTH METHOD: {detected_method}")
+                    logger.info(f"[TOOL DEBUG] Authentication is PROBABILISTIC - will try available credentials")
+
+                # Validate authentication using shared utility
+                from src.engines.crewai.tools.custom.powerbi_auth_utils import validate_auth_config
+                is_valid, error_msg = validate_auth_config(auth_config)
+                if not is_valid:
+                    return f"Error: {error_msg}"
 
                 inbound_params = {
                     "semantic_model_id": semantic_model_id,

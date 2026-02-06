@@ -101,7 +101,9 @@ def get_tool_configs():
             "client_id": "",  # Azure AD Application/Client ID (required)
             "workspace_id": "",  # Default Power BI Workspace ID (optional, can be overridden per task)
             "semantic_model_id": "",  # Default Power BI Semantic Model ID (optional, can be overridden per task)
-            "auth_method": "service_principal"  # Authentication method: "service_principal" or "device_code"
+            "auth_method": None,  # Authentication method: "service_principal" or "service_account" (None = use UI selection)
+            "username": "",  # Service Account username/UPN (for service_account auth)
+            "password": "",  # Service Account password (for service_account auth)
         },  # PowerBIAnalysisTool
         "73": {
             "result_as_answer": True,
@@ -111,9 +113,17 @@ def get_tool_configs():
             # Power BI inbound configuration
             "powerbi_semantic_model_id": "",
             "powerbi_group_id": "",
+            # Service Principal Authentication
             "powerbi_tenant_id": "",
             "powerbi_client_id": "",
             "powerbi_client_secret": "",
+            # Service Account Authentication
+            "powerbi_username": "",
+            "powerbi_password": "",
+            "powerbi_auth_method": None,  # "service_principal", "service_account", or None for auto-detect
+            # User OAuth Authentication
+            "powerbi_access_token": "",
+            # Other Power BI settings
             "powerbi_info_table_name": "Info Measures",
             "powerbi_include_hidden": False,
             "powerbi_filter_pattern": "",

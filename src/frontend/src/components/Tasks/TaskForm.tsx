@@ -685,6 +685,31 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           delete updatedToolConfigs['Power BI Report References Tool'];
         }
 
+        // Handle Power BI Comprehensive Analysis Tool config
+        if (powerBIConfig && Object.keys(powerBIConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Comprehensive Analysis Tool';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            'Power BI Comprehensive Analysis Tool': powerBIConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Comprehensive Analysis Tool';
+        })) {
+          // Remove Power BI Comprehensive Analysis Tool config if tool not selected
+          delete updatedToolConfigs['Power BI Comprehensive Analysis Tool'];
+        }
+
         // Handle MCP_SERVERS config - use dict format to match schema
         if (selectedMcpServers && selectedMcpServers.length > 0) {
           updatedToolConfigs = {

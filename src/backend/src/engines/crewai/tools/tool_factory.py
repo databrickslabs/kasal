@@ -1362,6 +1362,11 @@ class ToolFactory:
                         tool_args["client_id"] = tool_config.get("client_id")
                         tool_args["client_secret"] = tool_config.get("client_secret")
 
+                        # Service Account Authentication
+                        tool_args["username"] = tool_config.get("username")
+                        tool_args["password"] = tool_config.get("password")
+                        tool_args["auth_method"] = tool_config.get("auth_method")
+
                         # OAuth Authentication (alternative)
                         tool_args["access_token"] = tool_config.get("access_token")
 
@@ -1381,7 +1386,8 @@ class ToolFactory:
                     # Allow tool_config_override to override specific fields
                     if isinstance(tool_config_override, dict):
                         for key in ["workspace_id", "dataset_id", "tenant_id", "client_id",
-                                    "client_secret", "access_token", "llm_workspace_url",
+                                    "client_secret", "username", "password", "auth_method",
+                                    "access_token", "llm_workspace_url",
                                     "llm_token", "llm_model", "include_visual_references",
                                     "skip_system_tables", "output_format", "user_question"]:
                             if key in tool_config_override:
