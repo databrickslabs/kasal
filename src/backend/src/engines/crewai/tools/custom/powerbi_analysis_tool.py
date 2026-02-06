@@ -829,6 +829,14 @@ class PowerBIAnalysisTool(BaseTool):
         logger.info(prompt)
         logger.info("=" * 80)
 
+        # Emit trace event for LLM prompt (appears in UI technical trace)
+        self._emit_llm_trace(
+            event_context="DAX Generation - Prompt",
+            prompt=prompt,
+            model=llm_model,
+            operation="generate_dax"
+        )
+
         # Call Databricks LLM
         url = f"{llm_workspace_url.rstrip('/')}/serving-endpoints/{llm_model}/invocations"
         headers = {
@@ -855,6 +863,15 @@ class PowerBIAnalysisTool(BaseTool):
                 logger.info("[DAX Generation] LLM Raw Response:")
                 logger.info(content)
                 logger.info("=" * 80)
+
+                # Emit trace event for LLM response (appears in UI technical trace)
+                self._emit_llm_trace(
+                    event_context="DAX Generation - Response",
+                    prompt=prompt,
+                    response=content,
+                    model=llm_model,
+                    operation="generate_dax"
+                )
 
                 # Clean up: extract just the DAX query
                 dax = self._extract_dax_from_llm_response(content)
@@ -898,6 +915,81 @@ class PowerBIAnalysisTool(BaseTool):
                 logger.error(f"LLM DAX generation error: {e}")
                 # Fallback to simple generation
                 return self._generate_simple_dax(user_question, model_context)
+
+    def _emit_llm_trace(
+        self,
+        event_context: str,
+        prompt: str,
+        model: str,
+        operation: str,
+        response: Optional[str] = None
+    ) -> None:
+        """
+        Emit a trace event for LLM operations that appears in the UI technical trace.
+
+        This method uses the trace_context that was injected into the tool during
+        crew preparation to emit custom llm_call trace events.
+
+        Args:
+            event_context: Context description (e.g., "DAX Generation - Prompt")
+            prompt: The LLM prompt text
+            model: The model name used
+            operation: The operation type (e.g., "generate_dax")
+            response: Optional LLM response text
+        """
+        try:
+            # Check if trace_context was injected (happens during crew preparation)
+            trace_ctx = getattr(self, 'trace_context', None)
+            if not trace_ctx:
+                logger.debug("[PowerBIAnalysisTool] No trace_context available, skipping llm_call trace emission")
+                return
+
+            if not trace_ctx.get('job_id'):
+                logger.debug("[PowerBIAnalysisTool] trace_context missing job_id, skipping llm_call trace emission")
+                return
+
+            # Get the trace queue
+            from src.services.trace_queue import get_trace_queue
+            queue = get_trace_queue()
+
+            # Truncate prompt and response for trace storage (avoid huge payloads)
+            prompt_preview = (prompt[:500] + '...[truncated]') if len(prompt) > 500 else prompt
+            response_preview = None
+            if response:
+                response_preview = (response[:500] + '...[truncated]') if len(response) > 500 else response
+
+            # Build trace data
+            trace_output = {
+                'operation': operation,
+                'model': model,
+                'prompt_length': len(prompt),
+                'prompt_preview': prompt_preview
+            }
+
+            if response and response_preview:
+                trace_output['response_length'] = len(response)
+                trace_output['response_preview'] = response_preview
+
+            # Emit the trace event
+            queue.put_nowait({
+                'job_id': trace_ctx.get('job_id'),
+                'event_type': 'llm_call',
+                'event_source': 'PowerBI Analysis Tool',
+                'event_context': event_context,
+                'output': trace_output,
+                'trace_metadata': {
+                    'tool_name': 'PowerBIAnalysisTool',
+                    'operation': operation,
+                    'model': model
+                },
+                'group_context': trace_ctx.get('group_context')
+            })
+
+            logger.debug(f"[PowerBIAnalysisTool] Emitted llm_call trace event: {event_context}")
+
+        except Exception as e:
+            # Don't fail the tool execution if trace emission fails
+            logger.debug(f"[PowerBIAnalysisTool] Failed to emit llm_call trace: {e}")
 
     def _extract_dax_from_llm_response(self, content: str) -> str:
         """Extract clean DAX query from LLM response."""
