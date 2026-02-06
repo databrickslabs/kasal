@@ -277,7 +277,7 @@ class PowerBIHierarchiesTool(BaseTool):
                     merged_kwargs[key] = self._default_config.get(key, filtered_kwargs.get(key))
                 elif key in selection_fields:
                     # User selections: UI value takes precedence for deterministic behavior
-                    merged_kwargs[key] = filtered_kwargs.get(key, self._default_config.get(key))
+                    merged_kwargs[key] = self._default_config.get(key, filtered_kwargs.get(key))
                 else:
                     # Other fields: agent can override (filtered_kwargs takes precedence)
                     merged_kwargs[key] = filtered_kwargs.get(key, self._default_config.get(key))
@@ -293,6 +293,14 @@ class PowerBIHierarchiesTool(BaseTool):
             workspace_id = merged_kwargs.get("workspace_id")
             dataset_id = merged_kwargs.get("dataset_id")
 
+            # DEBUG: Log merged_kwargs to see what we're working with
+            logger.info("[PowerBIHierarchiesTool] MERGED KWARGS DEBUG:")
+            logger.info(f"  workspace_id: {workspace_id}")
+            logger.info(f"  dataset_id: {dataset_id}")
+            logger.info(f"  auth_method in merged_kwargs: {merged_kwargs.get('auth_method')}")
+            logger.info(f"  username in merged_kwargs: {merged_kwargs.get('username')}")
+            logger.info(f"  Has client_secret: {bool(merged_kwargs.get('client_secret'))}")
+
             # Build auth config
             auth_config = {
                 "tenant_id": merged_kwargs.get("tenant_id"),
@@ -303,6 +311,19 @@ class PowerBIHierarchiesTool(BaseTool):
                 "auth_method": merged_kwargs.get("auth_method"),
                 "access_token": merged_kwargs.get("access_token"),
             }
+
+            # DEBUG: Log what auth config is being used
+            logger.info("=" * 80)
+            logger.info("[PowerBIHierarchiesTool] AUTH CONFIG DEBUG")
+            logger.info("=" * 80)
+            logger.info(f"  tenant_id: {auth_config.get('tenant_id')}")
+            logger.info(f"  client_id: {auth_config.get('client_id')}")
+            logger.info(f"  client_secret: {'*' * len(auth_config.get('client_secret') or '') if auth_config.get('client_secret') else 'None'}")
+            logger.info(f"  username: {auth_config.get('username')}")
+            logger.info(f"  password: {'*' * len(auth_config.get('password') or '') if auth_config.get('password') else 'None'}")
+            logger.info(f"  auth_method: {auth_config.get('auth_method')} (type: {type(auth_config.get('auth_method'))})")
+            logger.info(f"  access_token: {'*' * 10 if auth_config.get('access_token') else 'None'}")
+            logger.info("=" * 80)
 
             # Validate required parameters
             if not workspace_id:
