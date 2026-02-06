@@ -864,14 +864,12 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           setExecutingJobId(mostRecentJob.job_id);
 
           // Load task states for running job (SSE handles real-time updates after this)
-          console.log('[WorkflowDesigner] Loading task states for running job:', mostRecentJob.job_id);
           loadStates(mostRecentJob.job_id);
 
           // Check if this is a flow execution and load crew states
           const isFlowExecution = mostRecentJob.execution_type === 'flow' ||
             mostRecentJob.run_name?.toLowerCase().includes('flow');
           if (isFlowExecution) {
-            console.log('[WorkflowDesigner] Detected running flow execution, loading crew states');
             loadCrewStates(mostRecentJob.job_id);
           }
         } else {
@@ -881,14 +879,12 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           const status = mostRecentJob.status.toLowerCase();
 
           if (status === 'completed' || status === 'failed') {
-            console.log('[WorkflowDesigner] Loading task states for most recent job:', mostRecentJob.job_id, 'status:', status);
             loadStates(mostRecentJob.job_id);
 
             // Check if this was a flow execution and load crew states
             const isFlowExecution = mostRecentJob.execution_type === 'flow' ||
               mostRecentJob.run_name?.toLowerCase().includes('flow');
             if (isFlowExecution) {
-              console.log('[WorkflowDesigner] Loading crew states for completed/failed flow:', mostRecentJob.job_id);
               loadCrewStates(mostRecentJob.job_id);
             }
           }
