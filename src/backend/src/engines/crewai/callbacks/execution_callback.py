@@ -174,8 +174,33 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
             agent_name = "Unknown Agent"
             
             logger.info(f"{log_prefix} Step output type: {step_type}, is_agent_action: {is_agent_action}, is_tool_result: {is_tool_result}")
-            logger.info(f"{log_prefix} Current context - agent: {execution_context.get('current_agent')}, task_index: {execution_context.get('task_index')}")
-            
+            logger.info(f"{log_prefix} Current context - agent: {execution_context.get('current_agent')}, task_index: {execution_context.get('task_index')}, pending_next_agent: {execution_context.get('pending_next_agent')}")
+
+            # ===================================================================================
+            # CRITICAL: Handle agent context switching BEFORE any other agent extraction logic!
+            # This is the FIRST thing we check to ensure correct agent attribution.
+            #
+            # The issue: When task_callback completes for agent A's task, it prepares the context
+            # for agent B (pending_next_agent) but doesn't immediately switch. Then when agent B
+            # starts producing events, we need to detect this and switch the context.
+            #
+            # For AgentFinish: ALWAYS use last_known_agent (the agent that just finished)
+            # For ANY other event: If pending_next_agent is set, this is agent B's first event
+            # ===================================================================================
+            if execution_context.get("pending_next_agent"):
+                if is_agent_finish:
+                    # AgentFinish comes from the agent that just completed - use last_known_agent
+                    agent_name = execution_context.get("last_known_agent", "Unknown Agent")
+                    logger.info(f"{log_prefix} PENDING_CONTEXT: AgentFinish using last_known_agent: {agent_name}")
+                else:
+                    # Any other event type signals the START of the new agent's work
+                    # Complete the context switch NOW
+                    agent_name = execution_context["pending_next_agent"]
+                    execution_context["current_agent"] = agent_name
+                    execution_context["last_known_agent"] = agent_name
+                    execution_context["pending_next_agent"] = None  # Clear the pending flag
+                    logger.info(f"{log_prefix} CONTEXT SWITCH COMPLETE: Switched to agent '{agent_name}' (triggered by {step_type})")
+
             # Check if we're working on a task that's different from what we expect
             # This helps detect task switches
             if crew_ref and hasattr(crew_ref, 'tasks') and execution_context["task_index"] < len(crew_ref.tasks):
@@ -191,7 +216,8 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
                         logger.info(f"{log_prefix} TASK SWITCH DETECTED - old agent: {old_agent}, new agent: {new_agent}")
             
             # Strategy 1: Direct agent attribute (rare but check first)
-            if hasattr(step_output, 'agent') and step_output.agent:
+            # Only check if we don't already have an agent from pending_next_agent check
+            if agent_name == "Unknown Agent" and hasattr(step_output, 'agent') and step_output.agent:
                 if hasattr(step_output.agent, 'role'):
                     agent_name = step_output.agent.role
                     execution_context["current_agent"] = agent_name
@@ -200,9 +226,10 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
                     agent_name = execution_context["agent_lookup"][id(step_output.agent)]
                     execution_context["current_agent"] = agent_name
                     execution_context["last_known_agent"] = agent_name
-            
+
             # Strategy 2: Handle specific object types using context
-            elif is_agent_action or is_agent_finish or is_tool_result or isinstance(step_output, str):
+            # Only proceed if we don't already have an agent determined
+            elif agent_name == "Unknown Agent" and (is_agent_action or is_agent_finish or is_tool_result or isinstance(step_output, str)):
                 # These types don't have direct agent reference, use context
                 
                 # Special handling for AgentAction - check which agent owns the tool being used
@@ -273,32 +300,52 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
                 
                 # If we still don't have an agent, use other strategies
                 if agent_name == "Unknown Agent":
-                    # For AgentAction, we're about to use a tool, so this is the current agent acting
-                    # For AgentFinish, the agent is finishing their task
-                    # For ToolResult, it's the result of the current agent's tool usage
-                    # For strings, it's output from an agent without tools
-                    
-                    # First check if we have a current task and its agent mapping
-                    # This is most reliable for multi-task crews
-                    if execution_context["current_task"] and execution_context["current_task"] in execution_context["task_to_agent"]:
-                        agent_name = execution_context["task_to_agent"][execution_context["current_task"]]
-                        execution_context["current_agent"] = agent_name
-                        execution_context["last_known_agent"] = agent_name
-                    elif execution_context["current_agent"]:
-                        agent_name = execution_context["current_agent"]
-                    elif execution_context["last_known_agent"]:
-                        agent_name = execution_context["last_known_agent"]
-                    # Try to infer from the first task if we haven't started yet
-                    elif not execution_context["current_agent"] and execution_context["task_to_agent"]:
-                        # If we have task mappings but no current agent, we're likely at the start
-                        # Use the agent from the first task
-                        for task_idx in sorted([k for k in execution_context["task_to_agent"].keys() if isinstance(k, int)]):
-                            agent_name = execution_context["task_to_agent"][task_idx]
+                    # CRITICAL: For AgentFinish events, ALWAYS use last_known_agent first!
+                    # AgentFinish is the completion signal from the agent that just finished.
+                    # If task_callback already prepared for next task, current_agent might be wrong.
+                    if is_agent_finish:
+                        if execution_context.get("last_known_agent"):
+                            agent_name = execution_context["last_known_agent"]
+                            logger.info(f"{log_prefix} AgentFinish using last_known_agent: {agent_name}")
+                        elif execution_context.get("current_agent"):
+                            agent_name = execution_context["current_agent"]
+                            logger.info(f"{log_prefix} AgentFinish fallback to current_agent: {agent_name}")
+                    else:
+                        # For AgentAction, we're about to use a tool, so this is the current agent acting
+                        # For ToolResult, it's the result of the current agent's tool usage
+                        # For strings, it's output from an agent without tools
+
+                        # NOTE: pending_next_agent is now handled EARLY in the function (line ~186)
+                        # This code block should rarely execute as the early check handles it first.
+                        # Keeping as safety fallback but logging if this path is hit.
+                        if execution_context.get("pending_next_agent"):
+                            # This is the first event from the new agent - complete the context switch
+                            agent_name = execution_context["pending_next_agent"]
                             execution_context["current_agent"] = agent_name
-                            logger.debug(f"{log_prefix} Using first task's agent: {agent_name}")
-                            break
+                            execution_context["last_known_agent"] = agent_name
+                            execution_context["pending_next_agent"] = None  # Clear the pending
+                            logger.warning(f"{log_prefix} FALLBACK CONTEXT SWITCH (early check bypassed): Now working with agent {agent_name} (triggered by {step_type})")
+                        # First check if we have a current task and its agent mapping
+                        # This is most reliable for multi-task crews
+                        elif execution_context["current_task"] and execution_context["current_task"] in execution_context["task_to_agent"]:
+                            agent_name = execution_context["task_to_agent"][execution_context["current_task"]]
+                            execution_context["current_agent"] = agent_name
+                            execution_context["last_known_agent"] = agent_name
+                        elif execution_context["current_agent"]:
+                            agent_name = execution_context["current_agent"]
+                        elif execution_context["last_known_agent"]:
+                            agent_name = execution_context["last_known_agent"]
+                        # Try to infer from the first task if we haven't started yet
+                        elif not execution_context["current_agent"] and execution_context["task_to_agent"]:
+                            # If we have task mappings but no current agent, we're likely at the start
+                            # Use the agent from the first task
+                            for task_idx in sorted([k for k in execution_context["task_to_agent"].keys() if isinstance(k, int)]):
+                                agent_name = execution_context["task_to_agent"][task_idx]
+                                execution_context["current_agent"] = agent_name
+                                logger.debug(f"{log_prefix} Using first task's agent: {agent_name}")
+                                break
                 # For single-agent crews
-                elif len(execution_context["agent_lookup"]) > 0:
+                if agent_name == "Unknown Agent" and len(execution_context["agent_lookup"]) > 0:
                     # Count actual agents (not including reverse lookups)
                     agent_roles = [v for k, v in execution_context["agent_lookup"].items() if isinstance(v, str)]
                     if len(agent_roles) == 1:
@@ -359,53 +406,19 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
                 logger.info(f"{log_prefix} [DEBUG STEP] Task ID: {task_id}")
                 logger.info(f"{log_prefix} [DEBUG STEP] Will log start event? {task_id and task_id not in execution_context['task_started_logged']}")
                 
-                # Check if this is a new task that we haven't logged a start for
+                # NOTE: task_started trace is now handled by logging_callbacks.py via TaskStartedEvent
+                # This avoids duplicate traces and ensures correct agent attribution.
+                # We still track which tasks have been logged for internal state management.
                 if task_id and task_id not in execution_context["task_started_logged"]:
-                    # Log task_started event
-                    logger.info(f"{log_prefix} Task started: {task_description} (ID: {task_id})")
-                    
-                    # Enqueue task_started trace
-                    task_started_data = {
-                        "type": "task_started",
-                        "agent_role": agent_name,
-                        "task_description": task_description
-                    }
-
-                    if task_id:
-                        task_started_data["task_id"] = task_id
-
-                    # Add crew_name for flow execution tracking
-                    if execution_context.get("crew_name"):
-                        task_started_data["crew_name"] = execution_context["crew_name"]
-                    
-                    trace_data = {
-                        "job_id": job_id,
-                        "event_source": "task",
-                        "event_context": task_description,
-                        "event_type": "task_started",
-                        "timestamp": timestamp.isoformat(),
-                        "output_content": f"Task '{task_description}' started by agent '{agent_name}'",
-                        "extra_data": task_started_data
-                    }
-                    
-                    # Add group context if available
-                    if group_context:
-                        trace_data["group_id"] = group_context.primary_group_id
-                        trace_data["group_email"] = group_context.group_email
-                    
-                    try:
-                        trace_queue.put_nowait(trace_data)
-                        execution_context["task_started_logged"].add(task_id)
-                        logger.debug(f"{log_prefix} Task started trace enqueued successfully")
-                    except Exception as trace_error:
-                        logger.error(f"{log_prefix} Failed to enqueue task started trace: {trace_error}")
+                    logger.info(f"{log_prefix} Task started: {task_description} (ID: {task_id}) - trace handled by event bus")
+                    execution_context["task_started_logged"].add(task_id)
             
             # Limit content length for logging
             content_preview = content[:500] + "..." if len(content) > 500 else content
-            
-            # Log the step
+
+            # Log the step to the execution log stream (this is for the live log view, not traces)
             log_message = f"[STEP] Agent: {agent_name} - Output: {content_preview}"
-            
+
             # Enqueue to execution logs with group context
             try:
                 enqueue_log(
@@ -416,32 +429,74 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
                 )
             except Exception as log_error:
                 logger.error(f"{log_prefix} Failed to enqueue execution log: {log_error}")
-            
-            # Enqueue to trace queue for detailed analysis
-            trace_data = {
-                "job_id": job_id,
-                "event_source": agent_name,
-                "event_context": "agent_step",
-                "event_type": "agent_execution",  # Use important event type
-                "timestamp": timestamp.isoformat(),
-                "output_content": content,
-                "extra_data": {
-                    "type": "step_callback",
-                    "agent_role": agent_name if agent_name != "Unknown Agent" else None,
-                    "step_type": type(step_output).__name__
+
+            # ==================================================================================
+            # TRACE CREATION CONSOLIDATION:
+            # Most agent output traces are now handled by logging_callbacks.py via the event bus:
+            # - AgentExecutionCompletedEvent → llm_response, task_completed, agent_reasoning
+            # - ToolUsageStarted/FinishedEvent → tool_usage (includes tool inputs and outputs)
+            # - MemoryRetrievalCompletedEvent → memory_retrieval_completed
+            #
+            # step_callback is now primarily for:
+            # 1. Context tracking (maintaining current agent/task state for correct attribution)
+            # 2. Execution logs (live log stream for debugging)
+            #
+            # We only create traces here for explicit "Final Answer:" patterns that benefit
+            # from step_callback's immediate context (the event bus sometimes has timing issues).
+            # ==================================================================================
+
+            should_create_trace = False
+            event_type = "agent_execution"
+            event_context = "agent_step"
+
+            if is_agent_finish:
+                # AgentFinish represents the agent's final output
+                # Check if it's a formal "Final Answer" pattern - these are important milestones
+                if "Final Answer:" in content or "FINAL ANSWER:" in content:
+                    should_create_trace = True
+                    event_type = "agent_final_answer"
+                    event_context = "final_answer"
+                    logger.info(f"{log_prefix} Creating trace for Final Answer from {agent_name}")
+                # Note: Regular agent completions are handled by AgentExecutionCompletedEvent (llm_response)
+
+            # Note: AgentAction (tool usage) traces are now handled by ToolUsageStartedEvent
+            # which has better context from the event bus. We don't create duplicates here.
+
+            # Create trace only if needed
+            if should_create_trace:
+                trace_data = {
+                    "job_id": job_id,
+                    "event_source": agent_name,
+                    "event_context": event_context,
+                    "event_type": event_type,
+                    "timestamp": timestamp.isoformat(),
+                    "output_content": content,
+                    "extra_data": {
+                        "type": "step_callback",
+                        "agent_role": agent_name if agent_name != "Unknown Agent" else None,
+                        "step_type": step_type,
+                        "task_id": task_id if current_task and hasattr(current_task, '_kasal_task_id') else None,
+                        "task_description": task_description if current_task and hasattr(current_task, 'description') else None
+                    }
                 }
-            }
-            
-            # Add group context if available
-            if group_context:
-                trace_data["group_id"] = group_context.primary_group_id
-                trace_data["group_email"] = group_context.group_email
-            
-            try:
-                trace_queue.put_nowait(trace_data)
-                logger.debug(f"{log_prefix} Step trace enqueued successfully")
-            except Exception as trace_error:
-                logger.error(f"{log_prefix} Failed to enqueue step trace: {trace_error}")
+
+                # Add current task context
+                if current_task:
+                    if hasattr(current_task, '_kasal_task_id'):
+                        trace_data["extra_data"]["task_id"] = str(current_task._kasal_task_id)
+                    if hasattr(current_task, 'description'):
+                        trace_data["extra_data"]["task_description"] = current_task.description
+
+                # Add group context if available
+                if group_context:
+                    trace_data["group_id"] = group_context.primary_group_id
+                    trace_data["group_email"] = group_context.group_email
+
+                try:
+                    trace_queue.put_nowait(trace_data)
+                    logger.debug(f"{log_prefix} Step trace ({event_type}) enqueued successfully")
+                except Exception as trace_error:
+                    logger.error(f"{log_prefix} Failed to enqueue step trace: {trace_error}")
             
         except Exception as e:
             logger.error(f"{log_prefix} Error in step_callback: {e}", exc_info=True)
@@ -596,23 +651,29 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
                             logger.info(f"{log_prefix} [DEBUG TASK COMPLETE] Next task ID: {next_task_id}")
                             logger.info(f"{log_prefix} [DEBUG TASK COMPLETE] Before context update - current_task: {execution_context.get('current_task')}")
                             logger.info(f"{log_prefix} [DEBUG TASK COMPLETE] Before context update - last_task_id: {execution_context.get('last_task_id')}")
-                            
-                            # IMMEDIATELY update context to the next agent
-                            execution_context["current_agent"] = next_agent_name
+
+                            # CRITICAL FIX: Do NOT update current_agent or last_known_agent yet!
+                            # There may still be pending step events (like AgentFinish) from the current agent.
+                            # Only update current_task and pending_next_agent so step_callback can handle the switch.
                             execution_context["current_task"] = next_task
-                            execution_context["last_known_agent"] = next_agent_name
-                            
+                            execution_context["pending_next_agent"] = next_agent_name  # Store for step_callback to use
+
+                            # Keep last_known_agent as the completing agent so AgentFinish events
+                            # are correctly attributed to the agent that produced them
+                            # execution_context["current_agent"] = next_agent_name  # REMOVED - don't switch yet
+                            # execution_context["last_known_agent"] = next_agent_name  # REMOVED - don't switch yet
+
                             # Clear the last task ID to allow the next task's start to be logged
                             execution_context["last_task_id"] = None
-                            
+
                             # IMPORTANT: Remove the next task from task_started_logged so it can be logged again
                             if next_task_id and next_task_id in execution_context["task_started_logged"]:
                                 execution_context["task_started_logged"].discard(next_task_id)
                                 logger.info(f"{log_prefix} [DEBUG TASK COMPLETE] Cleared task {next_task_id} from logged set to allow re-logging")
-                            
+
                             logger.info(f"{log_prefix} [DEBUG TASK COMPLETE] After context update - current_task: {execution_context.get('current_task')}")
                             logger.info(f"{log_prefix} [DEBUG TASK COMPLETE] After context update - last_task_id: {execution_context.get('last_task_id')}")
-                            logger.info(f"{log_prefix} *** CONTEXT SWITCH: Task {current_task_idx} ({agent_name}) completed → Task {next_task_idx} ({next_agent_name}) starting ***")
+                            logger.info(f"{log_prefix} *** CONTEXT PREPARED: Task {current_task_idx} ({agent_name}) completed, Task {next_task_idx} ({next_agent_name}) pending ***")
                         else:
                             logger.warning(f"{log_prefix} Next task exists but has no agent")
                     else:
@@ -623,10 +684,10 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
             # Limit content length for logging
             task_preview = task_description[:100] + "..." if len(task_description) > 100 else task_description
             content_preview = content[:500] + "..." if len(content) > 500 else content
-            
-            # Log the task completion
+
+            # Log the task completion to execution logs (for live log view)
             log_message = f"[TASK COMPLETED] Task: {task_preview} - Agent: {agent_name} - Output: {content_preview}"
-            
+
             # Enqueue to execution logs with group context
             try:
                 enqueue_log(
@@ -637,42 +698,10 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
                 )
             except Exception as log_error:
                 logger.error(f"{log_prefix} Failed to enqueue execution log: {log_error}")
-            
-            # Enqueue to trace queue for detailed analysis
-            extra_data = {
-                "type": "task_callback",
-                "agent_role": agent_name,
-                "task_description": task_description
-            }
 
-            # Add task_id if we found one
-            if task_id:
-                extra_data["task_id"] = task_id
-
-            # Add crew_name for flow execution tracking
-            if execution_context.get("crew_name"):
-                extra_data["crew_name"] = execution_context["crew_name"]
-            
-            trace_data = {
-                "job_id": job_id,
-                "event_source": "task",
-                "event_context": task_description,
-                "event_type": "task_completed",
-                "timestamp": timestamp.isoformat(),
-                "output_content": content,
-                "extra_data": extra_data
-            }
-            
-            # Add group context if available
-            if group_context:
-                trace_data["group_id"] = group_context.primary_group_id
-                trace_data["group_email"] = group_context.group_email
-            
-            try:
-                trace_queue.put_nowait(trace_data)
-                logger.debug(f"{log_prefix} Task trace enqueued successfully")
-            except Exception as trace_error:
-                logger.error(f"{log_prefix} Failed to enqueue task trace: {trace_error}")
+            # NOTE: task_completed trace is now handled by logging_callbacks.py via TaskCompletedEvent
+            # This avoids duplicate traces. The event bus handler has better agent/task attribution.
+            logger.debug(f"{log_prefix} Task completion logged (trace handled by event bus)")
             
         except Exception as e:
             logger.error(f"{log_prefix} Error in task_callback: {e}", exc_info=True)
@@ -711,29 +740,9 @@ def create_crew_callbacks(job_id: str, config: Dict[str, Any] = None, group_cont
             except Exception as log_error:
                 logger.error(f"{log_prefix} Failed to enqueue execution log: {log_error}")
             
-            # Also create trace for crew start
-            from src.services.trace_queue import get_trace_queue
-            trace_queue = get_trace_queue()
-            trace_data = {
-                "job_id": job_id,
-                "event_source": "crew",
-                "event_context": f"execution-{job_id}",
-                "event_type": "crew_started",
-                "timestamp": timestamp.isoformat(),
-                "output_content": f"Crew execution {job_id} started",
-                "extra_data": {"type": "crew_callback"}
-            }
-            
-            if group_context:
-                trace_data["group_id"] = group_context.primary_group_id
-                trace_data["group_email"] = group_context.group_email
-            
-            try:
-                trace_queue.put_nowait(trace_data)
-            except Exception as trace_error:
-                logger.error(f"{log_prefix} Failed to enqueue crew start trace: {trace_error}")
-            
-            logger.info(f"{log_prefix} Crew execution started")
+            # NOTE: crew_started trace is now handled by logging_callbacks.py via CrewKickoffStartedEvent
+            # This avoids duplicate traces. We only create the execution log entry here.
+            logger.info(f"{log_prefix} Crew execution started (trace created by event bus)")
             
         except Exception as e:
             logger.error(f"{log_prefix} Error in on_crew_start: {e}", exc_info=True)
@@ -757,29 +766,9 @@ def create_crew_callbacks(job_id: str, config: Dict[str, Any] = None, group_cont
             except Exception as log_error:
                 logger.error(f"{log_prefix} Failed to enqueue execution log: {log_error}")
             
-            # Also create trace for crew completion
-            from src.services.trace_queue import get_trace_queue
-            trace_queue = get_trace_queue()
-            trace_data = {
-                "job_id": job_id,
-                "event_source": "crew",
-                "event_context": f"execution-{job_id}",
-                "event_type": "crew_completed",
-                "timestamp": timestamp.isoformat(),
-                "output_content": result_preview,
-                "extra_data": {"type": "crew_callback"}
-            }
-            
-            if group_context:
-                trace_data["group_id"] = group_context.primary_group_id
-                trace_data["group_email"] = group_context.group_email
-            
-            try:
-                trace_queue.put_nowait(trace_data)
-            except Exception as trace_error:
-                logger.error(f"{log_prefix} Failed to enqueue crew completion trace: {trace_error}")
-            
-            logger.info(f"{log_prefix} Crew execution completed")
+            # NOTE: crew_completed trace is now handled by logging_callbacks.py via CrewKickoffCompletedEvent
+            # This avoids duplicate traces. We only create the execution log entry here.
+            logger.info(f"{log_prefix} Crew execution completed (trace created by event bus)")
             
         except Exception as e:
             logger.error(f"{log_prefix} Error in on_crew_complete: {e}", exc_info=True)

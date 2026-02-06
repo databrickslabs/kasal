@@ -192,32 +192,7 @@ class TraceManager:
                                         "agent_reasoning", "agent_reasoning_error"
                                     ]
 
-                                    # Debug-only events that should be suppressed when debug tracing is disabled
-                                    debug_only_event_types = {
-                                        "memory_write_started", "memory_retrieval_started",
-                                        "memory_write", "memory_retrieval",
-                                        "knowledge_retrieval_started", "knowledge_retrieval",
-                                        "agent_reasoning", "agent_reasoning_error",
-                                        "llm_guardrail",
-                                    }
-
                                     if event_type in important_event_types:
-                                        # Respect engine debug tracing config for verbose events
-                                        try:
-                                            if not hasattr(TraceManager, "_debug_tracing_enabled_cache"):
-                                                TraceManager._debug_tracing_enabled_cache = None
-                                            if TraceManager._debug_tracing_enabled_cache is None:
-                                                from src.services.engine_config_service import EngineConfigService
-                                                from src.db.session import async_session_factory
-                                                async with async_session_factory() as cfg_session:
-                                                    cfg_service = EngineConfigService(cfg_session)
-                                                    TraceManager._debug_tracing_enabled_cache = await cfg_service.get_crewai_debug_tracing()
-                                            if (event_type in debug_only_event_types) and (TraceManager._debug_tracing_enabled_cache is False):
-                                                logger.debug(f"[TraceManager._trace_writer_loop] {trace_info} Debug tracing disabled - skipping {event_type}")
-                                                continue
-                                        except Exception as cfg_err:
-                                            logger.debug(f"[TraceManager._trace_writer_loop] Could not read debug tracing flag: {cfg_err}. Defaulting to enabled.")
-
                                         # Prepare trace data in the format expected by ExecutionTraceService
                                         # Extract output content from the nested structure
                                         output_data = trace_data.get("output", {})

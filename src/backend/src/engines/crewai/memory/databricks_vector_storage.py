@@ -57,6 +57,7 @@ class DatabricksVectorStorage:
         embedding_dimension: int = 1024,
         user_token: Optional[str] = None,
         group_id: Optional[str] = None,
+        job_id: Optional[str] = None,
         wait_for_index: bool = False,
         max_wait_seconds: int = 300
     ):
@@ -76,6 +77,7 @@ class DatabricksVectorStorage:
             embedding_dimension: Dimension of embeddings (default 1024 for databricks-gte-large-en)
             user_token: Optional user token for OBO authentication
             group_id: Optional group ID for multi-tenant isolation (required for PAT authentication)
+            job_id: Optional job/execution ID for session scoping (used by short-term memory)
             wait_for_index: Whether to wait for index to be ready
             max_wait_seconds: Maximum time to wait for index
         """
@@ -86,6 +88,8 @@ class DatabricksVectorStorage:
         self.memory_type = memory_type
         self.embedding_dimension = embedding_dimension
         self.group_id = group_id
+        # job_id is used as session_id for short-term memory to scope memories to current run
+        self.job_id = job_id
 
         # Initialize memory logger based on type
         if memory_type == "short_term":
@@ -171,7 +175,9 @@ class DatabricksVectorStorage:
                 if "query_text" in schema:
                     record["query_text"] = data.get("context", {}).get("query_text", "")
                 if "session_id" in schema:
-                    record["session_id"] = data.get("context", {}).get("session_id", str(uuid.uuid4()))
+                    # CRITICAL: Use job_id as session_id to scope short-term memory to current run
+                    # This ensures short-term memories don't leak across different executions
+                    record["session_id"] = self.job_id or data.get("context", {}).get("session_id", str(uuid.uuid4()))
                 if "interaction_sequence" in schema:
                     record["interaction_sequence"] = data.get("context", {}).get("interaction_sequence", 0)
                 if "timestamp" in schema:
@@ -422,34 +428,8 @@ class DatabricksVectorStorage:
                 raise Exception(error_msg)
 
             self.memory_logger.debug(f"Saved {self.memory_type} memory record to index {self.index_name}")
-
-            # Emit execution trace for successful write
-            try:
-                if self.trace_context and self.trace_context.get('job_id'):
-                    from src.services.trace_queue import get_trace_queue
-                    q = get_trace_queue()
-                    # Prepare safe snapshot without embedding
-                    safe_record = {k: v for k, v in record.items() if k != 'embedding'}
-                    q.put_nowait({
-                        "job_id": self.trace_context.get('job_id'),
-                        "event_type": "memory_write",
-                        "event_source": f"Memory[{self.memory_type}:databricks]",
-                        "event_context": f"index={self.index_name}",
-                        "output": {
-                            "backend": "databricks",
-                            "memory_type": self.memory_type,
-                            "index": self.index_name,
-                            "endpoint": self.endpoint_name,
-                            "record": safe_record
-                        },
-                        "trace_metadata": {
-                            "crew_id": self.crew_id,
-                            "workspace_url": self.workspace_url
-                        },
-                        "group_context": self.trace_context.get('group_context')
-                    })
-            except Exception as trace_err:
-                self.memory_logger.debug(f"Could not enqueue memory_write trace: {trace_err}")
+            # NOTE: Trace emission removed - memory events are now captured
+            # by the CrewAI event bus in logging_callbacks.py with proper agent attribution.
 
         except Exception as e:
             self.memory_logger.error(f"Failed to save to Databricks Vector Search: {e}")

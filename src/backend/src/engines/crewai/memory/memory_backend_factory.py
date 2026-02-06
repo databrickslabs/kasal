@@ -5,7 +5,7 @@ This module provides a factory pattern for creating different memory storage
 backends based on configuration.
 """
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Tuple
 
 from src.core.logger import LoggerManager
 from src.schemas.memory_backend import MemoryBackendType, MemoryBackendConfig
@@ -13,25 +13,125 @@ from src.schemas.memory_backend import MemoryBackendType, MemoryBackendConfig
 logger = LoggerManager.get_instance().crew
 
 
+class DatabricksIndexValidationError(Exception):
+    """
+    Custom exception raised when Databricks Vector Search index validation fails.
+
+    This exception includes validation details that can be used to emit
+    trace events visible in the UI.
+    """
+    def __init__(self, message: str, validation_result: Dict[str, Any]):
+        super().__init__(message)
+        self.validation_result = validation_result
+        self.error_type = validation_result.get("error_type", "unknown")
+        self.missing_indexes = validation_result.get("missing_indexes", [])
+        self.provisioning_indexes = validation_result.get("provisioning_indexes", [])
+
+
 class MemoryBackendFactory:
     """Factory for creating memory storage backends."""
-    
+
+    @staticmethod
+    async def _validate_databricks_indexes(
+        config: MemoryBackendConfig,
+        user_token: Optional[str] = None
+    ) -> Tuple[bool, List[str], List[str], List[str]]:
+        """
+        Validate that configured Databricks Vector Search indexes exist and are ready.
+
+        Args:
+            config: Memory backend configuration
+            user_token: Optional user token for OBO authentication
+
+        Returns:
+            Tuple of (all_valid, valid_indexes, missing_indexes, provisioning_indexes)
+        """
+        if not config.databricks_config:
+            return True, [], [], []
+
+        valid_indexes = []
+        missing_indexes = []
+        provisioning_indexes = []
+
+        try:
+            from src.repositories.databricks_vector_index_repository import DatabricksVectorIndexRepository
+
+            workspace_url = config.databricks_config.workspace_url
+            endpoint_name = config.databricks_config.endpoint_name
+
+            repository = DatabricksVectorIndexRepository(workspace_url)
+
+            # Check each configured index
+            indexes_to_check = []
+            if config.enable_short_term and config.databricks_config.short_term_index:
+                indexes_to_check.append(("short_term", config.databricks_config.short_term_index))
+            if config.enable_long_term and config.databricks_config.long_term_index:
+                indexes_to_check.append(("long_term", config.databricks_config.long_term_index))
+            if config.enable_entity and config.databricks_config.entity_index:
+                indexes_to_check.append(("entity", config.databricks_config.entity_index))
+
+            for memory_type, index_name in indexes_to_check:
+                try:
+                    result = await repository.describe_index(
+                        index_name,
+                        endpoint_name,
+                        user_token
+                    )
+
+                    if result.get("success"):
+                        description = result.get("description", {})
+                        status = description.get("status", {})
+                        state = status.get("state", "UNKNOWN")
+                        is_ready = status.get("ready", False)
+
+                        if is_ready or state == "ONLINE" or state == "READY":
+                            valid_indexes.append(f"{memory_type}: {index_name}")
+                            logger.info(f"✓ Databricks {memory_type} memory index READY: {index_name}")
+                        elif state in ["PROVISIONING", "PENDING", "CREATING"]:
+                            provisioning_indexes.append(f"{memory_type}: {index_name} (state: {state})")
+                            logger.warning(f"⏳ Databricks {memory_type} memory index PROVISIONING: {index_name}")
+                            logger.warning(f"   Index state: {state} - Memory operations may fail until index is ready")
+                        else:
+                            # Index exists but in unknown or error state
+                            provisioning_indexes.append(f"{memory_type}: {index_name} (state: {state}, ready: {is_ready})")
+                            logger.warning(f"⚠ Databricks {memory_type} memory index not ready: {index_name}")
+                            logger.warning(f"   Index state: {state}, ready: {is_ready}")
+                    else:
+                        error_msg = result.get("error", "Unknown error")
+                        missing_indexes.append(f"{memory_type}: {index_name} ({error_msg})")
+                        logger.error(f"✗ Databricks {memory_type} memory index NOT FOUND or inaccessible: {index_name}")
+                        logger.error(f"  Error: {error_msg}")
+
+                except Exception as e:
+                    missing_indexes.append(f"{memory_type}: {index_name} (Error: {str(e)})")
+                    logger.error(f"✗ Failed to validate Databricks {memory_type} memory index: {index_name}")
+                    logger.error(f"  Error: {str(e)}")
+
+            all_valid = len(missing_indexes) == 0 and len(provisioning_indexes) == 0
+            return all_valid, valid_indexes, missing_indexes, provisioning_indexes
+
+        except Exception as e:
+            logger.error(f"Failed to validate Databricks indexes: {e}")
+            return False, [], [f"Validation failed: {str(e)}"], []
+
     @staticmethod
     async def create_memory_backends(
         config: MemoryBackendConfig,
         crew_id: str,
         embedder: Optional[Any] = None,
-        user_token: Optional[str] = None
+        user_token: Optional[str] = None,
+        job_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Create memory storage backends based on configuration.
-        
+
         Args:
             config: Memory backend configuration
             crew_id: Unique identifier for the crew
             embedder: Optional embedder to use for generating embeddings
             user_token: Optional user access token for OBO authentication
-            
+            job_id: Optional job/execution ID for session scoping (used by short-term memory)
+
         Returns:
             Dictionary with memory type keys and storage instances
         """
@@ -41,11 +141,87 @@ class MemoryBackendFactory:
             # Create Databricks Vector Storage backends
             if not config.databricks_config:
                 raise ValueError("Databricks configuration is required for Databricks backend")
-            
+
+            # CRITICAL: Validate that all configured indexes exist and are ready BEFORE creating backends
+            # This prevents confusing "no results found" errors when indexes are deleted or still provisioning
+            logger.info("=" * 80)
+            logger.info("DATABRICKS MEMORY BACKEND - INDEX VALIDATION")
+            logger.info("=" * 80)
+
+            all_valid, valid_indexes, missing_indexes, provisioning_indexes = await MemoryBackendFactory._validate_databricks_indexes(
+                config, user_token
+            )
+
+            # Build validation result for trace emission
+            validation_result = {
+                "valid": all_valid,
+                "valid_indexes": valid_indexes,
+                "missing_indexes": missing_indexes,
+                "provisioning_indexes": provisioning_indexes,
+                "error_message": None
+            }
+
+            if missing_indexes:
+                logger.error("=" * 80)
+                logger.error("DATABRICKS MEMORY BACKEND - MISSING INDEXES DETECTED!")
+                logger.error("=" * 80)
+                logger.error("The following Databricks Vector Search indexes are configured but do not exist:")
+                for missing in missing_indexes:
+                    logger.error(f"  ✗ {missing}")
+                logger.error("")
+                logger.error("RECOMMENDATION: Either:")
+                logger.error("  1. Create the missing indexes in Databricks")
+                logger.error("  2. Disable Databricks memory backend in settings and use default CrewAI memory")
+                logger.error("=" * 80)
+
+                error_msg = (
+                    f"Databricks memory backend configuration error: The following indexes do not exist or are inaccessible: "
+                    f"{', '.join(missing_indexes)}. "
+                    f"Please create the indexes in Databricks or disable Databricks memory backend in settings."
+                )
+                validation_result["error_message"] = error_msg
+                validation_result["error_type"] = "missing_indexes"
+
+                # Raise a custom exception that includes the validation result
+                raise DatabricksIndexValidationError(error_msg, validation_result)
+
+            if provisioning_indexes:
+                logger.error("=" * 80)
+                logger.error("DATABRICKS MEMORY BACKEND - INDEXES STILL PROVISIONING!")
+                logger.error("=" * 80)
+                logger.error("The following Databricks Vector Search indexes are still being provisioned:")
+                for provisioning in provisioning_indexes:
+                    logger.error(f"  ⏳ {provisioning}")
+                logger.error("")
+                logger.error("Memory read/write operations will FAIL until indexes are ready.")
+                logger.error("")
+                logger.error("RECOMMENDATION: Either:")
+                logger.error("  1. Wait for the indexes to finish provisioning (check Databricks UI)")
+                logger.error("  2. Disable Databricks memory backend in settings and use default CrewAI memory")
+                logger.error("  3. Disable memory on all agents until indexes are ready")
+                logger.error("=" * 80)
+
+                error_msg = (
+                    f"Databricks memory backend configuration error: The following indexes are still provisioning: "
+                    f"{', '.join(provisioning_indexes)}. "
+                    f"Please wait for the indexes to finish provisioning, or disable Databricks memory backend in settings."
+                )
+                validation_result["error_message"] = error_msg
+                validation_result["error_type"] = "provisioning_indexes"
+
+                # Raise a custom exception that includes the validation result
+                raise DatabricksIndexValidationError(error_msg, validation_result)
+
+            if valid_indexes:
+                logger.info("All configured Databricks indexes validated successfully:")
+                for valid in valid_indexes:
+                    logger.info(f"  ✓ {valid}")
+            logger.info("=" * 80)
+
             try:
                 from src.engines.crewai.memory.databricks_vector_storage import DatabricksVectorStorage
                 from src.engines.crewai.memory.crewai_databricks_wrapper import CrewAIDatabricksWrapper
-                
+
                 # Create short-term memory storage
                 if config.enable_short_term and config.databricks_config.short_term_index:
                     logger.info(f"Creating Databricks short-term memory storage for crew {crew_id}")
@@ -79,12 +255,17 @@ class MemoryBackendFactory:
                     if group_id:
                         storage_kwargs["group_id"] = group_id
                         logger.info(f"Added group_id to short-term storage: {group_id}")
+                    # CRITICAL: Pass job_id to short-term storage for session scoping
+                    # Short-term memory should only return results from the current run
+                    if job_id:
+                        storage_kwargs["job_id"] = job_id
+                        logger.info(f"Added job_id to short-term storage for session scoping: {job_id}")
 
                     short_term_storage = DatabricksVectorStorage(**storage_kwargs)
                     # Wrap with CrewAI-compatible wrapper
                     memory_backends['short_term'] = CrewAIDatabricksWrapper(
-                        short_term_storage, 
-                        embedder, 
+                        short_term_storage,
+                        embedder,
                         enable_relationship_retrieval=False  # Not applicable for short-term memory
                     )
                 

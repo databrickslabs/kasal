@@ -12,6 +12,7 @@ from typing import Dict, Any, Optional
 from src.models.execution_status import ExecutionStatus
 from src.repositories.execution_repository import ExecutionRepository
 from src.utils.asyncio_utils import execute_db_operation_with_fresh_engine
+from src.core.sse_manager import sse_manager, SSEEvent
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -113,6 +114,39 @@ class ExecutionStatusService:
                     logger.debug(f"[ExecutionStatusService] Committing transaction after flushing update for record_id: {record_id}")
                     await session.commit() # Attempt to COMMIT the transaction
                     logger.info(f"[ExecutionStatusService] Successfully committed status update for job_id: {job_id} (record_id: {record_id}) to {status}.")
+
+                    # Broadcast SSE event for real-time updates
+                    # Skip SSE broadcast in subprocess mode - subprocess has its own SSE manager with no clients
+                    import os
+                    is_subprocess = os.environ.get('CREW_SUBPROCESS_MODE') == 'true'
+                    if is_subprocess:
+                        logger.debug(f"[ExecutionStatusService] Skipping SSE broadcast in subprocess mode for job_id={job_id}")
+                    else:
+                        try:
+                            from datetime import datetime as dt
+                            event_data = {
+                                "job_id": job_id,
+                                "status": status,
+                                "message": message,
+                                "updated_at": dt.now().isoformat(),  # Use current timestamp since model has no updated_at
+                                "group_id": updated_execution.group_id  # Include group_id for filtering
+                            }
+                            if result is not None:
+                                event_data["result"] = result
+                            if status in [ExecutionStatus.COMPLETED.value, ExecutionStatus.FAILED.value, ExecutionStatus.CANCELLED.value]:
+                                event_data["completed_at"] = updated_execution.completed_at.isoformat() if updated_execution.completed_at else None
+
+                            event = SSEEvent(
+                                data=event_data,
+                                event="execution_update",
+                                id=f"{job_id}_{status}_{record_id}"
+                            )
+                            await sse_manager.broadcast_to_job(job_id, event)
+                            logger.debug(f"[ExecutionStatusService] Broadcasted SSE event for job_id: {job_id}")
+                        except Exception as sse_error:
+                            # Don't fail the update if SSE fails
+                            logger.warning(f"[ExecutionStatusService] Failed to broadcast SSE event: {sse_error}")
+
                     return True
                 else:
                     logger.error(f"[ExecutionStatusService] Failed to update execution for job_id: {job_id} (record_id: {record_id}). Update method returned None.")

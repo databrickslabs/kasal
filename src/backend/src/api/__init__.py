@@ -51,6 +51,7 @@ from src.api.kpi_conversion_router import router as kpi_conversion_router
 from src.api.converter_router import router as converter_router
 from src.api.agentbricks_router import router as agentbricks_router
 from src.api.hitl_router import router as hitl_router
+from src.api.sse_router import router as sse_router
 
 # Create the main API router
 api_router = APIRouter()
@@ -107,6 +108,7 @@ api_router.include_router(kpi_conversion_router)
 api_router.include_router(converter_router)
 api_router.include_router(agentbricks_router)
 api_router.include_router(hitl_router)
+api_router.include_router(sse_router)
 
 __all__ = [
     "api_router",
@@ -156,4 +158,5 @@ __all__ = [
     "agentbricks_router",
     "mlflow_router",
     "hitl_router",
+    "sse_router",
 ]

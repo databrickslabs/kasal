@@ -364,6 +364,16 @@ class CrewPreparation:
                         agent_config['tool_configs'] = {}
                     agent_config['tool_configs']['MCP_SERVERS'] = {'servers': agent_mcp_servers}
 
+                # Propagate crew-level reasoning config to each agent
+                # NOTE: In CrewAI, reasoning is an Agent-level parameter, NOT a Crew-level parameter
+                crew_config = self.config.get('crew', {})
+                if crew_config.get('reasoning') and 'reasoning' not in agent_config:
+                    agent_config['reasoning'] = True
+                    logger.info(f"Agent {agent_name}: Enabling reasoning from crew-level config")
+                if crew_config.get('max_reasoning_attempts') and 'max_reasoning_attempts' not in agent_config:
+                    agent_config['max_reasoning_attempts'] = crew_config['max_reasoning_attempts']
+                    logger.info(f"Agent {agent_name}: Setting max_reasoning_attempts={crew_config['max_reasoning_attempts']} from crew-level config")
+
                 agent = await create_agent(
                     agent_key=agent_name,
                     agent_config=agent_config,
@@ -672,14 +682,30 @@ class CrewPreparation:
             self.embedder_config = embedder_config
 
             # 5. Fetch and setup memory backend
-            should_disable_memory = not crew_kwargs.get('memory', True)
+            # CRITICAL: Use consistent defaults - memory is enabled by default
+            memory_enabled = crew_kwargs.get('memory', True)
+            should_disable_memory = not memory_enabled
+
+            logger.info("=" * 80)
+            logger.info("MEMORY BACKEND CONFIGURATION FLOW")
+            logger.info("=" * 80)
+            logger.info(f"crew_kwargs['memory'] = {crew_kwargs.get('memory')}")
+            logger.info(f"memory_enabled = {memory_enabled}")
+            logger.info(f"should_disable_memory = {should_disable_memory}")
 
             memory_backend_config = None
-            if crew_kwargs.get('memory', False) and not should_disable_memory:
+            if memory_enabled and not should_disable_memory:
+                logger.info("Memory is enabled - fetching memory backend config from database...")
                 memory_backend_config = await memory_service.fetch_memory_backend_config()
+                if memory_backend_config:
+                    logger.info(f"Successfully fetched memory backend config: {memory_backend_config.get('backend_type')}")
+                else:
+                    logger.warning("fetch_memory_backend_config returned None")
+            else:
+                logger.info(f"Skipping memory backend fetch: memory_enabled={memory_enabled}, should_disable_memory={should_disable_memory}")
 
             # If no config found, create default
-            if not memory_backend_config and crew_kwargs.get('memory', False):
+            if not memory_backend_config and memory_enabled:
                 memory_backend_config = {
                     'backend_type': 'default',
                     'enable_short_term': True,
@@ -700,9 +726,14 @@ class CrewPreparation:
                 logger.info("Found 'Disabled Configuration' - ignoring database config and using default memory")
 
             # 8. Configure memory components
-            if crew_kwargs.get('memory', False) and not should_disable_memory and memory_backend_config:
+            # Re-check memory_enabled after potential disability check
+            memory_enabled = crew_kwargs.get('memory', True) and not should_disable_memory
+            logger.info(f"Step 8 - Configure memory components: memory_enabled={memory_enabled}, memory_backend_config={memory_backend_config is not None}")
+            if memory_enabled and memory_backend_config:
                 # Determine which embedder to use
-                embedder_for_backends = custom_embedder if memory_backend_config.get('backend_type') == 'databricks' else crew_kwargs.get('embedder')
+                backend_type = memory_backend_config.get('backend_type')
+                embedder_for_backends = custom_embedder if backend_type == 'databricks' else crew_kwargs.get('embedder')
+                logger.info(f"Creating memory backends with backend_type={backend_type}, using_custom_embedder={embedder_for_backends is not None}")
 
                 # Create memory backends
                 memory_backends = await memory_service.create_memory_backends(
@@ -710,6 +741,7 @@ class CrewPreparation:
                     crew_id,
                     embedder_for_backends
                 )
+                logger.info(f"Created memory backends: {list(memory_backends.keys()) if memory_backends else 'None'}")
 
                 # Configure CrewAI memory components
                 from src.schemas.memory_backend import MemoryBackendConfig as MemBackConfig
@@ -739,6 +771,25 @@ class CrewPreparation:
 
             # 12. Log configuration
             config_builder.log_memory_configuration(crew_kwargs, memory_backend_config)
+
+            # SUMMARY: Log which backend is ACTUALLY being used
+            logger.info("=" * 80)
+            logger.info("MEMORY BACKEND SUMMARY (FINAL)")
+            logger.info("=" * 80)
+            actual_backend = memory_backend_config.get('backend_type', 'unknown') if memory_backend_config else 'default (ChromaDB + SQLite)'
+            logger.info(f"Backend Type: {actual_backend}")
+            logger.info(f"short_term_memory configured: {'short_term_memory' in crew_kwargs}")
+            logger.info(f"long_term_memory configured: {'long_term_memory' in crew_kwargs}")
+            logger.info(f"entity_memory configured: {'entity_memory' in crew_kwargs}")
+            logger.info(f"crew_kwargs['memory'] = {crew_kwargs.get('memory')}")
+            if memory_backend_config and memory_backend_config.get('backend_type') == 'databricks':
+                db_config = memory_backend_config.get('databricks_config')
+                if db_config:
+                    logger.info(f"Databricks indexes:")
+                    logger.info(f"  short_term: {getattr(db_config, 'short_term_index', 'N/A')}")
+                    logger.info(f"  long_term: {getattr(db_config, 'long_term_index', 'N/A')}")
+                    logger.info(f"  entity: {getattr(db_config, 'entity_index', 'N/A')}")
+            logger.info("=" * 80)
 
             # 13. Handle OpenAI API key
             await self._handle_openai_api_key()

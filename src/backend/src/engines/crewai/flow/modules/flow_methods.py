@@ -302,9 +302,18 @@ class FlowMethodFactory:
                 logger.info(f"Planning enabled for crew from configuration")
 
             # Add reasoning configuration if enabled
+            # NOTE: In CrewAI, reasoning is an Agent-level parameter, NOT just a Crew-level parameter
+            # We must propagate reasoning to each agent for it to actually work
             if crew_data and hasattr(crew_data, 'reasoning') and crew_data.reasoning:
                 crew_kwargs['reasoning'] = True
                 logger.info(f"Reasoning enabled for crew from configuration")
+
+                # Propagate reasoning to each agent (required for CrewAI reasoning to work)
+                for agent in agents:
+                    if not hasattr(agent, 'reasoning') or not agent.reasoning:
+                        agent.reasoning = True
+                        agent_role = agent.role if hasattr(agent, 'role') else 'Unknown'
+                        logger.info(f"  → Propagated reasoning=True to agent '{agent_role}'")
 
             # Log crew configuration for debugging
             logger.info(f"📋 Crew configuration: memory={crew_memory}, process={process_type}, planning={crew_kwargs.get('planning', False)}, reasoning={crew_kwargs.get('reasoning', False)}")
@@ -605,9 +614,18 @@ class FlowMethodFactory:
                 logger.info(f"Planning enabled for listener crew from configuration")
 
             # Add reasoning configuration if enabled
+            # NOTE: In CrewAI, reasoning is an Agent-level parameter, NOT just a Crew-level parameter
+            # We must propagate reasoning to each agent for it to actually work
             if crew_data and hasattr(crew_data, 'reasoning') and crew_data.reasoning:
                 crew_kwargs['reasoning'] = True
                 logger.info(f"Reasoning enabled for listener crew from configuration")
+
+                # Propagate reasoning to each agent (required for CrewAI reasoning to work)
+                for agent in agents:
+                    if not hasattr(agent, 'reasoning') or not agent.reasoning:
+                        agent.reasoning = True
+                        agent_role = agent.role if hasattr(agent, 'role') else 'Unknown'
+                        logger.info(f"  → Propagated reasoning=True to agent '{agent_role}'")
 
             # Log crew configuration for debugging
             logger.info(f"Listener crew configuration: memory={crew_memory}, process={process_type}, planning={crew_kwargs.get('planning', False)}, reasoning={crew_kwargs.get('reasoning', False)}")

@@ -721,22 +721,31 @@ class TestAgentContextSwitching:
                     crew=crew
                 )
 
-                # First agent does work
-                step_cb("Research output")
+                # First agent does work with Final Answer (triggers trace)
+                mock_output_1 = MagicMock()
+                mock_output_1.__class__.__name__ = "AgentFinish"
+                mock_output_1.output = "Final Answer: Research output"
+                mock_output_1.agent = agent1
+                step_cb(mock_output_1)
 
                 # First task completes
-                mock_output1 = MagicMock()
-                mock_output1.description = "Research task"
-                mock_output1.raw = "Research result"
-                mock_output1.task = task1
+                mock_task_output1 = MagicMock()
+                mock_task_output1.description = "Research task"
+                mock_task_output1.raw = "Research result"
+                mock_task_output1.task = task1
 
-                task_cb(mock_output1)
+                task_cb(mock_task_output1)
 
-                # Second agent does work
-                step_cb("Writing output")
+                # Second agent does work with Final Answer (triggers trace)
+                mock_output_2 = MagicMock()
+                mock_output_2.__class__.__name__ = "AgentFinish"
+                mock_output_2.output = "Final Answer: Writing output"
+                mock_output_2.agent = agent2
+                step_cb(mock_output_2)
 
-                # Should have queued events for context switching
+                # Should have queued events for Final Answer patterns
                 assert mock_queue.put_nowait.called
+                assert mock_queue.put_nowait.call_count >= 2
 
 
 if __name__ == "__main__":

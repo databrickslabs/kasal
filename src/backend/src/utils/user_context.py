@@ -164,6 +164,10 @@ class GroupContext:
                 else:
                     highest_role = user_groups_with_roles[0][1] if user_groups_with_roles else None
 
+                # Always generate the user's personal workspace ID for inclusion in queries
+                # This ensures users can always access their personal data regardless of selected workspace
+                personal_workspace_id = cls.generate_individual_group_id(email)
+
                 # If a specific group_id was provided, validate it
                 if group_id:
                     # Check if it's a regular group the user belongs to
@@ -171,11 +175,14 @@ class GroupContext:
                         user_role = roles_by_group[group_id]
                         # Put the selected group first in the list
                         user_group_ids = [group_id] + [gid for gid in user_group_ids if gid != group_id]
+                        # ALWAYS include personal workspace so users can see their personal data
+                        if personal_workspace_id not in user_group_ids:
+                            user_group_ids.append(personal_workspace_id)
+                            logger.debug(f"Added personal workspace {personal_workspace_id} to group list for data access")
                     # Check if it's a personal workspace
                     elif group_id.startswith("user_"):
                         # Validate that the personal workspace matches the user's email
-                        expected_personal_workspace = cls.generate_individual_group_id(email)
-                        if group_id != expected_personal_workspace:
+                        if group_id != personal_workspace_id:
                             # SECURITY: Reject unauthorized personal workspace access
                             logger.warning(f"SECURITY: User {email} attempted to access unauthorized personal workspace {group_id}")
                             raise ValueError(f"Access denied: User does not have access to group {group_id}")
@@ -196,6 +203,10 @@ class GroupContext:
                 else:
                     # No specific group_id provided - use the role from the first group
                     user_role = user_groups_with_roles[0][1] if user_groups_with_roles else None
+                    # ALWAYS include personal workspace so users can see their personal data
+                    if personal_workspace_id not in user_group_ids:
+                        user_group_ids.append(personal_workspace_id)
+                        logger.debug(f"Added personal workspace {personal_workspace_id} to group list for data access")
 
                 logger.info(f"User {email} belongs to groups: {user_group_ids} with role: {user_role}, highest role: {highest_role}")
 
