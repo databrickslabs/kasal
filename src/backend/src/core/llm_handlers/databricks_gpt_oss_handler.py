@@ -741,5 +741,52 @@ class DatabricksRetryLLM(LLM):
         return ""
 
 
-# Apply the monkey patch when this module is imported
+def apply_tool_calls_fix():
+    """
+    Fix CrewAI bug where tool_calls are silently dropped when the LLM returns
+    both content text and tool_calls in the same response (common with Claude).
+
+    Bug in LLM._handle_non_streaming_response (llm.py):
+        if (not tool_calls or not available_functions) and text_response:
+            return text_response  # Silently drops tool_calls!
+
+    Fix: Change condition to `not tool_calls and text_response` so tool_calls
+    are always returned to the executor when present.
+    """
+    import inspect
+    import textwrap
+
+    for method_name in ('_handle_non_streaming_response', '_ahandle_non_streaming_response'):
+        try:
+            method = getattr(LLM, method_name)
+            source = inspect.getsource(method)
+
+            if '(not tool_calls or not available_functions) and text_response' not in source:
+                logger.info(f"LLM.{method_name}: tool_calls fix not needed (condition already correct)")
+                continue
+
+            fixed_source = source.replace(
+                '(not tool_calls or not available_functions) and text_response',
+                'not tool_calls and text_response',
+            )
+
+            # Compile with annotations future flag (CO_FUTURE_ANNOTATIONS = 0x100000)
+            # This matches the `from __future__ import annotations` in crewai/llm.py
+            import crewai.llm as llm_module
+            code = compile(
+                'from __future__ import annotations\n' + textwrap.dedent(fixed_source),
+                f'<patched {method_name}>',
+                'exec',
+            )
+            code_ns = {**llm_module.__dict__}
+            exec(code, code_ns)
+            setattr(LLM, method_name, code_ns[method_name])
+            logger.info(f"Patched LLM.{method_name}: tool_calls no longer dropped when content also present")
+
+        except Exception as e:
+            logger.error(f"Failed to patch LLM.{method_name}: {e}")
+
+
+# Apply the monkey patches when this module is imported
 DatabricksGPTOSSHandler.apply_monkey_patch()
+apply_tool_calls_fix()
