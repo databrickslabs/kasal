@@ -80,6 +80,7 @@
     "filterByEndpoint": "Filtrar por Endpoint",
     "allEndpoints": "Todos os Endpoints",
     "noLogs": "Nenhum registro disponível",
+    "refresh": "Atualizar",
     "columns": {
       "timestamp": "Timestamp",
       "endpoint": "Endpoint",

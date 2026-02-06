@@ -80,6 +80,7 @@
     "filterByEndpoint": "एंडपॉइंट द्वारा फ़िल्टर करें",
     "allEndpoints": "सभी एंडपॉइंट",
     "noLogs": "कोई लॉग्स उपलब्ध नहीं",
+    "refresh": "रीफ्रेश",
     "columns": {
       "timestamp": "टाइमस्टैम्प",
       "endpoint": "एंडपॉइंट",

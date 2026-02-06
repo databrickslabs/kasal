@@ -84,6 +84,7 @@
     "filterByEndpoint": "Nach Endpunkt filtern",
     "allEndpoints": "Alle Endpunkte",
     "noLogs": "Keine Protokolle verfügbar",
+    "refresh": "Aktualisieren",
     "columns": {
       "timestamp": "Zeitstempel",
       "endpoint": "Endpunkt",

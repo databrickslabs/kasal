@@ -86,6 +86,7 @@
     "filterByEndpoint": "Filtrer par point de terminaison",
     "allEndpoints": "Tous les points de terminaison",
     "noLogs": "Aucun journal disponible",
+    "refresh": "Actualiser",
     "columns": {
       "timestamp": "Horodatage",
       "endpoint": "Point de terminaison",

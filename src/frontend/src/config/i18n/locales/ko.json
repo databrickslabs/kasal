@@ -80,6 +80,7 @@
     "filterByEndpoint": "엔드포인트로 필터링",
     "allEndpoints": "모든 엔드포인트",
     "noLogs": "사용 가능한 로그가 없습니다",
+    "refresh": "새로고침",
     "columns": {
       "timestamp": "타임스탬프",
       "endpoint": "엔드포인트",

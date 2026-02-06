@@ -145,6 +145,7 @@
     "filterByEndpoint": "Filter by Endpoint",
     "allEndpoints": "All Endpoints",
     "noLogs": "No logs available",
+    "refresh": "Refresh",
     "columns": {
       "timestamp": "Timestamp",
       "endpoint": "Endpoint",

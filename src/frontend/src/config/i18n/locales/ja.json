@@ -80,6 +80,7 @@
     "filterByEndpoint": "エンドポイントでフィルター",
     "allEndpoints": "すべてのエンドポイント",
     "noLogs": "利用可能なログがありません",
+    "refresh": "更新",
     "columns": {
       "timestamp": "タイムスタンプ",
       "endpoint": "エンドポイント",

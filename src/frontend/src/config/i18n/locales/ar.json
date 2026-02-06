@@ -80,6 +80,7 @@
     "filterByEndpoint": "تصفية حسب نقطة النهاية",
     "allEndpoints": "جميع نقاط النهاية",
     "noLogs": "لا توجد سجلات",
+    "refresh": "تحديث",
     "columns": {
       "timestamp": "الطابع الزمني",
       "endpoint": "نقطة النهاية",
