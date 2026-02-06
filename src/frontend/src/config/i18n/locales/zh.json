@@ -80,6 +80,7 @@
     "filterByEndpoint": "按端点筛选",
     "allEndpoints": "所有端点",
     "noLogs": "没有可用的日志",
+    "refresh": "刷新",
     "columns": {
       "timestamp": "时间戳",
       "endpoint": "端点",

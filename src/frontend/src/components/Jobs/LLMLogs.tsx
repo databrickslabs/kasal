@@ -21,9 +21,11 @@ import {
   Select,
   MenuItem,
   SelectChangeEvent,
+  Tooltip,
 } from '@mui/material';
 import KeyboardArrowDown from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowUp from '@mui/icons-material/KeyboardArrowUp';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import { LLMLog, LogRowProps } from '../../types/common';
 import logService from '../../api/LogService';
 import { useTranslation } from 'react-i18next';
@@ -156,9 +158,6 @@ const Logs: React.FC = () => {
 
   useEffect(() => {
     fetchLogs();
-    // Refresh logs every 30 seconds
-    const interval = setInterval(fetchLogs, 30000);
-    return () => clearInterval(interval);
   }, [fetchLogs]);
 
   const handleChangePage = (event: unknown, newPage: number) => {
@@ -188,19 +187,31 @@ const Logs: React.FC = () => {
       <CardContent>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
           <Typography variant="h5">{t('logs.title')}</Typography>
-          <FormControl sx={{ minWidth: 200 }}>
-            <InputLabel>{t('logs.filterByEndpoint')}</InputLabel>
-            <Select
-              value={endpoint}
-              onChange={handleEndpointChange}
-              label={t('logs.filterByEndpoint')}
-            >
-              <MenuItem value="all">{t('logs.allEndpoints')}</MenuItem>
-              <MenuItem value="generate-crew">Generate Crew</MenuItem>
-              <MenuItem value="generate-task">Generate Task</MenuItem>
-              <MenuItem value="generate-agent">Generate Agent</MenuItem>
-            </Select>
-          </FormControl>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Tooltip title={t('logs.refresh')}>
+              <IconButton
+                onClick={fetchLogs}
+                disabled={loading}
+                color="primary"
+                aria-label={t('logs.refresh')}
+              >
+                {loading ? <CircularProgress size={24} /> : <RefreshIcon />}
+              </IconButton>
+            </Tooltip>
+            <FormControl sx={{ minWidth: 200 }}>
+              <InputLabel>{t('logs.filterByEndpoint')}</InputLabel>
+              <Select
+                value={endpoint}
+                onChange={handleEndpointChange}
+                label={t('logs.filterByEndpoint')}
+              >
+                <MenuItem value="all">{t('logs.allEndpoints')}</MenuItem>
+                <MenuItem value="generate-crew">Generate Crew</MenuItem>
+                <MenuItem value="generate-task">Generate Task</MenuItem>
+                <MenuItem value="generate-agent">Generate Agent</MenuItem>
+              </Select>
+            </FormControl>
+          </Box>
         </Box>
         
         <TableContainer component={Paper} sx={{ maxHeight: 'calc(100vh - 250px)', overflow: 'auto' }}>

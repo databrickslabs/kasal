@@ -86,6 +86,7 @@
     "filterByEndpoint": "Filtrar por Punto Final",
     "allEndpoints": "Todos los Puntos Finales",
     "noLogs": "No hay registros disponibles",
+    "refresh": "Actualizar",
     "columns": {
       "timestamp": "Marca de Tiempo",
       "endpoint": "Punto Final",
