@@ -216,8 +216,11 @@ class TestGetGroupContext:
         mock_group_context.primary_group_id = "group-123"
         mock_group_context.group_ids = ["group-123", "group-456"]
         mock_group_context.group_email = "test@example.com"
-        
-        with patch('src.utils.user_context.GroupContext.from_email', 
+
+        # Ensure request.state has no _group_context_cache so cache logic is bypassed
+        mock_request.state = MagicMock(spec=[])
+
+        with patch('src.utils.user_context.GroupContext.from_email',
                    return_value=mock_group_context) as mock_from_email:
             result = await get_group_context(
                 request=mock_request,
@@ -246,8 +249,11 @@ class TestGetGroupContext:
         mock_group_context.primary_group_id = "group-789"
         mock_group_context.group_ids = ["group-789"]
         mock_group_context.group_email = "fallback@example.com"
-        
-        with patch('src.utils.user_context.GroupContext.from_email', 
+
+        # Ensure request.state has no _group_context_cache so cache logic is bypassed
+        mock_request.state = MagicMock(spec=[])
+
+        with patch('src.utils.user_context.GroupContext.from_email',
                    return_value=mock_group_context) as mock_from_email:
             result = await get_group_context(
                 request=mock_request,
@@ -271,6 +277,9 @@ class TestGetGroupContext:
     @pytest.mark.asyncio
     async def test_get_group_context_no_email(self, mock_request):
         """Test group context when no email headers are provided."""
+        # Ensure request.state has no _group_context_cache so cache logic is bypassed
+        mock_request.state = MagicMock(spec=[])
+
         with patch('src.core.dependencies.GroupContext') as mock_group_context_class:
             mock_empty_context = MagicMock(spec=GroupContext)
             mock_group_context_class.return_value = mock_empty_context
@@ -302,8 +311,11 @@ class TestGetGroupContext:
         mock_group_context.primary_group_id = "group-partial"
         mock_group_context.group_ids = ["group-partial"]
         mock_group_context.group_email = "partial@example.com"
-        
-        with patch('src.utils.user_context.GroupContext.from_email', 
+
+        # Ensure request.state has no _group_context_cache so cache logic is bypassed
+        mock_request.state = MagicMock(spec=[])
+
+        with patch('src.utils.user_context.GroupContext.from_email',
                    return_value=mock_group_context) as mock_from_email:
             result = await get_group_context(
                 request=mock_request,
