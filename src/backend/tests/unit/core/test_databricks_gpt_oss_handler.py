@@ -169,7 +169,30 @@ class TestDatabricksGPTOSSHandler:
 
 class TestDatabricksGPTOSSLLM:
     """Test suite for DatabricksGPTOSSLLM wrapper."""
-    
+
+    @pytest.fixture(autouse=True)
+    def mock_llm_factory(self, monkeypatch):
+        """Bypass LLM.__new__ factory to avoid OPENAI_API_KEY requirement.
+
+        CrewAI's LLM.__new__ is a factory that routes to native provider classes
+        (e.g. OpenAICompletion), which requires API keys. We bypass it so that
+        DatabricksGPTOSSLLM instances are created directly for unit testing.
+        """
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test-dummy-key-for-unit-tests")
+
+        original_init = DatabricksGPTOSSLLM.__init__
+
+        def patched_new(cls, *args, **kwargs):
+            return object.__new__(cls)
+
+        def patched_init(self, **kwargs):
+            # Skip parent LLM.__init__ but run DatabricksGPTOSSLLM's own setup
+            self._original_model_name = kwargs.get('model', '')
+
+        with patch('src.core.llm_handlers.databricks_gpt_oss_handler.LLM.__new__', patched_new):
+            with patch('src.core.llm_handlers.databricks_gpt_oss_handler.LLM.__init__', lambda self, **kwargs: None):
+                yield
+
     @patch('src.core.llm_handlers.databricks_gpt_oss_handler.LLM.__init__')
     def test_initialization(self, mock_llm_init):
         """Test DatabricksGPTOSSLLM initialization."""

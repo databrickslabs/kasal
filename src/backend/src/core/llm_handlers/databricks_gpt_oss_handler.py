@@ -388,6 +388,22 @@ class DatabricksGPTOSSLLM(LLM):
             logger.info(f"[_handle_non_streaming_response] Response preview: {str(response)[:100]}...")
             return response
 
+        except TypeError as e:
+            # Handle signature mismatch across CrewAI versions: if the parent
+            # method does not accept the extra kwargs (e.g., response_model),
+            # retry without them.
+            logger.warning(f"TypeError in GPT-OSS _handle_non_streaming_response, retrying without extra kwargs: {e}")
+            response = super()._handle_non_streaming_response(
+                params,
+                callbacks,
+                available_functions,
+                from_task,
+                from_agent,
+            )
+            if response is None or response == "":
+                return ""
+            return response
+
         except Exception as e:
             logger.error(f"Error in GPT-OSS _handle_non_streaming_response: {e}")
             import traceback
