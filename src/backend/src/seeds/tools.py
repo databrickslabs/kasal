@@ -144,10 +144,16 @@ def get_tool_configs():
             # Power BI Admin API configuration
             "workspace_id": "",
             "dataset_id": "",
-            # Admin API Service Principal authentication (required)
+            # Service Principal Authentication
             "tenant_id": "",
             "client_id": "",
             "client_secret": "",
+            # Service Account Authentication
+            "username": "",
+            "password": "",
+            "auth_method": None,  # None for auto-detect, or explicit "service_principal"/"service_account"/"user_oauth"
+            # User OAuth Authentication
+            "access_token": "",
             # LLM Configuration (optional)
             "llm_workspace_url": "",
             "llm_token": "",

@@ -106,7 +106,7 @@ class CrewLogger:
             crewai_logger.setLevel(logging.DEBUG)
             
             # Also capture other related loggers
-            for logger_name in ['langchain', 'httpx', 'openai']:
+            for logger_name in ['langchain', 'httpx', 'openai', 'src.converters']:
                 try:
                     related_logger = logging.getLogger(logger_name)
                     related_logger.handlers = []
