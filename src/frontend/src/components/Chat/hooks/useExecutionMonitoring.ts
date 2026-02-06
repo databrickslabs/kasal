@@ -7,10 +7,31 @@ import { Run } from '../../../types/run';
 import { useTaskExecutionStore } from '../../../store/taskExecutionStore';
 import { useChatMessagesStore } from '../../../store/chatMessagesStore';
 
+// Module-level storage for execution state per session
+// This persists execution state when switching tabs
+interface SessionExecutionState {
+  executingJobId: string | null;
+  lastExecutionJobId: string | null;
+  executionStartTime: Date | null;
+  processedTraceIds: Set<string>;
+}
+
+const sessionExecutionStates = new Map<string, SessionExecutionState>();
+
+// Helper function to clear execution state for a specific jobId across all sessions
+// This is called when a job completes to ensure no session is left blocked
+const clearExecutionStateForJob = (jobId: string) => {
+  sessionExecutionStates.forEach((state, sessionId) => {
+    if (state.executingJobId === jobId) {
+      sessionExecutionStates.delete(sessionId);
+    }
+  });
+};
+
 export const useExecutionMonitoring = (
   sessionId: string,
   saveMessageToBackend: (message: ChatMessage) => Promise<void>,
-  setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>
+  _setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>
 ) => {
   const [executingJobId, setExecutingJobId] = useState<string | null>(null);
   const [lastExecutionJobId, setLastExecutionJobId] = useState<string | null>(null);
@@ -21,8 +42,105 @@ export const useExecutionMonitoring = (
   // This prevents the continuous polling loop caused by monitorTraces recreation
   const initialFetchDoneForJobRef = useRef<string | null>(null);
 
+  // Track the previous sessionId to detect tab switches
+  const prevSessionIdRef = useRef<string>(sessionId);
+
+  // Track if this session is expecting a job to start (prevents other tabs from claiming the job)
+  const pendingExecutionRef = useRef<boolean>(false);
+
+  // Refs to access current values without adding them as dependencies
+  const executingJobIdRef = useRef<string | null>(executingJobId);
+  const lastExecutionJobIdRef = useRef<string | null>(lastExecutionJobId);
+  const executionStartTimeRef = useRef<Date | null>(executionStartTime);
+  const processedTraceIdsRef = useRef<Set<string>>(processedTraceIds);
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    executingJobIdRef.current = executingJobId;
+  }, [executingJobId]);
+
+  useEffect(() => {
+    lastExecutionJobIdRef.current = lastExecutionJobId;
+  }, [lastExecutionJobId]);
+
+  useEffect(() => {
+    executionStartTimeRef.current = executionStartTime;
+  }, [executionStartTime]);
+
+  useEffect(() => {
+    processedTraceIdsRef.current = processedTraceIds;
+  }, [processedTraceIds]);
+
+  // Save and restore execution state when sessionId changes (tab switch)
+  // This ensures each tab maintains its own execution state
+  useEffect(() => {
+    if (prevSessionIdRef.current !== sessionId) {
+      const prevSessionId = prevSessionIdRef.current;
+
+      // Save current execution state for the previous session
+      if (prevSessionId && (executingJobIdRef.current || lastExecutionJobIdRef.current)) {
+        sessionExecutionStates.set(prevSessionId, {
+          executingJobId: executingJobIdRef.current,
+          lastExecutionJobId: lastExecutionJobIdRef.current,
+          executionStartTime: executionStartTimeRef.current,
+          processedTraceIds: new Set(processedTraceIdsRef.current),
+        });
+      }
+
+      // Restore execution state for the new session (if any)
+      const savedState = sessionExecutionStates.get(sessionId);
+      if (savedState && savedState.executingJobId) {
+        // Verify the job is still running before restoring blocked state
+        runService.getRuns(100).then(runs => {
+          const job = runs.runs.find((r: Run) => r.job_id === savedState.executingJobId);
+          const isStillRunning = job && job.status?.toLowerCase() === 'running';
+
+          if (isStillRunning) {
+            setExecutingJobId(savedState.executingJobId);
+            setLastExecutionJobId(savedState.lastExecutionJobId);
+            setExecutionStartTime(savedState.executionStartTime);
+            setProcessedTraceIds(savedState.processedTraceIds);
+            initialFetchDoneForJobRef.current = savedState.executingJobId;
+          } else {
+            // Job completed while we were away, clear the saved state
+            sessionExecutionStates.delete(sessionId);
+            setExecutingJobId(null);
+            setLastExecutionJobId(savedState.lastExecutionJobId);
+            setExecutionStartTime(null);
+            setProcessedTraceIds(new Set());
+            initialFetchDoneForJobRef.current = null;
+          }
+        }).catch(error => {
+          console.error('[ExecutionMonitoring] Error checking job status:', error);
+          // On error, restore state anyway to be safe (can manually refresh)
+          setExecutingJobId(savedState.executingJobId);
+          setLastExecutionJobId(savedState.lastExecutionJobId);
+          setExecutionStartTime(savedState.executionStartTime);
+          setProcessedTraceIds(savedState.processedTraceIds);
+          initialFetchDoneForJobRef.current = savedState.executingJobId;
+        });
+      } else if (savedState) {
+        // Has saved state but no executingJobId, restore other state
+        setExecutingJobId(null);
+        setLastExecutionJobId(savedState.lastExecutionJobId);
+        setExecutionStartTime(null);
+        setProcessedTraceIds(savedState.processedTraceIds);
+        initialFetchDoneForJobRef.current = null;
+      } else {
+        // No saved state, start fresh for this session
+        setExecutingJobId(null);
+        setLastExecutionJobId(null);
+        setExecutionStartTime(null);
+        setProcessedTraceIds(new Set());
+        initialFetchDoneForJobRef.current = null;
+      }
+
+      prevSessionIdRef.current = sessionId;
+    }
+  }, [sessionId]);
+
   // Get task execution store methods
-  const { setTaskState, clearTaskStates } = useTaskExecutionStore();
+  const { setTaskState } = useTaskExecutionStore();
 
   // Get Zustand store methods
   const { addMessage } = useChatMessagesStore();
@@ -372,11 +490,31 @@ export const useExecutionMonitoring = (
   useEffect(() => {
     const handleJobCreated = (event: CustomEvent) => {
       const { jobId, jobName } = event.detail;
+
+      // Check if this session initiated the execution via markPendingExecution
+      // If pendingExecution is true, this session owns the job
+      // If not, we still track it (for backwards compatibility with single-tab usage)
+      const isPendingForThisSession = pendingExecutionRef.current;
+
+
+      // Clear the pending flag if it was set
+      if (isPendingForThisSession) {
+        pendingExecutionRef.current = false;
+      }
+
+      // Update refs IMMEDIATELY (before React's async state update)
+      // This ensures handleJobCompleted can find the jobId even if it fires quickly
+      executingJobIdRef.current = jobId;
+      lastExecutionJobIdRef.current = jobId;
+      processedTraceIdsRef.current = new Set();
+      executionStartTimeRef.current = new Date();
+
+      // Also update state for UI re-renders
       setExecutingJobId(jobId);
       setLastExecutionJobId(jobId);
       setProcessedTraceIds(new Set());
       setExecutionStartTime(new Date());
-      
+
       // Don't clear task states here - WorkflowDesigner handles this
       // clearTaskStates();
       
@@ -390,9 +528,31 @@ export const useExecutionMonitoring = (
 
     const handleJobCompleted = (event: CustomEvent) => {
       const { jobId } = event.detail;
-      
-      if (executingJobId || jobId === lastExecutionJobId) {
-        
+      // Use refs to get current values (avoid stale closure issues)
+      const currentExecutingJobId = executingJobIdRef.current;
+      const currentLastExecutionJobId = lastExecutionJobIdRef.current;
+
+      // Clear saved state for this job across all sessions
+      clearExecutionStateForJob(jobId);
+
+      // ALWAYS clear state for this job, regardless of whether we're currently tracking it
+      // This handles the case where the event fires when we're on a different tab
+      const shouldClear = currentExecutingJobId === jobId || jobId === currentLastExecutionJobId;
+
+      if (shouldClear) {
+
+        // Clear refs IMMEDIATELY (before React's async state update)
+        executingJobIdRef.current = null;
+        executionStartTimeRef.current = null;
+        processedTraceIdsRef.current = new Set();
+
+        // Clear state for UI re-renders
+        setExecutingJobId(null);
+        setExecutionStartTime(null);
+        setProcessedTraceIds(new Set());
+        sessionExecutionStates.delete(sessionId);
+        window.dispatchEvent(new CustomEvent('forceClearExecution'));
+
         // Add a small delay to ensure the backend has updated the result
         setTimeout(() => {
           
@@ -464,20 +624,20 @@ export const useExecutionMonitoring = (
             console.error('[WorkflowChat] Error fetching job result:', error);
           });
         }, 2000); // Wait 2 seconds for the backend to update
-        
-        setExecutingJobId(null);
-        setExecutionStartTime(null);
-        setProcessedTraceIds(new Set());
-        window.dispatchEvent(new CustomEvent('forceClearExecution'));
-      } else {
-        // No execution in progress, nothing to clear
       }
     };
 
     const handleJobFailed = (event: CustomEvent) => {
       const { jobId, error } = event.detail;
-      
-      if (executingJobId || jobId === lastExecutionJobId) {
+      // Use refs to get current values (avoid stale closure issues)
+      const currentExecutingJobId = executingJobIdRef.current;
+      const currentLastExecutionJobId = lastExecutionJobIdRef.current;
+
+      // Clear saved state for this job across all sessions
+      clearExecutionStateForJob(jobId);
+
+      if (currentExecutingJobId === jobId || jobId === currentLastExecutionJobId) {
+
         const failureMessage: ChatMessage = {
           id: `exec-failed-${Date.now()}`,
           type: 'execution',
@@ -485,26 +645,36 @@ export const useExecutionMonitoring = (
           timestamp: new Date(),
           jobId
         };
-        
+
         addMessage(sessionId, failureMessage);
         saveMessageToBackend(failureMessage);
-        
+
+        // Clear refs IMMEDIATELY
+        executingJobIdRef.current = null;
+        executionStartTimeRef.current = null;
+        processedTraceIdsRef.current = new Set();
+
+        // Clear state for UI re-renders
         setExecutingJobId(null);
         setExecutionStartTime(null);
         setProcessedTraceIds(new Set());
+        sessionExecutionStates.delete(sessionId);
         window.dispatchEvent(new CustomEvent('forceClearExecution'));
       }
     };
 
     const handleTraceUpdate = (event: CustomEvent) => {
       const { jobId, trace } = event.detail;
+      // Use refs to get current values (avoid stale closure issues)
+      const currentExecutingJobId = executingJobIdRef.current;
 
-      if (jobId === executingJobId && trace) {
+
+      if (jobId === currentExecutingJobId && trace) {
         // Generate consistent trace ID
         const traceId = `${trace.id}-${trace.created_at}`;
 
-        // Check if this trace has already been processed
-        if (processedTraceIds.has(traceId)) {
+        // Check if this trace has already been processed (use ref for current value)
+        if (processedTraceIdsRef.current.has(traceId)) {
           return;
         }
 
@@ -663,17 +833,30 @@ export const useExecutionMonitoring = (
     };
 
     const handleForceClearExecution = () => {
+      // Clear refs IMMEDIATELY
+      executingJobIdRef.current = null;
+      executionStartTimeRef.current = null;
+      processedTraceIdsRef.current = new Set();
+      initialFetchDoneForJobRef.current = null;
+
+      // Clear state for UI re-renders
       setExecutingJobId(null);
       setExecutionStartTime(null);
       setProcessedTraceIds(new Set());
-      // Reset initial fetch ref so next execution can do its initial fetch
-      initialFetchDoneForJobRef.current = null;
+      sessionExecutionStates.delete(sessionId);
     };
 
     const handleJobStopped = (event: CustomEvent) => {
       const { jobId, partialResults } = event.detail;
-      
-      if (executingJobId === jobId || jobId === lastExecutionJobId) {
+      // Use refs to get current values (avoid stale closure issues)
+      const currentExecutingJobId = executingJobIdRef.current;
+      const currentLastExecutionJobId = lastExecutionJobIdRef.current;
+
+      // Clear saved state for this job across all sessions
+      clearExecutionStateForJob(jobId);
+
+      if (currentExecutingJobId === jobId || jobId === currentLastExecutionJobId) {
+
         // Add a message about the execution being stopped
         const stoppedMessage: ChatMessage = {
           id: `exec-stopped-${Date.now()}`,
@@ -682,15 +865,21 @@ export const useExecutionMonitoring = (
           timestamp: new Date(),
           jobId
         };
-        
+
         addMessage(sessionId, stoppedMessage);
         saveMessageToBackend(stoppedMessage);
-        
-        // Clear execution state to re-enable input
+
+        // Clear refs IMMEDIATELY
+        executingJobIdRef.current = null;
+        executionStartTimeRef.current = null;
+        processedTraceIdsRef.current = new Set();
+
+        // Clear state for UI re-renders
         setExecutingJobId(null);
         setExecutionStartTime(null);
         setProcessedTraceIds(new Set());
-        
+        sessionExecutionStates.delete(sessionId);
+
         // Force clear any lingering execution state
         window.dispatchEvent(new CustomEvent('forceClearExecution'));
       }
@@ -713,7 +902,9 @@ export const useExecutionMonitoring = (
       window.removeEventListener('executionError', handleExecutionError as EventListener);
       window.removeEventListener('forceClearExecution', handleForceClearExecution);
     };
-  }, [executingJobId, lastExecutionJobId, processedTraceIds, executionStartTime, saveMessageToBackend, sessionId, addMessage, clearTaskStates]);
+  // CRITICAL: Using refs for executingJobId, lastExecutionJobId, and processedTraceIds
+  // so they don't need to be in the dependency array (avoids re-registering event handlers)
+  }, [saveMessageToBackend, sessionId, addMessage, setTaskState]);
 
   // Initial trace fetch when execution begins - SSE handles real-time updates
   // CRITICAL: Only depends on executingJobId, NOT monitorTraces
@@ -735,11 +926,18 @@ export const useExecutionMonitoring = (
     }
   }, [executingJobId]);
 
+  // Function to mark that this session is about to start an execution
+  // Call this BEFORE calling executeCrew/executeFlow
+  const markPendingExecution = useCallback(() => {
+    pendingExecutionRef.current = true;
+  }, []);
+
   return {
     executingJobId,
     setExecutingJobId,
     lastExecutionJobId,
     setLastExecutionJobId,
     executionStartTime,
+    markPendingExecution,
   };
 };
