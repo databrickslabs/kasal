@@ -103,7 +103,15 @@ class MQueryConnector(BaseInboundConnector):
         if self._connected:
             return
 
-        logger.info("Connecting to Power BI Admin API...")
+        logger.info("=" * 80)
+        logger.info("[MQueryConnector] CONNECT - Starting authentication")
+        logger.info("=" * 80)
+        logger.info(f"  Pre-obtained access_token: {'YES (skipping auth)' if self._access_token else 'NO (will authenticate)'}")
+        logger.info(f"  config.auth_method: {self.config.auth_method}")
+        logger.info(f"  config.tenant_id: {self.config.tenant_id}")
+        logger.info(f"  config.client_id: {self.config.client_id}")
+        logger.info(f"  config.username: {self.config.username}")
+        logger.info("=" * 80)
 
         # Initialize auth service with all auth options
         self._auth_service = AadService(
@@ -118,7 +126,10 @@ class MQueryConnector(BaseInboundConnector):
 
         # Get access token
         if not self._access_token:
+            logger.info("[MQueryConnector] No pre-obtained token, calling get_access_token()...")
             self._access_token = self._auth_service.get_access_token()
+        else:
+            logger.info("[MQueryConnector] Using pre-obtained access_token, skipping authentication")
 
         # Initialize scanner with token
         self._scanner = PowerBIAdminScanner(

@@ -372,7 +372,8 @@ class MqueryConversionPipelineTool(BaseTool):
             logger.info(f"[TOOL CALL] Instance {instance_id} - Pre-configured defaults: workspace_id={self._default_config.get('workspace_id', 'NOT SET')[:20] if self._default_config.get('workspace_id') else 'NOT SET'}...")
 
             # Pre-configured values take precedence over agent-provided placeholders
-            merged_kwargs = {**self._default_config, **filtered_kwargs}
+            # IMPORTANT: default_config must be second to override filtered_kwargs
+            merged_kwargs = {**filtered_kwargs, **self._default_config}
 
             # DYNAMIC PARAMETER RESOLUTION
             if execution_inputs:
@@ -396,6 +397,19 @@ class MqueryConversionPipelineTool(BaseTool):
                 "auth_method": merged_kwargs.get("auth_method"),
                 "access_token": merged_kwargs.get("access_token"),
             }
+
+            # DEBUG: Log auth config being used
+            logger.info("=" * 80)
+            logger.info("[MQueryConversionPipelineTool] AUTH CONFIG DEBUG")
+            logger.info("=" * 80)
+            logger.info(f"  tenant_id: {auth_config.get('tenant_id')}")
+            logger.info(f"  client_id: {auth_config.get('client_id')}")
+            logger.info(f"  client_secret: {'*' * len(auth_config.get('client_secret') or '') if auth_config.get('client_secret') else 'None'}")
+            logger.info(f"  username: {auth_config.get('username')}")
+            logger.info(f"  password: {'*' * len(auth_config.get('password') or '') if auth_config.get('password') else 'None'}")
+            logger.info(f"  auth_method: {auth_config.get('auth_method')} (type: {type(auth_config.get('auth_method'))})")
+            logger.info(f"  access_token: {'*' * 10 if auth_config.get('access_token') else 'None'}")
+            logger.info("=" * 80)
 
             # Validate required parameters
             if not workspace_id:
@@ -468,6 +482,27 @@ class MqueryConversionPipelineTool(BaseTool):
                 include_hidden_tables=merged_kwargs.get("include_hidden_tables", False),
                 skip_static_tables=merged_kwargs.get("skip_static_tables", True),
             )
+
+            # Log which authentication method will be used (auto-detect if not specified)
+            detected_auth_method = auth_config.get("auth_method")
+            if not detected_auth_method:
+                # Replicate AadService._determine_auth_method() logic
+                if auth_config.get("access_token"):
+                    detected_auth_method = "user_oauth (pre-obtained token)"
+                elif (auth_config.get("client_id") and auth_config.get("client_secret") and
+                      auth_config.get("tenant_id")):
+                    detected_auth_method = "service_principal (auto-detected)"
+                elif (auth_config.get("username") and auth_config.get("password") and
+                      auth_config.get("client_id") and auth_config.get("tenant_id")):
+                    detected_auth_method = "service_account (auto-detected)"
+                else:
+                    detected_auth_method = "UNKNOWN - insufficient credentials"
+
+            logger.info("=" * 80)
+            logger.info("[MQueryConversionPipelineTool] 🔑 AUTHENTICATION METHOD DETECTION")
+            logger.info("=" * 80)
+            logger.info(f"  Detected auth method: {detected_auth_method}")
+            logger.info("=" * 80)
 
             # Execute async conversion (use_llm was computed earlier)
             include_summary = merged_kwargs.get("include_summary", True)
