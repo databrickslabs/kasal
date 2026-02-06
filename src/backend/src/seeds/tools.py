@@ -169,10 +169,16 @@ def get_tool_configs():
             # Power BI Configuration (supports {placeholder} syntax in dynamic mode)
             "workspace_id": "",
             "dataset_id": "",
-            # Service Principal authentication (must be workspace member)
+            # Service Principal Authentication
             "tenant_id": "",
             "client_id": "",
             "client_secret": "",
+            # Service Account Authentication
+            "username": "",
+            "password": "",
+            "auth_method": None,  # None for auto-detect, or explicit "service_principal"/"service_account"/"user_oauth"
+            # User OAuth Authentication
+            "access_token": "",
             # Unity Catalog Target (supports {placeholder} syntax in dynamic mode)
             "target_catalog": "main",
             "target_schema": "default",
@@ -186,10 +192,16 @@ def get_tool_configs():
             # Power BI / Fabric Configuration (supports {placeholder} syntax in dynamic mode)
             "workspace_id": "",
             "dataset_id": "",
-            # Service Principal authentication (requires SemanticModel.ReadWrite.All)
+            # Service Principal Authentication
             "tenant_id": "",
             "client_id": "",
             "client_secret": "",
+            # Service Account Authentication
+            "username": "",
+            "password": "",
+            "auth_method": None,  # None for auto-detect, or explicit "service_principal"/"service_account"/"user_oauth"
+            # User OAuth Authentication
+            "access_token": "",
             # Unity Catalog Target (supports {placeholder} syntax in dynamic mode)
             "target_catalog": "main",
             "target_schema": "default",
@@ -203,10 +215,16 @@ def get_tool_configs():
             # Power BI / Fabric Configuration (supports {placeholder} syntax in dynamic mode)
             "workspace_id": "",
             "dataset_id": "",
-            # Service Principal authentication (requires SemanticModel.ReadWrite.All)
+            # Service Principal Authentication
             "tenant_id": "",
             "client_id": "",
             "client_secret": "",
+            # Service Account Authentication
+            "username": "",
+            "password": "",
+            "auth_method": None,  # None for auto-detect, or explicit "service_principal"/"service_account"/"user_oauth"
+            # User OAuth Authentication
+            "access_token": "",
             # Unity Catalog Target (supports {placeholder} syntax in dynamic mode)
             "target_catalog": "main",
             "target_schema": "default",

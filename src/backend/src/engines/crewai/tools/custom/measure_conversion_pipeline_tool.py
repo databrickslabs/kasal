@@ -413,7 +413,7 @@ class MeasureConversionPipelineTool(BaseTool):
                     merged_kwargs[key] = self._default_config.get(key, filtered_kwargs.get(key))
                 elif key in selection_fields:
                     # User selections: UI value takes precedence for deterministic behavior
-                    merged_kwargs[key] = filtered_kwargs.get(key, self._default_config.get(key))
+                    merged_kwargs[key] = self._default_config.get(key, filtered_kwargs.get(key))
                 else:
                     # Other fields: agent can override (filtered_kwargs takes precedence)
                     merged_kwargs[key] = filtered_kwargs.get(key, self._default_config.get(key))
