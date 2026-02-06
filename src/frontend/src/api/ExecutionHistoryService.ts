@@ -11,40 +11,56 @@ const CACHE_TTL = 5000; // 5 seconds cache time-to-live
 const durationCache = new Map<string, { duration: string; timestamp: number }>();
 const DURATION_CACHE_TTL = 60000; // 1 minute cache for durations
 
+/**
+ * Parse a timestamp string as UTC.
+ * Backend sends timestamps without timezone suffix (e.g., "2025-02-06T10:00:00")
+ * which JavaScript would interpret as local time. This function ensures UTC parsing.
+ */
+function parseAsUTC(timestamp: string | null | undefined): Date {
+  if (!timestamp) {
+    return new Date(0);
+  }
+  // If the timestamp doesn't have timezone info, treat it as UTC by appending 'Z'
+  const normalizedTimestamp = timestamp.endsWith('Z') || timestamp.includes('+') || timestamp.includes('-', 10)
+    ? timestamp
+    : timestamp + 'Z';
+  return new Date(normalizedTimestamp);
+}
+
 export async function calculateDurationFromTraces(run: Run): Promise<string> {
   // Convert status to uppercase for case-insensitive comparison
   const status = (run.status || '').toUpperCase();
-  
+
   // Only show duration for completed jobs
   if (status !== 'COMPLETED' && status !== 'FAILED' && status !== 'CANCELLED') {
     return '-';
   }
-  
+
   const cacheKey = run.job_id || run.id;
-  
+
   // Check cache first
   const cached = durationCache.get(cacheKey);
   if (cached && (Date.now() - cached.timestamp < DURATION_CACHE_TTL)) {
     return cached.duration;
   }
-  
+
   try {
     // Fetch traces for this run
-    const endpoint = run.job_id.includes('-') 
+    const endpoint = run.job_id.includes('-')
       ? `/traces/job/${run.job_id}`
       : `/traces/execution/${run.id}`;
-    
+
     const response = await apiClient.get<{ traces: Trace[] }>(endpoint);
-    
+
     if (!response.data?.traces || response.data.traces.length === 0) {
       // Fallback to using run timestamps if no traces
       return calculateDurationFromRunTimestamps(run);
     }
-    
-    // Sort traces by timestamp
+
+    // Sort traces by timestamp (using UTC-aware parsing)
     const traces = response.data.traces.sort((a, b) =>
-      new Date(a.created_at || '').getTime() -
-      new Date(b.created_at || '').getTime()
+      parseAsUTC(a.created_at).getTime() -
+      parseAsUTC(b.created_at).getTime()
     );
 
     // Calculate duration from first trace to crew completion (not last trace)
@@ -63,20 +79,20 @@ export async function calculateDurationFromTraces(run: Run): Promise<string> {
     // Use crew completion event if found, otherwise use last trace (for running jobs)
     const lastTrace = crewCompletedEvent || traces[traces.length - 1];
 
-    const startTime = new Date(firstTrace.created_at);
-    const endTime = new Date(lastTrace.created_at);
-    
+    const startTime = parseAsUTC(firstTrace.created_at);
+    const endTime = parseAsUTC(lastTrace.created_at);
+
     const durationMs = Math.max(0, endTime.getTime() - startTime.getTime());
-    
+
     // Format duration
     const formattedDuration = formatDuration(durationMs);
-    
+
     // Cache the result
-    durationCache.set(cacheKey, { 
-      duration: formattedDuration, 
-      timestamp: Date.now() 
+    durationCache.set(cacheKey, {
+      duration: formattedDuration,
+      timestamp: Date.now()
     });
-    
+
     return formattedDuration;
   } catch (error) {
     // On error, fallback to run timestamps
@@ -92,18 +108,19 @@ export function calculateDuration(run: Run): string {
 // Helper function for fallback duration calculation
 function calculateDurationFromRunTimestamps(run: Run): string {
   const status = (run.status || '').toUpperCase();
-  
+
   if (status !== 'COMPLETED' && status !== 'FAILED' && status !== 'CANCELLED') {
     return '-';
   }
-  
+
   if (!run?.created_at || !run?.completed_at) {
     return '-';
   }
-  
+
   try {
-    const startTime = new Date(run.created_at);
-    const endTime = new Date(run.completed_at);
+    // Use UTC-aware parsing for timestamps from backend
+    const startTime = parseAsUTC(run.created_at);
+    const endTime = parseAsUTC(run.completed_at);
     const durationMs = Math.max(0, endTime.getTime() - startTime.getTime());
     return formatDuration(durationMs);
   } catch (error) {
