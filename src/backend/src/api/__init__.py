@@ -22,8 +22,6 @@ from src.api.dispatcher_router import router as dispatcher_router
 from src.api.documentation_embeddings_router import (
     router as documentation_embeddings_router,
 )
-
-# from src.api.dspy_router import router as dspy_router  # Temporarily disabled
 from src.api.engine_config_router import router as engine_config_router
 from src.api.execution_history_router import router as execution_history_router
 from src.api.execution_logs_router import logs_router as execution_logs_router
@@ -99,7 +97,6 @@ api_router.include_router(runs_router)
 api_router.include_router(execution_logs_router)
 api_router.include_router(mcp_router)
 api_router.include_router(dispatcher_router)
-# api_router.include_router(dspy_router)  # Temporarily disabled
 api_router.include_router(engine_config_router)
 # Include user management routers (simplified)
 api_router.include_router(auth_router)

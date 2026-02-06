@@ -5,27 +5,26 @@ This module provides business logic for analyzing user messages and determining
 whether they want to generate an agent, task, or crew, then calling the appropriate service.
 """
 
+import asyncio
 import logging
 import os
 import re
-import asyncio
-import json
 from contextlib import nullcontext
-from typing import Dict, Any, Optional, List, Set
+from typing import Any, Dict, List, Optional, Set
+
 import litellm
 
+from src.core.llm_manager import LLMManager
+from src.schemas.crew import CrewGenerationRequest, CrewGenerationResponse
 from src.schemas.dispatcher import DispatcherRequest, DispatcherResponse, IntentType
 from src.schemas.task_generation import TaskGenerationRequest, TaskGenerationResponse
-from src.schemas.crew import CrewGenerationRequest, CrewGenerationResponse
 from src.services.agent_generation_service import AgentGenerationService
-from src.services.task_generation_service import TaskGenerationService
 from src.services.crew_generation_service import CrewGenerationService
-from src.services.template_service import TemplateService
+from src.services.databricks_service import DatabricksService
 from src.services.log_service import LLMLogService
 from src.services.mlflow_service import MLflowService
-from src.services.databricks_service import DatabricksService
-from src.services.dspy_optimization_service import DSPyOptimizationService, OptimizationType
-from src.core.llm_manager import LLMManager
+from src.services.task_generation_service import TaskGenerationService
+from src.services.template_service import TemplateService
 from src.utils.prompt_utils import robust_json_parser
 from src.utils.user_context import GroupContext
 
@@ -33,7 +32,9 @@ from src.utils.user_context import GroupContext
 logger = logging.getLogger(__name__)
 
 # Default model for intent detection
-DEFAULT_DISPATCHER_MODEL = os.getenv("DEFAULT_DISPATCHER_MODEL", "databricks-llama-4-maverick")
+DEFAULT_DISPATCHER_MODEL = os.getenv(
+    "DEFAULT_DISPATCHER_MODEL", "databricks-llama-4-maverick"
+)
 
 
 class DispatcherService:
@@ -41,53 +42,203 @@ class DispatcherService:
 
     # Task-related action words that indicate the user wants to create a task
     TASK_ACTION_WORDS = {
-        'find', 'search', 'locate', 'discover', 'identify', 'get', 'fetch', 'retrieve',
-        'analyze', 'examine', 'study', 'investigate', 'review', 'assess', 'evaluate',
-        'create', 'make', 'build', 'generate', 'produce', 'develop', 'construct',
-        'write', 'compose', 'draft', 'prepare', 'document', 'record', 'note',
-        'calculate', 'compute', 'determine', 'measure', 'count', 'sum', 'total',
-        'compare', 'contrast', 'match', 'relate', 'connect', 'link', 'associate',
-        'organize', 'sort', 'arrange', 'group', 'categorize', 'classify', 'order',
-        'summarize', 'abstract', 'condense', 'outline', 'highlight', 'extract',
-        'process', 'handle', 'manage', 'coordinate', 'execute', 'perform', 'run',
-        'check', 'verify', 'validate', 'confirm', 'test', 'inspect', 'audit',
-        'monitor', 'track', 'watch', 'observe', 'follow', 'supervise', 'oversee',
-        'update', 'modify', 'change', 'edit', 'revise', 'adjust', 'alter',
-        'send', 'deliver', 'transmit', 'forward', 'share', 'distribute', 'dispatch',
-        'collect', 'gather', 'compile', 'accumulate', 'assemble', 'combine',
-        'convert', 'transform', 'translate', 'adapt', 'format', 'parse', 'decode'
+        "find",
+        "search",
+        "locate",
+        "discover",
+        "identify",
+        "get",
+        "fetch",
+        "retrieve",
+        "analyze",
+        "examine",
+        "study",
+        "investigate",
+        "review",
+        "assess",
+        "evaluate",
+        "create",
+        "make",
+        "build",
+        "generate",
+        "produce",
+        "develop",
+        "construct",
+        "write",
+        "compose",
+        "draft",
+        "prepare",
+        "document",
+        "record",
+        "note",
+        "calculate",
+        "compute",
+        "determine",
+        "measure",
+        "count",
+        "sum",
+        "total",
+        "compare",
+        "contrast",
+        "match",
+        "relate",
+        "connect",
+        "link",
+        "associate",
+        "organize",
+        "sort",
+        "arrange",
+        "group",
+        "categorize",
+        "classify",
+        "order",
+        "summarize",
+        "abstract",
+        "condense",
+        "outline",
+        "highlight",
+        "extract",
+        "process",
+        "handle",
+        "manage",
+        "coordinate",
+        "execute",
+        "perform",
+        "run",
+        "check",
+        "verify",
+        "validate",
+        "confirm",
+        "test",
+        "inspect",
+        "audit",
+        "monitor",
+        "track",
+        "watch",
+        "observe",
+        "follow",
+        "supervise",
+        "oversee",
+        "update",
+        "modify",
+        "change",
+        "edit",
+        "revise",
+        "adjust",
+        "alter",
+        "send",
+        "deliver",
+        "transmit",
+        "forward",
+        "share",
+        "distribute",
+        "dispatch",
+        "collect",
+        "gather",
+        "compile",
+        "accumulate",
+        "assemble",
+        "combine",
+        "convert",
+        "transform",
+        "translate",
+        "adapt",
+        "format",
+        "parse",
+        "decode",
     }
-
-
 
     # Agent-related keywords
     AGENT_KEYWORDS = {
-        'agent', 'assistant', 'bot', 'robot', 'ai', 'helper', 'specialist',
-        'expert', 'analyst', 'advisor', 'consultant', 'operator', 'worker'
+        "agent",
+        "assistant",
+        "bot",
+        "robot",
+        "ai",
+        "helper",
+        "specialist",
+        "expert",
+        "analyst",
+        "advisor",
+        "consultant",
+        "operator",
+        "worker",
     }
 
     # Crew-related keywords (includes plan/strategy terms since they're functionally the same)
     CREW_KEYWORDS = {
-        'team', 'crew', 'group', 'squad', 'multiple', 'several', 'many',
-        'workflow', 'pipeline', 'process', 'collaboration', 'together',
-        'plan', 'planning', 'strategy', 'roadmap', 'blueprint', 'scheme',
-        'approach', 'design', 'outline', 'proposal', 'framework', 'architecture'
+        "team",
+        "crew",
+        "group",
+        "squad",
+        "multiple",
+        "several",
+        "many",
+        "workflow",
+        "pipeline",
+        "process",
+        "collaboration",
+        "together",
+        "plan",
+        "planning",
+        "strategy",
+        "roadmap",
+        "blueprint",
+        "scheme",
+        "approach",
+        "design",
+        "outline",
+        "proposal",
+        "framework",
+        "architecture",
     }
 
     # Execution-related keywords
     EXECUTE_KEYWORDS = {
-        'execute', 'run', 'start', 'launch', 'begin', 'proceed', 'go', 'ec'
+        "execute",
+        "run",
+        "start",
+        "launch",
+        "begin",
+        "proceed",
+        "go",
+        "ec",
     }
 
     # Configuration-related keywords
     CONFIGURE_KEYWORDS = {
-        'configure', 'config', 'setup', 'set', 'change', 'update', 'modify',
-        'settings', 'preferences', 'options', 'parameters', 'llm', 'model',
-        'maxr', 'max', 'rpm', 'rate', 'limit', 'tools', 'tool', 'select',
-        'choose', 'pick', 'adjust', 'tune', 'customize', 'personalize'
+        "configure",
+        "config",
+        "setup",
+        "set",
+        "change",
+        "update",
+        "modify",
+        "settings",
+        "preferences",
+        "options",
+        "parameters",
+        "llm",
+        "model",
+        "maxr",
+        "max",
+        "rpm",
+        "rate",
+        "limit",
+        "tools",
+        "tool",
+        "select",
+        "choose",
+        "pick",
+        "adjust",
+        "tune",
+        "customize",
+        "personalize",
     }
 
-    def __init__(self, log_service: LLMLogService, template_service: TemplateService, session):
+    def __init__(
+        self, log_service: LLMLogService, template_service: TemplateService, session
+    ):
         """
         Initialize the service.
 
@@ -103,20 +254,8 @@ class DispatcherService:
         self.task_service = TaskGenerationService(session)
         self.crew_service = CrewGenerationService(session)
 
-        # DSPy service initialization temporarily disabled
-        # TODO: Re-enable when evaluation metrics are implemented
-        self.use_dspy = False  # Temporarily disabled
-        self.dspy_service = None
-        # if self.use_dspy:
-        #     try:
-        #         self.dspy_service = DSPyOptimizationService(session)
-        #         logger.info("DSPy optimization service initialized")
-        #     except Exception as e:
-        #         logger.warning(f"Failed to initialize DSPy service: {e}")
-        #         self.use_dspy = False
-
     @classmethod
-    def create(cls, session) -> 'DispatcherService':
+    def create(cls, session) -> "DispatcherService":
         """
         Factory method to create a properly configured instance of the service.
 
@@ -128,11 +267,20 @@ class DispatcherService:
         """
         log_service = LLMLogService.create(session)
         template_service = TemplateService(session)
-        return cls(log_service=log_service, template_service=template_service, session=session)
+        return cls(
+            log_service=log_service, template_service=template_service, session=session
+        )
 
-    async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str,
-                                  status: str = 'success', error_message: Optional[str] = None,
-                                  group_context: Optional[GroupContext] = None):
+    async def _log_llm_interaction(
+        self,
+        endpoint: str,
+        prompt: str,
+        response: str,
+        model: str,
+        status: str = "success",
+        error_message: Optional[str] = None,
+        group_context: Optional[GroupContext] = None,
+    ):
         """
         Log LLM interaction using the log service.
 
@@ -153,44 +301,66 @@ class DispatcherService:
                 model=model,
                 status=status,
                 error_message=error_message,
-                group_context=group_context
+                group_context=group_context,
             )
             logger.info(f"Logged {endpoint} interaction to database")
         except Exception as e:
             logger.error(f"Failed to log LLM interaction: {str(e)}")
 
-    async def _maybe_enable_mlflow_tracing(self, group_context: Optional[GroupContext]) -> bool:
+    async def _maybe_enable_mlflow_tracing(
+        self, group_context: Optional[GroupContext]
+    ) -> bool:
         """Enable MLflow tracing for dispatcher/planner if workspace toggle is on.
         - Uses the same experiment as Crew execution traces so UI can link consistently.
         - Runs blocking MLflow setup in a background thread to keep API async.
         """
         try:
-            group_id = getattr(group_context, "primary_group_id", None) if group_context else None
+            group_id = (
+                getattr(group_context, "primary_group_id", None)
+                if group_context
+                else None
+            )
             svc = MLflowService(self.session, group_id=group_id)
             enabled = await svc.is_enabled()
             if not enabled:
-                logger.info("[Dispatcher] MLflow disabled for this workspace; skipping tracing setup")
+                logger.info(
+                    "[Dispatcher] MLflow disabled for this workspace; skipping tracing setup"
+                )
                 return False
 
             def _setup_mlflow_sync():
-                import os
-                import mlflow
                 import asyncio
+                import os
+
+                import mlflow
+
                 # Enable OBO → PAT → SPN fallback chain for MLflow authentication
                 # This matches the pattern used by LLM authentication
                 try:
-                    from src.utils.databricks_auth import get_auth_context, is_scope_error
+                    from src.utils.databricks_auth import (
+                        get_auth_context,
+                        is_scope_error,
+                    )
+
                     # Extract user_token from group_context if available
-                    user_token = getattr(group_context, 'access_token', None) if group_context else None
+                    user_token = (
+                        getattr(group_context, "access_token", None)
+                        if group_context
+                        else None
+                    )
 
                     # Try with OBO first (if user_token available)
                     auth = asyncio.run(get_auth_context(user_token=user_token))
                     if auth:
                         os.environ["DATABRICKS_HOST"] = auth.workspace_url
                         os.environ["DATABRICKS_TOKEN"] = auth.token
-                        logger.info(f"[Dispatcher] MLflow configured with {auth.auth_method} authentication")
+                        logger.info(
+                            f"[Dispatcher] MLflow configured with {auth.auth_method} authentication"
+                        )
                     else:
-                        logger.warning("[Dispatcher] No Databricks authentication available for MLflow")
+                        logger.warning(
+                            "[Dispatcher] No Databricks authentication available for MLflow"
+                        )
                         return
 
                     # Ensure Databricks tracking
@@ -200,7 +370,9 @@ class DispatcherService:
                     exp_name = "/Shared/kasal-crew-execution-traces"  # Default fallback
                     try:
                         databricks_service = DatabricksService(group_id=group_id)
-                        db_config = asyncio.run(databricks_service.get_databricks_config())
+                        db_config = asyncio.run(
+                            databricks_service.get_databricks_config()
+                        )
                         if db_config and db_config.mlflow_experiment_name:
                             # Ensure experiment name starts with /Shared/ for proper organization
                             if not db_config.mlflow_experiment_name.startswith("/"):
@@ -208,67 +380,107 @@ class DispatcherService:
                             else:
                                 exp_name = db_config.mlflow_experiment_name
                     except Exception as config_err:
-                        logger.info(f"[Dispatcher] Could not fetch MLflow experiment name from config: {config_err}, using default")
+                        logger.info(
+                            f"[Dispatcher] Could not fetch MLflow experiment name from config: {config_err}, using default"
+                        )
 
                     # Try to set experiment - this may fail with scope error if using OBO
                     try:
                         exp = mlflow.set_experiment(exp_name)
-                        logger.info(f"[Dispatcher] MLflow experiment set successfully with {auth.auth_method}")
+                        logger.info(
+                            f"[Dispatcher] MLflow experiment set successfully with {auth.auth_method}"
+                        )
                     except Exception as mlflow_e:
                         # Check if this is a scope error (OBO token lacks MLflow permissions)
                         if is_scope_error(mlflow_e) and user_token:
-                            logger.warning(f"[Dispatcher] OBO token lacks MLflow scopes, falling back to PAT/SPN: {mlflow_e}")
+                            logger.warning(
+                                f"[Dispatcher] OBO token lacks MLflow scopes, falling back to PAT/SPN: {mlflow_e}"
+                            )
                             # Retry with PAT/SPN fallback (no user_token)
-                            auth_fallback = asyncio.run(get_auth_context(user_token=None))
+                            auth_fallback = asyncio.run(
+                                get_auth_context(user_token=None)
+                            )
                             if auth_fallback:
-                                os.environ["DATABRICKS_HOST"] = auth_fallback.workspace_url
+                                os.environ["DATABRICKS_HOST"] = (
+                                    auth_fallback.workspace_url
+                                )
                                 os.environ["DATABRICKS_TOKEN"] = auth_fallback.token
-                                logger.info(f"[Dispatcher] MLflow reconfigured with {auth_fallback.auth_method} authentication")
+                                logger.info(
+                                    f"[Dispatcher] MLflow reconfigured with {auth_fallback.auth_method} authentication"
+                                )
                                 # Retry experiment creation with fallback auth
                                 mlflow.set_tracking_uri("databricks")
                                 exp = mlflow.set_experiment(exp_name)
-                                logger.info(f"[Dispatcher] MLflow experiment set successfully with {auth_fallback.auth_method} fallback")
+                                logger.info(
+                                    f"[Dispatcher] MLflow experiment set successfully with {auth_fallback.auth_method} fallback"
+                                )
                             else:
-                                logger.error("[Dispatcher] PAT/SPN fallback auth also failed")
+                                logger.error(
+                                    "[Dispatcher] PAT/SPN fallback auth also failed"
+                                )
                                 raise
                         else:
                             # Not a scope error or already using PAT/SPN, re-raise
                             raise
 
                 except Exception as auth_e:
-                    logger.warning(f"[Dispatcher] Databricks auth setup failed: {auth_e}")
+                    logger.warning(
+                        f"[Dispatcher] Databricks auth setup failed: {auth_e}"
+                    )
                     raise
                 try:
-                    logger.info(f"[Dispatcher] MLflow experiment set: {exp_name} (ID: {getattr(exp, 'experiment_id', '')})")
+                    logger.info(
+                        f"[Dispatcher] MLflow experiment set: {exp_name} (ID: {getattr(exp, 'experiment_id', '')})"
+                    )
                 except Exception:
                     pass
                 # Ensure OpenTelemetry SDK is enabled; otherwise MLflow traces won't record
                 try:
                     import os as _otel_env
-                    if _otel_env.environ.get("OTEL_SDK_DISABLED", "").lower() in ("", "true", "1"):
+
+                    if _otel_env.environ.get("OTEL_SDK_DISABLED", "").lower() in (
+                        "",
+                        "true",
+                        "1",
+                    ):
                         _otel_env.environ["OTEL_SDK_DISABLED"] = "false"
-                        logger.info("[Dispatcher] Set OTEL_SDK_DISABLED=false for MLflow tracing")
+                        logger.info(
+                            "[Dispatcher] Set OTEL_SDK_DISABLED=false for MLflow tracing"
+                        )
                 except Exception as _ote:
-                    logger.info(f"[Dispatcher] Could not adjust OTEL_SDK_DISABLED: {_ote}")
+                    logger.info(
+                        f"[Dispatcher] Could not adjust OTEL_SDK_DISABLED: {_ote}"
+                    )
                 # Route tracing to the experiment when available (MLflow 3.x)
                 try:
                     from mlflow.tracing.destination import Databricks as _Dest
-                    mlflow.tracing.set_destination(_Dest(experiment_id=str(getattr(exp, "experiment_id", ""))))
+
+                    mlflow.tracing.set_destination(
+                        _Dest(experiment_id=str(getattr(exp, "experiment_id", "")))
+                    )
                     mlflow.tracing.enable()
                 except Exception as te:
                     # Older MLflow versions may not support tracing destination
-                    logger.info(f"[Dispatcher] MLflow tracing destination not set (version/availability): {te}")
+                    logger.info(
+                        f"[Dispatcher] MLflow tracing destination not set (version/availability): {te}"
+                    )
                 # Enable LiteLLM autolog to create child spans (not separate root traces)
                 # log_traces=False creates spans that nest under the parent "dispatcher" trace
                 try:
                     mlflow.litellm.autolog(log_traces=False)
-                    logger.info("[Dispatcher] MLflow LiteLLM autolog enabled (spans only)")
+                    logger.info(
+                        "[Dispatcher] MLflow LiteLLM autolog enabled (spans only)"
+                    )
                 except Exception as ae:
-                    logger.info(f"[Dispatcher] MLflow LiteLLM autolog not available: {ae}")
+                    logger.info(
+                        f"[Dispatcher] MLflow LiteLLM autolog not available: {ae}"
+                    )
 
             # Run setup off the event loop
             await asyncio.to_thread(_setup_mlflow_sync)
-            logger.info("[Dispatcher] MLflow tracing configured (experiment and autolog)")
+            logger.info(
+                "[Dispatcher] MLflow tracing configured (experiment and autolog)"
+            )
             return True
         except Exception as e:
             logger.warning(f"[Dispatcher] MLflow setup skipped: {e}")
@@ -285,7 +497,7 @@ class DispatcherService:
             Dictionary containing semantic analysis results
         """
         # Normalize message for analysis
-        words = re.findall(r'\b\w+\b', message.lower())
+        words = re.findall(r"\b\w+\b", message.lower())
         word_set = set(words)
 
         # Count different types of keywords
@@ -298,38 +510,53 @@ class DispatcherService:
         configure_keywords = word_set.intersection(self.CONFIGURE_KEYWORDS)
 
         # Analyze message structure patterns
-        has_imperative = any(word in words[:3] for word in self.TASK_ACTION_WORDS)  # Action word in first 3 words
-        has_question = message.strip().endswith('?') or any(word in words[:2] for word in ['what', 'how', 'why', 'when', 'where', 'who'])
+        has_imperative = any(
+            word in words[:3] for word in self.TASK_ACTION_WORDS
+        )  # Action word in first 3 words
+        has_question = message.strip().endswith("?") or any(
+            word in words[:2] for word in ["what", "how", "why", "when", "where", "who"]
+        )
         has_greeting = False  # Removed conversation detection
 
         # Detect command-like structures
         command_patterns = [
-            r'^(find|get|create|make|build|search|analyze)',  # Starts with action
-            r'^(i need|i want|help me|can you)',              # Request patterns
-            r'^(an order|a task|a job)',                      # Task-like prefixes
+            r"^(find|get|create|make|build|search|analyze)",  # Starts with action
+            r"^(i need|i want|help me|can you)",  # Request patterns
+            r"^(an order|a task|a job)",  # Task-like prefixes
         ]
 
         # Detect configuration patterns
         configure_patterns = [
-            r'(configure|config|setup|set up)',               # Configuration words
-            r'(change|update|modify|adjust).*?(llm|model|tools|maxr|max|rpm)', # Change configuration
-            r'(select|choose|pick).*?(llm|model|tools)',       # Selection patterns
-            r'(llm|model|tools|maxr).*?(setting|config)',      # Configuration contexts
+            r"(configure|config|setup|set up)",  # Configuration words
+            r"(change|update|modify|adjust).*?(llm|model|tools|maxr|max|rpm)",  # Change configuration
+            r"(select|choose|pick).*?(llm|model|tools)",  # Selection patterns
+            r"(llm|model|tools|maxr).*?(setting|config)",  # Configuration contexts
         ]
 
-        has_command_structure = any(re.search(pattern, message.lower()) for pattern in command_patterns)
-        has_configure_structure = any(re.search(pattern, message.lower()) for pattern in configure_patterns)
+        has_command_structure = any(
+            re.search(pattern, message.lower()) for pattern in command_patterns
+        )
+        has_configure_structure = any(
+            re.search(pattern, message.lower()) for pattern in configure_patterns
+        )
 
         # Calculate intent suggestions based on semantic analysis
         # Check for complex multi-agent/multi-task workflows
-        has_complex_task = len(task_actions) > 1 or bool(re.search(r'multiple|several|all|various|different', message.lower()))
+        has_complex_task = len(task_actions) > 1 or bool(
+            re.search(r"multiple|several|all|various|different", message.lower())
+        )
 
         intent_scores = {
-            'generate_task': len(task_actions) * 2 + (1 if has_imperative else 0) + (1 if has_command_structure else 0),
-            'generate_agent': len(agent_keywords) * 3,
-            'generate_crew': len(crew_keywords) * 3 + (2 if has_complex_task and crew_keywords else 0),
-            'execute_crew': len(execute_keywords) * 4 + (2 if execute_keywords.intersection({'execute', 'ec'}) else 0),
-            'configure_crew': len(configure_keywords) * 3 + (2 if has_configure_structure else 0)
+            "generate_task": len(task_actions) * 2
+            + (1 if has_imperative else 0)
+            + (1 if has_command_structure else 0),
+            "generate_agent": len(agent_keywords) * 3,
+            "generate_crew": len(crew_keywords) * 3
+            + (2 if has_complex_task and crew_keywords else 0),
+            "execute_crew": len(execute_keywords) * 4
+            + (2 if execute_keywords.intersection({"execute", "ec"}) else 0),
+            "configure_crew": len(configure_keywords) * 3
+            + (2 if has_configure_structure else 0),
         }
 
         # Determine semantic hints
@@ -337,9 +564,13 @@ class DispatcherService:
         if task_actions:
             semantic_hints.append(f"Action words detected: {', '.join(task_actions)}")
         if execute_keywords:
-            semantic_hints.append(f"Execution words detected: {', '.join(execute_keywords)}")
+            semantic_hints.append(
+                f"Execution words detected: {', '.join(execute_keywords)}"
+            )
         if configure_keywords:
-            semantic_hints.append(f"Configuration words detected: {', '.join(configure_keywords)}")
+            semantic_hints.append(
+                f"Configuration words detected: {', '.join(configure_keywords)}"
+            )
 
         if has_complex_task:
             semantic_hints.append("Complex multi-step task detected")
@@ -356,10 +587,8 @@ class DispatcherService:
 
         return {
             "task_actions": list(task_actions),
-
             "agent_keywords": list(agent_keywords),
             "crew_keywords": list(crew_keywords),
-
             "execute_keywords": list(execute_keywords),
             "configure_keywords": list(configure_keywords),
             "has_imperative": has_imperative,
@@ -367,14 +596,19 @@ class DispatcherService:
             "has_greeting": has_greeting,
             "has_command_structure": has_command_structure,
             "has_configure_structure": has_configure_structure,
-
             "has_complex_task": has_complex_task,
             "intent_scores": intent_scores,
             "semantic_hints": semantic_hints,
-            "suggested_intent": max(intent_scores, key=intent_scores.get) if max(intent_scores.values()) > 0 else "unknown"
+            "suggested_intent": (
+                max(intent_scores, key=intent_scores.get)
+                if max(intent_scores.values()) > 0
+                else "unknown"
+            ),
         }
 
-    async def _detect_intent(self, message: str, model: str, group_context: Optional[GroupContext] = None) -> Dict[str, Any]:
+    async def _detect_intent(
+        self, message: str, model: str, group_context: Optional[GroupContext] = None
+    ) -> Dict[str, Any]:
         """
         Detect the intent from the user's message using LLM enhanced with semantic analysis.
 
@@ -387,37 +621,10 @@ class DispatcherService:
         """
         # Perform semantic analysis first
         semantic_analysis = self._analyze_message_semantics(message)
-        # DSPy is temporarily disabled - skip workspace DSPy check
-        # TODO: Re-enable when evaluation metrics are implemented
-        dspy_enabled = False
-        # try:
-        #     from src.services.dspy_settings_service import DSPySettingsService
-        #     group_id = group_context.primary_group_id if group_context else None
-        #     settings = DSPySettingsService(self.session, group_id=group_id)
-        #     dspy_enabled = await settings.is_enabled()
-        # except Exception:
-        #     dspy_enabled = self.use_dspy
-
-
-        # DSPy is temporarily disabled - skip DSPy optimization
-        # TODO: Re-enable DSPy when evaluation metrics are implemented
-        # if dspy_enabled and self.dspy_service:
-        #     try:
-        #         logger.info("Using DSPy for intent detection")
-        #         result = await self.dspy_service.predict_intent(
-        #             message=message,
-        #             semantic_hints=json.dumps(semantic_analysis)
-        #         )
-        #         result["source"] = "dspy_optimized"
-        #         result["semantic_analysis"] = semantic_analysis
-        #         logger.info(f"DSPy intent detection result: {result['intent']} (confidence: {result['confidence']})")
-        #         return result
-        #     except Exception as e:
-        #         logger.error(f"DSPy intent detection failed, falling back to template: {e}")
-        #         # Fall through to traditional method
-
         # Get prompt template from database
-        system_prompt = await self.template_service.get_template_content("detect_intent")
+        system_prompt = await self.template_service.get_template_content(
+            "detect_intent"
+        )
 
         if not system_prompt:
             # Use a default prompt if template not found
@@ -525,7 +732,7 @@ Please analyze this message and provide your intent classification, considering 
 
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": enhanced_user_message}
+            {"role": "user", "content": enhanced_user_message},
         ]
 
         try:
@@ -537,7 +744,7 @@ Please analyze this message and provide your intent classification, considering 
                 **model_params,
                 "messages": messages,
                 "temperature": 0.3,  # Lower temperature for more consistent intent detection
-                "max_tokens": 4000
+                "max_tokens": 4000,
             }
 
             # With litellm 1.75.8+, GPT-5 is natively supported
@@ -546,20 +753,30 @@ Please analyze this message and provide your intent classification, considering 
             # Generate completion with explicit span for tracing
             # LiteLLM autolog will create nested spans under this
             try:
-                mlflow = __import__('mlflow')
-                if hasattr(mlflow, 'start_span'):
-                    with mlflow.start_span(name="intent_detection", span_type="LLM") as intent_span:
-                        if hasattr(intent_span, 'set_inputs'):
-                            intent_span.set_inputs({
-                                "model": model,
-                                "messages": messages,
-                                "temperature": 0.3
-                            })
+                mlflow = __import__("mlflow")
+                if hasattr(mlflow, "start_span"):
+                    with mlflow.start_span(
+                        name="intent_detection", span_type="LLM"
+                    ) as intent_span:
+                        if hasattr(intent_span, "set_inputs"):
+                            intent_span.set_inputs(
+                                {
+                                    "model": model,
+                                    "messages": messages,
+                                    "temperature": 0.3,
+                                }
+                            )
                         response = await LLMManager.acompletion(**completion_params)
-                        if hasattr(intent_span, 'set_outputs'):
-                            intent_span.set_outputs({
-                                "response": response["choices"][0]["message"]["content"][:500]  # Truncate for brevity
-                            })
+                        if hasattr(intent_span, "set_outputs"):
+                            intent_span.set_outputs(
+                                {
+                                    "response": response["choices"][0]["message"][
+                                        "content"
+                                    ][
+                                        :500
+                                    ]  # Truncate for brevity
+                                }
+                            )
                 else:
                     response = await LLMManager.acompletion(**completion_params)
             except ImportError:
@@ -569,17 +786,24 @@ Please analyze this message and provide your intent classification, considering 
             # litellm 1.75.8 returns ModelResponse (Pydantic) objects
             content = response["choices"][0]["message"]["content"]
 
-
             # Check if content is empty
             if not content or not content.strip():
-                logger.warning(f"LLM returned empty response for intent detection with model {model}")
+                logger.warning(
+                    f"LLM returned empty response for intent detection with model {model}"
+                )
                 # Fall back to semantic analysis
-                semantic_confidence = max(semantic_analysis["intent_scores"].values()) / 5.0
+                semantic_confidence = (
+                    max(semantic_analysis["intent_scores"].values()) / 5.0
+                )
                 return {
-                    "intent": semantic_analysis["suggested_intent"] if semantic_confidence > 0.3 else "unknown",
+                    "intent": (
+                        semantic_analysis["suggested_intent"]
+                        if semantic_confidence > 0.3
+                        else "unknown"
+                    ),
                     "confidence": max(0.3, semantic_confidence),
                     "extracted_info": {},
-                    "source": "semantic_fallback_empty_response"
+                    "source": "semantic_fallback_empty_response",
                 }
 
             # Parse the response
@@ -597,9 +821,13 @@ Please analyze this message and provide your intent classification, considering 
                     confidence_value = float(result["confidence"])
                     result["confidence"] = max(0.0, min(1.0, confidence_value))
                     if confidence_value != result["confidence"]:
-                        logger.warning(f"Clamped confidence from {confidence_value} to {result['confidence']}")
+                        logger.warning(
+                            f"Clamped confidence from {confidence_value} to {result['confidence']}"
+                        )
                 except (ValueError, TypeError) as e:
-                    logger.warning(f"Invalid confidence value: {result['confidence']}, defaulting to 0.5")
+                    logger.warning(
+                        f"Invalid confidence value: {result['confidence']}, defaulting to 0.5"
+                    )
                     result["confidence"] = 0.5
             if "extracted_info" not in result:
                 result["extracted_info"] = {}
@@ -610,10 +838,14 @@ Please analyze this message and provide your intent classification, considering 
             result["extracted_info"]["semantic_analysis"] = semantic_analysis
 
             # If LLM result seems wrong and semantic analysis is confident, use semantic analysis
-            semantic_confidence = max(semantic_analysis["intent_scores"].values()) / 5.0  # Normalize to 0-1
+            semantic_confidence = (
+                max(semantic_analysis["intent_scores"].values()) / 5.0
+            )  # Normalize to 0-1
 
             if semantic_confidence > 0.6 and result["confidence"] < 0.7:
-                logger.info(f"Using semantic analysis suggestion: {semantic_analysis['suggested_intent']} (confidence: {semantic_confidence:.2f}) over LLM result: {result['intent']} (confidence: {result['confidence']:.2f})")
+                logger.info(
+                    f"Using semantic analysis suggestion: {semantic_analysis['suggested_intent']} (confidence: {semantic_confidence:.2f}) over LLM result: {result['intent']} (confidence: {result['confidence']:.2f})"
+                )
                 result["intent"] = semantic_analysis["suggested_intent"]
                 result["confidence"] = max(result["confidence"], semantic_confidence)
 
@@ -622,15 +854,23 @@ Please analyze this message and provide your intent classification, considering 
         except Exception as e:
             logger.error(f"Error detecting intent: {str(e)}")
             # Fall back to semantic analysis if LLM fails
-            semantic_confidence = max(semantic_analysis["intent_scores"].values()) / 5.0  # Normalize to 0-1
+            semantic_confidence = (
+                max(semantic_analysis["intent_scores"].values()) / 5.0
+            )  # Normalize to 0-1
             return {
-                "intent": semantic_analysis["suggested_intent"] if semantic_confidence > 0.3 else "unknown",
+                "intent": (
+                    semantic_analysis["suggested_intent"]
+                    if semantic_confidence > 0.3
+                    else "unknown"
+                ),
                 "confidence": max(0.3, semantic_confidence),
                 "extracted_info": {"semantic_analysis": semantic_analysis},
-                "suggested_prompt": message
+                "suggested_prompt": message,
             }
 
-    async def dispatch(self, request: DispatcherRequest, group_context: GroupContext = None) -> Dict[str, Any]:
+    async def dispatch(
+        self, request: DispatcherRequest, group_context: GroupContext = None
+    ) -> Dict[str, Any]:
         """
         Dispatch the user's request to the appropriate generation service.
 
@@ -649,9 +889,17 @@ Please analyze this message and provide your intent classification, considering 
         # Use mlflow_tracing_service for robust trace context creation
         if mlflow_enabled:
             try:
-                from src.services.mlflow_tracing_service import start_root_trace, get_last_active_trace_id
-                trace_ctx = start_root_trace("dispatcher", inputs={"message": request.message})
-                logger.info("[Dispatcher] MLflow root trace started using mlflow_tracing_service")
+                from src.services.mlflow_tracing_service import (
+                    get_last_active_trace_id,
+                    start_root_trace,
+                )
+
+                trace_ctx = start_root_trace(
+                    "dispatcher", inputs={"message": request.message}
+                )
+                logger.info(
+                    "[Dispatcher] MLflow root trace started using mlflow_tracing_service"
+                )
             except Exception as trace_e:
                 logger.warning(f"[Dispatcher] Could not start root trace: {trace_e}")
                 trace_ctx = nullcontext()
@@ -662,11 +910,15 @@ Please analyze this message and provide your intent classification, considering 
             # Explicitly set inputs on the trace if available
             if mlflow_enabled and root_trace is not None:
                 try:
-                    if hasattr(root_trace, 'set_inputs'):
-                        root_trace.set_inputs({"message": request.message, "model": model})
+                    if hasattr(root_trace, "set_inputs"):
+                        root_trace.set_inputs(
+                            {"message": request.message, "model": model}
+                        )
                         logger.info("[Dispatcher] Trace inputs set successfully")
                 except Exception as input_e:
-                    logger.warning(f"[Dispatcher] Could not set trace inputs: {input_e}")
+                    logger.warning(
+                        f"[Dispatcher] Could not set trace inputs: {input_e}"
+                    )
 
             # Try to log last active trace id for observability
             if mlflow_enabled:
@@ -678,15 +930,17 @@ Please analyze this message and provide your intent classification, considering 
                     pass
 
             # Detect intent
-            intent_result = await self._detect_intent(request.message, model, group_context)
+            intent_result = await self._detect_intent(
+                request.message, model, group_context
+            )
 
             # Log the intent detection to DB (separate from MLflow)
             await self._log_llm_interaction(
-                endpoint='detect-intent',
+                endpoint="detect-intent",
                 prompt=request.message,
                 response=str(intent_result),
                 model=model,
-                group_context=group_context
+                group_context=group_context,
             )
 
             # Create dispatcher response
@@ -694,7 +948,7 @@ Please analyze this message and provide your intent classification, considering 
                 intent=IntentType(intent_result["intent"]),
                 confidence=intent_result["confidence"],
                 extracted_info=intent_result["extracted_info"],
-                suggested_prompt=intent_result["suggested_prompt"]
+                suggested_prompt=intent_result["suggested_prompt"],
             )
 
             # Dispatch to appropriate service based on intent
@@ -702,17 +956,18 @@ Please analyze this message and provide your intent classification, considering 
             try:
                 if dispatcher_response.intent == IntentType.GENERATE_AGENT:
                     generation_result = await self.agent_service.generate_agent(
-                        prompt_text=dispatcher_response.suggested_prompt or request.message,
+                        prompt_text=dispatcher_response.suggested_prompt
+                        or request.message,
                         model=request.model,
                         tools=request.tools,
                         group_context=group_context,
-                        fast_planning=True
+                        fast_planning=True,
                     )
 
                 elif dispatcher_response.intent == IntentType.GENERATE_TASK:
                     task_request = TaskGenerationRequest(
                         text=dispatcher_response.suggested_prompt or request.message,
-                        model=request.model
+                        model=request.model,
                     )
                     generation_result = await self.task_service.generate_and_save_task(
                         task_request, group_context, fast_planning=True
@@ -722,7 +977,7 @@ Please analyze this message and provide your intent classification, considering 
                     crew_request = CrewGenerationRequest(
                         prompt=dispatcher_response.suggested_prompt or request.message,
                         model=request.model,
-                        tools=request.tools
+                        tools=request.tools,
                     )
                     generation_result = await self.crew_service.create_crew_complete(
                         crew_request, group_context, fast_planning=True
@@ -733,11 +988,13 @@ Please analyze this message and provide your intent classification, considering 
                         "type": "execute_crew",
                         "message": "Executing crew...",
                         "action": "execute_crew",
-                        "extracted_info": dispatcher_response.extracted_info
+                        "extracted_info": dispatcher_response.extracted_info,
                     }
 
                 elif dispatcher_response.intent == IntentType.CONFIGURE_CREW:
-                    config_type = dispatcher_response.extracted_info.get("config_type", "general")
+                    config_type = dispatcher_response.extracted_info.get(
+                        "config_type", "general"
+                    )
                     generation_result = {
                         "type": "configure_crew",
                         "config_type": config_type,
@@ -745,13 +1002,15 @@ Please analyze this message and provide your intent classification, considering 
                         "actions": {
                             "open_llm_dialog": config_type in ["llm", "general"],
                             "open_maxr_dialog": config_type in ["maxr", "general"],
-                            "open_tools_dialog": config_type in ["tools", "general"]
+                            "open_tools_dialog": config_type in ["tools", "general"],
                         },
-                        "extracted_info": dispatcher_response.extracted_info
+                        "extracted_info": dispatcher_response.extracted_info,
                     }
 
                 else:
-                    logger.warning(f"Unknown intent detected: {dispatcher_response.intent}")
+                    logger.warning(
+                        f"Unknown intent detected: {dispatcher_response.intent}"
+                    )
                     generation_result = {
                         "type": "unknown",
                         "message": "I'm not sure what you'd like me to create. Could you please clarify if you want me to generate a task, agent, crew, or plan?",
@@ -759,19 +1018,19 @@ Please analyze this message and provide your intent classification, considering 
                             "Create a task: 'I need a task to...'",
                             "Generate an agent: 'Create an agent that can...'",
                             "Build a crew: 'Build a team that can...'",
-                            "Create a plan: 'Create a plan for...'"
-                        ]
+                            "Create a plan: 'Create a plan for...'",
+                        ],
                     }
             except Exception as e:
                 logger.error(f"Error in generation service: {str(e)}")
                 await self._log_llm_interaction(
-                    endpoint=f'dispatch-{dispatcher_response.intent}',
+                    endpoint=f"dispatch-{dispatcher_response.intent}",
                     prompt=request.message,
                     response=str(e),
                     model=model,
-                    status='error',
+                    status="error",
                     error_message=str(e),
-                    group_context=group_context
+                    group_context=group_context,
                 )
                 raise
 
@@ -779,19 +1038,23 @@ Please analyze this message and provide your intent classification, considering 
             combined_response = {
                 "dispatcher": dispatcher_response.model_dump(),
                 "generation_result": generation_result,
-                "service_called": dispatcher_response.intent.value if dispatcher_response.intent != IntentType.UNKNOWN else None
+                "service_called": (
+                    dispatcher_response.intent.value
+                    if dispatcher_response.intent != IntentType.UNKNOWN
+                    else None
+                ),
             }
 
             # Set trace outputs if MLflow tracing is enabled
             if mlflow_enabled and root_trace is not None:
                 try:
-                    if hasattr(root_trace, 'set_outputs'):
+                    if hasattr(root_trace, "set_outputs"):
                         trace_outputs = {
                             "intent": dispatcher_response.intent.value,
                             "confidence": dispatcher_response.confidence,
                             "extracted_info": dispatcher_response.extracted_info,
                             "suggested_prompt": dispatcher_response.suggested_prompt,
-                            "service_called": combined_response["service_called"]
+                            "service_called": combined_response["service_called"],
                         }
 
                         # Add generation result summary (avoid large payloads)
@@ -801,13 +1064,15 @@ Please analyze this message and provide your intent classification, considering 
                                 trace_outputs["generation_summary"] = {
                                     "type": generation_result.get("type"),
                                     "message": generation_result.get("message"),
-                                    "has_result": bool(generation_result)
+                                    "has_result": bool(generation_result),
                                 }
 
                         root_trace.set_outputs(trace_outputs)
                         logger.info("[Dispatcher] Trace outputs set successfully")
                 except Exception as output_e:
-                    logger.warning(f"[Dispatcher] Could not set trace outputs: {output_e}")
+                    logger.warning(
+                        f"[Dispatcher] Could not set trace outputs: {output_e}"
+                    )
 
             # Return combined response
             return combined_response

@@ -50,11 +50,6 @@ dependencies = [
     "mcp>=1.23.1,<1.24.0",  # Required by crewai>=1.9.3
     "mcpadapt",
 
-    # DSPy
-    "dspy-ai>=2.5.0",
-    "optuna>=3.5.0",
-    "numpy>=1.24.0",
-
     # Observability
     "mlflow==3.4.0",
 

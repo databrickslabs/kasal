@@ -425,7 +425,7 @@ export class JobExecutionService {
 
             // Process LLM guardrail if explicitly enabled by the user (toggle ON)
             if (taskData.config?.llm_guardrail && config.tasks_yaml[taskName]) {
-              config.tasks_yaml[taskName].llm_guardrail = taskData.config.llm_guardrail;
+              config.tasks_yaml[taskName].guardrail = JSON.stringify(taskData.config.llm_guardrail);
               console.log(`Set llm_guardrail for task ${taskName}:`, taskData.config.llm_guardrail);
             }
           }

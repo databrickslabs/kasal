@@ -616,7 +616,7 @@ describe('JobExecutionService', () => {
   // ===========================================================================
 
   describe('llm_guardrail execution config', () => {
-    it('should include llm_guardrail in tasks_yaml when toggle is ON', async () => {
+    it('should set guardrail as JSON string in tasks_yaml when llm_guardrail toggle is ON', async () => {
       const agentNode = createMockAgentNode('agent-gr-1', {
         role: 'Researcher',
         goal: 'Research topics',
@@ -645,13 +645,16 @@ describe('JobExecutionService', () => {
       const taskName = Object.keys(config.tasks_yaml).find(k => k.includes('task-gr-1') || k.includes('task_gr'));
 
       expect(taskName).toBeDefined();
-      expect(config.tasks_yaml[taskName!].llm_guardrail).toEqual({
-        description: 'Validate output contains at least 5 sources',
-        llm_model: 'databricks-claude-sonnet-4-5'
-      });
+      // LLM guardrail is serialized to the guardrail field as a JSON string
+      expect(config.tasks_yaml[taskName!].guardrail).toBe(
+        JSON.stringify({
+          description: 'Validate output contains at least 5 sources',
+          llm_model: 'databricks-claude-sonnet-4-5'
+        })
+      );
     });
 
-    it('should NOT include llm_guardrail when toggle is OFF (null in config)', async () => {
+    it('should NOT set guardrail when llm_guardrail toggle is OFF (null in config)', async () => {
       const agentNode = createMockAgentNode('agent-gr-2', {
         role: 'Writer',
         goal: 'Write content',
@@ -676,10 +679,10 @@ describe('JobExecutionService', () => {
       const taskName = Object.keys(config.tasks_yaml).find(k => k.includes('task-gr-2') || k.includes('task_gr'));
 
       expect(taskName).toBeDefined();
-      expect(config.tasks_yaml[taskName!].llm_guardrail).toBeUndefined();
+      expect(config.tasks_yaml[taskName!].guardrail).toBeUndefined();
     });
 
-    it('should NOT include llm_guardrail when config has no llm_guardrail key', async () => {
+    it('should NOT set guardrail when config has no llm_guardrail key', async () => {
       const agentNode = createMockAgentNode('agent-gr-3', {
         role: 'Analyst',
         goal: 'Analyze data',
@@ -706,10 +709,10 @@ describe('JobExecutionService', () => {
       const taskName = Object.keys(config.tasks_yaml).find(k => k.includes('task-gr-3') || k.includes('task_gr'));
 
       expect(taskName).toBeDefined();
-      expect(config.tasks_yaml[taskName!].llm_guardrail).toBeUndefined();
+      expect(config.tasks_yaml[taskName!].guardrail).toBeUndefined();
     });
 
-    it('should handle tasks with code guardrail and llm_guardrail independently', async () => {
+    it('should overwrite code guardrail with llm_guardrail when both are present', async () => {
       const agentNode = createMockAgentNode('agent-gr-4', {
         role: 'Validator',
         goal: 'Validate data',
@@ -738,15 +741,13 @@ describe('JobExecutionService', () => {
       const taskName = Object.keys(config.tasks_yaml).find(k => k.includes('task-gr-4') || k.includes('task_gr'));
 
       expect(taskName).toBeDefined();
-      // Both guardrails should be present
-      expect(config.tasks_yaml[taskName!].guardrail).toEqual({
-        type: 'data_quality',
-        checks: ['completeness']
-      });
-      expect(config.tasks_yaml[taskName!].llm_guardrail).toEqual({
-        description: 'Validate report is comprehensive',
-        llm_model: 'databricks-claude-sonnet-4-5'
-      });
+      // LLM guardrail overwrites the code guardrail since both map to the same field
+      expect(config.tasks_yaml[taskName!].guardrail).toBe(
+        JSON.stringify({
+          description: 'Validate report is comprehensive',
+          llm_model: 'databricks-claude-sonnet-4-5'
+        })
+      );
     });
   });
 
