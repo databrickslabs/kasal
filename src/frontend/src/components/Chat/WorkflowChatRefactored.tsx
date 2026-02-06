@@ -185,6 +185,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     lastExecutionJobId: _lastExecutionJobId,
     setLastExecutionJobId,
     executionStartTime: _executionStartTime,
+    markPendingExecution,
   } = useExecutionMonitoring(sessionId, saveMessageToBackend, setMessages);
 
   const scrollToBottom = () => {
@@ -422,6 +423,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           timestamp: new Date(),
         };
         setMessages(prev => [...prev, pendingMessage]);
+
+        // Mark this session as expecting a job to start
+        markPendingExecution();
 
         if (pendingExecutionType === 'crew') {
           await executeCrew(nodes, edges);
