@@ -43,15 +43,17 @@ def app(mock_user):
     from src.api.auth_router import router
     from src.db.session import get_db
     from src.dependencies.auth import get_current_user, get_current_active_user
-    
+    from tests.unit.router.conftest import register_exception_handlers
+
     app = FastAPI()
     app.include_router(router)
-    
+    register_exception_handlers(app)
+
     # Override dependencies
     app.dependency_overrides[get_db] = lambda: AsyncMock()
     app.dependency_overrides[get_current_user] = lambda: mock_user
     app.dependency_overrides[get_current_active_user] = lambda: mock_user
-    
+
     return app
 
 

@@ -5,6 +5,7 @@ This module provides API endpoints for generating and testing connections
 between agents and tasks in the CrewAI ecosystem.
 """
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends

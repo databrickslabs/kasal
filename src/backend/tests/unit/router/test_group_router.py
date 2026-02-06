@@ -58,28 +58,31 @@ def mock_group_context():
 @pytest.fixture
 def app(mock_db_session, mock_current_user, mock_group_context):
     """Create a FastAPI app with mocked dependencies."""
+    from tests.unit.router.conftest import register_exception_handlers
+
     app = FastAPI()
     app.include_router(router)
-    
+    register_exception_handlers(app)
+
     async def override_get_db():
         return mock_db_session
-    
+
     def override_auth():
         return mock_current_user
-    
-    async def override_group_context(request=None, x_forwarded_email=None, x_forwarded_access_token=None, 
-                                   x_auth_request_email=None, x_auth_request_user=None, 
+
+    async def override_group_context(request=None, x_forwarded_email=None, x_forwarded_access_token=None,
+                                   x_auth_request_email=None, x_auth_request_user=None,
                                    x_auth_request_access_token=None):
         return mock_group_context
-    
+
     from src.core.dependencies import get_group_context
-    
+
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[require_authenticated_user] = override_auth
     app.dependency_overrides[get_authenticated_user] = override_auth
     app.dependency_overrides[get_admin_user] = override_auth
     app.dependency_overrides[get_group_context] = override_group_context
-    
+
     return app
 
 
@@ -151,9 +154,9 @@ class TestGroupRouter:
         mock_service.list_groups.side_effect = Exception("Database error")
         
         response = client.get("/groups")
-        
+
         assert response.status_code == 500
-        assert "Failed to list groups" in response.json()["detail"]
+        assert "Internal server error" in response.json()["detail"]
     
     @patch('src.api.group_router.GroupService')
     def test_create_group_success(self, mock_service_class, client, mock_db_session):
@@ -217,9 +220,9 @@ class TestGroupRouter:
         }
         
         response = client.post("/groups", json=group_data)
-        
+
         assert response.status_code == 500
-        assert "Failed to create group" in response.json()["detail"]
+        assert "Internal server error" in response.json()["detail"]
     
     @patch('src.api.group_router.GroupService')
     def test_get_group_success(self, mock_service_class, client, mock_db_session):
@@ -268,9 +271,9 @@ class TestGroupRouter:
         mock_service.get_group_by_id.side_effect = Exception("Database error")
         
         response = client.get("/groups/group-1")
-        
+
         assert response.status_code == 500
-        assert "Failed to get group" in response.json()["detail"]
+        assert "Internal server error" in response.json()["detail"]
     
     @patch('src.api.group_router.GroupService')
     def test_update_group_success(self, mock_service_class, client, mock_db_session):
@@ -328,9 +331,9 @@ class TestGroupRouter:
         update_data = {"name": "Updated Name"}
         
         response = client.put("/groups/group-1", json=update_data)
-        
+
         assert response.status_code == 500
-        assert "Failed to update group" in response.json()["detail"]
+        assert "Internal server error" in response.json()["detail"]
     
     @patch('src.api.group_router.GroupService')
     def test_delete_group_success(self, mock_service_class, client, mock_db_session):
@@ -364,9 +367,9 @@ class TestGroupRouter:
         mock_service.delete_group.side_effect = Exception("Database error")
         
         response = client.delete("/groups/group-1")
-        
+
         assert response.status_code == 500
-        assert "Failed to delete group" in response.json()["detail"]
+        assert "Internal server error" in response.json()["detail"]
     
     @patch('src.api.group_router.GroupService')
     def test_list_group_users_success(self, mock_service_class, client, mock_db_session):
@@ -438,9 +441,9 @@ class TestGroupRouter:
         mock_service.get_group_by_id.side_effect = Exception("Database error")
         
         response = client.get("/groups/group-1/users")
-        
+
         assert response.status_code == 500
-        assert "Failed to list group users" in response.json()["detail"]
+        assert "Internal server error" in response.json()["detail"]
     
     @patch('src.api.group_router.GroupService')
     def test_assign_user_to_group_success(self, mock_service_class, client, mock_db_session):
@@ -529,9 +532,9 @@ class TestGroupRouter:
         }
         
         response = client.post("/groups/group-1/users", json=user_data)
-        
+
         assert response.status_code == 500
-        assert "Failed to assign user to group" in response.json()["detail"]
+        assert "Internal server error" in response.json()["detail"]
     
     @patch('src.api.group_router.GroupService')
     @patch('sqlalchemy.select')
@@ -628,9 +631,9 @@ class TestGroupRouter:
         update_data = {"role": "admin"}
         
         response = client.put("/groups/group-1/users/user-1", json=update_data)
-        
+
         assert response.status_code == 500
-        assert "Failed to update group user" in response.json()["detail"]
+        assert "Internal server error" in response.json()["detail"]
     
     @patch('src.api.group_router.GroupService')
     def test_remove_user_from_group_success(self, mock_service_class, client, mock_db_session):
@@ -664,9 +667,9 @@ class TestGroupRouter:
         mock_service.remove_user_from_group.side_effect = Exception("Database error")
         
         response = client.delete("/groups/group-1/users/user-1")
-        
+
         assert response.status_code == 500
-        assert "Failed to remove user from group" in response.json()["detail"]
+        assert "Internal server error" in response.json()["detail"]
     
     def test_get_group_stats_success(self, client, mock_db_session, mock_group_context):
         """Test successful group statistics retrieval."""
@@ -713,22 +716,21 @@ class TestGroupRouter:
     def test_get_group_stats_exception(self, client, mock_db_session, mock_group_context):
         """Test group statistics retrieval with service exception."""
         from src.api.group_router import get_group_stats
-        from fastapi import HTTPException
-        
+
         # Test the function directly since route ordering prevents proper testing via HTTP
         with patch('src.api.group_router.GroupService') as mock_service_class:
             mock_service = AsyncMock()
             mock_service_class.return_value = mock_service
-            
+
             mock_service.get_group_stats.side_effect = Exception("Database error")
-            
+
             # Create a mock admin user
             class MockAdminUser:
                 email = "admin@test.com"
-                
+
             import asyncio
-            
-            # Test the function directly
+
+            # Test the function directly - exception now propagates (no inline try/except)
             async def run_test():
                 try:
                     await get_group_stats(
@@ -736,11 +738,10 @@ class TestGroupRouter:
                         admin_user=MockAdminUser(),
                         group_context=mock_group_context
                     )
-                    assert False, "Expected HTTPException to be raised"
-                except HTTPException as e:
-                    assert e.status_code == 500
-                    assert "Failed to get group statistics" in e.detail
-                    
+                    assert False, "Expected Exception to be raised"
+                except Exception as e:
+                    assert "Database error" in str(e)
+
             asyncio.run(run_test())
     
     def test_get_group_context_debug(self, client, mock_group_context):
