@@ -182,21 +182,23 @@ def app(mock_execution_history_service, mock_group_context):
     from src.api.execution_history_router import router
     from src.services.execution_history_service import get_execution_history_service
     from src.core.dependencies import get_group_context
-    
+    from tests.unit.router.conftest import register_exception_handlers
+
     app = FastAPI()
     app.include_router(router)
-    
+    register_exception_handlers(app)
+
     # Create override functions
     async def override_get_execution_history_service():
         return mock_execution_history_service
-        
+
     async def override_get_group_context():
         return mock_group_context
-    
+
     # Override dependencies
     app.dependency_overrides[get_execution_history_service] = override_get_execution_history_service
     app.dependency_overrides[get_group_context] = override_get_group_context
-    
+
     return app
 
 
@@ -287,7 +289,7 @@ class TestGetExecutionHistory:
         response = client.get("/executions/history")
         
         assert response.status_code == 500
-        assert "Failed to retrieve execution history" in response.json()["detail"]
+        assert "Internal server error" in response.json()["detail"]
 
 
 class TestCheckExecutionExists:
@@ -363,7 +365,7 @@ class TestGetExecutionById:
         response = client.get("/executions/history/1")
         
         assert response.status_code == 500
-        assert "Failed to retrieve execution" in response.json()["detail"]
+        assert "Internal server error" in response.json()["detail"]
     
     def test_get_execution_by_id_http_exception_reraise(self, client, mock_execution_history_service, mock_group_context):
         """Test getting execution by ID re-raising HTTPException."""
@@ -430,7 +432,7 @@ class TestGetExecutionOutputs:
         response = client.get("/executions/exec-123/outputs")
         
         assert response.status_code == 500
-        assert "Failed to retrieve execution outputs" in response.json()["detail"]
+        assert "Internal server error" in response.json()["detail"]
 
 
 class TestGetExecutionDebugOutputs:
@@ -473,7 +475,7 @@ class TestGetExecutionDebugOutputs:
         response = client.get("/executions/exec-123/outputs/debug")
         
         assert response.status_code == 500
-        assert "Failed to retrieve debug outputs" in response.json()["detail"]
+        assert "Internal server error" in response.json()["detail"]
     
     def test_get_execution_debug_outputs_http_exception_reraise(self, client, mock_execution_history_service, mock_group_context):
         """Test getting debug outputs re-raising HTTPException."""
@@ -509,7 +511,7 @@ class TestDeleteAllExecutions:
         response = client.delete("/executions/history")
         
         assert response.status_code == 500
-        assert "Failed to delete executions" in response.json()["detail"]
+        assert "Internal server error" in response.json()["detail"]
 
 
 class TestDeleteExecution:
@@ -545,8 +547,8 @@ class TestDeleteExecution:
         response = client.delete("/executions/history/1")
         
         assert response.status_code == 500
-        assert "Failed to delete execution" in response.json()["detail"]
-    
+        assert "Internal server error" in response.json()["detail"]
+
     def test_delete_execution_http_exception_reraise(self, client, mock_execution_history_service, mock_group_context):
         """Test deleting execution re-raising HTTPException."""
         from fastapi import HTTPException
@@ -590,8 +592,8 @@ class TestDeleteExecutionByJobId:
         response = client.delete("/executions/job-uuid-123")
         
         assert response.status_code == 500
-        assert "Failed to delete execution" in response.json()["detail"]
-    
+        assert "Internal server error" in response.json()["detail"]
+
     def test_delete_execution_by_job_id_http_exception_reraise(self, client, mock_execution_history_service, mock_group_context):
         """Test deleting execution by job ID re-raising HTTPException."""
         from fastapi import HTTPException

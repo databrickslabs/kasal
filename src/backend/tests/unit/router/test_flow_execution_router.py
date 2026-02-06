@@ -18,8 +18,11 @@ from src.api.flow_execution_router import router
 @pytest.fixture
 def app():
     """Create a FastAPI app for testing."""
+    from tests.unit.router.conftest import register_exception_handlers
+
     app = FastAPI()
     app.include_router(router)
+    register_exception_handlers(app)
     return app
 
 
@@ -152,10 +155,10 @@ class TestFlowExecutionRouter:
         }
         
         response = client.post("/flow-executions", json=execution_data)
-        
+
         assert response.status_code == 500
         data = response.json()
-        assert data["detail"] == "Service error"
+        assert data["detail"] == "Internal server error"
 
     @patch('src.api.flow_execution_router.CrewAIFlowService')
     def test_execute_flow_http_exception_passthrough(self, mock_service_class, client):
@@ -261,10 +264,10 @@ class TestFlowExecutionRouter:
         mock_service.get_flow_execution.side_effect = Exception("Service error")
         
         response = client.get("/flow-executions/123")
-        
+
         assert response.status_code == 500
         data = response.json()
-        assert data["detail"] == "Service error"
+        assert data["detail"] == "Internal server error"
 
     @patch('src.api.flow_execution_router.CrewAIFlowService')
     def test_get_flow_execution_http_exception_passthrough(self, mock_service_class, client):
@@ -369,10 +372,10 @@ class TestFlowExecutionRouter:
         mock_service.get_flow_executions_by_flow.side_effect = Exception("Service error")
         
         response = client.get("/flow-executions/by-flow/flow-123")
-        
+
         assert response.status_code == 500
         data = response.json()
-        assert data["detail"] == "Service error"
+        assert data["detail"] == "Internal server error"
 
     @patch('src.api.flow_execution_router.CrewAIFlowService')
     def test_get_flow_executions_by_flow_http_exception_passthrough(self, mock_service_class, client):
@@ -409,52 +412,46 @@ class TestFlowExecutionRouter:
             response = client.post("/flow-executions", json=execution_data)
             assert response.status_code == 202
 
-    @patch('src.api.flow_execution_router.logger')
     @patch('src.api.flow_execution_router.CrewAIFlowService')
-    def test_execute_flow_logging_on_exception(self, mock_service_class, mock_logger, client):
-        """Test that exceptions are logged properly in execute_flow."""
+    def test_execute_flow_exception_returns_500(self, mock_service_class, client):
+        """Test that exceptions return 500 in execute_flow."""
         mock_service = AsyncMock()
         mock_service_class.return_value = mock_service
-        
-        error_message = "Database connection failed"
-        mock_service.run_flow.side_effect = Exception(error_message)
-        
+
+        mock_service.run_flow.side_effect = Exception("Database connection failed")
+
         execution_data = {
             "flow_id": "test-flow",
             "job_id": "test-job"
         }
-        
+
         response = client.post("/flow-executions", json=execution_data)
-        
-        assert response.status_code == 500
-        mock_logger.error.assert_called_once_with(f"Error executing flow: {error_message}")
 
-    @patch('src.api.flow_execution_router.logger')
+        assert response.status_code == 500
+        assert response.json()["detail"] == "Internal server error"
+
     @patch('src.api.flow_execution_router.CrewAIFlowService')
-    def test_get_flow_execution_logging_on_exception(self, mock_service_class, mock_logger, client):
-        """Test that exceptions are logged properly in get_flow_execution."""
+    def test_get_flow_execution_exception_returns_500(self, mock_service_class, client):
+        """Test that exceptions return 500 in get_flow_execution."""
         mock_service = AsyncMock()
         mock_service_class.return_value = mock_service
-        
-        error_message = "Database query failed"
-        mock_service.get_flow_execution.side_effect = Exception(error_message)
-        
+
+        mock_service.get_flow_execution.side_effect = Exception("Database query failed")
+
         response = client.get("/flow-executions/123")
-        
-        assert response.status_code == 500
-        mock_logger.error.assert_called_once_with(f"Error getting flow execution: {error_message}")
 
-    @patch('src.api.flow_execution_router.logger')
+        assert response.status_code == 500
+        assert response.json()["detail"] == "Internal server error"
+
     @patch('src.api.flow_execution_router.CrewAIFlowService')
-    def test_get_flow_executions_by_flow_logging_on_exception(self, mock_service_class, mock_logger, client):
-        """Test that exceptions are logged properly in get_flow_executions_by_flow."""
+    def test_get_flow_executions_by_flow_exception_returns_500(self, mock_service_class, client):
+        """Test that exceptions return 500 in get_flow_executions_by_flow."""
         mock_service = AsyncMock()
         mock_service_class.return_value = mock_service
-        
-        error_message = "Network timeout"
-        mock_service.get_flow_executions_by_flow.side_effect = Exception(error_message)
-        
+
+        mock_service.get_flow_executions_by_flow.side_effect = Exception("Network timeout")
+
         response = client.get("/flow-executions/by-flow/flow-123")
-        
+
         assert response.status_code == 500
-        mock_logger.error.assert_called_once_with(f"Error getting flow executions: {error_message}")
+        assert response.json()["detail"] == "Internal server error"

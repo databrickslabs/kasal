@@ -34,17 +34,19 @@ def app(mock_group_context):
     from fastapi import FastAPI
     from src.api.dispatcher_router import router
     from src.core.dependencies import get_group_context
-    
+    from tests.unit.router.conftest import register_exception_handlers
+
     app = FastAPI()
     app.include_router(router)
-    
+    register_exception_handlers(app)
+
     # Create override function
     async def override_get_group_context():
         return mock_group_context
-    
+
     # Override dependencies
     app.dependency_overrides[get_group_context] = override_get_group_context
-    
+
     return app
 
 
@@ -237,8 +239,7 @@ class TestDispatchRequest:
         response = client.post("/dispatcher/dispatch", json=sample_dispatcher_request.model_dump())
         
         assert response.status_code == 500
-        assert "Error processing request" in response.json()["detail"]
-        assert "Service unavailable" in response.json()["detail"]
+        assert "Internal server error" in response.json()["detail"]
     
     @patch('src.api.dispatcher_router.DispatcherService.create')
     def test_dispatch_request_with_options(self, mock_create_service, client, mock_group_context):
@@ -529,8 +530,7 @@ class TestDetectIntentOnly:
         response = client.post("/dispatcher/detect-intent", json=request_data)
         
         assert response.status_code == 500
-        assert "Error in intent detection" in response.json()["detail"]
-        assert "Intent detection failed" in response.json()["detail"]
+        assert "Internal server error" in response.json()["detail"]
     
     @patch('src.api.dispatcher_router.DispatcherService.create')
     def test_detect_intent_only_service_creation_error(self, mock_create_service, client):
@@ -545,8 +545,7 @@ class TestDetectIntentOnly:
         response = client.post("/dispatcher/detect-intent", json=request_data)
         
         assert response.status_code == 500
-        assert "Error in intent detection" in response.json()["detail"]
-        assert "Service creation failed" in response.json()["detail"]
+        assert "Internal server error" in response.json()["detail"]
     
     def test_detect_intent_only_invalid_data(self, client):
         """Test intent detection with invalid request data."""
