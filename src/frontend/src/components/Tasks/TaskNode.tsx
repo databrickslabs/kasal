@@ -759,6 +759,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
                     if (node.id === id) {
                       const updatedData = {
                         ...node.data,
+                        taskId: savedTask.id,  // Sync taskId so future saves update instead of creating duplicates
                         label: savedTask.name,
                         description: savedTask.description,
                         expected_output: savedTask.expected_output,

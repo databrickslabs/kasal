@@ -337,16 +337,46 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       // Use refreshed nodes for execution
       nodes = refreshedNodes;
 
+      // Force refresh tasks from database to get latest tools and configs
+      console.log('[CrewExecution] Refreshing task data from database before execution');
+      const { TaskService } = await import('../api/TaskService');
+      nodes = await Promise.all(
+        nodes.map(async (node) => {
+          if (node.type === 'taskNode' && (node.data?.taskId || node.data?.id)) {
+            const taskId = node.data.taskId || node.data.id;
+            try {
+              const freshTask = await TaskService.getTask(taskId);
+              if (freshTask) {
+                console.log(`[CrewExecution] Refreshed task ${freshTask.name} - tools:`, freshTask.tools);
+                return {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    ...freshTask,
+                    taskId: freshTask.id,
+                    label: freshTask.name,
+                  }
+                };
+              }
+            } catch (error) {
+              console.error(`[CrewExecution] Failed to refresh task ${taskId}:`, error);
+            }
+          }
+          return node;
+        })
+      );
+
       // Log the task nodes
-      console.log('[CrewExecution] Task nodes before execution:', 
+      console.log('[CrewExecution] Task nodes before execution:',
         nodes.filter(node => node.type === 'taskNode')
-          .map(node => ({ 
-            id: node.id, 
-            type: node.type, 
-            data: { 
+          .map(node => ({
+            id: node.id,
+            type: node.type,
+            data: {
               taskId: node.data?.taskId,
-              label: node.data?.label 
-            } 
+              label: node.data?.label,
+              tools: node.data?.tools
+            }
           }))
       );
 
@@ -626,6 +656,37 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
         );
 
         nodes = refreshedNodes;
+      }
+
+      // Force refresh tasks from database to get latest tools and configs
+      if (hasTaskNodes) {
+        console.log('[TabExecution] Refreshing task data from database before execution');
+        const { TaskService } = await import('../api/TaskService');
+        nodes = await Promise.all(
+          nodes.map(async (node) => {
+            if (node.type === 'taskNode' && (node.data?.taskId || node.data?.id)) {
+              const taskId = node.data.taskId || node.data.id;
+              try {
+                const freshTask = await TaskService.getTask(taskId);
+                if (freshTask) {
+                  console.log(`[TabExecution] Refreshed task ${freshTask.name} - tools:`, freshTask.tools);
+                  return {
+                    ...node,
+                    data: {
+                      ...node.data,
+                      ...freshTask,
+                      taskId: freshTask.id,
+                      label: freshTask.name,
+                    }
+                  };
+                }
+              } catch (error) {
+                console.error(`[TabExecution] Failed to refresh task ${taskId}:`, error);
+              }
+            }
+            return node;
+          })
+        );
       }
 
       // Prepare additionalInputs with planning_llm, reasoning_llm, process type, and manager_llm

@@ -1,8 +1,9 @@
 /**
- * Unit tests for crewExecution store - node resolution logic.
+ * Unit tests for crewExecution store - node resolution and task refresh logic.
  *
  * Tests the handleRunClick node/edge resolution that reads from the tab manager
  * instead of the stale shared store state when switching between crew/flow canvases.
+ * Also tests the pre-execution task refresh that fetches latest tools from DB.
  */
 import { describe, it, expect } from 'vitest';
 import { Node, Edge } from 'reactflow';
@@ -285,5 +286,212 @@ describe('crewExecution - handleRunClick node resolution', () => {
 
       expect(hasVariables).toBe(true);
     });
+  });
+});
+
+/**
+ * Tests the pre-execution task refresh logic used in executeCrew/executeTab.
+ * This logic fetches the latest task data (including tools) from the database
+ * before building the execution config, mirroring the existing agent refresh.
+ */
+describe('crewExecution - task refresh before execution', () => {
+  // Helper to create mock nodes
+  const createNode = (id: string, type: string, data: Record<string, unknown> = {}): Node => ({
+    id,
+    type,
+    position: { x: 0, y: 0 },
+    data,
+  });
+
+  // Replicates the task refresh logic from executeCrew/executeTab
+  const refreshTaskNodes = async (
+    nodes: Node[],
+    getTask: (id: string) => Promise<{ id: string; name: string; tools: string[]; description?: string } | null>
+  ): Promise<Node[]> => {
+    return Promise.all(
+      nodes.map(async (node) => {
+        if (node.type === 'taskNode' && (node.data?.taskId || node.data?.id)) {
+          const taskId = node.data.taskId || node.data.id;
+          try {
+            const freshTask = await getTask(taskId);
+            if (freshTask) {
+              return {
+                ...node,
+                data: {
+                  ...node.data,
+                  ...freshTask,
+                  taskId: freshTask.id,
+                  label: freshTask.name,
+                }
+              };
+            }
+          } catch {
+            // Failed to refresh, keep original node
+          }
+        }
+        return node;
+      })
+    );
+  };
+
+  it('should refresh task node tools from database', async () => {
+    const nodes = [
+      createNode('agent-1', 'agentNode', { id: 'a1', name: 'Agent' }),
+      createNode('task-1', 'taskNode', { taskId: 't1', label: 'Task', tools: [] }),
+    ];
+
+    const getTask = async (id: string) => {
+      if (id === 't1') {
+        return { id: 't1', name: 'Task', tools: ['31', '32'], description: 'Updated' };
+      }
+      return null;
+    };
+
+    const refreshed = await refreshTaskNodes(nodes, getTask);
+
+    // Agent node should be untouched
+    expect(refreshed[0].data).toEqual({ id: 'a1', name: 'Agent' });
+    // Task node should have refreshed tools
+    expect(refreshed[1].data.tools).toEqual(['31', '32']);
+    expect(refreshed[1].data.taskId).toBe('t1');
+  });
+
+  it('should fall back to data.id when taskId is not set', async () => {
+    // Simulates nodes from LoadCrew before the fix, where data.id was used instead of data.taskId
+    const nodes = [
+      createNode('task-1', 'taskNode', { id: 't1', label: 'Task', tools: [] }),
+    ];
+
+    const getTask = async (id: string) => {
+      if (id === 't1') {
+        return { id: 't1', name: 'Fresh Task', tools: ['PerplexitySearchTool'] };
+      }
+      return null;
+    };
+
+    const refreshed = await refreshTaskNodes(nodes, getTask);
+
+    expect(refreshed[0].data.tools).toEqual(['PerplexitySearchTool']);
+    expect(refreshed[0].data.taskId).toBe('t1');
+    expect(refreshed[0].data.label).toBe('Fresh Task');
+  });
+
+  it('should skip non-task nodes', async () => {
+    const nodes = [
+      createNode('agent-1', 'agentNode', { id: 'a1', tools: ['old'] }),
+      createNode('crew-1', 'crewNode', { id: 'c1' }),
+    ];
+
+    const getTask = async () => {
+      return { id: 'x', name: 'Should Not Apply', tools: ['new'] };
+    };
+
+    const refreshed = await refreshTaskNodes(nodes, getTask);
+
+    // Neither should be modified
+    expect(refreshed[0].data.tools).toEqual(['old']);
+    expect(refreshed[1].data.tools).toBeUndefined();
+  });
+
+  it('should skip task nodes without taskId or id', async () => {
+    const nodes = [
+      createNode('task-1', 'taskNode', { label: 'Orphan Task', tools: [] }),
+    ];
+
+    let called = false;
+    const getTask = async () => {
+      called = true;
+      return { id: 'x', name: 'X', tools: ['tool'] };
+    };
+
+    const refreshed = await refreshTaskNodes(nodes, getTask);
+
+    expect(called).toBe(false);
+    expect(refreshed[0].data.tools).toEqual([]);
+  });
+
+  it('should preserve original node when getTask fails', async () => {
+    const nodes = [
+      createNode('task-1', 'taskNode', { taskId: 't1', label: 'Task', tools: ['existing'] }),
+    ];
+
+    const getTask = async (): Promise<never> => {
+      throw new Error('Network error');
+    };
+
+    const refreshed = await refreshTaskNodes(nodes, getTask);
+
+    expect(refreshed[0].data.tools).toEqual(['existing']);
+    expect(refreshed[0].data.label).toBe('Task');
+  });
+
+  it('should preserve original node when getTask returns null', async () => {
+    const nodes = [
+      createNode('task-1', 'taskNode', { taskId: 't1', label: 'Task', tools: ['existing'] }),
+    ];
+
+    const getTask = async () => null;
+
+    const refreshed = await refreshTaskNodes(nodes, getTask);
+
+    expect(refreshed[0].data.tools).toEqual(['existing']);
+  });
+
+  it('should refresh multiple task nodes independently', async () => {
+    const nodes = [
+      createNode('task-1', 'taskNode', { taskId: 't1', label: 'Task 1', tools: [] }),
+      createNode('task-2', 'taskNode', { taskId: 't2', label: 'Task 2', tools: ['old'] }),
+      createNode('task-3', 'taskNode', { taskId: 't3', label: 'Task 3', tools: [] }),
+    ];
+
+    const getTask = async (id: string) => {
+      const tasks: Record<string, { id: string; name: string; tools: string[] }> = {
+        t1: { id: 't1', name: 'Task 1', tools: ['PerplexitySearchTool'] },
+        t2: { id: 't2', name: 'Task 2', tools: ['WebSearchTool', 'CodeTool'] },
+        t3: { id: 't3', name: 'Task 3', tools: [] },
+      };
+      return tasks[id] || null;
+    };
+
+    const refreshed = await refreshTaskNodes(nodes, getTask);
+
+    expect(refreshed[0].data.tools).toEqual(['PerplexitySearchTool']);
+    expect(refreshed[1].data.tools).toEqual(['WebSearchTool', 'CodeTool']);
+    expect(refreshed[2].data.tools).toEqual([]);
+  });
+
+  it('should set taskId from fresh task even when original had data.id', async () => {
+    const nodes = [
+      createNode('task-1', 'taskNode', { id: 'old-id', label: 'Task', tools: [] }),
+    ];
+
+    const getTask = async () => {
+      return { id: 'new-db-id', name: 'Fresh', tools: ['tool1'] };
+    };
+
+    const refreshed = await refreshTaskNodes(nodes, getTask);
+
+    // taskId should be set from fresh task
+    expect(refreshed[0].data.taskId).toBe('new-db-id');
+    expect(refreshed[0].data.label).toBe('Fresh');
+  });
+
+  it('should preserve node position and type after refresh', async () => {
+    const nodes: Node[] = [{
+      id: 'task-1',
+      type: 'taskNode',
+      position: { x: 100, y: 200 },
+      data: { taskId: 't1', label: 'Task', tools: [] },
+    }];
+
+    const getTask = async () => {
+      return { id: 't1', name: 'Refreshed', tools: ['tool1'] };
+    };
+
+    const refreshed = await refreshTaskNodes(nodes, getTask);
+
+    expect(refreshed[0].id).toBe('task-1');
+    expect(refreshed[0].type).toBe('taskNode');
+    expect(refreshed[0].position).toEqual({ x: 100, y: 200 });
   });
 });
