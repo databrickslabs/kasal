@@ -352,3 +352,103 @@ describe('TaskNode Icon Display', () => {
     expect(screen.getByText('📝')).toBeInTheDocument();
   });
 });
+
+/**
+ * Tests for the onTaskSaved callback logic that syncs taskId and tools
+ * back to the node data after a task is saved via the TaskForm.
+ */
+describe('TaskNode - onTaskSaved node update logic', () => {
+  // Replicates the onTaskSaved callback logic from TaskNode
+  const buildUpdatedData = (
+    existingNodeData: Record<string, unknown>,
+    savedTask: { id: string; name: string; tools: string[]; description?: string; expected_output?: string; tool_configs?: Record<string, unknown>; async_execution?: boolean; context?: string[]; markdown?: boolean; config?: Record<string, unknown> }
+  ) => {
+    return {
+      ...existingNodeData,
+      taskId: savedTask.id,
+      label: savedTask.name,
+      description: savedTask.description,
+      expected_output: savedTask.expected_output,
+      tools: savedTask.tools,
+      tool_configs: savedTask.tool_configs || {},
+      async_execution: savedTask.async_execution,
+      context: savedTask.context,
+      markdown: savedTask.markdown !== undefined ? savedTask.markdown : (savedTask.config?.markdown || false),
+      config: {
+        ...(existingNodeData.config as Record<string, unknown>),
+        ...savedTask.config,
+        output_pydantic: savedTask.config?.output_pydantic || null,
+        output_json: savedTask.config?.output_json || null,
+        output_file: savedTask.config?.output_file || null,
+        callback: savedTask.config?.callback || null,
+        guardrail: savedTask.config?.guardrail || undefined,
+        llm_guardrail: savedTask.config?.llm_guardrail || null,
+        markdown: savedTask.markdown !== undefined ? savedTask.markdown : (savedTask.config?.markdown || false),
+      },
+    };
+  };
+
+  it('should sync taskId from saved task response', () => {
+    const existingData = { taskId: undefined, label: 'Old', tools: [] };
+    const savedTask = { id: 'new-task-id-123', name: 'Saved', tools: ['31'] };
+
+    const updated = buildUpdatedData(existingData, savedTask);
+
+    expect(updated.taskId).toBe('new-task-id-123');
+  });
+
+  it('should overwrite existing taskId with saved task id', () => {
+    const existingData = { taskId: 'old-id', label: 'Old', tools: [] };
+    const savedTask = { id: 'new-id', name: 'Saved', tools: [] };
+
+    const updated = buildUpdatedData(existingData, savedTask);
+
+    expect(updated.taskId).toBe('new-id');
+  });
+
+  it('should update tools from saved task response', () => {
+    const existingData = { taskId: 't1', label: 'Task', tools: [] };
+    const savedTask = { id: 't1', name: 'Task', tools: ['PerplexitySearchTool', 'WebSearchTool'] };
+
+    const updated = buildUpdatedData(existingData, savedTask);
+
+    expect(updated.tools).toEqual(['PerplexitySearchTool', 'WebSearchTool']);
+  });
+
+  it('should clear tools when saved task has empty tools', () => {
+    const existingData = { taskId: 't1', label: 'Task', tools: ['old-tool'] };
+    const savedTask = { id: 't1', name: 'Task', tools: [] };
+
+    const updated = buildUpdatedData(existingData, savedTask);
+
+    expect(updated.tools).toEqual([]);
+  });
+
+  it('should preserve extra node data not in saved task', () => {
+    const existingData = { taskId: 't1', label: 'Task', tools: [], customField: 'preserve-me' };
+    const savedTask = { id: 't1', name: 'Task', tools: ['tool1'] };
+
+    const updated = buildUpdatedData(existingData, savedTask);
+
+    expect(updated.customField).toBe('preserve-me');
+    expect(updated.tools).toEqual(['tool1']);
+  });
+
+  it('should update label from saved task name', () => {
+    const existingData = { taskId: 't1', label: 'Old Name', tools: [] };
+    const savedTask = { id: 't1', name: 'New Name', tools: [] };
+
+    const updated = buildUpdatedData(existingData, savedTask);
+
+    expect(updated.label).toBe('New Name');
+  });
+
+  it('should update tool_configs from saved task', () => {
+    const existingData = { taskId: 't1', label: 'Task', tools: [], tool_configs: {} };
+    const savedTask = { id: 't1', name: 'Task', tools: ['31'], tool_configs: { GenieTool: { space_id: '123' } } };
+
+    const updated = buildUpdatedData(existingData, savedTask);
+
+    expect(updated.tool_configs).toEqual({ GenieTool: { space_id: '123' } });
+  });
+});

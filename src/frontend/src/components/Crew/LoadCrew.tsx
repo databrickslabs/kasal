@@ -331,7 +331,7 @@ const LoadCrew: React.FC<LoadCrewProps> = ({ open, onClose, onCrewLoad, inputs, 
               type: 'taskNode',
               position: { x: 0, y: 0 }, // Temporary position, will be set by organizeNodesPositions
               data: {
-                id: taskId,
+                taskId: taskId,
                 label: taskName,
                 name: taskName,
                 description: taskData.description,
