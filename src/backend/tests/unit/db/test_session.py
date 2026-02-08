@@ -1000,6 +1000,70 @@ class TestActual100PercentCoverage:
             except ImportError:
                 # Module might not be importable due to test environment
                 pass
+
+
+# ===========================================================================
+# _validate_identifier tests
+# ===========================================================================
+
+from src.db.session import _validate_identifier as session_validate_identifier
+
+
+class TestSessionValidateIdentifier:
+    """Tests for _validate_identifier in db/session.py."""
+
+    @pytest.mark.parametrize(
+        "name",
+        ["users", "execution_logs", "_private", "Table123", "a", "_", "ALLCAPS"],
+    )
+    def test_accepts_valid(self, name):
+        assert session_validate_identifier(name) == name
+
+    def test_rejects_empty(self):
+        with pytest.raises(ValueError):
+            session_validate_identifier("")
+
+    def test_rejects_none(self):
+        with pytest.raises((ValueError, TypeError, AttributeError)):
+            session_validate_identifier(None)
+
+    @pytest.mark.parametrize("name", ["123table", "1", "0users"])
+    def test_rejects_leading_digit(self, name):
+        with pytest.raises(ValueError):
+            session_validate_identifier(name)
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            "users; DROP TABLE users; --",
+            "schema.table",
+            "my-table",
+            "my table",
+            "table'name",
+            "users;",
+            "table()",
+            "table\nname",
+            "user@domain",
+        ],
+    )
+    def test_rejects_injection_payloads(self, payload):
+        with pytest.raises(ValueError):
+            session_validate_identifier(payload)
+
+    def test_error_contains_default_kind(self):
+        with pytest.raises(ValueError, match="identifier"):
+            session_validate_identifier("bad-name")
+
+    def test_error_contains_custom_kind(self):
+        with pytest.raises(ValueError, match="database name"):
+            session_validate_identifier("bad-name", "database name")
+
+    def test_error_contains_repr(self):
+        try:
+            session_validate_identifier("bad name")
+            pytest.fail("Expected ValueError")
+        except ValueError as exc:
+            assert "'bad name'" in str(exc)
     
     
 

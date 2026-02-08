@@ -1,6 +1,7 @@
 from typing import AsyncGenerator, Generator
 import os
 import logging
+import re
 from pathlib import Path
 from datetime import datetime, timezone
 import sys
@@ -19,6 +20,17 @@ from sqlalchemy.exc import OperationalError
 from src.config.settings import settings
 from src.db.base import Base
 from src.core.logger import LoggerManager
+
+# SQL identifier validation to prevent injection in dynamic SQL
+_SAFE_IDENTIFIER_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+
+def _validate_identifier(name: str, kind: str = "identifier") -> str:
+    """Validate a SQL identifier against a safe pattern to prevent injection."""
+    if not name or not _SAFE_IDENTIFIER_RE.match(name):
+        raise ValueError(f"Invalid SQL {kind}: {name!r}")
+    return name
+
 
 # Configure logging using LoggerManager
 logger_manager = LoggerManager.get_instance()
@@ -370,6 +382,10 @@ async def init_db() -> None:
             port = settings.POSTGRES_PORT
             user = settings.POSTGRES_USER
             password = settings.POSTGRES_PASSWORD
+
+            # Defense-in-depth: validate db_name even though it comes from
+            # environment settings, to prevent SQL injection via CREATE DATABASE.
+            _validate_identifier(db_name, "database name")
 
             try:
                 # First, try to connect to the specified database
