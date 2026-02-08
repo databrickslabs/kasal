@@ -1,0 +1,20 @@
+FROM node:20-alpine
+
+# Set working directory
+WORKDIR /app
+
+# Copy only dependency files first for better layer caching
+COPY package.json package-lock.json ./
+
+# Install dependencies
+# This layer is cached until package.json or package-lock.json changes
+RUN npm ci
+
+# The source code will be bind-mounted at runtime via docker-compose
+# so we don't COPY it here — that enables live hot reloading
+
+EXPOSE 3000
+
+# React dev server with hot module replacement
+CMD ["npm", "start"]
+

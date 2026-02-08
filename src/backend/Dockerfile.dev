@@ -1,0 +1,36 @@
+FROM python:3.11-slim
+
+# Prevent Python from writing .pyc files and enable unbuffered output
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Install system dependencies required by some Python packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv (the fast Python package manager used by the project)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
+WORKDIR /app
+
+# Copy only dependency files first for better layer caching
+COPY pyproject.toml uv.lock ./
+
+# Install dependencies into the project venv
+# This layer is cached until pyproject.toml or uv.lock changes
+RUN uv sync --frozen --no-install-project
+
+# The source code will be bind-mounted at runtime via docker-compose
+# so we don't COPY it here — that enables live hot reloading
+
+# Create logs directory
+RUN mkdir -p /app/logs
+
+EXPOSE 8000
+
+# Entrypoint: sync deps (picks up any new additions) then start with hot reload
+CMD ["sh", "-c", "uv sync --frozen && uv run uvicorn src.main:app --reload --host 0.0.0.0 --port 8000"]
+
