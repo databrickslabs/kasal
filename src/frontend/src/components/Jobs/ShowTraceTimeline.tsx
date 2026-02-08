@@ -382,12 +382,6 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
       if (run?.job_id) {
         const storeTraces = getTracesForJob(run.job_id);
         console.log('[ShowTraceTimeline] Direct store query traces count:', storeTraces.length);
-
-        // Check SSE connection status
-        const store = useRunStatusStore.getState();
-        const sseConnected = store.activeSSEConnections.has(run.job_id);
-        console.log('[ShowTraceTimeline] SSE connection active for job:', sseConnected);
-        console.log('[ShowTraceTimeline] All active SSE connections:', Array.from(store.activeSSEConnections.keys()));
       }
     }
   }, [open, runId, run?.job_id, run?.status, _traces.length, getTracesForJob]);

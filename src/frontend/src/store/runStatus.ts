@@ -20,7 +20,6 @@ interface RunStatusState {
   // SSE state (primary and only communication method)
   sseEnabled: boolean; // Whether SSE is available (always true unless manually disabled)
   sseConnected: boolean; // Whether SSE is currently connected
-  activeSSEConnections: Map<string, boolean>; // Track SSE connections per job
   sseError: string | null; // Track SSE connection errors
 
   // Traces state - accumulates traces from SSE
@@ -40,8 +39,6 @@ interface RunStatusState {
   handleSSEUpdate: (data: any) => void; // Handle SSE events
   setSSEConnected: (connected: boolean) => void; // Update SSE connection state
   setSSEError: (error: string | null) => void; // Update SSE error state
-  registerSSEConnection: (jobId: string) => void; // Register SSE connection for a job
-  unregisterSSEConnection: (jobId: string) => void; // Unregister SSE connection
   addTrace: (jobId: string, trace: Trace) => void; // Add trace from SSE
   setTracesForJob: (jobId: string, traces: Trace[]) => void; // Set all traces for a job (initial load)
   getTracesForJob: (jobId: string) => Trace[]; // Get traces for a specific job
@@ -78,6 +75,7 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           run_name: jobName || `Run ${jobId}`,
+          group_id: groupId,
           agents_yaml: '',
           tasks_yaml: ''
         };
@@ -119,7 +117,6 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
     // SSE state (primary and only communication method)
     sseEnabled: true, // Always enabled - SSE is the only approach
     sseConnected: false,
-    activeSSEConnections: new Map<string, boolean>(),
     sseError: null,
 
     // Traces state
@@ -368,24 +365,47 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
       // Handle execution status update
       if (data.job_id && data.status) {
         const jobId = data.job_id;
-        const status = data.status;
+        const status = data.status.toLowerCase();
         const message = data.message || data.error;
         const result = data.result;
 
-        // Update the run in history
-        const updatedHistory = state.runHistory.map(run => {
-          if (run.job_id === jobId) {
-            return {
-              ...run,
-              status,
-              error: message,
-              result: result || run.result,
-              updated_at: data.updated_at || new Date().toISOString(),
-              completed_at: data.completed_at || run.completed_at
-            };
-          }
-          return run;
-        });
+        // Update the run in history, or add it if not present
+        const existsInHistory = state.runHistory.some(run => run.job_id === jobId);
+        let updatedHistory: ExtendedRun[];
+
+        if (existsInHistory) {
+          updatedHistory = state.runHistory.map(run => {
+            if (run.job_id === jobId) {
+              return {
+                ...run,
+                status,
+                error: message,
+                result: result || run.result,
+                updated_at: data.updated_at || new Date().toISOString(),
+                completed_at: data.completed_at || run.completed_at
+              };
+            }
+            return run;
+          });
+        } else {
+          // New job — add it to the beginning of history
+          const newRun: ExtendedRun = {
+            id: jobId,
+            job_id: jobId,
+            status,
+            run_name: data.run_name || `Run ${jobId.substring(0, 8)}`,
+            execution_type: data.execution_type || 'crew',
+            created_at: data.created_at || new Date().toISOString(),
+            updated_at: data.updated_at || new Date().toISOString(),
+            completed_at: data.completed_at,
+            group_id: data.group_id,
+            error: message,
+            result,
+            agents_yaml: '',
+            tasks_yaml: '',
+          };
+          updatedHistory = [newRun, ...state.runHistory];
+        }
 
         // Update active runs
         const updatedActiveRuns = { ...state.activeRuns };
@@ -412,7 +432,7 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
         const completionKey = `${jobId}-${status}`;
         const alreadyProcessed = state.processedCompletions.has(completionKey);
 
-        if (!alreadyProcessed && (status === 'completed' || status === 'failed')) {
+        if (!alreadyProcessed && (status === 'completed' || status === 'failed' || status === 'stopped' || status === 'cancelled')) {
           // Mark as processed
           const newProcessedCompletions = new Set(state.processedCompletions);
           newProcessedCompletions.add(completionKey);
@@ -425,6 +445,10 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
           } else if (status === 'failed') {
             window.dispatchEvent(new CustomEvent('jobFailed', {
               detail: { jobId, error: message || 'Job execution failed' }
+            }));
+          } else if (status === 'stopped' || status === 'cancelled') {
+            window.dispatchEvent(new CustomEvent('jobStopped', {
+              detail: { jobId, status }
             }));
           }
 
@@ -454,22 +478,6 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
 
     setSSEError: (error: string | null) => {
       set({ sseError: error });
-    },
-
-    registerSSEConnection: (jobId: string) => {
-      set((state) => {
-        const newConnections = new Map(state.activeSSEConnections);
-        newConnections.set(jobId, true);
-        return { activeSSEConnections: newConnections };
-      });
-    },
-
-    unregisterSSEConnection: (jobId: string) => {
-      set((state) => {
-        const newConnections = new Map(state.activeSSEConnections);
-        newConnections.delete(jobId);
-        return { activeSSEConnections: newConnections };
-      });
     },
 
     // Trace management methods

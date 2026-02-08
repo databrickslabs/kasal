@@ -1,8 +1,8 @@
 /**
  * Unit tests for SSEConnectionManager component.
  *
- * Tests the SSE connection management including global and per-job
- * connections, error handling, and store integration.
+ * Tests the SSE connection management including global connection,
+ * error handling, and store integration.
  */
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -12,18 +12,17 @@ import { SSEConnectionManager } from './SSEConnectionManager';
 
 // Must use vi.hoisted for variables referenced in vi.mock
 const mocks = vi.hoisted(() => ({
-  mockUseExecutionSSE: vi.fn(),
   mockUseGlobalExecutionSSE: vi.fn(),
   mockUseRunStatusStore: vi.fn(),
   mockToast: {
     error: vi.fn(),
     loading: vi.fn(),
+    dismiss: vi.fn(),
   },
 }));
 
 // Mock useSSE hooks
 vi.mock('../../hooks/global/useSSE', () => ({
-  useExecutionSSE: mocks.mockUseExecutionSSE,
   useGlobalExecutionSSE: mocks.mockUseGlobalExecutionSSE,
 }));
 
@@ -42,22 +41,15 @@ describe('SSEConnectionManager', () => {
     activeRuns: {},
     sseEnabled: true,
     handleSSEUpdate: vi.fn(),
-    registerSSEConnection: vi.fn(),
-    unregisterSSEConnection: vi.fn(),
     setSSEConnected: vi.fn(),
     setSSEError: vi.fn(),
     addTrace: vi.fn(),
-    activeSSEConnections: new Set<string>(),
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
 
     // Default mock implementations
-    mocks.mockUseExecutionSSE.mockReturnValue({
-      connectionState: 'connected',
-    });
-
     mocks.mockUseGlobalExecutionSSE.mockReturnValue({
       connectionState: 'connected',
     });
@@ -113,66 +105,13 @@ describe('SSEConnectionManager', () => {
         expect.any(Function),
         expect.objectContaining({
           autoReconnect: true,
-          maxReconnectAttempts: 5,
-          reconnectDelay: 2000,
+          maxReconnectAttempts: 10,
+          reconnectDelay: 3000,
           onConnect: expect.any(Function),
           onDisconnect: expect.any(Function),
           onError: expect.any(Function),
         })
       );
-    });
-  });
-
-  describe('Per-Job SSE Connections', () => {
-    it('creates SSE connection for each active job', () => {
-      mocks.mockUseRunStatusStore.mockImplementation((selector: (state: any) => any) => {
-        const state = {
-          ...defaultStoreState,
-          activeRuns: {
-            'job-1': { status: 'running' },
-            'job-2': { status: 'running' },
-          },
-        };
-        if (typeof selector === 'function') {
-          return selector(state);
-        }
-        return state;
-      });
-
-      render(<SSEConnectionManager />);
-
-      // Should create connections for each active job
-      // The component renders SSEConnectionForJob for each job
-      expect(mocks.mockUseExecutionSSE).toHaveBeenCalledWith(
-        'job-1',
-        expect.any(Function),
-        expect.any(Object)
-      );
-      expect(mocks.mockUseExecutionSSE).toHaveBeenCalledWith(
-        'job-2',
-        expect.any(Function),
-        expect.any(Object)
-      );
-    });
-
-    it('does not create per-job connections when no active runs', () => {
-      mocks.mockUseRunStatusStore.mockImplementation((selector: (state: any) => any) => {
-        const state = {
-          ...defaultStoreState,
-          activeRuns: {},
-        };
-        if (typeof selector === 'function') {
-          return selector(state);
-        }
-        return state;
-      });
-
-      render(<SSEConnectionManager />);
-
-      // Global connection should still be made
-      expect(mocks.mockUseGlobalExecutionSSE).toHaveBeenCalled();
-      // But no per-job connections
-      expect(mocks.mockUseExecutionSSE).not.toHaveBeenCalled();
     });
   });
 
@@ -273,19 +212,6 @@ describe('SSEConnectionManager', () => {
       expect(mocks.mockToast.error).toHaveBeenCalled();
     });
 
-    it('shows loading toast on first reconnection attempt', () => {
-      render(<SSEConnectionManager />);
-
-      // Get the onError callback from options
-      const [, options] = mocks.mockUseGlobalExecutionSSE.mock.calls[0];
-      const { onError } = options;
-
-      // Simulate first reconnection attempt
-      onError({ reconnectAttempt: 1, type: 'error' });
-
-      expect(mocks.mockToast.loading).toHaveBeenCalled();
-    });
-
     it('updates store with error message', () => {
       const setSSEError = vi.fn();
 
@@ -367,6 +293,40 @@ describe('SSEConnectionManager', () => {
       expect(handleSSEUpdate).not.toHaveBeenCalled();
     });
 
+    it('dispatches traceUpdate window event even for different group IDs', () => {
+      const addTrace = vi.fn();
+      const dispatchEventSpy = vi.spyOn(window, 'dispatchEvent').mockImplementation(() => true);
+
+      mocks.mockUseRunStatusStore.mockImplementation((selector: (state: any) => any) => {
+        const state = { ...defaultStoreState, addTrace };
+        if (typeof selector === 'function') {
+          return selector(state);
+        }
+        return state;
+      });
+
+      // Mock localStorage to return a specific group ID
+      Storage.prototype.getItem = vi.fn(() => 'my-group-id');
+
+      render(<SSEConnectionManager />);
+
+      const [onMessage] = mocks.mockUseGlobalExecutionSSE.mock.calls[0];
+
+      // Simulate trace from a different group
+      onMessage({
+        event: 'trace',
+        data: { job_id: 'job-123', id: 1, output: 'Test', group_id: 'other-group-id' },
+      });
+
+      // traceUpdate should still be dispatched (consumers have their own job-level guards)
+      expect(dispatchEventSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'traceUpdate' })
+      );
+
+      // But addTrace should NOT be called (store is group-filtered)
+      expect(addTrace).not.toHaveBeenCalled();
+    });
+
     it('processes events from matching group ID', () => {
       const handleSSEUpdate = vi.fn();
 
@@ -406,12 +366,9 @@ describe('getErrorMessage helper', () => {
           activeRuns: {},
           sseEnabled: true,
           handleSSEUpdate: vi.fn(),
-          registerSSEConnection: vi.fn(),
-          unregisterSSEConnection: vi.fn(),
           setSSEConnected: vi.fn(),
           setSSEError: vi.fn(),
           addTrace: vi.fn(),
-          activeSSEConnections: new Set<string>(),
         },
       };
       if (typeof selector === 'function') {
