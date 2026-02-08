@@ -1,8 +1,7 @@
 """
 API router for execution logs endpoints.
 
-This module provides endpoints for real-time execution log streaming
-and retrieving historical execution logs.
+This module provides endpoints for retrieving historical execution logs.
 """
 
 from typing import Annotated, Dict, List
@@ -10,17 +9,13 @@ from typing import Annotated, Dict, List
 from fastapi import (
     APIRouter,
     Depends,
-    HTTPException,
     Query,
-    WebSocket,
-    WebSocketDisconnect,
 )
 
 from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.logger import LoggerManager
 from src.schemas.execution_logs import ExecutionLogResponse, ExecutionLogsResponse
 from src.services.execution_logs_service import ExecutionLogsService
-from src.utils.user_context import GroupContext
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().system
@@ -47,7 +42,7 @@ ExecutionLogsServiceDep = Annotated[
     ExecutionLogsService, Depends(get_execution_logs_service)
 ]
 
-# Create router for WebSocket endpoints
+# Create router for log endpoints
 logs_router = APIRouter(
     prefix="/logs",
     tags=["logs"],
@@ -64,55 +59,6 @@ router = APIRouter(
     prefix="/execution-logs",
     tags=["execution-logs"],
 )
-
-
-@logs_router.websocket("/executions/{execution_id}/stream")
-async def websocket_execution_logs(websocket: WebSocket, execution_id: str):
-    """
-    WebSocket endpoint for streaming execution logs.
-
-    This endpoint allows clients to connect via WebSocket and receive
-    real-time updates about execution progress. For tenant isolation,
-    the tenant context should be passed as a query parameter.
-    """
-    try:
-        # Extract group information from query parameters for WebSocket
-        query_params = websocket.query_params
-        tenant_email = query_params.get(
-            "tenant_email"
-        )  # Keep for backward compatibility
-
-        # Create a basic group context from query params
-        # Note: WebSocket doesn't use standard headers, so we get group info from query params
-        from src.utils.user_context import GroupContext
-
-        group_context = (
-            await GroupContext.from_email(tenant_email)
-            if tenant_email
-            else GroupContext()
-        )
-
-        # Connect to the WebSocket with group context
-        await execution_logs_service.connect_with_group(
-            websocket, execution_id, group_context
-        )
-        logger.info(
-            f"WebSocket connection established for execution {execution_id} (group: {group_context.primary_group_id})"
-        )
-
-        # Keep the connection alive until disconnect
-        while True:
-            try:
-                # Wait for any client messages (typically ping/pong or close)
-                await websocket.receive_text()
-            except WebSocketDisconnect:
-                logger.info(f"WebSocket disconnected for execution {execution_id}")
-                break
-    except Exception as e:
-        logger.error(f"WebSocket error for execution {execution_id}: {e}")
-    finally:
-        # Ensure connection is properly cleaned up
-        await execution_logs_service.disconnect(websocket, execution_id)
 
 
 @logs_router.get(
@@ -175,7 +121,6 @@ async def get_run_logs(
     return ExecutionLogsResponse(logs=logs)
 
 
-# Export the send_execution_log function for use in other modules
 # Endpoints for the main execution-logs router (for test compatibility)
 @router.get("/{execution_id}", response_model=List[ExecutionLogResponse])
 async def get_execution_logs_main(
@@ -200,23 +145,3 @@ async def create_execution_log(
     """Create an execution log via main router."""
     # For now, just return a success response since this is mainly for testing
     return {"id": 1, "message": "Log created"}
-
-
-# Export the send_execution_log function for use in other modules
-async def send_execution_log(
-    execution_id: str, message: str, group_context: GroupContext = None
-):
-    """
-    Send an execution log message to all connected clients.
-
-    This function can be called from other parts of the application
-    to broadcast execution logs to WebSocket clients.
-
-    Args:
-        execution_id: ID of the execution the log belongs to
-        message: Content of the log message
-        group_context: Group context for logging isolation
-    """
-    await execution_logs_service.broadcast_to_execution(
-        execution_id, message, group_context
-    )
