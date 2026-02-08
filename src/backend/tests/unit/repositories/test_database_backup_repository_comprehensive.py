@@ -1,9 +1,9 @@
-import pytest
-from unittest.mock import Mock, patch, AsyncMock
-from typing import Dict, Any, Optional, List
 import json
 import os
+import pytest
 from datetime import datetime
+from typing import Dict, Any, Optional, List
+from unittest.mock import Mock, patch, AsyncMock
 
 # Test database backup repository - based on actual code inspection
 
@@ -377,9 +377,169 @@ class TestDatabaseBackupRepositoryBasicFunctionality:
     def test_repository_different_sessions(self):
         """Test repository works with different sessions"""
         sessions = [Mock(), Mock(), Mock()]
-        
+
         for session in sessions:
             with patch('src.repositories.database_backup_repository.DatabricksVolumeRepository'):
                 repo = DatabaseBackupRepository(session, "test-token")
                 assert repo.session == session
                 assert repo.user_token == "test-token"
+
+
+# ===========================================================================
+# _validate_identifier tests
+# ===========================================================================
+
+class TestValidateIdentifierAcceptsValidNames:
+    """_validate_identifier should accept names matching [A-Za-z_][A-Za-z0-9_]*."""
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "users", "execution_logs", "_private", "Table123",
+            "a", "A", "_", "__double__", "alembic_version",
+            "CamelCaseTable", "table_with_123_numbers",
+        ],
+    )
+    def test_accepts_valid_identifier(self, name: str):
+        result = DatabaseBackupRepository._validate_identifier(name)
+        assert result == name
+
+
+class TestValidateIdentifierRejectsInvalid:
+    """_validate_identifier should reject empty, None, leading-digit, and injection payloads."""
+
+    def test_rejects_empty_string(self):
+        with pytest.raises(ValueError, match="Invalid SQL"):
+            DatabaseBackupRepository._validate_identifier("")
+
+    def test_rejects_empty_with_custom_kind(self):
+        with pytest.raises(ValueError, match="Invalid SQL table name"):
+            DatabaseBackupRepository._validate_identifier("", kind="table name")
+
+    def test_rejects_none(self):
+        with pytest.raises((ValueError, TypeError)):
+            DatabaseBackupRepository._validate_identifier(None)
+
+    @pytest.mark.parametrize("name", ["123table", "1", "0users", "9_leading"])
+    def test_rejects_leading_digit(self, name: str):
+        with pytest.raises(ValueError, match="Invalid SQL"):
+            DatabaseBackupRepository._validate_identifier(name)
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            "users; DROP TABLE users; --",
+            "table' OR '1'='1",
+            "users\nDROP TABLE users",
+            "table.name",
+            "table-name",
+            "table name",
+            '"table"',
+            "'table'",
+            "users;",
+            "(SELECT 1)",
+            "users UNION SELECT * FROM secrets",
+            "table\ttab",
+            "`table`",
+            "$variable",
+            "table@host",
+            "table()",
+            "table[]",
+            "table=value",
+            "table*star",
+        ],
+    )
+    def test_rejects_injection_payload(self, payload: str):
+        with pytest.raises(ValueError, match="Invalid SQL"):
+            DatabaseBackupRepository._validate_identifier(payload)
+
+
+class TestValidateIdentifierErrorMessages:
+
+    def test_error_contains_default_kind(self):
+        with pytest.raises(ValueError, match="Invalid SQL identifier"):
+            DatabaseBackupRepository._validate_identifier("bad-name")
+
+    def test_error_contains_custom_kind(self):
+        with pytest.raises(ValueError, match="Invalid SQL table name"):
+            DatabaseBackupRepository._validate_identifier("bad-name", kind="table name")
+
+    def test_error_repr_shows_quotes(self):
+        try:
+            DatabaseBackupRepository._validate_identifier("bad name")
+            pytest.fail("Expected ValueError")
+        except ValueError as exc:
+            assert "'bad name'" in str(exc)
+
+
+class TestValidateIdentifierClassmethod:
+
+    def test_callable_on_class(self):
+        result = DatabaseBackupRepository._validate_identifier("users")
+        assert result == "users"
+
+    def test_regex_is_class_attribute(self):
+        assert hasattr(DatabaseBackupRepository, "_SAFE_IDENTIFIER_RE")
+        regex = DatabaseBackupRepository._SAFE_IDENTIFIER_RE
+        assert regex.match("valid_name")
+        assert not regex.match("123invalid")
+        assert not regex.match("has space")
+
+
+class TestRestorePostgresBackupJsonValidation:
+    """Verify _validate_identifier is called for table/column names in JSON backup."""
+
+    @pytest.fixture
+    def repo(self):
+        mock_session = AsyncMock()
+        with patch('src.repositories.database_backup_repository.DatabricksVolumeRepository'):
+            return DatabaseBackupRepository(session=mock_session, user_token="test-token")
+
+    @pytest.mark.asyncio
+    async def test_rejects_malicious_table_name_in_json_backup(self, repo):
+        malicious_backup = {
+            "database_type": "postgres",
+            "tables": {"users; DROP TABLE users; --": [{"id": 1}]},
+        }
+        repo.volume_repo.download_file_from_volume = AsyncMock(
+            return_value={"success": True, "content": json.dumps(malicious_backup).encode()}
+        )
+
+        result = await repo.restore_postgres_backup(
+            catalog="cat", schema="sch", volume_name="vol", backup_filename="backup.json",
+        )
+        assert result["success"] is False
+        assert "Invalid SQL table name" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_rejects_malicious_column_name_in_json_backup(self, repo):
+        malicious_backup = {
+            "database_type": "postgres",
+            "tables": {"users": [{"id": 1, "name; DROP TABLE x; --": "evil"}]},
+        }
+        repo.volume_repo.download_file_from_volume = AsyncMock(
+            return_value={"success": True, "content": json.dumps(malicious_backup).encode()}
+        )
+        repo.session.execute = AsyncMock()
+
+        result = await repo.restore_postgres_backup(
+            catalog="cat", schema="sch", volume_name="vol", backup_filename="backup.json",
+        )
+        assert result["success"] is False
+        assert "Invalid SQL column name" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_rejects_dot_in_table_name_json_backup(self, repo):
+        malicious_backup = {
+            "database_type": "postgres",
+            "tables": {"public.users": [{"id": 1}]},
+        }
+        repo.volume_repo.download_file_from_volume = AsyncMock(
+            return_value={"success": True, "content": json.dumps(malicious_backup).encode()}
+        )
+
+        result = await repo.restore_postgres_backup(
+            catalog="cat", schema="sch", volume_name="vol", backup_filename="backup.json",
+        )
+        assert result["success"] is False
+        assert "Invalid SQL table name" in result["error"]
