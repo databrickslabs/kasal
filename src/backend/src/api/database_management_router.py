@@ -7,9 +7,10 @@ import os
 from datetime import datetime
 from typing import Annotated, Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Header, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
+from src.config.settings import settings
 from src.core.dependencies import GroupContextDep, LegacySessionDep, SessionDep
 from src.core.exceptions import BadRequestError, ForbiddenError, KasalError
 from src.core.logger import LoggerManager
@@ -258,6 +259,8 @@ async def debug_permissions(
     session: SessionDep, group_context: GroupContextDep
 ) -> Dict[str, Any]:
     """Debug endpoint to check permission details."""
+    if not settings.DEBUG_MODE:
+        raise HTTPException(status_code=404)
     try:
         user_email = group_context.group_email
         user_token = group_context.access_token
@@ -402,6 +405,8 @@ async def debug_headers(
     request: Request, group_context: GroupContextDep
 ) -> Dict[str, Any]:
     """Debug endpoint to check what headers are being received."""
+    if not settings.DEBUG_MODE:
+        raise HTTPException(status_code=404)
     headers_dict = dict(request.headers)
 
     # Check ALL headers, not just filtered ones

@@ -13,6 +13,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
+from src.config.settings import settings
+
 from src.core.exceptions import ForbiddenError, NotFoundError
 
 from src.core.dependencies import GroupContextDep, SessionDep
@@ -167,6 +169,8 @@ async def health_check():
 @router.get("/debug-context")
 async def debug_context(group_context: GroupContextDep):
     """Debug endpoint to check group context extraction."""
+    if not settings.DEBUG_MODE:
+        raise HTTPException(status_code=404)
     return {
         "group_ids": group_context.group_ids,
         "group_email": group_context.group_email,
