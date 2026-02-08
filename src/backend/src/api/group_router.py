@@ -6,7 +6,9 @@ This is the admin interface for the simple multi-group foundation.
 """
 from typing import Annotated, Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from src.config.settings import settings
 from pydantic import BaseModel
 
 from src.core.exceptions import ForbiddenError, NotFoundError
@@ -464,6 +466,8 @@ async def get_group_context_debug(
     This endpoint helps verify that group isolation is working correctly
     by showing what group context is extracted from the request headers.
     """
+    if not settings.DEBUG_MODE:
+        raise HTTPException(status_code=404)
     return GroupContextResponse(
         group_id=group_context.primary_group_id,
         group_email=group_context.group_email,

@@ -8,7 +8,9 @@ execution history records and related data.
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Header, Query, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
+
+from src.config.settings import settings
 
 from src.core.exceptions import NotFoundError
 
@@ -44,6 +46,8 @@ async def debug_execution_groups(
     Debug endpoint to see all unique group_ids in execution_history table
     and compare with user's groups.
     """
+    if not settings.DEBUG_MODE:
+        raise HTTPException(status_code=404)
     # Get user email from headers
     user_email = x_auth_request_email or x_forwarded_email
 
