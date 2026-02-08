@@ -139,3 +139,118 @@ async def test_update_mlflow_evaluation_run_id_paths(monkeypatch):
     ok = await Svc.update_mlflow_evaluation_run_id(FakeSession(), job_id="j1", evaluation_run_id="er1")
     assert ok is True
 
+
+# ---------------------------------------------------------------------------
+# _broadcast_execution_created tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_broadcast_execution_created_builds_correct_event(monkeypatch):
+    """Test that _broadcast_execution_created builds and broadcasts correct SSE event."""
+    from src.services import execution_status_service as module
+
+    captured = {}
+
+    async def fake_broadcast(job_id, event):
+        captured["job_id"] = job_id
+        captured["event"] = event
+        return 1
+
+    monkeypatch.setattr(module.sse_manager, "broadcast_to_job", fake_broadcast)
+
+    execution_data = {
+        "job_id": "job-abc",
+        "status": "RUNNING",
+        "run_name": "my-run",
+        "execution_type": "crew",
+        "created_at": "2025-01-15T10:00:00",
+        "group_id": "grp-1",
+        "planning": True,
+    }
+
+    await Svc._broadcast_execution_created(execution_data)
+
+    assert captured["job_id"] == "job-abc"
+    event = captured["event"]
+    assert event.event == "execution_update"
+    assert event.id == "job-abc_created"
+    assert event.data["job_id"] == "job-abc"
+    assert event.data["status"] == "RUNNING"
+    assert event.data["run_name"] == "my-run"
+    assert event.data["execution_type"] == "crew"
+    assert event.data["created_at"] == "2025-01-15T10:00:00"
+    assert event.data["group_id"] == "grp-1"
+    assert event.data["planning"] is True
+    assert "updated_at" in event.data
+
+
+@pytest.mark.asyncio
+async def test_broadcast_execution_created_handles_datetime_created_at(monkeypatch):
+    """Test created_at as datetime object is converted via isoformat()."""
+    from datetime import datetime as dt
+    from src.services import execution_status_service as module
+
+    captured = {}
+
+    async def fake_broadcast(job_id, event):
+        captured["event"] = event
+        return 1
+
+    monkeypatch.setattr(module.sse_manager, "broadcast_to_job", fake_broadcast)
+
+    ts = dt(2025, 6, 1, 12, 30, 0)
+    execution_data = {
+        "job_id": "job-dt",
+        "created_at": ts,
+    }
+
+    await Svc._broadcast_execution_created(execution_data)
+
+    assert captured["event"].data["created_at"] == ts.isoformat()
+
+
+@pytest.mark.asyncio
+async def test_broadcast_execution_created_handles_missing_created_at(monkeypatch):
+    """Test missing created_at falls back to now()."""
+    from src.services import execution_status_service as module
+
+    captured = {}
+
+    async def fake_broadcast(job_id, event):
+        captured["event"] = event
+        return 1
+
+    monkeypatch.setattr(module.sse_manager, "broadcast_to_job", fake_broadcast)
+
+    execution_data = {
+        "job_id": "job-no-ts",
+        # created_at deliberately omitted
+    }
+
+    await Svc._broadcast_execution_created(execution_data)
+
+    created_at = captured["event"].data["created_at"]
+    # Should be an ISO-format string produced by datetime.now().isoformat()
+    assert isinstance(created_at, str)
+    assert "T" in created_at  # basic ISO-format check
+
+
+@pytest.mark.asyncio
+async def test_broadcast_execution_created_swallows_sse_errors(monkeypatch):
+    """Test that SSE broadcast errors are caught and don't propagate."""
+    from src.services import execution_status_service as module
+
+    async def boom(job_id, event):
+        raise RuntimeError("SSE connection lost")
+
+    monkeypatch.setattr(module.sse_manager, "broadcast_to_job", boom)
+
+    execution_data = {
+        "job_id": "job-err",
+        "created_at": "2025-01-01T00:00:00",
+    }
+
+    # Must not raise
+    await Svc._broadcast_execution_created(execution_data)
+

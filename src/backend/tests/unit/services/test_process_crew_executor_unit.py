@@ -1,7 +1,10 @@
-import pytest
-from unittest.mock import Mock, patch, MagicMock
+import asyncio
+import queue
 
-from src.services.process_crew_executor import run_crew_in_process
+import pytest
+from unittest.mock import Mock, patch, MagicMock, AsyncMock
+
+from src.services.process_crew_executor import run_crew_in_process, ProcessCrewExecutor
 
 
 class TestProcessCrewExecutorValidation:
@@ -229,3 +232,164 @@ class TestLLMResponseValidation:
         assert content_length == len(test_content)
         assert content_length > 0
 
+
+class TestRelayTaskEvents:
+    """Test _relay_task_events reads from a queue and broadcasts SSE events."""
+
+    def _make_executor(self) -> ProcessCrewExecutor:
+        """Create a bare ProcessCrewExecutor without starting any processes."""
+        return ProcessCrewExecutor()
+
+    @pytest.mark.asyncio
+    async def test_relay_task_events_broadcasts_task_started(self):
+        """Test that task_started events are relayed via SSE."""
+        executor = self._make_executor()
+        q = queue.Queue()
+
+        task_event = {
+            "event_type": "task_started",
+            "event_source": "crewai",
+            "event_context": "Analyze data",
+            "output": None,
+            "extra_data": {
+                "task_name": "Analyze data",
+                "task_id": "t-1",
+                "agent_role": "Analyst",
+                "crew_name": "data-crew",
+                "frontend_task_id": "ft-1",
+            },
+            "created_at": "2025-06-01T12:00:00",
+        }
+
+        # Put the event then None sentinel is not needed; we put the event
+        # and then make the next get() raise CancelledError to stop the loop.
+        q.put(task_event)
+
+        captured = {}
+
+        async def fake_broadcast(job_id, event):
+            captured["job_id"] = job_id
+            captured["event"] = event
+            return 1
+
+        with patch("src.core.sse_manager.sse_manager.broadcast_to_job", new=fake_broadcast):
+            # After the first event, cancel the relay task
+            async def run_with_cancel():
+                task = asyncio.ensure_future(
+                    executor._relay_task_events(q, "exec-123")
+                )
+                # Give the relay loop time to process one event
+                await asyncio.sleep(0.2)
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+            await run_with_cancel()
+
+        assert captured["job_id"] == "exec-123"
+        event = captured["event"]
+        assert event.event == "trace"
+        assert event.data["event_type"] == "task_started"
+        assert event.data["job_id"] == "exec-123"
+        assert event.data["trace_metadata"]["task_name"] == "Analyze data"
+        assert event.data["trace_metadata"]["task_id"] == "t-1"
+        assert event.data["trace_metadata"]["agent_role"] == "Analyst"
+        assert event.data["trace_metadata"]["frontend_task_id"] == "ft-1"
+
+    @pytest.mark.asyncio
+    async def test_relay_task_events_ignores_non_task_events(self):
+        """Test that non-task events (e.g. agent_execution) are skipped."""
+        executor = self._make_executor()
+        q = queue.Queue()
+
+        # An event_type that should be ignored
+        q.put({
+            "event_type": "agent_execution",
+            "event_source": "crewai",
+            "event_context": "some agent",
+            "extra_data": {},
+        })
+
+        captured = {}
+
+        async def fake_broadcast(job_id, event):
+            captured["job_id"] = job_id
+            return 1
+
+        with patch("src.core.sse_manager.sse_manager.broadcast_to_job", new=fake_broadcast):
+            task = asyncio.ensure_future(
+                executor._relay_task_events(q, "exec-456")
+            )
+            await asyncio.sleep(0.2)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        # broadcast_to_job should never have been called
+        assert "job_id" not in captured
+
+    @pytest.mark.asyncio
+    async def test_relay_task_events_handles_cancellation(self):
+        """Test clean shutdown when task is cancelled."""
+        executor = self._make_executor()
+        q = queue.Queue()
+        # Queue is empty; the relay loop will block on get() then get cancelled
+
+        task = asyncio.ensure_future(
+            executor._relay_task_events(q, "exec-789")
+        )
+        await asyncio.sleep(0.1)
+        task.cancel()
+
+        # The method catches CancelledError internally and breaks cleanly,
+        # so awaiting should complete without propagating the error.
+        await task
+
+    @pytest.mark.asyncio
+    async def test_relay_task_events_skips_none_data(self):
+        """Test that None items from queue are skipped."""
+        executor = self._make_executor()
+        q = queue.Queue()
+
+        # Put None (should be skipped) then a real event
+        q.put(None)
+        q.put({
+            "event_type": "task_completed",
+            "event_source": "crewai",
+            "event_context": "Write report",
+            "output": "Report written",
+            "extra_data": {
+                "task_name": "Write report",
+                "task_id": "t-2",
+                "agent_role": "Writer",
+                "crew_name": "report-crew",
+                "frontend_task_id": "ft-2",
+            },
+            "created_at": "2025-06-01T13:00:00",
+        })
+
+        captured_events = []
+
+        async def fake_broadcast(job_id, event):
+            captured_events.append(event)
+            return 1
+
+        with patch("src.core.sse_manager.sse_manager.broadcast_to_job", new=fake_broadcast):
+            task = asyncio.ensure_future(
+                executor._relay_task_events(q, "exec-none")
+            )
+            await asyncio.sleep(0.3)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        # Only the task_completed event should have been broadcast, not None
+        assert len(captured_events) == 1
+        assert captured_events[0].data["event_type"] == "task_completed"
+        assert captured_events[0].data["output"] == "Report written"

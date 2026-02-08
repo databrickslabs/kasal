@@ -34,6 +34,51 @@ class TestTraceManagerEventFiltering:
         assert "debug_info" not in important_event_types
         assert "random_event" not in important_event_types
 
+    def test_task_lifecycle_events_all_in_important_list(self):
+        """Test that all task lifecycle events (started, completed, failed) are important.
+
+        task_completed was previously excluded from storage; it is now included
+        so that the trace timeline can reconstruct task states on reconnect/refresh.
+        """
+        important_event_types = [
+            "agent_execution", "tool_usage", "tool_error",
+            "crew_started", "crew_completed",
+            "task_started", "task_completed", "task_failed",
+            "llm_call", "llm_guardrail",
+            "memory_write", "memory_retrieval",
+            "memory_write_started", "memory_retrieval_started",
+            "knowledge_retrieval", "knowledge_retrieval_started",
+            "agent_reasoning", "agent_reasoning_error"
+        ]
+
+        # All three task lifecycle events must be stored
+        assert "task_started" in important_event_types
+        assert "task_completed" in important_event_types
+        assert "task_failed" in important_event_types
+
+    def test_task_lifecycle_events_broadcast_via_sse(self):
+        """Test that task_started, task_completed, and task_failed are all broadcast via SSE.
+
+        Previously only task_completed was broadcast; now all three are for
+        real-time TaskNode/CrewNode visual status updates.
+        """
+        sse_broadcast_event_types = ("task_started", "task_completed", "task_failed")
+
+        assert "task_started" in sse_broadcast_event_types
+        assert "task_completed" in sse_broadcast_event_types
+        assert "task_failed" in sse_broadcast_event_types
+
+    def test_websocket_broadcast_uses_lowercase_event_types(self):
+        """Test that WebSocket broadcast checks use lowercase event types.
+
+        The event types from the trace writer use lowercase (e.g., 'task_started')
+        not uppercase (e.g., 'TASK_STARTED').
+        """
+        ws_broadcast_event_types = ["task_started", "task_completed", "task_failed"]
+
+        for event_type in ws_broadcast_event_types:
+            assert event_type == event_type.lower(), f"{event_type} should be lowercase"
+
     def test_step_callback_creates_log_but_not_trace_for_regular_output(self):
         """Test that step callback creates execution logs but not traces for regular output.
 

@@ -365,6 +365,10 @@ class ExecutionStatusService:
                 await session.commit()
 
                 logger.info(f"[ExecutionStatusService] Successfully created execution record with job_id: {job_id}")
+
+                # Broadcast SSE event so frontend shows the new job immediately
+                await ExecutionStatusService._broadcast_execution_created(execution_data)
+
                 return True
             else:
                 # Create database session internally (legacy path)
@@ -387,7 +391,47 @@ class ExecutionStatusService:
                     await session.commit()
 
                     logger.info(f"[ExecutionStatusService] Successfully created execution record with job_id: {job_id}")
+
+                    # Broadcast SSE event so frontend shows the new job immediately
+                    await ExecutionStatusService._broadcast_execution_created(execution_data)
+
                     return True
         except Exception as e:
             logger.error(f"[ExecutionStatusService] Error creating execution record: {e}", exc_info=True)
             return False
+
+    @staticmethod
+    async def _broadcast_execution_created(execution_data: Dict[str, Any]) -> None:
+        """Broadcast an SSE event when a new execution is created."""
+        try:
+            from datetime import datetime as dt
+
+            job_id = execution_data.get("job_id", "")
+            created_at = execution_data.get("created_at")
+            if hasattr(created_at, "isoformat"):
+                created_at = created_at.isoformat()
+            elif not isinstance(created_at, str):
+                created_at = dt.now().isoformat()
+
+            event_data = {
+                "job_id": job_id,
+                "status": execution_data.get("status", "RUNNING"),
+                "run_name": execution_data.get("run_name", ""),
+                "execution_type": execution_data.get("execution_type", "crew"),
+                "created_at": created_at,
+                "updated_at": dt.now().isoformat(),
+                "group_id": execution_data.get("group_id"),
+                "planning": execution_data.get("planning", False),
+            }
+
+            event = SSEEvent(
+                data=event_data,
+                event="execution_update",
+                id=f"{job_id}_created",
+            )
+            sent_count = await sse_manager.broadcast_to_job(job_id, event)
+            logger.info(
+                f"[ExecutionStatusService] Broadcasted execution_created SSE for job_id={job_id} to {sent_count} clients"
+            )
+        except Exception as sse_error:
+            logger.warning(f"[ExecutionStatusService] Failed to broadcast execution_created SSE: {sse_error}")

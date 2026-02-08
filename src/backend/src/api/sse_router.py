@@ -25,9 +25,9 @@ router = APIRouter(prefix="/sse", tags=["Server-Sent Events"])
 async def stream_execution_updates(
     job_id: str,
     group_context: GroupContextDep,
-    timeout: int = Query(300, ge=30, le=3600, description="Stream timeout in seconds"),
+    timeout: int = Query(3600, ge=30, le=7200, description="Stream timeout in seconds"),
     heartbeat: int = Query(
-        30, ge=10, le=120, description="Heartbeat interval in seconds"
+        15, ge=5, le=120, description="Heartbeat interval in seconds"
     ),
 ):
     """
@@ -92,8 +92,8 @@ async def stream_execution_updates(
 @router.get("/executions/stream-all")
 async def stream_all_executions(
     group_context: GroupContextDep,
-    timeout: int = Query(300, ge=30, le=3600),
-    heartbeat: int = Query(30, ge=10, le=120),
+    timeout: int = Query(3600, ge=30, le=7200),
+    heartbeat: int = Query(15, ge=5, le=120),
 ):
     """
     Stream updates for all executions in the user's groups.
