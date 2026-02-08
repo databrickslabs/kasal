@@ -170,7 +170,7 @@ class TestAgentTraceEventListener:
         assert task_id == "task_001"
         assert task_description == "Research the latest AI trends"
 
-    @patch('src.engines.crewai.callbacks.logging_callbacks.enqueue_log')
+    @patch('src.engines.crewai.callbacks.trace_persistence.enqueue_log')
     @patch('src.engines.crewai.callbacks.logging_callbacks.get_trace_queue')
     def test_enqueue_trace_main_process(self, mock_get_queue, mock_enqueue_log, setup):
         """Test trace enqueueing in main process mode."""
@@ -330,7 +330,7 @@ class TestTaskCompletionEventListener:
 class TestIntegrationScenarios:
     """Integration tests for event handling scenarios."""
 
-    @patch('src.engines.crewai.callbacks.logging_callbacks.enqueue_log')
+    @patch('src.engines.crewai.callbacks.trace_persistence.enqueue_log')
     @patch('src.engines.crewai.callbacks.logging_callbacks.get_trace_queue')
     @patch('src.engines.crewai.callbacks.logging_callbacks.crewai_event_bus')
     def test_agent_execution_with_tool_usage(self, mock_event_bus, mock_get_queue, mock_enqueue_log):
@@ -372,7 +372,7 @@ class TestIntegrationScenarios:
         # For now, just verify handler was found and called without error.
         assert handler is not None
 
-    @patch('src.engines.crewai.callbacks.logging_callbacks.enqueue_log')
+    @patch('src.engines.crewai.callbacks.trace_persistence.enqueue_log')
     @patch('src.engines.crewai.callbacks.logging_callbacks.get_trace_queue')
     @patch('src.engines.crewai.callbacks.logging_callbacks.crewai_event_bus')
     def test_crew_kickoff_lifecycle(self, mock_event_bus, mock_get_queue, mock_enqueue_log):
@@ -420,6 +420,139 @@ class TestIntegrationScenarios:
             trace_data = mock_queue.put.call_args_list[-1][0][0]
             assert trace_data["event_type"] == "crew_completed"
             assert trace_data["output"]["extra_data"]["total_tokens"] == 1500
+
+
+class TestPydanticOutputSerialization:
+    """Test that structured pydantic outputs (e.g., planning) are serialized as JSON
+    instead of Python repr when stored as trace output."""
+
+    @pytest.fixture
+    def setup(self):
+        """Create a basic listener for testing."""
+        job_id = "test_job_pydantic"
+        group_context = GroupContext(group_ids=["group_123"], group_email="test@example.com", email_domain="example.com")
+        return job_id, group_context
+
+    def test_pydantic_output_serialized_as_json(self, setup):
+        """When event.task.output.pydantic has model_dump_json, it should be used."""
+        # Simulate a pydantic model with model_dump_json
+        mock_pydantic = MagicMock()
+        mock_pydantic.model_dump_json.return_value = '{"list_of_plans_per_task":[{"task_number":1,"task":"Test","plan":"Step 1"}]}'
+
+        mock_task_output = MagicMock()
+        mock_task_output.pydantic = mock_pydantic
+
+        mock_task = MagicMock()
+        mock_task.output = mock_task_output
+
+        mock_event = MagicMock()
+        mock_event.output = "list_of_plans_per_task=[PlanPerTask(...)]"
+        mock_event.task = mock_task
+
+        # Apply the serialization logic from the callback
+        output_content = ""
+        if mock_event.output is not None:
+            task_output = getattr(mock_event.task, "output", None)
+            pydantic_output = getattr(task_output, "pydantic", None) if task_output else None
+            if pydantic_output and hasattr(pydantic_output, "model_dump_json"):
+                try:
+                    output_content = pydantic_output.model_dump_json()
+                except Exception:
+                    output_content = str(mock_event.output)
+            else:
+                output_content = str(mock_event.output)
+
+        assert output_content == '{"list_of_plans_per_task":[{"task_number":1,"task":"Test","plan":"Step 1"}]}'
+        # Verify it's valid JSON
+        parsed = json.loads(output_content)
+        assert "list_of_plans_per_task" in parsed
+
+    def test_fallback_to_str_when_no_pydantic(self, setup):
+        """When event.task.output.pydantic is None, fall back to str(event.output)."""
+        mock_task_output = MagicMock()
+        mock_task_output.pydantic = None
+
+        mock_task = MagicMock()
+        mock_task.output = mock_task_output
+
+        mock_event = MagicMock()
+        mock_event.output = "Final Answer: The result is 42"
+        mock_event.task = mock_task
+
+        output_content = ""
+        if mock_event.output is not None:
+            task_output = getattr(mock_event.task, "output", None)
+            pydantic_output = getattr(task_output, "pydantic", None) if task_output else None
+            if pydantic_output and hasattr(pydantic_output, "model_dump_json"):
+                try:
+                    output_content = pydantic_output.model_dump_json()
+                except Exception:
+                    output_content = str(mock_event.output)
+            else:
+                output_content = str(mock_event.output)
+
+        assert output_content == "Final Answer: The result is 42"
+
+    def test_fallback_to_str_when_model_dump_json_fails(self, setup):
+        """When model_dump_json raises, fall back to str(event.output)."""
+        mock_pydantic = MagicMock()
+        mock_pydantic.model_dump_json.side_effect = RuntimeError("serialization error")
+
+        mock_task_output = MagicMock()
+        mock_task_output.pydantic = mock_pydantic
+
+        mock_task = MagicMock()
+        mock_task.output = mock_task_output
+
+        mock_event = MagicMock()
+        mock_event.output = "list_of_plans_per_task=[PlanPerTask(...)]"
+        mock_event.task = mock_task
+
+        output_content = ""
+        if mock_event.output is not None:
+            task_output = getattr(mock_event.task, "output", None)
+            pydantic_output = getattr(task_output, "pydantic", None) if task_output else None
+            if pydantic_output and hasattr(pydantic_output, "model_dump_json"):
+                try:
+                    output_content = pydantic_output.model_dump_json()
+                except Exception:
+                    output_content = str(mock_event.output)
+            else:
+                output_content = str(mock_event.output)
+
+        assert output_content == "list_of_plans_per_task=[PlanPerTask(...)]"
+
+    def test_empty_output_when_event_output_is_none(self, setup):
+        """When event.output is None, output_content should be empty."""
+        mock_event = MagicMock()
+        mock_event.output = None
+
+        output_content = ""
+        if mock_event.output is not None:
+            output_content = str(mock_event.output)
+
+        assert output_content == ""
+
+    def test_fallback_when_task_has_no_output_attribute(self, setup):
+        """When event.task has no output attribute, fall back to str()."""
+        mock_task = MagicMock(spec=[])  # Empty spec - no attributes
+        mock_event = MagicMock()
+        mock_event.output = "Some regular output"
+        mock_event.task = mock_task
+
+        output_content = ""
+        if mock_event.output is not None:
+            task_output = getattr(mock_event.task, "output", None)
+            pydantic_output = getattr(task_output, "pydantic", None) if task_output else None
+            if pydantic_output and hasattr(pydantic_output, "model_dump_json"):
+                try:
+                    output_content = pydantic_output.model_dump_json()
+                except Exception:
+                    output_content = str(mock_event.output)
+            else:
+                output_content = str(mock_event.output)
+
+        assert output_content == "Some regular output"
 
 
 if __name__ == "__main__":

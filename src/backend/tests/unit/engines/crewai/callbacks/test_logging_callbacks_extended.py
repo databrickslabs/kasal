@@ -294,7 +294,7 @@ class TestEnqueueTrace:
         os.environ.pop('CREW_SUBPROCESS_MODE', None)
 
         with patch('src.engines.crewai.callbacks.logging_callbacks.get_trace_queue') as mock_get_queue:
-            with patch('src.engines.crewai.callbacks.logging_callbacks.enqueue_log') as mock_enqueue:
+            with patch('src.engines.crewai.callbacks.trace_persistence.enqueue_log') as mock_enqueue:
                 mock_queue = MagicMock()
                 mock_get_queue.return_value = mock_queue
 
@@ -354,7 +354,7 @@ class TestEnqueueTrace:
         os.environ.pop('CREW_SUBPROCESS_MODE', None)
 
         with patch('src.engines.crewai.callbacks.logging_callbacks.get_trace_queue') as mock_get_queue:
-            with patch('src.engines.crewai.callbacks.logging_callbacks.enqueue_log') as mock_enqueue:
+            with patch('src.engines.crewai.callbacks.trace_persistence.enqueue_log') as mock_enqueue:
                 mock_queue = MagicMock()
                 mock_get_queue.return_value = mock_queue
 
@@ -381,7 +381,7 @@ class TestEnqueueTrace:
         os.environ.pop('CREW_SUBPROCESS_MODE', None)
 
         with patch('src.engines.crewai.callbacks.logging_callbacks.get_trace_queue') as mock_get_queue:
-            with patch('src.engines.crewai.callbacks.logging_callbacks.enqueue_log') as mock_enqueue:
+            with patch('src.engines.crewai.callbacks.trace_persistence.enqueue_log') as mock_enqueue:
                 mock_queue = MagicMock()
                 mock_get_queue.return_value = mock_queue
 
@@ -546,7 +546,7 @@ class TestEventHandlerExecution:
         os.environ.pop('CREW_SUBPROCESS_MODE', None)
 
         with patch('src.engines.crewai.callbacks.logging_callbacks.get_trace_queue') as mock_get_queue:
-            with patch('src.engines.crewai.callbacks.logging_callbacks.enqueue_log') as mock_enqueue:
+            with patch('src.engines.crewai.callbacks.trace_persistence.enqueue_log') as mock_enqueue:
                 mock_queue = MagicMock()
                 mock_get_queue.return_value = mock_queue
 
@@ -592,7 +592,7 @@ class TestEventHandlerExecution:
         os.environ.pop('FLOW_SUBPROCESS_MODE', None)
 
         with patch('src.engines.crewai.callbacks.logging_callbacks.get_trace_queue') as mock_get_queue:
-            with patch('src.engines.crewai.callbacks.logging_callbacks.enqueue_log') as mock_enqueue:
+            with patch('src.engines.crewai.callbacks.trace_persistence.enqueue_log') as mock_enqueue:
                 mock_queue = MagicMock()
                 mock_get_queue.return_value = mock_queue
 
@@ -633,7 +633,7 @@ class TestEventHandlerExecution:
 
         try:
             with patch('src.engines.crewai.callbacks.logging_callbacks.get_trace_queue') as mock_get_queue:
-                with patch('src.engines.crewai.callbacks.logging_callbacks.enqueue_log') as mock_enqueue:
+                with patch('src.engines.crewai.callbacks.trace_persistence.enqueue_log') as mock_enqueue:
                     mock_queue = MagicMock()
                     mock_get_queue.return_value = mock_queue
 
