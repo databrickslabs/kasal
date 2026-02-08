@@ -37,6 +37,7 @@ import { CrewService } from '../../api/CrewService';
 import { CrewResponse } from '../../types/crews';
 import EdgeConfigDialog, { EdgeConfig } from '../Flow/EdgeConfigDialog';
 import { useUILayoutStore } from '../../store/uiLayout';
+import { useFlowExecutionStore } from '../../store/flowExecutionStore';
 
 // Node types
 import { CrewNode } from '../Flow';
@@ -434,6 +435,9 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
         item: newNode
       }]);
 
+      // Reset execution visual indicators when canvas changes
+      useFlowExecutionStore.getState().clearStates();
+
       showTemporaryNotification(`Added crew: ${crew.name} (${allTasks.length} tasks)`);
     } catch (error) {
       console.error('Error adding crew to canvas:', error);
@@ -475,6 +479,9 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
       onEdgesChange(edgesToRemove);
     }
 
+    // Reset execution visual indicators
+    useFlowExecutionStore.getState().clearStates();
+
     showTemporaryNotification(`Canvas cleared: removed ${flowNodeIds.length} nodes and ${edgesToRemove.length} edges`);
   }, [nodes, edges, onNodesChange, onEdgesChange, showTemporaryNotification]);
 
@@ -511,6 +518,8 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
 
     // Show success notification if something was deleted
     if (selectedNodes.length > 0 || allEdgesToDelete.size > 0) {
+      // Reset execution visual indicators when nodes are removed
+      useFlowExecutionStore.getState().clearStates();
       showTemporaryNotification(`Deleted ${selectedNodes.length} nodes and ${allEdgesToDelete.size} edges`);
     }
   }, [onNodesChange, onEdgesChange, showTemporaryNotification, edges]);
@@ -600,7 +609,7 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
           ...node,
           style: {
             ...node.style,
-            width: node.style?.width || 180,
+            width: node.style?.width || 140,
             height: node.style?.height || 80
           }
         };

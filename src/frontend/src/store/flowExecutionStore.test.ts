@@ -6,8 +6,21 @@
  * states to their terminal state when the SSE connection races ahead
  * of final trace delivery.
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { useFlowExecutionStore } from './flowExecutionStore';
+
+// Mock apiClient used by loadCrewStates
+vi.mock('../config/api/ApiConfig', () => ({
+  apiClient: {
+    get: vi.fn(),
+  },
+  config: { apiUrl: 'http://localhost:8000/api/v1' },
+  default: {
+    get: vi.fn(),
+  },
+}));
+
+import { apiClient } from '../config/api/ApiConfig';
 
 describe('flowExecutionStore', () => {
   beforeEach(() => {
@@ -16,10 +29,16 @@ describe('flowExecutionStore', () => {
       currentJobId: null,
       crewNodeStates: new Map(),
       isExecuting: false,
+      flowStatus: null,
       crewTaskCounts: new Map(),
       crewCompletedTasks: new Map(),
       crewFailed: new Set(),
     });
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   describe('startTracking', () => {
@@ -548,6 +567,300 @@ describe('flowExecutionStore', () => {
       const state = useFlowExecutionStore.getState();
       expect(state.crewNodeStates.has('SSE Crew')).toBe(true);
       expect(state.crewNodeStates.get('SSE Crew')?.status).toBe('running');
+    });
+  });
+
+  describe('loadCrewStates', () => {
+    const mockGet = apiClient.get as ReturnType<typeof vi.fn>;
+
+    it('should fetch traces from API and process them into crew states', async () => {
+      mockGet.mockResolvedValue({
+        data: {
+          traces: [
+            {
+              id: 1,
+              job_id: 'load-job-1',
+              event_type: 'TASK_STARTED',
+              trace_metadata: { crew_name: 'Alpha Crew' },
+              created_at: '2024-06-01T10:00:00Z',
+            },
+            {
+              id: 2,
+              job_id: 'load-job-1',
+              event_type: 'TASK_COMPLETED',
+              trace_metadata: { crew_name: 'Alpha Crew' },
+              created_at: '2024-06-01T10:01:00Z',
+            },
+            {
+              id: 3,
+              job_id: 'load-job-1',
+              event_type: 'TASK_STARTED',
+              trace_metadata: { crew_name: 'Beta Crew' },
+              created_at: '2024-06-01T10:00:30Z',
+            },
+          ],
+        },
+      });
+
+      await useFlowExecutionStore.getState().loadCrewStates('load-job-1');
+
+      expect(mockGet).toHaveBeenCalledWith('/traces/job/load-job-1', {
+        params: { limit: 500, offset: 0 },
+      });
+
+      const state = useFlowExecutionStore.getState();
+      expect(state.currentJobId).toBe('load-job-1');
+      expect(state.isExecuting).toBe(true);
+
+      // Alpha Crew: 1 started + 1 completed = completed
+      const alpha = state.crewNodeStates.get('Alpha Crew');
+      expect(alpha).toBeDefined();
+      expect(alpha?.status).toBe('completed');
+      expect(alpha?.completed_at).toBe('2024-06-01T10:01:00Z');
+
+      // Beta Crew: 1 started, 0 completed = running
+      const beta = state.crewNodeStates.get('Beta Crew');
+      expect(beta).toBeDefined();
+      expect(beta?.status).toBe('running');
+      expect(beta?.started_at).toBe('2024-06-01T10:00:30Z');
+    });
+
+    it('should handle API errors gracefully without crashing', async () => {
+      mockGet.mockRejectedValue(new Error('Network failure'));
+
+      // Should not throw
+      await useFlowExecutionStore.getState().loadCrewStates('err-job');
+
+      // State should remain at initial (no update applied)
+      const state = useFlowExecutionStore.getState();
+      expect(state.currentJobId).toBeNull();
+      expect(state.crewNodeStates.size).toBe(0);
+    });
+
+    it('should handle empty traces response', async () => {
+      mockGet.mockResolvedValue({
+        data: { traces: [] },
+      });
+
+      await useFlowExecutionStore.getState().loadCrewStates('empty-job');
+
+      // loadCrewStates still sets currentJobId and isExecuting even with no traces
+      const state = useFlowExecutionStore.getState();
+      expect(state.currentJobId).toBe('empty-job');
+      expect(state.isExecuting).toBe(true);
+      expect(state.crewNodeStates.size).toBe(0);
+    });
+
+    it('should handle response with no traces key', async () => {
+      mockGet.mockResolvedValue({
+        data: {},
+      });
+
+      await useFlowExecutionStore.getState().loadCrewStates('no-traces-job');
+
+      // Should early-return without updating state
+      const state = useFlowExecutionStore.getState();
+      expect(state.currentJobId).toBeNull();
+    });
+
+    it('should handle null data response', async () => {
+      mockGet.mockResolvedValue({
+        data: null,
+      });
+
+      await useFlowExecutionStore.getState().loadCrewStates('null-data-job');
+
+      const state = useFlowExecutionStore.getState();
+      expect(state.currentJobId).toBeNull();
+    });
+
+    it('should skip non-task events in loaded traces', async () => {
+      mockGet.mockResolvedValue({
+        data: {
+          traces: [
+            {
+              id: 1,
+              job_id: 'skip-job',
+              event_type: 'LLM_CALL',
+              trace_metadata: { crew_name: 'Crew X' },
+              created_at: '2024-06-01T10:00:00Z',
+            },
+            {
+              id: 2,
+              job_id: 'skip-job',
+              event_type: 'TASK_STARTED',
+              trace_metadata: { crew_name: 'Crew X' },
+              created_at: '2024-06-01T10:00:01Z',
+            },
+          ],
+        },
+      });
+
+      await useFlowExecutionStore.getState().loadCrewStates('skip-job');
+
+      const state = useFlowExecutionStore.getState();
+      const crewX = state.crewNodeStates.get('Crew X');
+      expect(crewX).toBeDefined();
+      expect(crewX?.status).toBe('running');
+      expect(state.crewTaskCounts.get('Crew X')).toBe(1);
+    });
+
+    it('should skip traces without crew_name or agent_role', async () => {
+      mockGet.mockResolvedValue({
+        data: {
+          traces: [
+            {
+              id: 1,
+              job_id: 'no-crew-job',
+              event_type: 'TASK_STARTED',
+              trace_metadata: {},
+              created_at: '2024-06-01T10:00:00Z',
+            },
+            {
+              id: 2,
+              job_id: 'no-crew-job',
+              event_type: 'TASK_STARTED',
+              trace_metadata: { crew_name: 'Valid Crew' },
+              created_at: '2024-06-01T10:00:01Z',
+            },
+          ],
+        },
+      });
+
+      await useFlowExecutionStore.getState().loadCrewStates('no-crew-job');
+
+      const state = useFlowExecutionStore.getState();
+      expect(state.crewNodeStates.size).toBe(1);
+      expect(state.crewNodeStates.has('Valid Crew')).toBe(true);
+    });
+
+    it('should extract crew_name from extra_data fallback', async () => {
+      mockGet.mockResolvedValue({
+        data: {
+          traces: [
+            {
+              id: 1,
+              job_id: 'legacy-job',
+              event_type: 'TASK_STARTED',
+              trace_metadata: { extra_data: { crew_name: 'Legacy Crew' } },
+              created_at: '2024-06-01T10:00:00Z',
+            },
+          ],
+        },
+      });
+
+      await useFlowExecutionStore.getState().loadCrewStates('legacy-job');
+
+      const state = useFlowExecutionStore.getState();
+      expect(state.crewNodeStates.has('Legacy Crew')).toBe(true);
+    });
+
+    it('should fall back to agent_role when crew_name is missing', async () => {
+      mockGet.mockResolvedValue({
+        data: {
+          traces: [
+            {
+              id: 1,
+              job_id: 'agent-role-job',
+              event_type: 'TASK_STARTED',
+              trace_metadata: { agent_role: 'Data Analyst' },
+              created_at: '2024-06-01T10:00:00Z',
+            },
+          ],
+        },
+      });
+
+      await useFlowExecutionStore.getState().loadCrewStates('agent-role-job');
+
+      const state = useFlowExecutionStore.getState();
+      expect(state.crewNodeStates.has('Data Analyst')).toBe(true);
+    });
+
+    it('should correctly handle TASK_FAILED traces', async () => {
+      mockGet.mockResolvedValue({
+        data: {
+          traces: [
+            {
+              id: 1,
+              job_id: 'fail-job',
+              event_type: 'TASK_STARTED',
+              trace_metadata: { crew_name: 'Failing Crew' },
+              created_at: '2024-06-01T10:00:00Z',
+            },
+            {
+              id: 2,
+              job_id: 'fail-job',
+              event_type: 'TASK_FAILED',
+              trace_metadata: { crew_name: 'Failing Crew' },
+              created_at: '2024-06-01T10:00:30Z',
+            },
+          ],
+        },
+      });
+
+      await useFlowExecutionStore.getState().loadCrewStates('fail-job');
+
+      const state = useFlowExecutionStore.getState();
+      const crew = state.crewNodeStates.get('Failing Crew');
+      expect(crew?.status).toBe('failed');
+      expect(crew?.failed_at).toBe('2024-06-01T10:00:30Z');
+      expect(state.crewFailed.has('Failing Crew')).toBe(true);
+    });
+
+    it('should track multiple crews from loaded traces', async () => {
+      mockGet.mockResolvedValue({
+        data: {
+          traces: [
+            {
+              id: 1,
+              job_id: 'multi-job',
+              event_type: 'TASK_STARTED',
+              trace_metadata: { crew_name: 'Crew 1' },
+              created_at: '2024-06-01T10:00:00Z',
+            },
+            {
+              id: 2,
+              job_id: 'multi-job',
+              event_type: 'TASK_COMPLETED',
+              trace_metadata: { crew_name: 'Crew 1' },
+              created_at: '2024-06-01T10:01:00Z',
+            },
+            {
+              id: 3,
+              job_id: 'multi-job',
+              event_type: 'TASK_STARTED',
+              trace_metadata: { crew_name: 'Crew 2' },
+              created_at: '2024-06-01T10:00:30Z',
+            },
+            {
+              id: 4,
+              job_id: 'multi-job',
+              event_type: 'TASK_STARTED',
+              trace_metadata: { crew_name: 'Crew 2' },
+              created_at: '2024-06-01T10:01:30Z',
+            },
+            {
+              id: 5,
+              job_id: 'multi-job',
+              event_type: 'TASK_COMPLETED',
+              trace_metadata: { crew_name: 'Crew 2' },
+              created_at: '2024-06-01T10:02:00Z',
+            },
+          ],
+        },
+      });
+
+      await useFlowExecutionStore.getState().loadCrewStates('multi-job');
+
+      const state = useFlowExecutionStore.getState();
+
+      // Crew 1: 1 started, 1 completed -> completed
+      expect(state.crewNodeStates.get('Crew 1')?.status).toBe('completed');
+
+      // Crew 2: 2 started, 1 completed -> still running (1 remaining)
+      expect(state.crewNodeStates.get('Crew 2')?.status).toBe('running');
+      expect(state.crewTaskCounts.get('Crew 2')).toBe(2);
+      expect(state.crewCompletedTasks.get('Crew 2')).toBe(1);
     });
   });
 });

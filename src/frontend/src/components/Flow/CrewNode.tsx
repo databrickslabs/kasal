@@ -34,7 +34,6 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
 
   // Get execution state for this crew node
   const crewNodeStates = useFlowExecutionStore(state => state.crewNodeStates);
-  const isExecuting = useFlowExecutionStore(state => state.isExecuting);
 
   // Find the execution state for this crew node by matching crew name
   // Try multiple key formats for robust matching
@@ -60,32 +59,32 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
 
   const { deleteElements } = useReactFlow();
 
+  // Determine the effective status: only use per-crew trace state.
+  // Do NOT fall back to global flowStatus — crew nodes that never ran
+  // (e.g. unmatched router branches) should stay idle, not show completed/failed.
+  const effectiveStatus: string | undefined = executionState?.status;
+
   // Get status-based styling
   const getStatusStyles = () => {
-    if (!executionState && !isExecuting) {
-      return {}; // No execution in progress
+    if (!effectiveStatus) {
+      return {}; // No per-crew status resolved — stay idle
     }
 
-    const status = executionState?.status;
-
-    switch (status) {
+    switch (effectiveStatus) {
       case 'running':
         return {
           borderColor: theme.palette.info.main,
-          boxShadow: `0 0 0 2px ${theme.palette.info.main}, 0 0 12px ${theme.palette.info.main}40`,
           background: `linear-gradient(135deg, ${theme.palette.info.light}15, ${theme.palette.info.main}10)`,
           animation: 'pulse 2s infinite',
         };
       case 'completed':
         return {
           borderColor: theme.palette.success.main,
-          boxShadow: `0 0 0 2px ${theme.palette.success.main}`,
           background: `linear-gradient(135deg, ${theme.palette.success.light}15, ${theme.palette.success.main}10)`,
         };
       case 'failed':
         return {
           borderColor: theme.palette.error.main,
-          boxShadow: `0 0 0 2px ${theme.palette.error.main}`,
           background: `linear-gradient(135deg, ${theme.palette.error.light}15, ${theme.palette.error.main}10)`,
         };
       case 'pending':
@@ -99,12 +98,11 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
 
   // Get status icon
   const getStatusIcon = () => {
-    if (!executionState) return null;
+    if (!effectiveStatus) return null;
 
-    const status = executionState.status;
     const iconStyle = { fontSize: 16 };
 
-    switch (status) {
+    switch (effectiveStatus) {
       case 'running':
         return <CircularProgress size={14} sx={{ color: theme.palette.info.main }} />;
       case 'completed':
@@ -135,20 +133,20 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
     <Tooltip title={taskTooltip} placement="top" arrow>
       <Box
         sx={{
-          width: 140,
-          height: 80,
+          width: '100%',
+          height: '100%',
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'center',
           alignItems: 'center',
-          borderRadius: '12px',
-          border: `1px solid ${statusStyles.borderColor || theme.palette.divider}`,
+          borderRadius: '8px',
+          border: `1px solid ${statusStyles.borderColor || (selected ? theme.palette.primary.main : theme.palette.grey[300])}`,
           background: statusStyles.background || (selected
             ? `${theme.palette.primary.light}20`
             : theme.palette.background.paper),
-          boxShadow: statusStyles.boxShadow || (selected
+          boxShadow: (selected
             ? `0 0 0 2px ${theme.palette.primary.main}`
-            : 1),
+            : `0 2px 4px ${theme.palette.mode === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(0, 0, 0, 0.2)'}`),
           position: 'relative',
           transition: 'all 0.2s ease',
           overflow: 'visible',
@@ -156,12 +154,12 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
           opacity: statusStyles.opacity || 1,
           animation: statusStyles.animation || 'none',
           '@keyframes pulse': {
-            '0%': { opacity: 1 },
-            '50%': { opacity: 0.7 },
-            '100%': { opacity: 1 },
+            '0%': { boxShadow: '0 0 0 0 rgba(33, 150, 243, 0.4)' },
+            '70%': { boxShadow: '0 0 0 10px rgba(33, 150, 243, 0)' },
+            '100%': { boxShadow: '0 0 0 0 rgba(33, 150, 243, 0)' },
           },
           '&:hover': {
-            boxShadow: statusStyles.boxShadow || 4,
+            boxShadow: '0 4px 8px rgba(0, 0, 0, 0.15)',
           }
         }}
         onMouseEnter={() => setIsHovered(true)}
@@ -255,11 +253,11 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
             textAlign="center"
             fontWeight="bold"
             sx={{
-              color: executionState?.status === 'running'
+              color: effectiveStatus === 'running'
                 ? theme.palette.info.main
-                : executionState?.status === 'completed'
+                : effectiveStatus === 'completed'
                   ? theme.palette.success.main
-                  : executionState?.status === 'failed'
+                  : effectiveStatus === 'failed'
                     ? theme.palette.error.main
                     : theme.palette.primary.main,
               padding: '0 8px',

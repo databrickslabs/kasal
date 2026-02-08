@@ -31,6 +31,8 @@ interface FlowExecutionState {
   crewNodeStates: Map<string, CrewNodeState>;
   // Is flow execution in progress
   isExecuting: boolean;
+  // Overall flow completion status — used as fallback when no per-crew traces arrived
+  flowStatus: 'idle' | 'running' | 'completed' | 'failed' | null;
   // Track task counts per crew for completion detection
   crewTaskCounts: Map<string, number>;
   crewCompletedTasks: Map<string, number>;
@@ -51,6 +53,7 @@ export const useFlowExecutionStore = create<FlowExecutionState>((set, get) => ({
   currentJobId: null,
   crewNodeStates: new Map(),
   isExecuting: false,
+  flowStatus: null,
   crewTaskCounts: new Map(),
   crewCompletedTasks: new Map(),
   crewFailed: new Set(),
@@ -201,6 +204,7 @@ export const useFlowExecutionStore = create<FlowExecutionState>((set, get) => ({
     set({
       currentJobId: jobId,
       isExecuting: true,
+      flowStatus: 'running',
       crewNodeStates: new Map(),
       crewTaskCounts: new Map(),
       crewCompletedTasks: new Map(),
@@ -222,6 +226,7 @@ export const useFlowExecutionStore = create<FlowExecutionState>((set, get) => ({
       currentJobId: null,
       crewNodeStates: new Map(),
       isExecuting: false,
+      flowStatus: null,
       crewTaskCounts: new Map(),
       crewCompletedTasks: new Map(),
       crewFailed: new Set(),
@@ -384,6 +389,10 @@ if (typeof window !== 'undefined') {
     if (detail && detail.jobId === store.currentJobId) {
       console.log('[FlowExecutionStore] Flow execution completed:', detail.jobId);
 
+      // Set flow-level status to completed — CrewNode uses this as fallback
+      // when no per-crew trace events arrived via SSE
+      useFlowExecutionStore.setState({ flowStatus: 'completed' });
+
       // Mark all still-running crew nodes as completed.
       // Due to a race condition, the per-job SSE connection may close before the
       // TraceBroadcastService polls the final task_completed traces from the DB.
@@ -424,6 +433,9 @@ if (typeof window !== 'undefined') {
     if (detail && detail.jobId === store.currentJobId) {
       console.log('[FlowExecutionStore] Flow execution failed:', detail.jobId);
 
+      // Set flow-level status to failed — CrewNode uses this as fallback
+      useFlowExecutionStore.setState({ flowStatus: 'failed' });
+
       // Mark all still-running crew nodes as failed since the job failed
       const { crewNodeStates } = store;
       if (crewNodeStates.size > 0) {
@@ -449,6 +461,17 @@ if (typeof window !== 'undefined') {
 
       // DON'T clear crew node states on failure - keep them visible until next run starts
       // Crew node states will be cleared when a new job is created (in jobCreated event handler)
+    }
+  }) as EventListener);
+
+  window.addEventListener('jobStopped', ((event: CustomEvent) => {
+    const detail = event.detail;
+    const store = useFlowExecutionStore.getState();
+    // Clear states if this is the tracked flow job, OR if no specific job is tracked
+    // (covers the case where the user stops from ExecutionHistory which may not match currentJobId)
+    if (detail && (detail.jobId === store.currentJobId || store.isExecuting)) {
+      console.log('[FlowExecutionStore] Flow execution stopped:', detail.jobId);
+      store.clearStates();
     }
   }) as EventListener);
 
