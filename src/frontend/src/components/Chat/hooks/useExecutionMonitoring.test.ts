@@ -13,10 +13,10 @@ import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { useExecutionMonitoring } from './useExecutionMonitoring';
 
 // Mock dependencies
-vi.mock('../../../api/TraceService', () => ({
-  default: {
-    getTracesByJobId: vi.fn().mockResolvedValue([]),
-  },
+vi.mock('../../../utils/taskIdUtils', () => ({
+  extractTaskId: vi.fn().mockReturnValue(null),
+  extractTaskName: vi.fn().mockReturnValue(null),
+  mapEventToStatus: vi.fn().mockReturnValue('running'),
 }));
 
 vi.mock('../../../api/ExecutionHistoryService', () => ({
@@ -27,16 +27,23 @@ vi.mock('../../../api/ExecutionHistoryService', () => ({
 }));
 
 vi.mock('../../../store/taskExecutionStore', () => ({
-  useTaskExecutionStore: () => ({
-    clearTasks: vi.fn(),
-    clearAllStates: vi.fn(),
-    loadTaskStates: vi.fn(),
-    loadCrewStates: vi.fn(),
-    setTaskState: vi.fn(),
-    setCrewState: vi.fn(),
-    getTaskState: vi.fn().mockReturnValue(null),
-    getCrewState: vi.fn().mockReturnValue(null),
-  }),
+  useTaskExecutionStore: Object.assign(
+    () => ({
+      clearTaskStates: vi.fn(),
+      loadTaskStates: vi.fn(),
+      transition: vi.fn().mockReturnValue(true),
+      getTaskStatus: vi.fn().mockReturnValue(null),
+    }),
+    {
+      getState: () => ({
+        clearTaskStates: vi.fn(),
+        setIsPlanningPhase: vi.fn(),
+        transitionAll: vi.fn(),
+        transition: vi.fn().mockReturnValue(true),
+        isPlanningPhase: false,
+      }),
+    }
+  ),
 }));
 
 vi.mock('../../../store/chatMessagesStore', () => ({
