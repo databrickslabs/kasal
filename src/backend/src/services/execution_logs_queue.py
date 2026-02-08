@@ -11,7 +11,7 @@ class JobOutputQueue:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(JobOutputQueue, cls).__new__(cls)
-            cls._instance._queue = queue.Queue()
+            cls._instance._queue = queue.Queue(maxsize=10000)
         return cls._instance
 
     def get_queue(self) -> queue.Queue:

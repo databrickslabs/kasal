@@ -481,6 +481,19 @@ class CrewAIExecutionService:
             message=message,
             result=result
         )
+
+        # Clean up in-memory entry once terminal status is persisted to DB
+        # This also releases the asyncio.Task reference, allowing GC of the coroutine
+        terminal_statuses = {
+            ExecutionStatus.COMPLETED,
+            ExecutionStatus.FAILED,
+            ExecutionStatus.STOPPED,
+            ExecutionStatus.CANCELLED,
+            ExecutionStatus.REJECTED,
+        }
+        if status in terminal_statuses:
+            executions.pop(execution_id, None)
+            crew_logger.debug(f"Cleaned up in-memory execution entry for {execution_id}")
     
     async def cancel_execution(self, execution_id: str) -> bool:
         """

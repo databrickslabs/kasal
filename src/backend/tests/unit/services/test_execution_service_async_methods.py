@@ -501,5 +501,119 @@ class TestExtractAgentsTasksFromFlowConfig:
         assert tasks_yaml == {}
 
 
+# ============================================================================
+# Test Class: _update_execution_status Memory Cleanup
+# ============================================================================
+
+class TestUpdateExecutionStatusCleanup:
+    """Tests for _update_execution_status cleaning up in-memory entries on terminal status."""
+
+    @pytest.mark.asyncio
+    async def test_terminal_status_removes_from_executions(self):
+        """Test that terminal status removes entry from ExecutionService.executions."""
+        exec_id = "test_cleanup_completed"
+        ExecutionService.executions[exec_id] = {"status": "RUNNING"}
+
+        with patch("src.services.execution_service.ExecutionStatusService.update_status", new_callable=AsyncMock, return_value=True):
+            await ExecutionService._update_execution_status(
+                exec_id, "COMPLETED", {"output": "done"}
+            )
+
+        assert exec_id not in ExecutionService.executions
+
+    @pytest.mark.asyncio
+    async def test_failed_status_removes_from_executions(self):
+        """Test that FAILED status removes entry from ExecutionService.executions."""
+        exec_id = "test_cleanup_failed"
+        ExecutionService.executions[exec_id] = {"status": "RUNNING"}
+
+        with patch("src.services.execution_service.ExecutionStatusService.update_status", new_callable=AsyncMock, return_value=True):
+            await ExecutionService._update_execution_status(
+                exec_id, "FAILED", {"error": "something went wrong"}
+            )
+
+        assert exec_id not in ExecutionService.executions
+
+    @pytest.mark.asyncio
+    async def test_stopped_status_removes_from_executions(self):
+        """Test that STOPPED status removes entry from ExecutionService.executions."""
+        exec_id = "test_cleanup_stopped"
+        ExecutionService.executions[exec_id] = {"status": "RUNNING"}
+
+        with patch("src.services.execution_service.ExecutionStatusService.update_status", new_callable=AsyncMock, return_value=True):
+            await ExecutionService._update_execution_status(
+                exec_id, "STOPPED"
+            )
+
+        assert exec_id not in ExecutionService.executions
+
+    @pytest.mark.asyncio
+    async def test_cancelled_status_removes_from_executions(self):
+        """Test that CANCELLED status removes entry from ExecutionService.executions."""
+        exec_id = "test_cleanup_cancelled"
+        ExecutionService.executions[exec_id] = {"status": "RUNNING"}
+
+        with patch("src.services.execution_service.ExecutionStatusService.update_status", new_callable=AsyncMock, return_value=True):
+            await ExecutionService._update_execution_status(
+                exec_id, "CANCELLED"
+            )
+
+        assert exec_id not in ExecutionService.executions
+
+    @pytest.mark.asyncio
+    async def test_rejected_status_removes_from_executions(self):
+        """Test that REJECTED status removes entry from ExecutionService.executions."""
+        exec_id = "test_cleanup_rejected"
+        ExecutionService.executions[exec_id] = {"status": "WAITING_FOR_APPROVAL"}
+
+        with patch("src.services.execution_service.ExecutionStatusService.update_status", new_callable=AsyncMock, return_value=True):
+            await ExecutionService._update_execution_status(
+                exec_id, "REJECTED"
+            )
+
+        assert exec_id not in ExecutionService.executions
+
+    @pytest.mark.asyncio
+    async def test_non_terminal_status_keeps_entry(self):
+        """Test that non-terminal status keeps entry in ExecutionService.executions."""
+        exec_id = "test_cleanup_running"
+        ExecutionService.executions[exec_id] = {"status": "PENDING"}
+
+        with patch("src.services.execution_service.ExecutionStatusService.update_status", new_callable=AsyncMock, return_value=True):
+            await ExecutionService._update_execution_status(
+                exec_id, "RUNNING"
+            )
+
+        assert exec_id in ExecutionService.executions
+
+    @pytest.mark.asyncio
+    async def test_db_update_failure_does_not_remove_entry(self):
+        """Test that failed DB update does not remove entry from memory."""
+        exec_id = "test_cleanup_db_fail"
+        ExecutionService.executions[exec_id] = {"status": "RUNNING"}
+
+        with patch("src.services.execution_service.ExecutionStatusService.update_status", new_callable=AsyncMock, return_value=False):
+            await ExecutionService._update_execution_status(
+                exec_id, "COMPLETED", {"output": "done"}
+            )
+
+        # Entry should still be in memory since DB update failed
+        assert exec_id in ExecutionService.executions
+
+    @pytest.mark.asyncio
+    async def test_cleanup_safe_when_entry_already_gone(self):
+        """Test that cleanup is safe even if the entry was already removed."""
+        exec_id = "test_cleanup_already_gone"
+        # Don't add to executions — simulate already removed
+
+        with patch("src.services.execution_service.ExecutionStatusService.update_status", new_callable=AsyncMock, return_value=True):
+            # Should not raise
+            await ExecutionService._update_execution_status(
+                exec_id, "COMPLETED", {"output": "done"}
+            )
+
+        assert exec_id not in ExecutionService.executions
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
