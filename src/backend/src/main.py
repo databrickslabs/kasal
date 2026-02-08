@@ -404,14 +404,13 @@ app = FastAPI(
     openapi_version="3.1.0",  # Explicitly set OpenAPI version
 )
 
-# Add CORS middleware with explicit allowed origins
+# Add CORS middleware using origins from settings
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "*"],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["*"],
 )
 
 # Add user context middleware to extract user tokens from Databricks Apps headers
