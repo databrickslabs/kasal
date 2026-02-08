@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.sse_manager import sse_manager, SSEEvent
 from src.db.session import async_session_factory
 from src.models.execution_trace import ExecutionTrace
+from src.models.execution_history import ExecutionHistory
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,14 @@ class TraceBroadcastService:
             self._task = None
         logger.info("[TraceBroadcastService] Stopped trace broadcast polling")
 
+    def _has_global_stream_listeners(self) -> bool:
+        """Check if any global stream (all_groups_*) has active listeners."""
+        stats = sse_manager.get_statistics()
+        for job_id in stats.get("active_jobs", []):
+            if job_id.startswith("all_groups_"):
+                return True
+        return False
+
     def _get_active_job_ids(self) -> Set[str]:
         """
         Get job IDs that have active SSE connections.
@@ -84,6 +93,22 @@ class TraceBroadcastService:
                 active_jobs.add(job_id)
 
         return active_jobs
+
+    async def _get_running_job_ids(self, session: AsyncSession) -> Set[str]:
+        """
+        Query DB for currently running job IDs.
+        Used when global SSE stream is connected but no per-job connections exist.
+        """
+        try:
+            query = (
+                select(ExecutionHistory.job_id)
+                .where(ExecutionHistory.status.in_(["RUNNING", "running"]))
+            )
+            result = await session.execute(query)
+            return {row[0] for row in result.fetchall() if row[0]}
+        except Exception as e:
+            logger.error(f"[TraceBroadcastService] Error querying running jobs: {e}")
+            return set()
 
     async def _poll_loop(self):
         """Main polling loop that checks for new traces."""
@@ -104,13 +129,23 @@ class TraceBroadcastService:
 
     async def _poll_for_traces(self):
         """Poll database for new traces and broadcast them."""
-        # Get jobs with active SSE connections
+        # Get jobs with active per-job SSE connections
         active_jobs = self._get_active_job_ids()
 
-        if not active_jobs:
+        # When the global SSE stream has listeners (but no per-job connections),
+        # we still need to poll for running jobs so trace events reach the frontend.
+        has_global = self._has_global_stream_listeners()
+
+        if not active_jobs and not has_global:
             return
 
         async with async_session_factory() as session:
+            if has_global:
+                running_jobs = await self._get_running_job_ids(session)
+                active_jobs = active_jobs | running_jobs
+
+            if not active_jobs:
+                return
             # Initialize tracking for new jobs - start from current max ID
             # This avoids re-broadcasting traces that the initial fetch already loaded
             for job_id in active_jobs:

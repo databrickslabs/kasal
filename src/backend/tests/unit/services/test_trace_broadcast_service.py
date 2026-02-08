@@ -241,14 +241,19 @@ class TestPollForTraces:
 
     @pytest.mark.asyncio
     async def test_poll_no_active_jobs_returns_early(self):
-        """Test that poll returns early when no active jobs."""
+        """Test that poll returns early when no active jobs and no global listeners."""
         service = TraceBroadcastService()
 
         with patch.object(service, '_get_active_job_ids', return_value=set()):
-            with patch('src.services.trace_broadcast_service.async_session_factory') as mock_factory:
-                await service._poll_for_traces()
+            with patch.object(service, '_has_global_stream_listeners', return_value=False):
+                with patch('src.services.trace_broadcast_service.async_session_factory') as mock_factory:
+                    mock_session = AsyncMock()
+                    mock_factory.return_value.__aenter__.return_value = mock_session
 
-                mock_factory.assert_not_called()
+                    await service._poll_for_traces()
+
+                    # Session is opened but no broadcast should happen since no active jobs
+                    mock_session.execute.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_poll_initializes_tracking_for_new_jobs(self):

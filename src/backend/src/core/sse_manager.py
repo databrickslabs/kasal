@@ -7,10 +7,22 @@ execution updates, traces, and other real-time events to connected clients.
 
 from typing import Dict, Set, Optional, Any, AsyncGenerator
 from datetime import datetime
+from uuid import UUID
 import asyncio
 import json
 
 from src.core.logger import LoggerManager
+
+
+class _SSEEncoder(json.JSONEncoder):
+    """JSON encoder that handles UUID and datetime objects."""
+
+    def default(self, obj: Any) -> Any:
+        if isinstance(obj, UUID):
+            return str(obj)
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return super().default(obj)
 
 logger = LoggerManager.get_instance().system
 
@@ -50,7 +62,7 @@ class SSEEvent:
 
         # Convert data to JSON if it's a dict/list
         if isinstance(self.data, (dict, list)):
-            data_str = json.dumps(self.data)
+            data_str = json.dumps(self.data, cls=_SSEEncoder)
         else:
             data_str = str(self.data)
 
@@ -218,7 +230,7 @@ sse_manager = SSEConnectionManager()
 
 async def event_stream_generator(
     job_id: str,
-    timeout: int = 300,
+    timeout: int = 3600,
     heartbeat_interval: int = 30
 ) -> AsyncGenerator[str, None]:
     """
@@ -263,8 +275,11 @@ async def event_stream_generator(
                 event = await asyncio.wait_for(queue.get(), timeout=5.0)
                 yield event.format()
 
-                # If this is a completion event, close the stream
-                if isinstance(event.data, dict):
+                # If this is a completion event, close per-job streams only.
+                # The global stream (all_groups_*) must stay open to serve
+                # subsequent jobs — it should only close on timeout or client
+                # disconnect.
+                if not job_id.startswith('all_groups_') and isinstance(event.data, dict):
                     status = event.data.get('status')
                     if status in ['completed', 'failed', 'stopped']:
                         logger.info(
