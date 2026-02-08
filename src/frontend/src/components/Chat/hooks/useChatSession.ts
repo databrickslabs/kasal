@@ -3,7 +3,7 @@ import { SaveMessageRequest, ChatSession, ChatMessage as BackendChatMessage } fr
 import { ChatHistoryServiceEnhanced as ChatHistoryService } from '../../../api/ChatHistoryServiceEnhanced';
 import { ChatMessage } from '../types';
 import { v4 as uuidv4 } from 'uuid';
-import { useChatMessagesStore } from '../../../store/chatMessagesStore';
+import { useChatMessagesStore, deduplicateMessages } from '../../../store/chatMessagesStore';
 
 export const useChatSession = (providedChatSessionId?: string) => {
   const [sessionId, setSessionId] = useState<string>(providedChatSessionId || uuidv4());
@@ -38,7 +38,7 @@ export const useChatSession = (providedChatSessionId?: string) => {
     const baseMessage: ChatMessage = {
       id: msg.id,
       type: msg.message_type as 'user' | 'assistant' | 'execution' | 'trace',
-      content: msg.content,
+      content: msg.content || '',
       timestamp: new Date(msg.timestamp),
       intent: msg.intent,
       confidence: msg.confidence ? parseFloat(msg.confidence) : undefined,
@@ -75,19 +75,20 @@ export const useChatSession = (providedChatSessionId?: string) => {
       if (!sessionId) return;
 
       try {
-        // Clear Zustand store for this session
-        setZustandMessages(sessionId, []);
-
         try {
           const response = await ChatHistoryService.getSessionMessages(sessionId);
           if (response.messages && response.messages.length > 0) {
             const loadedMessages = response.messages.map(convertBackendMessage);
-            setZustandMessages(sessionId, loadedMessages);
-          } else {
-            // No messages in session, continue with empty state
+            // Merge loaded messages with any that arrived during the async fetch
+            // (e.g. real-time trace messages from SSE). This avoids a race condition
+            // where setMessages would wipe messages added by addMessage during the fetch.
+            const currentMessages = useChatMessagesStore.getState().messagesBySession[sessionId] || [];
+            const merged = deduplicateMessages([...loadedMessages, ...currentMessages]);
+            setZustandMessages(sessionId, merged);
           }
+          // If no messages from backend, keep whatever is in the store (don't clear)
         } catch (sessionError) {
-          // Session loading failed, continue with empty session
+          // Session loading failed, continue with existing messages
         }
       } catch (error) {
         console.error('Error loading chat history:', error);
@@ -100,6 +101,8 @@ export const useChatSession = (providedChatSessionId?: string) => {
   // Save message to backend
   const saveMessageToBackend = useCallback(async (message: ChatMessage): Promise<void> => {
     if (!sessionId || chatHistoryDisabled) return;
+    // Skip saving messages with empty content (backend requires min_length=1)
+    if (!message.content) return;
     
     try {
       let generationResult = message.result;

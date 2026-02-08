@@ -78,13 +78,21 @@ vi.mock('../../store/crewExecution', () => ({
   }),
 }));
 
-vi.mock('../../store/chatMessagesStore', () => ({
-  useChatMessagesStore: () => ({
+vi.mock('../../store/chatMessagesStore', () => {
+  const storeState = {
+    messagesBySession: {},
     setMessages: vi.fn(),
-    getDeduplicatedMessages: vi.fn().mockReturnValue([]),
     setCurrentSession: vi.fn(),
-  }),
-}));
+  };
+  const hook = (selector?: (state: typeof storeState) => unknown) => {
+    if (typeof selector === 'function') return selector(storeState);
+    return storeState;
+  };
+  return {
+    useChatMessagesStore: hook,
+    deduplicateMessages: (msgs: unknown[]) => msgs,
+  };
+});
 
 vi.mock('../../store/knowledgeConfigStore', () => ({
   useKnowledgeConfigStore: () => ({
