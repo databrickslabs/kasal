@@ -876,31 +876,58 @@ class FlowBuilder:
                             # Try to extract values from CrewOutput
                             result_obj = args[0]
 
+                            # Helper to merge parsed JSON into eval context and state
+                            def merge_parsed_json(parsed_data, source_label):
+                                if isinstance(parsed_data, dict):
+                                    parsed_data = auto_convert_dict(parsed_data)
+                                    eval_context['state'].update(parsed_data)
+                                    eval_context.update(parsed_data)
+                                    logger.info(f"Parsed {source_label} JSON object and merged into state: {list(parsed_data.keys())}")
+                                elif isinstance(parsed_data, list) and parsed_data:
+                                    # For JSON arrays, extract keys from the first dict item
+                                    first_item = parsed_data[0]
+                                    if isinstance(first_item, dict):
+                                        first_item = auto_convert_dict(first_item)
+                                        eval_context['state'].update(first_item)
+                                        eval_context.update(first_item)
+                                        logger.info(f"Parsed {source_label} JSON array (first item) and merged into state: {list(first_item.keys())}")
+                                    # Also store the full array for advanced conditions
+                                    eval_context['items'] = parsed_data
+                                    eval_context['state']['items'] = parsed_data
+                                    logger.info(f"Stored {source_label} JSON array with {len(parsed_data)} items in context['items']")
+
+                            def strip_code_fences(s):
+                                """Strip markdown code fences (```json ... ```) from a string."""
+                                s = s.strip()
+                                if s.startswith('```'):
+                                    first_newline = s.find('\n')
+                                    if first_newline != -1:
+                                        s = s[first_newline + 1:]
+                                    if s.rstrip().endswith('```'):
+                                        s = s.rstrip()[:-3].rstrip()
+                                return s
+
+                            def looks_like_json(s):
+                                s = s.strip()
+                                return (s.startswith('{') and s.endswith('}')) or (s.startswith('[') and s.endswith(']'))
+
                             # If result has a 'raw' attribute (CrewOutput), try to parse it as JSON
                             if hasattr(result_obj, 'raw'):
                                 try:
-                                    raw_str = str(result_obj.raw).strip()
-                                    if raw_str.startswith('{') and raw_str.endswith('}'):
+                                    raw_str = strip_code_fences(str(result_obj.raw))
+                                    if looks_like_json(raw_str):
                                         parsed_data = json.loads(raw_str)
-                                        # Auto-convert numeric strings to actual numbers
-                                        parsed_data = auto_convert_dict(parsed_data)
-                                        eval_context['state'].update(parsed_data)
-                                        eval_context.update(parsed_data)  # Also add to top-level for easy access
-                                        logger.info(f"Parsed crew output JSON and merged into state: {parsed_data}")
+                                        merge_parsed_json(parsed_data, "crew output")
                                 except (json.JSONDecodeError, Exception) as parse_err:
                                     logger.debug(f"Could not parse crew output as JSON: {parse_err}")
 
                             # If result is a string that looks like JSON, parse it
                             elif isinstance(result_obj, str):
                                 try:
-                                    raw_str = result_obj.strip()
-                                    if raw_str.startswith('{') and raw_str.endswith('}'):
+                                    raw_str = strip_code_fences(result_obj)
+                                    if looks_like_json(raw_str):
                                         parsed_data = json.loads(raw_str)
-                                        # Auto-convert numeric strings to actual numbers
-                                        parsed_data = auto_convert_dict(parsed_data)
-                                        eval_context['state'].update(parsed_data)
-                                        eval_context.update(parsed_data)  # Also add to top-level for easy access
-                                        logger.info(f"Parsed string result as JSON and merged into state: {parsed_data}")
+                                        merge_parsed_json(parsed_data, "string result")
                                 except (json.JSONDecodeError, Exception) as parse_err:
                                     logger.debug(f"Could not parse string result as JSON: {parse_err}")
 
@@ -916,27 +943,13 @@ class FlowBuilder:
                             for key, value in list(eval_context['state'].items()):
                                 if isinstance(value, str):
                                     # Strip markdown code fences if present (e.g., ```json\n...\n```)
-                                    json_value = value.strip()
-                                    if json_value.startswith('```'):
-                                        # Remove opening code fence (```json or ```)
-                                        first_newline = json_value.find('\n')
-                                        if first_newline != -1:
-                                            json_value = json_value[first_newline + 1:]
-                                        # Remove closing code fence
-                                        if json_value.rstrip().endswith('```'):
-                                            json_value = json_value.rstrip()[:-3].rstrip()
+                                    json_value = strip_code_fences(value)
 
-                                    # Now check if it looks like JSON
-                                    if json_value.strip().startswith('{') and json_value.strip().endswith('}'):
+                                    # Now check if it looks like JSON (object or array)
+                                    if looks_like_json(json_value):
                                         try:
                                             parsed_value = json.loads(json_value)
-                                            if isinstance(parsed_value, dict):
-                                                # Auto-convert numeric strings to actual numbers
-                                                parsed_value = auto_convert_dict(parsed_value)
-                                                # Add parsed values to both state and top-level for easy access
-                                                eval_context['state'].update(parsed_value)
-                                                eval_context.update(parsed_value)
-                                                logger.info(f"Parsed state['{key}'] JSON and added to context: {list(parsed_value.keys())}")
+                                            merge_parsed_json(parsed_value, f"state['{key}']")
                                         except (json.JSONDecodeError, Exception) as e:
                                             logger.debug(f"Could not parse state['{key}'] as JSON: {e}")
                                             pass  # Not JSON, leave as-is
@@ -1046,6 +1059,13 @@ class FlowBuilder:
                         return default_route
 
                 route_method.__name__ = router_method_name
+                route_method.__qualname__ = router_method_name
+                # Also set the inner function's __name__ so that FlowMethod.__get__
+                # creates bound copies with the correct name (it re-wraps _meth,
+                # picking up __name__ from _meth, not from the wrapper's __dict__)
+                if hasattr(route_method, '_meth'):
+                    route_method._meth.__name__ = router_method_name
+                    route_method._meth.__qualname__ = router_method_name
                 return route_method
 
             # Add router method to flow
@@ -1207,6 +1227,10 @@ class FlowBuilder:
                             return result
 
                         route_listener_method.__name__ = route_listener_method_name
+                        route_listener_method.__qualname__ = route_listener_method_name
+                        if hasattr(route_listener_method, '_meth'):
+                            route_listener_method._meth.__name__ = route_listener_method_name
+                            route_listener_method._meth.__qualname__ = route_listener_method_name
                         return route_listener_method
 
                     # Try to get crew name from route tasks configuration
