@@ -693,6 +693,26 @@ class ExecutionHistoryService:
             logger.error(f"Error marking checkpoint {execution_id} as resumed: {str(e)}")
             raise
 
+    async def get_execution_groups_with_counts(self) -> list[tuple[str, int]]:
+        """
+        Get all unique group_ids from execution_history with their execution counts.
+
+        Returns:
+            List of (group_id, execution_count) tuples
+        """
+        try:
+            from sqlalchemy import distinct, func, select
+            from src.models.execution_history import ExecutionHistory
+
+            stmt = select(
+                distinct(ExecutionHistory.group_id), func.count(ExecutionHistory.id)
+            ).group_by(ExecutionHistory.group_id)
+            result = await self.session.execute(stmt)
+            return [(row[0], row[1]) for row in result.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting execution groups with counts: {str(e)}")
+            raise
+
 
 from src.core.dependencies import SessionDep
 

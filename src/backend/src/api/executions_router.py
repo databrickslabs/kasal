@@ -12,7 +12,6 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from sqlalchemy import desc, select
 
 from src.core.exceptions import ForbiddenError, NotFoundError
 
@@ -20,7 +19,6 @@ from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.logger import LoggerManager
 from src.core.permissions import check_role_in_context
 from src.engines.crewai.config_adapter import get_execution_logger
-from src.models.execution_history import ExecutionHistory
 from src.schemas.execution import (
     CrewConfig,
     ExecutionCreateResponse,
@@ -342,27 +340,23 @@ async def stop_execution(
     if not check_role_in_context(group_context, ["admin", "editor"]):
         raise ForbiddenError("Only admins and editors can stop executions")
 
-    # Use the injected service
-
-    # Get the execution from database to verify it exists and user has access
-    stmt = select(ExecutionHistory).where(
-        ExecutionHistory.job_id == execution_id,
-        ExecutionHistory.group_id == group_context.primary_group_id,
+    # Verify execution exists and user has access via service layer
+    execution_data = await service.get_execution_status(
+        execution_id, group_ids=group_context.group_ids
     )
-    result = await db.execute(stmt)
-    execution = result.scalar_one_or_none()
 
-    if not execution:
+    if not execution_data:
         raise NotFoundError(f"Execution {execution_id} not found")
 
     # Check if execution is in a stoppable state (case-insensitive)
-    status_upper = execution.status.upper() if execution.status else ""
+    current_status = execution_data.get("status", "")
+    status_upper = current_status.upper() if current_status else ""
     if status_upper not in ["RUNNING", "PREPARING"]:
         return StopExecutionResponse(
             execution_id=execution_id,
-            status=execution.status,
-            message=f"Execution is not running (current status: {execution.status})",
-            partial_results=execution.result,
+            status=current_status,
+            message=f"Execution is not running (current status: {current_status})",
+            partial_results=execution_data.get("result"),
         )
 
     # Call the stop service method
@@ -434,46 +428,20 @@ async def get_execution_status_simple(
     Returns:
         ExecutionStatusResponse with current status and progress
     """
-    # Get the execution from database
-    stmt = select(ExecutionHistory).where(
-        ExecutionHistory.job_id == execution_id,
-        ExecutionHistory.group_id == group_context.primary_group_id,
+    # Get detailed execution status via service layer
+    service = ExecutionService(session=db)
+    status_detail = await service.get_execution_status_detail(
+        execution_id, group_ids=group_context.group_ids
     )
-    result = await db.execute(stmt)
-    execution = result.scalar_one_or_none()
 
-    if not execution:
+    if not status_detail:
         raise NotFoundError(f"Execution {execution_id} not found")
-
-    # Build progress information if execution is running or stopping
-    progress = None
-    if execution.status in ["RUNNING", "STOPPING"]:
-        # Get task status information
-        from src.models.execution_history import TaskStatus
-
-        task_stmt = select(TaskStatus).where(TaskStatus.job_id == execution_id)
-        task_result = await db.execute(task_stmt)
-        tasks = task_result.scalars().all()
-
-        if tasks:
-            completed_tasks = [t for t in tasks if t.status == "completed"]
-            running_tasks = [t for t in tasks if t.status == "running"]
-            progress = {
-                "total_tasks": len(tasks),
-                "completed_tasks": len(completed_tasks),
-                "running_tasks": len(running_tasks),
-                "current_task": running_tasks[0].task_id if running_tasks else None,
-            }
 
     return ExecutionStatusResponse(
         execution_id=execution_id,
-        status=execution.status,
-        is_stopping=execution.is_stopping
-        if hasattr(execution, "is_stopping")
-        else False,
-        stopped_at=execution.stopped_at if hasattr(execution, "stopped_at") else None,
-        stop_reason=execution.stop_reason
-        if hasattr(execution, "stop_reason")
-        else None,
-        progress=progress,
+        status=status_detail["status"],
+        is_stopping=status_detail.get("is_stopping", False),
+        stopped_at=status_detail.get("stopped_at"),
+        stop_reason=status_detail.get("stop_reason"),
+        progress=status_detail.get("progress"),
     )

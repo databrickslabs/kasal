@@ -688,9 +688,73 @@ class ExecutionService:
             exec_logger.error(f"Error getting execution status for {execution_id}: {str(e)}")
             return None
     
+    async def get_execution_status_detail(
+        self, execution_id: str, group_ids: List[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get detailed execution status including task progress for the status endpoint.
+
+        Args:
+            execution_id: String ID of the execution
+            group_ids: List of group IDs for filtering
+
+        Returns:
+            Dictionary with execution status, stop info, and task progress, or None
+        """
+        try:
+            from src.repositories.execution_history_repository import (
+                ExecutionHistoryRepository,
+            )
+            from src.models.execution_history import TaskStatus
+            from sqlalchemy import select
+
+            if not self.session:
+                exec_logger.error("No database session available for getting execution status detail")
+                return None
+
+            repository = ExecutionHistoryRepository(self.session)
+            execution = await repository.get_execution_by_job_id(
+                execution_id, group_ids=group_ids
+            )
+
+            if not execution:
+                return None
+
+            progress = None
+            if execution.status in ["RUNNING", "STOPPING"]:
+                task_stmt = select(TaskStatus).where(
+                    TaskStatus.job_id == execution_id
+                )
+                task_result = await self.session.execute(task_stmt)
+                tasks = task_result.scalars().all()
+
+                if tasks:
+                    completed = [t for t in tasks if t.status == "completed"]
+                    running = [t for t in tasks if t.status == "running"]
+                    progress = {
+                        "total_tasks": len(tasks),
+                        "completed_tasks": len(completed),
+                        "running_tasks": len(running),
+                        "current_task": running[0].task_id if running else None,
+                    }
+
+            return {
+                "execution_id": execution_id,
+                "status": execution.status,
+                "is_stopping": getattr(execution, "is_stopping", False),
+                "stopped_at": getattr(execution, "stopped_at", None),
+                "stop_reason": getattr(execution, "stop_reason", None),
+                "progress": progress,
+            }
+        except Exception as e:
+            exec_logger.error(
+                f"Error getting execution status detail for {execution_id}: {str(e)}"
+            )
+            return None
+
     async def create_execution(
         self,
-        config: CrewConfig, 
+        config: CrewConfig,
         background_tasks = None,
         group_context: GroupContext = None
     ) -> Dict[str, Any]:

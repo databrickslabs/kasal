@@ -11,11 +11,9 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, Header, Query, Response, status
 
 from src.core.exceptions import NotFoundError
-from sqlalchemy import distinct, func, select
 
 from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.logger import LoggerManager
-from src.models.execution_history import ExecutionHistory
 from src.schemas.execution_history import (
     DeleteResponse,
     ExecutionHistoryItem,
@@ -49,12 +47,9 @@ async def debug_execution_groups(
     # Get user email from headers
     user_email = x_auth_request_email or x_forwarded_email
 
-    # Get all unique group_ids from execution_history table
-    stmt = select(
-        distinct(ExecutionHistory.group_id), func.count(ExecutionHistory.id)
-    ).group_by(ExecutionHistory.group_id)
-    result = await session.execute(stmt)
-    all_group_ids = [(row[0], row[1]) for row in result.fetchall()]
+    # Get all unique group_ids from execution_history table via service
+    history_service = ExecutionHistoryService(session)
+    all_group_ids = await history_service.get_execution_groups_with_counts()
 
     # Get user's groups if email provided
     user_groups = []

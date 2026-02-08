@@ -16,7 +16,6 @@ from src.core.logger import LoggerManager
 from src.core.permissions import check_role_in_context
 from src.dependencies.admin_auth import AdminUserDep, AuthenticatedUserDep
 from src.models.group import Group, GroupUser
-from src.models.user import User
 from src.schemas.group import (
     GroupCreateRequest,
     GroupResponse,
@@ -28,6 +27,7 @@ from src.schemas.group import (
     GroupWithRoleResponse,
 )
 from src.services.group_service import GroupService
+from src.services.user_service import UserService
 
 
 class GroupContextResponse(BaseModel):
@@ -392,12 +392,9 @@ async def update_group_user(
         group_id=group_id, user_id=user_id, **user_data.model_dump(exclude_unset=True)
     )
 
-    # Get email for response
-    from sqlalchemy import select
-
-    user_stmt = select(User).where(User.id == user_id)
-    result = await service.session.execute(user_stmt)
-    user = result.scalar_one_or_none()  # scalar_one_or_none() is synchronous on result
+    # Get email for response via UserService
+    user_svc = UserService(service.session)
+    user = await user_svc.get_user(user_id)
     email = user.email if user else f"{user_id}@databricks.com"
 
     response_data = {
