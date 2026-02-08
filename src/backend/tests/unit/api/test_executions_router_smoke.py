@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
 from datetime import datetime
 
@@ -111,17 +111,13 @@ async def test_stop_execution_permissions_and_success(monkeypatch):
         await stop_execution("e1", StopExecutionRequest(), service=AsyncMock(), group_context=Ctx(user_role="user"), db=SimpleNamespace())
 
     # Success path for admin with running execution
-    class DummyExec:
-        def __init__(self):
-            self.status = "RUNNING"
-            self.result = {"x": 1}
-    db = FakeDB(first=DummyExec())
-
     svc = AsyncMock()
+    svc.get_execution_status = AsyncMock(return_value={
+        "status": "RUNNING", "result": {"x": 1}})
     svc.stop_execution = AsyncMock(return_value={
         "execution_id": "e1", "status": "stopping", "message": "ok", "partial_results": {}})
 
-    out = await stop_execution("e1", StopExecutionRequest(), service=svc, group_context=Ctx(user_role="admin"), db=db)
+    out = await stop_execution("e1", StopExecutionRequest(), service=svc, group_context=Ctx(user_role="admin"), db=SimpleNamespace())
     assert out.status in ("stopping", "RUNNING")
 
 
@@ -134,16 +130,25 @@ async def test_force_stop_execution_returns_error_on_db_commit():
 
 
 @pytest.mark.asyncio
-async def test_get_execution_status_simple_with_progress():
-    # First execute returns execution, second returns tasks
-    class Task:
-        def __init__(self, status, task_id):
-            self.status = status
-            self.task_id = task_id
-    exec_obj = SimpleNamespace(status="RUNNING", is_stopping=False, stopped_at=None, stop_reason=None)
-    db = FakeDB(first=exec_obj, tasks=[Task("completed", "t1"), Task("running", "t2")])
+@patch("src.api.executions_router.ExecutionService")
+async def test_get_execution_status_simple_with_progress(MockExecSvc):
+    svc = AsyncMock()
+    svc.get_execution_status_detail = AsyncMock(return_value={
+        "execution_id": "e1",
+        "status": "RUNNING",
+        "is_stopping": False,
+        "stopped_at": None,
+        "stop_reason": None,
+        "progress": {
+            "total_tasks": 2,
+            "completed_tasks": 1,
+            "running_tasks": 1,
+            "current_task": "t2",
+        },
+    })
+    MockExecSvc.return_value = svc
 
-    out = await get_execution_status_simple("e1", group_context=Ctx(), db=db)
+    out = await get_execution_status_simple("e1", group_context=Ctx(), db=SimpleNamespace())
     assert out.status in ("RUNNING", "STOPPING")
     assert out.progress["total_tasks"] == 2
 
