@@ -594,12 +594,6 @@ describe('useGlobalExecutionSSE', () => {
     mockEventSourceInstances = [];
     (global as any).EventSource = TrackableMockEventSource;
     vi.useFakeTimers({ shouldAdvanceTime: true });
-
-    // Mock window.dispatchEvent
-    vi.spyOn(window, 'dispatchEvent').mockImplementation(() => true);
-
-    // Mock localStorage
-    Storage.prototype.getItem = vi.fn(() => 'test-group-id');
   });
 
   afterEach(() => {
@@ -624,7 +618,7 @@ describe('useGlobalExecutionSSE', () => {
     );
   });
 
-  it('handles execution_update events', async () => {
+  it('passes all events through to onUpdate', async () => {
     const onUpdate = vi.fn();
 
     renderHook(() => useGlobalExecutionSSE(onUpdate));
@@ -639,11 +633,17 @@ describe('useGlobalExecutionSSE', () => {
       );
     });
 
-    expect(onUpdate).toHaveBeenCalled();
+    expect(onUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { job_id: 'job-123', status: 'completed' },
+        event: 'execution_update',
+      })
+    );
   });
 
-  it('dispatches traceUpdate window event for trace events', async () => {
+  it('passes trace events through to onUpdate without dispatching window events', async () => {
     const onUpdate = vi.fn();
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent').mockImplementation(() => true);
 
     renderHook(() => useGlobalExecutionSSE(onUpdate));
 
@@ -657,15 +657,23 @@ describe('useGlobalExecutionSSE', () => {
       );
     });
 
-    expect(window.dispatchEvent).toHaveBeenCalledWith(
+    // Hook passes event to onUpdate
+    expect(onUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'traceUpdate',
+        data: { job_id: 'job-123', id: 1, output: 'Test' },
+        event: 'trace',
       })
+    );
+
+    // Hook does NOT dispatch window events (that's the component's job)
+    expect(dispatchSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'traceUpdate' })
     );
   });
 
-  it('dispatches hitlRequest window event for HITL events', async () => {
+  it('passes hitl_request events through to onUpdate without dispatching window events', async () => {
     const onUpdate = vi.fn();
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent').mockImplementation(() => true);
 
     renderHook(() => useGlobalExecutionSSE(onUpdate));
 
@@ -679,10 +687,17 @@ describe('useGlobalExecutionSSE', () => {
       );
     });
 
-    expect(window.dispatchEvent).toHaveBeenCalledWith(
+    // Hook passes event to onUpdate
+    expect(onUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'hitlRequest',
+        data: { job_id: 'job-123', approval_id: 1 },
+        event: 'hitl_request',
       })
+    );
+
+    // Hook does NOT dispatch window events (that's the component's job)
+    expect(dispatchSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'hitlRequest' })
     );
   });
 
