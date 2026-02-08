@@ -21,7 +21,7 @@ class TestSettings:
         assert settings.PROJECT_DESCRIPTION == "A modern backend API for the Kasal application"
         assert settings.VERSION == "0.1.0"
         assert settings.API_V1_STR == "/api/v1"
-        assert settings.CORS_ORIGINS == ["*"]
+        assert settings.CORS_ORIGINS == ["http://localhost:3000", "http://127.0.0.1:3000"]
         assert settings.DATABASE_TYPE == os.getenv("DATABASE_TYPE", "postgres")
         assert settings.SECRET_KEY == "development_secret_key"
         assert settings.ALGORITHM == "HS256"
