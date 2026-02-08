@@ -347,6 +347,15 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
             try {
               const freshTask = await TaskService.getTask(taskId);
               if (freshTask) {
+                // Warn if DB tools differ from canvas — helps catch unsaved edits
+                const canvasTools = Array.isArray(node.data?.tools) ? node.data.tools : [];
+                const dbTools = Array.isArray(freshTask.tools) ? freshTask.tools : [];
+                if (JSON.stringify(canvasTools.map(String).sort()) !== JSON.stringify(dbTools.map(String).sort())) {
+                  console.warn(
+                    `[CrewExecution] Tool mismatch for task "${freshTask.name}" — canvas: [${canvasTools}], DB: [${dbTools}]. ` +
+                    `Using DB version. If unexpected, ensure you saved the task after editing tools.`
+                  );
+                }
                 console.log(`[CrewExecution] Refreshed task ${freshTask.name} - tools:`, freshTask.tools);
                 return {
                   ...node,
@@ -426,7 +435,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           jobId: response.execution_id || response.job_id,
           jobName: `Crew Execution (${new Date().toLocaleTimeString()})`,
           status: 'running',
-          groupId: localStorage.getItem('selectedGroupId') // Include the group ID for security filtering
+          groupId: localStorage.getItem('selectedGroupId'), // Include the group ID for security filtering
+          planningEnabled
         }
       });
       console.log('[CrewExecution] Dispatching jobCreated event:', jobCreatedEvent.detail);
@@ -564,7 +574,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           jobName: `Flow Execution (${new Date().toLocaleTimeString()})`,
           status: 'running',
           groupId: localStorage.getItem('selectedGroupId'), // Include the group ID for security filtering
-          isFlow: true // Flag to indicate this is a flow execution
+          isFlow: true, // Flag to indicate this is a flow execution
+          planningEnabled
         }
       });
       console.log('[FlowExecution] Dispatching jobCreated event:', jobCreatedEvent.detail);
@@ -669,6 +680,15 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
               try {
                 const freshTask = await TaskService.getTask(taskId);
                 if (freshTask) {
+                  // Warn if DB tools differ from canvas — helps catch unsaved edits
+                  const canvasTools = Array.isArray(node.data?.tools) ? node.data.tools : [];
+                  const dbTools = Array.isArray(freshTask.tools) ? freshTask.tools : [];
+                  if (JSON.stringify(canvasTools.map(String).sort()) !== JSON.stringify(dbTools.map(String).sort())) {
+                    console.warn(
+                      `[TabExecution] Tool mismatch for task "${freshTask.name}" — canvas: [${canvasTools}], DB: [${dbTools}]. ` +
+                      `Using DB version. If unexpected, ensure you saved the task after editing tools.`
+                    );
+                  }
                   console.log(`[TabExecution] Refreshed task ${freshTask.name} - tools:`, freshTask.tools);
                   return {
                     ...node,
@@ -730,7 +750,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           jobId: response.execution_id || response.job_id,
           jobName: `${tabName || 'Unnamed Tab'} (${new Date().toLocaleTimeString()})`,
           status: 'running',
-          groupId: localStorage.getItem('selectedGroupId') // Include the group ID for security filtering
+          groupId: localStorage.getItem('selectedGroupId'), // Include the group ID for security filtering
+          planningEnabled
         }
       });
       console.log('[TabExecution] Dispatching jobCreated event:', jobCreatedEvent.detail);
@@ -981,7 +1002,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           jobId: response.execution_id || response.job_id,
           jobName: `Crew Generation (${new Date().toLocaleTimeString()})`,
           status: 'running',
-          groupId: localStorage.getItem('selectedGroupId') // Include the group ID for security filtering
+          groupId: localStorage.getItem('selectedGroupId'), // Include the group ID for security filtering
+          planningEnabled
         }
       }));
 

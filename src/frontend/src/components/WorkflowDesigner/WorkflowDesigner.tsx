@@ -1019,7 +1019,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
       setShowExecutionLogsDialog(true);
       setLastViewedJobId(jobToShow); // Track this as the last viewed job
 
-      // Fetch historical logs and connect to WebSocket
+      // Fetch historical logs via REST
       const historicalLogs = await executionLogService.getHistoricalLogs(jobToShow);
       setSelectedJobLogs(historicalLogs.map(({ job_id, execution_id, ...rest }) => ({
         ...rest,
@@ -1027,42 +1027,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         id: rest.id || Date.now()
       })));
 
-      executionLogService.connectToJobLogs(jobToShow);
-
-      const unsubscribeConnect = executionLogService.onConnected(jobToShow, () => {
-        setIsConnectingLogs(false);
-
-      });
-
-      const unsubscribeLogs = executionLogService.onJobLogs(jobToShow, (logMessage) => {
-        setSelectedJobLogs(prevLogs => [...prevLogs, {
-          id: logMessage.id || Date.now(),
-          output: logMessage.output || logMessage.content,
-          timestamp: logMessage.timestamp
-        }]);
-      });
-
-      const unsubscribeError = executionLogService.onError(jobToShow, () => {
-
-        setConnectionError('Failed to connect to log stream');
-        setIsConnectingLogs(false);
-      });
-
-      const unsubscribeClose = executionLogService.onClose(jobToShow, () => {
-
-        setIsConnectingLogs(false);
-      });
-
-      // Store the unsubscribe functions to be called on cleanup
-      return () => {
-        unsubscribeConnect();
-        unsubscribeLogs();
-        unsubscribeError();
-        unsubscribeClose();
-        executionLogService.disconnectFromJobLogs(jobToShow);
-      };
+      setIsConnectingLogs(false);
     } catch (error) {
-
       setConnectionError('Failed to load execution logs');
       setIsConnectingLogs(false);
     }
@@ -1727,9 +1693,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           open={showExecutionLogsDialog}
           onClose={() => {
             setShowExecutionLogsDialog(false);
-            if (selectedExecutionJobId) {
-              executionLogService.disconnectFromJobLogs(selectedExecutionJobId);
-            }
           }}
           logs={selectedJobLogs}
           jobId={selectedExecutionJobId || ''}

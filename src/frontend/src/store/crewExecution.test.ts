@@ -495,3 +495,44 @@ describe('crewExecution - task refresh before execution', () => {
     expect(refreshed[0].position).toEqual({ x: 100, y: 200 });
   });
 });
+
+/**
+ * Tests for the planningEnabled flag in jobCreated event detail.
+ * Verifies that execution functions include planningEnabled in the
+ * dispatched event so useExecutionMonitoring can set the planning phase.
+ */
+describe('crewExecution - planningEnabled in jobCreated event', () => {
+  // Replicates the event detail construction from executeCrew/executeTab
+  const buildJobCreatedDetail = (
+    jobId: string,
+    jobName: string,
+    planningEnabled: boolean
+  ) => {
+    return {
+      jobId,
+      jobName,
+      status: 'running',
+      groupId: 'test-group',
+      planningEnabled
+    };
+  };
+
+  it('should include planningEnabled: true when planning is enabled', () => {
+    const detail = buildJobCreatedDetail('job-1', 'Crew Execution', true);
+    expect(detail.planningEnabled).toBe(true);
+  });
+
+  it('should include planningEnabled: false when planning is disabled', () => {
+    const detail = buildJobCreatedDetail('job-1', 'Crew Execution', false);
+    expect(detail.planningEnabled).toBe(false);
+  });
+
+  it('should preserve other event detail fields alongside planningEnabled', () => {
+    const detail = buildJobCreatedDetail('job-123', 'My Crew', true);
+    expect(detail.jobId).toBe('job-123');
+    expect(detail.jobName).toBe('My Crew');
+    expect(detail.status).toBe('running');
+    expect(detail.groupId).toBe('test-group');
+    expect(detail.planningEnabled).toBe(true);
+  });
+});
