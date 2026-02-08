@@ -639,7 +639,18 @@ class ExecutionService:
                 exec_logger.error(f"Failed to update execution {execution_id} status to {status}")
             else:
                 exec_logger.info(f"Updated execution {execution_id} status to {status}")
-                
+                # Clean up in-memory entry once terminal status is persisted to DB
+                terminal_statuses = {
+                    ExecutionStatus.COMPLETED.value,
+                    ExecutionStatus.FAILED.value,
+                    ExecutionStatus.STOPPED.value,
+                    ExecutionStatus.CANCELLED.value,
+                    ExecutionStatus.REJECTED.value,
+                }
+                if status in terminal_statuses:
+                    ExecutionService.executions.pop(execution_id, None)
+                    exec_logger.debug(f"Cleaned up in-memory execution entry for {execution_id}")
+
         except Exception as e:
             exec_logger.error(f"Error updating execution status: {str(e)}")
     
