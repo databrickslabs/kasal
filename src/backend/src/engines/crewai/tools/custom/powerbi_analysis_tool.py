@@ -820,6 +820,34 @@ class PowerBIAnalysisTool(BaseTool):
 - DO NOT add suffixes like [measure_doc] or [measure_calc]
 - DO NOT modify measure names in any way
 
+## SUMMARIZECOLUMNS SYNTAX (MUST FOLLOW):
+The argument order for SUMMARIZECOLUMNS is strictly:
+```
+SUMMARIZECOLUMNS( <groupBy columns>, <filter tables>, "name", <expression> )
+```
+- **Filter tables (e.g. FILTER, TREATAS) MUST come BEFORE measure name/expression pairs**
+- **Measure name/expression pairs (e.g. "Total", [Total Sales]) MUST come LAST**
+- Placing a filter AFTER a measure pair causes error: "expects a column name as argument"
+ 
+Correct example:
+```
+EVALUATE
+SUMMARIZECOLUMNS(
+    Table1[Column1],
+    FILTER(ALL(Table1[Column1]), Table1[Column1] = "Value"),
+    "Result", [MyMeasure]
+)
+```
+ 
+Wrong example (DO NOT DO THIS):
+```
+EVALUATE
+SUMMARIZECOLUMNS(
+    Table1[Column1],
+    "Result", [MyMeasure],
+    FILTER(ALL(Table1[Column1]), Table1[Column1] = "Value")
+)
+
 ## DAX Query:
 """
 
@@ -1086,7 +1114,8 @@ Analyze the error(s) and generate a CORRECTED query.
    - Invalid relationship → Use only relationships listed above
    - Syntax error → Ensure proper DAX syntax (EVALUATE, SUMMARIZECOLUMNS, etc.)
    - Type mismatch → Ensure columns and measures are used correctly
-6. Return ONLY the corrected DAX query without explanations
+6. **SUMMARIZECOLUMNS argument order**: groupBy columns, then filter tables, then "name"/expression pairs LAST
+7. Return ONLY the corrected DAX query without explanations
 
 ## Corrected DAX Query:
 """

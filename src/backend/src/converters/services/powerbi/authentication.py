@@ -399,20 +399,58 @@ class AadService:
             self.logger.info(f"[AUTH DEBUG]   client_id: '{self.client_id}'")
             self.logger.info(f"[AUTH DEBUG]   username: '{username}'")
             self.logger.info(f"[AUTH DEBUG]   password length: {len(password)}")
+            self.logger.info(f"[AUTH DEBUG]   password stripped length: {len(password.strip())}")
+            self.logger.info(f"[AUTH DEBUG]   password has whitespace: {password != password.strip()}")
+
+            # Strip whitespace from credentials (common copy-paste issue)
+            username = username.strip()
+
+            # Handle base64-encoded passwords (for special characters like \$ that get escaped)
+            # If password starts with 'base64:', decode it
+            if password.strip().startswith('base64:'):
+                import base64
+                encoded_password = password.strip()[7:]  # Remove 'base64:' prefix
+                password = base64.b64decode(encoded_password).decode('utf-8')
+                self.logger.info(f"[AUTH DEBUG] Decoded base64 password - length: {len(password)}")
+            else:
+                password = password.strip()
+
+                # CRITICAL FIX: Unescape common escape sequences that appear in passwords
+                # When passwords are stored in env vars/JSON/DB, backslash escape sequences
+                # like \$ get stored literally instead of being interpreted
+                original_length = len(password)
+                password = password.replace('\\$', '$')  # \$ -> $
+                password = password.replace('\\\\', '\\')  # \\ -> \
+                password = password.replace('\\n', '\n')  # \n -> newline (unlikely but handle it)
+                password = password.replace('\\t', '\t')  # \t -> tab (unlikely but handle it)
+
+                if len(password) != original_length:
+                    self.logger.info(f"[AUTH DEBUG] Unescaped password - original length: {original_length}, new length: {len(password)}")
+                else:
+                    self.logger.info(f"[AUTH DEBUG] Using raw password - length: {len(password)}")
 
             # Ensure UsernamePasswordCredential is available
             if UsernamePasswordCredential is None:
                 raise RuntimeError("azure-identity library not available")
 
             # Create UsernamePasswordCredential and get token
-            # Note: client_secret is optional for public client applications
-            credential = UsernamePasswordCredential(
-                client_id=self.client_id,
-                username=username,
-                password=password,
-                tenant_id=self.tenant_id,
-                client_secret=self.client_secret if self.client_secret else None,
-            )
+            # Note: Service Account authentication can use both public (no secret) or confidential (with secret) clients
+            # Include client_secret if available (matches working implementation)
+            credential_kwargs = {
+                'client_id': self.client_id,
+                'username': username,
+                'password': password,
+                'tenant_id': self.tenant_id
+            }
+
+            # Include client_secret if provided (required for confidential client apps)
+            if self.client_secret:
+                credential_kwargs['client_secret'] = self.client_secret
+                self.logger.info(f"[AUTH DEBUG] Including client_secret (confidential client)")
+            else:
+                self.logger.info(f"[AUTH DEBUG] No client_secret (public client)")
+
+            credential = UsernamePasswordCredential(**credential_kwargs)
 
             # Acquire token for Power BI API
             token_response = credential.get_token(self.POWERBI_SCOPE)
