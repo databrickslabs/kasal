@@ -2,6 +2,7 @@
 Lakebase Service for managing Databricks Lakebase instances and configuration.
 """
 import os
+import re
 import uuid
 import logging
 from typing import Dict, Any, Optional
@@ -49,6 +50,23 @@ from src.services.lakebase_migration_service import LakebaseMigrationService
 
 logger_manager = LoggerManager.get_instance()
 logger = logging.getLogger(__name__)
+
+# --- SQL injection prevention helpers ---
+_SAFE_IDENTIFIER_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+
+def _validate_identifier(name: str, kind: str = "identifier") -> str:
+    """Validate a SQL identifier (schema name, table name) to prevent injection.
+
+    Only allows simple identifiers matching ``^[A-Za-z_][A-Za-z0-9_]*$``.
+
+    Raises:
+        ValueError: If the name does not match the safe pattern.
+    """
+    if not name or not _SAFE_IDENTIFIER_RE.match(name):
+        raise ValueError(f"Invalid SQL {kind}: {name!r}")
+    return name
+
 
 
 class LakebaseService(BaseService):
@@ -956,8 +974,10 @@ class LakebaseService(BaseService):
                     # Get row count for each table
                     for schema, table in tables:
                         try:
+                            safe_schema = _validate_identifier(schema, "schema name")
+                            safe_table = _validate_identifier(table, "table name")
                             count_result = await conn.execute(
-                                text(f"SELECT COUNT(*) FROM {schema}.{table}")
+                                text(f"SELECT COUNT(*) FROM {safe_schema}.{safe_table}")
                             )
                             count = count_result.scalar()
                             tables_info.append({
@@ -991,13 +1011,16 @@ class LakebaseService(BaseService):
 
                     existing_kasal_tables = []
                     for table_name in kasal_tables:
-                        check_result = await conn.execute(text(f"""
-                            SELECT EXISTS (
-                                SELECT FROM pg_tables
-                                WHERE schemaname = 'public'
-                                AND tablename = '{table_name}'
-                            );
-                        """))
+                        check_result = await conn.execute(
+                            text("""
+                                SELECT EXISTS (
+                                    SELECT FROM pg_tables
+                                    WHERE schemaname = 'public'
+                                    AND tablename = :tname
+                                );
+                            """),
+                            {"tname": table_name}
+                        )
                         if check_result.scalar():
                             existing_kasal_tables.append(table_name)
 
