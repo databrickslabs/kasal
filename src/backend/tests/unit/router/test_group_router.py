@@ -536,9 +536,9 @@ class TestGroupRouter:
         assert response.status_code == 500
         assert "Internal server error" in response.json()["detail"]
     
+    @patch('src.api.group_router.UserService')
     @patch('src.api.group_router.GroupService')
-    @patch('sqlalchemy.select')
-    def test_update_group_user_success(self, mock_select, mock_service_class, client, mock_db_session):
+    def test_update_group_user_success(self, mock_service_class, mock_user_svc_class, client, mock_db_session):
         """Test successful group user update."""
         mock_service = AsyncMock()
         mock_service_class.return_value = mock_service
@@ -554,28 +554,28 @@ class TestGroupRouter:
         mock_group_user.auto_created = False
         mock_group_user.created_at = datetime.utcnow()
         mock_group_user.updated_at = datetime.utcnow()
-        
+
         mock_service.update_group_user.return_value = mock_group_user
-        
-        # Mock the user lookup
+
+        # Mock the user lookup via UserService
         mock_user = MagicMock()
         mock_user.email = "user@example.com"
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_user
-        mock_db_session.execute.return_value = mock_result
-        
+        mock_user_svc = AsyncMock()
+        mock_user_svc.get_user.return_value = mock_user
+        mock_user_svc_class.return_value = mock_user_svc
+
         update_data = {"role": "admin"}
-        
+
         response = client.put("/groups/group-1/users/user-1", json=update_data)
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["role"] == "admin"
         assert data["email"] == "user@example.com"
     
+    @patch('src.api.group_router.UserService')
     @patch('src.api.group_router.GroupService')
-    @patch('sqlalchemy.select')
-    def test_update_group_user_no_user_found(self, mock_select, mock_service_class, client, mock_db_session):
+    def test_update_group_user_no_user_found(self, mock_service_class, mock_user_svc_class, client, mock_db_session):
         """Test group user update when user not found in database."""
         mock_service = AsyncMock()
         mock_service_class.return_value = mock_service
@@ -591,18 +591,18 @@ class TestGroupRouter:
         mock_group_user.auto_created = False
         mock_group_user.created_at = datetime.utcnow()
         mock_group_user.updated_at = datetime.utcnow()
-        
+
         mock_service.update_group_user.return_value = mock_group_user
-        
-        # Mock the user lookup returning None
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        mock_db_session.execute.return_value = mock_result
-        
+
+        # Mock the user lookup returning None via UserService
+        mock_user_svc = AsyncMock()
+        mock_user_svc.get_user.return_value = None
+        mock_user_svc_class.return_value = mock_user_svc
+
         update_data = {"role": "admin"}
-        
+
         response = client.put("/groups/group-1/users/user-1", json=update_data)
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["email"] == "user-1@databricks.com"  # Fallback email
