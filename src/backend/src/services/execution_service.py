@@ -796,12 +796,14 @@ class ExecutionService:
                 # This allows "test before save" workflow from the canvas
                 if not flow_id:
                     # Check if nodes and edges are provided in config for ad-hoc execution
-                    has_nodes = hasattr(config, 'nodes') and config.nodes
-                    has_edges = hasattr(config, 'edges') and config.edges
+                    has_nodes = hasattr(config, 'nodes') and config.nodes is not None and len(config.nodes) > 0
+                    has_edges = hasattr(config, 'edges') and config.edges is not None
 
-                    if has_nodes and has_edges:
-                        # Ad-hoc flow execution with nodes/edges from canvas (no database save required)
-                        exec_logger.info(f"[ExecutionService.create_execution] No flow_id provided, but nodes ({len(config.nodes)}) and edges ({len(config.edges)}) present - allowing ad-hoc flow execution")
+                    if has_nodes:
+                        # Ad-hoc flow execution with nodes from canvas (no database save required)
+                        # Edges may be empty for single-crew flows - that's valid
+                        edge_count = len(config.edges) if config.edges else 0
+                        exec_logger.info(f"[ExecutionService.create_execution] No flow_id provided, but nodes ({len(config.nodes)}) and edges ({edge_count}) present - allowing ad-hoc flow execution")
                     else:
                         # No flow_id and no nodes/edges, try to find the most recent flow from database
                         exec_logger.info(f"[ExecutionService.create_execution] No flow_id or nodes/edges provided for execution_id: {execution_id}, trying to find most recent flow from database")
