@@ -7,6 +7,7 @@ reusable component following the repository pattern and service architecture.
 
 import json
 import logging
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -17,6 +18,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.base_service import BaseService
 
 logger = logging.getLogger(__name__)
+
+# --- SQL injection prevention helpers ---
+_SAFE_IDENTIFIER_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+
+def _validate_identifier(name: str, kind: str = "identifier") -> str:
+    """Validate a SQL identifier (schema name, table name) to prevent injection.
+
+    Only allows simple identifiers matching ``^[A-Za-z_][A-Za-z0-9_]*$``.
+
+    Raises:
+        ValueError: If the name does not match the safe pattern.
+    """
+    if not name or not _SAFE_IDENTIFIER_RE.match(name):
+        raise ValueError(f"Invalid SQL {kind}: {name!r}")
+    return name
+
 
 
 class LakebaseMigrationService(BaseService):
@@ -426,8 +444,9 @@ class LakebaseMigrationService(BaseService):
             else:
                 # Read data from source normally
                 async with source_session.begin():
+                    safe_table = _validate_identifier(table_name, "table name")
                     result = await source_session.execute(
-                        text(f"SELECT * FROM {table_name}")
+                        text(f"SELECT * FROM {safe_table}")
                     )
                     rows = result.fetchall()
                     columns = list(result.keys())
@@ -438,7 +457,8 @@ class LakebaseMigrationService(BaseService):
 
             # Clear existing data in Lakebase to avoid duplicates
             async with lakebase_session.begin():
-                delete_sql = f"DELETE FROM {table_name}"
+                safe_table = _validate_identifier(table_name, "table name")
+                delete_sql = f"DELETE FROM {safe_table}"
                 await lakebase_session.execute(text(delete_sql))
                 logger.debug(f"  ↳ Cleared existing data from {table_name} in Lakebase")
 
@@ -448,7 +468,7 @@ class LakebaseMigrationService(BaseService):
                 col_names = ", ".join([f'"{col}"' for col in columns])
                 placeholders = ", ".join([f":{col}" for col in columns])
                 insert_sql = (
-                    f"INSERT INTO {table_name} ({col_names}) VALUES ({placeholders})"
+                    f"INSERT INTO {safe_table} ({col_names}) VALUES ({placeholders})"
                 )
 
                 # Batch insert with proper type conversion
@@ -496,14 +516,15 @@ class LakebaseMigrationService(BaseService):
         """
         try:
             # Get data from source
+            safe_table = _validate_identifier(table_name, "table name")
             if is_sqlite:
                 with source_engine.connect() as conn:
-                    result = conn.execute(text(f'SELECT * FROM "{table_name}"'))
+                    result = conn.execute(text(f'SELECT * FROM "{safe_table}"'))
                     rows = result.fetchall()
                     columns = result.keys()
             else:
                 with source_engine.begin() as conn:
-                    result = conn.execute(text(f'SELECT * FROM "{table_name}"'))
+                    result = conn.execute(text(f'SELECT * FROM "{safe_table}"'))
                     rows = result.fetchall()
                     columns = result.keys()
 
@@ -518,7 +539,7 @@ class LakebaseMigrationService(BaseService):
                 # Build insert statement
                 column_list = ", ".join([f'"{col}"' for col in columns])
                 placeholders = ", ".join([f":{col}" for col in columns])
-                insert_sql = f'INSERT INTO "{table_name}" ({column_list}) VALUES ({placeholders})'
+                insert_sql = f'INSERT INTO "{safe_table}" ({column_list}) VALUES ({placeholders})'
 
                 json_columns = self.json_columns_by_table.get(table_name, [])
                 datetime_columns = self.datetime_columns_by_table.get(table_name, [])

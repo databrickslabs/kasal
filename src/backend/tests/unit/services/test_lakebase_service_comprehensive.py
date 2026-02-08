@@ -317,3 +317,190 @@ class TestLakebaseServiceUtilityMethods:
             assert service.session is None
             assert service.config_repository is None
             assert service.migration_service is None
+
+
+# ===========================================================================
+# _validate_identifier tests (across lakebase services)
+# ===========================================================================
+
+from src.services.lakebase_schema_service import (
+    _validate_identifier as schema_validate_identifier,
+    _quote_pg_role as schema_quote_pg_role,
+)
+from src.services.lakebase_service import (
+    _validate_identifier as service_validate_identifier,
+)
+from src.services.lakebase_migration_service import (
+    _validate_identifier as migration_validate_identifier,
+)
+from src.services.lakebase_permission_service import (
+    _quote_pg_role as permission_quote_pg_role,
+)
+
+VALIDATE_IDENTIFIER_FNS = [
+    pytest.param(schema_validate_identifier, id="schema_service"),
+    pytest.param(service_validate_identifier, id="lakebase_service"),
+    pytest.param(migration_validate_identifier, id="migration_service"),
+]
+
+QUOTE_PG_ROLE_FNS = [
+    pytest.param(permission_quote_pg_role, id="permission_service"),
+    pytest.param(schema_quote_pg_role, id="schema_service"),
+]
+
+
+class TestLakebaseValidateIdentifier:
+
+    @pytest.mark.parametrize("fn", VALIDATE_IDENTIFIER_FNS)
+    @pytest.mark.parametrize(
+        "name",
+        ["users", "execution_logs", "_private", "Table123", "a", "_", "ALLCAPS"],
+    )
+    def test_accepts_valid(self, fn, name):
+        assert fn(name) == name
+
+    @pytest.mark.parametrize("fn", VALIDATE_IDENTIFIER_FNS)
+    def test_rejects_empty(self, fn):
+        with pytest.raises(ValueError):
+            fn("")
+
+    @pytest.mark.parametrize("fn", VALIDATE_IDENTIFIER_FNS)
+    def test_rejects_none(self, fn):
+        with pytest.raises((ValueError, TypeError, AttributeError)):
+            fn(None)
+
+    @pytest.mark.parametrize("fn", VALIDATE_IDENTIFIER_FNS)
+    def test_rejects_leading_digit(self, fn):
+        with pytest.raises(ValueError):
+            fn("123table")
+
+    @pytest.mark.parametrize("fn", VALIDATE_IDENTIFIER_FNS)
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            "users; DROP TABLE users; --",
+            "users UNION SELECT * FROM passwords",
+            "schema.table",
+            "my-table",
+            "my table",
+            "table'name",
+            "table()",
+            "table\nname",
+            "user@domain",
+            "users;",
+            "users--",
+        ],
+    )
+    def test_rejects_injection_payloads(self, fn, payload):
+        with pytest.raises(ValueError):
+            fn(payload)
+
+    @pytest.mark.parametrize("fn", VALIDATE_IDENTIFIER_FNS)
+    def test_error_message_includes_kind(self, fn):
+        with pytest.raises(ValueError, match="table name"):
+            fn("bad;input", "table name")
+
+    @pytest.mark.parametrize("fn", VALIDATE_IDENTIFIER_FNS)
+    def test_error_message_default_kind(self, fn):
+        with pytest.raises(ValueError, match="identifier"):
+            fn("bad;input")
+
+
+class TestLakebaseQuotePgRole:
+
+    @pytest.mark.parametrize("fn", QUOTE_PG_ROLE_FNS)
+    def test_simple_email(self, fn):
+        result = fn("user@example.com")
+        assert result == '"user@example.com"'
+
+    @pytest.mark.parametrize("fn", QUOTE_PG_ROLE_FNS)
+    def test_email_with_dots(self, fn):
+        result = fn("john.doe@company.co.uk")
+        assert result == '"john.doe@company.co.uk"'
+
+    @pytest.mark.parametrize("fn", QUOTE_PG_ROLE_FNS)
+    def test_email_with_plus(self, fn):
+        result = fn("user+tag@example.com")
+        assert result == '"user+tag@example.com"'
+
+    @pytest.mark.parametrize("fn", QUOTE_PG_ROLE_FNS)
+    def test_email_with_underscore(self, fn):
+        result = fn("user_name@example.com")
+        assert result == '"user_name@example.com"'
+
+    @pytest.mark.parametrize("fn", QUOTE_PG_ROLE_FNS)
+    def test_rejects_empty(self, fn):
+        with pytest.raises(ValueError):
+            fn("")
+
+    @pytest.mark.parametrize("fn", QUOTE_PG_ROLE_FNS)
+    def test_rejects_none(self, fn):
+        with pytest.raises((ValueError, TypeError, AttributeError)):
+            fn(None)
+
+    @pytest.mark.parametrize("fn", QUOTE_PG_ROLE_FNS)
+    def test_rejects_plain_string(self, fn):
+        with pytest.raises(ValueError):
+            fn("not-an-email")
+
+    @pytest.mark.parametrize("fn", QUOTE_PG_ROLE_FNS)
+    def test_rejects_missing_local_part(self, fn):
+        with pytest.raises(ValueError):
+            fn("@domain.com")
+
+    @pytest.mark.parametrize("fn", QUOTE_PG_ROLE_FNS)
+    def test_rejects_missing_domain(self, fn):
+        with pytest.raises(ValueError):
+            fn("user@")
+
+    @pytest.mark.parametrize("fn", QUOTE_PG_ROLE_FNS)
+    def test_rejects_sql_injection(self, fn):
+        with pytest.raises(ValueError):
+            fn('user"; DROP TABLE users; --@example.com')
+
+    @pytest.mark.parametrize("fn", QUOTE_PG_ROLE_FNS)
+    def test_rejects_semicolon_in_local(self, fn):
+        with pytest.raises(ValueError):
+            fn("user;drop@example.com")
+
+    @pytest.mark.parametrize("fn", QUOTE_PG_ROLE_FNS)
+    def test_rejects_newline(self, fn):
+        with pytest.raises(ValueError):
+            fn("user\n@example.com")
+
+    @pytest.mark.parametrize("fn", QUOTE_PG_ROLE_FNS)
+    def test_rejects_double_quote(self, fn):
+        with pytest.raises(ValueError):
+            fn('user"test@example.com')
+
+    @pytest.mark.parametrize("fn", QUOTE_PG_ROLE_FNS)
+    def test_error_mentions_role(self, fn):
+        with pytest.raises(ValueError, match="PostgreSQL role"):
+            fn("not-valid")
+
+    @pytest.mark.parametrize("fn", QUOTE_PG_ROLE_FNS)
+    def test_output_wrapped_in_double_quotes(self, fn):
+        result = fn("test@example.com")
+        assert result.startswith('"') and result.endswith('"')
+
+
+class TestLakebaseCrossImplementationConsistency:
+
+    @pytest.mark.parametrize("name", ["users", "_private", "Table123"])
+    def test_validate_consistent(self, name):
+        results = [fn(name) for fn in [
+            schema_validate_identifier,
+            service_validate_identifier,
+            migration_validate_identifier,
+        ]]
+        assert all(r == name for r in results)
+
+    @pytest.mark.parametrize("bad", ["123x", "my-table", "a.b", ""])
+    def test_validate_rejects_consistently(self, bad):
+        for fn in [schema_validate_identifier, service_validate_identifier, migration_validate_identifier]:
+            with pytest.raises(ValueError):
+                fn(bad)
+
+    @pytest.mark.parametrize("email", ["user@example.com", "a+b@c.co.uk"])
+    def test_quote_pg_role_consistent(self, email):
+        assert permission_quote_pg_role(email) == schema_quote_pg_role(email)
