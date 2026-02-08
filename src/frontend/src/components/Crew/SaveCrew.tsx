@@ -424,11 +424,12 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
           // Ensure we have a config object, create one if it doesn't exist
           const existingConfig = node.data?.config || {};
 
-          // Get llm_guardrail: config takes priority (user edits go there), top-level is fallback
-          // Use explicit undefined check because null means "user disabled it"
+          // Get llm_guardrail: ONLY use config value (user's explicit choice)
+          // Do NOT fall back to top-level llm_guardrail — that's the LLM suggestion, not user's choice
+          // null means "user disabled it" or "never enabled it" — both should result in no guardrail
           const llmGuardrail = existingConfig.llm_guardrail !== undefined
             ? existingConfig.llm_guardrail  // User explicitly set or cleared in config
-            : (node.data?.llm_guardrail ?? null);  // Original from dispatcher or null
+            : null;  // Not configured = disabled (don't use LLM suggestion)
 
           // Debug logging
           console.log(`SaveCrew: Processing task node ${node.id}`, {
@@ -444,13 +445,15 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
             ...node,
             data: {
               ...node.data,
-              // Preserve llm_guardrail at top level for compatibility
-              llm_guardrail: llmGuardrail,
+              // Preserve llm_guardrail at top level as suggestion for the UI toggle
+              // This is the LLM-generated suggestion, NOT the user's active choice
+              llm_guardrail: node.data?.llm_guardrail ?? null,
               config: {
                 ...existingConfig,
                 // Ensure markdown is included in config, prioritize top-level markdown
                 markdown: node.data?.markdown !== undefined ? node.data.markdown : (existingConfig.markdown || false),
-                // Ensure llm_guardrail is also in config for loading
+                // Only include llm_guardrail in config if user explicitly enabled it
+                // null = disabled, truthy object = user enabled it
                 llm_guardrail: llmGuardrail
               }
             }
