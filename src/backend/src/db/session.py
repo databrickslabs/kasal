@@ -8,6 +8,7 @@ import sys
 import asyncio
 import time
 from functools import wraps
+from contextlib import asynccontextmanager
 
 from sqlalchemy import text, event
 from sqlalchemy.ext.asyncio import (
@@ -358,6 +359,27 @@ if not str(settings.DATABASE_URI).startswith('sqlite'):
         autoflush=False,
         autocommit=False,
     )
+
+@asynccontextmanager
+async def safe_async_session():
+    """Create an async session that suppresses cleanup errors.
+
+    Use this in long-running subprocess operations (crew/flow execution)
+    where SQLite connections may go stale after the greenlet context is lost
+    during long-running CrewAI operations. The normal ``async with
+    async_session_factory() as session:`` pattern raises
+    ``sqlite3.OperationalError: no active connection`` in ``__aexit__``
+    when the underlying connection has become invalid.
+    """
+    session = async_session_factory()
+    try:
+        yield session
+    finally:
+        try:
+            await session.close()
+        except Exception:
+            pass
+
 
 # Sync session factory for non-async contexts (e.g. CrewAI guardrail callbacks).
 # Uses the sync_engine underlying the async engine.

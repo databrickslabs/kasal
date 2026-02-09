@@ -339,10 +339,10 @@ def run_flow_in_process(
 
             # Now run the actual flow execution
             try:
-                from src.db.session import async_session_factory
+                from src.db.session import safe_async_session
                 from src.engines.crewai.flow.flow_runner_service import FlowRunnerService
 
-                async with async_session_factory() as session:
+                async with safe_async_session() as session:
                     # Create flow runner service with session
                     flow_runner = FlowRunnerService(session)
 
@@ -564,10 +564,9 @@ def run_flow_in_process(
             if output:
                 # Log the captured output to flow.log with execution ID
                 # The database handler will automatically write to execution_logs
-                # FILTER: Skip CrewAI Flow's built-in visualization to reduce log spam
                 for line in output.split('\n'):
                     line_stripped = line.strip()
-                    if line_stripped and not _is_crewai_flow_visualization(line_stripped):
+                    if line_stripped:
                         async_logger.info(f"[STDOUT] {line_stripped}")
         except Exception as capture_error:
             # Log any errors in stdout capture (shouldn't happen normally)

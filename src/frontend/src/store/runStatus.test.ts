@@ -14,6 +14,7 @@ import { ExtendedRun } from '../types/run';
 vi.mock('../api/ExecutionHistoryService', () => ({
   runService: {
     getRuns: vi.fn(),
+    invalidateRunsCache: vi.fn(),
   },
 }));
 
@@ -596,6 +597,141 @@ describe('runStatus store', () => {
       await fetchPromise;
 
       expect(useRunStatusStore.getState().isLoading).toBe(false);
+    });
+
+    it('should preserve placeholder running runs not yet in API response', async () => {
+      const getItemSpy = vi.spyOn(Storage.prototype, 'getItem').mockReturnValue('group-1');
+
+      // Pre-populate store with a placeholder running run (just created via SSE)
+      const placeholderRun: ExtendedRun = {
+        id: 'job-placeholder',
+        job_id: 'job-placeholder',
+        status: 'running',
+        created_at: '2024-06-01T12:00:00Z',
+        updated_at: '2024-06-01T12:00:00Z',
+        run_name: 'Placeholder Run',
+        agents_yaml: '',
+        tasks_yaml: '',
+      };
+      useRunStatusStore.setState({
+        runHistory: [placeholderRun],
+        activeRuns: { 'job-placeholder': placeholderRun },
+        hasRunningJobs: true,
+      });
+
+      // API returns only an older completed run (placeholder not yet visible)
+      mockGetRuns.mockResolvedValue({
+        runs: [
+          {
+            id: '1',
+            job_id: 'job-old',
+            status: 'completed',
+            created_at: '2024-06-01T09:00:00Z',
+            updated_at: '2024-06-01T09:05:00Z',
+            completed_at: '2024-06-01T09:05:00Z',
+            run_name: 'Old Completed Run',
+            agents_yaml: '',
+            tasks_yaml: '',
+            group_id: 'group-1',
+          },
+        ],
+        total: 1,
+        limit: 50,
+        offset: 0,
+      });
+
+      await useRunStatusStore.getState().fetchInitialRunHistory();
+
+      const state = useRunStatusStore.getState();
+      // Should contain both the API run AND the placeholder
+      expect(state.runHistory).toHaveLength(2);
+      expect(state.runHistory.some(r => r.job_id === 'job-placeholder')).toBe(true);
+      expect(state.runHistory.some(r => r.job_id === 'job-old')).toBe(true);
+      expect(state.hasRunningJobs).toBe(true);
+      expect(state.activeRuns['job-placeholder']).toBeDefined();
+
+      getItemSpy.mockRestore();
+    });
+
+    it('should not duplicate placeholder run when API includes it', async () => {
+      const getItemSpy = vi.spyOn(Storage.prototype, 'getItem').mockReturnValue('group-1');
+
+      // Pre-populate store with a placeholder running run
+      const placeholderRun: ExtendedRun = {
+        id: 'job-now-visible',
+        job_id: 'job-now-visible',
+        status: 'running',
+        created_at: '2024-06-01T12:00:00Z',
+        updated_at: '2024-06-01T12:00:00Z',
+        run_name: 'Placeholder',
+        agents_yaml: '',
+        tasks_yaml: '',
+      };
+      useRunStatusStore.setState({
+        runHistory: [placeholderRun],
+        activeRuns: { 'job-now-visible': placeholderRun },
+      });
+
+      // API now includes this run (no longer a timing gap)
+      mockGetRuns.mockResolvedValue({
+        runs: [
+          {
+            id: 'job-now-visible',
+            job_id: 'job-now-visible',
+            status: 'running',
+            created_at: '2024-06-01T12:00:00Z',
+            updated_at: '2024-06-01T12:01:00Z',
+            run_name: 'Visible Run',
+            agents_yaml: '',
+            tasks_yaml: '',
+            group_id: 'group-1',
+          },
+        ],
+        total: 1,
+        limit: 50,
+        offset: 0,
+      });
+
+      await useRunStatusStore.getState().fetchInitialRunHistory();
+
+      const state = useRunStatusStore.getState();
+      // Should NOT duplicate - only 1 entry
+      expect(state.runHistory).toHaveLength(1);
+      expect(state.runHistory[0].job_id).toBe('job-now-visible');
+
+      getItemSpy.mockRestore();
+    });
+
+    it('should drop completed placeholder runs not in API response', async () => {
+      const getItemSpy = vi.spyOn(Storage.prototype, 'getItem').mockReturnValue('group-1');
+
+      // Pre-populate with a completed placeholder (should NOT be preserved)
+      const completedPlaceholder: ExtendedRun = {
+        id: 'job-done',
+        job_id: 'job-done',
+        status: 'completed',
+        created_at: '2024-06-01T11:00:00Z',
+        updated_at: '2024-06-01T11:05:00Z',
+        run_name: 'Done Placeholder',
+        agents_yaml: '',
+        tasks_yaml: '',
+      };
+      useRunStatusStore.setState({ runHistory: [completedPlaceholder] });
+
+      mockGetRuns.mockResolvedValue({
+        runs: [],
+        total: 0,
+        limit: 50,
+        offset: 0,
+      });
+
+      await useRunStatusStore.getState().fetchInitialRunHistory();
+
+      const state = useRunStatusStore.getState();
+      // Completed placeholder should NOT be preserved
+      expect(state.runHistory).toHaveLength(0);
+
+      getItemSpy.mockRestore();
     });
 
     it('should ensure completed_at is set for completed runs without it', async () => {
