@@ -33,7 +33,7 @@ from src.models.group import Group, GroupUser
 from src.models.chat_history import ChatHistory
 
 # User models (simplified auth)
-from src.models.user import User, RefreshToken
+from src.models.user import User
 
 # Billing models
 from src.models.billing import LLMUsageBilling, BillingPeriod, BillingAlert
@@ -81,7 +81,6 @@ __all__ = [
     "ChatHistory",
     # User models (simplified auth)
     "User",
-    "RefreshToken",
     # Billing models
     "LLMUsageBilling",
     "BillingPeriod",

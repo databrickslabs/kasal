@@ -15,14 +15,9 @@ export const apiClient = axios.create({
   },
 });
 
-// Add a request interceptor to include authentication tokens and group context
+// Add a request interceptor to include group context headers
 apiClient.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-
     // Add group context headers if available
     const selectedGroupId = localStorage.getItem('selectedGroupId');
 
@@ -44,35 +39,11 @@ apiClient.interceptors.request.use(
   }
 );
 
-// Track refresh token request to prevent multiple simultaneous refreshes
-let isRefreshing = false;
-let failedQueue: Array<{
-  resolve: (value?: unknown) => void;
-  reject: (reason?: unknown) => void;
-}> = [];
-
-const processQueue = (error: unknown, token: string | null = null) => {
-  failedQueue.forEach((prom) => {
-    if (error) {
-      prom.reject(error);
-    } else {
-      prom.resolve(token);
-    }
-  });
-
-  failedQueue = [];
-};
-
-// Add a response interceptor to handle errors and token refresh
+// Add a response interceptor to handle errors
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
-    const originalRequest = error.config;
-
     if (error.response) {
-      // The request was made and the server responded with a status code
-      // that falls out of the range of 2xx
-
       // List of endpoints where 404 is expected and shouldn't be logged as an error
       const expectedNotFoundEndpoints = [
         '/databricks/config',
@@ -85,76 +56,6 @@ apiClient.interceptors.response.use(
         expectedNotFoundEndpoints.some(endpoint =>
           error.config?.url?.includes(endpoint)
         );
-
-      // Handle 401 Unauthorized - token expired
-      if (error.response.status === 401 && !originalRequest._retry) {
-        // Avoid refreshing token for login/register endpoints
-        if (originalRequest.url?.includes('/auth/login') ||
-            originalRequest.url?.includes('/auth/register') ||
-            originalRequest.url?.includes('/auth/refresh-token')) {
-          return Promise.reject(error);
-        }
-
-        if (isRefreshing) {
-          // If already refreshing, queue this request
-          return new Promise((resolve, reject) => {
-            failedQueue.push({ resolve, reject });
-          })
-            .then((token) => {
-              originalRequest.headers['Authorization'] = 'Bearer ' + token;
-              return apiClient(originalRequest);
-            })
-            .catch((err) => {
-              return Promise.reject(err);
-            });
-        }
-
-        originalRequest._retry = true;
-        isRefreshing = true;
-
-        try {
-          // Attempt to refresh the token
-          const response = await axios.post(
-            `${config.apiUrl}/auth/refresh-token`,
-            {},
-            { withCredentials: true } // Include httpOnly cookie
-          );
-
-          const { access_token } = response.data;
-
-          if (access_token) {
-            // Update token in localStorage
-            localStorage.setItem('token', access_token);
-
-            // Update Authorization header
-            apiClient.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
-            originalRequest.headers['Authorization'] = `Bearer ${access_token}`;
-
-            // Process queued requests with new token
-            processQueue(null, access_token);
-
-            // Retry the original request
-            return apiClient(originalRequest);
-          }
-        } catch (refreshError) {
-          // Refresh failed - clear auth and redirect to login
-          processQueue(refreshError, null);
-
-          // Clear authentication state
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-          localStorage.removeItem('userEmail');
-          localStorage.removeItem('userId');
-          localStorage.removeItem('selectedGroupId');
-
-          // Redirect to login page
-          window.location.href = '/login';
-
-          return Promise.reject(refreshError);
-        } finally {
-          isRefreshing = false;
-        }
-      }
 
       // Don't log 404 errors for configuration endpoints or other expected cases
       if (!isExpected404 && error.response.status !== 404) {
