@@ -174,8 +174,8 @@ class SyncUnitOfWork:
     def initialize(self):
         """Initialize repositories with a session."""
         if not self._initialized:
-            from src.db.session import SessionLocal
-            self._session = SessionLocal()
+            from src.db.session import sync_session_factory
+            self._session = sync_session_factory()
             
             # Initialize repositories with the sync session
             self.tool_repository = ToolRepository(self._session)

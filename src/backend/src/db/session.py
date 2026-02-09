@@ -359,8 +359,15 @@ if not str(settings.DATABASE_URI).startswith('sqlite'):
         autocommit=False,
     )
 
-# SessionLocal removed - use async_session_factory instead
-# All database operations must be async
+# Sync session factory for non-async contexts (e.g. CrewAI guardrail callbacks).
+# Uses the sync_engine underlying the async engine.
+from sqlalchemy.orm import sessionmaker as sync_sessionmaker
+sync_session_factory = sync_sessionmaker(
+    engine.sync_engine,
+    expire_on_commit=False,
+    autoflush=False,
+    autocommit=False,
+)
 
 # Database initialization
 async def init_db() -> None:
