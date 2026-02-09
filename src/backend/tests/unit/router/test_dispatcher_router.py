@@ -311,7 +311,7 @@ class TestDetectIntentOnly:
             },
             "suggested_prompt": "Create a data analyst agent that can analyze data and generate reports"
         }
-        mock_service._detect_intent.return_value = intent_result
+        mock_service.detect_intent.return_value = intent_result
         
         request_data = {
             "message": "Create an agent that can analyze data",
@@ -326,7 +326,7 @@ class TestDetectIntentOnly:
         assert data["confidence"] == 0.95
         assert data["extracted_info"]["agent_type"] == "data analyst"
         assert data["suggested_prompt"] == "Create a data analyst agent that can analyze data and generate reports"
-        mock_service._detect_intent.assert_called_once_with(
+        mock_service.detect_intent.assert_called_once_with(
             "Create an agent that can analyze data", 
             "databricks-llama-4-maverick"
         )
@@ -348,7 +348,7 @@ class TestDetectIntentOnly:
             },
             "suggested_prompt": "Create a task to analyze the provided data"
         }
-        mock_service._detect_intent.return_value = intent_result
+        mock_service.detect_intent.return_value = intent_result
         
         request_data = {
             "message": "Analyze this data for trends"
@@ -363,7 +363,7 @@ class TestDetectIntentOnly:
         assert data["confidence"] == 0.88
         assert data["extracted_info"]["task_type"] == "data analysis"
         # Should use default model when none specified
-        mock_service._detect_intent.assert_called_once_with(
+        mock_service.detect_intent.assert_called_once_with(
             "Analyze this data for trends", 
             "databricks-llama-4-maverick"
         )
@@ -385,7 +385,7 @@ class TestDetectIntentOnly:
             },
             "suggested_prompt": "Create a crew for data processing workflow with collector, analyst, and writer"
         }
-        mock_service._detect_intent.return_value = intent_result
+        mock_service.detect_intent.return_value = intent_result
         
         request_data = {
             "message": "Create a team to collect, analyze and report on data",
@@ -400,7 +400,7 @@ class TestDetectIntentOnly:
         assert data["confidence"] == 0.92
         assert "workflow_type" in data["extracted_info"]
         assert len(data["extracted_info"]["agents_needed"]) == 3
-        mock_service._detect_intent.assert_called_once_with(
+        mock_service.detect_intent.assert_called_once_with(
             "Create a team to collect, analyze and report on data", 
             "gpt-4"
         )
@@ -422,7 +422,7 @@ class TestDetectIntentOnly:
             },
             "suggested_prompt": "Configure crew settings for LLM model and rate limits"
         }
-        mock_service._detect_intent.return_value = intent_result
+        mock_service.detect_intent.return_value = intent_result
         
         request_data = {
             "message": "Setup the LLM model and configure max RPM for the crew",
@@ -436,7 +436,7 @@ class TestDetectIntentOnly:
         assert data["intent"] == "configure_crew"
         assert data["confidence"] == 0.85
         assert data["extracted_info"]["config_type"] == "llm_settings"
-        mock_service._detect_intent.assert_called_once_with(
+        mock_service.detect_intent.assert_called_once_with(
             "Setup the LLM model and configure max RPM for the crew", 
             "claude-3-sonnet"
         )
@@ -458,7 +458,7 @@ class TestDetectIntentOnly:
             },
             "suggested_prompt": "Answer the user's question about system capabilities"
         }
-        mock_service._detect_intent.return_value = intent_result
+        mock_service.detect_intent.return_value = intent_result
         
         request_data = {
             "message": "What can this system do?"
@@ -472,7 +472,7 @@ class TestDetectIntentOnly:
         assert data["confidence"] == 0.78
         assert data["extracted_info"]["question_type"] == "general_inquiry"
         # Should use default model when none specified
-        mock_service._detect_intent.assert_called_once_with(
+        mock_service.detect_intent.assert_called_once_with(
             "What can this system do?", 
             "databricks-llama-4-maverick"
         )
@@ -494,7 +494,7 @@ class TestDetectIntentOnly:
             },
             "suggested_prompt": "Please provide more specific information about what you want to create"
         }
-        mock_service._detect_intent.return_value = intent_result
+        mock_service.detect_intent.return_value = intent_result
         
         request_data = {
             "message": "Help me with something",
@@ -508,7 +508,7 @@ class TestDetectIntentOnly:
         assert data["intent"] == "unknown"
         assert data["confidence"] == 0.25
         assert data["extracted_info"]["ambiguity_reason"] == "insufficient_context"
-        mock_service._detect_intent.assert_called_once_with(
+        mock_service.detect_intent.assert_called_once_with(
             "Help me with something", 
             "custom-model"
         )
@@ -521,7 +521,7 @@ class TestDetectIntentOnly:
         mock_create_service.return_value = mock_service
         
         # Mock service error
-        mock_service._detect_intent.side_effect = Exception("Intent detection failed")
+        mock_service.detect_intent.side_effect = Exception("Intent detection failed")
         
         request_data = {
             "message": "Create an agent for data analysis"
@@ -584,7 +584,7 @@ class TestDetectIntentOnly:
             },
             "suggested_prompt": "Create a SQL analyst agent with database tools"
         }
-        mock_service._detect_intent.return_value = intent_result
+        mock_service.detect_intent.return_value = intent_result
         
         request_data = {
             "message": "Create an agent that can query databases",
@@ -599,7 +599,7 @@ class TestDetectIntentOnly:
         assert data["intent"] == "generate_agent"
         assert data["confidence"] == 0.93
         # Verify the service was called with correct parameters
-        mock_service._detect_intent.assert_called_once_with(
+        mock_service.detect_intent.assert_called_once_with(
             "Create an agent that can query databases", 
             "databricks-llama-4-maverick"
         )

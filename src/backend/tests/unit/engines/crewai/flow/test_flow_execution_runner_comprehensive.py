@@ -38,7 +38,8 @@ class TestUpdateExecutionStatusWithRetry:
             mock_service.update_status.assert_called_once_with(
                 job_id='exec-123',
                 status='COMPLETED',
-                message='Test message'
+                message='Test message',
+                result=None
             )
 
     @pytest.mark.asyncio
@@ -185,7 +186,8 @@ class TestRunFlowInProcess:
                 mock_update.assert_called_with(
                     execution_id=execution_id,
                     status=ExecutionStatus.COMPLETED.value,
-                    message='Flow execution completed successfully'
+                    message='Flow execution completed successfully',
+                    result={'output': 'test'}
                 )
 
     @pytest.mark.asyncio
@@ -349,7 +351,8 @@ class TestRunFlowInProcess:
                 mock_update.assert_called_with(
                     execution_id=execution_id,
                     status=ExecutionStatus.CANCELLED.value,
-                    message='Flow execution was cancelled'
+                    message='Flow execution was cancelled',
+                    result=None
                 )
 
     @pytest.mark.asyncio
