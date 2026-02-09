@@ -43,7 +43,8 @@ interface CrewExecutionState {
   userActive: boolean;
   inputVariables: Record<string, string>;
   showInputVariablesDialog: boolean;
-  
+  pendingExecutionType: string | null;
+
   // UI state
   errorMessage: string;
   showError: boolean;
@@ -142,6 +143,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   userActive: false,
   inputVariables: {},
   showInputVariablesDialog: false,
+  pendingExecutionType: null,
   errorMessage: '',
   showError: false,
   successMessage: '',
@@ -915,9 +917,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     if (hasVariables) {
       if (state.inputMode === 'dialog') {
         // Show the input variables dialog instead of executing immediately
-        set({ showInputVariablesDialog: true });
-        // Store the execution type for later use
-        (window as Window & { __pendingExecutionType?: string }).__pendingExecutionType = type;
+        set({ showInputVariablesDialog: true, pendingExecutionType: type });
       } else {
         // Chat mode: Will be handled by chat interface
         console.log('[CrewExecution] Chat mode selected - variables will be collected via chat');
@@ -1028,10 +1028,9 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     });
 
     try {
-      // Get the pending execution type
-      const windowWithPending = window as Window & { __pendingExecutionType?: string };
-      const executionType = windowWithPending.__pendingExecutionType || 'crew';
-      delete windowWithPending.__pendingExecutionType;
+      // Get the pending execution type from store state
+      const executionType = state.pendingExecutionType || 'crew';
+      set({ pendingExecutionType: null });
 
       if (executionType === 'crew') {
         await state.executeCrew(state.nodes, state.edges);

@@ -32,6 +32,10 @@ const jsonStyles = {
   bracket: { color: '#000000' }
 };
 
+/** Escape HTML special characters to prevent XSS */
+const escapeHtml = (str: string): string =>
+  str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
 interface LoadCrewProps {
   open: boolean;
   onClose: () => void;
@@ -94,14 +98,14 @@ const formatJson = (obj: unknown): JSX.Element => {
           style = jsonStyles.number;
         }
         
-        return `<span style="color:${style.color}">${match}</span>`;
+        return `<span style="color:${style.color}">${escapeHtml(match)}</span>`;
       }
     );
-    
+
     // Add bracket coloring
     const bracketColored = highlighted.replace(
       /[{}[\]]/g,
-      (match) => `<span style="color:${jsonStyles.bracket.color}">${match}</span>`
+      (match) => `<span style="color:${jsonStyles.bracket.color}">${escapeHtml(match)}</span>`
     );
     
     // Preserve whitespace and line breaks
