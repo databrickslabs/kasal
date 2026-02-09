@@ -74,6 +74,32 @@ class PowerBIAnalysisSchema(BaseModel):
         description="[Power BI] Dataset/Semantic Model ID (GUID) to query."
     )
 
+    # ===== CONTEXT ENRICHMENT (Microsoft Copilot-style) =====
+    business_mappings: Optional[Dict[str, str]] = Field(
+        None,
+        description="[Context] Business terminology mappings - natural language to DAX expressions. Example: {'Complete CGR': \"[Initial_Sizing][description] = 'Complete CGR'\", 'Italian BU': \"[Initial_Sizing][BU] = 'Italy'\"}"
+    )
+    field_synonyms: Optional[Dict[str, List[str]]] = Field(
+        None,
+        description="[Context] Field synonyms for natural language understanding. Example: {'num_customers': ['number of customers', 'customer count', 'total customers'], 'BU': ['business unit', 'region']}"
+    )
+    active_filters: Optional[Dict[str, Any]] = Field(
+        None,
+        description="[Context] Currently active filters/slicers that should be automatically applied. Example: {'BU': 'Italy', 'Week': 1, 'Mandatory_Version': ['Landline', 'Mobile']}"
+    )
+    session_id: Optional[str] = Field(
+        None,
+        description="[Context] Session ID for tracking conversation history and maintaining context across queries."
+    )
+    visible_tables: Optional[List[str]] = Field(
+        None,
+        description="[Context] Tables currently visible/in use (simulates page-level context). Example: ['Initial_Sizing', 'Customer_Details']"
+    )
+    conversation_history: Optional[List[Dict[str, str]]] = Field(
+        None,
+        description="[Context] Previous questions and answers in this session. Example: [{'question': 'What is total revenue?', 'answer': '1.5M', 'filters_used': {'BU': 'Italy'}}]"
+    )
+
     # ===== SERVICE PRINCIPAL AUTHENTICATION =====
     tenant_id: Optional[str] = Field(
         None,
@@ -139,34 +165,63 @@ class PowerBIAnalysisSchema(BaseModel):
         "markdown",
         description="[Output] Output format: 'markdown' or 'json'."
     )
+    enable_info_columns: bool = Field(
+        False,
+        description="[Options] Enable INFO.COLUMNS() metadata enrichment (requires DMV permissions). Default False - most environments don't support this."
+    )
 
 
 class PowerBIAnalysisTool(BaseTool):
     """
-    Power BI Analysis Tool - Question-to-DAX-to-Results Pipeline.
+    Power BI Analysis Tool - Microsoft Copilot-Style Question-to-DAX-to-Results Pipeline.
+
+    **🚀 NEW: Enhanced Context Enrichment (Microsoft Copilot-style)**:
+    This tool now includes advanced context awareness for simplified natural language queries:
+    - **Business Term Mappings**: Translate natural language to DAX expressions
+      Example: "Complete CGR" → "[Initial_Sizing][description] = 'Complete CGR'"
+    - **Field Synonyms**: Understand alternative names for fields
+      Example: "number of customers" → [num_customers]
+    - **Active Filters**: Auto-apply current view state filters (implicit context)
+      Example: BU=Italy, Week=1 applied automatically even if not mentioned
+    - **Session Context**: Use conversation history for context
+    - **Sample Values**: Understand data patterns for better query generation
 
     **Flow**:
-    1. **Extract Model Context**: Fetches measures, relationships from semantic model
-    2. **Generate DAX**: Uses LLM to convert user question into DAX query
-    3. **Execute DAX**: Runs the query via Power BI Execute Queries API
-    4. **Find Visual References**: Identifies which reports/visuals use the queried measures
+    1. **Extract Model Context**: Fetches measures, relationships, column metadata from semantic model
+    2. **Enrich Context**: Adds business mappings, synonyms, active filters, conversation history
+    3. **Generate DAX**: Uses LLM with enriched context to convert simple questions into accurate DAX
+    4. **Execute DAX**: Runs the query via Power BI Execute Queries API with retry logic
+    5. **Find Visual References**: Identifies which reports/visuals use the queried measures
 
     **Authentication** (choose one):
     - **Service Principal**: client_id + client_secret + tenant_id (App Owns Data)
     - **Service Account**: username + password + client_id + tenant_id (User credentials)
     - **User OAuth**: access_token (pre-obtained token)
 
+    **Context Enrichment Parameters** (optional but recommended):
+    - **business_mappings**: Dict mapping natural language terms to DAX filter expressions
+    - **field_synonyms**: Dict mapping field names to alternative names/synonyms
+    - **active_filters**: Dict of currently active filters (auto-applied to queries)
+    - **session_id**: Session ID for tracking conversation history
+    - **visible_tables**: List of currently visible tables (page-level context)
+    - **conversation_history**: Previous Q&A for context awareness
+
     **Use Cases**:
-    - Answer business questions using Power BI data
-    - Generate and validate DAX queries
-    - Understand measure usage across reports
+    - Answer business questions using Power BI data with simple natural language
+    - Automatically apply implicit filters from view state (like Microsoft Copilot)
+    - Generate and validate DAX queries with business terminology understanding
+    - Understand measure usage across reports and pages
     """
 
-    name: str = "Power BI Comprehensive Analysis"
+    name: str = "Power BI Intelligent Analysis (Copilot-Style)"
     description: str = (
-        "Analyzes Power BI data by converting business questions into DAX queries. "
+        "Analyzes Power BI data by converting SIMPLE natural language questions into DAX queries using enriched context. "
+        "ENHANCED: Now supports Microsoft Copilot-style context enrichment - business term mappings, field synonyms, "
+        "active filters, and session context for simplified queries. "
         "IMPORTANT: Extract the user's business question from the task description and pass it as 'user_question' parameter. "
-        "The tool will: 1) Extract Power BI model context, 2) Generate DAX query using LLM, 3) Execute the query, 4) Return results. "
+        "Optional: Provide business_mappings, field_synonyms, and active_filters for enhanced natural language understanding. "
+        "The tool will: 1) Extract Power BI model context, 2) Enrich with metadata, 3) Generate accurate DAX using LLM, "
+        "4) Execute the query with auto-retry, 5) Return results. "
         "Connection credentials (workspace_id, dataset_id, authentication) are pre-configured - do not provide them unless overriding."
     )
     args_schema: Type[BaseModel] = PowerBIAnalysisSchema
@@ -203,7 +258,15 @@ class PowerBIAnalysisTool(BaseTool):
             "skip_system_tables": kwargs.get("skip_system_tables", True),
             "max_dax_retries": kwargs.get("max_dax_retries", 5),
             "output_format": kwargs.get("output_format", "markdown"),
+            "enable_info_columns": kwargs.get("enable_info_columns", False),  # Disabled by default
             "user_question": kwargs.get("user_question"),  # Pre-configured question from frontend
+            # Context enrichment fields (Microsoft Copilot-style)
+            "business_mappings": kwargs.get("business_mappings", {}),
+            "field_synonyms": kwargs.get("field_synonyms", {}),
+            "active_filters": kwargs.get("active_filters", {}),
+            "session_id": kwargs.get("session_id"),
+            "visible_tables": kwargs.get("visible_tables", []),
+            "conversation_history": kwargs.get("conversation_history", []),
         }
 
         # Call parent init
@@ -398,8 +461,20 @@ class PowerBIAnalysisTool(BaseTool):
             model_context = await self._extract_model_context(
                 workspace_id, dataset_id, access_token, config
             )
-            results["model_context"] = model_context
             logger.info(f"Model context extracted: {len(model_context['measures'])} measures, {len(model_context['relationships'])} relationships")
+
+            # Step 2b: Enrich model context with metadata (Microsoft Copilot-style)
+            # This adds column descriptions, sample values, and enhanced metadata
+            try:
+                model_context = await self._enrich_model_context_with_metadata(
+                    model_context, workspace_id, dataset_id, access_token, config
+                )
+                logger.info("[Context Enrichment] Model context enriched with metadata")
+            except Exception as e:
+                logger.warning(f"[Context Enrichment] Metadata enrichment failed (continuing with basic context): {e}")
+
+            results["model_context"] = model_context
+
         except Exception as e:
             results["errors"].append(f"Model extraction error: {str(e)}")
             logger.error(f"Model extraction failed: {e}")
@@ -745,13 +820,466 @@ class PowerBIAnalysisTool(BaseTool):
                 logger.error(f"Relationships extraction error: {e}")
                 return []
 
+    async def _enrich_model_context_with_metadata(
+        self,
+        model_context: Dict[str, Any],
+        workspace_id: str,
+        dataset_id: str,
+        access_token: str,
+        config: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Enrich model context with additional metadata (Microsoft Copilot-style).
+
+        Adds:
+        - Column descriptions and data types
+        - Sample values (min/max for numeric, examples for categorical)
+        - Table descriptions
+        - Enhanced metadata for better LLM understanding
+        """
+        enriched_context = {**model_context}
+
+        # Extract column-level metadata using INFO.COLUMNS("TableName") per table
+        # This is OPTIONAL and disabled by default since most environments don't support DMV queries
+        if config.get("enable_info_columns", False):
+            try:
+                tables = enriched_context.get("tables", [])
+                total_columns_enriched = 0
+                tables_enriched = 0
+
+                logger.info("[Context Enrichment] INFO.COLUMNS() enrichment enabled - fetching column metadata...")
+
+                # Limit to first 10 tables to avoid too many API calls
+                for table in tables[:10]:
+                    table_name = table["name"]
+
+                    # Skip system tables
+                    if config.get("skip_system_tables", True):
+                        if "LocalDateTable" in table_name or "DateTableTemplate" in table_name:
+                            continue
+
+                    try:
+                        # Fetch column metadata for this specific table
+                        columns_metadata = await self._fetch_column_metadata_for_table(
+                            workspace_id, dataset_id, access_token, table_name, config
+                        )
+
+                        if columns_metadata:
+                            table["column_metadata"] = columns_metadata
+
+                            # Extract data types
+                            table["column_types"] = {
+                                col["column_name"]: col["data_type"]
+                                for col in columns_metadata
+                            }
+
+                            # Extract descriptions if available
+                            table["column_descriptions"] = {
+                                col["column_name"]: col.get("description", "")
+                                for col in columns_metadata
+                                if col.get("description")
+                            }
+
+                            total_columns_enriched += len(columns_metadata)
+                            tables_enriched += 1
+
+                    except Exception as e:
+                        logger.debug(f"[Context Enrichment] Could not fetch metadata for table '{table_name}': {e}")
+                        continue
+
+                if tables_enriched > 0:
+                    logger.info(
+                        f"[Context Enrichment] Added column metadata for {tables_enriched} tables "
+                        f"({total_columns_enriched} columns)"
+                    )
+                else:
+                    logger.info(
+                        "[Context Enrichment] INFO.COLUMNS() not supported in this environment - "
+                        "using TMDL column information instead"
+                    )
+
+            except Exception as e:
+                logger.warning(f"[Context Enrichment] Column metadata enrichment error: {e}")
+        else:
+            logger.debug(
+                "[Context Enrichment] INFO.COLUMNS() disabled (enable_info_columns=False). "
+                "Using TMDL column information - this is the recommended default."
+            )
+
+        # Add sample values for key columns (helps LLM understand data patterns)
+        try:
+            sample_values = await self._fetch_sample_column_values(
+                workspace_id, dataset_id, access_token, enriched_context, config
+            )
+            enriched_context["sample_values"] = sample_values
+            logger.info(f"[Context Enrichment] Added sample values for {len(sample_values)} columns")
+        except Exception as e:
+            logger.warning(f"[Context Enrichment] Could not fetch sample values: {e}")
+
+        return enriched_context
+
+    async def _fetch_column_metadata(
+        self,
+        workspace_id: str,
+        dataset_id: str,
+        access_token: str,
+        config: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch column metadata using INFO.COLUMNS("TableName") DAX function.
+
+        Note: INFO.COLUMNS() requires a table name parameter and must be called
+        per table. This method is called BEFORE model_context has tables populated,
+        so it returns an empty list. Use _enrich_model_context_with_metadata() instead
+        which is called after tables are extracted.
+        """
+        # This method is kept for backwards compatibility but is not used
+        # Column metadata is now fetched in _fetch_column_metadata_for_table()
+        return []
+
+    async def _fetch_column_metadata_for_table(
+        self,
+        workspace_id: str,
+        dataset_id: str,
+        access_token: str,
+        table_name: str,
+        config: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch column metadata for a specific table using INFO.COLUMNS("TableName").
+
+        Args:
+            workspace_id: Power BI workspace ID
+            dataset_id: Power BI dataset ID
+            access_token: Authentication token
+            table_name: Name of the table to get metadata for
+            config: Configuration dict
+
+        Returns:
+            List of column metadata dictionaries
+        """
+        url = f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/datasets/{dataset_id}/executeQueries"
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        # Correct syntax: INFO.COLUMNS("TableName")
+        dax_query = f'EVALUATE INFO.COLUMNS("{table_name}")'
+
+        payload = {
+            "queries": [{"query": dax_query}],
+            "serializerSettings": {"includeNulls": True}
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                response = await client.post(url, headers=headers, json=payload)
+
+                # Check for error response
+                if response.status_code != 200:
+                    error_detail = ""
+                    try:
+                        error_json = response.json()
+                        error_detail = error_json.get("error", {}).get("message", response.text)
+                    except:
+                        error_detail = response.text[:500]
+
+                    logger.debug(
+                        f"[Context Enrichment] INFO.COLUMNS('{table_name}') failed (HTTP {response.status_code}). "
+                        f"Error: {error_detail[:100]}"
+                    )
+                    return []
+
+                response.raise_for_status()
+                data = response.json()
+
+                rows = data.get("results", [{}])[0].get("tables", [{}])[0].get("rows", [])
+                columns = []
+
+                for row in rows:
+                    column_name = row.get("[ExplicitName]", "") or row.get("[Name]", "")
+                    data_type = row.get("[DataType]", "")
+
+                    columns.append({
+                        "table_name": table_name,
+                        "column_name": column_name,
+                        "data_type": data_type,
+                        "is_hidden": row.get("[IsHidden]", False),
+                        "description": row.get("[Description]", "")
+                    })
+
+                return columns
+
+            except httpx.HTTPStatusError as e:
+                logger.debug(
+                    f"[Context Enrichment] INFO.COLUMNS('{table_name}') query failed: {e}"
+                )
+                return []
+
+            except Exception as e:
+                logger.debug(
+                    f"[Context Enrichment] Column metadata extraction failed for '{table_name}': {e}"
+                )
+                return []
+
+    async def _fetch_sample_column_values(
+        self,
+        workspace_id: str,
+        dataset_id: str,
+        access_token: str,
+        model_context: Dict[str, Any],
+        config: Dict[str, Any]
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Fetch sample values for key columns to help LLM understand data patterns.
+
+        For categorical columns: fetches distinct values (up to 10)
+        For numeric columns: fetches min/max values
+        """
+        sample_values = {}
+
+        # Limit to first 5 tables to avoid too many queries
+        tables = model_context.get("tables", [])[:5]
+
+        for table in tables:
+            table_name = table["name"]
+            columns = table.get("columns", [])[:10]  # Limit columns per table
+
+            for column in columns:
+                try:
+                    # Skip if column looks like a key/ID
+                    if any(suffix in column.lower() for suffix in ["id", "key", "_pk", "_fk"]):
+                        continue
+
+                    # Try to get distinct values (for categorical)
+                    dax_query = f"""
+                    EVALUATE
+                    TOPN(
+                        10,
+                        SUMMARIZECOLUMNS(
+                            {table_name}[{column}]
+                        )
+                    )
+                    """
+
+                    result = await self._execute_dax_query(
+                        workspace_id, dataset_id, access_token, dax_query
+                    )
+
+                    if result.get("success") and result.get("data"):
+                        values = [list(row.values())[0] for row in result["data"][:10]]
+                        sample_values[f"{table_name}[{column}]"] = {
+                            "type": "categorical",
+                            "sample_values": values
+                        }
+
+                except Exception as e:
+                    logger.debug(f"Could not fetch sample values for {table_name}[{column}]: {e}")
+                    continue
+
+        return sample_values
+
+    def _build_enriched_semantic_context(
+        self,
+        model_context: Dict[str, Any],
+        config: Dict[str, Any]
+    ) -> str:
+        """
+        Build enriched semantic context for LLM prompt (Microsoft Copilot-style).
+
+        This combines:
+        1. Model schema (tables, columns, measures, relationships)
+        2. Business mappings (natural language to DAX expressions)
+        3. Field synonyms (alternative names for fields)
+        4. Active filters (current view state)
+        5. Conversation history (previous Q&A)
+        6. Sample values (data patterns)
+        """
+        sections = []
+
+        # ===== SEMANTIC MODEL SCHEMA =====
+        sections.append("## 📊 SEMANTIC MODEL SCHEMA\n")
+
+        # Tables with enhanced metadata
+        tables = model_context.get("tables", [])
+        measures = model_context.get("measures", [])
+        visible_tables = config.get("visible_tables", [])
+
+        # Build list of tables that have measures (these are critical to include)
+        tables_with_measures = set()
+        for measure in measures[:20]:  # Check measures we're showing
+            table_name = measure.get("table")
+            if table_name:
+                tables_with_measures.add(table_name)
+
+        # Smart table selection strategy:
+        # 1. Include all tables that have measures (critical)
+        # 2. Include visible tables if specified
+        # 3. Fill remaining slots with other tables (up to 15 total)
+
+        tables_to_show = []
+        tables_seen = set()
+
+        # Priority 1: Tables with measures (MUST include)
+        for table in tables:
+            if table["name"] in tables_with_measures:
+                tables_to_show.append(table)
+                tables_seen.add(table["name"])
+
+        # Priority 2: Visible tables (if specified)
+        if visible_tables:
+            for table in tables:
+                if table["name"] in visible_tables and table["name"] not in tables_seen:
+                    tables_to_show.append(table)
+                    tables_seen.add(table["name"])
+
+        # Priority 3: Other tables (fill up to 15 total)
+        remaining_slots = 15 - len(tables_to_show)
+        for table in tables:
+            if table["name"] not in tables_seen and remaining_slots > 0:
+                tables_to_show.append(table)
+                tables_seen.add(table["name"])
+                remaining_slots -= 1
+
+        logger.info(
+            f"[Context Enrichment] Including {len(tables_to_show)} tables in context "
+            f"({len(tables_with_measures)} with measures, {len(tables)} total available)"
+        )
+
+        for table in tables_to_show:
+            table_name = table["name"]
+            sections.append(f"### Table: **{table_name}**")
+
+            # Columns with types
+            columns = table.get("columns", [])
+            if columns:
+                column_types = table.get("column_types", {})
+                column_list = []
+                for col in columns[:15]:  # Limit columns shown
+                    col_type = column_types.get(col, "")
+                    if col_type:
+                        column_list.append(f"{col} ({col_type})")
+                    else:
+                        column_list.append(col)
+                sections.append(f"**Columns**: {', '.join(column_list)}")
+
+            # Column descriptions if available
+            column_descriptions = table.get("column_descriptions", {})
+            if column_descriptions:
+                sections.append("**Column Descriptions**:")
+                for col, desc in list(column_descriptions.items())[:5]:
+                    sections.append(f"  - {col}: {desc}")
+
+            sections.append("")  # Blank line
+
+        # Measures
+        measures = model_context.get("measures", [])
+        if measures:
+            sections.append("### Available Measures")
+            for measure in measures[:20]:  # Limit measures shown
+                measure_name = measure["name"]
+                measure_table = measure.get("table", "")
+                measure_expr = measure.get("expression", "")[:100]
+                sections.append(f"- **{measure_name}** (Table: {measure_table})")
+                sections.append(f"  Expression: `{measure_expr}...`")
+            sections.append("")
+
+        # Relationships (filter to only show relationships for tables we're including)
+        relationships = model_context.get("relationships", [])
+        if relationships:
+            # Filter relationships to only those involving tables in our context
+            relevant_relationships = [
+                rel for rel in relationships
+                if rel['from_table'] in tables_seen or rel['to_table'] in tables_seen
+            ]
+
+            if relevant_relationships:
+                sections.append("### Table Relationships")
+                for rel in relevant_relationships:
+                    sections.append(
+                        f"- {rel['from_table']}[{rel['from_column']}] → {rel['to_table']}[{rel['to_column']}]"
+                    )
+                sections.append(f"\n**Note**: Showing {len(relevant_relationships)} relationships for included tables")
+                sections.append("")
+
+        # ===== BUSINESS TERMINOLOGY & SYNONYMS =====
+        business_mappings = config.get("business_mappings", {})
+        field_synonyms = config.get("field_synonyms", {})
+
+        if business_mappings or field_synonyms:
+            sections.append("## 🗣️ BUSINESS TERMINOLOGY & NATURAL LANGUAGE MAPPINGS\n")
+
+            if business_mappings:
+                sections.append("### Business Term Mappings")
+                sections.append("Use these to translate natural language into DAX filter expressions:\n")
+                for term, expression in business_mappings.items():
+                    sections.append(f"- **\"{term}\"** → `{expression}`")
+                sections.append("")
+
+            if field_synonyms:
+                sections.append("### Field Synonyms")
+                sections.append("These alternative names refer to the same fields:\n")
+                for field, synonyms in field_synonyms.items():
+                    sections.append(f"- **{field}**: {', '.join(synonyms)}")
+                sections.append("")
+
+        # ===== SAMPLE DATA VALUES =====
+        sample_values = model_context.get("sample_values", {})
+        if sample_values:
+            sections.append("## 📝 SAMPLE DATA VALUES\n")
+            sections.append("Example values to help understand the data:\n")
+            for column, value_info in list(sample_values.items())[:10]:
+                if value_info.get("type") == "categorical":
+                    values = value_info.get("sample_values", [])
+                    sections.append(f"- **{column}**: {', '.join([str(v) for v in values[:5]])}")
+            sections.append("")
+
+        # ===== CURRENT VIEW STATE (Active Filters) =====
+        active_filters = config.get("active_filters", {})
+        if active_filters:
+            sections.append("## 🎯 CURRENT VIEW STATE (AUTO-APPLY FILTERS)\n")
+            sections.append("**IMPORTANT**: The following filters are CURRENTLY ACTIVE and should be automatically applied to the query:\n")
+            for filter_name, filter_value in active_filters.items():
+                if isinstance(filter_value, list):
+                    quoted_values = ', '.join([f"'{v}'" for v in filter_value])
+                    sections.append(f"- **{filter_name}** IN ({quoted_values})")
+                else:
+                    sections.append(f"- **{filter_name}** = {filter_value}")
+            sections.append("\n**Note**: User questions may not explicitly mention these filters, but they should still be applied!\n")
+
+        # ===== CONVERSATION HISTORY =====
+        conversation_history = config.get("conversation_history", [])
+        if conversation_history:
+            sections.append("## 💬 RECENT CONVERSATION HISTORY\n")
+            sections.append("Previous questions in this session (for context):\n")
+            for i, turn in enumerate(conversation_history[-3:], 1):  # Last 3 turns
+                sections.append(f"**Q{i}**: {turn.get('question', '')}")
+                if turn.get('filters_used'):
+                    sections.append(f"  Filters used: {turn['filters_used']}")
+                if turn.get('answer'):
+                    sections.append(f"  Answer: {turn['answer']}")
+            sections.append("")
+
+        return "\n".join(sections)
+
     async def _generate_dax_with_llm(
         self,
         user_question: str,
         model_context: Dict[str, Any],
         config: Dict[str, Any]
     ) -> Optional[str]:
-        """Generate DAX query using LLM based on user question and model context."""
+        """
+        Generate DAX query using LLM with enriched context (Microsoft Copilot-style).
+
+        This method now includes:
+        - Full semantic model schema with descriptions
+        - Business terminology mappings
+        - Field synonyms
+        - Active filters (auto-applied)
+        - Conversation history
+        - Sample data values
+        """
         llm_workspace_url = config.get("llm_workspace_url")
         llm_token = config.get("llm_token")
         llm_model = config.get("llm_model", "databricks-claude-sonnet-4")
@@ -760,96 +1288,174 @@ class PowerBIAnalysisTool(BaseTool):
             # Fallback: Generate simple DAX without LLM
             return self._generate_simple_dax(user_question, model_context)
 
-        # Build context for LLM
-        measures = model_context.get("measures", [])
-        measures_text = "\n".join([
-            f"- {m['name']} (Table: {m['table']}): {m['expression'][:100]}..."
-            for m in measures[:20]
-        ])
-
-        # Log extracted measures for debugging
-        logger.info(f"[DAX Generation] Extracted {len(measures)} measures from model")
-        if measures:
-            logger.info(f"[DAX Generation] Sample measures: {[m['name'] for m in measures[:5]]}")
-        else:
-            logger.warning("[DAX Generation] No measures found in model context!")
-
-        tables_text = "\n".join([
-            f"- {t['name']}: columns={t.get('columns', [])[:5]}"
-            for t in model_context.get("tables", [])[:15]
-        ])
-
-        relationships_text = "\n".join([
-            f"- {r['from_table']}[{r['from_column']}] -> {r['to_table']}[{r['to_column']}]"
-            for r in model_context.get("relationships", [])[:15]
-        ])
-
         # Check if we have measures to work with
+        measures = model_context.get("measures", [])
         if not measures:
             logger.warning("[DAX Generation] No measures available - cannot generate meaningful query")
             return None
 
-        prompt = f"""You are a DAX query expert. Generate a DAX query to answer the user's question.
+        # Build ENRICHED context (Microsoft Copilot-style)
+        enriched_context = self._build_enriched_semantic_context(model_context, config)
 
-## User Question
+        # Log context size for debugging
+        logger.info(f"[DAX Generation] Enriched context size: {len(enriched_context)} characters")
+        logger.info(f"[DAX Generation] Active filters: {config.get('active_filters', {})}")
+        logger.info(f"[DAX Generation] Business mappings: {len(config.get('business_mappings', {}))} terms")
+        logger.info(f"[DAX Generation] Field synonyms: {len(config.get('field_synonyms', {}))} fields")
+
+        # Build the enhanced prompt
+        prompt = f"""{enriched_context}
+
+## 🎯 USER QUESTION
 {user_question}
 
-## Available Measures
-{measures_text}
+## 📋 DAX GENERATION INSTRUCTIONS
 
-## Available Tables
-{tables_text if tables_text else "No tables found"}
+### Context Understanding
+1. **Interpret natural language**: Use business term mappings and synonyms to understand the question
+2. **Apply implicit filters**: Automatically apply filters from "CURRENT VIEW STATE" even if not mentioned in question
+3. **Use conversation history**: Consider previous questions for context
+4. **Leverage sample values**: Use sample data to understand value formats and patterns
 
-## Relationships
-{relationships_text if relationships_text else "No relationships found"}
+### Query Generation Rules
+1. **ONLY use measure names from "Available Measures"** - DO NOT invent or modify names
+2. **ONLY use table/column names from "SEMANTIC MODEL SCHEMA"** - DO NOT guess names
+3. **Use exact syntax**: Measure references must match exactly (e.g., [Total Sales] not [Total_Sales])
+4. **Apply active filters**: Include filters from "CURRENT VIEW STATE" automatically
+5. **Natural language translation**: Use "Business Term Mappings" to convert phrases to DAX expressions
+   Example: If user says "Complete CGR", use the mapped expression from business mappings
 
-## CRITICAL INSTRUCTIONS
-1. **ONLY use measure names from the "Available Measures" list above**
-2. **DO NOT invent, modify, or guess measure names**
-3. If the question asks for "average", use AVERAGEX or include averaging logic
-4. Use EVALUATE with SUMMARIZECOLUMNS or other appropriate DAX functions
-5. Return ONLY the DAX query without explanations or markdown formatting
-6. The query must be executable via Power BI Execute Queries API
+### DAX Syntax Requirements
 
-## Examples of CORRECT measure usage:
-- If measure is listed as "Total Sales", use [Total Sales]
-- If measure is listed as "Revenue Amount", use [Revenue Amount]
+#### Basic Structure
+- Use `EVALUATE` with `SUMMARIZECOLUMNS`, `ADDCOLUMNS`, or other table functions
+- **Filter order**: In SUMMARIZECOLUMNS, filters MUST come BEFORE measure name/expression pairs
+- **Correct**: `SUMMARIZECOLUMNS(Column, FILTER(...), "Name", [Measure])`
+- **Wrong**: `SUMMARIZECOLUMNS(Column, "Name", [Measure], FILTER(...))`
+- Return ONLY the DAX query - no explanations, no markdown code blocks
 
-## Examples of INCORRECT usage (DO NOT DO THIS):
-- DO NOT use [Total_Sales] if only [Total Sales] exists
-- DO NOT add suffixes like [measure_doc] or [measure_calc]
-- DO NOT modify measure names in any way
+#### Multi-Table Filtering (CRITICAL)
+**NEVER use ALL() with columns from different tables** - this causes "must be from the same table" error
 
-## SUMMARIZECOLUMNS SYNTAX (MUST FOLLOW):
-The argument order for SUMMARIZECOLUMNS is strictly:
-```
-SUMMARIZECOLUMNS( <groupBy columns>, <filter tables>, "name", <expression> )
-```
-- **Filter tables (e.g. FILTER, TREATAS) MUST come BEFORE measure name/expression pairs**
-- **Measure name/expression pairs (e.g. "Total", [Total Sales]) MUST come LAST**
-- Placing a filter AFTER a measure pair causes error: "expects a column name as argument"
- 
-Correct example:
-```
-EVALUATE
-SUMMARIZECOLUMNS(
-    Table1[Column1],
-    FILTER(ALL(Table1[Column1]), Table1[Column1] = "Value"),
-    "Result", [MyMeasure]
+❌ **WRONG - Columns from multiple tables in ALL():**
+```dax
+FILTER(
+    ALL(Table1[Col1], Table2[Col2], Table3[Col3]),  ← ERROR!
+    Table1[Col1] = "X" && Table2[Col2] = "Y"
 )
 ```
- 
-Wrong example (DO NOT DO THIS):
+
+✅ **CORRECT - Use TREATAS or separate filters:**
+```dax
+SUMMARIZECOLUMNS(
+    TREATAS({"FilterValue1"}, DimTable1[Column1]),
+    TREATAS({"FilterValue2"}, DimTable2[Column2]),
+    FILTER(VALUES(FactTable[Column3]), FactTable[Column3] = "FilterValue3"),
+    "Result", SUM(FactTable[Measure])
+)
 ```
+
+✅ **CORRECT - Use CALCULATETABLE:**
+```dax
+EVALUATE
+CALCULATETABLE(
+    SUMMARIZECOLUMNS("Result", SUM(FactTable[Measure])),
+    FactTable[Col1] = "Value1",
+    DimTable1[Col2] = "Value2",
+    DimTable2[Col3] = "Value3"
+)
+```
+
+#### IN Operator for Multiple Values (CRITICAL)
+❌ **WRONG**: `Column = "Value1 OR Value2"` (treats as single literal string)
+❌ **WRONG**: `Column IN ("Value1", "Value2")` (parentheses not supported in this context)
+✅ **CORRECT**: `Column IN {{"Value1", "Value2"}}` (MUST use curly braces)
+
+**Examples:**
+- ✅ mandatory_version IN {{"Landline", "Mobile"}}
+- ✅ BU IN {{"Italy", "Germany", "France"}}
+- ❌ mandatory_version IN ("Landline", "Mobile") ← Will cause "Operator not supported" error
+
+### Example: Natural Language to DAX (Multi-Table Filtering)
+Question: "What is the number of customers with Complete CGR in the Italian BU in week 1 where Mandatory Version is Landline or Mobile?"
+
+Step 1 - Identify business terms and tables:
+- "number of customers" → SUM(tbl_initial_sizing_tracking[num_customers])
+- "Complete CGR" → tbl_initial_sizing_tracking[description] = 'Complete CGR'
+- "Italian BU" → dim_country[BU] = 'Italy' (related table via country_code)
+- "week 1" → dim_weeks[Week] = 1 (related table via loading_date)
+- "Landline or Mobile" → tbl_initial_sizing_tracking[mandatory_version] IN ('Landline', 'Mobile')
+
+Step 2 - Check relationships:
+- tbl_initial_sizing_tracking → dim_country (via country_code)
+- tbl_initial_sizing_tracking → dim_weeks (via loading_date)
+
+Step 3 - Generate DAX with multi-table filtering:
+
+✅ **CORRECT Approach - Using TREATAS for related tables:**
+```dax
 EVALUATE
 SUMMARIZECOLUMNS(
-    Table1[Column1],
-    "Result", [MyMeasure],
-    FILTER(ALL(Table1[Column1]), Table1[Column1] = "Value")
+    TREATAS({{"Italy"}}, dim_country[BU]),
+    TREATAS({{1}}, dim_weeks[Week]),
+    FILTER(
+        VALUES(tbl_initial_sizing_tracking[description]),
+        tbl_initial_sizing_tracking[description] = "Complete CGR"
+    ),
+    FILTER(
+        VALUES(tbl_initial_sizing_tracking[mandatory_version]),
+        tbl_initial_sizing_tracking[mandatory_version] IN {{"Landline", "Mobile"}}
+    ),
+    "num_customers", SUM(tbl_initial_sizing_tracking[num_customers])
 )
+```
 
-## DAX Query:
+✅ **ALTERNATIVE - Using CALCULATETABLE:**
+```dax
+EVALUATE
+CALCULATETABLE(
+    SUMMARIZECOLUMNS("num_customers", SUM(tbl_initial_sizing_tracking[num_customers])),
+    tbl_initial_sizing_tracking[description] = "Complete CGR",
+    dim_country[BU] = "Italy",
+    dim_weeks[Week] = 1,
+    tbl_initial_sizing_tracking[mandatory_version] IN {{"Landline", "Mobile"}}
+)
+```
+
+## ✅ YOUR GENERATED DAX QUERY
+
+**CRITICAL OUTPUT REQUIREMENTS:**
+1. Return ONLY the DAX query - NO explanations, NO markdown, NO commentary
+2. Start with EVALUATE and end with the closing parenthesis )
+3. Do NOT add any text like "Key Changes:", "Note:", "**", or explanations after the query
+4. The query must be executable as-is without any modifications
+
+**Example of CORRECT output format:**
+```
+EVALUATE
+CALCULATETABLE(
+    SUMMARIZECOLUMNS("result", SUM(Table[Column])),
+    Table[Filter] = "Value"
+)
+```
+
+**Example of WRONG output format (DO NOT DO THIS):**
+```
+EVALUATE
+CALCULATETABLE(...)
+)
+**Key Changes Made:**
+1. Fixed the syntax...
+```
+
+**YOUR DAX QUERY (no explanations):**
 """
+
+        # Log the full prompt for debugging
+        logger.info("=" * 80)
+        logger.info("[DAX Generation - Enhanced] LLM Prompt:")
+        logger.info(prompt)
+        logger.info("=" * 80)
 
         # Log the full prompt for debugging
         logger.info("=" * 80)
@@ -1032,7 +1638,14 @@ SUMMARIZECOLUMNS(
             logger.error(f"[PowerBIAnalysisTool] TRACE EMISSION DEBUG - Failed to emit llm_call trace: {e}", exc_info=True)
 
     def _extract_dax_from_llm_response(self, content: str) -> str:
-        """Extract clean DAX query from LLM response."""
+        """
+        Extract clean DAX query from LLM response.
+
+        Handles various response formats:
+        - Markdown code blocks
+        - Extra explanatory text before/after query
+        - Markdown formatting in the response
+        """
         # Remove markdown code blocks
         content = re.sub(r'```dax\s*', '', content)
         content = re.sub(r'```\s*', '', content)
@@ -1040,9 +1653,50 @@ SUMMARIZECOLUMNS(
         # Find EVALUATE statement
         evaluate_match = re.search(r'(EVALUATE[\s\S]+?)(?:\n\n|$)', content, re.IGNORECASE)
         if evaluate_match:
-            return evaluate_match.group(1).strip()
+            dax_query = evaluate_match.group(1).strip()
+        else:
+            dax_query = content.strip()
 
-        return content.strip()
+        # Clean up: Remove any markdown or explanatory text that might follow the query
+        # Look for the last closing parenthesis that's part of the actual DAX
+        # and remove everything after it
+
+        # Strategy: Find EVALUATE, then find the matching closing parenthesis
+        # Everything after the last ) that closes a CALCULATETABLE/SUMMARIZECOLUMNS is extra text
+
+        # Remove lines starting with markdown formatting (**, ##, -, etc.) after the query
+        lines = dax_query.split('\n')
+        clean_lines = []
+        found_closing = False
+        paren_depth = 0
+
+        for line in lines:
+            # Track parenthesis depth
+            paren_depth += line.count('(') - line.count(')')
+
+            # If we're at depth 0 after this line, we've closed all parens
+            if paren_depth == 0 and ('EVALUATE' in clean_lines or clean_lines):
+                clean_lines.append(line)
+                found_closing = True
+                # Stop after the first complete query (depth returns to 0)
+                break
+
+            # Keep building the query
+            clean_lines.append(line)
+
+        dax_query = '\n'.join(clean_lines).strip()
+
+        # Final cleanup: Remove any trailing markdown or text after the last )
+        # Find the last ) and cut everything after it
+        last_paren = dax_query.rfind(')')
+        if last_paren != -1:
+            # Check if there's any non-whitespace after the last )
+            after_paren = dax_query[last_paren + 1:].strip()
+            if after_paren and (after_paren.startswith('**') or after_paren.startswith('#') or after_paren.startswith('-')):
+                # There's markdown text after the query - remove it
+                dax_query = dax_query[:last_paren + 1]
+
+        return dax_query.strip()
 
     async def _generate_dax_with_self_correction(
         self,
@@ -1051,7 +1705,10 @@ SUMMARIZECOLUMNS(
         config: Dict[str, Any],
         previous_attempts: List[Dict[str, Any]]
     ) -> Optional[str]:
-        """Generate DAX with self-correction based on previous failed attempts."""
+        """
+        Generate DAX with self-correction based on previous failed attempts.
+        Uses enriched context (Microsoft Copilot-style) for better error recovery.
+        """
         llm_workspace_url = config.get("llm_workspace_url")
         llm_token = config.get("llm_token")
         llm_model = config.get("llm_model", "databricks-claude-sonnet-4")
@@ -1068,56 +1725,73 @@ SUMMARIZECOLUMNS(
             for att in previous_attempts
         ])
 
-        # Build measures and tables context
-        measures = model_context.get("measures", [])
-        measures_text = "\n".join([
-            f"- {m['name']} (Table: {m['table']}): {m['expression'][:100]}..."
-            for m in measures[:20]
-        ])
+        # Build enriched context (same as initial generation)
+        enriched_context = self._build_enriched_semantic_context(model_context, config)
 
-        tables_text = "\n".join([
-            f"- {t['name']}: columns={t.get('columns', [])[:5]}"
-            for t in model_context.get("tables", [])[:15]
-        ])
+        # Create self-correction prompt with enriched context
+        prompt = f"""{enriched_context}
 
-        relationships_text = "\n".join([
-            f"- {r['from_table']}[{r['from_column']}] -> {r['to_table']}[{r['to_column']}]"
-            for r in model_context.get("relationships", [])[:15]
-        ])
+## ⚠️ SELF-CORRECTION MODE
+Your previous attempt(s) to generate a DAX query failed. Analyze the errors and generate a CORRECTED query.
 
-        # Create self-correction prompt
-        prompt = f"""You are a DAX query expert. Your previous attempt(s) to generate a DAX query failed.
-Analyze the error(s) and generate a CORRECTED query.
-
-## User Question
+## 🎯 USER QUESTION
 {user_question}
 
-## Previous Failed Attempts
+## ❌ PREVIOUS FAILED ATTEMPTS
 {attempts_text}
 
-## Available Measures
-{measures_text}
+## 📋 ERROR ANALYSIS & CORRECTION INSTRUCTIONS
 
-## Available Tables
-{tables_text if tables_text else "No tables found"}
+### Step 1: Analyze the Error
+- Read the error message carefully
+- Identify the root cause (table name? column name? syntax? filter order?)
+- Check if you used non-existent measures, tables, or columns
 
-## Relationships
-{relationships_text if relationships_text else "No relationships found"}
+### Step 2: Use Available Resources
+- **ONLY use resources from "SEMANTIC MODEL SCHEMA"** above
+- **Check "Business Term Mappings"** for correct filter expressions
+- **Check "Field Synonyms"** for correct field names
+- **Apply "CURRENT VIEW STATE"** filters automatically
 
-## CRITICAL INSTRUCTIONS FOR CORRECTION
-1. **Analyze the error message** from the previous attempt(s)
-2. **ONLY use measure names from the "Available Measures" list above**
-3. **ONLY use table and column names from the "Available Tables" list above**
-4. **DO NOT repeat the same mistake** - generate a DIFFERENT query than before
-5. Common DAX errors to avoid:
-   - Table or column doesn't exist → Check spelling and use exact names from lists above
-   - Invalid relationship → Use only relationships listed above
-   - Syntax error → Ensure proper DAX syntax (EVALUATE, SUMMARIZECOLUMNS, etc.)
-   - Type mismatch → Ensure columns and measures are used correctly
-6. **SUMMARIZECOLUMNS argument order**: groupBy columns, then filter tables, then "name"/expression pairs LAST
-7. Return ONLY the corrected DAX query without explanations
+### Step 3: Common Error Patterns & Fixes
+1. **"Table/Column doesn't exist"**:
+   - Check spelling against "SEMANTIC MODEL SCHEMA"
+   - Use exact names (case-sensitive)
+   - Don't invent table or column names
 
-## Corrected DAX Query:
+2. **"Relationship doesn't exist"**:
+   - Use only relationships from schema
+   - Use explicit FILTER functions if relationship missing
+
+3. **"All column arguments must be from the same table"**:
+   - ❌ NEVER use ALL() with columns from multiple tables
+   - ✅ Use TREATAS() for related dimension tables
+   - ✅ Use separate FILTER(VALUES(...)) for each table
+   - ✅ Or use CALCULATETABLE with direct filters
+   - **Example Fix:**
+     - Wrong: `ALL(Table1[Col], Table2[Col], Table3[Col])`
+     - Right: `TREATAS({"Value"}, Table1[Col])` + `TREATAS({"Value"}, Table2[Col])`
+
+4. **"Syntax error" or "expects column name"**:
+   - Check SUMMARIZECOLUMNS argument order
+   - Filters MUST come BEFORE measure name/expression pairs
+
+5. **"Type mismatch"**:
+   - Check "SAMPLE DATA VALUES" for correct value types
+   - String values need quotes: "Italy" not Italy
+   - Numeric values don't need quotes: 1 not "1"
+
+6. **"OR operator" not working**:
+   - ❌ Don't use: `Column = "Value1 OR Value2"`
+   - ✅ Use: `Column IN ("Value1", "Value2")` or `Column IN {"Value1", "Value2"}`
+
+### Step 4: Generate Different Query
+- **DO NOT repeat the same query** - try a different approach
+- If previous query used SUMMARIZECOLUMNS, try ADDCOLUMNS or SELECTCOLUMNS
+- Simplify complex filters if needed
+- Use step-by-step logic
+
+## ✅ YOUR CORRECTED DAX QUERY
 """
 
         # Log the self-correction prompt
