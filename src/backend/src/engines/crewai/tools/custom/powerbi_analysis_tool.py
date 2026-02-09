@@ -175,7 +175,7 @@ class PowerBIAnalysisTool(BaseTool):
     """
     Power BI Analysis Tool - Microsoft Copilot-Style Question-to-DAX-to-Results Pipeline.
 
-    **🚀 NEW: Enhanced Context Enrichment (Microsoft Copilot-style)**:
+    **🚀 NEW: Enhanced Context Enrichment**:
     This tool now includes advanced context awareness for simplified natural language queries:
     - **Business Term Mappings**: Translate natural language to DAX expressions
       Example: "Complete CGR" → "[Initial_Sizing][description] = 'Complete CGR'"
@@ -345,16 +345,83 @@ class PowerBIAnalysisTool(BaseTool):
             merged_config["user_question"] = default_question if default_question is not None else kwarg_question
 
             # Options - prefer kwargs if provided
-            for key in ["include_visual_references", "skip_system_tables", "max_dax_retries", "output_format"]:
+            for key in ["include_visual_references", "skip_system_tables", "max_dax_retries", "output_format", "enable_info_columns"]:
                 kwarg_val = filtered_kwargs.get(key)
                 default_val = self._default_config.get(key)
                 merged_config[key] = kwarg_val if kwarg_val is not None else default_val
+
+            # Context enrichment parameters (Microsoft Copilot-style)
+            # These can come as JSON strings from frontend or as dicts
+            context_enrichment_keys = ["business_mappings", "field_synonyms", "active_filters", "session_id", "visible_tables", "conversation_history"]
+            logger.info("=" * 80)
+            logger.info("[CONTEXT ENRICHMENT DEBUG] Raw values before merging:")
+            for key in context_enrichment_keys:
+                kwarg_val = filtered_kwargs.get(key)
+                default_val = self._default_config.get(key)
+
+                # Debug: Show raw values
+                logger.info(f"[CONTEXT ENRICHMENT DEBUG]   {key}:")
+                logger.info(f"[CONTEXT ENRICHMENT DEBUG]     - default_config: type={type(default_val).__name__}, value={str(default_val)[:100]}")
+                logger.info(f"[CONTEXT ENRICHMENT DEBUG]     - kwargs: type={type(kwarg_val).__name__}, value={str(kwarg_val)[:100]}")
+
+                # Use kwarg if it has actual content, else use default config
+                # Check for empty collections ({}, [], "") not just None
+                kwarg_has_value = kwarg_val is not None and kwarg_val not in ({}, [], "")
+                default_has_value = default_val is not None and default_val not in ({}, [], "")
+
+                if kwarg_has_value:
+                    value = kwarg_val
+                    logger.info(f"[CONTEXT ENRICHMENT DEBUG]     → Using kwargs value")
+                elif default_has_value:
+                    value = default_val
+                    logger.info(f"[CONTEXT ENRICHMENT DEBUG]     → Using default_config value")
+                else:
+                    # Both empty - use appropriate empty collection
+                    if key in ["business_mappings", "field_synonyms", "active_filters"]:
+                        value = {}
+                    elif key in ["visible_tables", "conversation_history"]:
+                        value = []
+                    else:  # session_id
+                        value = None
+                    logger.info(f"[CONTEXT ENRICHMENT DEBUG]     → Both empty, using {type(value).__name__}")
+
+                # Parse JSON strings if needed (for business_mappings, field_synonyms, active_filters)
+                if value and isinstance(value, str) and key in ["business_mappings", "field_synonyms", "active_filters"]:
+                    try:
+                        value = json.loads(value)
+                        logger.info(f"[CONTEXT ENRICHMENT DEBUG]     ✅ Parsed JSON string for '{key}': {len(value)} items")
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"[CONTEXT ENRICHMENT DEBUG]     ❌ Failed to parse JSON for '{key}': {e}. Using empty dict.")
+                        value = {}
+
+                merged_config[key] = value
+            logger.info("=" * 80)
 
             logger.info(f"[PowerBIAnalysisTool] DEFAULT CONFIG user_question: {self._default_config.get('user_question', 'NOT SET')}")
             logger.info(f"[PowerBIAnalysisTool] KWARGS user_question: {filtered_kwargs.get('user_question', 'NOT SET')}")
             logger.info(f"[PowerBIAnalysisTool] MERGED user_question: {merged_config.get('user_question', 'NOT SET')}")
             logger.info(f"[PowerBIAnalysisTool] Merged config - workspace_id: {merged_config.get('workspace_id')}, "
                        f"question: {merged_config.get('user_question', '')[:50] if merged_config.get('user_question') else 'None'}...")
+
+            # Log context enrichment configuration
+            logger.info("=" * 80)
+            logger.info("[CONTEXT ENRICHMENT] Configuration:")
+            business_mappings = merged_config.get('business_mappings') or {}
+            field_synonyms = merged_config.get('field_synonyms') or {}
+            active_filters = merged_config.get('active_filters') or {}
+            logger.info(f"[CONTEXT ENRICHMENT]   business_mappings: {len(business_mappings)} terms")
+            if business_mappings:
+                for term, expr in list(business_mappings.items())[:3]:  # Show first 3
+                    logger.info(f"[CONTEXT ENRICHMENT]     - '{term}' → {expr[:50]}...")
+            logger.info(f"[CONTEXT ENRICHMENT]   field_synonyms: {len(field_synonyms)} fields")
+            if field_synonyms:
+                for field, synonyms in list(field_synonyms.items())[:3]:  # Show first 3
+                    logger.info(f"[CONTEXT ENRICHMENT]     - '{field}' → {synonyms}")
+            logger.info(f"[CONTEXT ENRICHMENT]   active_filters: {len(active_filters)} filters")
+            if active_filters:
+                for key, val in active_filters.items():
+                    logger.info(f"[CONTEXT ENRICHMENT]     - '{key}' = {val}")
+            logger.info("=" * 80)
 
             # Validate required parameters
             user_question = merged_config.get("user_question")
@@ -1280,6 +1347,15 @@ class PowerBIAnalysisTool(BaseTool):
         - Conversation history
         - Sample data values
         """
+        # DEBUG: Log config values at the start of DAX generation
+        logger.info("=" * 80)
+        logger.info("[DAX GENERATION CONFIG DEBUG] Config values received:")
+        logger.info(f"[DAX GENERATION CONFIG DEBUG]   business_mappings: {type(config.get('business_mappings')).__name__} = {str(config.get('business_mappings', {}))[:200]}")
+        logger.info(f"[DAX GENERATION CONFIG DEBUG]   field_synonyms: {type(config.get('field_synonyms')).__name__} = {str(config.get('field_synonyms', {}))[:200]}")
+        logger.info(f"[DAX GENERATION CONFIG DEBUG]   active_filters: {type(config.get('active_filters')).__name__} = {str(config.get('active_filters', {}))[:200]}")
+        logger.info(f"[DAX GENERATION CONFIG DEBUG]   conversation_history: {type(config.get('conversation_history')).__name__} = {str(config.get('conversation_history', []))[:200]}")
+        logger.info("=" * 80)
+
         llm_workspace_url = config.get("llm_workspace_url")
         llm_token = config.get("llm_token")
         llm_model = config.get("llm_model", "databricks-claude-sonnet-4")
@@ -1372,7 +1448,7 @@ CALCULATETABLE(
 ✅ **CORRECT**: `Column IN {{"Value1", "Value2"}}` (MUST use curly braces)
 
 **Examples:**
-- ✅ mandatory_version IN {{"Landline", "Mobile"}}
+- ✅ mandatory_version IN {{"Landline OR Mobile"}}
 - ✅ BU IN {{"Italy", "Germany", "France"}}
 - ❌ mandatory_version IN ("Landline", "Mobile") ← Will cause "Operator not supported" error
 
@@ -1404,7 +1480,7 @@ SUMMARIZECOLUMNS(
     ),
     FILTER(
         VALUES(tbl_initial_sizing_tracking[mandatory_version]),
-        tbl_initial_sizing_tracking[mandatory_version] IN {{"Landline", "Mobile"}}
+        tbl_initial_sizing_tracking[mandatory_version] IN {{"Landline OR Mobile"}}
     ),
     "num_customers", SUM(tbl_initial_sizing_tracking[num_customers])
 )
@@ -1418,7 +1494,7 @@ CALCULATETABLE(
     tbl_initial_sizing_tracking[description] = "Complete CGR",
     dim_country[BU] = "Italy",
     dim_weeks[Week] = 1,
-    tbl_initial_sizing_tracking[mandatory_version] IN {{"Landline", "Mobile"}}
+    tbl_initial_sizing_tracking[mandatory_version] IN {{"Landline OR Mobile"}}
 )
 ```
 

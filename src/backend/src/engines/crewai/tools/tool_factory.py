@@ -711,6 +711,21 @@ class ToolFactory:
                     if resolved_count > 0:
                         logger.info(f"[ToolFactory] ✓ Resolved {resolved_count} placeholders in {tool_name} config")
 
+            # Parse JSON strings for PowerBI Analysis Tool context enrichment fields
+            if "Power BI" in tool_name and "Analysis" in tool_name:
+                import json
+                json_fields = ['business_mappings', 'field_synonyms', 'active_filters', 'visible_tables', 'conversation_history']
+                for field in json_fields:
+                    if field in tool_config and isinstance(tool_config[field], str):
+                        try:
+                            # Try to parse the JSON string
+                            tool_config[field] = json.loads(tool_config[field])
+                            logger.info(f"[ToolFactory] Parsed {field} JSON string into dict/list")
+                        except json.JSONDecodeError as e:
+                            logger.warning(f"[ToolFactory] Failed to parse {field} as JSON: {e}. Keeping as string.")
+                        except Exception as e:
+                            logger.warning(f"[ToolFactory] Unexpected error parsing {field}: {e}")
+
             logger.info(f"[ToolFactory] {tool_name} config (after merge): {tool_config}")
 
             # For critical tools, verify override was applied
@@ -1379,9 +1394,19 @@ class ToolFactory:
                         tool_args["include_visual_references"] = tool_config.get("include_visual_references", True)
                         tool_args["skip_system_tables"] = tool_config.get("skip_system_tables", True)
                         tool_args["output_format"] = tool_config.get("output_format", "markdown")
+                        tool_args["enable_info_columns"] = tool_config.get("enable_info_columns", False)
+                        tool_args["max_dax_retries"] = tool_config.get("max_dax_retries", 5)
 
                         # User Question (pre-configured question from frontend)
                         tool_args["user_question"] = tool_config.get("user_question")
+
+                        # Context Enrichment Parameters (Microsoft Copilot-style)
+                        tool_args["business_mappings"] = tool_config.get("business_mappings")
+                        tool_args["field_synonyms"] = tool_config.get("field_synonyms")
+                        tool_args["active_filters"] = tool_config.get("active_filters")
+                        tool_args["session_id"] = tool_config.get("session_id")
+                        tool_args["visible_tables"] = tool_config.get("visible_tables")
+                        tool_args["conversation_history"] = tool_config.get("conversation_history")
 
                     # Allow tool_config_override to override specific fields
                     if isinstance(tool_config_override, dict):
@@ -1389,7 +1414,10 @@ class ToolFactory:
                                     "client_secret", "username", "password", "auth_method",
                                     "access_token", "llm_workspace_url",
                                     "llm_token", "llm_model", "include_visual_references",
-                                    "skip_system_tables", "output_format", "user_question"]:
+                                    "skip_system_tables", "output_format", "user_question",
+                                    "enable_info_columns", "max_dax_retries",
+                                    "business_mappings", "field_synonyms", "active_filters",
+                                    "session_id", "visible_tables", "conversation_history"]:
                             if key in tool_config_override:
                                 tool_args[key] = tool_config_override[key]
 
@@ -1406,6 +1434,16 @@ class ToolFactory:
                            f"has_access_token: {bool(tool_args.get('access_token'))}, "
                            f"llm_configured: {bool(tool_args.get('llm_workspace_url'))}, "
                            f"user_question: {tool_args.get('user_question', 'NOT SET')}")
+
+                # Log context enrichment parameters
+                business_mappings = tool_args.get('business_mappings')
+                field_synonyms = tool_args.get('field_synonyms')
+                active_filters = tool_args.get('active_filters')
+                logger.info(f"[TOOL_FACTORY] Context enrichment parameters:")
+                logger.info(f"[TOOL_FACTORY]   business_mappings: type={type(business_mappings).__name__}, value={str(business_mappings)[:100] if business_mappings else 'None'}")
+                logger.info(f"[TOOL_FACTORY]   field_synonyms: type={type(field_synonyms).__name__}, value={str(field_synonyms)[:100] if field_synonyms else 'None'}")
+                logger.info(f"[TOOL_FACTORY]   active_filters: type={type(active_filters).__name__}, value={str(active_filters)[:100] if active_filters else 'None'}")
+
                 return tool_class(**tool_args)
 
             elif tool_name == "MCPTool":
