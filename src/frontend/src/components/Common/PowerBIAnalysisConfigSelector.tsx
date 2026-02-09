@@ -30,7 +30,10 @@ import {
   FormControl,
   InputLabel,
   Select,
-  MenuItem
+  MenuItem,
+  CircularProgress,
+  Tooltip,
+  IconButton
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import LoginIcon from '@mui/icons-material/Login';
@@ -38,7 +41,11 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import SecurityIcon from '@mui/icons-material/Security';
 import PersonIcon from '@mui/icons-material/Person';
 import QuestionAnswerIcon from '@mui/icons-material/QuestionAnswer';
+import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
+import InfoIcon from '@mui/icons-material/Info';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import { usePowerBIOAuth } from '../../hooks/usePowerBIOAuth';
+import { apiClient } from '../../config/api/ApiConfig';
 
 // Authentication method type
 // - service_principal: App credentials (client_id + client_secret + tenant_id)
@@ -84,6 +91,14 @@ export interface PowerBIAnalysisConfig {
   skip_system_tables?: boolean;
   output_format?: 'markdown' | 'json';
 
+  // Context Enrichment
+  business_mappings?: string; // JSON string of {term: dax_expression}
+  field_synonyms?: string; // JSON string of {field_name: [synonyms]}
+  active_filters?: string; // JSON string of {filter_name: value}
+  session_id?: string;
+  visible_tables?: string; // JSON string of table names array
+  conversation_history?: string; // JSON string of conversation array
+
   // Index signature for compatibility
   [key: string]: string | boolean | undefined;
 }
@@ -103,6 +118,11 @@ export const PowerBIAnalysisConfigSelector: React.FC<PowerBIAnalysisConfigSelect
   const { accessToken, isAuthenticated, signIn, signOut, userEmail, isLoading: oauthLoading, error: oauthError } = usePowerBIOAuth({
     clientId: value.oauth_client_id || ''
   });
+
+  // State for fetching context config from database
+  const [loadingContextConfig, setLoadingContextConfig] = React.useState(false);
+  const [contextConfigError, setContextConfigError] = React.useState<string | null>(null);
+  const [contextConfigSuccess, setContextConfigSuccess] = React.useState<string | null>(null);
 
   const handleFieldChange = (field: keyof PowerBIAnalysisConfig, fieldValue: string | boolean) => {
     onChange({
@@ -176,6 +196,55 @@ export const PowerBIAnalysisConfigSelector: React.FC<PowerBIAnalysisConfigSelect
       }
 
       onChange(updatedConfig);
+    }
+  };
+
+  // Fetch context configuration from database
+  const handleFetchContextConfig = async () => {
+    const semanticModelId = value.dataset_id;
+
+    if (!semanticModelId) {
+      setContextConfigError('Please enter a Dataset/Semantic Model ID first');
+      return;
+    }
+
+    setLoadingContextConfig(true);
+    setContextConfigError(null);
+    setContextConfigSuccess(null);
+
+    try {
+      // Fetch context config from backend API
+      const response = await apiClient.get<{
+        business_mappings: Record<string, string> | null;
+        field_synonyms: Record<string, string[]> | null;
+      }>(`/powerbi/models/${semanticModelId}/context-config/dict`);
+
+      // Convert to JSON strings for storage
+      const updatedConfig: PowerBIAnalysisConfig = {
+        ...value,
+        business_mappings: response.data.business_mappings
+          ? JSON.stringify(response.data.business_mappings, null, 2)
+          : undefined,
+        field_synonyms: response.data.field_synonyms
+          ? JSON.stringify(response.data.field_synonyms, null, 2)
+          : undefined
+      };
+
+      onChange(updatedConfig);
+
+      const mappingsCount = response.data.business_mappings ? Object.keys(response.data.business_mappings).length : 0;
+      const synonymsCount = response.data.field_synonyms ? Object.keys(response.data.field_synonyms).length : 0;
+
+      if (mappingsCount === 0 && synonymsCount === 0) {
+        setContextConfigSuccess('No context configuration found in database. You can add mappings manually below.');
+      } else {
+        setContextConfigSuccess(`Loaded ${mappingsCount} business mappings and ${synonymsCount} field synonyms from database`);
+      }
+    } catch (error: any) {
+      console.error('Failed to fetch context config:', error);
+      setContextConfigError(error.response?.data?.detail || 'Failed to fetch context configuration from database');
+    } finally {
+      setLoadingContextConfig(false);
     }
   };
 
@@ -632,6 +701,175 @@ export const PowerBIAnalysisConfigSelector: React.FC<PowerBIAnalysisConfigSelect
                 <MenuItem value="json">JSON (Structured)</MenuItem>
               </Select>
             </FormControl>
+          </Box>
+        </AccordionDetails>
+      </Accordion>
+
+      {/* Context Enrichment */}
+      <Accordion>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <AutoAwesomeIcon color="primary" sx={{ fontSize: 20 }} />
+            <Typography variant="subtitle2">
+              Context Enrichment
+            </Typography>
+            <Chip label="Optional" size="small" variant="outlined" />
+          </Box>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Alert severity="info" variant="outlined" sx={{ py: 1 }}>
+              <Box sx={{ display: 'flex', alignItems: 'start', gap: 1 }}>
+                <InfoIcon sx={{ fontSize: 18, mt: 0.2 }} />
+                <Box>
+                  <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+                    Enhanced Natural Language Understanding
+                  </Typography>
+                  <Typography variant="caption" component="div">
+                    Add business terminology mappings and field synonyms to enable simpler, more natural queries.
+                    This allows users to ask questions using business language instead of technical DAX syntax.
+                  </Typography>
+                  <Box component="ul" sx={{ pl: 2, mt: 0.5, mb: 0, fontSize: '0.75rem' }}>
+                    <li><strong>Business Mappings</strong>: Translate natural terms to DAX filters (e.g., "Complete CGR" → filter expression)</li>
+                    <li><strong>Field Synonyms</strong>: Map alternative field names (e.g., "customer count" → [num_customers])</li>
+                  </Box>
+                </Box>
+              </Box>
+            </Alert>
+
+            {/* Fetch from Database Button */}
+            {mode === 'static' && value.dataset_id && (
+              <Box>
+                <Button
+                  variant="outlined"
+                  startIcon={loadingContextConfig ? <CircularProgress size={16} /> : <CloudDownloadIcon />}
+                  onClick={handleFetchContextConfig}
+                  disabled={disabled || loadingContextConfig || !value.dataset_id}
+                  fullWidth
+                  sx={{ mb: 1 }}
+                >
+                  {loadingContextConfig ? 'Loading from Database...' : 'Load from Database'}
+                </Button>
+
+                {contextConfigSuccess && (
+                  <Alert severity="success" variant="outlined" sx={{ py: 0.5 }}>
+                    <Typography variant="caption">{contextConfigSuccess}</Typography>
+                  </Alert>
+                )}
+
+                {contextConfigError && (
+                  <Alert severity="warning" variant="outlined" sx={{ py: 0.5 }}>
+                    <Typography variant="caption">{contextConfigError}</Typography>
+                  </Alert>
+                )}
+              </Box>
+            )}
+
+            {!value.dataset_id && mode === 'static' && (
+              <Alert severity="warning" variant="outlined" sx={{ py: 0.5 }}>
+                <Typography variant="caption">
+                  Enter a Dataset/Semantic Model ID above to load context configuration from database
+                </Typography>
+              </Alert>
+            )}
+
+            {/* Business Mappings */}
+            <Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1 }}>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                  Business Term Mappings
+                </Typography>
+                <Tooltip title="Maps natural language business terms to DAX filter expressions">
+                  <IconButton size="small">
+                    <InfoIcon sx={{ fontSize: 16 }} />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+              <TextField
+                value={value.business_mappings || ''}
+                onChange={(e) => handleFieldChange('business_mappings', e.target.value)}
+                disabled={disabled}
+                fullWidth
+                multiline
+                rows={4}
+                placeholder={`{\n  "Complete CGR": "[tbl_initial_sizing_tracking][description] = 'Complete CGR'",\n  "Active customers": "[tbl_customers][status] = 'Active'"\n}`}
+                helperText='JSON format: {"natural term": "DAX filter expression"}'
+                size="small"
+                sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
+              />
+            </Box>
+
+            {/* Field Synonyms */}
+            <Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1 }}>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                  Field Synonyms
+                </Typography>
+                <Tooltip title="Maps alternative field names to canonical field names in the semantic model">
+                  <IconButton size="small">
+                    <InfoIcon sx={{ fontSize: 16 }} />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+              <TextField
+                value={value.field_synonyms || ''}
+                onChange={(e) => handleFieldChange('field_synonyms', e.target.value)}
+                disabled={disabled}
+                fullWidth
+                multiline
+                rows={4}
+                placeholder={`{\n  "num_customers": ["number of customers", "customer count", "total customers"],\n  "revenue": ["sales", "total sales", "income"]\n}`}
+                helperText='JSON format: {"field_name": ["synonym1", "synonym2"]}'
+                size="small"
+                sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
+              />
+            </Box>
+
+            {/* Additional Context Fields */}
+            <Divider sx={{ my: 1 }}>
+              <Typography variant="caption" color="text.secondary">
+                Advanced Context (Optional)
+              </Typography>
+            </Divider>
+
+            <TextField
+              label="Active Filters"
+              value={value.active_filters || ''}
+              onChange={(e) => handleFieldChange('active_filters', e.target.value)}
+              disabled={disabled}
+              fullWidth
+              multiline
+              rows={2}
+              placeholder='{"BU": "Italy", "Week": 1}'
+              helperText="JSON format: filters currently active in the view"
+              size="small"
+              sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
+            />
+
+            <TextField
+              label="Session ID"
+              value={value.session_id || ''}
+              onChange={(e) => handleFieldChange('session_id', e.target.value)}
+              disabled={disabled}
+              fullWidth
+              placeholder="unique-session-id"
+              helperText="Track conversation context across multiple queries"
+              size="small"
+            />
+
+            <TextField
+              label="Visible Tables"
+              value={value.visible_tables || ''}
+              onChange={(e) => handleFieldChange('visible_tables', e.target.value)}
+              disabled={disabled}
+              fullWidth
+              multiline
+              rows={2}
+              placeholder='["tbl_customers", "tbl_sales", "dim_country"]'
+              helperText="JSON array: tables visible in current page context"
+              size="small"
+              sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
+            />
           </Box>
         </AccordionDetails>
       </Accordion>

@@ -1,4 +1,4 @@
-from typing import Dict, Annotated
+from typing import Dict, List, Annotated
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,7 +9,18 @@ from src.schemas.powerbi_config import (
     DAXQueryRequest,
     DAXQueryResponse
 )
+from src.schemas.powerbi_context_config import (
+    PowerBIBusinessMappingCreate,
+    PowerBIBusinessMappingUpdate,
+    PowerBIBusinessMappingResponse,
+    PowerBIFieldSynonymCreate,
+    PowerBIFieldSynonymUpdate,
+    PowerBIFieldSynonymResponse,
+    PowerBIContextConfigBulkResponse,
+    PowerBIContextConfigDict
+)
 from src.services.powerbi_service import PowerBIService
+from src.services.powerbi_context_config_service import PowerBIContextConfigService
 from src.core.dependencies import SessionDep, GroupContextDep
 from src.core.permissions import is_workspace_admin
 
@@ -48,6 +59,36 @@ def get_powerbi_service(
 
 # Type alias for cleaner function signatures
 PowerBIServiceDep = Annotated[PowerBIService, Depends(get_powerbi_service)]
+
+
+# Dependency to get PowerBIContextConfigService
+def get_powerbi_context_config_service(
+    session: SessionDep,
+    group_context: GroupContextDep
+) -> PowerBIContextConfigService:
+    """
+    Get a properly initialized PowerBIContextConfigService instance with group context.
+
+    Args:
+        session: Database session from dependency injection
+        group_context: Group context for multi-tenant filtering
+
+    Returns:
+        Initialized PowerBIContextConfigService with all dependencies
+    """
+    # Get group_id from context
+    group_id = group_context.primary_group_id if group_context else None
+    if not group_id:
+        raise HTTPException(status_code=400, detail="Group context is required")
+
+    # Create service with session and group context
+    service = PowerBIContextConfigService(session, group_id=group_id)
+
+    return service
+
+
+# Type alias for cleaner function signatures
+PowerBIContextConfigServiceDep = Annotated[PowerBIContextConfigService, Depends(get_powerbi_context_config_service)]
 
 
 @router.post("/config", response_model=Dict)
@@ -209,3 +250,198 @@ async def check_powerbi_status(
     except Exception as e:
         logger.error(f"Error checking Power BI status: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error checking Power BI status: {str(e)}")
+
+
+# ===== Context Configuration Endpoints =====
+
+@router.post("/models/{semantic_model_id}/business-mappings", response_model=PowerBIBusinessMappingResponse)
+async def create_business_mapping(
+    semantic_model_id: str,
+    mapping_data: PowerBIBusinessMappingCreate,
+    service: PowerBIContextConfigServiceDep,
+):
+    """
+    Create a new business terminology mapping for a semantic model.
+    Maps natural language terms to DAX expressions for context-aware queries.
+
+    Args:
+        semantic_model_id: Power BI semantic model ID
+        mapping_data: Business mapping data
+        service: Context configuration service
+
+    Returns:
+        Created business mapping
+    """
+    return await service.create_business_mapping(semantic_model_id, mapping_data)
+
+
+@router.get("/models/{semantic_model_id}/business-mappings", response_model=List[PowerBIBusinessMappingResponse])
+async def get_business_mappings(
+    semantic_model_id: str,
+    service: PowerBIContextConfigServiceDep,
+):
+    """
+    Get all business terminology mappings for a semantic model.
+
+    Args:
+        semantic_model_id: Power BI semantic model ID
+        service: Context configuration service
+
+    Returns:
+        List of business mappings
+    """
+    return await service.get_business_mappings(semantic_model_id)
+
+
+@router.put("/business-mappings/{mapping_id}", response_model=PowerBIBusinessMappingResponse)
+async def update_business_mapping(
+    mapping_id: int,
+    mapping_data: PowerBIBusinessMappingUpdate,
+    service: PowerBIContextConfigServiceDep,
+):
+    """
+    Update an existing business terminology mapping.
+
+    Args:
+        mapping_id: Mapping ID
+        mapping_data: Updated mapping data
+        service: Context configuration service
+
+    Returns:
+        Updated business mapping
+    """
+    return await service.update_business_mapping(mapping_id, mapping_data)
+
+
+@router.delete("/business-mappings/{mapping_id}")
+async def delete_business_mapping(
+    mapping_id: int,
+    service: PowerBIContextConfigServiceDep,
+):
+    """
+    Delete a business terminology mapping.
+
+    Args:
+        mapping_id: Mapping ID
+        service: Context configuration service
+
+    Returns:
+        Success response
+    """
+    await service.delete_business_mapping(mapping_id)
+    return {"message": "Business mapping deleted successfully"}
+
+
+@router.post("/models/{semantic_model_id}/field-synonyms", response_model=PowerBIFieldSynonymResponse)
+async def create_field_synonym(
+    semantic_model_id: str,
+    synonym_data: PowerBIFieldSynonymCreate,
+    service: PowerBIContextConfigServiceDep,
+):
+    """
+    Create a new field synonym for a semantic model.
+    Maps alternative field names to canonical field names.
+
+    Args:
+        semantic_model_id: Power BI semantic model ID
+        synonym_data: Field synonym data
+        service: Context configuration service
+
+    Returns:
+        Created field synonym
+    """
+    return await service.create_field_synonym(semantic_model_id, synonym_data)
+
+
+@router.get("/models/{semantic_model_id}/field-synonyms", response_model=List[PowerBIFieldSynonymResponse])
+async def get_field_synonyms(
+    semantic_model_id: str,
+    service: PowerBIContextConfigServiceDep,
+):
+    """
+    Get all field synonyms for a semantic model.
+
+    Args:
+        semantic_model_id: Power BI semantic model ID
+        service: Context configuration service
+
+    Returns:
+        List of field synonyms
+    """
+    return await service.get_field_synonyms(semantic_model_id)
+
+
+@router.put("/field-synonyms/{synonym_id}", response_model=PowerBIFieldSynonymResponse)
+async def update_field_synonym(
+    synonym_id: int,
+    synonym_data: PowerBIFieldSynonymUpdate,
+    service: PowerBIContextConfigServiceDep,
+):
+    """
+    Update an existing field synonym.
+
+    Args:
+        synonym_id: Synonym ID
+        synonym_data: Updated synonym data
+        service: Context configuration service
+
+    Returns:
+        Updated field synonym
+    """
+    return await service.update_field_synonym(synonym_id, synonym_data)
+
+
+@router.delete("/field-synonyms/{synonym_id}")
+async def delete_field_synonym(
+    synonym_id: int,
+    service: PowerBIContextConfigServiceDep,
+):
+    """
+    Delete a field synonym.
+
+    Args:
+        synonym_id: Synonym ID
+        service: Context configuration service
+
+    Returns:
+        Success response
+    """
+    await service.delete_field_synonym(synonym_id)
+    return {"message": "Field synonym deleted successfully"}
+
+
+@router.get("/models/{semantic_model_id}/context-config", response_model=PowerBIContextConfigBulkResponse)
+async def get_all_context_config(
+    semantic_model_id: str,
+    service: PowerBIContextConfigServiceDep,
+):
+    """
+    Get all context configuration (business mappings and field synonyms) for a semantic model.
+
+    Args:
+        semantic_model_id: Power BI semantic model ID
+        service: Context configuration service
+
+    Returns:
+        All business mappings and field synonyms
+    """
+    return await service.get_all_context_config(semantic_model_id)
+
+
+@router.get("/models/{semantic_model_id}/context-config/dict", response_model=PowerBIContextConfigDict)
+async def get_context_config_dict(
+    semantic_model_id: str,
+    service: PowerBIContextConfigServiceDep,
+):
+    """
+    Get context configuration in dictionary format (for tool integration).
+    Returns mappings and synonyms in the format expected by powerbi_analysis_tool.
+
+    Args:
+        semantic_model_id: Power BI semantic model ID
+        service: Context configuration service
+
+    Returns:
+        Context configuration in dictionary format
+    """
+    return await service.get_context_config_dict(semantic_model_id)

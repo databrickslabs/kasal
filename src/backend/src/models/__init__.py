@@ -23,3 +23,4 @@ from src.models.conversion import (
 from src.models.user import User, RefreshToken
 from src.models.group import Group, GroupUser
 from src.models.hitl_approval import HITLApproval, HITLWebhook, HITLApprovalStatus, HITLTimeoutAction, HITLRejectionAction
+from src.models.powerbi_context_config import PowerBIBusinessMapping, PowerBIFieldSynonym
