@@ -21,6 +21,7 @@ async def update_execution_status_with_retry(
     execution_id: str,
     status: str,
     message: Optional[str] = None,
+    result: Any = None,
     max_retries: int = 3,
     retry_delay: float = 0.5
 ) -> bool:
@@ -31,6 +32,7 @@ async def update_execution_status_with_retry(
         execution_id: ID of the execution
         status: New status value
         message: Optional status message
+        result: Optional result data to persist
         max_retries: Maximum number of retry attempts
         retry_delay: Delay between retries in seconds
 
@@ -44,7 +46,8 @@ async def update_execution_status_with_retry(
             success = await ExecutionStatusService.update_status(
                 job_id=execution_id,
                 status=status,
-                message=message
+                message=message,
+                result=result
             )
             if success:
                 return True
@@ -97,6 +100,7 @@ async def run_flow_in_process(
 
     final_status = None
     final_message = None
+    final_result = None
 
     try:
         logger.info(f"[run_flow_in_process] Preparing to run flow {execution_id} in process")
@@ -140,6 +144,7 @@ async def run_flow_in_process(
         elif result.get('status') == 'COMPLETED':
             final_status = ExecutionStatus.COMPLETED.value
             final_message = "Flow execution completed successfully"
+            final_result = result.get('result')
             logger.info(f"Flow execution COMPLETED for {execution_id}")
         else:
             # Before setting FAILED, check if the execution was stopped
@@ -185,7 +190,8 @@ async def run_flow_in_process(
                 await update_execution_status_with_retry(
                     execution_id=execution_id,
                     status=final_status,
-                    message=final_message
+                    message=final_message,
+                    result=final_result
                 )
                 logger.info(f"[run_flow_in_process] Successfully updated status to {final_status}")
             except Exception as status_error:
