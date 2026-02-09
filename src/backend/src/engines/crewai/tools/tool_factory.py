@@ -1371,6 +1371,7 @@ class ToolFactory:
                         # Power BI Configuration
                         tool_args["workspace_id"] = tool_config.get("workspace_id")
                         tool_args["dataset_id"] = tool_config.get("dataset_id")
+                        tool_args["report_id"] = tool_config.get("report_id")  # Optional: for auto-extracting default filters
 
                         # Service Principal Authentication
                         tool_args["tenant_id"] = tool_config.get("tenant_id")
@@ -1410,7 +1411,7 @@ class ToolFactory:
 
                     # Allow tool_config_override to override specific fields
                     if isinstance(tool_config_override, dict):
-                        for key in ["workspace_id", "dataset_id", "tenant_id", "client_id",
+                        for key in ["workspace_id", "dataset_id", "report_id", "tenant_id", "client_id",
                                     "client_secret", "username", "password", "auth_method",
                                     "access_token", "llm_workspace_url",
                                     "llm_token", "llm_model", "include_visual_references",

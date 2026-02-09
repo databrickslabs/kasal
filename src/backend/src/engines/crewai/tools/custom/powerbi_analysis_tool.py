@@ -73,6 +73,10 @@ class PowerBIAnalysisSchema(BaseModel):
         None,
         description="[Power BI] Dataset/Semantic Model ID (GUID) to query."
     )
+    report_id: Optional[str] = Field(
+        None,
+        description="[Power BI] Optional Report ID (GUID) to auto-extract default filters from. Enables cross-page analysis with report-level filter context."
+    )
 
     # ===== CONTEXT ENRICHMENT (Microsoft Copilot-style) =====
     business_mappings: Optional[Dict[str, str]] = Field(
@@ -244,6 +248,7 @@ class PowerBIAnalysisTool(BaseTool):
         default_config = {
             "workspace_id": kwargs.get("workspace_id"),
             "dataset_id": kwargs.get("dataset_id"),
+            "report_id": kwargs.get("report_id"),  # Optional: for auto-extracting default filters
             "tenant_id": kwargs.get("tenant_id"),
             "client_id": kwargs.get("client_id"),
             "client_secret": kwargs.get("client_secret"),
@@ -329,7 +334,7 @@ class PowerBIAnalysisTool(BaseTool):
             merged_config = {}
 
             # Connection and auth parameters - default config takes precedence
-            config_params = ["workspace_id", "dataset_id", "tenant_id", "client_id",
+            config_params = ["workspace_id", "dataset_id", "report_id", "tenant_id", "client_id",
                            "client_secret", "username", "password", "auth_method",
                            "access_token", "llm_workspace_url", "llm_token", "llm_model"]
             for key in config_params:
@@ -539,6 +544,30 @@ class PowerBIAnalysisTool(BaseTool):
                 logger.info("[Context Enrichment] Model context enriched with metadata")
             except Exception as e:
                 logger.warning(f"[Context Enrichment] Metadata enrichment failed (continuing with basic context): {e}")
+
+            # Step 2c: Auto-extract default filters from report (if report_id provided)
+            # These are report-level filters that apply to all pages
+            # They are MERGED with any user-provided active_filters
+            report_id = config.get("report_id")
+            if report_id:
+                try:
+                    report_level_filters = await self._extract_default_filters(
+                        workspace_id, report_id, access_token
+                    )
+                    if report_level_filters:
+                        # Get existing active_filters (user-provided or empty)
+                        existing_filters = config.get("active_filters", {})
+                        if not existing_filters:
+                            existing_filters = {}
+
+                        # Merge: report-level filters first, then user filters (user filters take precedence)
+                        merged_filters = {**report_level_filters, **existing_filters}
+
+                        config["active_filters"] = merged_filters
+                        logger.info(f"[Context Enrichment] Auto-extracted {len(report_level_filters)} report-level filters")
+                        logger.info(f"[Context Enrichment] Total active filters: {len(merged_filters)} (report-level + user-provided)")
+                except Exception as e:
+                    logger.warning(f"[Context Enrichment] Failed to extract default filters (continuing without): {e}")
 
             results["model_context"] = model_context
 
@@ -984,6 +1013,504 @@ class PowerBIAnalysisTool(BaseTool):
             logger.warning(f"[Context Enrichment] Could not fetch sample values: {e}")
 
         return enriched_context
+
+    async def _extract_default_filters(
+        self,
+        workspace_id: str,
+        report_id: str,
+        access_token: str
+    ) -> Dict[str, Any]:
+        """
+        Extract default filters from Power BI report definition.
+
+        Uses Fabric API to get report definition in PBIR format, which includes:
+        - Report-level filters (filters on all pages)
+        - Page-level filters
+        - Visual-level filters
+
+        Returns:
+            Dict mapping filter names to their values/expressions
+        """
+        logger.info(f"[Filter Extraction] Extracting default filters from report {report_id} via Fabric API")
+
+        filters = {}
+
+        try:
+            # Get report definition via Fabric API (PBIR format for reports, not TMDL)
+            # TMDL is for semantic models, reports use PBIR (Power BI Report) format
+            url = f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}/reports/{report_id}/getDefinition"
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json"
+            }
+
+            async with httpx.AsyncClient() as client:
+                logger.info("[Filter Extraction] Fetching report TMDL definition...")
+                logger.info(f"[Filter Extraction] 🔍 DEBUG: API URL: {url}")
+                response = await client.post(url, headers=headers, json={}, timeout=60.0)
+                logger.info(f"[Filter Extraction] 🔍 DEBUG: Got response status: {response.status_code}")
+
+                if response.status_code == 202:
+                    logger.info("[Filter Extraction] 🔍 DEBUG: Using async polling flow (202)")
+                    # Long-running operation - poll for completion
+                    location = response.headers.get("Location")
+                    logger.info(f"[Filter Extraction] 🔍 DEBUG: Location header: {location}")
+                    if location:
+                        for poll_attempt in range(10):  # Poll up to 10 times
+                            await asyncio.sleep(2)
+                            logger.info(f"[Filter Extraction] 🔍 DEBUG: Polling attempt {poll_attempt + 1}/10")
+                            poll_response = await client.get(location, headers=headers)
+                            poll_data = poll_response.json()
+                            logger.info(f"[Filter Extraction] 🔍 DEBUG: Poll status: {poll_data.get('status')}")
+
+                            if poll_data.get("status") == "Succeeded":
+                                logger.info("[Filter Extraction] 🔍 DEBUG: Operation succeeded, fetching result")
+                                result_url = location + "/result"
+                                result_response = await client.get(result_url, headers=headers)
+                                result_response.raise_for_status()
+                                result_json = result_response.json()
+                                logger.info(f"[Filter Extraction] 🔍 DEBUG: Result JSON keys: {list(result_json.keys())}")
+                                report_tmdl_parts = result_json.get("definition", {}).get("parts", [])
+                                logger.info(f"[Filter Extraction] 🔍 DEBUG: Got {len(report_tmdl_parts)} TMDL parts")
+                                filters = self._parse_tmdl_for_filters(report_tmdl_parts)
+                                break
+                            elif poll_data.get("status") == "Failed":
+                                logger.error(f"[Filter Extraction] Report TMDL fetch failed: {poll_data}")
+                                break
+                    else:
+                        logger.warning("[Filter Extraction] ⚠️ No Location header in 202 response")
+
+                elif response.status_code == 200:
+                    logger.info("[Filter Extraction] 🔍 DEBUG: Using direct response flow (200)")
+                    # Direct response
+                    response_json = response.json()
+                    logger.info(f"[Filter Extraction] 🔍 DEBUG: Response JSON keys: {list(response_json.keys())}")
+                    report_tmdl_parts = response_json.get("definition", {}).get("parts", [])
+                    logger.info(f"[Filter Extraction] 🔍 DEBUG: Got {len(report_tmdl_parts)} TMDL parts")
+                    filters = self._parse_tmdl_for_filters(report_tmdl_parts)
+                else:
+                    logger.warning(f"[Filter Extraction] ⚠️ Unexpected status code: {response.status_code}")
+                    logger.warning(f"[Filter Extraction] 🔍 DEBUG: Response body: {response.text[:500]}")
+
+                if filters:
+                    logger.info(f"[Filter Extraction] ✅ Successfully extracted {len(filters)} report-level filters")
+                    for filter_name, filter_desc in filters.items():
+                        logger.info(f"[Filter Extraction]   • {filter_name}: {filter_desc}")
+                else:
+                    logger.info("[Filter Extraction] No report-level filters found")
+
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"[Filter Extraction] HTTP error getting report TMDL: {e.response.status_code}")
+        except Exception as e:
+            logger.warning(f"[Filter Extraction] Error extracting filters from TMDL: {e}")
+
+        return filters
+
+    def _parse_tmdl_for_filters(self, tmdl_parts: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Parse report definition (PBIR format) to extract filters.
+
+        PBIR format stores filters in report.json as a JSON string.
+        Structure example:
+            {
+              "filters": "[{\"$schema\":\"...\", \"target\":{...}, \"filter\":{...}}]",
+              "config": "...",
+              "layoutOptimization": 0
+            }
+        """
+        filters = {}
+
+        try:
+            logger.info(f"[Filter Extraction] 🔍 DEBUG: Received {len(tmdl_parts)} definition parts to parse")
+
+            for idx, part in enumerate(tmdl_parts):
+                payload = part.get("payload", "")
+                path = part.get("path", "")
+
+                logger.info(f"[Filter Extraction] 🔍 DEBUG: Part {idx+1}/{len(tmdl_parts)}")
+                logger.info(f"[Filter Extraction] 🔍 DEBUG:   - Path: {path}")
+                logger.info(f"[Filter Extraction] 🔍 DEBUG:   - Payload size: {len(payload)} chars (base64)")
+
+                # Look for report.json file (contains filter definitions)
+                if "report.json" in path.lower():
+                    logger.info(f"[Filter Extraction] ✅ Found report JSON file: {path}")
+
+                    try:
+                        # Decode base64 payload
+                        import base64
+                        content = base64.b64decode(payload).decode("utf-8")
+                        logger.info(f"[Filter Extraction] 🔍 DEBUG: Decoded content size: {len(content)} chars")
+                        logger.info(f"[Filter Extraction] 🔍 DEBUG: Content preview: {content[:300]}...")
+
+                        # Parse JSON content
+                        report_json = json.loads(content)
+                        logger.info(f"[Filter Extraction] Report JSON keys: {list(report_json.keys())}")
+
+                        # Look for filters field
+                        if "filters" in report_json:
+                            filters_str = report_json["filters"]
+                            logger.info(f"[Filter Extraction] Found 'filters' field, parsing...")
+
+                            # Parse filters JSON string
+                            if isinstance(filters_str, str):
+                                filter_definitions = json.loads(filters_str)
+                            else:
+                                filter_definitions = filters_str
+
+                            logger.info(f"[Filter Extraction] Parsing {len(filter_definitions)} filter definitions...")
+
+                            # Extract filter values
+                            for filter_def in filter_definitions:
+                                filter_name, filter_description = self._extract_filter_from_definition(filter_def)
+                                if filter_name and filter_description:
+                                    filters[filter_name] = filter_description
+
+                        else:
+                            logger.info(f"[Filter Extraction] ⚠️ No 'filters' field found in report JSON")
+
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"[Filter Extraction] Failed to parse JSON: {e}")
+                        # Log the content for debugging
+                        logger.info(f"[Filter Extraction] 🔍 DEBUG: Full content:\n{content[:2000]}")
+
+        except Exception as e:
+            logger.warning(f"[Filter Extraction] Error parsing report for filters: {e}")
+            import traceback
+            logger.warning(f"[Filter Extraction] Traceback: {traceback.format_exc()}")
+
+        return filters
+
+    def _extract_filter_from_definition(self, filter_def: Dict[str, Any]) -> tuple:
+        """
+        Extract filter name and description from Power BI filter definition.
+
+        Power BI filter structure:
+        {
+          "expression": {
+            "Column": {
+              "Expression": {"SourceRef": {"Entity": "table_name"}},
+              "Property": "column_name"
+            }
+          },
+          "filter": {
+            "Where": [{"Condition": {...}}]
+          },
+          "type": "Categorical" or "Advanced"
+        }
+        """
+        try:
+            # Extract table and column from expression
+            expression = filter_def.get("expression", {})
+            column_expr = expression.get("Column", {})
+
+            # Get table name
+            expr = column_expr.get("Expression", {})
+            source_ref = expr.get("SourceRef", {})
+            table = source_ref.get("Entity", "")
+
+            # Get column name
+            column = column_expr.get("Property", "")
+
+            if not table or not column:
+                logger.info(f"[Filter Extraction] ⚠️ Could not extract table/column from filter")
+                return (None, None)
+
+            # Create filter name
+            filter_name = f"{table}[{column}]"
+
+            # Extract filter description from Where clause
+            filter_obj = filter_def.get("filter", {})
+            where_clauses = filter_obj.get("Where", [])
+
+            if not where_clauses:
+                logger.info(f"[Filter Extraction] ⚠️ No Where clause found")
+                return (filter_name, "has filter (unknown type)")
+
+            # Parse the first Where clause
+            condition = where_clauses[0].get("Condition", {})
+            filter_description = self._parse_filter_condition(condition)
+
+            logger.info(f"[Filter Extraction] ✅ Extracted: {filter_name} - {filter_description}")
+            return (filter_name, filter_description)
+
+        except Exception as e:
+            logger.warning(f"[Filter Extraction] Failed to extract filter: {e}")
+            import traceback
+            logger.warning(f"[Filter Extraction] Traceback: {traceback.format_exc()}")
+            return (None, None)
+
+    def _parse_filter_condition(self, condition: Dict[str, Any]) -> str:
+        """
+        Parse a Power BI filter condition into a human-readable description.
+
+        Handles:
+        - NOT IN (null) → "NOT NULL"
+        - NOT StartsWith '7' → "NOT STARTS WITH '7'"
+        - IN ('Mandatory') → "= 'Mandatory'"
+        - And more complex conditions
+        """
+        try:
+            # Check for NOT condition
+            if "Not" in condition:
+                not_expr = condition["Not"]["Expression"]
+
+                # NOT IN (null) → NOT NULL
+                if "In" in not_expr:
+                    in_expr = not_expr["In"]
+                    values = in_expr.get("Values", [])
+
+                    # Check if it's filtering out null
+                    if values and len(values) > 0:
+                        first_value = values[0]
+                        if len(first_value) > 0:
+                            literal = first_value[0].get("Literal", {})
+                            if literal.get("Value") == "null":
+                                return "NOT NULL"
+
+                    # Other NOT IN cases
+                    value_strs = []
+                    for val_list in values:
+                        for val in val_list:
+                            lit_val = val.get("Literal", {}).get("Value", "")
+                            value_strs.append(lit_val.strip("'\""))
+
+                    if value_strs:
+                        return f"NOT IN ({', '.join(value_strs)})"
+
+                # NOT StartsWith
+                elif "StartsWith" in not_expr:
+                    starts_with = not_expr["StartsWith"]
+                    right_val = starts_with.get("Right", {}).get("Literal", {}).get("Value", "")
+                    cleaned_val = right_val.strip("'\"")
+                    return f"NOT STARTS WITH '{cleaned_val}'"
+
+            # Check for IN condition (positive)
+            elif "In" in condition:
+                in_expr = condition["In"]
+                values = in_expr.get("Values", [])
+
+                # Extract values
+                value_strs = []
+                for val_list in values:
+                    for val in val_list:
+                        lit_val = val.get("Literal", {}).get("Value", "")
+                        value_strs.append(lit_val.strip("'\""))
+
+                if len(value_strs) == 1:
+                    return f"= '{value_strs[0]}'"
+                elif len(value_strs) > 1:
+                    return f"IN ({', '.join(value_strs)})"
+
+            # Check for Equals
+            elif "Comparison" in condition:
+                comparison = condition["Comparison"]
+                operator = comparison.get("ComparisonKind", 0)
+                right = comparison.get("Right", {}).get("Literal", {}).get("Value", "")
+
+                op_map = {0: "=", 1: "!=", 2: ">", 3: ">=", 4: "<", 5: "<="}
+                op_str = op_map.get(operator, "=")
+                return f"{op_str} {right}"
+
+            # Fallback - return a generic description
+            return "has complex filter"
+
+        except Exception as e:
+            logger.warning(f"[Filter Extraction] Error parsing condition: {e}")
+            return "has filter"
+
+    def _auto_wrap_with_report_filters(self, dax_query: str, config: Dict[str, Any]) -> str:
+        """
+        Automatically wrap the LLM-generated DAX with report-level filters.
+
+        This ensures ALL report-level filters are applied, even if the LLM forgot to include them.
+        This is more reliable than relying on the LLM to remember all filters.
+        """
+        active_filters = config.get("active_filters", {})
+
+        if not active_filters:
+            # No filters to apply, return original DAX
+            return dax_query
+
+        logger.info("[DAX Auto-Wrap] Wrapping DAX with report-level filters...")
+
+        # Generate DAX filter conditions
+        filter_conditions = []
+        for filter_name, filter_description in active_filters.items():
+            # Check if this filter is already in the DAX (avoid duplicates)
+            if filter_name in dax_query:
+                logger.info(f"[DAX Auto-Wrap]   ⊘ Skipping {filter_name} (already in query)")
+                continue
+
+            dax_condition = self._generate_dax_filter_condition(filter_name, filter_description)
+            if dax_condition and not dax_condition.startswith("//"):
+                filter_conditions.append(dax_condition)
+                logger.info(f"[DAX Auto-Wrap]   + {filter_name}: {dax_condition}")
+
+        if not filter_conditions:
+            logger.info("[DAX Auto-Wrap] No additional filters to apply")
+            return dax_query
+
+        # Extract the inner part of the DAX (remove EVALUATE if present)
+        inner_dax = dax_query.strip()
+        if inner_dax.upper().startswith("EVALUATE"):
+            inner_dax = inner_dax[8:].strip()  # Remove "EVALUATE"
+
+        # Check if already wrapped in CALCULATETABLE
+        if inner_dax.upper().startswith("CALCULATETABLE"):
+            # Already has CALCULATETABLE - extract its contents and merge filters
+            logger.info("[DAX Auto-Wrap] DAX already uses CALCULATETABLE - merging filters")
+
+            # Find the opening and closing parentheses
+            paren_count = 0
+            start_idx = inner_dax.find("(")
+            end_idx = -1
+
+            for i, char in enumerate(inner_dax[start_idx:], start=start_idx):
+                if char == "(":
+                    paren_count += 1
+                elif char == ")":
+                    paren_count -= 1
+                    if paren_count == 0:
+                        end_idx = i
+                        break
+
+            if end_idx > start_idx:
+                # Extract content inside CALCULATETABLE
+                inner_content = inner_dax[start_idx + 1:end_idx]
+
+                # Add our filters to the existing CALCULATETABLE
+                wrapped_dax = f"EVALUATE\nCALCULATETABLE(\n    {inner_content},\n"
+                for condition in filter_conditions:
+                    wrapped_dax += f"    {condition},\n"
+
+                wrapped_dax = wrapped_dax.rstrip(',\n') + "\n)"
+            else:
+                # Couldn't parse - just wrap it
+                wrapped_dax = f"EVALUATE\nCALCULATETABLE(\n    {inner_dax},\n"
+                for condition in filter_conditions:
+                    wrapped_dax += f"    {condition},\n"
+                wrapped_dax = wrapped_dax.rstrip(',\n') + "\n)"
+
+        else:
+            # Not using CALCULATETABLE - wrap it
+            wrapped_dax = f"EVALUATE\nCALCULATETABLE(\n    {inner_dax},\n"
+            for condition in filter_conditions:
+                wrapped_dax += f"    {condition},\n"
+            wrapped_dax = wrapped_dax.rstrip(',\n') + "\n)"
+
+        logger.info("[DAX Auto-Wrap] ✅ Successfully wrapped DAX with report-level filters")
+        logger.info(f"[DAX Auto-Wrap] Wrapped DAX:\n{wrapped_dax}")
+
+        return wrapped_dax
+
+    def _generate_dax_filter_condition(self, filter_name: str, filter_description: str) -> str:
+        """
+        Generate a DAX filter condition from a filter name and description.
+
+        Handles:
+        - NOT NULL → ISBLANK(column) = FALSE
+        - NOT STARTS WITH 'X' → FILTER(VALUES(column), NOT(STARTSWITH(column, "X")))
+        - = 'Value' → column = "Value"
+        - IN (val1, val2) → column IN {"val1", "val2"}
+        """
+        try:
+            # Parse the filter description
+            filter_desc = str(filter_description).strip()
+
+            # Handle NOT NULL
+            if filter_desc == "NOT NULL":
+                return f"ISBLANK({filter_name}) = FALSE"
+
+            # Handle NOT STARTS WITH
+            if filter_desc.startswith("NOT STARTS WITH"):
+                # Extract the value
+                value = filter_desc.replace("NOT STARTS WITH", "").strip().strip("'\"")
+                # Use FILTER() for proper DAX filter context
+                return f'FILTER(VALUES({filter_name}), NOT(STARTSWITH({filter_name}, "{value}")))'
+
+            # Handle equals
+            if filter_desc.startswith("= "):
+                value = filter_desc[2:].strip().strip("'\"")
+                return f'{filter_name} = "{value}"'
+
+            # Handle IN (multiple values)
+            if filter_desc.startswith("IN ("):
+                # Extract values from "IN (val1, val2, val3)"
+                values_str = filter_desc[4:-1]  # Remove "IN (" and ")"
+                values = [v.strip().strip("'\"") for v in values_str.split(",")]
+                values_list = ', '.join([f'"{v}"' for v in values])
+                return f'{filter_name} IN {{{values_list}}}'
+
+            # Handle plain value (treat as equals)
+            if not filter_desc.startswith("NOT") and not filter_desc.startswith("IN"):
+                # Might be just a value
+                value = filter_desc.strip("'\"")
+                return f'{filter_name} = "{value}"'
+
+            # Fallback - return as comment
+            logger.warning(f"[DAX Filter] Could not generate condition for: {filter_name} {filter_desc}")
+            return f'// TODO: Apply filter {filter_name} {filter_desc}'
+
+        except Exception as e:
+            logger.warning(f"[DAX Filter] Error generating condition for {filter_name}: {e}")
+            return f'// Error: Could not apply filter {filter_name}'
+
+    def _extract_filters_from_tmdl_content(self, content: str, section_name: str) -> Dict[str, Any]:
+        """
+        Extract filters from a TMDL section.
+
+        Example TMDL filter format:
+            filter 'Region' on 'dim_region'[Region] in {"North", "South"}
+            filter 'Year' on 'dim_date'[Year] = 2024
+        """
+        filters = {}
+        lines = content.split('\n')
+        in_section = False
+
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+
+            # Check if we're in the target section
+            if section_name.lower() in stripped.lower():
+                in_section = True
+                continue
+
+            # Exit section if we hit another top-level element
+            if in_section and not line.startswith((' ', '\t')) and line.strip():
+                break
+
+            # Parse filter lines
+            if in_section and 'filter' in stripped and ' on ' in stripped:
+                try:
+                    # Example: filter 'Region' on 'dim_region'[Region] = "North"
+                    # Example: filter 'Year' on 'dim_date'[Year] in {2023, 2024}
+
+                    # Extract filter name
+                    if "filter '" in stripped or 'filter "' in stripped:
+                        filter_name_start = stripped.find("filter '") + 8 if "filter '" in stripped else stripped.find('filter "') + 8
+                        filter_name_end = stripped.find("'", filter_name_start) if "filter '" in stripped else stripped.find('"', filter_name_start)
+                        filter_name = stripped[filter_name_start:filter_name_end]
+
+                        # Extract filter value/expression
+                        if ' = ' in stripped:
+                            value_part = stripped.split(' = ', 1)[1].strip()
+                            # Remove quotes and clean
+                            value = value_part.strip('"\'')
+                        elif ' in {' in stripped:
+                            # Extract values from set
+                            value_part = stripped.split(' in {', 1)[1].split('}')[0]
+                            values = [v.strip().strip('"\'') for v in value_part.split(',')]
+                            value = values if len(values) > 1 else values[0]
+                        else:
+                            continue
+
+                        filters[filter_name] = value
+                        logger.info(f"[Filter Extraction]   - '{filter_name}' = {value}")
+
+                except Exception as e:
+                    logger.debug(f"[Filter Extraction] Could not parse filter line: {stripped} - {e}")
+
+        return filters
 
     async def _fetch_column_metadata(
         self,
@@ -1460,7 +1987,7 @@ Step 1 - Identify business terms and tables:
 - "Complete CGR" → tbl_initial_sizing_tracking[description] = 'Complete CGR'
 - "Italian BU" → dim_country[BU] = 'Italy' (related table via country_code)
 - "week 1" → dim_weeks[Week] = 1 (related table via loading_date)
-- "Landline or Mobile" → tbl_initial_sizing_tracking[mandatory_version] IN ('Landline', 'Mobile')
+- "Landline or Mobile" → tbl_initial_sizing_tracking[mandatory_version] IN ('Landline OR Mobile')
 
 Step 2 - Check relationships:
 - tbl_initial_sizing_tracking → dim_country (via country_code)
@@ -1618,6 +2145,9 @@ CALCULATETABLE(...)
                 if hallucinated:
                     logger.warning(f"[DAX Generation] LLM may have used non-existent measures: {hallucinated}")
                     logger.warning(f"[DAX Generation] Available measures are: {available_measure_names[:10]}")
+
+                # Auto-wrap with report-level filters if present
+                dax = self._auto_wrap_with_report_filters(dax, config)
 
                 return dax
 
