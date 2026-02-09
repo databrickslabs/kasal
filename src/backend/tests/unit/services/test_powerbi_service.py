@@ -4,11 +4,22 @@ Unit tests for PowerBIService.
 Tests the core functionality of Power BI integration operations including
 DAX query execution, authentication, and result processing.
 """
+import sys
+import types
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 
 from fastapi import HTTPException
+
+# Ensure azure.identity is mockable even when not installed
+if 'azure' not in sys.modules:
+    azure_mock = types.ModuleType('azure')
+    azure_mock.identity = types.ModuleType('azure.identity')
+    azure_mock.identity.UsernamePasswordCredential = MagicMock
+    azure_mock.identity.DeviceCodeCredential = MagicMock
+    sys.modules['azure'] = azure_mock
+    sys.modules['azure.identity'] = azure_mock.identity
 
 from src.services.powerbi_service import PowerBIService
 from src.schemas.powerbi_config import DAXQueryRequest, DAXQueryResponse
@@ -197,7 +208,7 @@ class TestPowerBIServiceTokenGeneration:
     @pytest.mark.asyncio
     async def test_generate_token_success(self, powerbi_service, mock_powerbi_config):
         """Test successful token generation."""
-        with patch('src.services.powerbi_service.UsernamePasswordCredential') as MockCred:
+        with patch('azure.identity.UsernamePasswordCredential') as MockCred:
             mock_credential = MagicMock()
             mock_token = MagicMock()
             mock_token.token = "test-token-123"
@@ -226,7 +237,7 @@ class TestPowerBIServiceTokenGeneration:
     @pytest.mark.asyncio
     async def test_generate_token_authentication_error(self, powerbi_service, mock_powerbi_config):
         """Test token generation authentication error."""
-        with patch('src.services.powerbi_service.UsernamePasswordCredential') as MockCred:
+        with patch('azure.identity.UsernamePasswordCredential') as MockCred:
             MockCred.side_effect = Exception("Auth failed")
 
             with patch.dict('os.environ', {
