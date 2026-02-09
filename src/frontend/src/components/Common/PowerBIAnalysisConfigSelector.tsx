@@ -63,6 +63,7 @@ export interface PowerBIAnalysisConfig {
   // Power BI Configuration
   workspace_id?: string;
   dataset_id?: string;
+  report_id?: string;
 
   // Authentication method
   auth_method?: PowerBIAuthMethod;
@@ -184,6 +185,7 @@ export const PowerBIAnalysisConfigSelector: React.FC<PowerBIAnalysisConfigSelect
         updatedConfig.user_question = '{user_question}';
         updatedConfig.workspace_id = '{workspace_id}';
         updatedConfig.dataset_id = '{dataset_id}';
+        updatedConfig.report_id = '{report_id}';
         updatedConfig.tenant_id = '{tenant_id}';
         updatedConfig.client_id = '{client_id}';
         updatedConfig.client_secret = '{client_secret}';
@@ -315,6 +317,18 @@ export const PowerBIAnalysisConfigSelector: React.FC<PowerBIAnalysisConfigSelect
 
           <Box sx={{ mt: 1.5, p: 1, bgcolor: 'rgba(0,0,0,0.04)', borderRadius: 1 }}>
             <Typography variant="caption" sx={{ fontWeight: 600 }}>
+              Optional inputs:
+            </Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+              <Chip label="report_id" size="small" color="info" variant="outlined" />
+              <Typography variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
+                (Auto-extracts filters)
+              </Typography>
+            </Box>
+          </Box>
+
+          <Box sx={{ mt: 1.5, p: 1, bgcolor: 'rgba(0,0,0,0.04)', borderRadius: 1 }}>
+            <Typography variant="caption" sx={{ fontWeight: 600 }}>
               Authentication (choose one):
             </Typography>
             <Box sx={{ mt: 0.5 }}>
@@ -400,6 +414,24 @@ export const PowerBIAnalysisConfigSelector: React.FC<PowerBIAnalysisConfigSelect
               helperText="Power BI semantic model (dataset) ID to query"
               size="small"
             />
+            <Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                <TextField
+                  label="Report ID (Optional)"
+                  value={value.report_id || ''}
+                  onChange={(e) => handleFieldChange('report_id', e.target.value)}
+                  disabled={disabled}
+                  fullWidth
+                  helperText="Auto-extracts default filters for cross-page analysis"
+                  size="small"
+                />
+                <Tooltip title="Provides Report ID to automatically extract report-level and page-level filters from the report definition, enabling accurate cross-page summarization without the report being open">
+                  <IconButton size="small">
+                    <InfoIcon sx={{ fontSize: 16 }} />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+            </Box>
           </Box>
 
           <Divider sx={{ my: 1 }}>
