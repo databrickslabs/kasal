@@ -128,7 +128,8 @@ class SSEConnectionManager:
             if not self.job_queues[job_id]:
                 del self.job_queues[job_id]
 
-        self.connection_count -= 1
+        if self.connection_count > 0:
+            self.connection_count -= 1
 
         logger.info(
             f"SSE connection closed for job {job_id}. "

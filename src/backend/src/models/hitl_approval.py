@@ -187,7 +187,13 @@ class HITLApproval(Base):
         """Check if this approval has expired."""
         if self.expires_at is None:
             return False
-        return datetime.now(timezone.utc) > self.expires_at
+        now_utc = datetime.now(timezone.utc)
+        expires = self.expires_at
+        # SQLite strips timezone info, so expires_at may be naive on retrieval.
+        # Treat naive datetimes as UTC to avoid comparison errors.
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        return now_utc > expires
 
     @property
     def timeout_action(self) -> str:
