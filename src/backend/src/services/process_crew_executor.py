@@ -781,8 +781,8 @@ def run_crew_in_process(
                     # Continue execution even if MLflow setup fails
 
             # Create services using session factory
-            from src.db.session import async_session_factory
-            async with async_session_factory() as session:
+            from src.db.session import safe_async_session
+            async with safe_async_session() as session:
                 # Extract group_id first for service initialization
                 group_id = None
                 try:

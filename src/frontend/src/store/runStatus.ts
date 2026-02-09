@@ -315,8 +315,21 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
           return run;
         });
 
+        // Merge with existing store runs to preserve jobCreated placeholders
+        // that may not be in the API response yet (timing edge case).
+        const existingHistory = get().runHistory;
+        const apiJobIds = new Set(processedRuns.map(r => r.job_id));
+        const placeholderRuns = existingHistory.filter(existing => {
+          // Keep existing placeholder runs that are still running/queued and
+          // not yet present in the API response.
+          if (apiJobIds.has(existing.job_id)) return false;
+          const s = existing.status?.toLowerCase();
+          return s === 'running' || s === 'queued' || s === 'pending';
+        });
+        const mergedRuns = [...placeholderRuns, ...processedRuns];
+
         // Update the running jobs flag
-        const hasActiveJobs = processedRuns.some(run =>
+        const hasActiveJobs = mergedRuns.some(run =>
           run.status.toLowerCase() === 'running' || run.status.toLowerCase() === 'queued' || run.status.toLowerCase() === 'pending'
         );
 
@@ -324,7 +337,7 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
         const updatedActiveRuns: Record<string, ExtendedRun> = {};
 
         // Only keep truly active runs (running, queued, or pending)
-        processedRuns.forEach(run => {
+        mergedRuns.forEach(run => {
           // Add to active runs if it's running, queued, or pending
           if (run.status.toLowerCase() === 'running' || run.status.toLowerCase() === 'queued' || run.status.toLowerCase() === 'pending') {
             updatedActiveRuns[run.job_id] = run;
@@ -333,7 +346,7 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
 
         // Update store with all runs information
         set({
-          runHistory: processedRuns,
+          runHistory: mergedRuns,
           activeRuns: updatedActiveRuns,
           isLoading: false,
           error: null,
