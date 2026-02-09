@@ -1,0 +1,140 @@
+{
+  "_comment": "Example Power BI Analysis Tool Configuration with Context Enrichment",
+  "_description": "This example shows how to configure the Power BI Analysis Tool with Microsoft Copilot-style context enrichment for simplified natural language queries",
+
+  "user_question": "What is the number of customers with Complete CGR in the Italian BU in week 1?",
+
+  "_section_connection": "===== POWER BI CONNECTION =====",
+  "workspace_id": "your-workspace-guid-here",
+  "dataset_id": "your-dataset-guid-here",
+
+  "_section_auth": "===== AUTHENTICATION (choose one method) =====",
+  "tenant_id": "your-tenant-id",
+  "client_id": "your-client-id",
+  "client_secret": "your-client-secret",
+
+  "_or_service_account": "OR use Service Account authentication:",
+  "username": "service-account@company.com",
+  "password": "service-account-password",
+
+  "_or_oauth": "OR use pre-obtained OAuth token:",
+  "access_token": "eyJ0eXAiOiJKV1QiLCJhbGc...",
+
+  "_section_llm": "===== LLM CONFIGURATION =====",
+  "llm_workspace_url": "https://your-databricks-workspace.cloud.databricks.com",
+  "llm_token": "your-databricks-token",
+  "llm_model": "databricks-claude-sonnet-4",
+
+  "_section_context_enrichment": "===== CONTEXT ENRICHMENT (Microsoft Copilot-style) =====",
+
+  "business_mappings": {
+    "_comment": "Map natural language phrases to DAX filter expressions",
+    "Complete CGR": "[Initial_Sizing][description] = 'Complete CGR'",
+    "Italian BU": "[Initial_Sizing][BU] = 'Italy'",
+    "German BU": "[Initial_Sizing][BU] = 'Germany'",
+    "week 1": "[Initial_Sizing][Week] = 1",
+    "week 2": "[Initial_Sizing][Week] = 2",
+    "Landline or Mobile": "[Initial_Sizing][Mandatory_Version] IN ('Landline', 'Mobile')",
+    "high-value customers": "[Customer_Segment] = 'Premium'",
+    "active customers": "[Status] = 'Active'",
+    "last quarter": "[Quarter] = QUARTER(TODAY()) - 1",
+    "this year": "[Year] = YEAR(TODAY())"
+  },
+
+  "field_synonyms": {
+    "_comment": "Define alternative names for fields that users might use",
+    "num_customers": [
+      "number of customers",
+      "customer count",
+      "total customers",
+      "clients",
+      "subscriber count"
+    ],
+    "BU": [
+      "business unit",
+      "region",
+      "division",
+      "territory",
+      "market"
+    ],
+    "description": [
+      "desc",
+      "type",
+      "category",
+      "classification"
+    ],
+    "Mandatory_Version": [
+      "version",
+      "service type",
+      "product type",
+      "offering"
+    ],
+    "revenue": [
+      "sales",
+      "income",
+      "turnover",
+      "earnings"
+    ],
+    "churn_rate": [
+      "attrition",
+      "customer loss",
+      "turnover rate"
+    ]
+  },
+
+  "active_filters": {
+    "_comment": "Filters currently active in the user's view that should be auto-applied (simulates page-level context)",
+    "Mandatory_Version": ["Landline", "Mobile"],
+    "_note": "These filters are automatically applied even if not mentioned in the question!"
+  },
+
+  "session_id": "session_12345_user_abc",
+  "_session_comment": "Unique session ID for tracking conversation across multiple queries",
+
+  "visible_tables": [
+    "Initial_Sizing",
+    "Customer_Details",
+    "Revenue_Summary"
+  ],
+  "_visible_tables_comment": "Tables currently visible in the user's view (prioritizes these in schema context)",
+
+  "conversation_history": [
+    {
+      "question": "What is the total revenue for Italy?",
+      "answer": "€1.5M",
+      "filters_used": {
+        "BU": "Italy",
+        "Quarter": 1
+      }
+    },
+    {
+      "question": "How many customers do we have?",
+      "answer": "50,000 customers",
+      "filters_used": {
+        "BU": "Italy",
+        "Quarter": 1
+      }
+    }
+  ],
+  "_conversation_comment": "Previous questions provide context for follow-up queries",
+
+  "_section_options": "===== OPTIONS =====",
+  "include_visual_references": true,
+  "skip_system_tables": true,
+  "max_dax_retries": 5,
+  "output_format": "markdown",
+
+  "_section_example_simple_questions": "===== EXAMPLE SIMPLE QUESTIONS THAT NOW WORK =====",
+  "_examples": [
+    "What is the number of customers with Complete CGR?",
+    "Show me revenue for the Italian BU",
+    "How many high-value customers do we have?",
+    "What was the churn rate last quarter?",
+    "Compare revenue between Italy and Germany"
+  ],
+
+  "_section_what_changed": "===== WHAT CHANGED? =====",
+  "_before": "Required: 'What is the num_customers within the table Initial Sizing with description Complete CGR for the BU Italy in Week 1 and where the Mandatory Version is Landline OR Mobile?'",
+  "_after": "Now works: 'What is the number of customers with Complete CGR in the Italian BU in week 1?'",
+  "_reason": "The tool now uses business_mappings, field_synonyms, and active_filters to understand natural language and apply implicit context automatically"
+}
