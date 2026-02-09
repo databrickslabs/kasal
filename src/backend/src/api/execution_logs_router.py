@@ -9,6 +9,7 @@ from typing import Annotated, Dict, List
 from fastapi import (
     APIRouter,
     Depends,
+    HTTPException,
     Query,
 )
 
@@ -143,5 +144,4 @@ async def create_execution_log(
     group_context: GroupContextDep,
 ):
     """Create an execution log via main router."""
-    # For now, just return a success response since this is mainly for testing
-    return {"id": 1, "message": "Log created"}
+    raise HTTPException(status_code=501, detail="Execution log creation not implemented")
