@@ -2017,9 +2017,7 @@ class ProcessCrewExecutor:
             import os
             import json
             from datetime import datetime, timezone
-            from sqlalchemy.ext.asyncio import create_async_engine
             from sqlalchemy import text
-            from src.config.settings import settings
 
             # Get the crew.log path
             log_dir = os.environ.get('LOG_DIR')
@@ -2066,33 +2064,23 @@ class ProcessCrewExecutor:
             else:
                 logger.info(f"Found {len(logs_to_write)-1} logs for execution {exec_id_short} in crew.log")
 
-            # Build database URL
-            if settings.DATABASE_TYPE == 'sqlite':
-                db_url = f'sqlite+aiosqlite:///{settings.SQLITE_DB_PATH}'
-                logger.info(f"[ProcessCrewExecutor] [DEBUG] Using SQLite database: {settings.SQLITE_DB_PATH}")
-            else:
-                postgres_user = settings.POSTGRES_USER or 'postgres'
-                postgres_password = settings.POSTGRES_PASSWORD or 'postgres'
-                postgres_server = settings.POSTGRES_SERVER or 'localhost'
-                postgres_port = settings.POSTGRES_PORT or '5432'
-                postgres_db = settings.POSTGRES_DB or 'kasal'
-                db_url = f'postgresql+asyncpg://{postgres_user}:{postgres_password}@{postgres_server}:{postgres_port}/{postgres_db}'
-                logger.info(f"[ProcessCrewExecutor] [DEBUG] Using PostgreSQL database: {postgres_server}:{postgres_port}/{postgres_db}")
+            # Use the application's existing engine from session.py.
+            # This runs in the main process (after process.join), so the app
+            # engine is available and already connected to the correct database.
+            # Previously, a one-off engine was created from individual settings
+            # fields (POSTGRES_SERVER, POSTGRES_PORT, etc.) which default to
+            # localhost — breaking in Databricks Apps where DATABASE_URI is set
+            # as a single env var pointing to the managed PostgreSQL instance.
+            from src.db.session import engine as app_engine
 
-            # Write logs to database
-            logger.info(f"[ProcessCrewExecutor] [DEBUG] About to create async engine for database connection")
-            engine = create_async_engine(db_url)
-            logger.info(f"[ProcessCrewExecutor] [DEBUG] Async engine created successfully")
-            async with engine.begin() as conn:
+            logger.info(f"[ProcessCrewExecutor] [DEBUG] Using application engine for database connection")
+            async with app_engine.begin() as conn:
                 for log_data in logs_to_write:
                     await conn.execute(text("""
                         INSERT INTO execution_logs (execution_id, content, timestamp, group_id, group_email)
                         VALUES (:execution_id, :content, :timestamp, :group_id, :group_email)
                     """), log_data)
 
-            logger.info(f"[ProcessCrewExecutor] [DEBUG] About to dispose async engine")
-            await engine.dispose()
-            logger.info(f"[ProcessCrewExecutor] [DEBUG] Async engine disposed successfully")
             logger.info(f"[ProcessCrewExecutor] Successfully wrote {len(logs_to_write)} logs to execution_logs table")
 
         except Exception as e:

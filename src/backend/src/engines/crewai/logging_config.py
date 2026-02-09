@@ -125,34 +125,20 @@ class ExecutionLogsDatabaseHandler(logging.Handler):
         self._db_url = os.environ.get('DATABASE_URL')
 
         if not self._db_url:
-            # Import settings to get the proper database configuration
+            # Derive the sync database URL from settings.DATABASE_URI.
+            # This ensures we use the exact same connection string as the
+            # rest of the application, avoiding mismatches when individual
+            # fields (POSTGRES_SERVER, etc.) are not set but DATABASE_URI is.
             try:
                 from src.config.settings import settings
 
-                # Determine database type and construct appropriate sync URL
-                db_type = settings.DATABASE_TYPE.lower() if settings.DATABASE_TYPE else 'postgres'
-                logger.info(f"[DB_HANDLER] Settings DATABASE_TYPE: {db_type}")
-
-                if db_type == 'sqlite':
-                    # For SQLite, use the configured path
-                    sqlite_path = settings.SQLITE_DB_PATH or './app.db'
-                    # Make sure we use absolute path
-                    if not os.path.isabs(sqlite_path):
-                        backend_root = pathlib.Path(__file__).parent.parent.parent.parent
-                        sqlite_path = str((backend_root / sqlite_path).absolute())
-                    self._db_url = f'sqlite:///{sqlite_path}'
-                    logger.info(f"[DB_HANDLER] Using SQLite database: {sqlite_path}")
-                else:
-                    # For PostgreSQL, build connection string from settings
-                    postgres_user = settings.POSTGRES_USER or 'postgres'
-                    postgres_password = settings.POSTGRES_PASSWORD or 'postgres'
-                    postgres_server = settings.POSTGRES_SERVER or 'localhost'
-                    postgres_port = settings.POSTGRES_PORT or '5432'
-                    postgres_db = settings.POSTGRES_DB or 'kasal'
-
-                    # Build PostgreSQL URL (we'll convert to asyncpg in _write_to_db_async)
-                    self._db_url = f'postgresql://{postgres_user}:{postgres_password}@{postgres_server}:{postgres_port}/{postgres_db}'
-                    logger.info(f"[DB_HANDLER] Using PostgreSQL database: {postgres_db} on {postgres_server}:{postgres_port}")
+                # settings.DATABASE_URI is the canonical source of truth,
+                # already assembled from env vars or individual fields.
+                # Strip async driver prefixes to get a sync-compatible URL
+                # (_write_to_db_async re-adds +asyncpg when needed).
+                db_uri = str(settings.DATABASE_URI)
+                self._db_url = db_uri.replace('+asyncpg', '').replace('+aiosqlite', '')
+                logger.info(f"[DB_HANDLER] Using database URL derived from settings.DATABASE_URI")
 
             except ImportError as e:
                 # If settings cannot be imported, use SQLite fallback
