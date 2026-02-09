@@ -299,7 +299,23 @@ class FlowMethodFactory:
             # Add planning configuration if enabled
             if crew_data and hasattr(crew_data, 'planning') and crew_data.planning:
                 crew_kwargs['planning'] = True
-                logger.info(f"Planning enabled for crew from configuration")
+                # Set planning_llm to avoid CrewAI defaulting to OpenAI
+                planning_llm_model = getattr(crew_data, 'planning_llm', None)
+                if planning_llm_model:
+                    # Use the explicit planning_llm from crew configuration
+                    try:
+                        from src.core.llm_manager import LLMManager
+                        planning_llm = await LLMManager.get_llm(planning_llm_model)
+                        crew_kwargs['planning_llm'] = planning_llm
+                        logger.info(f"Planning enabled - using crew planning_llm: {planning_llm_model}")
+                    except Exception as e:
+                        logger.warning(f"Could not create planning LLM for {planning_llm_model}: {e}")
+                elif agents and hasattr(agents[0], 'llm') and agents[0].llm:
+                    # Fallback: use the first agent's LLM so we don't default to OpenAI
+                    crew_kwargs['planning_llm'] = agents[0].llm
+                    logger.info(f"Planning enabled - using first agent's LLM as planning_llm")
+                else:
+                    logger.warning(f"Planning enabled but no planning_llm configured and no agent LLM available")
 
             # Add reasoning configuration if enabled
             # NOTE: In CrewAI, reasoning is an Agent-level parameter, NOT just a Crew-level parameter
@@ -617,7 +633,21 @@ class FlowMethodFactory:
             # Add planning configuration if enabled
             if crew_data and hasattr(crew_data, 'planning') and crew_data.planning:
                 crew_kwargs['planning'] = True
-                logger.info(f"Planning enabled for listener crew from configuration")
+                # Set planning_llm to avoid CrewAI defaulting to OpenAI
+                planning_llm_model = getattr(crew_data, 'planning_llm', None)
+                if planning_llm_model:
+                    try:
+                        from src.core.llm_manager import LLMManager
+                        planning_llm = await LLMManager.get_llm(planning_llm_model)
+                        crew_kwargs['planning_llm'] = planning_llm
+                        logger.info(f"Planning enabled for listener crew - using crew planning_llm: {planning_llm_model}")
+                    except Exception as e:
+                        logger.warning(f"Could not create planning LLM for listener crew {planning_llm_model}: {e}")
+                elif agents and hasattr(agents[0], 'llm') and agents[0].llm:
+                    crew_kwargs['planning_llm'] = agents[0].llm
+                    logger.info(f"Planning enabled for listener crew - using first agent's LLM as planning_llm")
+                else:
+                    logger.warning(f"Planning enabled for listener crew but no planning_llm configured and no agent LLM available")
 
             # Add reasoning configuration if enabled
             # NOTE: In CrewAI, reasoning is an Agent-level parameter, NOT just a Crew-level parameter
