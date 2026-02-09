@@ -115,15 +115,7 @@ async def export_database(
         f"[EXPORT DEBUG] User token available: {bool(service.user_token)}, SPN configured: {bool(os.getenv('DATABRICKS_CLIENT_ID'))}"
     )
 
-    # Debug: Log token preview if available
-    if service.user_token:
-        token_preview = (
-            service.user_token[:20] + "..."
-            if len(service.user_token) > 20
-            else "SHORT_TOKEN"
-        )
-        logger.info(f"[EXPORT DEBUG] User token preview: {token_preview}")
-    else:
+    if not service.user_token:
         logger.warning(
             f"[EXPORT DEBUG] No user token available - will use fallback authentication"
         )

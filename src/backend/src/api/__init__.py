@@ -7,8 +7,6 @@ from src.api.agentbricks_router import router as agentbricks_router
 from src.api.agents_router import router as agents_router
 from src.api.api_keys_router import router as api_keys_router
 
-# User management routers (simplified)
-from src.api.auth_router import router as auth_router
 from src.api.chat_history_router import router as chat_history_router
 from src.api.connections_router import router as connections_router
 from src.api.crew_generation_router import router as crew_generation_router
@@ -98,8 +96,6 @@ api_router.include_router(execution_logs_router)
 api_router.include_router(mcp_router)
 api_router.include_router(dispatcher_router)
 api_router.include_router(engine_config_router)
-# Include user management routers (simplified)
-api_router.include_router(auth_router)
 api_router.include_router(users_router)
 api_router.include_router(group_router)
 api_router.include_router(chat_history_router)
@@ -144,8 +140,6 @@ __all__ = [
     "mcp_router",
     "dispatcher_router",
     "engine_config_router",
-    # User management routers (simplified)
-    "auth_router",
     "users_router",
     "runs_router",
     "group_router",
