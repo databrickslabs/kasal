@@ -220,6 +220,12 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
       set({ isLoading: true, error: null });
 
       try {
+        // Invalidate cache to ensure we get fresh data from the API.
+        // This is critical when called after creating a new execution,
+        // otherwise the 5-second cache returns stale data that overwrites
+        // the jobCreated placeholder and the new execution disappears.
+        runService.invalidateRunsCache();
+
         // Fetch recent runs from the backend
         const response = await runService.getRuns(50, 0);
 
