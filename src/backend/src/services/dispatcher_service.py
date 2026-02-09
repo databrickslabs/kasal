@@ -606,7 +606,7 @@ class DispatcherService:
             ),
         }
 
-    async def _detect_intent(
+    async def detect_intent(
         self, message: str, model: str, group_context: Optional[GroupContext] = None
     ) -> Dict[str, Any]:
         """
@@ -930,7 +930,7 @@ Please analyze this message and provide your intent classification, considering 
                     pass
 
             # Detect intent
-            intent_result = await self._detect_intent(
+            intent_result = await self.detect_intent(
                 request.message, model, group_context
             )
 

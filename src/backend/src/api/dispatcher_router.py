@@ -83,7 +83,7 @@ async def detect_intent_only(
     dispatcher_service = DispatcherService.create(session)
 
     # Only detect intent without dispatching
-    intent_result = await dispatcher_service._detect_intent(
+    intent_result = await dispatcher_service.detect_intent(
         request.message, request.model or "databricks-llama-4-maverick"
     )
 
