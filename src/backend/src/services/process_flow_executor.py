@@ -1141,7 +1141,7 @@ class ProcessFlowExecutor:
         try:
             import os
             from datetime import datetime
-            from src.config.settings import settings
+            from sqlalchemy import text
 
             # Get the flow.log path
             log_dir = os.environ.get('LOG_DIR')
@@ -1188,13 +1188,23 @@ class ProcessFlowExecutor:
             else:
                 logger.info(f"Found {len(logs_to_write)-1} logs for execution {exec_id_short} in flow.log")
 
-            # Try to write logs using synchronous SQLite (more reliable in post-subprocess context)
-            # Async database operations can have greenlet/event loop issues after subprocess completion
-            if settings.DATABASE_TYPE == 'sqlite':
-                await self._write_logs_sqlite_sync(logs_to_write, settings.SQLITE_DB_PATH)
-            else:
-                # For PostgreSQL, use async with NullPool
-                await self._write_logs_postgres_async(logs_to_write, settings)
+            # Use the application's existing engine from session.py.
+            # This runs in the main process (after process.join), so the app
+            # engine is available and already connected to the correct database.
+            # Previously, separate engines were created from individual settings
+            # fields which could conflict with the existing engine (especially
+            # for SQLite where a second connection causes "no active connection").
+            from src.db.session import engine as app_engine
+
+            logger.info(f"[ProcessFlowExecutor] [DEBUG] Using application engine for database connection")
+            async with app_engine.begin() as conn:
+                for log_data in logs_to_write:
+                    await conn.execute(text("""
+                        INSERT INTO execution_logs (execution_id, content, timestamp, group_id, group_email)
+                        VALUES (:execution_id, :content, :timestamp, :group_id, :group_email)
+                    """), log_data)
+
+            logger.info(f"[ProcessFlowExecutor] Successfully wrote {len(logs_to_write)} logs to execution_logs table")
 
         except Exception as e:
             # Log the error but don't fail the execution - this is a non-critical operation
