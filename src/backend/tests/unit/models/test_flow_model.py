@@ -81,12 +81,19 @@ class TestFlow:
         """Test Flow model foreign key relationships."""
         # Act
         columns = Flow.__table__.columns
-        
+
         # Assert
         # crew_id should be a foreign key to crews.id
         crew_id_fks = [fk for fk in columns['crew_id'].foreign_keys]
         assert len(crew_id_fks) == 1
         assert str(crew_id_fks[0].column) == "crews.id"
+
+    def test_flow_crew_id_cascade_delete(self):
+        """Test that crew_id foreign key has ON DELETE CASCADE."""
+        columns = Flow.__table__.columns
+        crew_id_fks = list(columns['crew_id'].foreign_keys)
+        assert len(crew_id_fks) == 1
+        assert crew_id_fks[0].ondelete == "CASCADE"
 
     def test_flow_indexes(self):
         """Test that the model has the expected database indexes."""
@@ -340,6 +347,59 @@ class TestFlow:
             assert "edges" in pattern
             json.dumps(pattern["nodes"])
             json.dumps(pattern["edges"])
+
+
+class TestFlowInit:
+    """Tests that actually instantiate Flow to cover __init__ logic."""
+
+    def test_defaults_when_no_kwargs(self):
+        """Instantiating with only required 'name' fills all defaults."""
+        flow = Flow(name="basic")
+        assert flow.name == "basic"
+        assert isinstance(flow.id, uuid.UUID)
+        assert flow.nodes == []
+        assert flow.edges == []
+        assert flow.flow_config == {"actions": []}
+        assert isinstance(flow.created_at, datetime)
+        assert isinstance(flow.updated_at, datetime)
+
+    def test_provided_id_is_preserved(self):
+        """If id is passed, __init__ should NOT overwrite it."""
+        fixed_id = uuid.uuid4()
+        flow = Flow(name="x", id=fixed_id)
+        assert flow.id == fixed_id
+
+    def test_provided_nodes_edges_preserved(self):
+        """If nodes/edges are provided, __init__ should keep them."""
+        nodes = [{"id": "n1"}]
+        edges = [{"source": "n1", "target": "n2"}]
+        flow = Flow(name="x", nodes=nodes, edges=edges)
+        assert flow.nodes == nodes
+        assert flow.edges == edges
+
+    def test_flow_config_none_gets_default(self):
+        """flow_config=None results in {'actions': []}."""
+        flow = Flow(name="x", flow_config=None)
+        assert flow.flow_config == {"actions": []}
+
+    def test_flow_config_dict_without_actions_gets_actions_key(self):
+        """A dict config missing 'actions' gets the key added."""
+        flow = Flow(name="x", flow_config={"retries": 3})
+        assert flow.flow_config == {"retries": 3, "actions": []}
+
+    def test_flow_config_with_actions_unchanged(self):
+        """A dict config that already has 'actions' is left alone."""
+        cfg = {"actions": ["a1", "a2"], "retries": 3}
+        flow = Flow(name="x", flow_config=cfg)
+        assert flow.flow_config["actions"] == ["a1", "a2"]
+        assert flow.flow_config["retries"] == 3
+
+    def test_provided_timestamps_preserved(self):
+        """If created_at / updated_at are passed, they are kept."""
+        ts = datetime(2025, 1, 1, 0, 0, 0)
+        flow = Flow(name="x", created_at=ts, updated_at=ts)
+        assert flow.created_at == ts
+        assert flow.updated_at == ts
 
 
 class TestFlowEdgeCases:
