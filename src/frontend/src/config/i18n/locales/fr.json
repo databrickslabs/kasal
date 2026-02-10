@@ -86,6 +86,7 @@
     "filterByEndpoint": "Filtrer par point de terminaison",
     "allEndpoints": "Tous les points de terminaison",
     "noLogs": "Aucun journal disponible",
+    "refresh": "Actualiser",
     "columns": {
       "timestamp": "Horodatage",
       "endpoint": "Point de terminaison",
@@ -107,7 +108,8 @@
       "connectionError": "Échec de la connexion au flux de journaux. Veuillez réessayer.",
       "autoScrollOn": "Défilement automatique ACTIVÉ",
       "autoScrollOff": "Défilement automatique DÉSACTIVÉ",
-      "refreshLogs": "Actualiser les journaux"
+      "refreshLogs": "Actualiser les journaux",
+      "downloadLogs": "Télécharger les journaux"
     }
   },
   "tools": {

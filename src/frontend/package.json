@@ -91,6 +91,7 @@
     "@types/react-redux": "^7.1.33",
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "@vitest/coverage-v8": "^4.0.18",
     "cypress": "^13.6.4",
     "eslint": "^9.17.0",
     "eslint-plugin-react-hooks": "^5.1.0",

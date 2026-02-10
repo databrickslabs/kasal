@@ -31,15 +31,17 @@ def app(mock_group_context):
     from fastapi import FastAPI
     from src.api.execution_trace_router import router
     from src.core.dependencies import get_group_context
-    
+    from tests.unit.router.conftest import register_exception_handlers
+
     app = FastAPI()
     app.include_router(router)
-    
+    register_exception_handlers(app)
+
     async def override_get_group_context():
         return mock_group_context
-    
+
     app.dependency_overrides[get_group_context] = override_get_group_context
-    
+
     return app
 
 
@@ -111,8 +113,8 @@ class TestExecutionTraceRouter:
         response = client.get("/traces/")
         
         assert response.status_code == 500
-        assert "Failed to retrieve traces" in response.json()["detail"]
-    
+        assert "Internal server error" in response.json()["detail"]
+
     # Test get_traces_by_run_id endpoint
     @patch('src.api.execution_trace_router.ExecutionTraceService.get_traces_by_run_id')
     def test_get_traces_by_run_id_success(self, mock_get_traces, client, mock_group_context):
@@ -166,8 +168,8 @@ class TestExecutionTraceRouter:
         response = client.get("/traces/execution/456")
         
         assert response.status_code == 500
-        assert "Failed to retrieve traces" in response.json()["detail"]
-    
+        assert "Internal server error" in response.json()["detail"]
+
     # Test get_traces_by_job_id endpoint
     @patch('src.api.execution_trace_router.ExecutionTraceService.get_traces_by_job_id')
     def test_get_traces_by_job_id_success(self, mock_get_traces, client, mock_group_context):
@@ -221,8 +223,8 @@ class TestExecutionTraceRouter:
         response = client.get("/traces/job/job-123")
         
         assert response.status_code == 500
-        assert "Failed to retrieve traces" in response.json()["detail"]
-    
+        assert "Internal server error" in response.json()["detail"]
+
     # Test get_trace_by_id endpoint
     @patch('src.api.execution_trace_router.ExecutionTraceService.get_trace_by_id_with_group_check')
     def test_get_trace_by_id_success(self, mock_get_trace, client, mock_group_context):
@@ -275,8 +277,8 @@ class TestExecutionTraceRouter:
         response = client.get("/traces/123")
         
         assert response.status_code == 500
-        assert "Failed to retrieve trace" in response.json()["detail"]
-    
+        assert "Internal server error" in response.json()["detail"]
+
     # Test create_trace endpoint
     @patch('src.api.execution_trace_router.ExecutionTraceService.create_trace_with_group')
     def test_create_trace_success(self, mock_create_trace, client, mock_group_context):
@@ -318,7 +320,7 @@ class TestExecutionTraceRouter:
         response = client.post("/traces/", json=trace_data)
         
         assert response.status_code == 500
-        assert "Failed to create trace" in response.json()["detail"]
+        assert "Internal server error" in response.json()["detail"]
     
     # Test delete_traces_by_run_id endpoint
     @patch('src.api.execution_trace_router.ExecutionTraceService.delete_traces_by_run_id_with_group_check')
@@ -344,8 +346,8 @@ class TestExecutionTraceRouter:
         response = client.delete("/traces/execution/456")
         
         assert response.status_code == 500
-        assert "Failed to delete traces" in response.json()["detail"]
-    
+        assert "Internal server error" in response.json()["detail"]
+
     # Test delete_traces_by_job_id endpoint
     @patch('src.api.execution_trace_router.ExecutionTraceService.delete_traces_by_job_id_with_group_check')
     def test_delete_traces_by_job_id_success(self, mock_delete_traces, client, mock_group_context):
@@ -370,8 +372,8 @@ class TestExecutionTraceRouter:
         response = client.delete("/traces/job/job-123")
         
         assert response.status_code == 500
-        assert "Failed to delete traces" in response.json()["detail"]
-    
+        assert "Internal server error" in response.json()["detail"]
+
     # Test delete_trace endpoint
     @patch('src.api.execution_trace_router.ExecutionTraceService.delete_trace_with_group_check')
     def test_delete_trace_success(self, mock_delete_trace, client, mock_group_context):
@@ -416,8 +418,8 @@ class TestExecutionTraceRouter:
         response = client.delete("/traces/123")
         
         assert response.status_code == 500
-        assert "Failed to delete trace" in response.json()["detail"]
-    
+        assert "Internal server error" in response.json()["detail"]
+
     # Test delete_all_traces endpoint
     @patch('src.api.execution_trace_router.ExecutionTraceService.delete_all_traces_for_group')
     def test_delete_all_traces_success(self, mock_delete_all_traces, client, mock_group_context):
@@ -442,8 +444,8 @@ class TestExecutionTraceRouter:
         response = client.delete("/traces/")
         
         assert response.status_code == 500
-        assert "Failed to delete traces" in response.json()["detail"]
-    
+        assert "Internal server error" in response.json()["detail"]
+
     # Test query parameter validation
     @patch('src.api.execution_trace_router.ExecutionTraceService.get_all_traces_for_group')
     def test_get_all_traces_with_custom_params(self, mock_get_all_traces, client, mock_group_context):

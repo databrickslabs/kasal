@@ -201,10 +201,8 @@ export const useSSE = <T = any>(
     });
 
     eventSource.addEventListener('trace', (event: any) => {
-      console.log('[SSE Hook] Raw trace event received:', event);
       try {
         const data = JSON.parse(event.data);
-        console.log('[SSE Hook] Parsed trace data:', data);
         onMessageRef.current({
           data,
           event: 'trace',
@@ -320,29 +318,10 @@ export const useGlobalExecutionSSE = (
   return useSSE(
     endpoint,
     (event) => {
-      // Handle all event types from the global stream
-      if (event.event === 'execution_update') {
-        onUpdate(event);
-      } else if (event.event === 'trace') {
-        // CRITICAL: Pass trace events to onUpdate so GlobalSSEConnection can add to store
-        onUpdate(event);
-        // Also dispatch window event for backwards compatibility with useExecutionMonitoring
-        if (event.data?.job_id) {
-          window.dispatchEvent(new CustomEvent('traceUpdate', {
-            detail: { jobId: event.data.job_id, trace: event.data }
-          }));
-        }
-      } else if (event.event === 'hitl_request') {
-        // Dispatch HITL request event
-        if (event.data?.job_id) {
-          window.dispatchEvent(new CustomEvent('hitlRequest', {
-            detail: event.data
-          }));
-        }
-      } else {
-        // Handle generic data messages
-        onUpdate(event);
-      }
+      // Pass all events through to the consumer (GlobalSSEConnection).
+      // The component is responsible for dispatching window events and
+      // routing data to the store — this hook has no side effects.
+      onUpdate(event);
     },
     {
       ...options,

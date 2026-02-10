@@ -6,33 +6,42 @@ This module provides API endpoints for managing HITL approvals and webhooks.
 
 import logging
 from typing import Annotated
-from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from src.core.dependencies import SessionDep, GroupContextDep
-from src.services.hitl_service import (
-    HITLService,
-    HITLServiceError,
-    HITLApprovalNotFoundError,
-    HITLApprovalAlreadyProcessedError,
-    HITLApprovalExpiredError,
-    HITLPermissionDeniedError
+from fastapi import APIRouter, Depends, Query, status
+
+from src.core.exceptions import (
+    ConflictError,
+    ForbiddenError,
+    GoneError,
+    KasalError,
+    NotFoundError,
 )
-from src.services.hitl_webhook_service import (
-    HITLWebhookService,
-    HITLWebhookServiceError,
-    HITLWebhookNotFoundError
-)
+
+from src.core.dependencies import GroupContextDep, SessionDep
 from src.schemas.hitl import (
-    HITLApprovalResponse,
+    ExecutionHITLStatus,
+    HITLActionResponse,
     HITLApprovalListResponse,
+    HITLApprovalResponse,
     HITLApproveRequest,
     HITLRejectRequest,
-    HITLActionResponse,
-    ExecutionHITLStatus,
     HITLWebhookCreate,
-    HITLWebhookUpdate,
+    HITLWebhookListResponse,
     HITLWebhookResponse,
-    HITLWebhookListResponse
+    HITLWebhookUpdate,
+)
+from src.services.hitl_service import (
+    HITLApprovalAlreadyProcessedError,
+    HITLApprovalExpiredError,
+    HITLApprovalNotFoundError,
+    HITLPermissionDeniedError,
+    HITLService,
+    HITLServiceError,
+)
+from src.services.hitl_webhook_service import (
+    HITLWebhookNotFoundError,
+    HITLWebhookService,
+    HITLWebhookServiceError,
 )
 
 logger = logging.getLogger(__name__)
@@ -43,6 +52,7 @@ router = APIRouter(prefix="/hitl", tags=["Human in the Loop"])
 # =============================================================================
 # Dependency Providers
 # =============================================================================
+
 
 async def get_hitl_service(session: SessionDep) -> HITLService:
     """
@@ -82,6 +92,7 @@ HITLWebhookServiceDep = Annotated[HITLWebhookService, Depends(get_hitl_webhook_s
 # Approval Endpoints
 # =============================================================================
 
+
 @router.get("/pending", response_model=HITLApprovalListResponse)
 async def get_pending_approvals(
     service: HITLServiceDep,
@@ -97,16 +108,11 @@ async def get_pending_approvals(
     """
     try:
         return await service.get_pending_approvals(
-            group_id=group_context.primary_group_id,
-            limit=limit,
-            offset=offset
+            group_id=group_context.primary_group_id, limit=limit, offset=offset
         )
     except HITLServiceError as e:
         logger.error(f"Error getting pending approvals: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise KasalError(str(e))
 
 
 @router.get("/approvals/{approval_id}", response_model=HITLApprovalResponse)
@@ -121,15 +127,11 @@ async def get_approval(
     try:
         # Get execution status which includes the approval
         approval = await service.approval_repo.get_by_id(
-            approval_id,
-            group_context.primary_group_id
+            approval_id, group_context.primary_group_id
         )
 
         if not approval:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Approval {approval_id} not found"
-            )
+            raise NotFoundError(f"Approval {approval_id} not found")
 
         from src.schemas.hitl import HITLApprovalStatusEnum, HITLRejectionActionEnum
 
@@ -150,22 +152,18 @@ async def get_approval(
             rejection_reason=approval.rejection_reason,
             rejection_action=(
                 HITLRejectionActionEnum(approval.rejection_action)
-                if approval.rejection_action else None
+                if approval.rejection_action
+                else None
             ),
             expires_at=approval.expires_at,
             is_expired=approval.is_expired,
             created_at=approval.created_at,
-            group_id=approval.group_id
+            group_id=approval.group_id,
         )
 
-    except HTTPException:
-        raise
     except HITLServiceError as e:
         logger.error(f"Error getting approval {approval_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise KasalError(str(e))
 
 
 @router.post("/approvals/{approval_id}/approve", response_model=HITLActionResponse)
@@ -186,36 +184,21 @@ async def approve_gate(
             approved_by=group_context.group_email or "unknown",
             group_id=group_context.primary_group_id,
             comment=request.comment,
-            user_token=group_context.access_token  # Pass user's token for OBO auth on resume
+            user_token=group_context.access_token,  # Pass user's token for OBO auth on resume
         )
         return result
 
     except HITLApprovalNotFoundError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
-        )
+        raise NotFoundError(str(e))
     except HITLApprovalAlreadyProcessedError as e:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=str(e)
-        )
+        raise ConflictError(str(e))
     except HITLApprovalExpiredError as e:
-        raise HTTPException(
-            status_code=status.HTTP_410_GONE,
-            detail=str(e)
-        )
+        raise GoneError(str(e))
     except HITLPermissionDeniedError as e:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=str(e)
-        )
+        raise ForbiddenError(str(e))
     except HITLServiceError as e:
         logger.error(f"Error approving gate {approval_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise KasalError(str(e))
 
 
 @router.post("/approvals/{approval_id}/reject", response_model=HITLActionResponse)
@@ -238,36 +221,21 @@ async def reject_gate(
             rejected_by=group_context.group_email or "unknown",
             group_id=group_context.primary_group_id,
             reason=request.reason,
-            action=request.action
+            action=request.action,
         )
         return result
 
     except HITLApprovalNotFoundError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
-        )
+        raise NotFoundError(str(e))
     except HITLApprovalAlreadyProcessedError as e:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=str(e)
-        )
+        raise ConflictError(str(e))
     except HITLApprovalExpiredError as e:
-        raise HTTPException(
-            status_code=status.HTTP_410_GONE,
-            detail=str(e)
-        )
+        raise GoneError(str(e))
     except HITLPermissionDeniedError as e:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=str(e)
-        )
+        raise ForbiddenError(str(e))
     except HITLServiceError as e:
         logger.error(f"Error rejecting gate {approval_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise KasalError(str(e))
 
 
 @router.get("/execution/{execution_id}", response_model=ExecutionHITLStatus)
@@ -284,20 +252,17 @@ async def get_execution_hitl_status(
     """
     try:
         return await service.get_execution_hitl_status(
-            execution_id=execution_id,
-            group_id=group_context.primary_group_id
+            execution_id=execution_id, group_id=group_context.primary_group_id
         )
     except HITLServiceError as e:
         logger.error(f"Error getting execution HITL status: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise KasalError(str(e))
 
 
 # =============================================================================
 # Webhook Endpoints
 # =============================================================================
+
 
 @router.get("/webhooks", response_model=HITLWebhookListResponse)
 async def list_webhooks(
@@ -308,18 +273,15 @@ async def list_webhooks(
     List all HITL webhooks for the current user's group.
     """
     try:
-        return await service.list_webhooks(
-            group_id=group_context.primary_group_id
-        )
+        return await service.list_webhooks(group_id=group_context.primary_group_id)
     except HITLWebhookServiceError as e:
         logger.error(f"Error listing webhooks: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise KasalError(str(e))
 
 
-@router.post("/webhooks", response_model=HITLWebhookResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/webhooks", response_model=HITLWebhookResponse, status_code=status.HTTP_201_CREATED
+)
 async def create_webhook(
     webhook_data: HITLWebhookCreate,
     service: HITLWebhookServiceDep,
@@ -334,16 +296,12 @@ async def create_webhook(
     """
     try:
         return await service.create_webhook(
-            webhook_data=webhook_data,
-            group_id=group_context.primary_group_id
+            webhook_data=webhook_data, group_id=group_context.primary_group_id
         )
 
     except HITLWebhookServiceError as e:
         logger.error(f"Error creating webhook: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise KasalError(str(e))
 
 
 @router.get("/webhooks/{webhook_id}", response_model=HITLWebhookResponse)
@@ -357,20 +315,13 @@ async def get_webhook(
     """
     try:
         return await service.get_webhook(
-            webhook_id=webhook_id,
-            group_id=group_context.primary_group_id
+            webhook_id=webhook_id, group_id=group_context.primary_group_id
         )
     except HITLWebhookNotFoundError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
-        )
+        raise NotFoundError(str(e))
     except HITLWebhookServiceError as e:
         logger.error(f"Error getting webhook {webhook_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise KasalError(str(e))
 
 
 @router.patch("/webhooks/{webhook_id}", response_model=HITLWebhookResponse)
@@ -387,20 +338,14 @@ async def update_webhook(
         return await service.update_webhook(
             webhook_id=webhook_id,
             webhook_data=webhook_data,
-            group_id=group_context.primary_group_id
+            group_id=group_context.primary_group_id,
         )
 
     except HITLWebhookNotFoundError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
-        )
+        raise NotFoundError(str(e))
     except HITLWebhookServiceError as e:
         logger.error(f"Error updating webhook {webhook_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise KasalError(str(e))
 
 
 @router.delete("/webhooks/{webhook_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -414,18 +359,11 @@ async def delete_webhook(
     """
     try:
         await service.delete_webhook(
-            webhook_id=webhook_id,
-            group_id=group_context.primary_group_id
+            webhook_id=webhook_id, group_id=group_context.primary_group_id
         )
 
     except HITLWebhookNotFoundError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
-        )
+        raise NotFoundError(str(e))
     except HITLWebhookServiceError as e:
         logger.error(f"Error deleting webhook {webhook_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise KasalError(str(e))

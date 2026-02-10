@@ -3,38 +3,44 @@ asyncpg
 pg8000  # Pure Python PostgreSQL driver for synchronous operations in subprocesses
 aiosqlite
 aiofiles>=23.0.0  # For async file I/O operations
-pydantic-settings
+pydantic-settings==2.10.1
 cryptography
 python-multipart
 databricks
-databricks-sdk>=0.65.0  # Latest version - Lakebase features may require additional setup
-databricks-vectorsearch
-azure-identity  # Required for Power BI Service Principal authentication
+databricks-sdk==0.76.0  # Pinned from uv.lock to prevent pip backtracking
+databricks-vectorsearch==0.63  # Pinned from uv.lock to prevent pip backtracking
 croniter
-crewai[tools]>=0.193.2
-pydantic[email]
+crewai[tools]==1.9.3  # Pinned from uv.lock - [tools] extra installs crewai-tools package
+pydantic[email]==2.11.10  # Pinned from uv.lock to prevent pip backtracking
 passlib
 email-validator
 google-api-python-client
 pysendpulse
-langchain
-crewai_tools>=0.73.1
+langchain==0.3.27  # Pinned from uv.lock to prevent pip backtracking
 nixtla
 greenlet
 wheel
 selenium
 python-pptx
 urllib3>=1.26.6
-mcp==1.9.0
-mcpadapt
+mcp>=1.23.1,<1.24.0  # Required by crewai>=1.9.3
+mcpadapt==0.1.10
 pytest
 pytest-asyncio
 
-# Dependency conflict resolution
+# Dependency conflict resolution - pinned from uv.lock
 bcrypt==4.0.1
 starlette==0.40.0
 httpx-sse==0.4.0  # Required by cohere 5.18.0
 rich>=13.7.0,<14.0.0  # Required by embedchain 0.1.128
+openai==1.83.0  # Pinned to prevent jiter backtracking
+instructor==1.12.0  # Pinned from uv.lock to prevent pip backtracking
+langchain-core==0.3.83  # Pinned from uv.lock to prevent pip backtracking
+langchain-openai==0.3.23  # Pinned from uv.lock to prevent pip backtracking
+langsmith==0.5.0  # Pinned from uv.lock to prevent pip backtracking
+chromadb==1.1.1  # Pinned from uv.lock to prevent pip backtracking
+sse-starlette==3.0.3  # Pinned from uv.lock to prevent pip backtracking
+grpcio==1.76.0  # Pinned from uv.lock to prevent pip backtracking
 
 # Add any other dependencies your project requires below
 pytest-cov
@@ -42,13 +48,7 @@ psutil  # For process management and cleanup in ProcessCrewExecutor
 mlflow==3.4.0  # For LLM observability and tracking in Databricks
 azure-identity>=1.15.0  # For Power BI authentication (UsernamePasswordCredential)
 protobuf>=5.29.0,<6.0.0  # mem0ai compatibility
-databricks-agents>=1.4.0
-grpcio-status>=1.62.0,<1.71.0  # Compatible with protobuf <6.0.0
-
-# DSPy dependencies for prompt optimization
-dspy-ai>=2.5.0  # DSPy framework for prompt optimization
-optuna>=3.5.0  # For hyperparameter optimization with DSPy
-numpy>=1.24.0  # Required by DSPy for numerical operations
-redis>=5.0.0  # Optional: For distributed caching of optimized modules
+databricks-agents==1.4.0  # Pinned from uv.lock to prevent pip backtracking
+grpcio-status==1.70.0  # Pinned from uv.lock - compatible with protobuf <6.0.0
 
 # Security - Prompt injection detection

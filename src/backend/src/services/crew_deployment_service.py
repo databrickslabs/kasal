@@ -197,8 +197,7 @@ class CrewDeploymentService:
                         'pip',
                         {
                             'pip': [
-                                'crewai>=0.80.0',
-                                'crewai-tools>=0.12.0',
+                                'crewai[tools]>=1.9.3',  # [tools] extra installs crewai-tools
                                 'pydantic>=2.0.0',
                                 'cloudpickle',
                             ]

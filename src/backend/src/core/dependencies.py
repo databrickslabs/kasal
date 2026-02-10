@@ -37,6 +37,9 @@ async def get_group_context(
     """
     Extract group context from Databricks Apps or OAuth2-Proxy headers.
 
+    PERFORMANCE: Uses request-scoped caching to avoid repeated database queries
+    when multiple endpoints/dependencies need the GroupContext in the same request.
+
     For Databricks Apps deployment with OAuth2-Proxy, this extracts group information from:
     - group_id: Explicit group ID from frontend group selector (matches database column name)
     - X-Group-Domain: Explicit group domain from frontend group selector
@@ -65,6 +68,18 @@ async def get_group_context(
     user_email = x_auth_request_email or x_forwarded_email
     access_token = x_auth_request_access_token or x_forwarded_access_token
 
+    # =========================================================================
+    # REQUEST-SCOPED CACHE: Check if GroupContext already exists for this request
+    # =========================================================================
+    # Create a cache key that includes email and group_id to handle group switching
+    cache_key = f"group_context:{user_email}:{x_group_id}"
+
+    if hasattr(request.state, '_group_context_cache'):
+        cached = request.state._group_context_cache.get(cache_key)
+        if cached is not None:
+            logger.info(f"[CACHE HIT] Returning cached GroupContext for {user_email}")
+            return cached
+
     logger.debug(f"get_group_context called with:")
     logger.debug(f"  X-Auth-Request-Email: {x_auth_request_email}")
     logger.debug(f"  X-Forwarded-Email: {x_forwarded_email}")
@@ -81,6 +96,15 @@ async def get_group_context(
                 group_id=x_group_id  # Pass the selected group ID from header
             )
             logger.debug(f"Created group context: primary_group_id={group_context.primary_group_id}, group_ids={group_context.group_ids}, email={group_context.group_email}, role={group_context.user_role}")
+
+            # =========================================================================
+            # CACHE: Store in request.state for subsequent accesses in this request
+            # =========================================================================
+            if not hasattr(request.state, '_group_context_cache'):
+                request.state._group_context_cache = {}
+            request.state._group_context_cache[cache_key] = group_context
+            logger.info(f"[CACHE SET] Cached GroupContext for {user_email}")
+
             return group_context
         except ValueError as e:
             # SECURITY: Unauthorized group access attempt

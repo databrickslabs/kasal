@@ -304,15 +304,14 @@ This project is exported from Kasal and follows your organization's licensing te
     def _generate_requirements(self, tools: List[str]) -> str:
         """Generate requirements.txt content"""
         requirements = [
-            'crewai>=0.80.0',
-            'crewai-tools>=0.12.0',
+            'crewai[tools]>=1.9.3',  # [tools] extra installs crewai-tools
             'pydantic>=2.0.0',
             'python-dotenv>=1.0.0',
         ]
 
         # Add tool-specific dependencies
         if 'SerperDevTool' in tools:
-            requirements.append('# SerperDevTool (already included in crewai-tools)')
+            requirements.append('# SerperDevTool (included via crewai[tools])')
 
         return '\n'.join(requirements) + '\n'
 

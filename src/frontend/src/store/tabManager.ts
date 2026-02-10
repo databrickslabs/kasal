@@ -18,6 +18,11 @@ export interface TabData {
   name: string;
   nodes: Node[];
   edges: Edge[];
+  // Flow canvas nodes/edges (independent from crew canvas)
+  flowNodes: Node[];
+  flowEdges: Edge[];
+  // View mode: which canvas is currently visible in this tab
+  viewMode: 'crew' | 'flow';
   isActive: boolean;
   isDirty: boolean; // Track if tab has unsaved changes
   createdAt: Date;
@@ -50,6 +55,9 @@ interface TabManagerState {
   updateTabName: (tabId: string, name: string) => void;
   updateTabNodes: (tabId: string, nodes: Node[]) => void;
   updateTabEdges: (tabId: string, edges: Edge[]) => void;
+  updateTabFlowNodes: (tabId: string, flowNodes: Node[]) => void;
+  updateTabFlowEdges: (tabId: string, flowEdges: Edge[]) => void;
+  updateTabViewMode: (tabId: string, viewMode: 'crew' | 'flow') => void;
   markTabDirty: (tabId: string) => void;
   markTabClean: (tabId: string) => void;
   duplicateTab: (tabId: string) => string;
@@ -154,6 +162,9 @@ export const useTabManagerStore = create<TabManagerState>()(
           name: tabName,
           nodes: [],
           edges: [],
+          flowNodes: [],
+          flowEdges: [],
+          viewMode: 'crew', // Default to crew canvas view
           isActive: true,
           isDirty: false,
           createdAt: new Date(),
@@ -268,23 +279,23 @@ export const useTabManagerStore = create<TabManagerState>()(
         set(state => {
           const tab = state.tabs.find(t => t.id === tabId);
           if (!tab) return state;
-          
+
           const edgesChanged = edgesHaveActuallyChanged(tab.edges, edges);
           const shouldMarkDirty = edgesChanged && (!tab.savedCrewId || tab.isDirty);
-          
+
           // Clear execution status when edges are meaningfully changed
           const shouldClearExecutionStatus = edgesChanged && tab.executionStatus;
-          
+
           return {
             tabs: state.tabs.map(t =>
               t.id === tabId
-                ? { 
-                    ...t, 
+                ? {
+                    ...t,
                     edges: edges.map(edge => ({
                       ...edge,
                       data: edge.data ? { ...edge.data } : undefined
-                    })), 
-                    isDirty: shouldMarkDirty, 
+                    })),
+                    isDirty: shouldMarkDirty,
                     lastModified: new Date(),
                     // Clear execution status if edges changed
                     executionStatus: shouldClearExecutionStatus ? undefined : t.executionStatus,
@@ -294,6 +305,69 @@ export const useTabManagerStore = create<TabManagerState>()(
             )
           };
         });
+      },
+
+      updateTabFlowNodes: (tabId: string, flowNodes: Node[]) => {
+        set(state => {
+          const tab = state.tabs.find(t => t.id === tabId);
+          if (!tab) return state;
+
+          const nodesChanged = nodesHaveActuallyChanged(tab.flowNodes, flowNodes);
+
+          if (!nodesChanged) return state;
+
+          return {
+            tabs: state.tabs.map(t =>
+              t.id === tabId
+                ? {
+                    ...t,
+                    flowNodes: flowNodes.map(node => ({
+                      ...node,
+                      position: { ...node.position },
+                      data: { ...node.data }
+                    })),
+                    lastModified: new Date()
+                  }
+                : t
+            )
+          };
+        });
+      },
+
+      updateTabFlowEdges: (tabId: string, flowEdges: Edge[]) => {
+        set(state => {
+          const tab = state.tabs.find(t => t.id === tabId);
+          if (!tab) return state;
+
+          const edgesChanged = edgesHaveActuallyChanged(tab.flowEdges, flowEdges);
+
+          if (!edgesChanged) return state;
+
+          return {
+            tabs: state.tabs.map(t =>
+              t.id === tabId
+                ? {
+                    ...t,
+                    flowEdges: flowEdges.map(edge => ({
+                      ...edge,
+                      data: edge.data ? { ...edge.data } : undefined
+                    })),
+                    lastModified: new Date()
+                  }
+                : t
+            )
+          };
+        });
+      },
+
+      updateTabViewMode: (tabId: string, viewMode: 'crew' | 'flow') => {
+        set(state => ({
+          tabs: state.tabs.map(tab =>
+            tab.id === tabId
+              ? { ...tab, viewMode }
+              : tab
+          )
+        }));
       },
 
       markTabDirty: (tabId: string) => {
@@ -334,6 +408,17 @@ export const useTabManagerStore = create<TabManagerState>()(
             id: uuidv4(), // Generate new IDs for duplicated edges
             selected: false
           })),
+          flowNodes: sourceTab.flowNodes.map(node => ({
+            ...node,
+            id: uuidv4(), // Generate new IDs for duplicated flow nodes
+            selected: false
+          })),
+          flowEdges: sourceTab.flowEdges.map(edge => ({
+            ...edge,
+            id: uuidv4(), // Generate new IDs for duplicated flow edges
+            selected: false
+          })),
+          viewMode: sourceTab.viewMode, // Preserve the view mode
           isActive: true,
           isDirty: true,
           createdAt: new Date(),
@@ -346,7 +431,7 @@ export const useTabManagerStore = create<TabManagerState>()(
           chatSessionId: uuidv4() // New chat session for duplicated tab
         };
 
-        // Update edge references to point to new node IDs
+        // Update edge references to point to new node IDs (crew canvas)
         const nodeIdMap = new Map();
         sourceTab.nodes.forEach((oldNode, index) => {
           nodeIdMap.set(oldNode.id, newTab.nodes[index].id);
@@ -356,6 +441,18 @@ export const useTabManagerStore = create<TabManagerState>()(
           ...edge,
           source: nodeIdMap.get(edge.source) || edge.source,
           target: nodeIdMap.get(edge.target) || edge.target
+        }));
+
+        // Update edge references to point to new node IDs (flow canvas)
+        const flowNodeIdMap = new Map();
+        sourceTab.flowNodes.forEach((oldNode, index) => {
+          flowNodeIdMap.set(oldNode.id, newTab.flowNodes[index].id);
+        });
+
+        newTab.flowEdges = newTab.flowEdges.map(edge => ({
+          ...edge,
+          source: flowNodeIdMap.get(edge.source) || edge.source,
+          target: flowNodeIdMap.get(edge.target) || edge.target
         }));
 
         set(state => ({
@@ -559,7 +656,12 @@ export const useTabManagerStore = create<TabManagerState>()(
             lastSavedAt: tab.lastSavedAt ? new Date(tab.lastSavedAt) : undefined,
             lastExecutionTime: tab.lastExecutionTime ? new Date(tab.lastExecutionTime) : undefined,
             // Migration: Add group_id to existing tabs that don't have it
-            group_id: tab.group_id || currentGroupId
+            group_id: tab.group_id || currentGroupId,
+            // Migration: Add flowNodes/flowEdges to existing tabs that don't have them
+            flowNodes: tab.flowNodes || [],
+            flowEdges: tab.flowEdges || [],
+            // Migration: Add viewMode to existing tabs that don't have it
+            viewMode: tab.viewMode || 'crew'
           }));
         }
       }

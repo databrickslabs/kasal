@@ -786,8 +786,8 @@ def run_crew_in_process(
                     # Continue execution even if MLflow setup fails
 
             # Create services using session factory
-            from src.db.session import async_session_factory
-            async with async_session_factory() as session:
+            from src.db.session import safe_async_session
+            async with safe_async_session() as session:
                 # Extract group_id first for service initialization
                 group_id = None
                 try:
@@ -954,7 +954,7 @@ def run_crew_in_process(
                     from crewai.events import crewai_event_bus
 
                     # Create and register the event listeners with group_context
-                    agent_trace_listener = AgentTraceEventListener(job_id=execution_id, group_context=group_context)
+                    agent_trace_listener = AgentTraceEventListener(job_id=execution_id, group_context=group_context, task_event_queue=log_queue)
                     agent_trace_listener.setup_listeners(crewai_event_bus)
                     async_logger.info(f"Created and registered AgentTraceEventListener for {execution_id}")
 
@@ -1766,6 +1766,12 @@ class ProcessCrewExecutor:
                 os.environ.pop('KASAL_EXECUTION_ID', None)
 
         try:
+            # Start a background task to relay task lifecycle events from subprocess
+            # to the main process for real-time SSE broadcasting
+            relay_task = asyncio.create_task(
+                self._relay_task_events(log_queue, execution_id)
+            )
+
             # Wait for the process to complete with optional timeout
             if timeout:
                 # Use asyncio to wait with timeout
@@ -1776,6 +1782,13 @@ class ProcessCrewExecutor:
                 # Wait indefinitely
                 loop = asyncio.get_event_loop()
                 await loop.run_in_executor(None, process.join)
+
+            # Stop the relay task now that the subprocess has finished
+            relay_task.cancel()
+            try:
+                await relay_task
+            except asyncio.CancelledError:
+                pass
 
             # Process logs from crew.log file and write to database
             # This reads the crew.log file after execution to capture ALL logs
@@ -1968,6 +1981,73 @@ class ProcessCrewExecutor:
                 # Should already be deleted above, but ensure cleanup
                 del self._running_executors[execution_id]
 
+    async def _relay_task_events(self, task_event_queue, execution_id: str):
+        """
+        Read task lifecycle events from the subprocess multiprocessing.Queue
+        and broadcast them via SSE for real-time frontend updates.
+
+        Runs concurrently with process.join() so events are relayed in real-time.
+        """
+        from queue import Empty
+        from src.core.sse_manager import sse_manager, SSEEvent
+
+        logger.info(f"[ProcessCrewExecutor] Starting task event relay for {execution_id}")
+
+        while True:
+            try:
+                # Block with short timeout to allow cancellation checks
+                trace_data = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: task_event_queue.get(block=True, timeout=0.5)
+                )
+            except Empty:
+                continue
+            except asyncio.CancelledError:
+                logger.info(f"[ProcessCrewExecutor] Task event relay cancelled for {execution_id}")
+                break
+            except Exception as e:
+                logger.warning(f"[ProcessCrewExecutor] Error reading task event queue: {e}")
+                continue
+
+            if trace_data is None:
+                continue
+
+            event_type = trace_data.get("event_type", "")
+            if event_type not in ("task_started", "task_completed", "task_failed"):
+                continue
+
+            try:
+                extra_data = trace_data.get("extra_data", {})
+                trace_metadata = trace_data.get("trace_metadata", extra_data)
+
+                sse_trace_data = {
+                    "job_id": execution_id,
+                    "event_source": trace_data.get("event_source", ""),
+                    "event_type": event_type,
+                    "event_context": trace_data.get("event_context", ""),
+                    "output": trace_data.get("output"),
+                    "trace_metadata": {
+                        "task_name": extra_data.get("task_name") or trace_data.get("event_context"),
+                        "task_id": extra_data.get("task_id"),
+                        "agent_role": extra_data.get("agent_role"),
+                        "crew_name": extra_data.get("crew_name"),
+                        "frontend_task_id": extra_data.get("frontend_task_id"),
+                        **trace_metadata
+                    },
+                    "created_at": trace_data.get("created_at", datetime.now().isoformat()) if isinstance(trace_data.get("created_at"), str) else datetime.now().isoformat()
+                }
+
+                event = SSEEvent(
+                    data=sse_trace_data,
+                    event="trace",
+                    id=f"{execution_id}_{event_type}_{datetime.now().timestamp()}"
+                )
+                sent_count = await sse_manager.broadcast_to_job(execution_id, event)
+                logger.info(
+                    f"[ProcessCrewExecutor] Relayed {event_type} SSE to {sent_count} clients for job {execution_id}"
+                )
+            except Exception as sse_err:
+                logger.warning(f"[ProcessCrewExecutor] Failed to broadcast relayed {event_type}: {sse_err}")
+
     async def _process_log_queue(self, log_queue, execution_id: str, group_context=None):
         """
         Read crew.log file and write logs for the execution to the database.
@@ -1985,9 +2065,7 @@ class ProcessCrewExecutor:
             import os
             import json
             from datetime import datetime, timezone
-            from sqlalchemy.ext.asyncio import create_async_engine
             from sqlalchemy import text
-            from src.config.settings import settings
 
             # Get the crew.log path
             log_dir = os.environ.get('LOG_DIR')
@@ -2059,33 +2137,23 @@ class ProcessCrewExecutor:
             else:
                 logger.info(f"Found {len(logs_to_write)-1} logs for execution {exec_id_short} in crew.log")
 
-            # Build database URL
-            if settings.DATABASE_TYPE == 'sqlite':
-                db_url = f'sqlite+aiosqlite:///{settings.SQLITE_DB_PATH}'
-                logger.info(f"[ProcessCrewExecutor] [DEBUG] Using SQLite database: {settings.SQLITE_DB_PATH}")
-            else:
-                postgres_user = settings.POSTGRES_USER or 'postgres'
-                postgres_password = settings.POSTGRES_PASSWORD or 'postgres'
-                postgres_server = settings.POSTGRES_SERVER or 'localhost'
-                postgres_port = settings.POSTGRES_PORT or '5432'
-                postgres_db = settings.POSTGRES_DB or 'kasal'
-                db_url = f'postgresql+asyncpg://{postgres_user}:{postgres_password}@{postgres_server}:{postgres_port}/{postgres_db}'
-                logger.info(f"[ProcessCrewExecutor] [DEBUG] Using PostgreSQL database: {postgres_server}:{postgres_port}/{postgres_db}")
+            # Use the application's existing engine from session.py.
+            # This runs in the main process (after process.join), so the app
+            # engine is available and already connected to the correct database.
+            # Previously, a one-off engine was created from individual settings
+            # fields (POSTGRES_SERVER, POSTGRES_PORT, etc.) which default to
+            # localhost — breaking in Databricks Apps where DATABASE_URI is set
+            # as a single env var pointing to the managed PostgreSQL instance.
+            from src.db.session import engine as app_engine
 
-            # Write logs to database
-            logger.info(f"[ProcessCrewExecutor] [DEBUG] About to create async engine for database connection")
-            engine = create_async_engine(db_url)
-            logger.info(f"[ProcessCrewExecutor] [DEBUG] Async engine created successfully")
-            async with engine.begin() as conn:
+            logger.info(f"[ProcessCrewExecutor] [DEBUG] Using application engine for database connection")
+            async with app_engine.begin() as conn:
                 for log_data in logs_to_write:
                     await conn.execute(text("""
                         INSERT INTO execution_logs (execution_id, content, timestamp, group_id, group_email)
                         VALUES (:execution_id, :content, :timestamp, :group_id, :group_email)
                     """), log_data)
 
-            logger.info(f"[ProcessCrewExecutor] [DEBUG] About to dispose async engine")
-            await engine.dispose()
-            logger.info(f"[ProcessCrewExecutor] [DEBUG] Async engine disposed successfully")
             logger.info(f"[ProcessCrewExecutor] Successfully wrote {len(logs_to_write)} logs to execution_logs table")
 
         except Exception as e:

@@ -1000,6 +1000,132 @@ class TestActual100PercentCoverage:
             except ImportError:
                 # Module might not be importable due to test environment
                 pass
-    
-    
+
+
+# ===========================================================================
+# _validate_identifier tests
+# ===========================================================================
+
+from src.db.session import _validate_identifier as session_validate_identifier
+
+
+class TestSessionValidateIdentifier:
+    """Tests for _validate_identifier in db/session.py."""
+
+    @pytest.mark.parametrize(
+        "name",
+        ["users", "execution_logs", "_private", "Table123", "a", "_", "ALLCAPS"],
+    )
+    def test_accepts_valid(self, name):
+        assert session_validate_identifier(name) == name
+
+    def test_rejects_empty(self):
+        with pytest.raises(ValueError):
+            session_validate_identifier("")
+
+    def test_rejects_none(self):
+        with pytest.raises((ValueError, TypeError, AttributeError)):
+            session_validate_identifier(None)
+
+    @pytest.mark.parametrize("name", ["123table", "1", "0users"])
+    def test_rejects_leading_digit(self, name):
+        with pytest.raises(ValueError):
+            session_validate_identifier(name)
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            "users; DROP TABLE users; --",
+            "schema.table",
+            "my-table",
+            "my table",
+            "table'name",
+            "users;",
+            "table()",
+            "table\nname",
+            "user@domain",
+        ],
+    )
+    def test_rejects_injection_payloads(self, payload):
+        with pytest.raises(ValueError):
+            session_validate_identifier(payload)
+
+    def test_error_contains_default_kind(self):
+        with pytest.raises(ValueError, match="identifier"):
+            session_validate_identifier("bad-name")
+
+    def test_error_contains_custom_kind(self):
+        with pytest.raises(ValueError, match="database name"):
+            session_validate_identifier("bad-name", "database name")
+
+    def test_error_contains_repr(self):
+        try:
+            session_validate_identifier("bad name")
+            pytest.fail("Expected ValueError")
+        except ValueError as exc:
+            assert "'bad name'" in str(exc)
+
+
+class TestSafeAsyncSession:
+    """Tests for the safe_async_session context manager."""
+
+    @pytest.mark.asyncio
+    async def test_yields_session_and_closes(self):
+        """Test that safe_async_session yields a session and closes it."""
+        mock_session = AsyncMock()
+        mock_factory = MagicMock(return_value=mock_session)
+
+        with patch('src.db.session.async_session_factory', mock_factory):
+            from src.db.session import safe_async_session
+
+            async with safe_async_session() as session:
+                assert session is mock_session
+
+            mock_session.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_suppresses_close_errors(self):
+        """Test that close errors are suppressed (stale SQLite connections)."""
+        mock_session = AsyncMock()
+        mock_session.close.side_effect = Exception("no active connection")
+        mock_factory = MagicMock(return_value=mock_session)
+
+        with patch('src.db.session.async_session_factory', mock_factory):
+            from src.db.session import safe_async_session
+
+            # Should NOT raise even though close() throws
+            async with safe_async_session() as session:
+                assert session is mock_session
+
+    @pytest.mark.asyncio
+    async def test_propagates_body_exceptions(self):
+        """Test that exceptions inside the with-block propagate normally."""
+        mock_session = AsyncMock()
+        mock_factory = MagicMock(return_value=mock_session)
+
+        with patch('src.db.session.async_session_factory', mock_factory):
+            from src.db.session import safe_async_session
+
+            with pytest.raises(ValueError, match="test error"):
+                async with safe_async_session() as session:
+                    raise ValueError("test error")
+
+            # close should still be called even after body exception
+            mock_session.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_close_error_during_body_exception(self):
+        """Test body exception propagates even when close also fails."""
+        mock_session = AsyncMock()
+        mock_session.close.side_effect = Exception("stale connection")
+        mock_factory = MagicMock(return_value=mock_session)
+
+        with patch('src.db.session.async_session_factory', mock_factory):
+            from src.db.session import safe_async_session
+
+            with pytest.raises(RuntimeError, match="body error"):
+                async with safe_async_session() as session:
+                    raise RuntimeError("body error")
+
+
 

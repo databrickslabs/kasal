@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional, Dict, Any, Union
-from sqlalchemy import select, update, delete, and_, or_, func
-from src.models.user import User, RefreshToken
+from sqlalchemy import select, update, or_, func
+from src.models.user import User
 from src.core.base_repository import BaseRepository
 
 
@@ -44,37 +44,6 @@ class UserRepository(BaseRepository[User]):
 
 
 # UserProfileRepository removed - display_name moved to User model
-
-
-class RefreshTokenRepository(BaseRepository[RefreshToken]):
-    """Repository for RefreshToken model"""
-
-    async def get_by_token(self, token: str) -> Optional[RefreshToken]:
-        """Get a refresh token by token value"""
-        query = select(self.model).where(self.model.token == token)
-        result = await self.session.execute(query)
-        return result.scalars().first()
-
-    async def get_by_user_id(self, user_id: str) -> List[RefreshToken]:
-        """Get all refresh tokens for a user"""
-        query = select(self.model).where(self.model.user_id == user_id)
-        result = await self.session.execute(query)
-        return list(result.scalars().all())
-
-    async def revoke_token(self, token: str) -> None:
-        """Revoke a refresh token"""
-        query = update(self.model).where(self.model.token == token).values(is_revoked=True)
-        await self.session.execute(query)
-
-    async def revoke_all_user_tokens(self, user_id: str) -> None:
-        """Revoke all refresh tokens for a user"""
-        query = update(self.model).where(self.model.user_id == user_id).values(is_revoked=True)
-        await self.session.execute(query)
-
-    async def delete_expired_tokens(self) -> None:
-        """Delete expired refresh tokens"""
-        query = delete(self.model).where(self.model.expires_at < datetime.utcnow())
-        await self.session.execute(query)
 
 
 # Legacy compatibility - maintain old names for backward compatibility during migration

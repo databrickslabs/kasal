@@ -48,7 +48,11 @@ class AgentBase(BaseModel):
     
     # Knowledge sources
     knowledge_sources: List[Any] = Field(default_factory=list)
-    
+
+    # Date awareness settings (CrewAI 1.9+)
+    inject_date: bool = Field(default=True, description="Injects current date into agent's context for time-sensitive tasks. Enabled by default.")
+    date_format: Optional[str] = Field(default=None, description="Custom date format string (e.g., '%B %d, %Y' for 'February 05, 2026'). Defaults to ISO format if not specified.")
+
     @field_validator('max_rpm', mode='before')
     @classmethod
     def coerce_max_rpm_none_to_default(cls, v):
@@ -116,7 +120,11 @@ class AgentUpdate(BaseModel):
     
     # Knowledge sources
     knowledge_sources: Optional[List[Any]] = None
-    
+
+    # Date awareness settings (CrewAI 1.9+)
+    inject_date: Optional[bool] = None
+    date_format: Optional[str] = None
+
     @field_validator('allow_code_execution', mode='before')
     @classmethod
     def force_code_execution_false(cls, v):

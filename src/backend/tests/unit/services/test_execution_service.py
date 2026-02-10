@@ -558,3 +558,150 @@ class TestReasoningFieldHandling:
         assert inputs["reasoning"] is False
         assert inputs["planning"] is True
 
+
+class TestAdHocFlowValidation:
+    """Test ad-hoc flow execution validation (no flow_id, nodes from canvas).
+
+    Validates the logic from execution_service.py lines 795-812 where
+    ad-hoc flow execution checks whether nodes/edges are provided when
+    no flow_id exists.  Single-crew flows may legitimately have empty
+    edges.
+    """
+
+    @staticmethod
+    def _check_adhoc_flow(config) -> dict:
+        """Replicate the ad-hoc flow validation logic from
+        execution_service.py create_execution method.
+
+        Returns a dict with the validation result:
+          - {"valid": True, "type": "adhoc", "edge_count": N} for ad-hoc
+          - {"valid": False, "reason": "..."} for failure
+        """
+        has_nodes = (
+            hasattr(config, 'nodes')
+            and config.nodes is not None
+            and len(config.nodes) > 0
+        )
+        has_edges = hasattr(config, 'edges') and config.edges is not None
+
+        if has_nodes:
+            edge_count = len(config.edges) if has_edges and config.edges else 0
+            return {"valid": True, "type": "adhoc", "edge_count": edge_count}
+        else:
+            return {"valid": False, "reason": "no_nodes"}
+
+    def test_single_crew_flow_allows_empty_edges(self):
+        """A single-crew flow with nodes but no edges is valid."""
+        class Config:
+            flow_id = None
+            nodes = [{"id": "crew-1", "type": "crew", "data": {"name": "Research"}}]
+            edges = []
+            inputs = {}
+
+        result = self._check_adhoc_flow(Config())
+        assert result["valid"] is True
+        assert result["type"] == "adhoc"
+        assert result["edge_count"] == 0
+
+    def test_single_crew_flow_allows_none_edges(self):
+        """A single-crew flow with nodes and edges=None is valid.
+
+        The has_edges check uses ``is not None`` so None is handled
+        differently from an empty list, but has_nodes is the primary
+        gate.
+        """
+        class Config:
+            flow_id = None
+            nodes = [{"id": "crew-1", "type": "crew"}]
+            edges = None
+            inputs = {}
+
+        result = self._check_adhoc_flow(Config())
+        assert result["valid"] is True
+        assert result["edge_count"] == 0
+
+    def test_multi_crew_flow_with_edges(self):
+        """A multi-crew flow with nodes and edges is valid."""
+        class Config:
+            flow_id = None
+            nodes = [
+                {"id": "crew-1", "type": "crew"},
+                {"id": "crew-2", "type": "crew"},
+            ]
+            edges = [{"source": "crew-1", "target": "crew-2"}]
+            inputs = {}
+
+        result = self._check_adhoc_flow(Config())
+        assert result["valid"] is True
+        assert result["edge_count"] == 1
+
+    def test_requires_at_least_one_node(self):
+        """Empty nodes list is rejected."""
+        class Config:
+            flow_id = None
+            nodes = []
+            edges = []
+            inputs = {}
+
+        result = self._check_adhoc_flow(Config())
+        assert result["valid"] is False
+        assert result["reason"] == "no_nodes"
+
+    def test_none_nodes_rejected(self):
+        """nodes=None is rejected (no ad-hoc flow possible)."""
+        class Config:
+            flow_id = None
+            nodes = None
+            edges = None
+            inputs = {}
+
+        result = self._check_adhoc_flow(Config())
+        assert result["valid"] is False
+        assert result["reason"] == "no_nodes"
+
+    def test_missing_nodes_attribute_rejected(self):
+        """Config object without 'nodes' attribute is rejected."""
+        class Config:
+            flow_id = None
+            inputs = {}
+
+        result = self._check_adhoc_flow(Config())
+        assert result["valid"] is False
+        assert result["reason"] == "no_nodes"
+
+    def test_missing_edges_attribute_with_nodes(self):
+        """Config with nodes but no 'edges' attribute is still valid.
+
+        The has_edges check uses hasattr, so missing attribute evaluates
+        to False, but ad-hoc validity depends only on has_nodes.
+        """
+        class Config:
+            flow_id = None
+            nodes = [{"id": "crew-1"}]
+            inputs = {}
+
+        result = self._check_adhoc_flow(Config())
+        assert result["valid"] is True
+        assert result["edge_count"] == 0
+
+    def test_complex_flow_with_router_edges(self):
+        """Flow with multiple nodes and router edges is valid."""
+        class Config:
+            flow_id = None
+            nodes = [
+                {"id": "crew-1", "type": "crew"},
+                {"id": "router-1", "type": "router"},
+                {"id": "crew-2", "type": "crew"},
+                {"id": "crew-3", "type": "crew"},
+            ]
+            edges = [
+                {"source": "crew-1", "target": "router-1"},
+                {"source": "router-1", "target": "crew-2", "data": {"condition": "x > 5"}},
+                {"source": "router-1", "target": "crew-3", "data": {"condition": "x <= 5"}},
+            ]
+            inputs = {}
+
+        result = self._check_adhoc_flow(Config())
+        assert result["valid"] is True
+        assert result["edge_count"] == 3
+

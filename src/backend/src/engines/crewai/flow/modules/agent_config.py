@@ -323,7 +323,9 @@ class AgentConfig:
         additional_params = [
             'memory', 'max_iter', 'max_rpm', 'code_execution_mode',
             'max_context_window_size', 'max_tokens',
-            'reasoning', 'max_reasoning_attempts'
+            'reasoning', 'max_reasoning_attempts',
+            # Date awareness settings (CrewAI 1.9+) - inject current date into agent context
+            'inject_date', 'date_format'
         ]
         for prop in additional_params:
             if hasattr(agent_data, prop) and getattr(agent_data, prop) is not None:

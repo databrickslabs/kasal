@@ -19,6 +19,7 @@ from src.schemas.connection import (
     Agent, Task, TaskContext, AgentAssignment, TaskAssignment, Dependency,
     ApiKeyTestResult, PythonInfo
 )
+from src.utils.user_context import GroupContext
 
 
 @pytest.fixture
@@ -28,13 +29,23 @@ def mock_connection_service():
     return service
 
 
+@pytest.fixture
+def mock_group_context():
+    """Create a mock group context."""
+    context = GroupContext(
+        group_ids=["group-123"],
+        group_email="test@example.com",
+        user_id="user-123",
+    )
+    return context
+
 
 @pytest.fixture
 def mock_current_user():
     """Create a mock authenticated user."""
     from src.models.enums import UserRole, UserStatus
     from datetime import datetime
-    
+
     class MockUser:
         def __init__(self):
             self.id = "current-user-123"
@@ -44,25 +55,35 @@ def mock_current_user():
             self.status = UserStatus.ACTIVE
             self.created_at = datetime.utcnow()
             self.updated_at = datetime.utcnow()
-    
+
     return MockUser()
 
 
 @pytest.fixture
-def client():
+def client(mock_connection_service, mock_current_user, mock_group_context):
     """Create a test client."""
     from fastapi import FastAPI
-    from src.api.connections_router import router
-    
+    from src.api.connections_router import router, get_connection_service
+    from src.core.dependencies import get_group_context
+    from tests.unit.router.conftest import register_exception_handlers
+
     app = FastAPI()
     app.include_router(router)
-    # Override authentication dependencies for testing
+    register_exception_handlers(app)
+
+    # Override dependencies
+    async def override_get_connection_service():
+        return mock_connection_service
+
+    async def override_get_group_context():
+        return mock_group_context
+
+    app.dependency_overrides[get_connection_service] = override_get_connection_service
+    app.dependency_overrides[get_group_context] = override_get_group_context
     app.dependency_overrides[require_authenticated_user] = lambda: mock_current_user
     app.dependency_overrides[get_authenticated_user] = lambda: mock_current_user
     app.dependency_overrides[get_admin_user] = lambda: mock_current_user
 
-
-    
     return TestClient(app)
 
 
@@ -145,39 +166,36 @@ class TestGenerateConnections:
                 )
             ]
         )
-        
+
         mock_connection_service.generate_connections.return_value = mock_response
-        
-        with patch('src.api.connections_router.ConnectionService', return_value=mock_connection_service):
-            response = client.post("/connections/generate-connections", json=sample_connection_request.model_dump())
-        
+
+        response = client.post("/connections/generate-connections", json=sample_connection_request.model_dump())
+
         assert response.status_code == 200
         data = response.json()
         assert len(data["assignments"]) == 2
         assert len(data["dependencies"]) == 1
         assert data["assignments"][0]["agent_name"] == "Agent 1"
         assert data["assignments"][0]["tasks"][0]["task_name"] == "Task 1"
-    
+
     def test_generate_connections_validation_error(self, client, mock_connection_service, sample_connection_request):
         """Test connection generation with validation error."""
         mock_connection_service.generate_connections.side_effect = ValueError("Invalid agent configuration")
-        
-        with patch('src.api.connections_router.ConnectionService', return_value=mock_connection_service):
-            response = client.post("/connections/generate-connections", json=sample_connection_request.model_dump())
-        
+
+        response = client.post("/connections/generate-connections", json=sample_connection_request.model_dump())
+
         assert response.status_code == 400
         assert "Invalid agent configuration" in response.json()["detail"]
-    
+
     def test_generate_connections_server_error(self, client, mock_connection_service, sample_connection_request):
         """Test connection generation with server error."""
         mock_connection_service.generate_connections.side_effect = Exception("Internal server error")
-        
-        with patch('src.api.connections_router.ConnectionService', return_value=mock_connection_service):
-            response = client.post("/connections/generate-connections", json=sample_connection_request.model_dump())
-        
+
+        response = client.post("/connections/generate-connections", json=sample_connection_request.model_dump())
+
         assert response.status_code == 500
-        assert "Error generating connections" in response.json()["detail"]
-    
+        assert "Internal server error" in response.json()["detail"]
+
     def test_generate_connections_empty_agents(self, client, mock_connection_service):
         """Test connection generation with empty agents list."""
         request_data = {
@@ -197,18 +215,17 @@ class TestGenerateConnections:
                 }
             ]
         }
-        
+
         mock_response = ConnectionResponse(assignments=[], dependencies=[])
         mock_connection_service.generate_connections.return_value = mock_response
-        
-        with patch('src.api.connections_router.ConnectionService', return_value=mock_connection_service):
-            response = client.post("/connections/generate-connections", json=request_data)
-        
+
+        response = client.post("/connections/generate-connections", json=request_data)
+
         assert response.status_code == 200
         data = response.json()
         assert len(data["assignments"]) == 0
         assert len(data["dependencies"]) == 0
-    
+
     def test_generate_connections_empty_tasks(self, client, mock_connection_service):
         """Test connection generation with empty tasks list."""
         request_data = {
@@ -223,27 +240,25 @@ class TestGenerateConnections:
             ],
             "tasks": []
         }
-        
+
         mock_response = ConnectionResponse(assignments=[], dependencies=[])
         mock_connection_service.generate_connections.return_value = mock_response
-        
-        with patch('src.api.connections_router.ConnectionService', return_value=mock_connection_service):
-            response = client.post("/connections/generate-connections", json=request_data)
-        
+
+        response = client.post("/connections/generate-connections", json=request_data)
+
         assert response.status_code == 200
         data = response.json()
         assert len(data["assignments"]) == 0
         assert len(data["dependencies"]) == 0
-    
+
     def test_generate_connections_logging(self, client, mock_connection_service, sample_connection_request, caplog):
         """Test that connection generation logs properly."""
         mock_response = ConnectionResponse(assignments=[], dependencies=[])
         mock_connection_service.generate_connections.return_value = mock_response
-        
+
         with caplog.at_level(logging.INFO):
-            with patch('src.api.connections_router.ConnectionService', return_value=mock_connection_service):
-                response = client.post("/connections/generate-connections", json=sample_connection_request.model_dump())
-        
+            response = client.post("/connections/generate-connections", json=sample_connection_request.model_dump())
+
         assert response.status_code == 200
         assert "Generating connections for 2 agents and 2 tasks" in caplog.text
         assert "Generated 0 assignments and 0 dependencies" in caplog.text
@@ -260,12 +275,11 @@ class TestApiKeyEndpoint:
             deepseek=ApiKeyTestResult(has_key=False, valid=False, message="API key not configured"),
             python_info=PythonInfo(version="3.9.0", executable="/usr/bin/python", platform="linux")
         )
-        
+
         mock_connection_service.test_api_keys.return_value = mock_response
-        
-        with patch('src.api.connections_router.ConnectionService', return_value=mock_connection_service):
-            response = client.get("/connections/test-api-key")
-        
+
+        response = client.get("/connections/test-api-key")
+
         assert response.status_code == 200
         data = response.json()
         assert data["openai"]["has_key"] is True
@@ -274,7 +288,7 @@ class TestApiKeyEndpoint:
         assert data["anthropic"]["valid"] is True
         assert data["deepseek"]["has_key"] is False
         assert data["python_info"]["version"] == "3.9.0"
-    
+
     def test_test_api_key_all_invalid(self, client, mock_connection_service):
         """Test API key testing when all keys are invalid."""
         mock_response = ApiKeyTestResponse(
@@ -283,12 +297,11 @@ class TestApiKeyEndpoint:
             deepseek=ApiKeyTestResult(has_key=False, valid=False, message="API key not configured"),
             python_info=PythonInfo(version="3.9.0", executable="/usr/bin/python", platform="linux")
         )
-        
+
         mock_connection_service.test_api_keys.return_value = mock_response
-        
-        with patch('src.api.connections_router.ConnectionService', return_value=mock_connection_service):
-            response = client.get("/connections/test-api-key")
-        
+
+        response = client.get("/connections/test-api-key")
+
         assert response.status_code == 200
         data = response.json()
         assert data["openai"]["has_key"] is True
@@ -296,17 +309,16 @@ class TestApiKeyEndpoint:
         assert data["anthropic"]["has_key"] is True
         assert data["anthropic"]["valid"] is False
         assert data["deepseek"]["has_key"] is False
-    
+
     def test_test_api_key_server_error(self, client, mock_connection_service):
         """Test API key testing with server error."""
         mock_connection_service.test_api_keys.side_effect = Exception("Service unavailable")
-        
-        with patch('src.api.connections_router.ConnectionService', return_value=mock_connection_service):
-            response = client.get("/connections/test-api-key")
-        
+
+        response = client.get("/connections/test-api-key")
+
         assert response.status_code == 500
-        assert "Error testing API keys" in response.json()["detail"]
-    
+        assert "Internal server error" in response.json()["detail"]
+
     def test_test_api_key_logging(self, client, mock_connection_service, caplog):
         """Test that API key testing logs properly."""
         mock_response = ApiKeyTestResponse(
@@ -315,12 +327,11 @@ class TestApiKeyEndpoint:
             deepseek=ApiKeyTestResult(has_key=False, valid=False, message="Not configured"),
             python_info=PythonInfo(version="3.9.0", executable="/usr/bin/python", platform="linux")
         )
-        
+
         mock_connection_service.test_api_keys.return_value = mock_response
-        
+
         with caplog.at_level(logging.INFO):
-            with patch('src.api.connections_router.ConnectionService', return_value=mock_connection_service):
-                response = client.get("/connections/test-api-key")
-        
+            response = client.get("/connections/test-api-key")
+
         assert response.status_code == 200
         assert "Testing API keys" in caplog.text

@@ -19,19 +19,19 @@ def mock_problematic_modules():
     # Store original modules
     original_crewai_tools = sys.modules.get('crewai_tools')
     original_asyncpg = sys.modules.get('asyncpg')
-    
+
     # Mock the modules
     sys.modules['crewai_tools'] = Mock()
     sys.modules['asyncpg'] = Mock()
-    
+
     yield
-    
+
     # Restore original modules
     if original_crewai_tools is not None:
         sys.modules['crewai_tools'] = original_crewai_tools
     else:
         sys.modules.pop('crewai_tools', None)
-    
+
     if original_asyncpg is not None:
         sys.modules['asyncpg'] = original_asyncpg
     else:

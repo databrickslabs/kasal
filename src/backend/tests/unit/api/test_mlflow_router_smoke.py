@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, Mock, patch
-from fastapi import HTTPException
+
+from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 
 from src.api.mlflow_router import (
     get_mlflow_status,
@@ -35,10 +36,9 @@ async def test_get_mlflow_status_enabled():
 @pytest.mark.asyncio
 async def test_get_mlflow_status_requires_group():
     session = AsyncMock()
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(ForbiddenError) as ei:
         await get_mlflow_status(session=session, group_ctx=None)
-    # Router wraps into 500 since it catches general Exception
-    assert ei.value.status_code == 500
+    assert ei.value.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -53,7 +53,7 @@ async def test_set_mlflow_status_true_false():
         assert out.enabled is True
         
         svc.set_enabled = AsyncMock(return_value=False)
-        with pytest.raises(HTTPException) as ei:
+        with pytest.raises(NotFoundError) as ei:
             await set_mlflow_status(MLflowConfigUpdate(enabled=False), session=session, group_ctx=group_ctx)
         assert ei.value.status_code == 404
 
@@ -77,7 +77,7 @@ async def test_evaluation_status_get_set():
 async def test_trigger_evaluation_requires_job():
     session = AsyncMock()
     group_ctx = Group('g1')
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(BadRequestError) as ei:
         await trigger_evaluation(MLflowEvaluateRequest(job_id=""), request=Mock(), session=session, group_ctx=group_ctx)
     assert ei.value.status_code == 400
 

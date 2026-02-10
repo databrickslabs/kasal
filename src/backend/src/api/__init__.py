@@ -1,57 +1,61 @@
 from fastapi import APIRouter
 
+from src.api.agent_generation_router import router as agent_generation_router
+from src.api.agentbricks_router import router as agentbricks_router
+
 # Note: Memory management and database management routers removed per SDR request
 from src.api.agents_router import router as agents_router
-from src.api.crews_router import router as crews_router
-from src.api.crews_export_router import router as crews_export_router
-from src.api.databricks_router import router as databricks_router
-from src.api.databricks_knowledge_router import router as databricks_knowledge_router
-from src.api.powerbi_router import router as powerbi_router
-from src.api.flows_router import router as flows_router
-from src.api.healthcheck_router import router as healthcheck_router
-from src.api.logs_router import router as logs_router
-from src.api.models_router import router as models_router
-from src.api.databricks_secrets_router import router as databricks_secrets_router
 from src.api.api_keys_router import router as api_keys_router
-from src.api.tasks_router import router as tasks_router
-from src.api.templates_router import router as templates_router
-from src.api.schemas_router import router as schemas_router
-from src.api.tools_router import router as tools_router
+
+from src.api.chat_history_router import router as chat_history_router
+from src.api.connections_router import router as connections_router
+from src.api.crew_generation_router import router as crew_generation_router
+from src.api.crews_export_router import router as crews_export_router
+from src.api.crews_router import router as crews_router
+from src.api.database_management_router import router as database_management_router
+from src.api.databricks_knowledge_router import router as databricks_knowledge_router
+from src.api.databricks_router import router as databricks_router
+from src.api.databricks_secrets_router import router as databricks_secrets_router
+from src.api.dispatcher_router import router as dispatcher_router
+from src.api.documentation_embeddings_router import (
+    router as documentation_embeddings_router,
+)
+from src.api.engine_config_router import router as engine_config_router
+from src.api.execution_history_router import router as execution_history_router
+from src.api.execution_logs_router import logs_router as execution_logs_router
+from src.api.execution_logs_router import (
+    runs_router,
+)
+from src.api.execution_trace_router import router as execution_trace_router
+from src.api.executions_router import router as executions_router
+from src.api.flow_execution_router import router as flow_execution_router
+from src.api.flows_router import router as flows_router
+from src.api.genie_router import router as genie_router
+from src.api.group_router import router as group_router
 from src.api.group_tools_router import router as group_tools_router
+from src.api.healthcheck_router import router as healthcheck_router
+from src.api.hitl_router import router as hitl_router
+from src.api.logs_router import router as logs_router
+from src.api.mcp_router import router as mcp_router
+from src.api.memory_backend_router import router as memory_backend_router
 from src.api.mlflow_router import router as mlflow_router
+from src.api.models_router import router as models_router
+from src.api.powerbi_router import router as powerbi_router
+from src.api.scheduler_router import router as scheduler_router
+from src.api.schemas_router import router as schemas_router
+from src.api.sse_router import router as sse_router
+from src.api.task_generation_router import router as task_generation_router
 
 # DISABLED: Local file uploads are not allowed - use Databricks volumes instead
 # from src.api.upload_router import router as upload_router
 from src.api.task_tracking_router import router as task_tracking_router
-from src.api.scheduler_router import router as scheduler_router
-from src.api.agent_generation_router import router as agent_generation_router
-from src.api.connections_router import router as connections_router
-from src.api.crew_generation_router import router as crew_generation_router
-from src.api.task_generation_router import router as task_generation_router
+from src.api.tasks_router import router as tasks_router
 from src.api.template_generation_router import router as template_generation_router
-from src.api.execution_logs_router import runs_router, logs_router as execution_logs_router
-from src.api.executions_router import router as executions_router
-from src.api.execution_history_router import router as execution_history_router
-from src.api.execution_trace_router import router as execution_trace_router
-from src.api.flow_execution_router import router as flow_execution_router
-from src.api.mcp_router import router as mcp_router
-from src.api.dispatcher_router import router as dispatcher_router
-# from src.api.dspy_router import router as dspy_router  # Temporarily disabled
-from src.api.engine_config_router import router as engine_config_router
-# User management routers (simplified)
-from src.api.auth_router import router as auth_router
+from src.api.templates_router import router as templates_router
+from src.api.tools_router import router as tools_router
 from src.api.users_router import router as users_router
-from src.api.group_router import router as group_router
-from src.api.chat_history_router import router as chat_history_router
-from src.api.memory_backend_router import router as memory_backend_router
-from src.api.documentation_embeddings_router import router as documentation_embeddings_router
-from src.api.database_management_router import router as database_management_router
-from src.api.genie_router import router as genie_router
 from src.api.kpi_conversion_router import router as kpi_conversion_router
 from src.api.converter_router import router as converter_router
-from src.api.agentbricks_router import router as agentbricks_router
-from src.api.hitl_router import router as hitl_router
-from src.api.sse_router import router as sse_router
 
 # Create the main API router
 api_router = APIRouter()
@@ -93,10 +97,7 @@ api_router.include_router(runs_router)
 api_router.include_router(execution_logs_router)
 api_router.include_router(mcp_router)
 api_router.include_router(dispatcher_router)
-# api_router.include_router(dspy_router)  # Temporarily disabled
 api_router.include_router(engine_config_router)
-# Include user management routers (simplified)
-api_router.include_router(auth_router)
 api_router.include_router(users_router)
 api_router.include_router(group_router)
 api_router.include_router(chat_history_router)
@@ -143,8 +144,6 @@ __all__ = [
     "mcp_router",
     "dispatcher_router",
     "engine_config_router",
-    # User management routers (simplified)
-    "auth_router",
     "users_router",
     "runs_router",
     "group_router",

@@ -190,7 +190,7 @@ class TestSSEConnectionManager:
 
         # Should not raise
         manager.remove_event_queue("nonexistent-job", queue)
-        assert manager.connection_count == -1  # Decremented even if not found
+        assert manager.connection_count == 0  # Guard prevents decrement below zero
 
     def test_remove_event_queue_nonexistent_queue(self):
         """Test removing nonexistent queue from job doesn't raise error."""

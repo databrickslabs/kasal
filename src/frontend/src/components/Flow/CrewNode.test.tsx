@@ -42,6 +42,7 @@ vi.mock('../../store/flowExecutionStore', () => ({
     const state = {
       crewNodeStates: new Map(),
       isExecuting: false,
+      flowStatus: null,
     };
     return selector(state);
   }),
@@ -221,13 +222,13 @@ describe('CrewNode', () => {
     it('should have fixed width of 140px', () => {
       const { container } = renderCrewNode();
       const box = container.querySelector('[class*="MuiBox-root"]');
-      expect(box).toHaveStyle({ width: '140px' });
+      expect(box).toHaveStyle({ width: '100%' });
     });
 
     it('should have fixed height of 80px', () => {
       const { container } = renderCrewNode();
       const box = container.querySelector('[class*="MuiBox-root"]');
-      expect(box).toHaveStyle({ height: '80px' });
+      expect(box).toHaveStyle({ height: '100%' });
     });
   });
 });

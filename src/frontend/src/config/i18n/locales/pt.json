@@ -80,6 +80,7 @@
     "filterByEndpoint": "Filtrar por Endpoint",
     "allEndpoints": "Todos os Endpoints",
     "noLogs": "Nenhum registro disponível",
+    "refresh": "Atualizar",
     "columns": {
       "timestamp": "Timestamp",
       "endpoint": "Endpoint",
@@ -101,7 +102,8 @@
       "connectionError": "Falha ao conectar ao fluxo de registros. Por favor, tente novamente.",
       "autoScrollOn": "Rolagem automática ATIVADA",
       "autoScrollOff": "Rolagem automática DESATIVADA",
-      "refreshLogs": "Atualizar Registros"
+      "refreshLogs": "Atualizar Registros",
+      "downloadLogs": "Baixar Registros"
     }
   },
   "tools": {

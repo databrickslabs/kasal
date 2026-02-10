@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     # BACKEND_CORS_ORIGINS is a comma-separated list of origins
     # e.g: "http://localhost,http://localhost:8080"
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
-    CORS_ORIGINS: List[str] = ["*"]  # Default to allow all origins
+    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> Union[List[str], str]:

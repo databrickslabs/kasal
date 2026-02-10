@@ -207,6 +207,9 @@ export class JobExecutionService {
               max_reasoning_attempts: agentData.max_reasoning_attempts,
               embedder_config: agentData.embedder_config,
               knowledge_sources: agentData.knowledge_sources || [],
+              // Date awareness settings (CrewAI 1.9+) - inject current date into agent context
+              inject_date: agentData.inject_date ?? true,  // Default to true for date awareness
+              date_format: agentData.date_format,
             };
             
             console.log(`[DEBUG] AgentConfig for ${agentName} knowledge_sources:`, agentConfig.knowledge_sources);
@@ -409,7 +412,7 @@ export class JobExecutionService {
               try {
                 // Parse the guardrail JSON string
                 const guardrailConfig = JSON.parse(taskData.config.guardrail);
-                
+
                 // Set the guardrail in the task YAML
                 if (config.tasks_yaml[taskName]) {
                   config.tasks_yaml[taskName].guardrail = guardrailConfig;
@@ -418,6 +421,12 @@ export class JobExecutionService {
               } catch (error) {
                 console.error(`Error parsing guardrail for task ${taskName}:`, error);
               }
+            }
+
+            // Process LLM guardrail if explicitly enabled by the user (toggle ON)
+            if (taskData.config?.llm_guardrail && config.tasks_yaml[taskName]) {
+              config.tasks_yaml[taskName].guardrail = JSON.stringify(taskData.config.llm_guardrail);
+              console.log(`Set llm_guardrail for task ${taskName}:`, taskData.config.llm_guardrail);
             }
           }
         });

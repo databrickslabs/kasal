@@ -359,9 +359,35 @@ class TestUpdateExecutionStatus:
         return CrewAIExecutionService()
 
     @pytest.mark.asyncio
-    async def test_update_execution_status_in_memory(self, service):
-        """Test updating execution status in memory."""
+    async def test_update_execution_status_in_memory_non_terminal(self, service):
+        """Test updating execution status in memory with non-terminal status."""
         execution_id = 'status-exec-1'
+        executions[execution_id] = {
+            'status': 'PENDING',
+            'created_at': datetime.now()
+        }
+
+        with patch('src.services.crewai_execution_service.ExecutionStatusService') as mock_status:
+            mock_status.update_status = AsyncMock()
+
+            await service.update_execution_status(
+                execution_id=execution_id,
+                status=ExecutionStatus.RUNNING,
+                message='Execution running',
+                result=None
+            )
+
+        # Non-terminal status should keep the entry in memory
+        assert execution_id in executions
+        assert executions[execution_id]['status'] == ExecutionStatus.RUNNING.value
+
+        # Clean up
+        del executions[execution_id]
+
+    @pytest.mark.asyncio
+    async def test_update_execution_status_terminal_cleans_up(self, service):
+        """Test that terminal status removes entry from in-memory executions."""
+        execution_id = 'status-exec-terminal'
         executions[execution_id] = {
             'status': 'RUNNING',
             'created_at': datetime.now()
@@ -377,11 +403,38 @@ class TestUpdateExecutionStatus:
                 result={'output': 'test'}
             )
 
-        assert executions[execution_id]['status'] == ExecutionStatus.COMPLETED.value
-        assert executions[execution_id]['result'] == {'output': 'test'}
+        # Terminal status should remove entry from memory after DB persist
+        assert execution_id not in executions
 
-        # Clean up
-        del executions[execution_id]
+    @pytest.mark.asyncio
+    async def test_update_execution_status_all_terminal_statuses_clean_up(self, service):
+        """Test that all terminal statuses clean up in-memory entries."""
+        terminal_statuses = [
+            ExecutionStatus.COMPLETED,
+            ExecutionStatus.FAILED,
+            ExecutionStatus.STOPPED,
+            ExecutionStatus.CANCELLED,
+            ExecutionStatus.REJECTED,
+        ]
+        for terminal_status in terminal_statuses:
+            execution_id = f'terminal-{terminal_status.value}'
+            executions[execution_id] = {
+                'status': 'RUNNING',
+                'created_at': datetime.now()
+            }
+
+            with patch('src.services.crewai_execution_service.ExecutionStatusService') as mock_status:
+                mock_status.update_status = AsyncMock()
+
+                await service.update_execution_status(
+                    execution_id=execution_id,
+                    status=terminal_status,
+                    message=f'Status: {terminal_status.value}',
+                )
+
+            assert execution_id not in executions, (
+                f"Expected {execution_id} to be removed for terminal status {terminal_status.value}"
+            )
 
     @pytest.mark.asyncio
     async def test_update_execution_status_not_in_memory(self, service):
@@ -399,6 +452,9 @@ class TestUpdateExecutionStatus:
             )
 
             mock_status.update_status.assert_called_once()
+
+        # Should still not be in memory (pop on non-existent key is safe)
+        assert execution_id not in executions
 
 
 class TestCancelExecution:

@@ -9,6 +9,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import { Task } from '../../api/TaskService';
 import { ToolService, Tool } from '../../api/ToolService';
 import TaskForm from './TaskForm';
@@ -17,6 +18,7 @@ import { Theme } from '@mui/material/styles';
 import { useTabDirtyState } from '../../hooks/workflow/useTabDirtyState';
 import { useTaskExecutionStore } from '../../store/taskExecutionStore';
 import { useUILayoutStore } from '../../store/uiLayout';
+import { findTaskStoreKey } from '../../utils/taskIdUtils';
 
 import { type LLMGuardrailConfig } from '../../types/task';
 
@@ -102,79 +104,13 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
   // Get current layout orientation
   const layoutOrientation = useUILayoutStore(state => state.layoutOrientation);
 
-  // Task execution state - try multiple ID formats for compatibility
+  // Planning phase indicator — shown on all task nodes during crew planning
+  const isPlanningPhase = useTaskExecutionStore(state => state.isPlanningPhase);
+
+  // Deterministic task execution state lookup using shared utility
   const taskStatus = useTaskExecutionStore(state => {
-    // DEBUG: Log what we're looking for
-
-    let status = null;
-
-    // Try with the label first (most reliable match with backend task names)
-    if (data.label) {
-      status = state.getTaskStatus(data.label);
-
-      // Try lowercase version of label
-      if (!status) {
-        status = state.getTaskStatus(data.label.toLowerCase());
-      }
-
-      // Try with underscores replaced by spaces
-      if (!status) {
-        const labelWithSpaces = data.label.replace(/_/g, ' ');
-        status = state.getTaskStatus(labelWithSpaces);
-      }
-
-      // Try with task_ prefix and label
-      if (!status) {
-        const labelBasedId = `task_${data.label.replace(/\s+/g, '_').toLowerCase()}`;
-        status = state.getTaskStatus(labelBasedId);
-      }
-
-      // Check if any task state key contains keywords from the label
-      // This handles cases where backend sends full description but label is short
-      if (!status) {
-        const labelLower = data.label.toLowerCase();
-        const labelWords = labelLower.split(/\s+/).filter(word => word.length > 2); // Get significant words
-        const allKeys = Array.from(state.taskStates.keys());
-
-        for (const key of allKeys) {
-          const keyLower = key.toLowerCase();
-
-          // Check if key starts with the label
-          if (keyLower.startsWith(labelLower) ||
-              keyLower.startsWith(labelLower.replace(/\s+/g, '_')) ||
-              keyLower.startsWith(labelLower.replace(/\s+/g, '-'))) {
-            status = state.getTaskStatus(key);
-            if (status) {
-              break;
-            }
-          }
-
-          // Check if all significant words from label are in the key
-          if (!status && labelWords.length > 0) {
-            const allWordsFound = labelWords.every(word => keyLower.includes(word));
-            if (allWordsFound) {
-              status = state.getTaskStatus(key);
-              if (status) {
-                break;
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // Try exact taskId if provided and no match found yet
-    if (!status && data.taskId) {
-      status = state.getTaskStatus(data.taskId);
-
-      // If taskId starts with "task-", also try just the UUID part
-      if (!status && data.taskId.startsWith('task-')) {
-        const uuidOnly = data.taskId.substring(5); // Remove "task-" prefix
-        status = state.getTaskStatus(uuidOnly);
-      }
-    }
-
-    return status;
+    const key = findTaskStoreKey(state.taskStates, data.taskId, data.label);
+    return key ? state.taskStates.get(key) ?? null : null;
   });
 
   // Add debugging logs on component mount
@@ -227,7 +163,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
   const handleEditClick = useCallback(() => {
     setEditTooltipOpen(false);
     setDeleteTooltipOpen(false);
-    document.activeElement && (document.activeElement as HTMLElement).blur();
+    if (document.activeElement) { (document.activeElement as HTMLElement).blur(); }
     setIsEditing(true);
   }, []);
 
@@ -371,9 +307,40 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
   };
 
   const getStatusIcon = () => {
+    // Show planning indicator when crew is in planning phase (before any task starts)
+    if (isPlanningPhase && !taskStatus) {
+      return (
+        <AutoAwesomeIcon
+          sx={{
+            fontSize: 16,
+            color: 'warning.main',
+            animation: 'planningPulse 1.5s ease-in-out infinite',
+            '@keyframes planningPulse': {
+              '0%, 100%': { opacity: 0.4, transform: 'scale(0.85)' },
+              '50%': { opacity: 1, transform: 'scale(1.1)' },
+            },
+          }}
+        />
+      );
+    }
+
     if (!taskStatus) return null;
 
     switch (taskStatus.status) {
+      case 'planning':
+        return (
+          <AutoAwesomeIcon
+            sx={{
+              fontSize: 16,
+              color: 'warning.main',
+              animation: 'planningPulse 1.5s ease-in-out infinite',
+              '@keyframes planningPulse': {
+                '0%, 100%': { opacity: 0.4, transform: 'scale(0.85)' },
+                '50%': { opacity: 1, transform: 'scale(1.1)' },
+              },
+            }}
+          />
+        );
       case 'running':
         return <CircularProgress size={14} sx={{ color: 'info.main' }} />;
       case 'completed':
@@ -386,6 +353,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
   };
 
   const getTaskStyles = () => {
+    const isPlanning = isPlanningPhase && !taskStatus;
     const isRunning = taskStatus?.status === 'running';
     const isCompleted = taskStatus?.status === 'completed';
     const isFailed = taskStatus?.status === 'failed';
@@ -399,6 +367,9 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
       padding: 2,
       cursor: 'pointer',
       background: (theme: Theme) => {
+        if (isPlanning || taskStatus?.status === 'planning') {
+          return `linear-gradient(135deg, ${theme.palette.warning.light}15, ${theme.palette.warning.main}10)`;
+        }
         if (isRunning) {
           return `linear-gradient(135deg, ${theme.palette.info.light}15, ${theme.palette.info.main}10)`;
         }
@@ -415,6 +386,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
       borderRadius: '8px',
       border: '1px solid',
       borderColor: (theme: Theme) => {
+        if (isPlanning || taskStatus?.status === 'planning') return theme.palette.warning.main;
         if (isRunning) return theme.palette.info.main;
         if (isCompleted) return theme.palette.success.main;
         if (isFailed) return theme.palette.error.main;
@@ -425,7 +397,14 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
       boxShadow: (theme: Theme) => isSelected
         ? `0 0 0 2px ${theme.palette.primary.main}`
         : `0 2px 4px ${theme.palette.mode === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(0, 0, 0, 0.2)'}`,
-      animation: isRunning ? 'pulse 2s infinite' : 'none',
+      animation: (isPlanning || taskStatus?.status === 'planning')
+        ? 'planningGlow 2.5s ease-in-out infinite'
+        : isRunning ? 'pulse 2s infinite' : 'none',
+      '@keyframes planningGlow': {
+        '0%': { boxShadow: '0 0 0 0 rgba(255, 167, 38, 0.3)' },
+        '50%': { boxShadow: '0 0 0 6px rgba(255, 167, 38, 0)' },
+        '100%': { boxShadow: '0 0 0 0 rgba(255, 167, 38, 0)' }
+      },
       '@keyframes pulse': {
         '0%': { boxShadow: '0 0 0 0 rgba(33, 150, 243, 0.4)' },
         '70%': { boxShadow: '0 0 0 10px rgba(33, 150, 243, 0)' },
@@ -564,7 +543,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
           </Box>
         )}
 
-        {taskStatus && (
+        {(taskStatus || isPlanningPhase) && (
           <Box
             sx={{
               position: 'absolute',
@@ -616,7 +595,15 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
           <Tooltip title={data.label} placement="top" arrow>
             <Typography variant="body2" sx={{
               fontWeight: 500,
-              color: (theme: Theme) => theme.palette.primary.main,
+              color: (theme: Theme) => {
+                // Match CrewNode's status-based text color
+                if (isPlanningPhase && !taskStatus) return theme.palette.warning.main;
+                if (taskStatus?.status === 'planning') return theme.palette.warning.main;
+                if (taskStatus?.status === 'running') return theme.palette.info.main;
+                if (taskStatus?.status === 'completed') return theme.palette.success.main;
+                if (taskStatus?.status === 'failed') return theme.palette.error.main;
+                return theme.palette.primary.main;
+              },
               fontSize: '0.9rem',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -755,6 +742,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
                     if (node.id === id) {
                       const updatedData = {
                         ...node.data,
+                        taskId: savedTask.id,  // Sync taskId so future saves update instead of creating duplicates
                         label: savedTask.name,
                         description: savedTask.description,
                         expected_output: savedTask.expected_output,

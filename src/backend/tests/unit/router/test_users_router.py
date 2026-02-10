@@ -80,16 +80,18 @@ def client(mock_current_user, mock_session):
     from src.dependencies.admin_auth import (
         require_authenticated_user, get_authenticated_user, get_admin_user
     )
-    
+    from tests.unit.router.conftest import register_exception_handlers
+
     app = FastAPI()
     app.include_router(router)
-    
+    register_exception_handlers(app)
+
     # Override the actual dependency functions for testing
     app.dependency_overrides[require_authenticated_user] = lambda: mock_current_user
     app.dependency_overrides[get_authenticated_user] = lambda: mock_current_user
     app.dependency_overrides[get_admin_user] = lambda: mock_current_user
     app.dependency_overrides[get_db] = lambda: mock_session
-    
+
     return TestClient(app)
 
 

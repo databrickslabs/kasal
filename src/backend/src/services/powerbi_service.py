@@ -3,7 +3,6 @@ import os
 import time
 from typing import Dict, List, Optional
 import requests
-from azure.identity import UsernamePasswordCredential, DeviceCodeCredential
 from fastapi import HTTPException
 
 from src.repositories.powerbi_config_repository import PowerBIConfigRepository
@@ -152,6 +151,7 @@ class PowerBIService:
             Authentication token string
         """
         try:
+            from azure.identity import DeviceCodeCredential
             credential = DeviceCodeCredential(
                 client_id=client_id,
                 tenant_id=tenant_id,
@@ -215,6 +215,7 @@ class PowerBIService:
             logger.info(f"Authenticating with username length: {len(username)}, password length: {len(password)}")
 
             # Create credential and get token
+            from azure.identity import UsernamePasswordCredential
             credential = UsernamePasswordCredential(
                 client_id=client_id,
                 username=username,

@@ -80,6 +80,7 @@
     "filterByEndpoint": "एंडपॉइंट द्वारा फ़िल्टर करें",
     "allEndpoints": "सभी एंडपॉइंट",
     "noLogs": "कोई लॉग्स उपलब्ध नहीं",
+    "refresh": "रीफ्रेश",
     "columns": {
       "timestamp": "टाइमस्टैम्प",
       "endpoint": "एंडपॉइंट",
@@ -101,7 +102,8 @@
       "connectionError": "लॉग स्ट्रीम से कनेक्ट करने में विफल। कृपया पुनः प्रयास करें।",
       "autoScrollOn": "स्वचालित स्क्रॉल चालू",
       "autoScrollOff": "स्वचालित स्क्रॉल बंद",
-      "refreshLogs": "लॉग्स रीफ्रेश करें"
+      "refreshLogs": "लॉग्स रीफ्रेश करें",
+      "downloadLogs": "लॉग्स डाउनलोड करें"
     }
   },
   "tools": {

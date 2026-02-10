@@ -84,6 +84,7 @@
     "filterByEndpoint": "Nach Endpunkt filtern",
     "allEndpoints": "Alle Endpunkte",
     "noLogs": "Keine Protokolle verfügbar",
+    "refresh": "Aktualisieren",
     "columns": {
       "timestamp": "Zeitstempel",
       "endpoint": "Endpunkt",
@@ -105,7 +106,8 @@
       "connectionError": "Verbindung zum Protokollstream fehlgeschlagen. Bitte versuchen Sie es erneut.",
       "autoScrollOn": "Automatisches Scrollen EIN",
       "autoScrollOff": "Automatisches Scrollen AUS",
-      "refreshLogs": "Protokolle aktualisieren"
+      "refreshLogs": "Protokolle aktualisieren",
+      "downloadLogs": "Protokolle herunterladen"
     }
   },
   "tools": {

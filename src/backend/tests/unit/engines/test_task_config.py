@@ -809,11 +809,12 @@ class TestTaskConfigGuardrails:
         task.tools = None
         task.guardrail = "company_count_guardrail"
         task.llm_guardrail = None
+        task.config = {}
         return task
 
     @pytest.fixture
     def mock_task_data_with_llm_guardrail(self):
-        """Mock task data with LLM guardrail."""
+        """Mock task data with LLM guardrail enabled in config (user toggled ON)."""
         task = Mock()
         task.name = "LLM Guardrail Task"
         task.description = "Test description"
@@ -825,10 +826,45 @@ class TestTaskConfigGuardrails:
         task.human_input = False
         task.tools = None
         task.guardrail = None
+        # LLM guardrail is read from config (user's explicit choice via toggle)
+        task.config = {
+            "llm_guardrail": {
+                "description": "Validate the output contains at least 5 companies",
+                "llm_model": "databricks-claude-sonnet-4-5"
+            }
+        }
+        # Column stores the suggestion (may differ from config)
         task.llm_guardrail = {
             "description": "Validate the output contains at least 5 companies",
             "llm_model": "databricks-claude-sonnet-4-5"
         }
+        return task
+
+    @pytest.fixture
+    def mock_task_data_with_llm_guardrail_column_only(self):
+        """Mock task data with LLM guardrail in column but NOT in config (user toggle OFF).
+
+        This simulates the crew generation scenario where the LLM suggestion is
+        stored in the column but the user hasn't enabled it via the toggle.
+        """
+        task = Mock()
+        task.name = "Suggestion Only Task"
+        task.description = "Test description"
+        task.expected_output = "Test output"
+        task.agent_id = "1"
+        task.id = "1"
+        task.markdown = False
+        task.async_execution = False
+        task.human_input = False
+        task.tools = None
+        task.guardrail = None
+        # Column has the suggestion from crew generation
+        task.llm_guardrail = {
+            "description": "Validate the output contains at least 5 companies",
+            "llm_model": "databricks-claude-sonnet-4-5"
+        }
+        # Config does NOT have llm_guardrail (toggle is OFF)
+        task.config = {}
         return task
 
     @pytest.fixture
@@ -845,6 +881,13 @@ class TestTaskConfigGuardrails:
         task.human_input = False
         task.tools = None
         task.guardrail = "company_count_guardrail"
+        # LLM guardrail enabled in config (user toggled ON)
+        task.config = {
+            "llm_guardrail": {
+                "description": "Validate the task output",
+                "llm_model": "databricks-claude-sonnet-4-5"
+            }
+        }
         # Use default description so LLM guardrail won't augment (avoiding Mock + str issue)
         task.llm_guardrail = {
             "description": "Validate the task output",  # Default description, won't trigger augmentation
@@ -1038,6 +1081,7 @@ class TestTaskConfigGuardrails:
         mock_task_data.tools = None
         mock_task_data.guardrail = None
         mock_task_data.llm_guardrail = None
+        mock_task_data.config = {}
 
         with patch('crewai.Task') as mock_task_class:
             mock_task = Mock()
@@ -1050,3 +1094,30 @@ class TestTaskConfigGuardrails:
 
             # Task should be created without guardrail
             assert result == mock_task
+
+    @pytest.mark.asyncio
+    async def test_configure_task_llm_guardrail_column_only_not_applied(
+        self, mock_task_data_with_llm_guardrail_column_only, mock_agent
+    ):
+        """Test that LLM guardrail is NOT applied when only in column (toggle OFF).
+
+        After crew generation, the LLM guardrail suggestion is stored in the
+        database column but NOT in config. The execution should respect the
+        config (user's explicit choice) and NOT apply the guardrail.
+        """
+        from src.engines.crewai.flow.modules.task_config import TaskConfig
+
+        with patch('crewai.Task') as mock_task_class:
+            mock_task = Mock()
+            mock_task.description = "Test description"
+            mock_task_class.return_value = mock_task
+
+            result = await TaskConfig.configure_task(
+                mock_task_data_with_llm_guardrail_column_only,
+                agent=mock_agent
+            )
+
+            # Task should be created WITHOUT guardrail even though column has value
+            assert result == mock_task
+            # Description should NOT be augmented
+            assert "VALIDATION REQUIREMENTS" not in mock_task.description

@@ -1,3 +1,4 @@
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -6,6 +7,17 @@ from pathlib import Path
 Drops any unique index on prompttemplate.name in a SQLite DB.
 Usage: python -m src.scripts.drop_prompttemplate_unique_sqlite /absolute/path/to/app.db
 """
+
+# SQL identifier validation to prevent injection in dynamic SQL
+_SAFE_IDENTIFIER_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+
+def _validate_identifier(name: str, kind: str = "identifier") -> str:
+    """Validate a SQL identifier against a safe pattern to prevent injection."""
+    if not name or not _SAFE_IDENTIFIER_RE.match(name):
+        raise ValueError(f"Invalid SQL {kind}: {name!r}")
+    return name
+
 
 if len(sys.argv) != 2:
     print("Usage: drop_prompttemplate_unique_sqlite.py /absolute/path/to/app.db")
@@ -30,6 +42,10 @@ try:
         is_unique = bool(idx[2])
         if not is_unique:
             continue
+
+        # Validate index name before use in SQL
+        _validate_identifier(idx_name, "index name")
+
         # Get index columns
         cur.execute(f"PRAGMA index_info('{idx_name}')")
         cols = cur.fetchall()
@@ -49,4 +65,3 @@ try:
     print("Dropped indexes:", ", ".join(dropped) or "none")
 finally:
     conn.close()
-

@@ -376,66 +376,28 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
       setSelectedJobId(jobId);
       setShowLogsDialog(true);
       
-      // Fetch historical logs and connect to WebSocket
+      // Fetch historical logs via REST
       const historicalLogs = await executionLogService.getHistoricalLogs(jobId);
       setSelectedJobLogs(historicalLogs.map(({ job_id, execution_id, ...rest }: LogMessage) => ({
         ...rest,
-        // Ensure we handle both content and output fields
         output: rest.output || rest.content,
         id: rest.id || Date.now()
       })));
-      
-      executionLogService.connectToJobLogs(jobId);
-      
+
       // Load task states for this execution
       const { loadTaskStates } = useTaskExecutionStore.getState();
       await loadTaskStates(jobId);
-      
-      const unsubscribeConnect = executionLogService.onConnected(jobId, () => {
-        setIsConnecting(false);
-        console.log('Connected to WebSocket for job logs:', jobId);
-      });
-      
-      const unsubscribeLogs = executionLogService.onJobLogs(jobId, (logMessage: LogMessage) => {
-        setSelectedJobLogs(prevLogs => [...prevLogs, {
-          id: logMessage.id || Date.now(),
-          output: logMessage.output || logMessage.content,
-          timestamp: logMessage.timestamp
-        }]);
-      });
-      
-      const unsubscribeError = executionLogService.onError(jobId, (error: Event | Error) => {
-        console.error('WebSocket error:', error);
-        setConnectionError('Failed to connect to log stream');
-        setIsConnecting(false);
-      });
-      
-      const unsubscribeClose = executionLogService.onClose(jobId, (event: CloseEvent) => {
-        console.log('WebSocket closed:', event);
-        setIsConnecting(false);
-      });
-      
-      // Store the unsubscribe functions to be called on cleanup
-      return () => {
-        unsubscribeConnect();
-        unsubscribeLogs();
-        unsubscribeError();
-        unsubscribeClose();
-        executionLogService.disconnectFromJobLogs(jobId);
-      };
+
+      setIsConnecting(false);
     } catch (error) {
-      console.error('Error setting up job logs:', error);
+      console.error('Error fetching job logs:', error);
       setConnectionError('Failed to fetch logs');
       setIsConnecting(false);
-      return () => {
-        console.log('Log connection cleanup with no active subscriptions');
-      };
     }
   };
 
   const handleCloseLogs = () => {
     if (selectedJobId) {
-      executionLogService.disconnectFromJobLogs(selectedJobId);
       setSelectedJobId(null);
     }
     // Clear task states when closing dialog
@@ -446,11 +408,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
     fetchRuns().catch(err => console.error('Error refreshing after closing logs:', err));
   };
 
-  useEffect(() => {
-    return () => {
-      executionLogService.cleanup();
-    };
-  }, []);
+  // No WebSocket cleanup needed — logs are fetched via REST only
 
 
   const handleScheduleJob = async () => {

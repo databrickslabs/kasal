@@ -443,8 +443,8 @@ class TestGetExecutionLogsMain:
 class TestCreateExecutionLog:
     """Test cases for create execution log endpoint."""
 
-    def test_create_execution_log_success(self, client_main, mock_group_context):
-        """Test successful execution log creation (line 158)."""
+    def test_create_execution_log_not_implemented(self, client_main, mock_group_context):
+        """Test that execution log creation returns 501 (not implemented)."""
         log_data = {
             "execution_id": "exec-123",
             "level": "INFO",
@@ -453,21 +453,8 @@ class TestCreateExecutionLog:
 
         response = client_main.post("/execution-logs/", json=log_data)
 
-        assert response.status_code == 201
-        data = response.json()
-        assert data["id"] == 1
-        assert data["message"] == "Log created"
-
-    @patch('src.api.execution_logs_router.logger')
-    def test_create_execution_log_exception_handling(self, mock_logger, client_main, mock_group_context):
-        """Test create execution log exception handling (lines 159-161)."""
-        log_data = {"invalid": "data"}
-
-        # Mock an exception during processing
-        with patch('src.api.execution_logs_router.logger', side_effect=Exception("Processing error")):
-            # The endpoint always returns success, but we can test the structure
-            response = client_main.post("/execution-logs/", json=log_data)
-            assert response.status_code == 201
+        assert response.status_code == 501
+        assert "not implemented" in response.json()["detail"].lower()
 
 
 class TestSendExecutionLog:

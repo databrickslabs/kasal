@@ -119,64 +119,258 @@ class TestTask:
 
     def test_task_init_basic(self):
         """Test Task initialization with basic parameters."""
-        # Act & Assert - Test that __init__ method exists and has documentation
-        assert hasattr(Task, '__init__')
-        
-        # Test basic initialization logic without creating database objects
-        with patch.object(Task, '__init__', return_value=None) as mock_init:
-            task_data = {
-                'name': 'Test Task',
-                'description': 'Test Description',
-                'expected_output': 'Test Output'
-            }
-            Task(**task_data)
-            mock_init.assert_called_once_with(**task_data)
+        # Act - Create a real Task instance
+        task = Task(
+            name='Test Task',
+            description='Test Description',
+            expected_output='Test Output'
+        )
+
+        # Assert - Verify defaults are set correctly
+        assert task.name == 'Test Task'
+        assert task.description == 'Test Description'
+        assert task.expected_output == 'Test Output'
+        assert task.id is not None  # UUID auto-generated
+        assert task.tools == []
+        assert task.context == []
+        assert task.config == {}
+        assert task.async_execution is False
+        assert task.markdown is False
+        assert task.human_input is False
+        assert task.created_at is not None
+        assert task.updated_at is not None
 
     def test_task_init_with_condition(self):
         """Test Task initialization with condition parameter."""
-        # Test condition parameter extraction logic
+        # Act - Create task with condition
         condition_data = {
             'type': 'dependent',
             'parameters': {'param1': 'value1'},
             'dependent_task': 'task_id_123'
         }
-        
-        # Assert condition structure
-        assert 'type' in condition_data
-        assert 'parameters' in condition_data
-        assert 'dependent_task' in condition_data
+        task = Task(
+            name='Conditional Task',
+            description='A task with condition',
+            expected_output='Output',
+            condition=condition_data
+        )
 
-    def test_task_config_synchronization_logic(self):
-        """Test the config synchronization logic structure."""
-        # Test output field synchronization scenarios
-        sync_scenarios = [
-            {
-                'field': 'output_pydantic',
-                'config_key': 'output_pydantic',
-                'test_value': 'MyPydanticModel'
-            },
-            {
-                'field': 'output_json',
-                'config_key': 'output_json',
-                'test_value': 'output.json'
-            },
-            {
-                'field': 'output_file',
-                'config_key': 'output_file',
-                'test_value': '/path/to/output.txt'
-            },
-            {
-                'field': 'callback',
-                'config_key': 'callback',
-                'test_value': 'my_callback_function'
+        # Assert - Condition should be structured in config
+        assert 'condition' in task.config
+        assert task.config['condition']['type'] == 'dependent'
+        assert task.config['condition']['parameters'] == {'param1': 'value1'}
+        assert task.config['condition']['dependent_task'] == 'task_id_123'
+
+    def test_task_config_synchronization_output_pydantic_from_config(self):
+        """Test output_pydantic syncs from config to field."""
+        task = Task(
+            name='Task',
+            description='Desc',
+            expected_output='Output',
+            config={'output_pydantic': 'MyModel'}
+        )
+        assert task.output_pydantic == 'MyModel'
+
+    def test_task_config_synchronization_output_pydantic_from_field(self):
+        """Test output_pydantic syncs from field to config."""
+        task = Task(
+            name='Task',
+            description='Desc',
+            expected_output='Output',
+            output_pydantic='MyModel'
+        )
+        assert task.config.get('output_pydantic') == 'MyModel'
+
+    def test_task_config_synchronization_output_json(self):
+        """Test output_json syncs between config and field."""
+        # Config → field
+        task1 = Task(
+            name='Task',
+            description='Desc',
+            expected_output='Output',
+            config={'output_json': 'output.json'}
+        )
+        assert task1.output_json == 'output.json'
+
+        # Field → config
+        task2 = Task(
+            name='Task',
+            description='Desc',
+            expected_output='Output',
+            output_json='output.json'
+        )
+        assert task2.config.get('output_json') == 'output.json'
+
+    def test_task_config_synchronization_output_file(self):
+        """Test output_file syncs between config and field."""
+        # Config → field
+        task1 = Task(
+            name='Task',
+            description='Desc',
+            expected_output='Output',
+            config={'output_file': '/path/to/output.txt'}
+        )
+        assert task1.output_file == '/path/to/output.txt'
+
+        # Field → config
+        task2 = Task(
+            name='Task',
+            description='Desc',
+            expected_output='Output',
+            output_file='/path/to/output.txt'
+        )
+        assert task2.config.get('output_file') == '/path/to/output.txt'
+
+    def test_task_config_synchronization_callback(self):
+        """Test callback syncs between config and field."""
+        # Config → field
+        task1 = Task(
+            name='Task',
+            description='Desc',
+            expected_output='Output',
+            config={'callback': 'my_callback'}
+        )
+        assert task1.callback == 'my_callback'
+
+        # Field → config
+        task2 = Task(
+            name='Task',
+            description='Desc',
+            expected_output='Output',
+            callback='my_callback'
+        )
+        assert task2.config.get('callback') == 'my_callback'
+
+    def test_task_config_synchronization_markdown(self):
+        """Test markdown syncs between config and field."""
+        # Config → field
+        task1 = Task(
+            name='Task',
+            description='Desc',
+            expected_output='Output',
+            config={'markdown': True}
+        )
+        assert task1.markdown is True
+
+        # Field → config (only when explicitly provided)
+        task2 = Task(
+            name='Task',
+            description='Desc',
+            expected_output='Output',
+            markdown=True
+        )
+        assert task2.config.get('markdown') is True
+
+    def test_task_config_synchronization_guardrail(self):
+        """Test code guardrail syncs between config and field."""
+        # Config → field
+        task1 = Task(
+            name='Task',
+            description='Desc',
+            expected_output='Output',
+            config={'guardrail': 'validate_output'}
+        )
+        assert task1.guardrail == 'validate_output'
+
+        # Field → config
+        task2 = Task(
+            name='Task',
+            description='Desc',
+            expected_output='Output',
+            guardrail='validate_output'
+        )
+        assert task2.config.get('guardrail') == 'validate_output'
+
+    def test_llm_guardrail_column_does_not_sync_to_config(self):
+        """Test that llm_guardrail column does NOT auto-sync to config.
+
+        When a task is created during crew generation with llm_guardrail in the
+        column (but NOT in config), the value should NOT be copied into config.
+        The config stores the user's explicit choice (toggle ON/OFF), while
+        the column stores the LLM-generated suggestion.
+        """
+        # Act - Create task with llm_guardrail column value but no config entry
+        task = Task(
+            name='Generated Task',
+            description='LLM generated task',
+            expected_output='Output',
+            llm_guardrail={
+                'description': 'Validate output',
+                'llm_model': 'databricks-claude-sonnet-4-5'
             }
-        ]
-        
-        for scenario in sync_scenarios:
-            # Assert scenario structure
-            assert 'field' in scenario
-            assert 'config_key' in scenario
-            assert 'test_value' in scenario
+        )
+
+        # Assert - config should NOT have llm_guardrail (no column → config sync)
+        assert 'llm_guardrail' not in task.config
+        # Column should retain the value
+        assert task.llm_guardrail == {
+            'description': 'Validate output',
+            'llm_model': 'databricks-claude-sonnet-4-5'
+        }
+
+    def test_llm_guardrail_config_syncs_to_column(self):
+        """Test that config llm_guardrail syncs to column (config → column).
+
+        When the user explicitly enables the guardrail via the toggle, the
+        config gets the value and it should sync to the column.
+        """
+        guardrail_config = {
+            'description': 'Validate output completeness',
+            'llm_model': 'databricks-claude-sonnet-4-5'
+        }
+
+        # Act - Create task with llm_guardrail in config (user toggle ON)
+        task = Task(
+            name='Task with guardrail',
+            description='Desc',
+            expected_output='Output',
+            config={'llm_guardrail': guardrail_config}
+        )
+
+        # Assert - column should be synced from config
+        assert task.llm_guardrail == guardrail_config
+
+    def test_llm_guardrail_config_null_clears_column(self):
+        """Test that setting config llm_guardrail to null clears the column.
+
+        When the user disables the guardrail toggle, config gets null
+        and the column should also be cleared.
+        """
+        # Act - Create task with llm_guardrail explicitly null in config
+        task = Task(
+            name='Task',
+            description='Desc',
+            expected_output='Output',
+            config={'llm_guardrail': None}
+        )
+
+        # Assert - column should be null (synced from config)
+        assert task.llm_guardrail is None
+
+    def test_llm_guardrail_column_preserves_suggestion(self):
+        """Test that llm_guardrail column value is preserved during generation.
+
+        During crew generation, the column stores the LLM suggestion.
+        It should NOT leak into config (which controls execution).
+        """
+        suggestion = {
+            'description': 'Validate research output accuracy',
+            'llm_model': 'databricks-claude-sonnet-4-5'
+        }
+
+        # Act - Create task with column value and empty config
+        task = Task(
+            name='Generated Task',
+            description='Desc',
+            expected_output='Output',
+            llm_guardrail=suggestion,
+            config={}
+        )
+
+        # Assert - Column retains the suggestion
+        assert task.llm_guardrail == suggestion
+        # Config remains clean (no auto-sync from column)
+        assert 'llm_guardrail' not in task.config
 
     def test_task_model_documentation(self):
         """Test Task model documentation."""

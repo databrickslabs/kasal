@@ -1,12 +1,14 @@
 from typing import AsyncGenerator, Generator
 import os
 import logging
+import re
 from pathlib import Path
 from datetime import datetime, timezone
 import sys
 import asyncio
 import time
 from functools import wraps
+from contextlib import asynccontextmanager
 
 from sqlalchemy import text, event
 from sqlalchemy.ext.asyncio import (
@@ -19,6 +21,17 @@ from sqlalchemy.exc import OperationalError
 from src.config.settings import settings
 from src.db.base import Base
 from src.core.logger import LoggerManager
+
+# SQL identifier validation to prevent injection in dynamic SQL
+_SAFE_IDENTIFIER_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+
+def _validate_identifier(name: str, kind: str = "identifier") -> str:
+    """Validate a SQL identifier against a safe pattern to prevent injection."""
+    if not name or not _SAFE_IDENTIFIER_RE.match(name):
+        raise ValueError(f"Invalid SQL {kind}: {name!r}")
+    return name
+
 
 # Configure logging using LoggerManager
 logger_manager = LoggerManager.get_instance()
@@ -347,8 +360,36 @@ if not str(settings.DATABASE_URI).startswith('sqlite'):
         autocommit=False,
     )
 
-# SessionLocal removed - use async_session_factory instead
-# All database operations must be async
+@asynccontextmanager
+async def safe_async_session():
+    """Create an async session that suppresses cleanup errors.
+
+    Use this in long-running subprocess operations (crew/flow execution)
+    where SQLite connections may go stale after the greenlet context is lost
+    during long-running CrewAI operations. The normal ``async with
+    async_session_factory() as session:`` pattern raises
+    ``sqlite3.OperationalError: no active connection`` in ``__aexit__``
+    when the underlying connection has become invalid.
+    """
+    session = async_session_factory()
+    try:
+        yield session
+    finally:
+        try:
+            await session.close()
+        except Exception:
+            pass
+
+
+# Sync session factory for non-async contexts (e.g. CrewAI guardrail callbacks).
+# Uses the sync_engine underlying the async engine.
+from sqlalchemy.orm import sessionmaker as sync_sessionmaker
+sync_session_factory = sync_sessionmaker(
+    engine.sync_engine,
+    expire_on_commit=False,
+    autoflush=False,
+    autocommit=False,
+)
 
 # Database initialization
 async def init_db() -> None:
@@ -370,6 +411,10 @@ async def init_db() -> None:
             port = settings.POSTGRES_PORT
             user = settings.POSTGRES_USER
             password = settings.POSTGRES_PASSWORD
+
+            # Defense-in-depth: validate db_name even though it comes from
+            # environment settings, to prevent SQL injection via CREATE DATABASE.
+            _validate_identifier(db_name, "database name")
 
             try:
                 # First, try to connect to the specified database

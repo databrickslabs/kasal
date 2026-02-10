@@ -71,16 +71,27 @@ class GPT5CompatibleLLM(LLM):
         
         return transformed
     
-    def call(self, messages: Union[str, List[Dict[str, str]]], **kwargs) -> str:
+    def call(
+        self,
+        messages: Union[str, List[Dict[str, str]]],
+        tools=None,
+        callbacks=None,
+        available_functions=None,
+        from_task=None,
+        from_agent=None,
+        **kwargs,  # Accept additional kwargs for CrewAI 1.9.x compatibility (e.g., response_model)
+    ) -> str:
         """
         Override the call method to transform parameters for GPT-5.
-        
+
         This method intercepts all calls and ensures max_tokens is
         converted to max_completion_tokens for GPT-5 models.
+
+        Note: Signature updated for CrewAI 1.9.x compatibility with response_model support.
         """
         logger.info(f"GPT5CompatibleLLM.call() invoked with model: {getattr(self, 'model', 'unknown')}")
         logger.debug(f"GPT5CompatibleLLM.call() kwargs before transformation: {list(kwargs.keys())}")
-        
+
         # Check if this is a GPT-5 model
         if hasattr(self, 'model') and self._is_gpt5_model(str(self.model)):
             # Transform the kwargs to remove max_tokens
@@ -89,37 +100,49 @@ class GPT5CompatibleLLM(LLM):
                 if 'max_completion_tokens' not in kwargs:
                     kwargs['max_completion_tokens'] = max_tokens_value
                     logger.debug(f"Transformed max_tokens to max_completion_tokens in call()")
-        
+
         logger.debug(f"GPT5CompatibleLLM.call() kwargs after transformation: {list(kwargs.keys())}")
-        
+
         # Call the parent implementation with transformed params
-        return super().call(messages, **kwargs)
+        return super().call(
+            messages,
+            tools=tools,
+            callbacks=callbacks,
+            available_functions=available_functions,
+            from_task=from_task,
+            from_agent=from_agent,
+            **kwargs,
+        )
     
     def _handle_non_streaming_response(
-        self, 
-        params: Dict[str, Any], 
+        self,
+        params: Dict[str, Any],
         callbacks: Optional[List[Any]] = None,
         available_functions: Optional[Dict[str, Any]] = None,
         from_task: Optional[Any] = None,
-        from_agent: Optional[Any] = None
+        from_agent: Optional[Any] = None,
+        **kwargs,  # Accept additional kwargs for CrewAI 1.9.x compatibility (e.g., response_model)
     ) -> Union[str, Any]:
         """
         Override to transform parameters before calling litellm.
-        
+
         This is the internal method that CrewAI LLM uses to make the actual
         litellm call for non-streaming responses.
+
+        Note: Signature updated for CrewAI 1.9.x compatibility with response_model support.
         """
         logger.info(f"GPT5CompatibleLLM._handle_non_streaming_response() called")
         logger.debug(f"Parameters before transformation: {list(params.keys())}")
-        
+        logger.debug(f"Additional kwargs: {list(kwargs.keys())}")
+
         # Check if this is a GPT-5 model and transform params
         if hasattr(self, 'model') and self._is_gpt5_model(str(self.model)):
             params = self._transform_params(params)
             logger.info(f"Transformed parameters in _handle_non_streaming_response for GPT-5")
             logger.debug(f"Parameters after transformation: {list(params.keys())}")
-        
+
         return super()._handle_non_streaming_response(
-            params, callbacks, available_functions, from_task, from_agent
+            params, callbacks, available_functions, from_task, from_agent, **kwargs
         )
     
     def _handle_streaming_response(
@@ -128,19 +151,22 @@ class GPT5CompatibleLLM(LLM):
         callbacks: Optional[List[Any]] = None,
         available_functions: Optional[Dict[str, Any]] = None,
         from_task: Optional[Any] = None,
-        from_agent: Optional[Any] = None
+        from_agent: Optional[Any] = None,
+        **kwargs,  # Accept additional kwargs for CrewAI 1.9.x compatibility (e.g., response_model)
     ) -> Union[str, Any]:
         """
         Override to transform parameters before calling litellm for streaming.
-        
+
         This is the internal method that CrewAI LLM uses to make the actual
         litellm call for streaming responses.
+
+        Note: Signature updated for CrewAI 1.9.x compatibility with response_model support.
         """
         # Check if this is a GPT-5 model and transform params
         if hasattr(self, 'model') and self._is_gpt5_model(str(self.model)):
             params = self._transform_params(params)
             logger.debug("Transformed parameters in _handle_streaming_response")
-        
+
         return super()._handle_streaming_response(
-            params, callbacks, available_functions, from_task, from_agent
+            params, callbacks, available_functions, from_task, from_agent, **kwargs
         )

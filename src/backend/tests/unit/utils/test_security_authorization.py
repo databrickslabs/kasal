@@ -146,6 +146,8 @@ class TestGroupAuthorizationSecurity:
         """Test that the FastAPI dependency raises HTTPException 403 for unauthorized access."""
         # Create mock request
         mock_request = Mock(spec=Request)
+        # Ensure request.state has no _group_context_cache so cache logic is bypassed
+        mock_request.state = Mock(spec=[])
 
         # Mock user groups
         mock_user = Mock()
