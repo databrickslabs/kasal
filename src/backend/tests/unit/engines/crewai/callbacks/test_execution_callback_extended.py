@@ -1,17 +1,12 @@
 """
 Extended unit tests for execution_callback module.
 
-Comprehensive tests covering:
-- Step callback context tracking
-- Task callback agent extraction
-- Tool-to-agent mapping
-- Task switch detection
-- Error handling scenarios
-- Group context propagation
+Comprehensive tests covering the simplified execution-scoped callbacks that
+handle execution log streaming only.  Trace creation is delegated to the
+event bus handlers (logging_callbacks.py) and the OTel pipeline.
 """
 import pytest
-from unittest.mock import Mock, MagicMock, patch, call
-from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
 
 
 class TestCreateExecutionCallbacksExtended:
@@ -29,586 +24,316 @@ class TestCreateExecutionCallbacksExtended:
     def mock_crew(self):
         """Create mock crew with agents and tasks."""
         crew = MagicMock()
-
-        # Create mock agents
         agent1 = MagicMock()
         agent1.role = "Research Agent"
         agent1.tools = []
-
         agent2 = MagicMock()
         agent2.role = "Writer Agent"
         agent2.tools = []
-
         crew.agents = [agent1, agent2]
         crew.name = "Test Crew"
-
-        # Create mock tasks
         task1 = MagicMock()
         task1.description = "Research the topic"
         task1.agent = agent1
-
         task2 = MagicMock()
         task2.description = "Write the content"
         task2.agent = agent2
-
         crew.tasks = [task1, task2]
-
         return crew
 
-    def test_callbacks_with_crew_builds_agent_lookup(self, mock_group_context, mock_crew):
-        """Test that agent lookup is built from crew."""
-        with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_queue:
-            mock_queue.return_value = MagicMock()
+    def test_callbacks_accept_crew_parameter(self, mock_group_context, mock_crew):
+        """Test that crew parameter is accepted for API compatibility."""
+        from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
 
-            from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
+        step_cb, task_cb = create_execution_callbacks(
+            job_id="test_job",
+            config={},
+            group_context=mock_group_context,
+            crew=mock_crew,
+        )
+        assert callable(step_cb)
+        assert callable(task_cb)
 
-            step_cb, task_cb = create_execution_callbacks(
-                job_id="test_job",
-                config={},
-                group_context=mock_group_context,
-                crew=mock_crew
-            )
+    def test_callbacks_work_without_crew(self, mock_group_context):
+        """Test that callbacks work without crew parameter."""
+        from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
 
-            # Callbacks should be created
-            assert callable(step_cb)
-            assert callable(task_cb)
+        step_cb, task_cb = create_execution_callbacks(
+            job_id="test_job",
+            config={},
+            group_context=mock_group_context,
+        )
+        assert callable(step_cb)
+        assert callable(task_cb)
 
-    def test_callbacks_with_crew_builds_task_mapping(self, mock_group_context, mock_crew):
-        """Test that task-to-agent mapping is built from crew."""
-        with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_queue:
-            mock_queue.return_value = MagicMock()
+    def test_callbacks_work_without_config(self, mock_group_context):
+        """Test that callbacks work with None config."""
+        from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
 
-            from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
-
-            step_cb, task_cb = create_execution_callbacks(
-                job_id="test_job",
-                config={},
-                group_context=mock_group_context,
-                crew=mock_crew
-            )
-
-            assert callable(step_cb)
-            assert callable(task_cb)
-
-    def test_callbacks_with_tools_builds_tool_mapping(self, mock_group_context):
-        """Test that tool-to-agent mapping is built."""
-        crew = MagicMock()
-
-        # Create agent with tools
-        agent = MagicMock()
-        agent.role = "Tool Agent"
-
-        tool1 = MagicMock()
-        tool1.name = "SearchTool"
-
-        tool2 = MagicMock()
-        tool2.name = "WebScrapeTool"
-
-        agent.tools = [tool1, tool2]
-        crew.agents = [agent]
-        crew.tasks = []
-        crew.name = "Tool Crew"
-
-        with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_queue:
-            mock_queue.return_value = MagicMock()
-
-            from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
-
-            step_cb, task_cb = create_execution_callbacks(
-                job_id="test_job",
-                config={},
-                group_context=mock_group_context,
-                crew=crew
-            )
-
-            assert callable(step_cb)
-
-    def test_callbacks_maps_mcp_tools(self, mock_group_context):
-        """Test that MCP tools with prefixes are properly mapped."""
-        crew = MagicMock()
-
-        agent = MagicMock()
-        agent.role = "MCP Agent"
-
-        # MCP tool with prefix
-        tool = MagicMock()
-        tool.name = "Gmail_send_email_tool"
-
-        agent.tools = [tool]
-        crew.agents = [agent]
-        crew.tasks = []
-        crew.name = "MCP Crew"
-
-        with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_queue:
-            mock_queue.return_value = MagicMock()
-
-            from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
-
-            step_cb, task_cb = create_execution_callbacks(
-                job_id="test_job",
-                config={},
-                group_context=mock_group_context,
-                crew=crew
-            )
-
-            assert callable(step_cb)
+        step_cb, task_cb = create_execution_callbacks(
+            job_id="test_job",
+            config=None,
+            group_context=mock_group_context,
+        )
+        assert callable(step_cb)
+        assert callable(task_cb)
 
 
 class TestStepCallbackExtended:
     """Extended tests for step callback functionality."""
 
-    def test_step_callback_handles_agent_action(self):
-        """Test step callback handles AgentAction objects."""
-        mock_queue = MagicMock()
-        mock_group_context = MagicMock()
-        mock_group_context.primary_group_id = "group_123"
-        mock_group_context.group_email = "test@example.com"
+    def _create_step_callback(self, job_id="test_job", group_context=None):
+        from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
 
-        crew = MagicMock()
-        agent = MagicMock()
-        agent.role = "Test Agent"
-        agent.tools = []
-        crew.agents = [agent]
-        crew.tasks = []
-        crew.name = "Test Crew"
+        step_cb, _ = create_execution_callbacks(
+            job_id=job_id, config={}, group_context=group_context
+        )
+        return step_cb
 
-        with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_get_queue:
-            with patch("src.engines.crewai.callbacks.execution_callback.enqueue_log") as mock_enqueue:
-                mock_get_queue.return_value = mock_queue
+    def test_step_callback_handles_output_attribute(self):
+        """Test step callback reads 'output' attribute."""
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            step_cb = self._create_step_callback()
+            mock_output = MagicMock()
+            mock_output.output = "Agent step output"
+            step_cb(mock_output)
 
-                from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
+            mock_enqueue.assert_called_once()
+            kwargs = mock_enqueue.call_args[1]
+            assert "[STEP]" in kwargs["content"]
+            assert "Agent step output" in kwargs["content"]
 
-                step_cb, task_cb = create_execution_callbacks(
-                    job_id="test_job",
-                    config={},
-                    group_context=mock_group_context,
-                    crew=crew
-                )
+    def test_step_callback_handles_raw_attribute(self):
+        """Test step callback reads 'raw' attribute when 'output' is missing."""
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            step_cb = self._create_step_callback()
+            mock_output = MagicMock(spec=[])
+            mock_output.raw = "Raw content"
+            step_cb(mock_output)
 
-                # Create AgentAction-like mock
-                mock_output = MagicMock()
-                mock_output.__class__.__name__ = "AgentAction"
-                mock_output.tool = "SearchTool"
-                mock_output.tool_input = "search query"
-                mock_output.thought = "I need to search"
-                mock_output.log = "Searching..."
+            kwargs = mock_enqueue.call_args[1]
+            assert "Raw content" in kwargs["content"]
 
-                step_cb(mock_output)
+    def test_step_callback_handles_log_attribute(self):
+        """Test step callback reads 'log' attribute as fallback."""
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            step_cb = self._create_step_callback()
+            mock_output = MagicMock(spec=[])
+            mock_output.log = "Log content"
+            step_cb(mock_output)
 
-                # Should have logged and queued
-                assert mock_enqueue.called or mock_queue.put_nowait.called
-
-    def test_step_callback_handles_agent_finish(self):
-        """Test step callback handles AgentFinish objects."""
-        mock_queue = MagicMock()
-        mock_group_context = MagicMock()
-        mock_group_context.primary_group_id = "group_123"
-        mock_group_context.group_email = "test@example.com"
-
-        crew = MagicMock()
-        agent = MagicMock()
-        agent.role = "Test Agent"
-        agent.tools = []
-        crew.agents = [agent]
-        crew.tasks = []
-        crew.name = "Test Crew"
-
-        with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_get_queue:
-            with patch("src.engines.crewai.callbacks.execution_callback.enqueue_log") as mock_enqueue:
-                mock_get_queue.return_value = mock_queue
-
-                from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
-
-                step_cb, task_cb = create_execution_callbacks(
-                    job_id="test_job",
-                    config={},
-                    group_context=mock_group_context,
-                    crew=crew
-                )
-
-                mock_output = MagicMock()
-                mock_output.__class__.__name__ = "AgentFinish"
-                mock_output.output = "Final answer"
-
-                step_cb(mock_output)
-
-                assert mock_enqueue.called or mock_queue.put_nowait.called
+            kwargs = mock_enqueue.call_args[1]
+            assert "Log content" in kwargs["content"]
 
     def test_step_callback_handles_string_output(self):
-        """Test step callback handles string output."""
-        mock_queue = MagicMock()
-        mock_group_context = MagicMock()
-        mock_group_context.primary_group_id = "group_123"
-        mock_group_context.group_email = "test@example.com"
+        """Test step callback handles plain string output."""
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            step_cb = self._create_step_callback()
+            step_cb("Simple string output")
 
-        crew = MagicMock()
-        agent = MagicMock()
-        agent.role = "Test Agent"
-        agent.tools = []
-        crew.agents = [agent]
-        crew.tasks = []
-        crew.name = "Test Crew"
-
-        with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_get_queue:
-            with patch("src.engines.crewai.callbacks.execution_callback.enqueue_log") as mock_enqueue:
-                mock_get_queue.return_value = mock_queue
-
-                from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
-
-                step_cb, task_cb = create_execution_callbacks(
-                    job_id="test_job",
-                    config={},
-                    group_context=mock_group_context,
-                    crew=crew
-                )
-
-                step_cb("Simple string output")
-
-                assert mock_enqueue.called or mock_queue.put_nowait.called
-
-    def test_step_callback_handles_output_with_raw(self):
-        """Test step callback extracts raw attribute."""
-        mock_queue = MagicMock()
-        mock_group_context = MagicMock()
-        mock_group_context.primary_group_id = "group_123"
-        mock_group_context.group_email = "test@example.com"
-
-        crew = MagicMock()
-        agent = MagicMock()
-        agent.role = "Test Agent"
-        agent.tools = []
-        crew.agents = [agent]
-        crew.tasks = []
-        crew.name = "Test Crew"
-
-        with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_get_queue:
-            with patch("src.engines.crewai.callbacks.execution_callback.enqueue_log") as mock_enqueue:
-                mock_get_queue.return_value = mock_queue
-
-                from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
-
-                step_cb, task_cb = create_execution_callbacks(
-                    job_id="test_job",
-                    config={},
-                    group_context=mock_group_context,
-                    crew=crew
-                )
-
-                mock_output = MagicMock()
-                mock_output.output = None
-                mock_output.raw = "Raw content"
-
-                step_cb(mock_output)
-
-                assert mock_enqueue.called or mock_queue.put_nowait.called
+            mock_enqueue.assert_called_once()
+            kwargs = mock_enqueue.call_args[1]
+            assert "Simple string output" in kwargs["content"]
 
     def test_step_callback_truncates_long_content(self):
-        """Test step callback truncates very long content."""
-        mock_queue = MagicMock()
-        mock_group_context = MagicMock()
-        mock_group_context.primary_group_id = "group_123"
-        mock_group_context.group_email = "test@example.com"
+        """Test step callback truncates content longer than 500 chars."""
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            step_cb = self._create_step_callback()
+            mock_output = MagicMock()
+            mock_output.output = "x" * 1000
+            step_cb(mock_output)
 
-        crew = MagicMock()
-        agent = MagicMock()
-        agent.role = "Test Agent"
-        agent.tools = []
-        crew.agents = [agent]
-        crew.tasks = []
-        crew.name = "Test Crew"
-
-        with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_get_queue:
-            with patch("src.engines.crewai.callbacks.execution_callback.enqueue_log") as mock_enqueue:
-                mock_get_queue.return_value = mock_queue
-
-                from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
-
-                step_cb, task_cb = create_execution_callbacks(
-                    job_id="test_job",
-                    config={},
-                    group_context=mock_group_context,
-                    crew=crew
-                )
-
-                long_output = "x" * 1000
-                mock_output = MagicMock()
-                mock_output.output = long_output
-
-                step_cb(mock_output)
-
-                # Should still work without error
-                assert mock_enqueue.called or mock_queue.put_nowait.called
+            kwargs = mock_enqueue.call_args[1]
+            assert kwargs["content"].endswith("...")
+            assert len(kwargs["content"]) < 600
 
     def test_step_callback_handles_exception_gracefully(self):
         """Test step callback handles exceptions without crashing."""
-        mock_queue = MagicMock()
-        mock_queue.put_nowait.side_effect = Exception("Queue error")
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            mock_enqueue.side_effect = Exception("Log error")
+            step_cb = self._create_step_callback()
+            # Should not raise
+            step_cb("test output")
 
-        mock_group_context = MagicMock()
-        mock_group_context.primary_group_id = "group_123"
-        mock_group_context.group_email = "test@example.com"
+    def test_step_callback_includes_job_id(self):
+        """Test step callback passes correct execution_id."""
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            step_cb = self._create_step_callback(job_id="my_job_42")
+            mock_output = MagicMock()
+            mock_output.output = "test"
+            step_cb(mock_output)
 
-        crew = MagicMock()
-        agent = MagicMock()
-        agent.role = "Test Agent"
-        agent.tools = []
-        crew.agents = [agent]
-        crew.tasks = []
-        crew.name = "Test Crew"
+            kwargs = mock_enqueue.call_args[1]
+            assert kwargs["execution_id"] == "my_job_42"
 
-        with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_get_queue:
-            with patch("src.engines.crewai.callbacks.execution_callback.enqueue_log") as mock_enqueue:
-                mock_enqueue.side_effect = Exception("Log error")
-                mock_get_queue.return_value = mock_queue
+    def test_step_callback_includes_group_context(self):
+        """Test step callback passes group_context."""
+        gc = MagicMock()
+        gc.primary_group_id = "g1"
+        gc.group_email = "g@test.com"
 
-                from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            step_cb = self._create_step_callback(group_context=gc)
+            mock_output = MagicMock()
+            mock_output.output = "test"
+            step_cb(mock_output)
 
-                step_cb, task_cb = create_execution_callbacks(
-                    job_id="test_job",
-                    config={},
-                    group_context=mock_group_context,
-                    crew=crew
-                )
-
-                # Should not raise
-                step_cb("test output")
+            kwargs = mock_enqueue.call_args[1]
+            assert kwargs["group_context"] == gc
 
 
 class TestTaskCallbackExtended:
     """Extended tests for task callback functionality."""
 
-    def test_task_callback_extracts_agent_from_task_output(self):
-        """Test task callback extracts agent from task_output.agent."""
-        mock_queue = MagicMock()
-        mock_group_context = MagicMock()
-        mock_group_context.primary_group_id = "group_123"
-        mock_group_context.group_email = "test@example.com"
+    def _create_task_callback(self, job_id="test_job", group_context=None):
+        from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
 
-        crew = MagicMock()
-        agent1 = MagicMock()
-        agent1.role = "Agent One"
-        agent1.tools = []
+        _, task_cb = create_execution_callbacks(
+            job_id=job_id, config={}, group_context=group_context
+        )
+        return task_cb
 
-        agent2 = MagicMock()
-        agent2.role = "Agent Two"
-        agent2.tools = []
+    def test_task_callback_extracts_description(self):
+        """Test task callback extracts description from task_output.description."""
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            task_cb = self._create_task_callback()
+            mock_output = MagicMock()
+            mock_output.description = "My Task Description"
+            mock_output.raw = "result"
+            task_cb(mock_output)
 
-        task1 = MagicMock()
-        task1.description = "Task One Description"
-        task1.agent = agent1
+            kwargs = mock_enqueue.call_args[1]
+            assert "My Task Description" in kwargs["content"]
+            assert "TASK COMPLETED" in kwargs["content"]
 
-        task2 = MagicMock()
-        task2.description = "Task Two Description"
-        task2.agent = agent2
+    def test_task_callback_extracts_description_from_task_attr(self):
+        """Test task callback extracts description from task_output.task.description."""
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            task_cb = self._create_task_callback()
+            mock_output = MagicMock(spec=[])
+            mock_output.task = MagicMock()
+            mock_output.task.description = "Nested task desc"
+            mock_output.output = "result"
+            task_cb(mock_output)
 
-        crew.agents = [agent1, agent2]
-        crew.tasks = [task1, task2]
-        crew.name = "Multi-Task Crew"
+            kwargs = mock_enqueue.call_args[1]
+            assert "Nested task desc" in kwargs["content"]
 
-        with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_get_queue:
-            with patch("src.engines.crewai.callbacks.execution_callback.enqueue_log") as mock_enqueue:
-                mock_get_queue.return_value = mock_queue
+    def test_task_callback_extracts_raw_content(self):
+        """Test task callback extracts content from raw attribute."""
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            task_cb = self._create_task_callback()
+            mock_output = MagicMock()
+            mock_output.description = "task"
+            mock_output.raw = "Raw task result"
+            task_cb(mock_output)
 
-                from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
+            kwargs = mock_enqueue.call_args[1]
+            assert "Raw task result" in kwargs["content"]
 
-                step_cb, task_cb = create_execution_callbacks(
-                    job_id="test_job",
-                    config={},
-                    group_context=mock_group_context,
-                    crew=crew
-                )
+    def test_task_callback_extracts_output_content(self):
+        """Test task callback extracts content from output attribute when raw is missing."""
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            task_cb = self._create_task_callback()
+            mock_output = MagicMock(spec=[])
+            mock_output.output = "Output task result"
+            task_cb(mock_output)
 
-                mock_output = MagicMock()
-                mock_output.description = "Task One Description"
-                mock_output.raw = "Task result"
-                mock_output.agent = crew.agents[0]
-                mock_output.task = crew.tasks[0]
+            kwargs = mock_enqueue.call_args[1]
+            assert "Output task result" in kwargs["content"]
 
-                task_cb(mock_output)
+    def test_task_callback_falls_back_to_str_when_no_raw_or_output(self):
+        """Test task callback uses str(task_output) when neither raw nor output exist.
 
-                assert mock_enqueue.called or mock_queue.put_nowait.called
+        Covers line 95: content = str(task_output) -- the else branch in task_callback
+        when the task_output object has neither .raw nor .output attributes.
+        """
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            task_cb = self._create_task_callback()
 
-    def test_task_callback_extracts_agent_from_task_object(self):
-        """Test task callback extracts agent from task.agent."""
-        mock_queue = MagicMock()
-        mock_group_context = MagicMock()
-        mock_group_context.primary_group_id = "group_123"
-        mock_group_context.group_email = "test@example.com"
+            # Use a plain object that has description but NOT raw or output
+            class BareTaskOutput:
+                def __init__(self):
+                    self.description = "Fallback task"
 
-        crew = MagicMock()
-        agent1 = MagicMock()
-        agent1.role = "Agent One"
-        agent1.tools = []
+                def __str__(self):
+                    return "stringified-task-output"
 
-        task1 = MagicMock()
-        task1.description = "Task One Description"
-        task1.agent = agent1
+            mock_output = BareTaskOutput()
+            task_cb(mock_output)
 
-        crew.agents = [agent1]
-        crew.tasks = [task1]
-        crew.name = "Crew"
+            mock_enqueue.assert_called_once()
+            kwargs = mock_enqueue.call_args[1]
+            assert "stringified-task-output" in kwargs["content"]
+            assert "TASK COMPLETED" in kwargs["content"]
 
-        with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_get_queue:
-            with patch("src.engines.crewai.callbacks.execution_callback.enqueue_log") as mock_enqueue:
-                mock_get_queue.return_value = mock_queue
+    def test_task_callback_handles_exception_gracefully(self):
+        """Test task callback handles exceptions without crashing."""
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            mock_enqueue.side_effect = Exception("Log error")
+            task_cb = self._create_task_callback()
+            mock_output = MagicMock()
+            mock_output.raw = "result"
+            mock_output.description = "task"
+            # Should not raise
+            task_cb(mock_output)
 
-                from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
+    def test_task_callback_truncates_long_description(self):
+        """Test task callback truncates descriptions longer than 100 chars."""
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            task_cb = self._create_task_callback()
+            mock_output = MagicMock()
+            mock_output.description = "D" * 200
+            mock_output.raw = "result"
+            task_cb(mock_output)
 
-                step_cb, task_cb = create_execution_callbacks(
-                    job_id="test_job",
-                    config={},
-                    group_context=mock_group_context,
-                    crew=crew
-                )
+            kwargs = mock_enqueue.call_args[1]
+            # The description part should be truncated
+            assert "..." in kwargs["content"]
 
-                mock_output = MagicMock()
-                mock_output.description = "Task description"
-                mock_output.raw = "Result"
-                mock_output.agent = None
-                mock_output.task = crew.tasks[0]
+    def test_task_callback_includes_job_id(self):
+        """Test task callback passes correct execution_id."""
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            task_cb = self._create_task_callback(job_id="my_job_99")
+            mock_output = MagicMock()
+            mock_output.description = "task"
+            mock_output.raw = "result"
+            task_cb(mock_output)
 
-                task_cb(mock_output)
-
-                assert mock_enqueue.called or mock_queue.put_nowait.called
-
-    def test_task_callback_matches_by_description(self):
-        """Test task callback matches task by description."""
-        mock_queue = MagicMock()
-        mock_group_context = MagicMock()
-        mock_group_context.primary_group_id = "group_123"
-        mock_group_context.group_email = "test@example.com"
-
-        crew = MagicMock()
-        agent1 = MagicMock()
-        agent1.role = "Agent One"
-        agent1.tools = []
-
-        task1 = MagicMock()
-        task1.description = "Task One Description"
-        task1.agent = agent1
-
-        crew.agents = [agent1]
-        crew.tasks = [task1]
-        crew.name = "Crew"
-
-        with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_get_queue:
-            with patch("src.engines.crewai.callbacks.execution_callback.enqueue_log") as mock_enqueue:
-                mock_get_queue.return_value = mock_queue
-
-                from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
-
-                step_cb, task_cb = create_execution_callbacks(
-                    job_id="test_job",
-                    config={},
-                    group_context=mock_group_context,
-                    crew=crew
-                )
-
-                mock_output = MagicMock()
-                mock_output.description = "Task One Description"
-                mock_output.raw = "Result"
-                mock_output.agent = None
-                mock_output.task = None
-
-                # Should find agent from crew.tasks by description match
-                task_cb(mock_output)
-
-                assert mock_enqueue.called or mock_queue.put_nowait.called
-
-    def test_task_callback_updates_context_for_next_task(self):
-        """Test task callback updates context for next task."""
-        mock_queue = MagicMock()
-        mock_group_context = MagicMock()
-        mock_group_context.primary_group_id = "group_123"
-        mock_group_context.group_email = "test@example.com"
-
-        crew = MagicMock()
-        agent1 = MagicMock()
-        agent1.role = "Agent One"
-        agent1.tools = []
-
-        agent2 = MagicMock()
-        agent2.role = "Agent Two"
-        agent2.tools = []
-
-        task1 = MagicMock()
-        task1.description = "Task One Description"
-        task1.agent = agent1
-
-        task2 = MagicMock()
-        task2.description = "Task Two Description"
-        task2.agent = agent2
-
-        crew.agents = [agent1, agent2]
-        crew.tasks = [task1, task2]
-        crew.name = "Multi-Task Crew"
-
-        with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_get_queue:
-            with patch("src.engines.crewai.callbacks.execution_callback.enqueue_log") as mock_enqueue:
-                mock_get_queue.return_value = mock_queue
-
-                from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
-
-                step_cb, task_cb = create_execution_callbacks(
-                    job_id="test_job",
-                    config={},
-                    group_context=mock_group_context,
-                    crew=crew
-                )
-
-                # Complete first task
-                mock_output = MagicMock()
-                mock_output.description = "Task One Description"
-                mock_output.raw = "Result"
-                mock_output.task = crew.tasks[0]
-
-                task_cb(mock_output)
-
-                # Context should be prepared for next task
-                assert mock_enqueue.called or mock_queue.put_nowait.called
-
-    def test_task_callback_handles_last_task(self):
-        """Test task callback handles completion of last task."""
-        mock_queue = MagicMock()
-        mock_group_context = MagicMock()
-        mock_group_context.primary_group_id = "group_123"
-        mock_group_context.group_email = "test@example.com"
-
-        crew = MagicMock()
-        agent1 = MagicMock()
-        agent1.role = "Agent One"
-        agent1.tools = []
-
-        task1 = MagicMock()
-        task1.description = "Task Description"
-        task1.agent = agent1
-
-        crew.agents = [agent1]
-        crew.tasks = [task1]
-        crew.name = "Crew"
-
-        with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_get_queue:
-            with patch("src.engines.crewai.callbacks.execution_callback.enqueue_log") as mock_enqueue:
-                mock_get_queue.return_value = mock_queue
-
-                from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
-
-                step_cb, task_cb = create_execution_callbacks(
-                    job_id="test_job",
-                    config={},
-                    group_context=mock_group_context,
-                    crew=crew
-                )
-
-                # Complete last task
-                mock_output = MagicMock()
-                mock_output.description = "Task Description"
-                mock_output.raw = "Final result"
-                mock_output.task = crew.tasks[0]
-
-                task_cb(mock_output)
-
-                assert mock_enqueue.called or mock_queue.put_nowait.called
+            kwargs = mock_enqueue.call_args[1]
+            assert kwargs["execution_id"] == "my_job_99"
 
 
 class TestCrewCallbacksExtended:
@@ -616,136 +341,161 @@ class TestCrewCallbacksExtended:
 
     def test_create_crew_callbacks_returns_callbacks(self):
         """Test create_crew_callbacks returns callback functions."""
-        with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_queue:
-            mock_queue.return_value = MagicMock()
+        from src.engines.crewai.callbacks.execution_callback import create_crew_callbacks
 
-            from src.engines.crewai.callbacks.execution_callback import create_crew_callbacks
-
-            mock_group_context = MagicMock()
-            mock_group_context.primary_group_id = "group_123"
-            mock_group_context.group_email = "test@example.com"
-
-            callbacks = create_crew_callbacks(
-                job_id="test_job",
-                group_context=mock_group_context
-            )
-
-            # Should return dict with callback functions
-            assert isinstance(callbacks, dict)
+        callbacks = create_crew_callbacks(
+            job_id="test_job",
+            group_context=MagicMock(),
+        )
+        assert isinstance(callbacks, dict)
+        assert "on_start" in callbacks
+        assert "on_complete" in callbacks
+        assert "on_error" in callbacks
 
     def test_log_crew_initialization_logs_config(self):
         """Test log_crew_initialization logs configuration."""
         from src.engines.crewai.callbacks.execution_callback import log_crew_initialization
 
-        mock_group_context = MagicMock()
-        mock_group_context.primary_group_id = "group_123"
-        mock_group_context.group_email = "test@example.com"
-
-        config = {
-            "agents": [{"role": "Test Agent"}],
-            "tasks": [{"description": "Test Task"}]
-        }
-
-        # Should not raise
-        log_crew_initialization(
-            job_id="test_job",
-            config=config,
-            group_context=mock_group_context
-        )
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            log_crew_initialization(
+                job_id="test_job",
+                config={"agents": [{"role": "Test Agent"}]},
+                group_context=MagicMock(),
+            )
+            mock_enqueue.assert_called_once()
 
     def test_log_crew_initialization_sanitizes_config(self):
         """Test log_crew_initialization removes sensitive data."""
         from src.engines.crewai.callbacks.execution_callback import log_crew_initialization
 
-        mock_group_context = MagicMock()
-        mock_group_context.primary_group_id = "group_123"
-        mock_group_context.group_email = "test@example.com"
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            log_crew_initialization(
+                job_id="test_job",
+                config={
+                    "model": "test-model",
+                    "api_keys": {"secret": "hidden"},
+                    "tokens": {"access_token": "secret"},
+                    "passwords": {"db_pass": "secret"},
+                    "normal_field": "visible",
+                },
+                group_context=MagicMock(),
+            )
+            content = mock_enqueue.call_args[1]["content"]
+            assert "test-model" in content
+            assert "visible" in content
+            assert "secret" not in content
+            assert "hidden" not in content
 
-        config = {
-            "agents": [{"role": "Test Agent"}],
-            "api_key": "secret_key",
-            "token": "secret_token",
-            "password": "secret_password"
-        }
 
-        # Should not raise and should sanitize sensitive fields
-        log_crew_initialization(
-            job_id="test_job",
-            config=config,
-            group_context=mock_group_context
-        )
+    def test_on_crew_start_handles_exception_gracefully(self):
+        """Test on_crew_start exception handler catches and logs errors.
+
+        Covers lines 152-153: except Exception handler in on_crew_start.
+        """
+        from src.engines.crewai.callbacks.execution_callback import create_crew_callbacks
+
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            mock_enqueue.side_effect = RuntimeError("Queue unavailable")
+            callbacks = create_crew_callbacks(
+                job_id="err_job",
+                group_context=MagicMock(),
+            )
+            # Should not raise -- the exception handler catches and logs the error
+            callbacks["on_start"]()
+
+    def test_on_crew_complete_handles_exception_gracefully(self):
+        """Test on_crew_complete exception handler catches and logs errors.
+
+        Covers lines 173-174: except Exception handler in on_crew_complete.
+        """
+        from src.engines.crewai.callbacks.execution_callback import create_crew_callbacks
+
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            mock_enqueue.side_effect = RuntimeError("Queue unavailable")
+            callbacks = create_crew_callbacks(
+                job_id="err_job",
+                group_context=MagicMock(),
+            )
+            # Should not raise -- the exception handler catches and logs the error
+            callbacks["on_complete"]("some result")
+
+    def test_on_crew_error_handles_exception_gracefully(self):
+        """Test on_crew_error exception handler catches and logs errors.
+
+        Covers lines 193-194: except Exception handler in on_crew_error.
+        """
+        from src.engines.crewai.callbacks.execution_callback import create_crew_callbacks
+
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            mock_enqueue.side_effect = RuntimeError("Queue unavailable")
+            callbacks = create_crew_callbacks(
+                job_id="err_job",
+                group_context=MagicMock(),
+            )
+            # Should not raise -- the exception handler catches and logs the error
+            callbacks["on_error"](Exception("Original crew error"))
 
 
-class TestAgentContextSwitching:
-    """Tests for agent context switching during multi-agent execution."""
+class TestMultiAgentExecution:
+    """Tests for multi-agent execution log isolation."""
 
-    def test_context_switches_between_agents(self):
-        """Test that context properly switches between agents."""
-        mock_queue = MagicMock()
-        mock_group_context = MagicMock()
-        mock_group_context.primary_group_id = "group_123"
-        mock_group_context.group_email = "test@example.com"
+    def test_sequential_step_callbacks_isolated(self):
+        """Test that step callbacks from different jobs produce separate logs."""
+        from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
 
-        crew = MagicMock()
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            step_1, _ = create_execution_callbacks("job_1", {}, None)
+            step_2, _ = create_execution_callbacks("job_2", {}, None)
 
-        agent1 = MagicMock()
-        agent1.role = "Research Agent"
-        agent1.tools = []
+            out1 = MagicMock()
+            out1.output = "Output from job 1"
+            out2 = MagicMock()
+            out2.output = "Output from job 2"
 
-        agent2 = MagicMock()
-        agent2.role = "Writer Agent"
-        agent2.tools = []
+            step_1(out1)
+            step_2(out2)
 
-        task1 = MagicMock()
-        task1.description = "Research task"
-        task1.agent = agent1
+            assert mock_enqueue.call_count == 2
+            calls = mock_enqueue.call_args_list
+            assert calls[0][1]["execution_id"] == "job_1"
+            assert calls[1][1]["execution_id"] == "job_2"
 
-        task2 = MagicMock()
-        task2.description = "Writing task"
-        task2.agent = agent2
+    def test_sequential_task_callbacks_isolated(self):
+        """Test that task callbacks from different jobs produce separate logs."""
+        from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
 
-        crew.agents = [agent1, agent2]
-        crew.tasks = [task1, task2]
-        crew.name = "Multi-Agent Crew"
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            _, task_1 = create_execution_callbacks("job_1", {}, None)
+            _, task_2 = create_execution_callbacks("job_2", {}, None)
 
-        with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_get_queue:
-            with patch("src.engines.crewai.callbacks.execution_callback.enqueue_log"):
-                mock_get_queue.return_value = mock_queue
+            out1 = MagicMock()
+            out1.description = "Task 1"
+            out1.raw = "Result 1"
+            out2 = MagicMock()
+            out2.description = "Task 2"
+            out2.raw = "Result 2"
 
-                from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
+            task_1(out1)
+            task_2(out2)
 
-                step_cb, task_cb = create_execution_callbacks(
-                    job_id="test_job",
-                    config={},
-                    group_context=mock_group_context,
-                    crew=crew
-                )
-
-                # First agent does work with Final Answer (triggers trace)
-                mock_output_1 = MagicMock()
-                mock_output_1.__class__.__name__ = "AgentFinish"
-                mock_output_1.output = "Final Answer: Research output"
-                mock_output_1.agent = agent1
-                step_cb(mock_output_1)
-
-                # First task completes
-                mock_task_output1 = MagicMock()
-                mock_task_output1.description = "Research task"
-                mock_task_output1.raw = "Research result"
-                mock_task_output1.task = task1
-
-                task_cb(mock_task_output1)
-
-                # Second agent does work with Final Answer (triggers trace)
-                mock_output_2 = MagicMock()
-                mock_output_2.__class__.__name__ = "AgentFinish"
-                mock_output_2.output = "Final Answer: Writing output"
-                mock_output_2.agent = agent2
-                step_cb(mock_output_2)
-
-                # Should have queued events for Final Answer patterns
-                assert mock_queue.put_nowait.called
-                assert mock_queue.put_nowait.call_count >= 2
+            assert mock_enqueue.call_count == 2
+            calls = mock_enqueue.call_args_list
+            assert calls[0][1]["execution_id"] == "job_1"
+            assert calls[1][1]["execution_id"] == "job_2"
 
 
 if __name__ == "__main__":
