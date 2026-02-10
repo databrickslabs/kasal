@@ -2,7 +2,9 @@
 """
 Direct deployment script for Kasal application.
 
-This script deploys the backend code as-is and uses import-dir for frontend_static.
+Deploys backend source, frontend source, and docs to Databricks Apps.
+Frontend is built on Databricks Apps via npm lifecycle hooks in package.json.
+Uses hybrid upload: SDK for root files (avoids .py→notebook conversion), import-dir for directories.
 """
 
 import os
@@ -235,12 +237,23 @@ def deploy_source_to_databricks(
         logger.error(f"Failed to connect to Databricks: {e}")
         raise
     
-    # Check that frontend_static exists
-    frontend_static_dir = root_dir / "frontend_static"
-    if not frontend_static_dir.exists():
-        logger.error("frontend_static directory does not exist. Please run 'python build.py' first to build the frontend.")
-        raise FileNotFoundError("frontend_static directory not found")
-    
+    # Check that frontend source directory exists (built on Databricks Apps)
+    frontend_src_dir = root_dir / "frontend"
+    if not frontend_src_dir.exists():
+        logger.error("frontend/ directory not found. Cannot deploy without frontend source.")
+        raise FileNotFoundError("frontend/ directory not found")
+
+    # Check that docs directory exists
+    docs_dir = root_dir / "docs"
+    if not docs_dir.exists():
+        logger.warning("docs/ directory not found. Continuing without docs.")
+
+    # Check that root package.json exists (needed for Databricks Apps build)
+    root_package_json = root_dir / "package.json"
+    if not root_package_json.exists():
+        logger.error("package.json not found. This file is required for building frontend on Databricks Apps.")
+        raise FileNotFoundError("package.json not found")
+
     # Verify app.yaml exists
     app_yaml_path = root_dir / "app.yaml"
     if not app_yaml_path.exists():
@@ -362,19 +375,34 @@ starlette==0.40.0
                 logger.error("Backend folder not found!")
                 raise FileNotFoundError("Backend folder not found")
             
-            # Copy frontend_static folder
-            logger.info("Copying frontend_static folder...")
-            frontend_static_src = root_dir / "frontend_static"
-            frontend_static_dst = databricks_dist / "frontend_static"
-            if frontend_static_src.exists():
-                shutil.copytree(frontend_static_src, frontend_static_dst)
-                logger.info(f"Copied frontend_static folder")
+            # Copy frontend source folder (without node_modules, dist, coverage)
+            logger.info("Copying frontend source folder...")
+            frontend_src = root_dir / "frontend"
+            frontend_dst = databricks_dist / "frontend"
+            if frontend_src.exists():
+                shutil.copytree(frontend_src, frontend_dst, ignore=shutil.ignore_patterns(
+                    'node_modules', 'dist', 'coverage', '.env.local',
+                    '.env.development.local', '.env.test.local', '.env.production.local'
+                ))
+                logger.info("Copied frontend source folder")
             else:
-                logger.error("frontend_static folder not found!")
-                raise FileNotFoundError("frontend_static folder not found")
-            
-            # Copy essential files
-            essential_files = ["app.yaml", "requirements.txt", "entrypoint.py"]
+                logger.error("Frontend source folder not found!")
+                raise FileNotFoundError("frontend/ folder not found")
+
+            # Copy docs folder (markdown files for frontend)
+            logger.info("Copying docs folder...")
+            docs_src = root_dir / "docs"
+            docs_dst = databricks_dist / "docs"
+            if docs_src.exists():
+                shutil.copytree(docs_src, docs_dst, ignore=shutil.ignore_patterns(
+                    'archive', '*.pyc', '__pycache__'
+                ))
+                logger.info("Copied docs folder")
+            else:
+                logger.warning("docs/ folder not found, skipping")
+
+            # Copy essential files (including package.json for frontend build)
+            essential_files = ["app.yaml", "requirements.txt", "entrypoint.py", "package.json"]
             for file_name in essential_files:
                 src_file = root_dir / file_name
                 dst_file = databricks_dist / file_name
@@ -384,33 +412,61 @@ starlette==0.40.0
                 else:
                     logger.warning(f"{file_name} not found, skipping")
             
-            
-            # Upload databricksdist folder using databricks CLI import-dir
-            logger.info(f"Uploading clean deployment folder to workspace using import-dir")
-            
-            import_cmd = [
-                "databricks", "workspace", "import-dir", 
-                "--overwrite",
-                str(databricks_dist), 
-                workspace_dir
-            ]
-            
-            logger.info(f"About to run command: {' '.join(import_cmd)}")
+
+            # Hybrid upload strategy:
+            # 1. Use import-dir for bulk directory uploads (backend/, frontend/, docs/)
+            # 2. Use SDK workspace.upload() for root-level files to avoid .py→notebook conversion
+            logger.info(f"Uploading deployment to workspace: {workspace_dir}")
             logger.info(f"Uploading from: {databricks_dist}")
-            logger.info(f"Contents: backend/, frontend_static/, app.yaml, requirements.txt, entrypoint.py")
-            confirmation = input("Do you want to proceed with this command? (y/N): ")
-            
+            logger.info(f"Contents: backend/, frontend/, docs/, package.json, app.yaml, requirements.txt, entrypoint.py")
+            confirmation = input("Do you want to proceed with this upload? (y/N): ")
+
             if confirmation.lower() not in ['y', 'yes']:
                 logger.info("Upload cancelled by user")
                 return False
-            
+
             logger.info("Proceeding with upload...")
-            result = subprocess.run(import_cmd, check=True, capture_output=True, text=True)
-            
-            logger.info("Source code uploaded successfully using import-dir")
-            logger.info(f"Upload output: {result.stdout}")
-            if result.stderr:
-                logger.warning(f"Upload warnings: {result.stderr}")
+
+            # Step 1: Upload directories using import-dir (safe for non-.py bulk content)
+            directories_to_upload = ["backend", "frontend", "docs"]
+            for dir_name in directories_to_upload:
+                dir_path = databricks_dist / dir_name
+                if dir_path.exists():
+                    target_path = f"{workspace_dir}/{dir_name}"
+                    import_cmd = [
+                        "databricks", "workspace", "import-dir",
+                        "--overwrite",
+                        str(dir_path),
+                        target_path
+                    ]
+                    logger.info(f"Uploading {dir_name}/ to {target_path}")
+                    result = subprocess.run(import_cmd, check=True, capture_output=True, text=True)
+                    logger.info(f"Uploaded {dir_name}/ successfully")
+                    if result.stderr:
+                        logger.warning(f"Upload warnings for {dir_name}/: {result.stderr}")
+                else:
+                    logger.warning(f"Directory {dir_name}/ not found in databricksdist, skipping")
+
+            # Step 2: Upload root-level files individually using SDK
+            # This avoids the import-dir bug that converts .py files to notebooks
+            root_files = ["entrypoint.py", "requirements.txt", "app.yaml", "package.json"]
+            for file_name in root_files:
+                file_path = databricks_dist / file_name
+                if file_path.exists():
+                    target_path = f"{workspace_dir}/{file_name}"
+                    logger.info(f"Uploading {file_name} to {target_path}")
+                    with open(file_path, "rb") as f:
+                        client.workspace.upload(
+                            target_path,
+                            f,
+                            format=ImportFormat.AUTO,
+                            overwrite=True
+                        )
+                    logger.info(f"Uploaded {file_name} successfully")
+                else:
+                    logger.warning(f"File {file_name} not found in databricksdist, skipping")
+
+            logger.info("All files uploaded successfully")
             
             # Clean up databricksdist directory
             logger.info("Cleaning up databricksdist directory")

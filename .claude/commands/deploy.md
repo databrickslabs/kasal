@@ -1,6 +1,6 @@
 # deploy
 
-Build frontend and deploy to Databricks Apps.
+Deploy to Databricks Apps (frontend is built on Databricks during deployment).
 
 ## Prerequisites Check
 
@@ -28,9 +28,9 @@ export DATABRICKS_HOST=<your-databricks-host>
    - "What app name should be used?" (default: kasal)
    - "What is your Databricks user email?"
 
-4. **After receiving all inputs**, run the deployment with `yes` command to auto-confirm prompts:
+4. **After receiving all inputs**, run the deployment with `yes` command to auto-confirm prompts (no local build needed — frontend builds on Databricks):
    ```bash
-   cd ~/workspace/kasal && source ~/workspace/venv/bin/activate && export DATABRICKS_TOKEN=<provided-token> && export DATABRICKS_HOST=<provided-host> && python src/build.py && yes | python src/deploy.py --app-name <app-name> --user-name <user-email>
+   cd ~/workspace/kasal && source ~/workspace/venv/bin/activate && export DATABRICKS_TOKEN=<provided-token> && export DATABRICKS_HOST=<provided-host> && yes | python src/deploy.py --app-name <app-name> --user-name <user-email>
    ```
 
 5. **Configure OAuth scopes** after deployment completes (run in Python):
@@ -85,11 +85,12 @@ export DATABRICKS_HOST=<your-databricks-host>
 
 This command:
 1. Validates Databricks credentials are available
-2. Builds frontend static assets (npm install, npm build)
-3. Copies documentation to public/docs
-4. Copies built assets to frontend_static/
-5. Deploys to Databricks Apps platform (auto-confirms prompts)
-6. Configures OAuth scopes for the app (SQL, Vector Search, Serving, Files, Dashboards)
+2. Uploads frontend source, backend, docs, and package.json to Databricks workspace
+3. Databricks Apps auto-detects package.json and runs `npm install` + `npm run build` to build frontend
+4. Deploys to Databricks Apps platform (auto-confirms prompts)
+5. Configures OAuth scopes for the app (SQL, Vector Search, Serving, Files, Dashboards)
+
+**Note**: `frontend_static/` is no longer tracked in git. The frontend is built on Databricks Apps during deployment using npm lifecycle hooks in `src/package.json`. For local development, `python src/build.py` still works.
 
 ## Usage
 
