@@ -113,7 +113,7 @@
         "llm": "databricks-llama-4-maverick",
         "function_calling_llm": null,
         "max_iter": 25,
-        "max_rpm": 1,
+        "max_rpm": 10,
         "max_execution_time": 300,
         "verbose": false,
         "allow_delegation": false,
