@@ -68,8 +68,12 @@ class EncryptionUtils:
         else:
             # Generate new keys
             private_key, public_key = EncryptionUtils.generate_ssh_key_pair()
-            # Save keys to files
+            # Save keys to files with restrictive permissions
             private_key_path.write_bytes(private_key)
+            try:
+                os.chmod(str(private_key_path), 0o600)
+            except (OSError, TypeError):
+                pass  # Best-effort on platforms where chmod may not apply
             public_key_path.write_bytes(public_key)
             logger.info("Generated new SSH key pair for encryption")
         
@@ -165,7 +169,7 @@ class EncryptionUtils:
             combined = base64.b64decode(value.encode())
             parts = combined.split(b":", 1)
             return len(parts) == 2
-        except:
+        except Exception:
             return False
 
     @staticmethod

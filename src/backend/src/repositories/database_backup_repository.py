@@ -18,7 +18,10 @@ logger = LoggerManager.get_instance().system
 
 class DatabaseBackupRepository:
     """Repository for database backup operations with Databricks Unity Catalog volumes."""
-    
+
+    # Regex for valid SQL identifiers (alphanumeric and underscores only)
+    _SAFE_IDENTIFIER_RE = __import__('re').compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
     def __init__(self, session: AsyncSession, user_token: Optional[str] = None):
         """Initialize the repository with session and volume repository.
 
@@ -29,6 +32,24 @@ class DatabaseBackupRepository:
         self.session = session
         self.volume_repo = DatabricksVolumeRepository(user_token=user_token)
         self.user_token = user_token
+
+    @classmethod
+    def _validate_identifier(cls, name: str, kind: str = "identifier") -> str:
+        """Validate a SQL identifier (table name, column name) to prevent injection.
+
+        Args:
+            name: The identifier to validate
+            kind: Description for error messages (e.g. 'table name', 'column name')
+
+        Returns:
+            The validated identifier string
+
+        Raises:
+            ValueError: If the identifier contains unsafe characters
+        """
+        if not name or not cls._SAFE_IDENTIFIER_RE.match(name):
+            raise ValueError(f"Invalid SQL {kind}: {name!r}")
+        return name
     
     @staticmethod
     def get_database_type() -> str:
@@ -181,28 +202,32 @@ class DatabaseBackupRepository:
             total_rows = 0
             
             for table in tables:
+                # Validate table name from pg_tables (defense-in-depth)
+                self._validate_identifier(table, "table name")
+
                 sql_content.append(f"-- Table: {table}")
                 sql_content.append("")
-                
+
                 # Get table columns info for proper INSERT statements
                 col_result = await db_session.execute(
-                    text(f"""
-                        SELECT column_name, data_type 
-                        FROM information_schema.columns 
-                        WHERE table_schema = 'public' 
-                        AND table_name = '{table}'
+                    text("""
+                        SELECT column_name, data_type
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                        AND table_name = :table_name
                         ORDER BY ordinal_position
-                    """)
+                    """),
+                    {"table_name": table}
                 )
                 columns = [(row[0], row[1]) for row in col_result.fetchall()]
                 column_names = [col[0] for col in columns]
-                
+
                 # Disable triggers and constraints for this table
                 sql_content.append(f"ALTER TABLE {table} DISABLE TRIGGER ALL;")
                 sql_content.append(f"DELETE FROM {table};")
                 sql_content.append("")
 
-                # Get table data
+                # Get table data (table name validated above)
                 result = await db_session.execute(
                     text(f"SELECT * FROM {table}")
                 )
@@ -325,19 +350,23 @@ class DatabaseBackupRepository:
             total_rows = 0
             
             for table_name in pg_tables:
-                # Get table columns info
+                # Validate table name from pg_tables (defense-in-depth)
+                self._validate_identifier(table_name, "table name")
+
+                # Get table columns info (parameterized value query)
                 col_result = await session.execute(
-                    text(f"""
+                    text("""
                         SELECT column_name, data_type, is_nullable
-                        FROM information_schema.columns 
-                        WHERE table_schema = 'public' 
-                        AND table_name = '{table_name}'
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                        AND table_name = :table_name
                         ORDER BY ordinal_position
-                    """)
+                    """),
+                    {"table_name": table_name}
                 )
                 columns = [(row[0], row[1], row[2]) for row in col_result.fetchall()]
-                
-                # Create SQLite table
+
+                # Create SQLite table (table_name validated above)
                 create_table_sql = f"CREATE TABLE IF NOT EXISTS {table_name} ("
                 col_definitions = []
                 
@@ -583,6 +612,9 @@ class DatabaseBackupRepository:
                     logger.info(f"[IMPORT] Importing table: {table_name}")
 
                     try:
+                        # Validate table name from backup file (untrusted source)
+                        self._validate_identifier(table_name, "table name")
+
                         # Get column names from backup table
                         backup_cursor.execute(f"PRAGMA table_info({table_name})")
                         columns_info = backup_cursor.fetchall()
@@ -798,11 +830,17 @@ class DatabaseBackupRepository:
                 # Clear existing data and restore
                 restored_tables = []
                 for table_name, rows in backup_data["tables"].items():
+                    # Validate table name from backup JSON (untrusted source)
+                    self._validate_identifier(table_name, "table name")
+
                     # Clear table
                     await db_session.execute(text(f"TRUNCATE TABLE {table_name} CASCADE"))
 
                     # Insert rows
                     for row_data in rows:
+                        # Validate all column names from backup JSON (untrusted source)
+                        for col_name in row_data.keys():
+                            self._validate_identifier(col_name, "column name")
                         columns = ', '.join(row_data.keys())
                         placeholders = ', '.join([f":{k}" for k in row_data.keys()])
                         insert_query = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
@@ -1078,6 +1116,7 @@ class DatabaseBackupRepository:
                 # Get row counts for each table
                 table_info = {}
                 for table in tables:
+                    self._validate_identifier(table, "table name")
                     cursor.execute(f"SELECT COUNT(*) FROM {table}")
                     count = cursor.fetchone()[0]
                     table_info[table] = count
@@ -1125,6 +1164,7 @@ class DatabaseBackupRepository:
                 # Get row counts for each table
                 table_info = {}
                 for table in tables:
+                    self._validate_identifier(table, "table name")
                     result = await db_session.execute(text(f"SELECT COUNT(*) FROM {table}"))
                     count = result.scalar()
                     table_info[table] = count

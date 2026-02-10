@@ -430,7 +430,12 @@ class TestGetPydanticClassFromName:
 
 class TestCreateTask:
     """Test cases for create_task function."""
-    
+
+    @pytest.fixture(autouse=True)
+    def mock_openai_api_key(self, monkeypatch):
+        """Set a dummy OPENAI_API_KEY for tests that create CrewAI Agent instances."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test-dummy-key-for-unit-tests")
+
     @pytest.mark.asyncio
     async def test_create_task_basic(self):
         """Test creating a basic task without tools."""

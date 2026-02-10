@@ -1,7 +1,8 @@
 import pytest
 from unittest.mock import AsyncMock
 from types import SimpleNamespace
-from fastapi import HTTPException
+
+from src.core.exceptions import BadRequestError, ForbiddenError, KasalError
 
 from src.api.database_management_router import (
     export_database,
@@ -46,7 +47,7 @@ async def test_export_import_permissions_and_success():
     ctx_system_admin = Ctx(user_role="admin", is_system_admin=True)
 
     # Non-system-admin export -> 403
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(ForbiddenError) as ei:
         await export_database(ExportRequest(), service=svc, group_context=ctx_user)
     assert ei.value.status_code == 403
 
@@ -56,7 +57,7 @@ async def test_export_import_permissions_and_success():
     assert out.success is True
 
     # Non-system-admin import -> 403
-    with pytest.raises(HTTPException):
+    with pytest.raises(ForbiddenError):
         await import_database(ImportRequest(catalog="c", schema="s", volume_name="v", backup_filename="b.db"), service=svc, group_context=ctx_user)
 
     # System admin import -> success
@@ -127,13 +128,13 @@ async def test_lakebase_endpoints_success_and_validations():
     out5 = await check_lakebase_tables(service=svc)
     assert "tables" in out5
 
-    # Migrate: missing endpoint -> function wraps into 500
-    with pytest.raises(HTTPException) as ei:
+    # Migrate: missing endpoint -> 400
+    with pytest.raises(BadRequestError) as ei:
         await migrate_to_lakebase({"instance_name": "kasal-lakebase"}, service=svc)
-    assert ei.value.status_code == 500
+    assert ei.value.status_code == 400
 
     # Start instance: missing instance_name -> 400
-    with pytest.raises(HTTPException):
+    with pytest.raises(BadRequestError):
         await start_lakebase_instance({}, service=svc)
 
     # Start instance: success
@@ -156,7 +157,7 @@ async def test_lakebase_endpoints_success_and_validations():
     assert out9["workspace_url"].startswith("https://")
 
     # Enable without migration: validation and success
-    with pytest.raises(HTTPException):
+    with pytest.raises(BadRequestError):
         await enable_lakebase_without_migration({"instance_name": "x"}, service=svc)
 
     svc.enable_lakebase = AsyncMock(return_value={"enabled": True})

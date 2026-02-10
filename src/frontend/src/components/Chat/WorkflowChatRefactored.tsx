@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   Box,
   TextField,
@@ -29,7 +29,7 @@ import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import DispatcherService, { DispatchResult, ConfigureCrewResult } from '../../api/DispatcherService';
 import { useWorkflowStore } from '../../store/workflow';
 import { useCrewExecutionStore } from '../../store/crewExecution';
-import { useChatMessagesStore } from '../../store/chatMessagesStore';
+import { useChatMessagesStore, deduplicateMessages } from '../../store/chatMessagesStore';
 import { useKnowledgeConfigStore } from '../../store/knowledgeConfigStore';
 import { useModelConfigStore } from '../../store/modelConfig';
 import { Node as FlowNode } from 'reactflow';
@@ -139,7 +139,6 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   // Use Zustand store for messages
   const {
     setMessages: setZustandMessages,
-    getDeduplicatedMessages,
     setCurrentSession,
   } = useChatMessagesStore();
 
@@ -158,8 +157,17 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     startNewChat,
   } = useChatSession(providedChatSessionId);
 
-  // Get messages from Zustand store
-  const messages = getDeduplicatedMessages(sessionId);
+  // Subscribe to raw session messages via selector — this guarantees re-renders
+  // when addMessage() is called from useExecutionMonitoring or any other source.
+  // Previously, destructuring only methods from useChatMessagesStore() did not create
+  // a data subscription, so the component could miss re-renders on message updates.
+  const rawSessionMessages = useChatMessagesStore(
+    state => state.messagesBySession[sessionId]
+  );
+  const messages = useMemo(
+    () => deduplicateMessages(rawSessionMessages || []),
+    [rawSessionMessages]
+  );
 
   // Set current session in Zustand store when sessionId changes
   useEffect(() => {
@@ -171,8 +179,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   // Create a Zustand-compatible setMessages function
   const setMessages = (updater: React.SetStateAction<ChatMessage[]>) => {
     if (typeof updater === 'function') {
-      const currentMessages = getDeduplicatedMessages(sessionId);
-      const newMessages = updater(currentMessages);
+      const newMessages = updater(messages);
       setZustandMessages(sessionId, newMessages);
     } else {
       setZustandMessages(sessionId, updater);
@@ -185,6 +192,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     lastExecutionJobId: _lastExecutionJobId,
     setLastExecutionJobId,
     executionStartTime: _executionStartTime,
+    markPendingExecution,
   } = useExecutionMonitoring(sessionId, saveMessageToBackend, setMessages);
 
   const scrollToBottom = () => {
@@ -422,6 +430,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           timestamp: new Date(),
         };
         setMessages(prev => [...prev, pendingMessage]);
+
+        // Mark this session as expecting a job to start
+        markPendingExecution();
 
         if (pendingExecutionType === 'crew') {
           await executeCrew(nodes, edges);

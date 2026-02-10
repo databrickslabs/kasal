@@ -80,6 +80,7 @@
     "filterByEndpoint": "엔드포인트로 필터링",
     "allEndpoints": "모든 엔드포인트",
     "noLogs": "사용 가능한 로그가 없습니다",
+    "refresh": "새로고침",
     "columns": {
       "timestamp": "타임스탬프",
       "endpoint": "엔드포인트",
@@ -101,7 +102,8 @@
       "connectionError": "로그 스트림 연결에 실패했습니다. 다시 시도해 주세요.",
       "autoScrollOn": "자동 스크롤 켜짐",
       "autoScrollOff": "자동 스크롤 꺼짐",
-      "refreshLogs": "로그 새로고침"
+      "refreshLogs": "로그 새로고침",
+      "downloadLogs": "로그 다운로드"
     }
   },
   "tools": {

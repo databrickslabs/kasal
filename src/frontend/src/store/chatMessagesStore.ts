@@ -24,34 +24,32 @@ interface ChatMessagesState {
 }
 
 // Advanced deduplication logic
-const deduplicateMessages = (messages: ChatMessage[]): ChatMessage[] => {
+export const deduplicateMessages = (messages: ChatMessage[]): ChatMessage[] => {
   const seenIds = new Set<string>();
   const seenMessages = new Map<string, ChatMessage>();
 
   return messages.filter((message) => {
     // Check for exact ID duplicates
     if (seenIds.has(message.id)) {
-      console.log(`[DEBUG] Duplicate message ID detected: ${message.id}`);
       return false;
     }
 
+    // Guard against missing content or timestamp (e.g. trace/execution messages from backend)
+    const content = message.content || '';
+    const timestamp = message.timestamp instanceof Date ? message.timestamp.getTime() : Date.now();
+
     // Create a unique signature for content deduplication
-    const messageSignature = `${message.type}:${message.content}:${message.timestamp.getTime()}`;
-    const contentKey = `${message.type}-${message.content.substring(0, 100)}`;
+    const messageSignature = `${message.type}:${content}:${timestamp}`;
+    const contentKey = `${message.type}-${content.substring(0, 100)}`;
 
     // Check for near-duplicate content within a very small time window (1 second)
     const seenMessagesArray = Array.from(seenMessages.entries());
     for (const [existingKey, existingMessage] of seenMessagesArray) {
-      const timeDiff = Math.abs(message.timestamp.getTime() - existingMessage.timestamp.getTime());
+      const existingTimestamp = existingMessage.timestamp instanceof Date ? existingMessage.timestamp.getTime() : Date.now();
+      const timeDiff = Math.abs(timestamp - existingTimestamp);
       const isNearDuplicate = existingKey.includes(contentKey) && timeDiff < 1000;
 
       if (isNearDuplicate && existingMessage.type === message.type) {
-        console.log(`[DEBUG] Near-duplicate message filtered:`, {
-          existing: existingMessage.id,
-          duplicate: message.id,
-          timeDiff,
-          content: message.content.substring(0, 50) + '...'
-        });
         return false;
       }
     }

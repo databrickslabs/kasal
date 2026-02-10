@@ -97,21 +97,23 @@ def app(mock_flow_service, mock_group_context):
     from src.api.flows_router import router, get_flow_service
     from src.core.dependencies import get_group_context
     from fastapi import FastAPI
-    
+    from tests.unit.router.conftest import register_exception_handlers
+
     app = FastAPI()
     app.include_router(router)
-    
+    register_exception_handlers(app)
+
     # Create override functions
     async def override_get_flow_service():
         return mock_flow_service
-        
+
     async def override_get_group_context():
         return mock_group_context
-    
+
     # Override dependencies
     app.dependency_overrides[get_flow_service] = override_get_flow_service
     app.dependency_overrides[get_group_context] = override_get_group_context
-    
+
     return app
 
 
@@ -198,7 +200,7 @@ class TestGetAllFlows:
         response = client.get("/flows")
         
         assert response.status_code == 500
-        assert "Database error" in response.json()["detail"]
+        assert "Internal server error" in response.json()["detail"]
 
 
 class TestGetFlow:
@@ -242,7 +244,7 @@ class TestGetFlow:
         response = client.get(f"/flows/{flow_id}")
         
         assert response.status_code == 500
-        assert "Database error" in response.json()["detail"]
+        assert "Internal server error" in response.json()["detail"]
 
 
 class TestCreateFlow:
@@ -267,7 +269,7 @@ class TestCreateFlow:
         response = client.post("/flows", json=sample_flow_create.model_dump(mode='json'))
         
         assert response.status_code == 500
-        assert "Creation error" in response.json()["detail"]
+        assert "Internal server error" in response.json()["detail"]
 
 
 class TestDebugFlowData:
@@ -338,7 +340,7 @@ class TestUpdateFlow:
         response = client.put(f"/flows/{flow_id}", json=sample_flow_update.model_dump(mode='json'))
         
         assert response.status_code == 500
-        assert "Update error" in response.json()["detail"]
+        assert "Internal server error" in response.json()["detail"]
 
 
 class TestDeleteFlow:
@@ -396,7 +398,7 @@ class TestDeleteFlow:
         response = client.delete(f"/flows/{flow_id}")
         
         assert response.status_code == 500
-        assert "Unexpected error deleting flow" in response.json()["detail"]
+        assert "Internal server error" in response.json()["detail"]
 
 
 class TestDeleteAllFlows:
@@ -421,7 +423,7 @@ class TestDeleteAllFlows:
         response = client.delete("/flows")
         
         assert response.status_code == 500
-        assert "Deletion error" in response.json()["detail"]
+        assert "Internal server error" in response.json()["detail"]
 
 
 class TestGetFlowServiceDependency:

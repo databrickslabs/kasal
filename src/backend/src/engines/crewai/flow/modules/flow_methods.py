@@ -299,7 +299,23 @@ class FlowMethodFactory:
             # Add planning configuration if enabled
             if crew_data and hasattr(crew_data, 'planning') and crew_data.planning:
                 crew_kwargs['planning'] = True
-                logger.info(f"Planning enabled for crew from configuration")
+                # Set planning_llm to avoid CrewAI defaulting to OpenAI
+                planning_llm_model = getattr(crew_data, 'planning_llm', None)
+                if planning_llm_model:
+                    # Use the explicit planning_llm from crew configuration
+                    try:
+                        from src.core.llm_manager import LLMManager
+                        planning_llm = await LLMManager.get_llm(planning_llm_model)
+                        crew_kwargs['planning_llm'] = planning_llm
+                        logger.info(f"Planning enabled - using crew planning_llm: {planning_llm_model}")
+                    except Exception as e:
+                        logger.warning(f"Could not create planning LLM for {planning_llm_model}: {e}")
+                elif agents and hasattr(agents[0], 'llm') and agents[0].llm:
+                    # Fallback: use the first agent's LLM so we don't default to OpenAI
+                    crew_kwargs['planning_llm'] = agents[0].llm
+                    logger.info(f"Planning enabled - using first agent's LLM as planning_llm")
+                else:
+                    logger.warning(f"Planning enabled but no planning_llm configured and no agent LLM available")
 
             # Add reasoning configuration if enabled
             # NOTE: In CrewAI, reasoning is an Agent-level parameter, NOT just a Crew-level parameter
@@ -413,9 +429,15 @@ class FlowMethodFactory:
                 logger.error(f"❌ Error during crew '{crew_name}' kickoff after {elapsed_time:.2f} seconds: {e}", exc_info=True)
                 raise
 
-        # Set metadata
+        # Set metadata on both wrapper AND wrapped function
+        # CRITICAL: Must also set _meth.__name__ because StartMethod.__get__ creates a new
+        # bound wrapper from _meth, which inherits __name__ from _meth (not the outer wrapper).
+        # Without this, Flow.__init__ stores the method under the wrong name in _methods,
+        # causing KeyError when kickoff_async tries to find it by the name in _start_methods.
         starting_point_crew_method.__name__ = method_name
         starting_point_crew_method.__qualname__ = method_name
+        starting_point_crew_method._meth.__name__ = method_name
+        starting_point_crew_method._meth.__qualname__ = method_name
 
         return starting_point_crew_method
 
@@ -611,7 +633,21 @@ class FlowMethodFactory:
             # Add planning configuration if enabled
             if crew_data and hasattr(crew_data, 'planning') and crew_data.planning:
                 crew_kwargs['planning'] = True
-                logger.info(f"Planning enabled for listener crew from configuration")
+                # Set planning_llm to avoid CrewAI defaulting to OpenAI
+                planning_llm_model = getattr(crew_data, 'planning_llm', None)
+                if planning_llm_model:
+                    try:
+                        from src.core.llm_manager import LLMManager
+                        planning_llm = await LLMManager.get_llm(planning_llm_model)
+                        crew_kwargs['planning_llm'] = planning_llm
+                        logger.info(f"Planning enabled for listener crew - using crew planning_llm: {planning_llm_model}")
+                    except Exception as e:
+                        logger.warning(f"Could not create planning LLM for listener crew {planning_llm_model}: {e}")
+                elif agents and hasattr(agents[0], 'llm') and agents[0].llm:
+                    crew_kwargs['planning_llm'] = agents[0].llm
+                    logger.info(f"Planning enabled for listener crew - using first agent's LLM as planning_llm")
+                else:
+                    logger.warning(f"Planning enabled for listener crew but no planning_llm configured and no agent LLM available")
 
             # Add reasoning configuration if enabled
             # NOTE: In CrewAI, reasoning is an Agent-level parameter, NOT just a Crew-level parameter
@@ -725,9 +761,13 @@ class FlowMethodFactory:
                 logger.error(f"❌ Error during listener crew kickoff after {elapsed_time:.2f} seconds: {e}", exc_info=True)
                 raise
 
-        # Set metadata
+        # Set metadata on both wrapper AND wrapped function
+        # CRITICAL: Must also set _meth.__name__ because ListenMethod.__get__ creates a new
+        # bound wrapper from _meth, which inherits __name__ from _meth (not the outer wrapper).
         listener_method.__name__ = method_name
         listener_method.__qualname__ = method_name
+        listener_method._meth.__name__ = method_name
+        listener_method._meth.__qualname__ = method_name
 
         return listener_method
 
@@ -898,8 +938,11 @@ class FlowMethodFactory:
                 logger.info("="*80)
                 return result_output
 
+            # Set metadata on both wrapper AND wrapped function
             skipped_starting_method.__name__ = method_name
             skipped_starting_method.__qualname__ = method_name
+            skipped_starting_method._meth.__name__ = method_name
+            skipped_starting_method._meth.__qualname__ = method_name
             return skipped_starting_method
         else:
             # Create a listener stub method that returns checkpoint output
@@ -942,8 +985,11 @@ class FlowMethodFactory:
                 logger.info("="*80)
                 return result_output
 
+            # Set metadata on both wrapper AND wrapped function
             skipped_listener_method.__name__ = method_name
             skipped_listener_method.__qualname__ = method_name
+            skipped_listener_method._meth.__name__ = method_name
+            skipped_listener_method._meth.__qualname__ = method_name
             return skipped_listener_method
 
     @staticmethod
@@ -1152,6 +1198,9 @@ class FlowMethodFactory:
                 flow_uuid=flow_uuid
             )
 
+        # Set metadata on both wrapper AND wrapped function
         hitl_gate_method.__name__ = method_name
         hitl_gate_method.__qualname__ = method_name
+        hitl_gate_method._meth.__name__ = method_name
+        hitl_gate_method._meth.__qualname__ = method_name
         return hitl_gate_method

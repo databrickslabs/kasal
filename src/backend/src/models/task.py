@@ -116,12 +116,13 @@ class Task(Base):
             self.config['guardrail'] = self.guardrail
 
         # Synchronize llm_guardrail field (LLM-based guardrail)
-        # Handle both setting and clearing of llm_guardrail
+        # config → column: If llm_guardrail is explicitly in config, sync to column
         if self.config and 'llm_guardrail' in self.config:
-            # If llm_guardrail is explicitly in config (even if null), use that value
             self.llm_guardrail = self.config['llm_guardrail']
-        elif self.llm_guardrail and (not self.config.get('llm_guardrail')):
-            self.config['llm_guardrail'] = self.llm_guardrail
+        # Note: We do NOT sync column → config here. The column stores the
+        # LLM-generated suggestion (set during crew generation). The config
+        # stores the user's explicit choice (set via the UI toggle).
+        # This ensures guardrails are disabled by default after generation.
 
         # Ensure condition is properly structured in config if present
         if condition is not None:

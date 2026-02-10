@@ -684,7 +684,18 @@ class ExecutionService:
                 exec_logger.error(f"Failed to update execution {execution_id} status to {status}")
             else:
                 exec_logger.info(f"Updated execution {execution_id} status to {status}")
-                
+                # Clean up in-memory entry once terminal status is persisted to DB
+                terminal_statuses = {
+                    ExecutionStatus.COMPLETED.value,
+                    ExecutionStatus.FAILED.value,
+                    ExecutionStatus.STOPPED.value,
+                    ExecutionStatus.CANCELLED.value,
+                    ExecutionStatus.REJECTED.value,
+                }
+                if status in terminal_statuses:
+                    ExecutionService.executions.pop(execution_id, None)
+                    exec_logger.debug(f"Cleaned up in-memory execution entry for {execution_id}")
+
         except Exception as e:
             exec_logger.error(f"Error updating execution status: {str(e)}")
     
@@ -733,9 +744,73 @@ class ExecutionService:
             exec_logger.error(f"Error getting execution status for {execution_id}: {str(e)}")
             return None
     
+    async def get_execution_status_detail(
+        self, execution_id: str, group_ids: List[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get detailed execution status including task progress for the status endpoint.
+
+        Args:
+            execution_id: String ID of the execution
+            group_ids: List of group IDs for filtering
+
+        Returns:
+            Dictionary with execution status, stop info, and task progress, or None
+        """
+        try:
+            from src.repositories.execution_history_repository import (
+                ExecutionHistoryRepository,
+            )
+            from src.models.execution_history import TaskStatus
+            from sqlalchemy import select
+
+            if not self.session:
+                exec_logger.error("No database session available for getting execution status detail")
+                return None
+
+            repository = ExecutionHistoryRepository(self.session)
+            execution = await repository.get_execution_by_job_id(
+                execution_id, group_ids=group_ids
+            )
+
+            if not execution:
+                return None
+
+            progress = None
+            if execution.status in ["RUNNING", "STOPPING"]:
+                task_stmt = select(TaskStatus).where(
+                    TaskStatus.job_id == execution_id
+                )
+                task_result = await self.session.execute(task_stmt)
+                tasks = task_result.scalars().all()
+
+                if tasks:
+                    completed = [t for t in tasks if t.status == "completed"]
+                    running = [t for t in tasks if t.status == "running"]
+                    progress = {
+                        "total_tasks": len(tasks),
+                        "completed_tasks": len(completed),
+                        "running_tasks": len(running),
+                        "current_task": running[0].task_id if running else None,
+                    }
+
+            return {
+                "execution_id": execution_id,
+                "status": execution.status,
+                "is_stopping": getattr(execution, "is_stopping", False),
+                "stopped_at": getattr(execution, "stopped_at", None),
+                "stop_reason": getattr(execution, "stop_reason", None),
+                "progress": progress,
+            }
+        except Exception as e:
+            exec_logger.error(
+                f"Error getting execution status detail for {execution_id}: {str(e)}"
+            )
+            return None
+
     async def create_execution(
         self,
-        config: CrewConfig, 
+        config: CrewConfig,
         background_tasks = None,
         group_context: GroupContext = None
     ) -> Dict[str, Any]:
@@ -841,12 +916,14 @@ class ExecutionService:
                 # This allows "test before save" workflow from the canvas
                 if not flow_id:
                     # Check if nodes and edges are provided in config for ad-hoc execution
-                    has_nodes = hasattr(config, 'nodes') and config.nodes
-                    has_edges = hasattr(config, 'edges') and config.edges
+                    has_nodes = hasattr(config, 'nodes') and config.nodes is not None and len(config.nodes) > 0
+                    has_edges = hasattr(config, 'edges') and config.edges is not None
 
-                    if has_nodes and has_edges:
-                        # Ad-hoc flow execution with nodes/edges from canvas (no database save required)
-                        exec_logger.info(f"[ExecutionService.create_execution] No flow_id provided, but nodes ({len(config.nodes)}) and edges ({len(config.edges)}) present - allowing ad-hoc flow execution")
+                    if has_nodes:
+                        # Ad-hoc flow execution with nodes from canvas (no database save required)
+                        # Edges may be empty for single-crew flows - that's valid
+                        edge_count = len(config.edges) if config.edges else 0
+                        exec_logger.info(f"[ExecutionService.create_execution] No flow_id provided, but nodes ({len(config.nodes)}) and edges ({edge_count}) present - allowing ad-hoc flow execution")
                     else:
                         # No flow_id and no nodes/edges, try to find the most recent flow from database
                         exec_logger.info(f"[ExecutionService.create_execution] No flow_id or nodes/edges provided for execution_id: {execution_id}, trying to find most recent flow from database")

@@ -7,13 +7,12 @@ This module provides database operations for execution logs.
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import desc, func, delete, text
+from sqlalchemy import desc, func, delete
 import logging
 from datetime import datetime, timezone
 
 from src.models.execution_logs import ExecutionLog
 from src.core.logger import LoggerManager
-from src.utils.user_context import GroupContext
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().system
@@ -31,7 +30,7 @@ class ExecutionLogsRepository:
         """
         self.session = session
 
-    async def create_log(self, execution_id: str, content: str, timestamp=None) -> ExecutionLog:
+    async def create_log(self, execution_id: str, content: str, timestamp=None, group_id: str = None, group_email: str = None) -> ExecutionLog:
         """
         Create a new execution log entry using injected session.
 
@@ -39,6 +38,8 @@ class ExecutionLogsRepository:
             execution_id: ID of the execution
             content: Log content text
             timestamp: Optional timestamp, will use current time if not provided
+            group_id: Optional group ID for multi-tenant isolation
+            group_email: Optional user email for audit trail
 
         Returns:
             Created ExecutionLog object
@@ -51,7 +52,9 @@ class ExecutionLogsRepository:
             log = ExecutionLog(
                 execution_id=execution_id,
                 content=content,
-                timestamp=normalized_timestamp  # If None, the model default will be used
+                timestamp=normalized_timestamp,  # If None, the model default will be used
+                group_id=group_id,
+                group_email=group_email,
             )
 
             # Add it to the session
@@ -78,7 +81,8 @@ class ExecutionLogsRepository:
         execution_id: str,
         limit: int = 1000,
         offset: int = 0,
-        newest_first: bool = False
+        newest_first: bool = False,
+        group_ids: list = None
     ) -> List[ExecutionLog]:
         """
         Retrieve logs for a specific execution using injected session.
@@ -88,6 +92,7 @@ class ExecutionLogsRepository:
             limit: Maximum number of logs to return
             offset: Number of logs to skip
             newest_first: If True, return newest logs first
+            group_ids: Optional list of group IDs for tenant isolation
 
         Returns:
             List of ExecutionLog objects
@@ -95,6 +100,8 @@ class ExecutionLogsRepository:
         query = select(ExecutionLog).where(
             ExecutionLog.execution_id == execution_id
         )
+        if group_ids:
+            query = query.where(ExecutionLog.group_id.in_(group_ids))
 
         if newest_first:
             query = query.order_by(desc(ExecutionLog.timestamp))
@@ -157,19 +164,21 @@ class ExecutionLogsRepository:
         result = await self.session.execute(query)
         return result.scalars().first()
     
-    async def delete_by_execution_id(self, execution_id: str) -> int:
+    async def delete_by_execution_id(self, execution_id: str, group_ids: list = None) -> int:
         """
         Delete all logs for a specific execution using injected session.
 
         Args:
             execution_id: ID of the execution to delete logs for
+            group_ids: Optional list of group IDs for tenant isolation
 
         Returns:
             Number of deleted records
         """
-        result = await self.session.execute(
-            text(f"DELETE FROM execution_logs WHERE execution_id = '{execution_id}'")
-        )
+        stmt = delete(ExecutionLog).where(ExecutionLog.execution_id == execution_id)
+        if group_ids:
+            stmt = stmt.where(ExecutionLog.group_id.in_(group_ids))
+        result = await self.session.execute(stmt)
         # Don't commit here - let the service/router manage transactions
         await self.session.flush()
         return result.rowcount
@@ -187,19 +196,23 @@ class ExecutionLogsRepository:
         await self.session.flush()
         return result.rowcount
     
-    async def count_by_execution_id(self, execution_id: str) -> int:
+    async def count_by_execution_id(self, execution_id: str, group_ids: list = None) -> int:
         """
         Count logs for a specific execution using injected session.
 
         Args:
             execution_id: ID of the execution to count logs for
+            group_ids: Optional list of group IDs for tenant isolation
 
         Returns:
             Number of logs
         """
-        result = await self.session.execute(
-            text(f"SELECT COUNT(*) FROM execution_logs WHERE execution_id = '{execution_id}'")
+        stmt = select(func.count()).select_from(ExecutionLog).where(
+            ExecutionLog.execution_id == execution_id
         )
+        if group_ids:
+            stmt = stmt.where(ExecutionLog.group_id.in_(group_ids))
+        result = await self.session.execute(stmt)
         return result.scalar_one()
     
     

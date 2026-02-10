@@ -35,10 +35,16 @@ class TestJobOutputQueue:
     def test_job_output_queue_initialization(self):
         """Test that JobOutputQueue is properly initialized."""
         job_queue = JobOutputQueue()
-        
+
         assert job_queue is not None
         assert job_queue._queue is not None
         assert isinstance(job_queue._queue, queue.Queue)
+
+    def test_job_output_queue_has_maxsize(self):
+        """Test that JobOutputQueue is bounded with maxsize=10000."""
+        job_queue = JobOutputQueue()
+
+        assert job_queue._queue.maxsize == 10000
     
     def test_get_queue_returns_queue_instance(self):
         """Test that get_queue returns the internal queue."""
@@ -285,19 +291,31 @@ class TestEnqueueLog:
         assert "group_id" not in log_data
         assert "group_email" not in log_data
     
+    def test_enqueue_log_returns_false_when_queue_full(self):
+        """Test that enqueue_log returns False when the bounded queue is full."""
+        # Create a small-maxsize queue to test backpressure
+        job_queue_instance = JobOutputQueue()
+        # Replace the internal queue with a tiny one for testing
+        job_queue_instance._queue = queue.Queue(maxsize=2)
+
+        assert enqueue_log("exec-1", "msg1") is True
+        assert enqueue_log("exec-2", "msg2") is True
+        # Queue is now full (maxsize=2)
+        assert enqueue_log("exec-3", "msg3") is False
+
     def test_integration_with_job_output_queue(self):
         """Test integration between enqueue_log and JobOutputQueue."""
         # Use enqueue_log to add data
         enqueue_log("integration-test", "Integration content")
-        
+
         # Access via JobOutputQueue directly
         job_queue = JobOutputQueue()
         direct_queue = job_queue.get_queue()
-        
+
         # Should be the same queue
         util_queue = get_job_output_queue()
         assert direct_queue is util_queue
-        
+
         # Data should be accessible
         log_data = direct_queue.get()
         assert log_data["job_id"] == "integration-test"

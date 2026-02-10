@@ -3,6 +3,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from src.core.exceptions import ForbiddenError
 from src.schemas.powerbi_config import (
     PowerBIConfigCreate,
     PowerBIConfigResponse,

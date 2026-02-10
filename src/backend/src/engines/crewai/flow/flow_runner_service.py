@@ -8,6 +8,7 @@ import os
 import logging
 import asyncio
 import uuid
+from contextlib import asynccontextmanager
 from typing import Dict, List, Optional, Any, Union
 from datetime import datetime, UTC
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,7 +51,26 @@ class FlowRunnerService:
         self.agent_repo = AgentRepository(db)
         self.tool_repo = ToolRepository(db)
         self.crew_repo = CrewRepository(db)
-    
+
+    @staticmethod
+    @asynccontextmanager
+    async def _safe_session():
+        """Create a session with safe cleanup that suppresses stale-connection errors.
+
+        After long-running operations (like CrewAI kickoff), SQLite+aiosqlite sessions
+        can lose their greenlet context, causing MissingGreenlet errors during cleanup.
+        This context manager suppresses those cleanup errors to prevent them from
+        corrupting successful execution results (overwriting COMPLETED with FAILED).
+        """
+        session = async_session_factory()
+        try:
+            yield session
+        finally:
+            try:
+                await session.close()
+            except Exception as close_err:
+                logger.debug(f"Session cleanup error suppressed (expected after long execution): {close_err}")
+
     async def create_flow_execution(self, flow_id: Union[uuid.UUID, str], job_id: str, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Create a new flow execution record and prepare for execution.
@@ -316,8 +336,9 @@ class FlowRunnerService:
         Returns:
             Dict containing the flow execution result with 'success', 'result' or 'error' keys
         """
-        # Create a fresh database session for this background task
-        async with async_session_factory() as session:
+        # Create a session with safe cleanup to prevent stale-connection errors
+        # from corrupting successful results after long-running kickoff()
+        async with self._safe_session() as session:
             # Create fresh service instance with the new session
             flow_execution_service = FlowExecutionService(session)
 
@@ -433,60 +454,67 @@ class FlowRunnerService:
                     logger.info(f"FLOW EXECUTION COMPLETED - result: {result}")
                     logger.info("="*100)
 
-                    # Update the execution with the result
-                    if result.get("success", False):
-                        # Ensure result is a dictionary
-                        result_data = result.get("result", {})
-                        if not isinstance(result_data, dict):
-                            logger.warning(f"Expected result to be a dictionary, got {type(result_data)}. Converting to dict.")
-                            try:
-                                if hasattr(result_data, 'to_dict'):
-                                    result_data = result_data.to_dict()
-                                elif hasattr(result_data, '__dict__'):
-                                    result_data = result_data.__dict__
-                                else:
+                    # CRITICAL: Create a fresh session for post-execution DB updates.
+                    # The original session may have a stale/dead SQLite connection after
+                    # the long-running kickoff() (minutes to hours). This prevents
+                    # "(sqlite3.OperationalError) no active connection" errors.
+                    async with async_session_factory() as post_session:
+                        post_flow_service = FlowExecutionService(post_session)
+
+                        # Update the execution with the result
+                        if result.get("success", False):
+                            # Ensure result is a dictionary
+                            result_data = result.get("result", {})
+                            if not isinstance(result_data, dict):
+                                logger.warning(f"Expected result to be a dictionary, got {type(result_data)}. Converting to dict.")
+                                try:
+                                    if hasattr(result_data, 'to_dict'):
+                                        result_data = result_data.to_dict()
+                                    elif hasattr(result_data, '__dict__'):
+                                        result_data = result_data.__dict__
+                                    else:
+                                        result_data = {"content": str(result_data)}
+                                except Exception as conv_error:
+                                    logger.error(f"Error converting result to dictionary: {conv_error}. Using fallback.", exc_info=True)
                                     result_data = {"content": str(result_data)}
-                            except Exception as conv_error:
-                                logger.error(f"Error converting result to dictionary: {conv_error}. Using fallback.", exc_info=True)
-                                result_data = {"content": str(result_data)}
 
-                        await flow_execution_service.update_execution_status(
-                            execution_id=execution_id,
-                            status=FlowExecutionStatus.COMPLETED,
-                            result=result_data
-                        )
+                            await post_flow_service.update_execution_status(
+                                execution_id=execution_id,
+                                status=FlowExecutionStatus.COMPLETED,
+                                result=result_data
+                            )
 
-                        # Save checkpoint info if flow_uuid is available (from @persist)
-                        flow_uuid = result.get("flow_uuid")
-                        if flow_uuid:
-                            try:
-                                from src.services.execution_history_service import ExecutionHistoryService
-                                history_service = ExecutionHistoryService(session)
-                                await history_service.set_checkpoint_active(
-                                    execution_id=execution_id,
-                                    flow_uuid=flow_uuid,
-                                    checkpoint_method="flow_complete"
-                                )
-                                logger.info(f"Saved checkpoint info for execution {execution_id} with flow_uuid {flow_uuid}")
-                            except Exception as checkpoint_err:
-                                logger.warning(f"Could not save checkpoint info: {checkpoint_err}")
+                            # Save checkpoint info if flow_uuid is available (from @persist)
+                            flow_uuid = result.get("flow_uuid")
+                            if flow_uuid:
+                                try:
+                                    from src.services.execution_history_service import ExecutionHistoryService
+                                    history_service = ExecutionHistoryService(post_session)
+                                    await history_service.set_checkpoint_active(
+                                        execution_id=execution_id,
+                                        flow_uuid=flow_uuid,
+                                        checkpoint_method="flow_complete"
+                                    )
+                                    logger.info(f"Saved checkpoint info for execution {execution_id} with flow_uuid {flow_uuid}")
+                                except Exception as checkpoint_err:
+                                    logger.warning(f"Could not save checkpoint info: {checkpoint_err}")
 
-                        logger.info(f"Successfully completed dynamic flow execution {execution_id}")
-                        return_dict = {"success": True, "result": result_data, "execution_id": execution_id}
-                        # Include flow_uuid for checkpoint/resume functionality
-                        if flow_uuid:
-                            return_dict["flow_uuid"] = flow_uuid
-                        return return_dict
-                    else:
-                        # Flow returned with success=False
-                        error_msg = result.get("error", "Flow execution failed")
-                        await flow_execution_service.update_execution_status(
-                            execution_id=execution_id,
-                            status=FlowExecutionStatus.FAILED,
-                            error=error_msg
-                        )
-                        logger.error(f"Dynamic flow execution {execution_id} failed: {error_msg}")
-                        return {"success": False, "error": error_msg, "execution_id": execution_id}
+                            logger.info(f"Successfully completed dynamic flow execution {execution_id}")
+                            return_dict = {"success": True, "result": result_data, "execution_id": execution_id}
+                            # Include flow_uuid for checkpoint/resume functionality
+                            if flow_uuid:
+                                return_dict["flow_uuid"] = flow_uuid
+                            return return_dict
+                        else:
+                            # Flow returned with success=False
+                            error_msg = result.get("error", "Flow execution failed")
+                            await post_flow_service.update_execution_status(
+                                execution_id=execution_id,
+                                status=FlowExecutionStatus.FAILED,
+                                error=error_msg
+                            )
+                            logger.error(f"Dynamic flow execution {execution_id} failed: {error_msg}")
+                            return {"success": False, "error": error_msg, "execution_id": execution_id}
 
                 except FlowPausedForApprovalException as pause_exc:
                     # Flow paused at HITL gate - this is not an error, it's a controlled pause
@@ -495,36 +523,40 @@ class FlowRunnerService:
                     logger.info(f"   Execution ID: {pause_exc.execution_id}")
                     logger.info(f"   Crew sequence: {pause_exc.crew_sequence}")
 
-                    # Update execution status to WAITING_FOR_APPROVAL
-                    await flow_execution_service.update_execution_status(
-                        execution_id=execution_id,
-                        status=FlowExecutionStatus.WAITING_FOR_APPROVAL,  # HITL pause
-                        result={
-                            "hitl_paused": True,
-                            "approval_id": pause_exc.approval_id,
-                            "gate_node_id": pause_exc.gate_node_id,
-                            "message": pause_exc.message,
-                            "crew_sequence": pause_exc.crew_sequence
-                        }
-                    )
+                    # Fresh session for HITL status update
+                    async with async_session_factory() as hitl_session:
+                        hitl_flow_service = FlowExecutionService(hitl_session)
 
-                    # Save checkpoint info for resume (resume data is in result field)
-                    logger.info(f"🔍 HITL checkpoint save check for execution {execution_id} [run_flow_internal]")
-                    logger.info(f"   pause_exc.flow_uuid: {pause_exc.flow_uuid}")
-                    if pause_exc.flow_uuid:
-                        try:
-                            from src.services.execution_history_service import ExecutionHistoryService
-                            history_service = ExecutionHistoryService(session)
-                            await history_service.set_checkpoint_active(
-                                execution_id=execution_id,
-                                flow_uuid=pause_exc.flow_uuid,
-                                checkpoint_method="hitl_gate_pause"
-                            )
-                            logger.info(f"✅ Saved HITL checkpoint for execution {execution_id} with flow_uuid={pause_exc.flow_uuid}")
-                        except Exception as checkpoint_err:
-                            logger.error(f"❌ Could not save HITL checkpoint info: {checkpoint_err}", exc_info=True)
-                    else:
-                        logger.warning(f"⚠️ No flow_uuid available - checkpoint NOT saved! Resume dialog will not work.")
+                        # Update execution status to WAITING_FOR_APPROVAL
+                        await hitl_flow_service.update_execution_status(
+                            execution_id=execution_id,
+                            status=FlowExecutionStatus.WAITING_FOR_APPROVAL,  # HITL pause
+                            result={
+                                "hitl_paused": True,
+                                "approval_id": pause_exc.approval_id,
+                                "gate_node_id": pause_exc.gate_node_id,
+                                "message": pause_exc.message,
+                                "crew_sequence": pause_exc.crew_sequence
+                            }
+                        )
+
+                        # Save checkpoint info for resume (resume data is in result field)
+                        logger.info(f"🔍 HITL checkpoint save check for execution {execution_id} [run_flow_internal]")
+                        logger.info(f"   pause_exc.flow_uuid: {pause_exc.flow_uuid}")
+                        if pause_exc.flow_uuid:
+                            try:
+                                from src.services.execution_history_service import ExecutionHistoryService
+                                history_service = ExecutionHistoryService(hitl_session)
+                                await history_service.set_checkpoint_active(
+                                    execution_id=execution_id,
+                                    flow_uuid=pause_exc.flow_uuid,
+                                    checkpoint_method="hitl_gate_pause"
+                                )
+                                logger.info(f"✅ Saved HITL checkpoint for execution {execution_id} with flow_uuid={pause_exc.flow_uuid}")
+                            except Exception as checkpoint_err:
+                                logger.error(f"❌ Could not save HITL checkpoint info: {checkpoint_err}", exc_info=True)
+                        else:
+                            logger.warning(f"⚠️ No flow_uuid available - checkpoint NOT saved! Resume dialog will not work.")
 
                     return {
                         "success": True,  # Not a failure - controlled pause
@@ -540,11 +572,14 @@ class FlowRunnerService:
 
                 except Exception as kickoff_error:
                     logger.error(f"Error during backend_flow.kickoff() for dynamic flow {execution_id}: {kickoff_error}", exc_info=True)
-                    await flow_execution_service.update_execution_status(
-                        execution_id=execution_id,
-                        status=FlowExecutionStatus.FAILED,
-                        error=str(kickoff_error)
-                    )
+                    # Fresh session for error status update
+                    async with async_session_factory() as err_session:
+                        err_flow_service = FlowExecutionService(err_session)
+                        await err_flow_service.update_execution_status(
+                            execution_id=execution_id,
+                            status=FlowExecutionStatus.FAILED,
+                            error=str(kickoff_error)
+                        )
                     return {"success": False, "error": str(kickoff_error), "execution_id": execution_id}
 
             except FlowPausedForApprovalException as pause_exc:
@@ -554,12 +589,14 @@ class FlowRunnerService:
             except Exception as e:
                 logger.error(f"Error running dynamic flow execution {execution_id}: {e}", exc_info=True)
                 try:
-                    # Update status to FAILED via service layer
-                    await flow_execution_service.update_execution_status(
-                        execution_id=execution_id,
-                        status=FlowExecutionStatus.FAILED,
-                        error=str(e)
-                    )
+                    # Fresh session for outer error status update
+                    async with async_session_factory() as outer_err_session:
+                        outer_err_service = FlowExecutionService(outer_err_session)
+                        await outer_err_service.update_execution_status(
+                            execution_id=execution_id,
+                            status=FlowExecutionStatus.FAILED,
+                            error=str(e)
+                        )
                 except Exception as update_error:
                     logger.error(f"Error updating flow execution {execution_id} status: {update_error}", exc_info=True)
                 return {"success": False, "error": str(e), "execution_id": execution_id}
@@ -645,8 +682,9 @@ class FlowRunnerService:
         Returns:
             Dict containing the flow execution result with 'success', 'result' or 'error' keys
         """
-        # Create a fresh database session for this background task
-        async with async_session_factory() as session:
+        # Create a session with safe cleanup to prevent stale-connection errors
+        # from corrupting successful results after long-running kickoff()
+        async with self._safe_session() as session:
             # Create fresh service and repository instances with the new session
             flow_execution_service = FlowExecutionService(session)
             flow_repo = FlowRepository(session)
@@ -854,59 +892,66 @@ class FlowRunnerService:
                     logger.info(f"FLOW EXECUTION COMPLETED - result: {result}")
                     logger.info("="*100)
 
-                    # Update the execution with the result
-                    if result.get("success", False):
-                        # Ensure result is a dictionary
-                        result_data = result.get("result", {})
-                        if not isinstance(result_data, dict):
-                            logger.warning(f"Expected result to be a dictionary, got {type(result_data)}. Converting to dict.")
-                            try:
-                                if hasattr(result_data, 'to_dict'):
-                                    result_data = result_data.to_dict()
-                                elif hasattr(result_data, '__dict__'):
-                                    result_data = result_data.__dict__
-                                else:
+                    # CRITICAL: Create a fresh session for post-execution DB updates.
+                    # The original session may have a stale/dead SQLite connection after
+                    # the long-running kickoff() (minutes to hours). This prevents
+                    # "(sqlite3.OperationalError) no active connection" errors.
+                    async with async_session_factory() as post_session:
+                        post_flow_service = FlowExecutionService(post_session)
+
+                        # Update the execution with the result
+                        if result.get("success", False):
+                            # Ensure result is a dictionary
+                            result_data = result.get("result", {})
+                            if not isinstance(result_data, dict):
+                                logger.warning(f"Expected result to be a dictionary, got {type(result_data)}. Converting to dict.")
+                                try:
+                                    if hasattr(result_data, 'to_dict'):
+                                        result_data = result_data.to_dict()
+                                    elif hasattr(result_data, '__dict__'):
+                                        result_data = result_data.__dict__
+                                    else:
+                                        result_data = {"content": str(result_data)}
+                                except Exception as conv_error:
+                                    logger.error(f"Error converting result to dictionary: {conv_error}. Using fallback.", exc_info=True)
                                     result_data = {"content": str(result_data)}
-                            except Exception as conv_error:
-                                logger.error(f"Error converting result to dictionary: {conv_error}. Using fallback.", exc_info=True)
-                                result_data = {"content": str(result_data)}
 
-                        await flow_execution_service.update_execution_status(
-                            execution_id=execution_id,
-                            status=FlowExecutionStatus.COMPLETED,
-                            result=result_data
-                        )
+                            await post_flow_service.update_execution_status(
+                                execution_id=execution_id,
+                                status=FlowExecutionStatus.COMPLETED,
+                                result=result_data
+                            )
 
-                        # Save checkpoint info if flow_uuid is available (from @persist)
-                        flow_uuid = result.get("flow_uuid")
-                        if flow_uuid:
-                            try:
-                                from src.services.execution_history_service import ExecutionHistoryService
-                                history_service = ExecutionHistoryService(session)
-                                await history_service.set_checkpoint_active(
-                                    execution_id=execution_id,
-                                    flow_uuid=flow_uuid,
-                                    checkpoint_method="flow_complete"
-                                )
-                                logger.info(f"Saved checkpoint info for execution {execution_id} with flow_uuid {flow_uuid}")
-                            except Exception as checkpoint_err:
-                                logger.warning(f"Could not save checkpoint info: {checkpoint_err}")
+                            # Save checkpoint info if flow_uuid is available (from @persist)
+                            flow_uuid = result.get("flow_uuid")
+                            if flow_uuid:
+                                try:
+                                    from src.services.execution_history_service import ExecutionHistoryService
+                                    history_service = ExecutionHistoryService(post_session)
+                                    await history_service.set_checkpoint_active(
+                                        execution_id=execution_id,
+                                        flow_uuid=flow_uuid,
+                                        checkpoint_method="flow_complete"
+                                    )
+                                    logger.info(f"Saved checkpoint info for execution {execution_id} with flow_uuid {flow_uuid}")
+                                except Exception as checkpoint_err:
+                                    logger.warning(f"Could not save checkpoint info: {checkpoint_err}")
 
-                        logger.info(f"Updated flow execution {execution_id} with final status: COMPLETED")
-                        return_dict = {"success": True, "result": result_data, "execution_id": execution_id}
-                        # Include flow_uuid for checkpoint/resume functionality
-                        if flow_uuid:
-                            return_dict["flow_uuid"] = flow_uuid
-                        return return_dict
-                    else:
-                        error_msg = result.get("error", "Unknown error")
-                        await flow_execution_service.update_execution_status(
-                            execution_id=execution_id,
-                            status=FlowExecutionStatus.FAILED,
-                            error=error_msg
-                        )
-                        logger.info(f"Updated flow execution {execution_id} with final status: FAILED")
-                        return {"success": False, "error": error_msg, "execution_id": execution_id}
+                            logger.info(f"Updated flow execution {execution_id} with final status: COMPLETED")
+                            return_dict = {"success": True, "result": result_data, "execution_id": execution_id}
+                            # Include flow_uuid for checkpoint/resume functionality
+                            if flow_uuid:
+                                return_dict["flow_uuid"] = flow_uuid
+                            return return_dict
+                        else:
+                            error_msg = result.get("error", "Unknown error")
+                            await post_flow_service.update_execution_status(
+                                execution_id=execution_id,
+                                status=FlowExecutionStatus.FAILED,
+                                error=error_msg
+                            )
+                            logger.info(f"Updated flow execution {execution_id} with final status: FAILED")
+                            return {"success": False, "error": error_msg, "execution_id": execution_id}
 
                 except FlowPausedForApprovalException as pause_exc:
                     # Flow paused at HITL gate - this is not an error, it's a controlled pause
@@ -915,36 +960,40 @@ class FlowRunnerService:
                     logger.info(f"   Execution ID: {pause_exc.execution_id}")
                     logger.info(f"   Crew sequence: {pause_exc.crew_sequence}")
 
-                    # Update execution status to WAITING_FOR_APPROVAL
-                    await flow_execution_service.update_execution_status(
-                        execution_id=execution_id,
-                        status=FlowExecutionStatus.WAITING_FOR_APPROVAL,
-                        result={
-                            "hitl_paused": True,
-                            "approval_id": pause_exc.approval_id,
-                            "gate_node_id": pause_exc.gate_node_id,
-                            "message": pause_exc.message,
-                            "crew_sequence": pause_exc.crew_sequence
-                        }
-                    )
+                    # Fresh session for HITL status update
+                    async with async_session_factory() as hitl_session:
+                        hitl_flow_service = FlowExecutionService(hitl_session)
 
-                    # Save checkpoint info for resume (resume data is in result field)
-                    logger.info(f"🔍 HITL checkpoint save check for execution {execution_id} [run_flow]")
-                    logger.info(f"   pause_exc.flow_uuid: {pause_exc.flow_uuid}")
-                    if pause_exc.flow_uuid:
-                        try:
-                            from src.services.execution_history_service import ExecutionHistoryService
-                            history_service = ExecutionHistoryService(session)
-                            await history_service.set_checkpoint_active(
-                                execution_id=execution_id,
-                                flow_uuid=pause_exc.flow_uuid,
-                                checkpoint_method="hitl_gate_pause"
-                            )
-                            logger.info(f"✅ Saved HITL checkpoint for execution {execution_id} with flow_uuid={pause_exc.flow_uuid}")
-                        except Exception as checkpoint_err:
-                            logger.error(f"❌ Could not save HITL checkpoint info: {checkpoint_err}", exc_info=True)
-                    else:
-                        logger.warning(f"⚠️ No flow_uuid available - checkpoint NOT saved! Resume dialog will not work.")
+                        # Update execution status to WAITING_FOR_APPROVAL
+                        await hitl_flow_service.update_execution_status(
+                            execution_id=execution_id,
+                            status=FlowExecutionStatus.WAITING_FOR_APPROVAL,
+                            result={
+                                "hitl_paused": True,
+                                "approval_id": pause_exc.approval_id,
+                                "gate_node_id": pause_exc.gate_node_id,
+                                "message": pause_exc.message,
+                                "crew_sequence": pause_exc.crew_sequence
+                            }
+                        )
+
+                        # Save checkpoint info for resume (resume data is in result field)
+                        logger.info(f"🔍 HITL checkpoint save check for execution {execution_id} [run_flow]")
+                        logger.info(f"   pause_exc.flow_uuid: {pause_exc.flow_uuid}")
+                        if pause_exc.flow_uuid:
+                            try:
+                                from src.services.execution_history_service import ExecutionHistoryService
+                                history_service = ExecutionHistoryService(hitl_session)
+                                await history_service.set_checkpoint_active(
+                                    execution_id=execution_id,
+                                    flow_uuid=pause_exc.flow_uuid,
+                                    checkpoint_method="hitl_gate_pause"
+                                )
+                                logger.info(f"✅ Saved HITL checkpoint for execution {execution_id} with flow_uuid={pause_exc.flow_uuid}")
+                            except Exception as checkpoint_err:
+                                logger.error(f"❌ Could not save HITL checkpoint info: {checkpoint_err}", exc_info=True)
+                        else:
+                            logger.warning(f"⚠️ No flow_uuid available - checkpoint NOT saved! Resume dialog will not work.")
 
                     return {
                         "success": True,
@@ -959,11 +1008,14 @@ class FlowRunnerService:
 
                 except Exception as kickoff_error:
                     logger.error(f"Error executing flow {flow_id}: {kickoff_error}", exc_info=True)
-                    await flow_execution_service.update_execution_status(
-                        execution_id=execution_id,
-                        status=FlowExecutionStatus.FAILED,
-                        error=str(kickoff_error)
-                    )
+                    # Fresh session for error status update
+                    async with async_session_factory() as err_session:
+                        err_flow_service = FlowExecutionService(err_session)
+                        await err_flow_service.update_execution_status(
+                            execution_id=execution_id,
+                            status=FlowExecutionStatus.FAILED,
+                            error=str(kickoff_error)
+                        )
                     return {"success": False, "error": str(kickoff_error), "execution_id": execution_id}
 
             except FlowPausedForApprovalException:
@@ -973,12 +1025,14 @@ class FlowRunnerService:
             except Exception as e:
                 logger.error(f"Error in flow execution {execution_id}: {e}", exc_info=True)
                 try:
-                    # Update status to FAILED via service layer
-                    await flow_execution_service.update_execution_status(
-                        execution_id=execution_id,
-                        status=FlowExecutionStatus.FAILED,
-                        error=str(e)
-                    )
+                    # Fresh session for outer error status update
+                    async with async_session_factory() as outer_err_session:
+                        outer_err_service = FlowExecutionService(outer_err_session)
+                        await outer_err_service.update_execution_status(
+                            execution_id=execution_id,
+                            status=FlowExecutionStatus.FAILED,
+                            error=str(e)
+                        )
                 except Exception as update_error:
                     logger.error(f"Error updating flow execution {execution_id} status: {update_error}", exc_info=True)
                 return {"success": False, "error": str(e), "execution_id": execution_id}

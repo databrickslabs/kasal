@@ -64,6 +64,7 @@ __pycache__/
 *$py.class
 *.so
 .Python
+uv.lock
 
 # Logs
 logs/

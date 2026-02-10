@@ -13,7 +13,8 @@ import logging
 
 from src.core.llm_handlers.databricks_gpt_oss_handler import (
     DatabricksGPTOSSHandler,
-    DatabricksGPTOSSLLM
+    DatabricksGPTOSSLLM,
+    apply_tool_calls_fix,
 )
 
 
@@ -169,7 +170,30 @@ class TestDatabricksGPTOSSHandler:
 
 class TestDatabricksGPTOSSLLM:
     """Test suite for DatabricksGPTOSSLLM wrapper."""
-    
+
+    @pytest.fixture(autouse=True)
+    def mock_llm_factory(self, monkeypatch):
+        """Bypass LLM.__new__ factory to avoid OPENAI_API_KEY requirement.
+
+        CrewAI's LLM.__new__ is a factory that routes to native provider classes
+        (e.g. OpenAICompletion), which requires API keys. We bypass it so that
+        DatabricksGPTOSSLLM instances are created directly for unit testing.
+        """
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test-dummy-key-for-unit-tests")
+
+        original_init = DatabricksGPTOSSLLM.__init__
+
+        def patched_new(cls, *args, **kwargs):
+            return object.__new__(cls)
+
+        def patched_init(self, **kwargs):
+            # Skip parent LLM.__init__ but run DatabricksGPTOSSLLM's own setup
+            self._original_model_name = kwargs.get('model', '')
+
+        with patch('src.core.llm_handlers.databricks_gpt_oss_handler.LLM.__new__', patched_new):
+            with patch('src.core.llm_handlers.databricks_gpt_oss_handler.LLM.__init__', lambda self, **kwargs: None):
+                yield
+
     @patch('src.core.llm_handlers.databricks_gpt_oss_handler.LLM.__init__')
     def test_initialization(self, mock_llm_init):
         """Test DatabricksGPTOSSLLM initialization."""
@@ -307,9 +331,189 @@ class TestDatabricksGPTOSSLLM:
     def test_handle_non_streaming_response_returns_empty_on_none(self, mock_parent_handle):
         """Test that None response returns empty string."""
         mock_parent_handle.return_value = None
-        
+
         llm = DatabricksGPTOSSLLM(model="gpt-oss-test")
         params = {"model": "test", "messages": []}
-        
+
         result = llm._handle_non_streaming_response(params)
         assert result == ""
+
+
+class TestApplyToolCallsFix:
+    """Test suite for apply_tool_calls_fix monkey-patch.
+
+    This patch fixes a CrewAI bug where tool_calls are silently dropped when
+    the LLM returns both content text and tool_calls in the same response.
+    """
+
+    def _make_mock_llm(self):
+        """Build a mock LLM instance with required attributes."""
+        llm = MagicMock()
+        llm.is_litellm = False
+        llm._token_usage = {}
+        llm._handle_emit_call_events = MagicMock()
+        llm._track_token_usage_internal = MagicMock()
+        llm._handle_tool_call = MagicMock()
+        return llm
+
+    def _make_mock_response(self, content="", tool_calls=None):
+        """Build a mock litellm ModelResponse."""
+        mock_message = MagicMock()
+        mock_message.content = content
+        mock_message.tool_calls = tool_calls or []
+
+        mock_choice = MagicMock()
+        mock_choice.message = mock_message
+
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
+        mock_response.usage = MagicMock()
+        return mock_response
+
+    def _make_tool_call(self, name="PerplexityTool", arguments='{"query": "test"}'):
+        tc = MagicMock()
+        tc.function.name = name
+        tc.function.arguments = arguments
+        return tc
+
+    def test_patch_applied_to_sync_method(self):
+        """Verify the patch was applied to LLM._handle_non_streaming_response."""
+        from crewai import LLM
+        assert "<patched" in LLM._handle_non_streaming_response.__code__.co_filename
+
+    def test_patch_applied_to_async_method(self):
+        """Verify the patch was applied to LLM._ahandle_non_streaming_response."""
+        from crewai import LLM
+        assert "<patched" in LLM._ahandle_non_streaming_response.__code__.co_filename
+
+    @patch("litellm.completion")
+    def test_returns_tool_calls_when_both_content_and_tools_present(self, mock_completion):
+        """Core bug fix: when LLM returns both content and tool_calls, return tool_calls."""
+        from crewai import LLM
+
+        tool_call = self._make_tool_call()
+        mock_completion.return_value = self._make_mock_response(
+            content="I'll search for that information.",
+            tool_calls=[tool_call],
+        )
+
+        result = LLM._handle_non_streaming_response(
+            self._make_mock_llm(),
+            params={"messages": [{"role": "user", "content": "test"}], "model": "test"},
+            callbacks=None,
+            available_functions=None,
+        )
+
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0].function.name == "PerplexityTool"
+
+    @patch("litellm.completion")
+    def test_returns_text_when_no_tool_calls(self, mock_completion):
+        """When LLM returns only text (no tool_calls), return text normally."""
+        from crewai import LLM
+
+        mock_completion.return_value = self._make_mock_response(
+            content="Here is the answer.",
+            tool_calls=[],
+        )
+
+        result = LLM._handle_non_streaming_response(
+            self._make_mock_llm(),
+            params={"messages": [{"role": "user", "content": "test"}], "model": "test"},
+            callbacks=None,
+            available_functions=None,
+        )
+
+        assert isinstance(result, str)
+        assert result == "Here is the answer."
+
+    @patch("litellm.completion")
+    def test_returns_tool_calls_when_no_text_content(self, mock_completion):
+        """When LLM returns tool_calls without text content, return tool_calls."""
+        from crewai import LLM
+
+        tool_call = self._make_tool_call()
+        mock_completion.return_value = self._make_mock_response(
+            content="",
+            tool_calls=[tool_call],
+        )
+
+        result = LLM._handle_non_streaming_response(
+            self._make_mock_llm(),
+            params={"messages": [{"role": "user", "content": "test"}], "model": "test"},
+            callbacks=None,
+            available_functions=None,
+        )
+
+        assert isinstance(result, list)
+        assert len(result) == 1
+
+    @patch("litellm.completion")
+    def test_executes_tools_when_available_functions_provided(self, mock_completion):
+        """When available_functions is provided, tool execution is handled by LLM internally."""
+        from crewai import LLM
+
+        tool_call = self._make_tool_call()
+        mock_completion.return_value = self._make_mock_response(
+            content="",
+            tool_calls=[tool_call],
+        )
+
+        llm = self._make_mock_llm()
+        llm._handle_tool_call.return_value = "tool result"
+
+        result = LLM._handle_non_streaming_response(
+            llm,
+            params={"messages": [{"role": "user", "content": "test"}], "model": "test"},
+            callbacks=None,
+            available_functions={"PerplexityTool": lambda **kw: "result"},
+        )
+
+        assert result == "tool result"
+        llm._handle_tool_call.assert_called_once()
+
+    @patch("litellm.completion")
+    def test_returns_multiple_tool_calls(self, mock_completion):
+        """When LLM returns multiple tool_calls alongside text, all are returned."""
+        from crewai import LLM
+
+        tc1 = self._make_tool_call(name="PerplexityTool")
+        tc2 = self._make_tool_call(name="WebSearchTool")
+        mock_completion.return_value = self._make_mock_response(
+            content="Let me search using multiple tools.",
+            tool_calls=[tc1, tc2],
+        )
+
+        result = LLM._handle_non_streaming_response(
+            self._make_mock_llm(),
+            params={"messages": [{"role": "user", "content": "test"}], "model": "test"},
+            callbacks=None,
+            available_functions=None,
+        )
+
+        assert isinstance(result, list)
+        assert len(result) == 2
+
+    def test_reapply_is_idempotent(self):
+        """Calling apply_tool_calls_fix again doesn't break anything."""
+        from crewai import LLM
+
+        apply_tool_calls_fix()
+
+        # Patch should still be in place (either re-applied or skipped gracefully)
+        assert "<patched" in LLM._handle_non_streaming_response.__code__.co_filename
+        assert "<patched" in LLM._ahandle_non_streaming_response.__code__.co_filename
+
+    def test_handles_patch_failure_gracefully(self):
+        """If patching fails, existing method is preserved and error is logged."""
+        from crewai import LLM
+
+        original_method = LLM._handle_non_streaming_response
+
+        with patch("inspect.getsource",
+                    side_effect=OSError("could not get source")):
+            apply_tool_calls_fix()
+
+        # Method should be unchanged after failed patch
+        assert LLM._handle_non_streaming_response is original_method

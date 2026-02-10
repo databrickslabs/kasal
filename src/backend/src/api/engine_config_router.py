@@ -1,19 +1,21 @@
-from typing import Annotated, List, Dict, Any
-
-from fastapi import APIRouter, Depends, HTTPException, status
 import logging
+from typing import Annotated, Any, Dict, List
 
-from src.core.dependencies import SessionDep, GroupContextDep
+from fastapi import APIRouter, Depends, status
+
+from src.core.exceptions import ForbiddenError, KasalError, NotFoundError
+
+from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.permissions import check_role_in_context, is_system_admin
 from src.models.engine_config import EngineConfig
 from src.schemas.engine_config import (
-    EngineConfigCreate,
-    EngineConfigUpdate,
-    EngineConfigResponse,
-    EngineConfigListResponse,
-    EngineConfigToggleUpdate,
-    EngineConfigValueUpdate,
     CrewAIFlowConfigUpdate,
+    EngineConfigCreate,
+    EngineConfigListResponse,
+    EngineConfigResponse,
+    EngineConfigToggleUpdate,
+    EngineConfigUpdate,
+    EngineConfigValueUpdate,
 )
 from src.services.engine_config_service import EngineConfigService
 
@@ -25,6 +27,7 @@ router = APIRouter(
 
 # Set up logging
 logger = logging.getLogger(__name__)
+
 
 # Dependency to get EngineConfigService
 def get_engine_config_service(session: SessionDep) -> EngineConfigService:
@@ -42,8 +45,11 @@ def get_engine_config_service(session: SessionDep) -> EngineConfigService:
     """
     return EngineConfigService(session)
 
+
 # Type alias for cleaner function signatures
-EngineConfigServiceDep = Annotated[EngineConfigService, Depends(get_engine_config_service)]
+EngineConfigServiceDep = Annotated[
+    EngineConfigService, Depends(get_engine_config_service)
+]
 
 
 @router.get("", response_model=EngineConfigListResponse)
@@ -53,23 +59,19 @@ async def get_engine_configs(
 ):
     """
     Get all engine configurations.
-    
+
     Args:
         service: EngineConfig service injected by dependency
-        
+
     Returns:
         List of engine configurations
     """
-    try:
-        logger.info("API call: GET /engine-config")
-        
-        configs = await service.find_all()
-        logger.info(f"Found {len(configs)} engine configurations in database")
-        
-        return EngineConfigListResponse(configs=configs, count=len(configs))
-    except Exception as e:
-        logger.error(f"Error getting engine configurations: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    logger.info("API call: GET /engine-config")
+
+    configs = await service.find_all()
+    logger.info(f"Found {len(configs)} engine configurations in database")
+
+    return EngineConfigListResponse(configs=configs, count=len(configs))
 
 
 @router.get("/enabled", response_model=EngineConfigListResponse)
@@ -79,23 +81,19 @@ async def get_enabled_engine_configs(
 ):
     """
     Get only enabled engine configurations.
-    
+
     Args:
         service: EngineConfig service injected by dependency
-        
+
     Returns:
         List of enabled engine configurations
     """
-    try:
-        logger.info("API call: GET /engine-config/enabled")
-        
-        configs = await service.find_enabled_configs()
-        logger.info(f"Found {len(configs)} enabled engine configurations in database")
-        
-        return EngineConfigListResponse(configs=configs, count=len(configs))
-    except Exception as e:
-        logger.error(f"Error getting enabled engine configurations: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    logger.info("API call: GET /engine-config/enabled")
+
+    configs = await service.find_enabled_configs()
+    logger.info(f"Found {len(configs)} enabled engine configurations in database")
+
+    return EngineConfigListResponse(configs=configs, count=len(configs))
 
 
 @router.get("/engine/{engine_name}", response_model=EngineConfigResponse)
@@ -106,37 +104,30 @@ async def get_engine_config(
 ):
     """
     Get a specific engine configuration by engine name.
-    
+
     Args:
         engine_name: Name of the engine configuration to get
         service: EngineConfig service injected by dependency
-        
+
     Returns:
         Engine configuration if found
-        
+
     Raises:
         HTTPException: If engine configuration not found
     """
-    try:
-        logger.info(f"API call: GET /engine-config/engine/{engine_name}")
-        
-        config = await service.find_by_engine_name(engine_name)
-        if not config:
-            logger.warning(f"Engine configuration with name {engine_name} not found")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Engine configuration with name {engine_name} not found"
-            )
-            
-        return config
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting engine configuration {engine_name}: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    logger.info(f"API call: GET /engine-config/engine/{engine_name}")
+
+    config = await service.find_by_engine_name(engine_name)
+    if not config:
+        logger.warning(f"Engine configuration with name {engine_name} not found")
+        raise NotFoundError(f"Engine configuration with name {engine_name} not found")
+
+    return config
 
 
-@router.get("/engine/{engine_name}/config/{config_key}", response_model=EngineConfigResponse)
+@router.get(
+    "/engine/{engine_name}/config/{config_key}", response_model=EngineConfigResponse
+)
 async def get_engine_config_by_key(
     engine_name: str,
     config_key: str,
@@ -145,35 +136,28 @@ async def get_engine_config_by_key(
 ):
     """
     Get a specific engine configuration by engine name and config key.
-    
+
     Args:
         engine_name: Name of the engine
         config_key: Configuration key
         service: EngineConfig service injected by dependency
-        
+
     Returns:
         Engine configuration if found
-        
+
     Raises:
         HTTPException: If engine configuration not found
     """
-    try:
-        logger.info(f"API call: GET /engine-config/engine/{engine_name}/config/{config_key}")
-        
-        config = await service.find_by_engine_and_key(engine_name, config_key)
-        if not config:
-            logger.warning(f"Engine configuration {engine_name}.{config_key} not found")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Engine configuration {engine_name}.{config_key} not found"
-            )
-            
-        return config
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting engine configuration {engine_name}.{config_key}: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    logger.info(
+        f"API call: GET /engine-config/engine/{engine_name}/config/{config_key}"
+    )
+
+    config = await service.find_by_engine_and_key(engine_name, config_key)
+    if not config:
+        logger.warning(f"Engine configuration {engine_name}.{config_key} not found")
+        raise NotFoundError(f"Engine configuration {engine_name}.{config_key} not found")
+
+    return config
 
 
 @router.get("/type/{engine_type}", response_model=EngineConfigListResponse)
@@ -184,27 +168,25 @@ async def get_engine_configs_by_type(
 ):
     """
     Get all engine configurations by engine type.
-    
+
     Args:
         engine_type: Type of the engine
         service: EngineConfig service injected by dependency
-        
+
     Returns:
         List of engine configurations
     """
-    try:
-        logger.info(f"API call: GET /engine-config/type/{engine_type}")
-        
-        configs = await service.find_by_engine_type(engine_type)
-        logger.info(f"Found {len(configs)} engine configurations for type {engine_type}")
-        
-        return EngineConfigListResponse(configs=configs, count=len(configs))
-    except Exception as e:
-        logger.error(f"Error getting engine configurations by type {engine_type}: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    logger.info(f"API call: GET /engine-config/type/{engine_type}")
+
+    configs = await service.find_by_engine_type(engine_type)
+    logger.info(f"Found {len(configs)} engine configurations for type {engine_type}")
+
+    return EngineConfigListResponse(configs=configs, count=len(configs))
 
 
-@router.post("", response_model=EngineConfigResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", response_model=EngineConfigResponse, status_code=status.HTTP_201_CREATED
+)
 async def create_engine_config(
     config: EngineConfigCreate,
     service: EngineConfigServiceDep,
@@ -226,28 +208,16 @@ async def create_engine_config(
     """
     # Check permissions - only admins can create engine configurations
     if not check_role_in_context(group_context, ["admin"]):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can create engine configurations"
-        )
+        raise ForbiddenError("Only admins can create engine configurations")
 
-    try:
-        logger.info(f"API call: POST /engine-config - Creating engine config {config.engine_name}")
-        
-        created_config = await service.create_engine_config(config)
-        logger.info(f"Engine config {config.engine_name} created successfully")
-        
-        return created_config
-    except ValueError as ve:
-        # Value error indicates engine config already exists
-        logger.error(f"Engine config with name {config.engine_name} and key {config.config_key} already exists")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(ve)
-        )
-    except Exception as e:
-        logger.error(f"Error creating engine config {config.engine_name}: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    logger.info(
+        f"API call: POST /engine-config - Creating engine config {config.engine_name}"
+    )
+
+    created_config = await service.create_engine_config(config)
+    logger.info(f"Engine config {config.engine_name} created successfully")
+
+    return created_config
 
 
 @router.put("/engine/{engine_name}", response_model=EngineConfigResponse)
@@ -274,29 +244,19 @@ async def update_engine_config(
     """
     # Check permissions - only admins can update engine configurations
     if not check_role_in_context(group_context, ["admin"]):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can update engine configurations"
-        )
+        raise ForbiddenError("Only admins can update engine configurations")
 
-    try:
-        logger.info(f"API call: PUT /engine-config/engine/{engine_name}")
-        
-        updated_config = await service.update_engine_config(engine_name, config)
-        if not updated_config:
-            logger.warning(f"Engine configuration with name {engine_name} not found for update")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Engine configuration with name {engine_name} not found"
-            )
-            
-        logger.info(f"Engine config {engine_name} updated successfully")
-        return updated_config
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating engine config {engine_name}: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    logger.info(f"API call: PUT /engine-config/engine/{engine_name}")
+
+    updated_config = await service.update_engine_config(engine_name, config)
+    if not updated_config:
+        logger.warning(
+            f"Engine configuration with name {engine_name} not found for update"
+        )
+        raise NotFoundError(f"Engine configuration with name {engine_name} not found")
+
+    logger.info(f"Engine config {engine_name} updated successfully")
+    return updated_config
 
 
 @router.patch("/engine/{engine_name}/toggle", response_model=EngineConfigResponse)
@@ -323,32 +283,29 @@ async def toggle_engine_config(
     """
     # Check permissions - only admins can toggle engine configurations
     if not check_role_in_context(group_context, ["admin"]):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can toggle engine configurations"
+        raise ForbiddenError("Only admins can toggle engine configurations")
+
+    logger.info(
+        f"API call: PATCH /engine-config/engine/{engine_name}/toggle - enabled={toggle_data.enabled}"
+    )
+
+    updated_config = await service.toggle_engine_enabled(
+        engine_name, toggle_data.enabled
+    )
+    if not updated_config:
+        logger.warning(
+            f"Engine configuration with name {engine_name} not found for toggle"
         )
+        raise NotFoundError(f"Engine configuration with name {engine_name} not found")
 
-    try:
-        logger.info(f"API call: PATCH /engine-config/engine/{engine_name}/toggle - enabled={toggle_data.enabled}")
-        
-        updated_config = await service.toggle_engine_enabled(engine_name, toggle_data.enabled)
-        if not updated_config:
-            logger.warning(f"Engine configuration with name {engine_name} not found for toggle")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Engine configuration with name {engine_name} not found"
-            )
-            
-        logger.info(f"Engine config {engine_name} toggled to enabled={toggle_data.enabled}")
-        return updated_config
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error toggling engine config {engine_name}: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    logger.info(f"Engine config {engine_name} toggled to enabled={toggle_data.enabled}")
+    return updated_config
 
 
-@router.patch("/engine/{engine_name}/config/{config_key}/value", response_model=EngineConfigResponse)
+@router.patch(
+    "/engine/{engine_name}/config/{config_key}/value",
+    response_model=EngineConfigResponse,
+)
 async def update_config_value(
     engine_name: str,
     config_key: str,
@@ -374,29 +331,23 @@ async def update_config_value(
     """
     # Check permissions - only admins can update engine configuration values
     if not check_role_in_context(group_context, ["admin"]):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can update engine configuration values"
-        )
+        raise ForbiddenError("Only admins can update engine configuration values")
 
-    try:
-        logger.info(f"API call: PATCH /engine-config/engine/{engine_name}/config/{config_key}/value")
-        
-        updated_config = await service.update_config_value(engine_name, config_key, value_data.config_value)
-        if not updated_config:
-            logger.warning(f"Engine configuration {engine_name}.{config_key} not found for value update")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Engine configuration {engine_name}.{config_key} not found"
-            )
-            
-        logger.info(f"Engine config {engine_name}.{config_key} value updated successfully")
-        return updated_config
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating config value {engine_name}.{config_key}: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    logger.info(
+        f"API call: PATCH /engine-config/engine/{engine_name}/config/{config_key}/value"
+    )
+
+    updated_config = await service.update_config_value(
+        engine_name, config_key, value_data.config_value
+    )
+    if not updated_config:
+        logger.warning(
+            f"Engine configuration {engine_name}.{config_key} not found for value update"
+        )
+        raise NotFoundError(f"Engine configuration {engine_name}.{config_key} not found")
+
+    logger.info(f"Engine config {engine_name}.{config_key} value updated successfully")
+    return updated_config
 
 
 @router.get("/crewai/flow-enabled")
@@ -416,21 +367,14 @@ async def get_crewai_flow_enabled(
     """
     # Check permissions - only system admins can access engine configuration
     if not is_system_admin(group_context):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only system administrators can access engine configuration"
-        )
+        raise ForbiddenError("Only system administrators can access engine configuration")
 
-    try:
-        logger.info("API call: GET /engine-config/crewai/flow-enabled")
+    logger.info("API call: GET /engine-config/crewai/flow-enabled")
 
-        enabled = await service.get_crewai_flow_enabled()
-        logger.info(f"CrewAI flow enabled status: {enabled}")
+    enabled = await service.get_crewai_flow_enabled()
+    logger.info(f"CrewAI flow enabled status: {enabled}")
 
-        return {"flow_enabled": enabled}
-    except Exception as e:
-        logger.error(f"Error getting CrewAI flow enabled status: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return {"flow_enabled": enabled}
 
 
 @router.patch("/crewai/flow-enabled")
@@ -452,28 +396,18 @@ async def set_crewai_flow_enabled(
     """
     # Check permissions - only system admins can manage engine configuration
     if not is_system_admin(group_context):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only system administrators can manage engine configuration"
-        )
+        raise ForbiddenError("Only system administrators can manage engine configuration")
 
-    try:
-        logger.info(f"API call: PATCH /engine-config/crewai/flow-enabled - enabled={config_data.flow_enabled}")
+    logger.info(
+        f"API call: PATCH /engine-config/crewai/flow-enabled - enabled={config_data.flow_enabled}"
+    )
 
-        success = await service.set_crewai_flow_enabled(config_data.flow_enabled)
-        if not success:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to update CrewAI flow configuration"
-            )
+    success = await service.set_crewai_flow_enabled(config_data.flow_enabled)
+    if not success:
+        raise KasalError("Failed to update CrewAI flow configuration")
 
-        logger.info(f"CrewAI flow enabled status updated to: {config_data.flow_enabled}")
-        return {"success": True, "flow_enabled": config_data.flow_enabled}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error setting CrewAI flow enabled status: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    logger.info(f"CrewAI flow enabled status updated to: {config_data.flow_enabled}")
+    return {"success": True, "flow_enabled": config_data.flow_enabled}
 
 
 @router.delete("/engine/{engine_name}", status_code=status.HTTP_204_NO_CONTENT)
@@ -495,25 +429,15 @@ async def delete_engine_config(
     """
     # Check permissions - only admins can delete engine configurations
     if not check_role_in_context(group_context, ["admin"]):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can delete engine configurations"
-        )
+        raise ForbiddenError("Only admins can delete engine configurations")
 
-    try:
-        logger.info(f"API call: DELETE /engine-config/engine/{engine_name}")
-        
-        deleted = await service.delete_engine_config(engine_name)
-        if not deleted:
-            logger.warning(f"Engine configuration with name {engine_name} not found for deletion")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Engine configuration with name {engine_name} not found"
-            )
-            
-        logger.info(f"Engine config {engine_name} deleted successfully")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting engine config {engine_name}: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e)) 
+    logger.info(f"API call: DELETE /engine-config/engine/{engine_name}")
+
+    deleted = await service.delete_engine_config(engine_name)
+    if not deleted:
+        logger.warning(
+            f"Engine configuration with name {engine_name} not found for deletion"
+        )
+        raise NotFoundError(f"Engine configuration with name {engine_name} not found")
+
+    logger.info(f"Engine config {engine_name} deleted successfully")

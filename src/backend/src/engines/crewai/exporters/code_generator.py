@@ -329,7 +329,7 @@ class CodeGenerator:
         imports.append('from crewai import Agent, Crew, Task, Process')
         imports.append('from crewai.project import CrewBase, agent, crew, task')
 
-        # Add tool imports
+        # Add tool imports (crewai.tools since v1.0.0)
         standard_tool_imports = {
             'SerperDevTool': 'from crewai_tools import SerperDevTool',
             'ScrapeWebsiteTool': 'from crewai_tools import ScrapeWebsiteTool',

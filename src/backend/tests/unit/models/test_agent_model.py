@@ -20,14 +20,14 @@ class TestAgent:
         name = "Research Agent"
         role = "Senior Researcher"
         goal = "Conduct thorough research on given topics"
-        
+
         # Act
         agent = Agent(
             name=name,
             role=role,
             goal=goal
         )
-        
+
         # Assert
         assert agent.name == name
         assert agent.role == role
@@ -71,7 +71,9 @@ class TestAgent:
         use_system_prompt = True
         respect_context_window = False
         knowledge_sources = ["company_database", "market_research"]
-        
+        inject_date = True
+        date_format = "%B %d, %Y"
+
         # Act
         agent = Agent(
             name=name,
@@ -99,9 +101,11 @@ class TestAgent:
             max_retry_limit=max_retry_limit,
             use_system_prompt=use_system_prompt,
             respect_context_window=respect_context_window,
-            knowledge_sources=knowledge_sources
+            knowledge_sources=knowledge_sources,
+            inject_date=inject_date,
+            date_format=date_format
         )
-        
+
         # Assert
         assert agent.name == name
         assert agent.role == role
@@ -129,6 +133,8 @@ class TestAgent:
         assert agent.use_system_prompt == use_system_prompt
         assert agent.respect_context_window == respect_context_window
         assert agent.knowledge_sources == knowledge_sources
+        assert agent.inject_date == inject_date
+        assert agent.date_format == date_format
 
     def test_agent_defaults(self):
         """Test Agent model with default values."""
@@ -138,7 +144,7 @@ class TestAgent:
             role="Test Role",
             goal="Test Goal"
         )
-        
+
         # Assert
         # Note: SQLAlchemy defaults are applied when saved to database
         # Test that __init__ method sets lists to empty when None
@@ -156,6 +162,8 @@ class TestAgent:
         assert Agent.__table__.columns['max_retry_limit'].default.arg == 2
         assert Agent.__table__.columns['use_system_prompt'].default.arg is True
         assert Agent.__table__.columns['respect_context_window'].default.arg is True
+        # Test inject_date default value
+        assert Agent.__table__.columns['inject_date'].default.arg is True
 
     def test_agent_init_method_logic(self):
         """Test the custom __init__ method logic."""
@@ -167,7 +175,7 @@ class TestAgent:
             tools=None
         )
         assert agent1.tools == []
-        
+
         # Test 2: When knowledge_sources is None
         agent2 = Agent(
             name="Agent 2",
@@ -176,7 +184,7 @@ class TestAgent:
             knowledge_sources=None
         )
         assert agent2.knowledge_sources == []
-        
+
         # Test 3: When tools and knowledge_sources are provided
         agent3 = Agent(
             name="Agent 3",
@@ -198,7 +206,7 @@ class TestAgent:
             "databricks-llama-4-maverick",
             "custom-model"
         ]
-        
+
         for llm in llm_configs:
             agent = Agent(
                 name=f"Agent for {llm}",
@@ -217,7 +225,7 @@ class TestAgent:
             ["python_repl", "sql_query", "web_search"],  # Multiple tools
             ["custom_tool_1", "custom_tool_2", "custom_tool_3", "custom_tool_4"]  # Many tools
         ]
-        
+
         for tools in tools_configs:
             # Act
             agent = Agent(
@@ -226,7 +234,7 @@ class TestAgent:
                 goal="Test different tool configurations",
                 tools=tools
             )
-            
+
             # Assert
             assert agent.tools == tools
             assert isinstance(agent.tools, list)
@@ -245,7 +253,7 @@ class TestAgent:
             allow_delegation=False,
             cache=True
         )
-        
+
         # Test high resource configuration
         high_resource_agent = Agent(
             name="High Resource Agent",
@@ -258,14 +266,14 @@ class TestAgent:
             allow_delegation=True,
             cache=False
         )
-        
+
         # Assert
         assert low_resource_agent.max_iter == 5
         assert low_resource_agent.max_rpm == 1
         assert low_resource_agent.max_execution_time == 60
         assert low_resource_agent.verbose is False
         assert low_resource_agent.allow_delegation is False
-        
+
         assert high_resource_agent.max_iter == 100
         assert high_resource_agent.max_rpm == 60
         assert high_resource_agent.max_execution_time == 7200
@@ -281,7 +289,7 @@ class TestAgent:
             "dimensions": 1536,
             "max_tokens": 8000
         }
-        
+
         # Act
         agent = Agent(
             name="Memory Agent",
@@ -290,7 +298,7 @@ class TestAgent:
             memory=True,
             embedder_config=embedder_config
         )
-        
+
         # Assert
         assert agent.memory is True
         assert agent.embedder_config == embedder_config
@@ -303,7 +311,7 @@ class TestAgent:
         system_template = "You are a helpful AI assistant specialized in {domain}."
         prompt_template = "User query: {query}\nContext: {context}\nPlease provide a detailed response."
         response_template = "Response: {response}\nConfidence: {confidence}\nSources: {sources}"
-        
+
         # Act
         agent = Agent(
             name="Template Agent",
@@ -313,7 +321,7 @@ class TestAgent:
             prompt_template=prompt_template,
             response_template=response_template
         )
-        
+
         # Assert
         assert agent.system_template == system_template
         assert agent.prompt_template == prompt_template
@@ -332,7 +340,7 @@ class TestAgent:
             allow_code_execution=True,
             code_execution_mode="safe"
         )
-        
+
         # Test docker mode
         docker_agent = Agent(
             name="Docker Agent",
@@ -341,7 +349,7 @@ class TestAgent:
             allow_code_execution=True,
             code_execution_mode="docker"
         )
-        
+
         # Test disabled code execution
         no_code_agent = Agent(
             name="No Code Agent",
@@ -349,14 +357,14 @@ class TestAgent:
             goal="No code execution",
             allow_code_execution=False
         )
-        
+
         # Assert
         assert safe_agent.allow_code_execution is True
         assert safe_agent.code_execution_mode == "safe"
-        
+
         assert docker_agent.allow_code_execution is True
         assert docker_agent.code_execution_mode == "docker"
-        
+
         assert no_code_agent.allow_code_execution is False
         # Note: code_execution_mode default is applied by database
         assert no_code_agent.code_execution_mode is None or no_code_agent.code_execution_mode == "safe"
@@ -366,12 +374,12 @@ class TestAgent:
         # Arrange
         knowledge_sources = [
             "company_wiki",
-            "technical_documentation", 
+            "technical_documentation",
             "previous_conversations",
             "external_apis",
             "database_schemas"
         ]
-        
+
         # Act
         agent = Agent(
             name="Knowledge Agent",
@@ -379,7 +387,7 @@ class TestAgent:
             goal="Access and use various knowledge sources",
             knowledge_sources=knowledge_sources
         )
-        
+
         # Assert
         assert agent.knowledge_sources == knowledge_sources
         assert len(agent.knowledge_sources) == 5
@@ -391,7 +399,7 @@ class TestAgent:
         # Arrange
         group_id = "team-alpha"
         created_by_email = "leader@team-alpha.com"
-        
+
         # Act
         agent = Agent(
             name="Team Agent",
@@ -400,7 +408,7 @@ class TestAgent:
             group_id=group_id,
             created_by_email=created_by_email
         )
-        
+
         # Assert
         assert agent.group_id == group_id
         assert agent.created_by_email == created_by_email
@@ -418,7 +426,7 @@ class TestAgent:
             role="Test Role",
             goal="Test UUID generation"
         )
-        
+
         # Note: The actual UUID is generated when saved to database
         # Here we just test that the default function is set correctly
         # Check that the default is a callable (the generate_uuid function)
@@ -429,7 +437,7 @@ class TestAgent:
         """Test that the model has the expected database indexes."""
         # Act
         columns = Agent.__table__.columns
-        
+
         # Assert - Check that group_id has index
         group_id_column = columns['group_id']
         assert group_id_column.index is True
@@ -438,22 +446,22 @@ class TestAgent:
         """Test that columns have correct data types and constraints."""
         # Act
         columns = Agent.__table__.columns
-        
+
         # Assert required fields
         assert columns['name'].nullable is False
         assert columns['role'].nullable is False
         assert columns['goal'].nullable is False
-        
+
         # Assert optional fields
         assert columns['backstory'].nullable is True
         assert columns['group_id'].nullable is True
         assert columns['created_by_email'].nullable is True
-        
+
         # Assert JSON columns
         assert "JSON" in str(columns['tools'].type)
         assert "JSON" in str(columns['embedder_config'].type)
         assert "JSON" in str(columns['knowledge_sources'].type)
-        
+
         # Assert Boolean columns
         assert "BOOLEAN" in str(columns['verbose'].type)
         assert "BOOLEAN" in str(columns['allow_delegation'].type)
@@ -464,22 +472,22 @@ class TestAgent:
         """Test timestamp behavior in Agent."""
         # Arrange
         before_creation = datetime.utcnow()
-        
+
         # Act
         agent = Agent(
             name="Timestamp Test",
             role="Time Keeper",
             goal="Test timestamps"
         )
-        
+
         after_creation = datetime.utcnow()
-        
+
         # Assert
         # Note: created_at and updated_at are set by database defaults
         # Here we just verify the column configurations
         created_at_column = Agent.__table__.columns['created_at']
         updated_at_column = Agent.__table__.columns['updated_at']
-        
+
         assert created_at_column.default is not None
         assert updated_at_column.default is not None
         assert updated_at_column.onupdate is not None
@@ -492,10 +500,10 @@ class TestAgent:
             role="Test Role",
             goal="Test representation"
         )
-        
+
         # Act
         repr_str = repr(agent)
-        
+
         # Assert
         assert "Agent" in repr_str
 
@@ -516,7 +524,7 @@ class TestAgent:
                 "tokenizer": "custom-tokenizer"
             }
         }
-        
+
         complex_tools = [
             {
                 "name": "advanced_calculator",
@@ -527,7 +535,7 @@ class TestAgent:
                 "config": {"host": "localhost", "timeout": 30}
             }
         ]
-        
+
         # Act
         agent = Agent(
             name="Complex JSON Agent",
@@ -536,7 +544,7 @@ class TestAgent:
             embedder_config=complex_embedder_config,
             tools=complex_tools
         )
-        
+
         # Assert
         assert agent.embedder_config["provider"] == "custom"
         assert agent.embedder_config["model_config"]["dimensions"] == 2048
@@ -552,7 +560,7 @@ class TestGenerateUuid:
         # Act
         uuid1 = generate_uuid()
         uuid2 = generate_uuid()
-        
+
         # Assert
         assert uuid1 is not None
         assert uuid2 is not None
@@ -566,7 +574,7 @@ class TestGenerateUuid:
         """Test that generate_uuid generates unique IDs."""
         # Act
         uuids = [generate_uuid() for _ in range(100)]
-        
+
         # Assert
         assert len(set(uuids)) == 100  # All UUIDs should be unique
 
@@ -583,7 +591,7 @@ class TestAgentEdgeCases:
             goal="",
             backstory=""
         )
-        
+
         # Assert
         assert agent.name == ""
         assert agent.role == ""
@@ -597,7 +605,7 @@ class TestAgentEdgeCases:
         long_role = "Role " * 100   # 500 characters
         long_goal = "Goal " * 100   # 500 characters
         long_backstory = "Backstory " * 200  # 2000 characters
-        
+
         # Act
         agent = Agent(
             name=long_name,
@@ -605,7 +613,7 @@ class TestAgentEdgeCases:
             goal=long_goal,
             backstory=long_backstory
         )
-        
+
         # Assert
         assert len(agent.name) == 600
         assert len(agent.role) == 500
@@ -620,11 +628,11 @@ class TestAgentEdgeCases:
             role="Stress Tester",
             goal="Test extreme values",
             max_iter=0,  # Minimum
-            max_rpm=0,   # Minimum  
+            max_rpm=0,   # Minimum
             max_execution_time=0,  # Minimum
             max_retry_limit=0  # Minimum
         )
-        
+
         # Assert
         assert extreme_agent.max_iter == 0
         assert extreme_agent.max_rpm == 0
@@ -644,7 +652,7 @@ class TestAgentEdgeCases:
             verbose=True,
             memory=True
         )
-        
+
         # Code Assistant Agent
         code_agent = Agent(
             name="Code Assistant",
@@ -656,7 +664,7 @@ class TestAgentEdgeCases:
             code_execution_mode="docker",
             max_iter=30
         )
-        
+
         # Data Analysis Agent
         data_agent = Agent(
             name="Data Analyst",
@@ -667,15 +675,303 @@ class TestAgentEdgeCases:
             allow_code_execution=True,
             max_execution_time=3600
         )
-        
+
         # Assert
         assert "Research" in research_agent.name
         assert research_agent.verbose is True
         assert "web_search" in research_agent.tools
-        
+
         assert code_agent.allow_code_execution is True
         assert code_agent.code_execution_mode == "docker"
         assert "python_repl" in code_agent.tools
-        
+
         assert data_agent.max_execution_time == 3600
         assert "statistical_analysis" in data_agent.tools
+
+
+class TestAgentDateAwareness:
+    """Test cases for Agent date awareness settings (CrewAI 1.9+)."""
+
+    def test_inject_date_column_exists(self):
+        """Test that Agent model has inject_date column."""
+        # Act
+        columns = Agent.__table__.columns
+
+        # Assert
+        assert 'inject_date' in columns
+        assert "BOOLEAN" in str(columns['inject_date'].type)
+
+    def test_inject_date_default_is_true(self):
+        """Test that inject_date column has default=True."""
+        # Act
+        inject_date_column = Agent.__table__.columns['inject_date']
+
+        # Assert
+        assert inject_date_column.default is not None
+        assert inject_date_column.default.arg is True
+
+    def test_date_format_column_exists(self):
+        """Test that Agent model has date_format column."""
+        # Act
+        columns = Agent.__table__.columns
+
+        # Assert
+        assert 'date_format' in columns
+        assert "VARCHAR" in str(columns['date_format'].type) or "STRING" in str(columns['date_format'].type)
+
+    def test_date_format_column_is_nullable(self):
+        """Test that date_format column is nullable."""
+        # Act
+        date_format_column = Agent.__table__.columns['date_format']
+
+        # Assert
+        assert date_format_column.nullable is True
+
+    def test_agent_creation_with_inject_date_true(self):
+        """Test creating an Agent with inject_date=True."""
+        # Arrange & Act
+        agent = Agent(
+            name="Date Aware Agent",
+            role="Time Keeper",
+            goal="Demonstrate date awareness",
+            inject_date=True
+        )
+
+        # Assert
+        assert agent.inject_date is True
+
+    def test_agent_creation_with_inject_date_false(self):
+        """Test creating an Agent with inject_date=False."""
+        # Arrange & Act
+        agent = Agent(
+            name="Timeless Agent",
+            role="Static Assistant",
+            goal="Work without date context",
+            inject_date=False
+        )
+
+        # Assert
+        assert agent.inject_date is False
+
+    def test_agent_creation_with_custom_date_format(self):
+        """Test creating an Agent with custom date_format."""
+        # Arrange
+        custom_formats = [
+            "%B %d, %Y",           # e.g., "January 01, 2024"
+            "%Y-%m-%d",            # e.g., "2024-01-01"
+            "%d/%m/%Y",            # e.g., "01/01/2024"
+            "%A, %B %d, %Y",       # e.g., "Monday, January 01, 2024"
+            "%Y%m%d",              # e.g., "20240101"
+            "%m/%d/%Y %H:%M:%S",   # e.g., "01/01/2024 12:00:00"
+        ]
+
+        for date_format in custom_formats:
+            # Act
+            agent = Agent(
+                name=f"Agent with format {date_format}",
+                role="Date Formatter",
+                goal="Use custom date format",
+                inject_date=True,
+                date_format=date_format
+            )
+
+            # Assert
+            assert agent.date_format == date_format
+            assert agent.inject_date is True
+
+    def test_agent_date_format_can_be_null(self):
+        """Test that date_format can be null."""
+        # Arrange & Act
+        agent = Agent(
+            name="Default Format Agent",
+            role="Standard Assistant",
+            goal="Use default date format",
+            inject_date=True,
+            date_format=None
+        )
+
+        # Assert
+        assert agent.date_format is None
+        assert agent.inject_date is True
+
+    def test_agent_date_format_not_provided(self):
+        """Test agent when date_format is not provided at all."""
+        # Arrange & Act
+        agent = Agent(
+            name="No Format Specified Agent",
+            role="Basic Assistant",
+            goal="Date format not specified"
+        )
+
+        # Assert
+        assert agent.date_format is None
+
+    def test_agent_inject_date_and_date_format_combination(self):
+        """Test various combinations of inject_date and date_format."""
+        # Test 1: inject_date=True with custom format
+        agent1 = Agent(
+            name="Agent 1",
+            role="Role 1",
+            goal="Goal 1",
+            inject_date=True,
+            date_format="%Y-%m-%d"
+        )
+        assert agent1.inject_date is True
+        assert agent1.date_format == "%Y-%m-%d"
+
+        # Test 2: inject_date=True with no format (uses default)
+        agent2 = Agent(
+            name="Agent 2",
+            role="Role 2",
+            goal="Goal 2",
+            inject_date=True,
+            date_format=None
+        )
+        assert agent2.inject_date is True
+        assert agent2.date_format is None
+
+        # Test 3: inject_date=False with format (format ignored in practice)
+        agent3 = Agent(
+            name="Agent 3",
+            role="Role 3",
+            goal="Goal 3",
+            inject_date=False,
+            date_format="%B %d, %Y"
+        )
+        assert agent3.inject_date is False
+        assert agent3.date_format == "%B %d, %Y"  # Still stored even if not used
+
+        # Test 4: inject_date=False with no format
+        agent4 = Agent(
+            name="Agent 4",
+            role="Role 4",
+            goal="Goal 4",
+            inject_date=False,
+            date_format=None
+        )
+        assert agent4.inject_date is False
+        assert agent4.date_format is None
+
+    def test_agent_date_awareness_with_all_fields(self):
+        """Test Agent with date awareness fields alongside all other fields."""
+        # Arrange
+        agent = Agent(
+            name="Complete Agent",
+            role="Full Featured Assistant",
+            goal="Demonstrate all agent capabilities including date awareness",
+            backstory="A comprehensive agent with all features enabled",
+            group_id="test-group",
+            created_by_email="test@example.com",
+            llm="gpt-4",
+            tools=["web_search", "calculator"],
+            max_iter=30,
+            verbose=True,
+            allow_delegation=True,
+            memory=True,
+            allow_code_execution=True,
+            code_execution_mode="safe",
+            inject_date=True,
+            date_format="%B %d, %Y"
+        )
+
+        # Assert date awareness fields
+        assert agent.inject_date is True
+        assert agent.date_format == "%B %d, %Y"
+
+        # Assert other fields still work correctly
+        assert agent.name == "Complete Agent"
+        assert agent.verbose is True
+        assert agent.allow_delegation is True
+        assert "web_search" in agent.tools
+
+    def test_agent_date_format_empty_string(self):
+        """Test Agent with empty string date_format."""
+        # Arrange & Act
+        agent = Agent(
+            name="Empty Format Agent",
+            role="Test Assistant",
+            goal="Test empty date format",
+            inject_date=True,
+            date_format=""
+        )
+
+        # Assert
+        assert agent.date_format == ""
+
+    def test_agent_date_format_special_characters(self):
+        """Test Agent with date_format containing special characters."""
+        # Arrange
+        special_formats = [
+            "%Y-%m-%dT%H:%M:%S%z",     # ISO 8601 with timezone
+            "%d.%m.%Y",                 # European style with dots
+            "%Y/%m/%d",                 # Japanese style
+            "Today is %A, %B %d",       # With text
+        ]
+
+        for date_format in special_formats:
+            # Act
+            agent = Agent(
+                name="Special Format Agent",
+                role="Format Tester",
+                goal="Test special format characters",
+                inject_date=True,
+                date_format=date_format
+            )
+
+            # Assert
+            assert agent.date_format == date_format
+
+    def test_agent_date_awareness_use_case_scheduling(self):
+        """Test Agent configured for scheduling use case with date awareness."""
+        # Arrange & Act
+        scheduling_agent = Agent(
+            name="Scheduling Agent",
+            role="Meeting Coordinator",
+            goal="Schedule meetings and manage calendars with accurate date awareness",
+            backstory="An efficient assistant that helps coordinate schedules",
+            tools=["calendar_access", "email_sender"],
+            inject_date=True,
+            date_format="%A, %B %d, %Y",  # Full weekday and date for clarity
+            max_iter=20,
+            verbose=True
+        )
+
+        # Assert
+        assert scheduling_agent.inject_date is True
+        assert scheduling_agent.date_format == "%A, %B %d, %Y"
+        assert "calendar_access" in scheduling_agent.tools
+
+    def test_agent_date_awareness_use_case_reporting(self):
+        """Test Agent configured for reporting use case with date awareness."""
+        # Arrange & Act
+        reporting_agent = Agent(
+            name="Report Generator",
+            role="Business Analyst",
+            goal="Generate reports with accurate timestamps",
+            backstory="Analyst that produces time-sensitive business reports",
+            tools=["data_analysis", "report_generator"],
+            inject_date=True,
+            date_format="%Y-%m-%d",  # ISO format for reports
+            verbose=False
+        )
+
+        # Assert
+        assert reporting_agent.inject_date is True
+        assert reporting_agent.date_format == "%Y-%m-%d"
+
+    def test_agent_date_awareness_disabled_for_static_tasks(self):
+        """Test Agent with date awareness disabled for static/timeless tasks."""
+        # Arrange & Act
+        static_agent = Agent(
+            name="Documentation Agent",
+            role="Technical Writer",
+            goal="Write timeless documentation that does not require date context",
+            backstory="Technical writer focused on evergreen content",
+            tools=["text_editor"],
+            inject_date=False,
+            date_format=None
+        )
+
+        # Assert
+        assert static_agent.inject_date is False
+        assert static_agent.date_format is None

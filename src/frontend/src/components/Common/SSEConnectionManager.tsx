@@ -1,15 +1,14 @@
 /**
  * SSE Connection Manager Component
  *
- * Manages Server-Sent Events connections for active jobs.
- * Automatically connects to SSE streams for running jobs and
- * feeds updates to the runStatus store.
+ * Manages a single global Server-Sent Events connection that receives
+ * updates for all jobs. Feeds updates to the runStatus store.
  */
 
 import { useEffect, memo, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
 import { useRunStatusStore } from '../../store/runStatus';
-import { useExecutionSSE, useGlobalExecutionSSE } from '../../hooks/global/useSSE';
+import { useGlobalExecutionSSE } from '../../hooks/global/useSSE';
 
 /**
  * Generate user-friendly error message based on error type
@@ -34,111 +33,6 @@ const getErrorMessage = (error: any, jobId: string): string => {
 
   // Generic fallback
   return `Connection issue with job ${jobId}. Attempting to reconnect...`;
-};
-
-interface SSEConnectionForJob {
-  jobId: string;
-}
-
-/**
- * Component that establishes SSE connection for a single job
- */
-const SSEConnectionForJob: React.FC<SSEConnectionForJob> = ({ jobId }) => {
-  // CRITICAL: Use selectors to prevent re-renders on every store update
-  const handleSSEUpdate = useRunStatusStore(state => state.handleSSEUpdate);
-  const registerSSEConnection = useRunStatusStore(state => state.registerSSEConnection);
-  const unregisterSSEConnection = useRunStatusStore(state => state.unregisterSSEConnection);
-  const setSSEConnected = useRunStatusStore(state => state.setSSEConnected);
-  const setSSEError = useRunStatusStore(state => state.setSSEError);
-  const addTrace = useRunStatusStore(state => state.addTrace);
-
-  // CRITICAL: Wrap callbacks in useCallback to provide stable references
-  // This prevents the useSSE hook from recreating its connect function,
-  // which would trigger cleanup and cause disconnect/reconnect cycles
-  const onMessage = useCallback((eventData: any) => {
-    // Handle different event types
-    if (eventData.event === 'execution_update') {
-      // Feed execution status updates to the store
-      handleSSEUpdate(eventData.data);
-    } else if (eventData.event === 'trace') {
-      // Store trace in Zustand store for real-time updates
-      if (eventData.data) {
-        console.log('[SSE] Received trace event for job', jobId, '- adding to store');
-        addTrace(jobId, eventData.data);
-        console.log('[SSE] Trace added to store');
-      }
-      // Also dispatch window event for backwards compatibility
-      window.dispatchEvent(new CustomEvent('traceUpdate', {
-        detail: { jobId, trace: eventData.data }
-      }));
-    } else {
-      // Handle other events (e.g., data without specific event type)
-      handleSSEUpdate(eventData.data);
-    }
-  }, [jobId, handleSSEUpdate, addTrace]);
-
-  const onConnect = useCallback(() => {
-    console.log(`[SSE] Connected to job ${jobId}`);
-    registerSSEConnection(jobId);
-    setSSEConnected(true);
-    // Clear any previous errors on successful connection
-    setSSEError(null);
-  }, [jobId, registerSSEConnection, setSSEConnected, setSSEError]);
-
-  const onDisconnect = useCallback(() => {
-    console.log(`[SSE] Disconnected from job ${jobId}`);
-    unregisterSSEConnection(jobId);
-    // Check if there are any other active SSE connections
-    const { activeSSEConnections } = useRunStatusStore.getState();
-    if (activeSSEConnections.size === 0) {
-      setSSEConnected(false);
-    }
-  }, [jobId, unregisterSSEConnection, setSSEConnected]);
-
-  const onError = useCallback((error: any) => {
-    console.error(`[SSE] Error for job ${jobId}:`, error);
-
-    // Generate user-friendly error message
-    const errorMessage = getErrorMessage(error, jobId);
-
-    // Update store with error
-    setSSEError(errorMessage);
-
-    // Show toast notification only for fatal errors
-    if (error.isFatal) {
-      toast.error(errorMessage, {
-        duration: 8000,
-        position: 'bottom-right',
-      });
-    } else if (error.reconnectAttempt === 1) {
-      // Show info toast on first reconnection attempt
-      toast.loading(errorMessage, {
-        id: `sse-reconnect-${jobId}`, // Use ID to prevent duplicate toasts
-        duration: 3000,
-        position: 'bottom-right',
-      });
-    }
-  }, [jobId, setSSEError]);
-
-  const { connectionState } = useExecutionSSE(
-    jobId,
-    onMessage,
-    {
-      autoReconnect: true,
-      maxReconnectAttempts: 5,
-      reconnectDelay: 1000,
-      onConnect,
-      onDisconnect,
-      onError,
-    }
-  );
-
-  useEffect(() => {
-    console.log(`[SSE] Connection state for job ${jobId}: ${connectionState}`);
-  }, [connectionState, jobId]);
-
-  // This component doesn't render anything
-  return null;
 };
 
 /**
@@ -178,21 +72,19 @@ const GlobalSSEConnection: React.FC = () => {
       // This ensures traces are visible even for completed jobs that aren't in activeRuns
       const jobId = eventData.data.job_id;
       if (jobId) {
-        // Security filter by group_id if available
-        if (eventData.data.group_id && eventData.data.group_id !== selectedGroupId) {
-          console.log(
-            `[GlobalSSE] Ignoring trace for different group: ${eventData.data.group_id} (selected: ${selectedGroupId})`
-          );
-          return;
-        }
-
-        console.log('[GlobalSSE] Received trace event for job', jobId, '- adding to store');
-        addTrace(jobId, eventData.data);
-
-        // Also dispatch window event for backwards compatibility with useExecutionMonitoring
+        // Always dispatch traceUpdate window event — consumers (useExecutionMonitoring,
+        // flowExecutionStore) have their own job-specific guards for filtering.
+        // This must happen before the group_id check so visual indicators work.
         window.dispatchEvent(new CustomEvent('traceUpdate', {
           detail: { jobId, trace: eventData.data }
         }));
+
+        // Security filter by group_id for the store (ShowTraceTimeline data)
+        if (eventData.data.group_id && eventData.data.group_id !== selectedGroupId) {
+          return;
+        }
+
+        addTrace(jobId, eventData.data);
       }
     } else if (eventData.event === 'hitl_request' && eventData.data) {
       // Dispatch HITL request event
@@ -209,6 +101,7 @@ const GlobalSSEConnection: React.FC = () => {
     console.log('[GlobalSSE] Connected to global execution stream');
     setSSEConnected(true);
     setSSEError(null);
+    toast.dismiss('sse-reconnect-global');
   }, [setSSEConnected, setSSEError]);
 
   const onDisconnect = useCallback(() => {
@@ -216,25 +109,19 @@ const GlobalSSEConnection: React.FC = () => {
   }, []);
 
   const onError = useCallback((error: any) => {
-    console.error('[GlobalSSE] Error:', error);
+    if (error.isFatal) {
+      console.error('[GlobalSSE] Fatal error:', error);
+    } else {
+      console.debug('[GlobalSSE] Connection interrupted, will reconnect');
+    }
 
-    // Generate user-friendly error message
     const errorMessage = getErrorMessage(error, 'global stream');
-
-    // Update store with error
     setSSEError(errorMessage);
 
-    // Show toast notification only for fatal errors
+    // Only show toast for fatal errors
     if (error.isFatal) {
       toast.error(errorMessage, {
         duration: 8000,
-        position: 'bottom-right',
-      });
-    } else if (error.reconnectAttempt === 1) {
-      // Show info toast on first reconnection attempt
-      toast.loading(errorMessage, {
-        id: 'sse-reconnect-global',
-        duration: 3000,
         position: 'bottom-right',
       });
     }
@@ -244,8 +131,8 @@ const GlobalSSEConnection: React.FC = () => {
     onMessage,
     {
       autoReconnect: true,
-      maxReconnectAttempts: 5,
-      reconnectDelay: 2000, // Slightly longer delay for global stream
+      maxReconnectAttempts: 10,
+      reconnectDelay: 3000,
       onConnect,
       onDisconnect,
       onError,
@@ -263,16 +150,12 @@ const GlobalSSEConnection: React.FC = () => {
 /**
  * Main SSE Connection Manager
  *
- * Monitors active jobs and establishes SSE connections for each.
- * Also maintains a global SSE connection for cross-browser synchronization.
+ * Maintains a single global SSE connection that receives updates for all jobs.
  *
  * CRITICAL: Wrapped in React.memo to prevent re-renders when parent App component
  * re-renders due to user/group state changes. This keeps SSE connections stable.
  */
 const SSEConnectionManagerComponent: React.FC = () => {
-  // CRITICAL: Use selectors to prevent unnecessary re-renders
-  // Subscribing to the entire activeRuns object causes re-renders on every status update
-  const activeJobIds = useRunStatusStore(state => Object.keys(state.activeRuns));
   const sseEnabled = useRunStatusStore(state => state.sseEnabled);
 
   // Don't establish connections if SSE is disabled
@@ -282,13 +165,8 @@ const SSEConnectionManagerComponent: React.FC = () => {
 
   return (
     <>
-      {/* Global SSE connection for cross-browser synchronization */}
+      {/* Global SSE connection for all job updates */}
       <GlobalSSEConnection />
-
-      {/* Per-job SSE connections for detailed updates */}
-      {activeJobIds.map((jobId) => (
-        <SSEConnectionForJob key={jobId} jobId={jobId} />
-      ))}
     </>
   );
 };

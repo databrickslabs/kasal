@@ -21,7 +21,13 @@ from datetime import datetime, timezone, timedelta
 from typing import List
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from fastapi import HTTPException
+from src.core.exceptions import (
+    ConflictError,
+    ForbiddenError,
+    GoneError,
+    KasalError,
+    NotFoundError,
+)
 
 from src.api.hitl_router import (
     router,
@@ -355,7 +361,7 @@ class TestGetPendingApprovals:
             "Database connection failed"
         )
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await get_pending_approvals(
                 service=mock_hitl_service,
                 group_context=mock_group_context,
@@ -429,7 +435,7 @@ class TestGetApproval:
         mock_hitl_service.approval_repo = AsyncMock()
         mock_hitl_service.approval_repo.get_by_id = AsyncMock(return_value=None)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await get_approval(
                 approval_id=999,
                 service=mock_hitl_service,
@@ -451,7 +457,7 @@ class TestGetApproval:
             side_effect=HITLServiceError("Database error")
         )
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await get_approval(
                 approval_id=1,
                 service=mock_hitl_service,
@@ -581,7 +587,7 @@ class TestApproveGate:
         )
         request = HITLApproveRequest(comment=None)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await approve_gate(
                 approval_id=999,
                 request=request,
@@ -604,7 +610,7 @@ class TestApproveGate:
         )
         request = HITLApproveRequest(comment=None)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ConflictError) as exc_info:
             await approve_gate(
                 approval_id=1,
                 request=request,
@@ -627,7 +633,7 @@ class TestApproveGate:
         )
         request = HITLApproveRequest(comment=None)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(GoneError) as exc_info:
             await approve_gate(
                 approval_id=1,
                 request=request,
@@ -650,7 +656,7 @@ class TestApproveGate:
         )
         request = HITLApproveRequest(comment=None)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ForbiddenError) as exc_info:
             await approve_gate(
                 approval_id=1,
                 request=request,
@@ -673,7 +679,7 @@ class TestApproveGate:
         )
         request = HITLApproveRequest(comment=None)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await approve_gate(
                 approval_id=1,
                 request=request,
@@ -800,7 +806,7 @@ class TestRejectGate:
         )
         request = HITLRejectRequest(reason="Test reason")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await reject_gate(
                 approval_id=999,
                 request=request,
@@ -823,7 +829,7 @@ class TestRejectGate:
         )
         request = HITLRejectRequest(reason="Test reason")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ConflictError) as exc_info:
             await reject_gate(
                 approval_id=1,
                 request=request,
@@ -846,7 +852,7 @@ class TestRejectGate:
         )
         request = HITLRejectRequest(reason="Test reason")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(GoneError) as exc_info:
             await reject_gate(
                 approval_id=1,
                 request=request,
@@ -869,7 +875,7 @@ class TestRejectGate:
         )
         request = HITLRejectRequest(reason="Test reason")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ForbiddenError) as exc_info:
             await reject_gate(
                 approval_id=1,
                 request=request,
@@ -892,7 +898,7 @@ class TestRejectGate:
         )
         request = HITLRejectRequest(reason="Test reason")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await reject_gate(
                 approval_id=1,
                 request=request,
@@ -974,7 +980,7 @@ class TestGetExecutionHITLStatus:
             "Failed to get HITL status"
         )
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await get_execution_hitl_status(
                 execution_id="exec-123",
                 service=mock_hitl_service,
@@ -1045,7 +1051,7 @@ class TestListWebhooks:
             "Database error"
         )
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await list_webhooks(
                 service=mock_webhook_service,
                 group_context=mock_group_context,
@@ -1127,7 +1133,7 @@ class TestCreateWebhook:
             url="https://example.com/webhook",
         )
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await create_webhook(
                 webhook_data=webhook_data,
                 service=mock_webhook_service,
@@ -1174,7 +1180,7 @@ class TestGetWebhook:
             "Webhook 999 not found"
         )
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await get_webhook(
                 webhook_id=999,
                 service=mock_webhook_service,
@@ -1195,7 +1201,7 @@ class TestGetWebhook:
             "Database error"
         )
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await get_webhook(
                 webhook_id=1,
                 service=mock_webhook_service,
@@ -1271,7 +1277,7 @@ class TestUpdateWebhook:
         )
         webhook_data = HITLWebhookUpdate(name="Updated")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await update_webhook(
                 webhook_id=999,
                 webhook_data=webhook_data,
@@ -1293,7 +1299,7 @@ class TestUpdateWebhook:
         )
         webhook_data = HITLWebhookUpdate(name="Updated")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await update_webhook(
                 webhook_id=1,
                 webhook_data=webhook_data,
@@ -1339,7 +1345,7 @@ class TestDeleteWebhook:
             "Webhook 999 not found"
         )
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await delete_webhook(
                 webhook_id=999,
                 service=mock_webhook_service,
@@ -1359,7 +1365,7 @@ class TestDeleteWebhook:
             "Database error"
         )
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await delete_webhook(
                 webhook_id=1,
                 service=mock_webhook_service,

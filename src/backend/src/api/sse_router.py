@@ -7,13 +7,14 @@ Provides SSE endpoints for:
 - HITL notifications
 """
 
-from fastapi import APIRouter, Header, Query
-from fastapi.responses import StreamingResponse
 from typing import Optional
 
+from fastapi import APIRouter, Header, Query
+from fastapi.responses import StreamingResponse
+
+from src.core.dependencies import GroupContextDep
 from src.core.logger import LoggerManager
 from src.core.sse_manager import event_stream_generator, sse_manager
-from src.core.dependencies import GroupContextDep
 
 logger = LoggerManager.get_instance().system
 
@@ -24,8 +25,10 @@ router = APIRouter(prefix="/sse", tags=["Server-Sent Events"])
 async def stream_execution_updates(
     job_id: str,
     group_context: GroupContextDep,
-    timeout: int = Query(300, ge=30, le=3600, description="Stream timeout in seconds"),
-    heartbeat: int = Query(30, ge=10, le=120, description="Heartbeat interval in seconds")
+    timeout: int = Query(3600, ge=30, le=7200, description="Stream timeout in seconds"),
+    heartbeat: int = Query(
+        15, ge=5, le=120, description="Heartbeat interval in seconds"
+    ),
 ):
     """
     Stream real-time updates for a specific execution via Server-Sent Events.
@@ -82,15 +85,15 @@ async def stream_execution_updates(
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",  # Disable buffering in nginx
-        }
+        },
     )
 
 
 @router.get("/executions/stream-all")
 async def stream_all_executions(
     group_context: GroupContextDep,
-    timeout: int = Query(300, ge=30, le=3600),
-    heartbeat: int = Query(30, ge=10, le=120)
+    timeout: int = Query(3600, ge=30, le=7200),
+    heartbeat: int = Query(15, ge=5, le=120),
 ):
     """
     Stream updates for all executions in the user's groups.
@@ -120,13 +123,15 @@ async def stream_all_executions(
     )
 
     return StreamingResponse(
-        event_stream_generator(stream_id, timeout=timeout, heartbeat_interval=heartbeat),
+        event_stream_generator(
+            stream_id, timeout=timeout, heartbeat_interval=heartbeat
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
-        }
+        },
     )
 
 
@@ -155,5 +160,5 @@ async def sse_health():
     return {
         "status": "healthy",
         "active_connections": stats["total_connections"],
-        "active_streams": len(stats["active_jobs"])
+        "active_streams": len(stats["active_jobs"]),
     }

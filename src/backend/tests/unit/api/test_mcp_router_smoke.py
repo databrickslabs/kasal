@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock
-from fastapi import HTTPException
+
+from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 
 from src.api.mcp_router import (
     get_mcp_servers,
@@ -48,8 +49,8 @@ async def test_mcp_list_endpoints():
 @pytest.mark.asyncio
 async def test_get_mcp_server_404():
     svc = AsyncMock()
-    with pytest.raises(HTTPException) as ei:
-        svc.get_server_by_id = AsyncMock(side_effect=HTTPException(status_code=404, detail="nf"))
+    with pytest.raises(NotFoundError) as ei:
+        svc.get_server_by_id = AsyncMock(side_effect=NotFoundError("nf"))
         await get_mcp_server(123, service=svc, group_context=Ctx())
     assert ei.value.status_code == 404
 
@@ -58,7 +59,7 @@ async def test_get_mcp_server_404():
 async def test_create_update_delete_permissions_and_success():
     svc = AsyncMock()
     # Create forbidden for non-admin
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(ForbiddenError) as ei:
         await create_mcp_server(MCPServerCreate(name="n", server_url="u", api_key="k"), service=svc, group_context=Ctx(user_role="user"))
     assert ei.value.status_code == 403
 
@@ -69,7 +70,7 @@ async def test_create_update_delete_permissions_and_success():
     assert out.id == 1
 
     # Update forbidden for non-admin
-    with pytest.raises(HTTPException) as ei2:
+    with pytest.raises(ForbiddenError) as ei2:
         await update_mcp_server(1, MCPServerUpdate(name="x"), service=svc, group_context=Ctx(user_role="user"))
     assert ei2.value.status_code == 403
 
@@ -79,7 +80,7 @@ async def test_create_update_delete_permissions_and_success():
     assert out2["name"] == "x"
 
     # Delete forbidden for non-admin
-    with pytest.raises(HTTPException) as ei3:
+    with pytest.raises(ForbiddenError) as ei3:
         await delete_mcp_server(1, service=svc, group_context=Ctx(user_role="user"))
     assert ei3.value.status_code == 403
 
@@ -93,9 +94,9 @@ async def test_create_update_delete_permissions_and_success():
 async def test_toggle_and_global_toggle_permissions_and_success():
     svc = AsyncMock()
     # Non-admin forbidden
-    with pytest.raises(HTTPException):
+    with pytest.raises(ForbiddenError):
         await toggle_mcp_server_enabled(1, service=svc, group_context=Ctx(user_role="user"))
-    with pytest.raises(HTTPException):
+    with pytest.raises(ForbiddenError):
         await toggle_mcp_server_global_enabled(1, service=svc, group_context=Ctx(user_role="user"))
 
     # Admin success
@@ -113,12 +114,12 @@ async def test_toggle_and_global_toggle_permissions_and_success():
 async def test_enable_for_workspace_admin_and_requires_group():
     svc = AsyncMock()
     # Requires admin
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(ForbiddenError) as ei:
         await enable_mcp_server_for_workspace(1, service=svc, group_context=Ctx(user_role="user", primary_group_id="g1"))
     assert ei.value.status_code == 403
 
     # Requires group id
-    with pytest.raises(HTTPException) as ei2:
+    with pytest.raises(BadRequestError) as ei2:
         await enable_mcp_server_for_workspace(1, service=svc, group_context=Ctx(user_role="admin", primary_group_id=None))
     assert ei2.value.status_code == 400
 
@@ -133,7 +134,7 @@ async def test_test_connection_admin_success_and_error_path():
     svc = AsyncMock()
     # Non-admin forbidden
     m = importlib.import_module('src.api.mcp_router')
-    with pytest.raises(HTTPException):
+    with pytest.raises(ForbiddenError):
         await m.test_mcp_connection(MCPTestConnectionRequest(server_url="u", api_key="k"), service=svc, group_context=Ctx(user_role="user"))
 
     # Admin success
@@ -158,7 +159,7 @@ async def test_settings_get_and_update_permissions():
     assert out.global_enabled is True
 
     # Update forbidden for non-admin
-    with pytest.raises(HTTPException):
+    with pytest.raises(ForbiddenError):
         await update_mcp_settings(MCPSettingsUpdate(global_enabled=False), service=svc, group_context=Ctx(user_role="user"))
 
     # Update success for admin

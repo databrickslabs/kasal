@@ -5,6 +5,7 @@ This service handles all permission-related operations for Lakebase instances,
 including schema permissions, default privileges, and error handling.
 """
 import logging
+import re
 from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -13,6 +14,27 @@ from sqlalchemy.engine import Connection
 from src.core.base_service import BaseService
 
 logger = logging.getLogger(__name__)
+
+# --- SQL injection prevention helpers ---
+_SAFE_IDENTIFIER_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+
+def _quote_pg_role(email: str) -> str:
+    """Safely quote a PostgreSQL role name derived from an email address.
+
+    Validates the email against a strict pattern and escapes embedded
+    double-quotes so the result is safe for use as a quoted identifier
+    in GRANT / ALTER DEFAULT PRIVILEGES statements.
+
+    Raises:
+        ValueError: If the email does not match the expected format.
+    """
+    if not email or not re.match(
+        r'^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$', email
+    ):
+        raise ValueError(f"Invalid email for PostgreSQL role: {email!r}")
+    # Escape any embedded double-quotes and wrap in double-quotes
+    return '"' + email.replace('"', '""') + '"'
 
 
 class LakebasePermissionService(BaseService):
@@ -49,16 +71,17 @@ class LakebasePermissionService(BaseService):
             are logged but don't fail the migration process.
         """
         try:
+            safe_role = _quote_pg_role(user_email)
             async with engine.begin() as conn:
                 # Grant all privileges on kasal schema
                 await conn.execute(
-                    text(f'GRANT ALL ON SCHEMA kasal TO "{user_email}"')
+                    text(f'GRANT ALL ON SCHEMA kasal TO {safe_role}')
                 )
                 # Grant all privileges on public schema
                 await conn.execute(
-                    text(f'GRANT ALL ON SCHEMA public TO "{user_email}"')
+                    text(f'GRANT ALL ON SCHEMA public TO {safe_role}')
                 )
-                logger.info(f"✅ Granted schema permissions to {user_email}")
+                logger.info(f"Granted schema permissions to {user_email}")
         except Exception as grant_error:
             # Log but don't fail - user might already have permissions
             # or permissions might be set differently in the environment
@@ -87,15 +110,16 @@ class LakebasePermissionService(BaseService):
             are logged but don't fail the migration process.
         """
         try:
+            safe_role = _quote_pg_role(user_email)
             # Grant all privileges on kasal schema
             connection.execute(
-                text(f'GRANT ALL ON SCHEMA kasal TO "{user_email}"')
+                text(f'GRANT ALL ON SCHEMA kasal TO {safe_role}')
             )
             # Grant all privileges on public schema
             connection.execute(
-                text(f'GRANT ALL ON SCHEMA public TO "{user_email}"')
+                text(f'GRANT ALL ON SCHEMA public TO {safe_role}')
             )
-            logger.info(f"✅ Granted schema permissions to {user_email}")
+            logger.info(f"Granted schema permissions to {user_email}")
         except Exception as grant_error:
             # Log but don't fail - user might already have permissions
             # or permissions might be set differently in the environment
@@ -124,22 +148,23 @@ class LakebasePermissionService(BaseService):
             are logged but don't fail the migration process.
         """
         try:
+            safe_role = _quote_pg_role(user_email)
             async with engine.begin() as conn:
                 # Set default privileges for tables
                 await conn.execute(
                     text(
                         f'ALTER DEFAULT PRIVILEGES IN SCHEMA kasal '
-                        f'GRANT ALL ON TABLES TO "{user_email}"'
+                        f'GRANT ALL ON TABLES TO {safe_role}'
                     )
                 )
                 # Set default privileges for sequences
                 await conn.execute(
                     text(
                         f'ALTER DEFAULT PRIVILEGES IN SCHEMA kasal '
-                        f'GRANT ALL ON SEQUENCES TO "{user_email}"'
+                        f'GRANT ALL ON SEQUENCES TO {safe_role}'
                     )
                 )
-                logger.info(f"✅ Set default privileges for {user_email}")
+                logger.info(f"Set default privileges for {user_email}")
         except Exception as privilege_error:
             # Log but don't fail - default privileges might be set differently
             # or the user might not have permission to alter default privileges
@@ -168,21 +193,22 @@ class LakebasePermissionService(BaseService):
             are logged but don't fail the migration process.
         """
         try:
+            safe_role = _quote_pg_role(user_email)
             # Set default privileges for tables
             connection.execute(
                 text(
                     f'ALTER DEFAULT PRIVILEGES IN SCHEMA kasal '
-                    f'GRANT ALL ON TABLES TO "{user_email}"'
+                    f'GRANT ALL ON TABLES TO {safe_role}'
                 )
             )
             # Set default privileges for sequences
             connection.execute(
                 text(
                     f'ALTER DEFAULT PRIVILEGES IN SCHEMA kasal '
-                    f'GRANT ALL ON SEQUENCES TO "{user_email}"'
+                    f'GRANT ALL ON SEQUENCES TO {safe_role}'
                 )
             )
-            logger.info(f"✅ Set default privileges for {user_email}")
+            logger.info(f"Set default privileges for {user_email}")
         except Exception as privilege_error:
             # Log but don't fail - default privileges might be set differently
             # or the user might not have permission to alter default privileges

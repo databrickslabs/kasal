@@ -29,24 +29,8 @@ class User(Base):
     updated_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
     last_login = Column(DateTime(timezone=True), nullable=True)
 
-    # Relationships
-    refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
-    # Complex auth relationships removed - using simplified group-based roles
+    # Complex auth relationships removed - using Databricks Apps proxy authentication
     # UserProfile removed - display_name moved to User model
-
-
-class RefreshToken(Base):
-    __tablename__ = "refresh_tokens"
-
-    id = Column(String, primary_key=True, default=generate_uuid)
-    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"))
-    token = Column(String, nullable=False, unique=True)  # Hashed token
-    expires_at = Column(DateTime(timezone=True), nullable=False)
-    is_revoked = Column(Boolean, default=False)
-    created_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
-    
-    # Relationships
-    user = relationship("User", back_populates="refresh_tokens")
 
 
 # ExternalIdentity model removed - simplified auth system

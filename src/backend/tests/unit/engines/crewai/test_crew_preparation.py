@@ -485,13 +485,14 @@ class TestCrewPreparation:
         # Setup agents and tasks
         crew_preparation.agents = {"agent1": MagicMock()}
         crew_preparation.tasks = [MagicMock()]
-        
+
         mock_crew = MagicMock()
-        
-        with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew):
-            
+
+        with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew), \
+             patch('src.engines.crewai.services.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+
             result = await crew_preparation._create_crew()
-            
+
             assert result is True
             assert crew_preparation.crew == mock_crew
     
@@ -500,14 +501,15 @@ class TestCrewPreparation:
         """Test crew creation in Databricks environment."""
         crew_preparation.agents = {"agent1": MagicMock()}
         crew_preparation.tasks = [MagicMock()]
-        
+
         mock_crew = MagicMock()
         mock_llm = MagicMock()
-        
+
         with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.core.llm_manager.LLMManager.get_llm', return_value=mock_llm), \
-             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None):
-            
+             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
+             patch('src.engines.crewai.services.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+
             result = await crew_preparation._create_crew()
             assert result is True
     
@@ -531,7 +533,8 @@ class TestCrewPreparation:
         with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
              patch('src.core.llm_manager.LLMManager.get_llm') as mock_get_llm, \
              patch('src.core.llm_manager.LLMManager.configure_crewai_llm') as mock_configure_llm, \
-             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None):
+             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
+             patch('src.engines.crewai.services.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             def configure_llm_side_effect(model, group_id):
                 if model == "gpt-3.5-turbo":
@@ -558,13 +561,14 @@ class TestCrewPreparation:
         crew_preparation.agents = {"agent1": MagicMock()}
         crew_preparation.tasks = [MagicMock()]
         crew_preparation.config["max_rpm"] = 15
-        
+
         mock_crew = MagicMock()
-        
-        with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class:
-            
+
+        with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
+             patch('src.engines.crewai.services.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+
             result = await crew_preparation._create_crew()
-            
+
             assert result is True
             call_kwargs = mock_crew_class.call_args[1]
             assert call_kwargs['max_rpm'] == 15
@@ -574,10 +578,11 @@ class TestCrewPreparation:
         """Test crew creation handles exceptions."""
         crew_preparation.agents = {"agent1": MagicMock()}
         crew_preparation.tasks = [MagicMock()]
-        
+
         with patch('src.engines.crewai.crew_preparation.Crew', side_effect=Exception("Test error")), \
-             patch('src.engines.crewai.crew_preparation.handle_crew_error') as mock_handle_error:
-            
+             patch('src.engines.crewai.crew_preparation.handle_crew_error') as mock_handle_error, \
+             patch('src.engines.crewai.services.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+
             result = await crew_preparation._create_crew()
             assert result is False
             mock_handle_error.assert_called_once()
@@ -588,17 +593,17 @@ class TestCrewPreparation:
         crew_preparation.agents = {"agent1": MagicMock()}
         crew_preparation.tasks = [MagicMock()]
         crew_preparation.config["model"] = "gpt-4"
-        
+
         mock_crew = MagicMock()
-        
+
         with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.core.llm_manager.LLMManager.get_llm', side_effect=ImportError("Module not found")), \
-             patch('src.engines.crewai.crew_preparation.logger') as mock_logger:
-            
+             patch('src.engines.crewai.crew_preparation.logger') as mock_logger, \
+             patch('src.engines.crewai.services.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+
             result = await crew_preparation._create_crew()
 
             assert result is True
-            # Logger assertions removed - implementation details moved to ManagerConfigBuilder service
     
     @pytest.mark.asyncio
     async def test_create_crew_llm_manager_exception(self, crew_preparation):
@@ -606,17 +611,17 @@ class TestCrewPreparation:
         crew_preparation.agents = {"agent1": MagicMock()}
         crew_preparation.tasks = [MagicMock()]
         crew_preparation.config["model"] = "gpt-4"
-        
+
         mock_crew = MagicMock()
-        
+
         with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.core.llm_manager.LLMManager.get_llm', side_effect=Exception("LLM error")), \
-             patch('src.engines.crewai.crew_preparation.logger') as mock_logger:
-            
+             patch('src.engines.crewai.crew_preparation.logger') as mock_logger, \
+             patch('src.engines.crewai.services.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+
             result = await crew_preparation._create_crew()
-            
+
             assert result is True
-            # Logger assertions removed - implementation details moved to ManagerConfigBuilder service
     
     @pytest.mark.asyncio
     async def test_create_crew_databricks_fallback_on_llm_error(self, crew_preparation):
@@ -631,12 +636,12 @@ class TestCrewPreparation:
         with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.core.llm_manager.LLMManager.get_llm', side_effect=[Exception("LLM error"), mock_fallback_llm]), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
-             patch('src.engines.crewai.crew_preparation.logger') as mock_logger:
-            
+             patch('src.engines.crewai.crew_preparation.logger') as mock_logger, \
+             patch('src.engines.crewai.services.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+
             result = await crew_preparation._create_crew()
 
             assert result is True
-            # Logger assertions removed - fallback handling moved to ManagerConfigBuilder service
     
     @pytest.mark.asyncio
     async def test_create_crew_no_model_databricks_default(self, crew_preparation):
@@ -651,13 +656,13 @@ class TestCrewPreparation:
         
         with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.core.llm_manager.LLMManager.get_llm', return_value=mock_default_llm), \
-             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None):
-            
+             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
+             patch('src.engines.crewai.services.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+
             result = await crew_preparation._create_crew()
-            
+
             assert result is True
-            # Just assert that the crew was created successfully - the logging is complex due to embedder logic
-    
+
     @pytest.mark.asyncio
     async def test_create_crew_no_model_standard_environment(self, crew_preparation):
         """Test crew creation uses CrewAI defaults when no model specified in standard environment."""
@@ -665,16 +670,16 @@ class TestCrewPreparation:
         crew_preparation.tasks = [MagicMock()]
         # Explicitly remove model from config
         crew_preparation.config.pop('model', None)
-        
+
         mock_crew = MagicMock()
-        
+
         with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew), \
-             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None):
-            
+             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
+             patch('src.engines.crewai.services.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+
             result = await crew_preparation._create_crew()
-            
+
             assert result is True
-            # Just assert that the crew was created successfully - the logging is complex due to embedder logic
     
     @pytest.mark.asyncio
     async def test_create_crew_with_embedder_config_in_agents(self, crew_preparation):
@@ -691,12 +696,12 @@ class TestCrewPreparation:
         
         with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value="test-key"), \
-             patch('src.engines.crewai.crew_preparation.logger') as mock_logger:
-            
+             patch('src.engines.crewai.crew_preparation.logger') as mock_logger, \
+             patch('src.engines.crewai.services.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+
             result = await crew_preparation._create_crew()
-            
+
             assert result is True
-            # Logger assertions removed - embedder config handling moved to EmbedderConfigBuilder service
     
     @pytest.mark.asyncio
     async def test_create_crew_openai_api_key_in_databricks(self, crew_preparation):
@@ -709,10 +714,11 @@ class TestCrewPreparation:
         with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value="test-openai-key"), \
              patch.dict('os.environ', {}, clear=True), \
-             patch('src.engines.crewai.crew_preparation.logger') as mock_logger:
-            
+             patch('src.engines.crewai.crew_preparation.logger') as mock_logger, \
+             patch('src.engines.crewai.services.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+
             result = await crew_preparation._create_crew()
-            
+
             assert result is True
             mock_logger.info.assert_any_call("OpenAI API key is configured, keeping it for CrewAI")
     
@@ -727,10 +733,11 @@ class TestCrewPreparation:
         with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
              patch.dict('os.environ', {}, clear=True), \
-             patch('src.engines.crewai.crew_preparation.logger') as mock_logger:
-            
+             patch('src.engines.crewai.crew_preparation.logger') as mock_logger, \
+             patch('src.engines.crewai.services.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+
             result = await crew_preparation._create_crew()
-            
+
             assert result is True
             mock_logger.info.assert_any_call("No OpenAI API key configured, set dummy key for CrewAI validation")
     
@@ -744,12 +751,12 @@ class TestCrewPreparation:
         
         with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', side_effect=Exception("API error")), \
-             patch('src.engines.crewai.crew_preparation.logger') as mock_logger:
-            
+             patch('src.engines.crewai.crew_preparation.logger') as mock_logger, \
+             patch('src.engines.crewai.services.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+
             result = await crew_preparation._create_crew()
-            
+
             assert result is True
-            # Logger assertions removed - OpenAI key handling is in _handle_openai_api_key helper
     
     @pytest.mark.asyncio
     async def test_execute_success(self, crew_preparation):
@@ -820,7 +827,8 @@ class TestCrewPreparation:
              patch('src.core.llm_manager.LLMManager.get_llm', side_effect=Exception("Model not found")) as mock_get_llm, \
              patch('src.engines.crewai.crew_preparation.logger') as mock_logger, \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
-             patch('src.repositories.databricks_config_repository.DatabricksConfigRepository') as mock_databricks_repo:
+             patch('src.repositories.databricks_config_repository.DatabricksConfigRepository') as mock_databricks_repo, \
+             patch('src.engines.crewai.services.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
             
             # Configure mock to return None for get_databricks_config
             mock_databricks_instance = MagicMock()
@@ -861,7 +869,8 @@ class TestCrewPreparation:
         mock_crew = MagicMock()
 
         with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
-             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None):
+             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
+             patch('src.engines.crewai.services.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
 
@@ -924,7 +933,8 @@ class TestCrewPreparation:
         with patch('src.engines.crewai.crew_preparation.Crew', side_effect=crew_side_effect) as mock_crew_class, \
              patch('src.engines.crewai.config.manager_config_builder.LLMManager.configure_crewai_llm',
                    return_value=mock_manager_llm), \
-             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None):
+             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
+             patch('src.engines.crewai.services.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
 
@@ -972,7 +982,8 @@ class TestCrewPreparation:
 
         with patch('src.engines.crewai.crew_preparation.Crew', side_effect=crew_side_effect) as mock_crew_class, \
              patch('src.engines.crewai.config.manager_config_builder.create_agent', side_effect=mock_create_agent_func), \
-             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None):
+             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
+             patch('src.engines.crewai.services.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
 

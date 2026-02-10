@@ -1,11 +1,16 @@
-from typing import List, Annotated
 import logging
+from typing import Annotated, List
 
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, Depends, status
 
 from src.core.dependencies import GroupContextDep, SessionDep
+from src.schemas.schema import (
+    SchemaCreate,
+    SchemaListResponse,
+    SchemaResponse,
+    SchemaUpdate,
+)
 from src.services.schema_service import SchemaService
-from src.schemas.schema import SchemaCreate, SchemaUpdate, SchemaResponse, SchemaListResponse
 
 # Create router instance
 router = APIRouter(
@@ -37,10 +42,10 @@ async def get_schema_service(session: SessionDep) -> SchemaService:
 # Type alias for cleaner function signatures
 SchemaServiceDep = Annotated[SchemaService, Depends(get_schema_service)]
 
+
 @router.get("", response_model=SchemaListResponse)
 async def get_all_schemas(
-    service: SchemaServiceDep,
-    group_context: GroupContextDep = None
+    service: SchemaServiceDep, group_context: GroupContextDep = None
 ) -> SchemaListResponse:
     """
     Get all schemas.
@@ -55,9 +60,7 @@ async def get_all_schemas(
 
 @router.get("/by-type/{schema_type}", response_model=SchemaListResponse)
 async def get_schemas_by_type(
-    schema_type: str,
-    service: SchemaServiceDep,
-    group_context: GroupContextDep = None
+    schema_type: str, service: SchemaServiceDep, group_context: GroupContextDep = None
 ) -> SchemaListResponse:
     """
     Get schemas by type.
@@ -72,9 +75,7 @@ async def get_schemas_by_type(
 
 @router.get("/{schema_name}", response_model=SchemaResponse)
 async def get_schema_by_name(
-    schema_name: str,
-    service: SchemaServiceDep,
-    group_context: GroupContextDep = None
+    schema_name: str, service: SchemaServiceDep, group_context: GroupContextDep = None
 ) -> SchemaResponse:
     """
     Get a schema by name.
@@ -82,20 +83,16 @@ async def get_schema_by_name(
     Uses dependency injection to get SchemaService with repository.
     """
     logger.info(f"Getting schema with name '{schema_name}'")
-    try:
-        schema = await service.get_schema_by_name(schema_name)
-        logger.info(f"Found schema with name '{schema_name}'")
-        return schema
-    except HTTPException as e:
-        logger.warning(f"Schema retrieval failed: {str(e)}")
-        raise
+    schema = await service.get_schema_by_name(schema_name)
+    logger.info(f"Found schema with name '{schema_name}'")
+    return schema
 
 
 @router.post("", response_model=SchemaResponse, status_code=status.HTTP_201_CREATED)
 async def create_schema(
     schema_data: SchemaCreate,
     service: SchemaServiceDep,
-    group_context: GroupContextDep = None
+    group_context: GroupContextDep = None,
 ) -> SchemaResponse:
     """
     Create a new schema.
@@ -103,13 +100,9 @@ async def create_schema(
     Uses dependency injection to get SchemaService with repository.
     """
     logger.info(f"Creating schema with name '{schema_data.name}'")
-    try:
-        schema = await service.create_schema(schema_data)
-        logger.info(f"Created schema with name '{schema.name}'")
-        return schema
-    except HTTPException as e:
-        logger.warning(f"Schema creation failed: {str(e)}")
-        raise
+    schema = await service.create_schema(schema_data)
+    logger.info(f"Created schema with name '{schema.name}'")
+    return schema
 
 
 @router.put("/{schema_name}", response_model=SchemaResponse)
@@ -117,7 +110,7 @@ async def update_schema(
     schema_name: str,
     schema_data: SchemaUpdate,
     service: SchemaServiceDep,
-    group_context: GroupContextDep = None
+    group_context: GroupContextDep = None,
 ) -> SchemaResponse:
     """
     Update an existing schema.
@@ -125,20 +118,14 @@ async def update_schema(
     Uses dependency injection to get SchemaService with repository.
     """
     logger.info(f"Updating schema with name '{schema_name}'")
-    try:
-        schema = await service.update_schema(schema_name, schema_data)
-        logger.info(f"Updated schema with name '{schema_name}'")
-        return schema
-    except HTTPException as e:
-        logger.warning(f"Schema update failed: {str(e)}")
-        raise
+    schema = await service.update_schema(schema_name, schema_data)
+    logger.info(f"Updated schema with name '{schema_name}'")
+    return schema
 
 
 @router.delete("/{schema_name}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_schema(
-    schema_name: str,
-    service: SchemaServiceDep,
-    group_context: GroupContextDep = None
+    schema_name: str, service: SchemaServiceDep, group_context: GroupContextDep = None
 ) -> None:
     """
     Delete a schema.
@@ -146,9 +133,5 @@ async def delete_schema(
     Uses dependency injection to get SchemaService with repository.
     """
     logger.info(f"Deleting schema with name '{schema_name}'")
-    try:
-        await service.delete_schema(schema_name)
-        logger.info(f"Deleted schema with name '{schema_name}'")
-    except HTTPException as e:
-        logger.warning(f"Schema deletion failed: {str(e)}")
-        raise 
+    await service.delete_schema(schema_name)
+    logger.info(f"Deleted schema with name '{schema_name}'")

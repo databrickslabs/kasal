@@ -1,17 +1,18 @@
-from typing import Annotated, List, Dict, Any
-
-from fastapi import APIRouter, Depends, HTTPException, status
 import logging
+from typing import Annotated, Any, Dict, List
 
-from src.core.dependencies import SessionDep, GroupContextDep
+from fastapi import APIRouter, Depends, status
+
+from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.exceptions import ForbiddenError, NotFoundError
 from src.core.permissions import check_role_in_context
 from src.models.model_config import ModelConfig
 from src.schemas.model_config import (
     ModelConfigCreate,
-    ModelConfigUpdate,
     ModelConfigResponse,
+    ModelConfigUpdate,
     ModelListResponse,
-    ModelToggleUpdate
+    ModelToggleUpdate,
 )
 from src.services.model_config_service import ModelConfigService
 
@@ -24,9 +25,9 @@ router = APIRouter(
 # Set up logging
 logger = logging.getLogger(__name__)
 
+
 async def get_model_config_service(
-    session: SessionDep,
-    group_context: GroupContextDep
+    session: SessionDep, group_context: GroupContextDep
 ) -> ModelConfigService:
     """
     Dependency provider for ModelConfigService.
@@ -71,20 +72,18 @@ async def get_models(
     Returns:
         List of model configurations
     """
-    try:
-        logger.info("API call: GET /models")
+    logger.info("API call: GET /models")
 
-        models = await service.find_all_for_group(group_context)
-        logger.info(f"Found {len(models)} models for group")
+    models = await service.find_all_for_group(group_context)
+    logger.info(f"Found {len(models)} models for group")
 
-        # Log first few models for debugging
-        for model in models[:3]:
-            logger.debug(f"Model example: {model.key}, {model.name}, {model.provider}, enabled={model.enabled}")
+    # Log first few models for debugging
+    for model in models[:3]:
+        logger.debug(
+            f"Model example: {model.key}, {model.name}, {model.provider}, enabled={model.enabled}"
+        )
 
-        return ModelListResponse(models=models, count=len(models))
-    except Exception as e:
-        logger.error(f"Error getting models: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return ModelListResponse(models=models, count=len(models))
 
 
 @router.get("/enabled", response_model=ModelListResponse)
@@ -101,16 +100,13 @@ async def get_enabled_models(
     Returns:
         List of enabled model configurations
     """
-    try:
-        logger.info("API call: GET /models/enabled")
+    logger.info("API call: GET /models/enabled")
 
-        enabled_models = await service.find_enabled_models_for_group(group_context)
-        logger.info(f"Found {len(enabled_models)} enabled models for group")
+    enabled_models = await service.find_enabled_models_for_group(group_context)
+    logger.info(f"Found {len(enabled_models)} enabled models for group")
 
-        return ModelListResponse(models=enabled_models, count=len(enabled_models))
-    except Exception as e:
-        logger.error(f"Error getting enabled models: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return ModelListResponse(models=enabled_models, count=len(enabled_models))
+
 
 @router.get("/global", response_model=ModelListResponse)
 async def get_global_models(
@@ -119,13 +115,9 @@ async def get_global_models(
     """
     Get global (system-wide) model configurations (group_id is NULL).
     """
-    try:
-        logger.info("API call: GET /models/global")
-        models = await service.find_all_global()
-        return ModelListResponse(models=models, count=len(models))
-    except Exception as e:
-        logger.error(f"Error getting global models: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    logger.info("API call: GET /models/global")
+    models = await service.find_all_global()
+    return ModelListResponse(models=models, count=len(models))
 
 
 @router.patch("/global/{model_key}/toggle", response_model=ModelConfigResponse)
@@ -143,31 +135,25 @@ async def toggle_global_model(
     is_allowed = False
     try:
         from src.core.permissions import get_effective_role
+
         role = get_effective_role(group_context) if group_context else None
         is_allowed = (role and role.lower() == "admin") or (
-            hasattr(group_context, "current_user") and getattr(group_context.current_user, "is_system_admin", False)
+            hasattr(group_context, "current_user")
+            and getattr(group_context.current_user, "is_system_admin", False)
         )
     except Exception:
         is_allowed = False
 
     if not is_allowed:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can toggle global model configurations"
-        )
+        raise ForbiddenError("Only admins can toggle global model configurations")
 
-    try:
-        logger.info(f"API call: PATCH /models/global/{model_key}/toggle - enabled={toggle_data.enabled}")
-        updated = await service.toggle_global_enabled(model_key, toggle_data.enabled)
-        if not updated:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Model with key {model_key} not found")
-        return updated
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error toggling global model {model_key}: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
+    logger.info(
+        f"API call: PATCH /models/global/{model_key}/toggle - enabled={toggle_data.enabled}"
+    )
+    updated = await service.toggle_global_enabled(model_key, toggle_data.enabled)
+    if not updated:
+        raise NotFoundError(f"Model with key {model_key} not found")
+    return updated
 
 
 @router.get("/{model_key}", response_model=ModelConfigResponse)
@@ -189,26 +175,19 @@ async def get_model(
     Raises:
         HTTPException: If model not found
     """
-    try:
-        logger.info(f"API call: GET /models/{model_key}")
+    logger.info(f"API call: GET /models/{model_key}")
 
-        model = await service.find_by_key(model_key)
-        if not model:
-            logger.warning(f"Model with key {model_key} not found")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Model with key {model_key} not found"
-            )
+    model = await service.find_by_key(model_key)
+    if not model:
+        logger.warning(f"Model with key {model_key} not found")
+        raise NotFoundError(f"Model with key {model_key} not found")
 
-        return model
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting model {model_key}: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return model
 
 
-@router.post("", response_model=ModelConfigResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", response_model=ModelConfigResponse, status_code=status.HTTP_201_CREATED
+)
 async def create_model(
     model: ModelConfigCreate,
     service: ModelConfigServiceDep,
@@ -230,28 +209,14 @@ async def create_model(
     """
     # Check permissions - only admins can create model configurations
     if not check_role_in_context(group_context, ["admin"]):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can create model configurations"
-        )
+        raise ForbiddenError("Only admins can create model configurations")
 
-    try:
-        logger.info(f"API call: POST /models - Creating model {model.key}")
+    logger.info(f"API call: POST /models - Creating model {model.key}")
 
-        created_model = await service.create_model_config(model)
-        logger.info(f"Model {model.key} created successfully")
+    created_model = await service.create_model_config(model)
+    logger.info(f"Model {model.key} created successfully")
 
-        return created_model
-    except ValueError as ve:
-        # Value error indicates model already exists
-        logger.error(f"Model with key {model.key} already exists")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(ve)
-        )
-    except Exception as e:
-        logger.error(f"Error creating model {model.key}: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return created_model
 
 
 @router.put("/{model_key}", response_model=ModelConfigResponse)
@@ -278,29 +243,17 @@ async def update_model(
     """
     # Check permissions - only admins can update model configurations
     if not check_role_in_context(group_context, ["admin"]):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can update model configurations"
-        )
+        raise ForbiddenError("Only admins can update model configurations")
 
-    try:
-        logger.info(f"API call: PUT /models/{model_key}")
+    logger.info(f"API call: PUT /models/{model_key}")
 
-        updated_model = await service.update_model_config(model_key, model)
-        if not updated_model:
-            logger.warning(f"Model with key {model_key} not found for update")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Model with key {model_key} not found"
-            )
+    updated_model = await service.update_model_config(model_key, model)
+    if not updated_model:
+        logger.warning(f"Model with key {model_key} not found for update")
+        raise NotFoundError(f"Model with key {model_key} not found")
 
-        logger.info(f"Model {model_key} updated successfully")
-        return updated_model
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating model {model_key}: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    logger.info(f"Model {model_key} updated successfully")
+    return updated_model
 
 
 @router.patch("/{model_key}/toggle", response_model=ModelConfigResponse)
@@ -328,29 +281,21 @@ async def toggle_model(
     """
     # Check permissions - only admins can toggle model configurations
     if not check_role_in_context(group_context, ["admin"]):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can toggle model configurations"
-        )
+        raise ForbiddenError("Only admins can toggle model configurations")
 
-    try:
-        logger.info(f"API call: PATCH /models/{model_key}/toggle - Setting enabled={toggle_data.enabled}")
+    logger.info(
+        f"API call: PATCH /models/{model_key}/toggle - Setting enabled={toggle_data.enabled}"
+    )
 
-        updated_model = await service.toggle_model_enabled_with_group(model_key, toggle_data.enabled, group_context)
-        if not updated_model:
-            logger.warning(f"Model with key {model_key} not found for toggle")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Model with key {model_key} not found"
-            )
+    updated_model = await service.toggle_model_enabled_with_group(
+        model_key, toggle_data.enabled, group_context
+    )
+    if not updated_model:
+        logger.warning(f"Model with key {model_key} not found for toggle")
+        raise NotFoundError(f"Model with key {model_key} not found")
 
-        logger.info(f"Model {model_key} toggled to {toggle_data.enabled} successfully")
-        return updated_model
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error toggling model {model_key}: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    logger.info(f"Model {model_key} toggled to {toggle_data.enabled} successfully")
+    return updated_model
 
 
 @router.delete("/{model_key}", status_code=status.HTTP_204_NO_CONTENT)
@@ -372,28 +317,16 @@ async def delete_model(
     """
     # Check permissions - only admins can delete model configurations
     if not check_role_in_context(group_context, ["admin"]):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can delete model configurations"
-        )
+        raise ForbiddenError("Only admins can delete model configurations")
 
-    try:
-        logger.info(f"API call: DELETE /models/{model_key}")
+    logger.info(f"API call: DELETE /models/{model_key}")
 
-        deleted = await service.delete_model_config(model_key)
-        if not deleted:
-            logger.warning(f"Model with key {model_key} not found for deletion")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Model with key {model_key} not found"
-            )
+    deleted = await service.delete_model_config(model_key)
+    if not deleted:
+        logger.warning(f"Model with key {model_key} not found for deletion")
+        raise NotFoundError(f"Model with key {model_key} not found")
 
-        logger.info(f"Model {model_key} deleted successfully")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting model {model_key}: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    logger.info(f"Model {model_key} deleted successfully")
 
 
 @router.post("/enable-all", response_model=ModelListResponse)
@@ -413,21 +346,14 @@ async def enable_all_models(
     """
     # Check permissions - only admins can enable all models
     if not check_role_in_context(group_context, ["admin"]):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can enable all model configurations"
-        )
+        raise ForbiddenError("Only admins can enable all model configurations")
 
-    try:
-        logger.info("API call: POST /models/enable-all")
+    logger.info("API call: POST /models/enable-all")
 
-        models = await service.enable_all_models()
-        logger.info(f"All {len(models)} models enabled successfully")
+    models = await service.enable_all_models()
+    logger.info(f"All {len(models)} models enabled successfully")
 
-        return ModelListResponse(models=models, count=len(models))
-    except Exception as e:
-        logger.error(f"Error enabling all models: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return ModelListResponse(models=models, count=len(models))
 
 
 @router.post("/disable-all", response_model=ModelListResponse)
@@ -447,18 +373,11 @@ async def disable_all_models(
     """
     # Check permissions - only admins can disable all models
     if not check_role_in_context(group_context, ["admin"]):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can disable all model configurations"
-        )
+        raise ForbiddenError("Only admins can disable all model configurations")
 
-    try:
-        logger.info("API call: POST /models/disable-all")
+    logger.info("API call: POST /models/disable-all")
 
-        models = await service.disable_all_models()
-        logger.info(f"All {len(models)} models disabled successfully")
+    models = await service.disable_all_models()
+    logger.info(f"All {len(models)} models disabled successfully")
 
-        return ModelListResponse(models=models, count=len(models))
-    except Exception as e:
-        logger.error(f"Error disabling all models: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return ModelListResponse(models=models, count=len(models))

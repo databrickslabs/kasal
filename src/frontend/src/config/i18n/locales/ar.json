@@ -80,6 +80,7 @@
     "filterByEndpoint": "تصفية حسب نقطة النهاية",
     "allEndpoints": "جميع نقاط النهاية",
     "noLogs": "لا توجد سجلات",
+    "refresh": "تحديث",
     "columns": {
       "timestamp": "الطابع الزمني",
       "endpoint": "نقطة النهاية",
@@ -101,7 +102,8 @@
       "connectionError": "فشل الاتصال بتدفق السجلات. يرجى المحاولة مرة أخرى.",
       "autoScrollOn": "التمرير التلقائي مفعل",
       "autoScrollOff": "التمرير التلقائي معطل",
-      "refreshLogs": "تحديث السجلات"
+      "refreshLogs": "تحديث السجلات",
+      "downloadLogs": "تحميل السجلات"
     }
   },
   "tools": {

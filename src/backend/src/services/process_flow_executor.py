@@ -339,10 +339,10 @@ def run_flow_in_process(
 
             # Now run the actual flow execution
             try:
-                from src.db.session import async_session_factory
+                from src.db.session import safe_async_session
                 from src.engines.crewai.flow.flow_runner_service import FlowRunnerService
 
-                async with async_session_factory() as session:
+                async with safe_async_session() as session:
                     # Create flow runner service with session
                     flow_runner = FlowRunnerService(session)
 
@@ -383,7 +383,26 @@ def run_flow_in_process(
         try:
             # Run the flow
             result = loop.run_until_complete(run_async_flow())
-            async_logger.info(f"[FLOW_SUBPROCESS] Flow completed successfully")
+
+            # Check if the result indicates failure BEFORE logging success
+            flow_failed = False
+            flow_error = None
+            if isinstance(result, dict):
+                # Check for explicit failure indicators
+                if result.get('success') is False:
+                    flow_failed = True
+                    flow_error = result.get('error', 'Flow execution failed')
+                elif result.get('error'):
+                    flow_failed = True
+                    flow_error = result.get('error')
+                elif result.get('status') == 'FAILED':
+                    flow_failed = True
+                    flow_error = result.get('error', result.get('message', 'Flow execution failed'))
+
+            if flow_failed:
+                async_logger.error(f"[FLOW_SUBPROCESS] Flow execution failed: {flow_error}")
+            else:
+                async_logger.info(f"[FLOW_SUBPROCESS] Flow completed successfully")
 
             # Process result - extract actual content like ProcessCrewExecutor does
             processed_result = None
@@ -448,12 +467,23 @@ def run_flow_in_process(
                 return return_dict
 
             # Build return dict with flow_uuid for checkpoint/resume functionality
-            return_dict = {
-                "status": "COMPLETED",
-                "execution_id": execution_id,
-                "result": processed_result,
-                "process_id": os.getpid()
-            }
+            # CRITICAL: Check if flow failed and set status accordingly
+            if flow_failed:
+                return_dict = {
+                    "status": "FAILED",
+                    "execution_id": execution_id,
+                    "error": flow_error,
+                    "result": processed_result,
+                    "process_id": os.getpid()
+                }
+                async_logger.info(f"[FLOW_SUBPROCESS] Returning FAILED status due to flow error: {flow_error}")
+            else:
+                return_dict = {
+                    "status": "COMPLETED",
+                    "execution_id": execution_id,
+                    "result": processed_result,
+                    "process_id": os.getpid()
+                }
             # Include flow_uuid if available (from @persist)
             if isinstance(result, dict) and result.get("flow_uuid"):
                 return_dict["flow_uuid"] = result.get("flow_uuid")
@@ -534,10 +564,9 @@ def run_flow_in_process(
             if output:
                 # Log the captured output to flow.log with execution ID
                 # The database handler will automatically write to execution_logs
-                # FILTER: Skip CrewAI Flow's built-in visualization to reduce log spam
                 for line in output.split('\n'):
                     line_stripped = line.strip()
-                    if line_stripped and not _is_crewai_flow_visualization(line_stripped):
+                    if line_stripped:
                         async_logger.info(f"[STDOUT] {line_stripped}")
         except Exception as capture_error:
             # Log any errors in stdout capture (shouldn't happen normally)
@@ -1111,7 +1140,7 @@ class ProcessFlowExecutor:
         try:
             import os
             from datetime import datetime
-            from src.config.settings import settings
+            from sqlalchemy import text
 
             # Get the flow.log path
             log_dir = os.environ.get('LOG_DIR')
@@ -1158,13 +1187,23 @@ class ProcessFlowExecutor:
             else:
                 logger.info(f"Found {len(logs_to_write)-1} logs for execution {exec_id_short} in flow.log")
 
-            # Try to write logs using synchronous SQLite (more reliable in post-subprocess context)
-            # Async database operations can have greenlet/event loop issues after subprocess completion
-            if settings.DATABASE_TYPE == 'sqlite':
-                await self._write_logs_sqlite_sync(logs_to_write, settings.SQLITE_DB_PATH)
-            else:
-                # For PostgreSQL, use async with NullPool
-                await self._write_logs_postgres_async(logs_to_write, settings)
+            # Use the application's existing engine from session.py.
+            # This runs in the main process (after process.join), so the app
+            # engine is available and already connected to the correct database.
+            # Previously, separate engines were created from individual settings
+            # fields which could conflict with the existing engine (especially
+            # for SQLite where a second connection causes "no active connection").
+            from src.db.session import engine as app_engine
+
+            logger.info(f"[ProcessFlowExecutor] [DEBUG] Using application engine for database connection")
+            async with app_engine.begin() as conn:
+                for log_data in logs_to_write:
+                    await conn.execute(text("""
+                        INSERT INTO execution_logs (execution_id, content, timestamp, group_id, group_email)
+                        VALUES (:execution_id, :content, :timestamp, :group_id, :group_email)
+                    """), log_data)
+
+            logger.info(f"[ProcessFlowExecutor] Successfully wrote {len(logs_to_write)} logs to execution_logs table")
 
         except Exception as e:
             # Log the error but don't fail the execution - this is a non-critical operation

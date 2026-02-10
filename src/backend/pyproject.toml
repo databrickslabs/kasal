@@ -2,7 +2,7 @@
 name = "kasal-backend"
 version = "0.1.0"
 description = "Kasal Backend - AI Agent Workflow Orchestration Platform"
-requires-python = ">=3.10"
+requires-python = ">=3.11,<3.12"
 dependencies = [
     # Web framework
     "fastapi>=0.110.0",
@@ -47,16 +47,10 @@ dependencies = [
 
     # AI/ML
     "litellm==1.74.9",
-    "crewai[tools]>=0.193.2",
-    "crewai_tools>=0.73.1",
+    "crewai[tools]>=1.9.3",  # [tools] extra installs crewai-tools package
     "langchain",
-    "mcp==1.9.0",
+    "mcp>=1.23.1,<1.24.0",  # Required by crewai>=1.9.3
     "mcpadapt",
-
-    # DSPy
-    "dspy-ai>=2.5.0",
-    "optuna>=3.5.0",
-    "numpy>=1.24.0",
 
     # Observability
     "mlflow==3.4.0",
@@ -104,14 +98,14 @@ packages = ["src"]
 
 [tool.black]
 line-length = 88
-target-version = ["py39"]
+target-version = ["py311"]
 
 [tool.isort]
 profile = "black"
 line_length = 88
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -119,7 +113,7 @@ disallow_incomplete_defs = true
 
 [tool.ruff]
 line-length = 88
-target-version = "py39"
+target-version = "py311"
 select = ["E", "F", "I001"]
 ignore = []
 exclude = [

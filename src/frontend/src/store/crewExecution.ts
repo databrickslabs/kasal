@@ -43,7 +43,8 @@ interface CrewExecutionState {
   userActive: boolean;
   inputVariables: Record<string, string>;
   showInputVariablesDialog: boolean;
-  
+  pendingExecutionType: string | null;
+
   // UI state
   errorMessage: string;
   showError: boolean;
@@ -142,6 +143,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   userActive: false,
   inputVariables: {},
   showInputVariablesDialog: false,
+  pendingExecutionType: null,
   errorMessage: '',
   showError: false,
   successMessage: '',
@@ -337,16 +339,55 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       // Use refreshed nodes for execution
       nodes = refreshedNodes;
 
+      // Force refresh tasks from database to get latest tools and configs
+      console.log('[CrewExecution] Refreshing task data from database before execution');
+      const { TaskService } = await import('../api/TaskService');
+      nodes = await Promise.all(
+        nodes.map(async (node) => {
+          if (node.type === 'taskNode' && (node.data?.taskId || node.data?.id)) {
+            const taskId = node.data.taskId || node.data.id;
+            try {
+              const freshTask = await TaskService.getTask(taskId);
+              if (freshTask) {
+                // Warn if DB tools differ from canvas — helps catch unsaved edits
+                const canvasTools = Array.isArray(node.data?.tools) ? node.data.tools : [];
+                const dbTools = Array.isArray(freshTask.tools) ? freshTask.tools : [];
+                if (JSON.stringify(canvasTools.map(String).sort()) !== JSON.stringify(dbTools.map(String).sort())) {
+                  console.warn(
+                    `[CrewExecution] Tool mismatch for task "${freshTask.name}" — canvas: [${canvasTools}], DB: [${dbTools}]. ` +
+                    `Using DB version. If unexpected, ensure you saved the task after editing tools.`
+                  );
+                }
+                console.log(`[CrewExecution] Refreshed task ${freshTask.name} - tools:`, freshTask.tools);
+                return {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    ...freshTask,
+                    taskId: freshTask.id,
+                    label: freshTask.name,
+                  }
+                };
+              }
+            } catch (error) {
+              console.error(`[CrewExecution] Failed to refresh task ${taskId}:`, error);
+            }
+          }
+          return node;
+        })
+      );
+
       // Log the task nodes
-      console.log('[CrewExecution] Task nodes before execution:', 
+      console.log('[CrewExecution] Task nodes before execution:',
         nodes.filter(node => node.type === 'taskNode')
-          .map(node => ({ 
-            id: node.id, 
-            type: node.type, 
-            data: { 
+          .map(node => ({
+            id: node.id,
+            type: node.type,
+            data: {
               taskId: node.data?.taskId,
-              label: node.data?.label 
-            } 
+              label: node.data?.label,
+              tools: node.data?.tools
+            }
           }))
       );
 
@@ -396,7 +437,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           jobId: response.execution_id || response.job_id,
           jobName: `Crew Execution (${new Date().toLocaleTimeString()})`,
           status: 'running',
-          groupId: localStorage.getItem('selectedGroupId') // Include the group ID for security filtering
+          groupId: localStorage.getItem('selectedGroupId'), // Include the group ID for security filtering
+          planningEnabled
         }
       });
       console.log('[CrewExecution] Dispatching jobCreated event:', jobCreatedEvent.detail);
@@ -533,7 +575,9 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           jobId: response.execution_id || response.job_id,
           jobName: `Flow Execution (${new Date().toLocaleTimeString()})`,
           status: 'running',
-          groupId: localStorage.getItem('selectedGroupId') // Include the group ID for security filtering
+          groupId: localStorage.getItem('selectedGroupId'), // Include the group ID for security filtering
+          isFlow: true, // Flag to indicate this is a flow execution
+          planningEnabled
         }
       });
       console.log('[FlowExecution] Dispatching jobCreated event:', jobCreatedEvent.detail);
@@ -627,6 +671,46 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
         nodes = refreshedNodes;
       }
 
+      // Force refresh tasks from database to get latest tools and configs
+      if (hasTaskNodes) {
+        console.log('[TabExecution] Refreshing task data from database before execution');
+        const { TaskService } = await import('../api/TaskService');
+        nodes = await Promise.all(
+          nodes.map(async (node) => {
+            if (node.type === 'taskNode' && (node.data?.taskId || node.data?.id)) {
+              const taskId = node.data.taskId || node.data.id;
+              try {
+                const freshTask = await TaskService.getTask(taskId);
+                if (freshTask) {
+                  // Warn if DB tools differ from canvas — helps catch unsaved edits
+                  const canvasTools = Array.isArray(node.data?.tools) ? node.data.tools : [];
+                  const dbTools = Array.isArray(freshTask.tools) ? freshTask.tools : [];
+                  if (JSON.stringify(canvasTools.map(String).sort()) !== JSON.stringify(dbTools.map(String).sort())) {
+                    console.warn(
+                      `[TabExecution] Tool mismatch for task "${freshTask.name}" — canvas: [${canvasTools}], DB: [${dbTools}]. ` +
+                      `Using DB version. If unexpected, ensure you saved the task after editing tools.`
+                    );
+                  }
+                  console.log(`[TabExecution] Refreshed task ${freshTask.name} - tools:`, freshTask.tools);
+                  return {
+                    ...node,
+                    data: {
+                      ...node.data,
+                      ...freshTask,
+                      taskId: freshTask.id,
+                      label: freshTask.name,
+                    }
+                  };
+                }
+              } catch (error) {
+                console.error(`[TabExecution] Failed to refresh task ${taskId}:`, error);
+              }
+            }
+            return node;
+          })
+        );
+      }
+
       // Prepare additionalInputs with planning_llm, reasoning_llm, process type, and manager_llm
       const additionalInputs: Record<string, unknown> = {
         process: processType
@@ -668,7 +752,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           jobId: response.execution_id || response.job_id,
           jobName: `${tabName || 'Unnamed Tab'} (${new Date().toLocaleTimeString()})`,
           status: 'running',
-          groupId: localStorage.getItem('selectedGroupId') // Include the group ID for security filtering
+          groupId: localStorage.getItem('selectedGroupId'), // Include the group ID for security filtering
+          planningEnabled
         }
       });
       console.log('[TabExecution] Dispatching jobCreated event:', jobCreatedEvent.detail);
@@ -707,6 +792,25 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
 
     console.log('[CrewExecution] handleRunClick called with type:', type);
     console.log('[CrewExecution] Current nodes:', state.nodes);
+
+    // Resolve correct nodes/edges based on execution type from tab manager
+    // The crewExecution store has a single nodes/edges property that gets overwritten
+    // when switching between crew and flow canvases. Read directly from tab state instead.
+    const tabState = useTabManagerStore.getState();
+    const activeTab = tabState.tabs.find(t => t.id === tabState.activeTabId);
+    let resolvedNodes: Node[];
+    let resolvedEdges: Edge[];
+    if (type === 'crew' && activeTab) {
+      resolvedNodes = activeTab.nodes;
+      resolvedEdges = activeTab.edges;
+    } else if (type === 'flow' && activeTab) {
+      resolvedNodes = activeTab.flowNodes;
+      resolvedEdges = activeTab.flowEdges;
+    } else {
+      resolvedNodes = state.nodes;
+      resolvedEdges = state.edges;
+    }
+    console.log('[CrewExecution] Resolved nodes for', type, ':', resolvedNodes.length);
 
     // Helper function to check for checkpoints and handle flow execution
     const checkForCheckpointsAndExecuteFlow = async (nodes: Node[], edges: Edge[]) => {
@@ -767,7 +871,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     // Check if we need to show input variables dialog
     // Only check for variables in the nodes relevant to the execution type
     const variablePattern = /\{([^}]+)\}/g;
-    const hasVariables = state.nodes.some(node => {
+    const hasVariables = resolvedNodes.some(node => {
       // For crew execution, check agent and task nodes
       // For flow execution, we don't check for input variables (flows use crew configurations)
       if (type === 'crew' && (node.type === 'agentNode' || node.type === 'taskNode')) {
@@ -813,9 +917,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     if (hasVariables) {
       if (state.inputMode === 'dialog') {
         // Show the input variables dialog instead of executing immediately
-        set({ showInputVariablesDialog: true });
-        // Store the execution type for later use
-        (window as Window & { __pendingExecutionType?: string }).__pendingExecutionType = type;
+        set({ showInputVariablesDialog: true, pendingExecutionType: type });
       } else {
         // Chat mode: Will be handled by chat interface
         console.log('[CrewExecution] Chat mode selected - variables will be collected via chat');
@@ -823,10 +925,10 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
         set({ isExecuting: true });
         try {
           if (type === 'crew') {
-            await state.executeCrew(state.nodes, state.edges);
+            await state.executeCrew(resolvedNodes, resolvedEdges);
           } else {
             // Check for checkpoints before executing flow
-            await checkForCheckpointsAndExecuteFlow(state.nodes, state.edges);
+            await checkForCheckpointsAndExecuteFlow(resolvedNodes, resolvedEdges);
           }
         } catch (error) {
           set({
@@ -845,11 +947,11 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
         console.log('[CrewExecution] Type check - type:', type, 'comparison result:', type === 'crew');
         if (type === 'crew') {
           console.log('[CrewExecution] Executing CREW path');
-          await state.executeCrew(state.nodes, state.edges);
+          await state.executeCrew(resolvedNodes, resolvedEdges);
         } else {
           console.log('[CrewExecution] Executing FLOW path');
           // Check for checkpoints before executing flow
-          await checkForCheckpointsAndExecuteFlow(state.nodes, state.edges);
+          await checkForCheckpointsAndExecuteFlow(resolvedNodes, resolvedEdges);
         }
       } catch (error) {
         set({
@@ -900,7 +1002,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           jobId: response.execution_id || response.job_id,
           jobName: `Crew Generation (${new Date().toLocaleTimeString()})`,
           status: 'running',
-          groupId: localStorage.getItem('selectedGroupId') // Include the group ID for security filtering
+          groupId: localStorage.getItem('selectedGroupId'), // Include the group ID for security filtering
+          planningEnabled
         }
       }));
 
@@ -925,10 +1028,9 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     });
 
     try {
-      // Get the pending execution type
-      const windowWithPending = window as Window & { __pendingExecutionType?: string };
-      const executionType = windowWithPending.__pendingExecutionType || 'crew';
-      delete windowWithPending.__pendingExecutionType;
+      // Get the pending execution type from store state
+      const executionType = state.pendingExecutionType || 'crew';
+      set({ pendingExecutionType: null });
 
       if (executionType === 'crew') {
         await state.executeCrew(state.nodes, state.edges);

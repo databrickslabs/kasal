@@ -9,6 +9,7 @@ This service handles:
 - Special handling for tables with vector columns (documentation_embeddings)
 """
 import logging
+import re
 from typing import Optional, AsyncGenerator, Dict, Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -18,6 +19,39 @@ from src.core.base_service import BaseService
 from src.db.base import Base
 
 logger = logging.getLogger(__name__)
+
+# --- SQL injection prevention helpers ---
+_SAFE_IDENTIFIER_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+
+def _validate_identifier(name: str, kind: str = "identifier") -> str:
+    """Validate a SQL identifier (schema name, table name) to prevent injection.
+
+    Only allows simple identifiers matching ``^[A-Za-z_][A-Za-z0-9_]*$``.
+
+    Raises:
+        ValueError: If the name does not match the safe pattern.
+    """
+    if not name or not _SAFE_IDENTIFIER_RE.match(name):
+        raise ValueError(f"Invalid SQL {kind}: {name!r}")
+    return name
+
+
+def _quote_pg_role(email: str) -> str:
+    """Safely quote a PostgreSQL role name derived from an email address.
+
+    Validates the email against a strict pattern and escapes embedded
+    double-quotes so the result is safe for use as a quoted identifier
+    in GRANT / ALTER DEFAULT PRIVILEGES statements.
+
+    Raises:
+        ValueError: If the email does not match the expected format.
+    """
+    if not email or not re.match(
+        r'^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$', email
+    ):
+        raise ValueError(f"Invalid email for PostgreSQL role: {email!r}")
+    return '"' + email.replace('"', '""') + '"'
 
 
 class LakebaseSchemaService(BaseService):
@@ -51,13 +85,15 @@ class LakebaseSchemaService(BaseService):
             Exception: If schema creation fails
         """
         try:
+            safe_role = _quote_pg_role(user_email)
+
             # Handle schema recreation if requested
             if recreate:
                 try:
                     async with engine.begin() as conn:
-                        logger.info("🗑️ Dropping existing kasal schema (if exists)...")
+                        logger.info("Dropping existing kasal schema (if exists)...")
                         await conn.execute(text("DROP SCHEMA IF EXISTS kasal CASCADE"))
-                        logger.info("✅ Dropped kasal schema")
+                        logger.info("Dropped kasal schema")
                 except Exception as drop_error:
                     logger.warning(
                         f"Could not drop schema (may be owned by different role): {drop_error}"
@@ -69,13 +105,13 @@ class LakebaseSchemaService(BaseService):
             async with engine.begin() as conn:
                 # Create kasal schema if it doesn't exist
                 await conn.execute(text("CREATE SCHEMA IF NOT EXISTS kasal"))
-                logger.info("✅ Created kasal schema in Lakebase")
+                logger.info("Created kasal schema in Lakebase")
 
                 # Grant schema permissions
                 try:
-                    await conn.execute(text(f'GRANT ALL ON SCHEMA kasal TO "{user_email}"'))
-                    await conn.execute(text(f'GRANT ALL ON SCHEMA public TO "{user_email}"'))
-                    logger.info(f"✅ Granted schema permissions to {user_email}")
+                    await conn.execute(text(f'GRANT ALL ON SCHEMA kasal TO {safe_role}'))
+                    await conn.execute(text(f'GRANT ALL ON SCHEMA public TO {safe_role}'))
+                    logger.info(f"Granted schema permissions to {user_email}")
                 except Exception as grant_error:
                     # Log but don't fail - user might already have permissions
                     logger.warning(f"Permission grant warning (may be ok): {grant_error}")
@@ -85,16 +121,16 @@ class LakebaseSchemaService(BaseService):
                     await conn.execute(
                         text(
                             f'ALTER DEFAULT PRIVILEGES IN SCHEMA kasal '
-                            f'GRANT ALL ON TABLES TO "{user_email}"'
+                            f'GRANT ALL ON TABLES TO {safe_role}'
                         )
                     )
                     await conn.execute(
                         text(
                             f'ALTER DEFAULT PRIVILEGES IN SCHEMA kasal '
-                            f'GRANT ALL ON SEQUENCES TO "{user_email}"'
+                            f'GRANT ALL ON SEQUENCES TO {safe_role}'
                         )
                     )
-                    logger.info(f"✅ Set default privileges for {user_email}")
+                    logger.info(f"Set default privileges for {user_email}")
                 except Exception as privilege_error:
                     logger.warning(f"Default privilege warning (may be ok): {privilege_error}")
 
@@ -120,13 +156,15 @@ class LakebaseSchemaService(BaseService):
             Exception: If schema creation fails
         """
         try:
+            safe_role = _quote_pg_role(user_email)
+
             # Handle schema recreation if requested
             if recreate:
                 try:
                     with engine.begin() as conn:
-                        logger.info("🗑️ Dropping existing kasal schema (if exists)...")
+                        logger.info("Dropping existing kasal schema (if exists)...")
                         conn.execute(text("DROP SCHEMA IF EXISTS kasal CASCADE"))
-                        logger.info("✅ Dropped kasal schema")
+                        logger.info("Dropped kasal schema")
                 except Exception as drop_error:
                     logger.warning(
                         f"Could not drop schema (may be owned by different role): {drop_error}"
@@ -137,24 +175,24 @@ class LakebaseSchemaService(BaseService):
             with engine.begin() as conn:
                 # Create kasal schema if it doesn't exist
                 conn.execute(text("CREATE SCHEMA IF NOT EXISTS kasal"))
-                logger.info("✅ Created kasal schema")
+                logger.info("Created kasal schema")
 
                 # Grant schema permissions
                 try:
-                    conn.execute(text(f'GRANT ALL ON SCHEMA kasal TO "{user_email}"'))
+                    conn.execute(text(f'GRANT ALL ON SCHEMA kasal TO {safe_role}'))
                     conn.execute(
                         text(
                             f'ALTER DEFAULT PRIVILEGES IN SCHEMA kasal '
-                            f'GRANT ALL ON TABLES TO "{user_email}"'
+                            f'GRANT ALL ON TABLES TO {safe_role}'
                         )
                     )
                     conn.execute(
                         text(
                             f'ALTER DEFAULT PRIVILEGES IN SCHEMA kasal '
-                            f'GRANT ALL ON SEQUENCES TO "{user_email}"'
+                            f'GRANT ALL ON SEQUENCES TO {safe_role}'
                         )
                     )
-                    logger.info(f"✅ Granted schema permissions to {user_email}")
+                    logger.info(f"Granted schema permissions to {user_email}")
                 except Exception as grant_error:
                     logger.warning(f"Permission grant warning: {grant_error}")
 
@@ -179,7 +217,7 @@ class LakebaseSchemaService(BaseService):
             async with engine.begin() as conn:
                 # Set kasal as the default schema for this connection
                 await conn.execute(text("SET search_path TO kasal, public"))
-                logger.info("✅ Set kasal schema as default search path")
+                logger.info("Set kasal schema as default search path")
 
                 # Tables with vector columns that need special handling
                 tables_to_skip = ['documentation_embeddings']
@@ -209,7 +247,7 @@ class LakebaseSchemaService(BaseService):
                         await conn.run_sync(table.create, checkfirst=True)
                         logger.info(f"Created table {table.name}")
 
-                logger.info("✅ Created table structure in Lakebase")
+                logger.info("Created table structure in Lakebase")
 
         except Exception as e:
             logger.error(f"Error creating tables: {e}")
@@ -232,7 +270,7 @@ class LakebaseSchemaService(BaseService):
             with engine.begin() as conn:
                 # Set kasal as the default schema for this connection
                 conn.execute(text("SET search_path TO kasal"))
-                logger.info("✅ Set kasal schema as default search path")
+                logger.info("Set kasal schema as default search path")
 
                 # Tables with vector columns that need special handling
                 tables_to_skip = ['documentation_embeddings']
@@ -262,7 +300,7 @@ class LakebaseSchemaService(BaseService):
                         table.create(conn, checkfirst=True)
                         logger.info(f"Created table {table.name}")
 
-                logger.info("✅ Created table structure in Lakebase")
+                logger.info("Created table structure in Lakebase")
 
         except Exception as e:
             logger.error(f"Error creating tables: {e}")
@@ -287,7 +325,7 @@ class LakebaseSchemaService(BaseService):
             async with engine.begin() as conn:
                 # Set kasal as the default schema for this connection
                 await conn.execute(text("SET search_path TO kasal, public"))
-                yield {"type": "success", "message": "✅ Set kasal schema as default search path"}
+                yield {"type": "success", "message": "Set kasal schema as default search path"}
 
                 # Tables with vector columns that need special handling
                 tables_to_skip = ['documentation_embeddings']
@@ -322,7 +360,7 @@ class LakebaseSchemaService(BaseService):
                         await conn.run_sync(table.create, checkfirst=True)
                         yield {"type": "success", "message": f"Created table {table.name}"}
 
-                yield {"type": "success", "message": "✅ Created table structure in Lakebase"}
+                yield {"type": "success", "message": "Created table structure in Lakebase"}
 
         except Exception as e:
             logger.error(f"Error creating tables: {e}")
@@ -345,7 +383,7 @@ class LakebaseSchemaService(BaseService):
             with engine.begin() as conn:
                 # Set kasal as the default schema for this connection
                 conn.execute(text("SET search_path TO kasal"))
-                yield {"type": "success", "message": "✅ Set kasal schema as default search path"}
+                yield {"type": "success", "message": "Set kasal schema as default search path"}
 
                 # Tables with vector columns that need special handling
                 tables_to_skip = ['documentation_embeddings']
@@ -380,7 +418,7 @@ class LakebaseSchemaService(BaseService):
                         table.create(conn, checkfirst=True)
                         yield {"type": "success", "message": f"Created table {table.name}"}
 
-                yield {"type": "success", "message": "✅ Created table structure in Lakebase"}
+                yield {"type": "success", "message": "Created table structure in Lakebase"}
 
         except Exception as e:
             logger.error(f"Error creating tables: {e}")
@@ -396,10 +434,12 @@ class LakebaseSchemaService(BaseService):
             schema: Schema name to set as search path (default: kasal)
 
         Raises:
+            ValueError: If schema name is not a valid identifier
             Exception: If setting search path fails
         """
         try:
-            await connection.execute(text(f"SET search_path TO {schema}, public"))
+            safe_schema = _validate_identifier(schema, "schema name")
+            await connection.execute(text(f"SET search_path TO {safe_schema}, public"))
             logger.debug(f"Set search path to {schema}")
         except Exception as e:
             logger.error(f"Error setting search path: {e}")
@@ -414,10 +454,12 @@ class LakebaseSchemaService(BaseService):
             schema: Schema name to set as search path (default: kasal)
 
         Raises:
+            ValueError: If schema name is not a valid identifier
             Exception: If setting search path fails
         """
         try:
-            connection.execute(text(f"SET search_path TO {schema}"))
+            safe_schema = _validate_identifier(schema, "schema name")
+            connection.execute(text(f"SET search_path TO {safe_schema}"))
             logger.debug(f"Set search path to {schema}")
         except Exception as e:
             logger.error(f"Error setting search path: {e}")
