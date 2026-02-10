@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   Box,
   TextField,
@@ -177,14 +177,20 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   }, [sessionId, setCurrentSession]);
 
   // Create a Zustand-compatible setMessages function
-  const setMessages = (updater: React.SetStateAction<ChatMessage[]>) => {
+  // CRITICAL: Read latest state from Zustand store (getState()) instead of the
+  // render-time `messages` snapshot to avoid stale closure bugs.  When multiple
+  // setMessages calls happen in the same render cycle (e.g. adding user prompt
+  // then assistant response), using the render snapshot causes earlier messages
+  // to be silently overwritten because each call reads the same stale array.
+  const setMessages = useCallback((updater: React.SetStateAction<ChatMessage[]>) => {
     if (typeof updater === 'function') {
-      const newMessages = updater(messages);
+      const currentMessages = useChatMessagesStore.getState().messagesBySession[sessionId] || [];
+      const newMessages = updater(currentMessages);
       setZustandMessages(sessionId, newMessages);
     } else {
       setZustandMessages(sessionId, updater);
     }
-  };
+  }, [sessionId, setZustandMessages]);
 
   const {
     executingJobId,
@@ -710,7 +716,12 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     setInputValue('');
     setIsLoading(true);
 
-    saveMessageToBackend(userMessage);
+    // Await the save so the backend has the user message before the (potentially long)
+    // dispatch call.  This protects against Databricks Apps proxy resets / page reloads
+    // that would otherwise lose the message (it only existed in Zustand memory).
+    // Errors are handled inside saveMessageToBackend (grace period logic), so this
+    // won't throw even if the save fails.
+    await saveMessageToBackend(userMessage);
 
     // Progressive canvas feedback: add temporary placeholder nodes/edges while generating
     let cleanupPlaceholders: (() => void) | null = null;

@@ -19,6 +19,10 @@ export const useChatSession = (providedChatSessionId?: string) => {
   const consecutiveFailures = useRef(0);
   const FAILURE_THRESHOLD = 3; // Show warning after 3 consecutive failures
 
+  // Guard: when true, loadChatHistory will skip the merge to avoid
+  // overwriting in-flight messages that haven't reached the backend yet.
+  const sendInProgress = useRef(false);
+
   // Initialize session on component mount or when providedChatSessionId changes
   useEffect(() => {
     const initializeSession = () => {
@@ -74,6 +78,14 @@ export const useChatSession = (providedChatSessionId?: string) => {
     const loadChatHistory = async () => {
       if (!sessionId) return;
 
+      // Skip if a message send is in progress – the save hasn't reached the
+      // backend yet, so the response would lack the user's latest message.
+      // Merging now would risk overwriting in-memory-only messages.
+      if (sendInProgress.current) {
+        console.log('[ChatHistory] Skipping loadChatHistory – send in progress');
+        return;
+      }
+
       try {
         try {
           const response = await ChatHistoryService.getSessionMessages(sessionId);
@@ -103,7 +115,11 @@ export const useChatSession = (providedChatSessionId?: string) => {
     if (!sessionId || chatHistoryDisabled) return;
     // Skip saving messages with empty content (backend requires min_length=1)
     if (!message.content) return;
-    
+
+    // Signal that a save is in progress so loadChatHistory won't overwrite
+    // in-memory messages that haven't reached the backend yet.
+    sendInProgress.current = true;
+
     try {
       let generationResult = message.result;
       if (message.type === 'execution' || message.type === 'trace') {
@@ -138,25 +154,27 @@ export const useChatSession = (providedChatSessionId?: string) => {
       }
     } catch (error) {
       console.error('[ChatHistory] Error saving message to backend:', error);
-      
+
       // Increment failure counter
       consecutiveFailures.current += 1;
       console.log(`[ChatHistory] Consecutive failures: ${consecutiveFailures.current}/${FAILURE_THRESHOLD}`);
-      
+
       // Only show warning after multiple consecutive failures
       if (consecutiveFailures.current >= FAILURE_THRESHOLD && !chatHistoryDisabled) {
         setChatHistoryDisabled(true);
-        
+
         const errorMessage: ChatMessage = {
           id: `error-${Date.now()}`,
           type: 'assistant',
           content: '⚠️ Chat history is temporarily disabled due to service issues. Your messages will not be saved.',
           timestamp: new Date(),
         };
-        
+
         // Add error message to Zustand store
         addMessage(sessionId, errorMessage);
       }
+    } finally {
+      sendInProgress.current = false;
     }
   }, [sessionId, chatHistoryDisabled, FAILURE_THRESHOLD, addMessage]);
 
