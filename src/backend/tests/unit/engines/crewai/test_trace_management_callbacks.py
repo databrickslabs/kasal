@@ -4,42 +4,34 @@ Simplified unit tests for trace management with execution-scoped callbacks.
 Tests core trace management functionality with minimal async complexity.
 
 NOTE: The execution_callback module has been refactored to delegate trace creation
-to the event bus (logging_callbacks.py). The callbacks now primarily:
-1. Maintain execution context (current agent, task tracking)
-2. Create execution logs (for live log view)
-3. Only create traces for specific patterns like "Final Answer:"
+to the event bus (logging_callbacks.py) and the OTel pipeline.  The callbacks now
+only create execution logs via enqueue_log().
 """
+import asyncio
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
-
+from src.engines.crewai.trace_management import TraceManager
 class TestTraceManagerEventFiltering:
     """Test cases for trace manager event filtering."""
 
     def test_important_event_types_list(self):
         """Test that important event types are correctly defined."""
-        # This tests the event filtering logic that's in the trace writer
         important_event_types = [
             "agent_execution", "tool_usage", "crew_started",
             "crew_completed", "task_started", "task_completed", "llm_call"
         ]
 
-        # Test that our callback events are in the important list
         assert "agent_execution" in important_event_types
         assert "task_completed" in important_event_types
         assert "crew_started" in important_event_types
         assert "crew_completed" in important_event_types
 
-        # Test that random events would not be in the list
         assert "debug_info" not in important_event_types
         assert "random_event" not in important_event_types
 
     def test_task_lifecycle_events_all_in_important_list(self):
-        """Test that all task lifecycle events (started, completed, failed) are important.
-
-        task_completed was previously excluded from storage; it is now included
-        so that the trace timeline can reconstruct task states on reconnect/refresh.
-        """
+        """Test that all task lifecycle events are important."""
         important_event_types = [
             "agent_execution", "tool_usage", "tool_error",
             "crew_started", "crew_completed",
@@ -51,17 +43,12 @@ class TestTraceManagerEventFiltering:
             "agent_reasoning", "agent_reasoning_error"
         ]
 
-        # All three task lifecycle events must be stored
         assert "task_started" in important_event_types
         assert "task_completed" in important_event_types
         assert "task_failed" in important_event_types
 
     def test_task_lifecycle_events_broadcast_via_sse(self):
-        """Test that task_started, task_completed, and task_failed are all broadcast via SSE.
-
-        Previously only task_completed was broadcast; now all three are for
-        real-time TaskNode/CrewNode visual status updates.
-        """
+        """Test that task lifecycle events are all broadcast via SSE."""
         sse_broadcast_event_types = ("task_started", "task_completed", "task_failed")
 
         assert "task_started" in sse_broadcast_event_types
@@ -69,170 +56,97 @@ class TestTraceManagerEventFiltering:
         assert "task_failed" in sse_broadcast_event_types
 
     def test_websocket_broadcast_uses_lowercase_event_types(self):
-        """Test that WebSocket broadcast checks use lowercase event types.
-
-        The event types from the trace writer use lowercase (e.g., 'task_started')
-        not uppercase (e.g., 'TASK_STARTED').
-        """
+        """Test that WebSocket broadcast checks use lowercase event types."""
         ws_broadcast_event_types = ["task_started", "task_completed", "task_failed"]
 
         for event_type in ws_broadcast_event_types:
             assert event_type == event_type.lower(), f"{event_type} should be lowercase"
 
-    def test_step_callback_creates_log_but_not_trace_for_regular_output(self):
-        """Test that step callback creates execution logs but not traces for regular output.
-
-        Traces are now handled by the event bus (logging_callbacks.py), except for
-        'Final Answer:' patterns which are still traced by step_callback.
-        """
+    def test_step_callback_creates_log(self):
+        """Test that step callback creates execution log."""
         from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
 
-        job_id = "test_job_123"
-        config = {"model": "test-model"}
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            step_callback, _ = create_execution_callbacks("test_job_123", {"model": "test"}, None)
 
-        with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_get_queue, \
-             patch("src.engines.crewai.callbacks.execution_callback.enqueue_log") as mock_enqueue_log:
-
-            mock_queue = MagicMock()
-            mock_get_queue.return_value = mock_queue
-
-            step_callback, task_callback = create_execution_callbacks(job_id, config, None)
-
-            # Test step callback with regular output (no "Final Answer:")
             mock_step_output = MagicMock()
             mock_step_output.output = "Agent output"
-            mock_step_output.agent = MagicMock()
-            mock_step_output.agent.role = "Test Agent"
-            mock_step_output.__class__.__name__ = "MockStepOutput"
-
             step_callback(mock_step_output)
 
-            # Execution log should be created
-            mock_enqueue_log.assert_called_once()
-            call_kwargs = mock_enqueue_log.call_args[1]
-            assert call_kwargs["execution_id"] == job_id
-            assert "[STEP]" in call_kwargs["content"]
+            mock_enqueue.assert_called_once()
+            kwargs = mock_enqueue.call_args[1]
+            assert kwargs["execution_id"] == "test_job_123"
+            assert "[STEP]" in kwargs["content"]
 
-            # Trace should NOT be created for regular output
-            mock_queue.put_nowait.assert_not_called()
-
-    def test_step_callback_creates_trace_for_final_answer(self):
-        """Test that step callback creates trace for 'Final Answer:' pattern."""
+    def test_step_callback_with_various_output_types(self):
+        """Test that step callback handles various output object types."""
         from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
 
-        job_id = "test_job_123"
-        config = {"model": "test-model"}
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            step_callback, _ = create_execution_callbacks("test_job", {}, None)
 
-        with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_get_queue, \
-             patch("src.engines.crewai.callbacks.execution_callback.enqueue_log"):
+            # Test with output attribute
+            mock_output = MagicMock()
+            mock_output.output = "via output attr"
+            step_callback(mock_output)
+            assert "via output attr" in mock_enqueue.call_args[1]["content"]
 
-            mock_queue = MagicMock()
-            mock_get_queue.return_value = mock_queue
+            mock_enqueue.reset_mock()
 
-            step_callback, _ = create_execution_callbacks(job_id, config, None)
+            # Test with raw attribute (no output)
+            mock_output2 = MagicMock(spec=[])
+            mock_output2.raw = "via raw attr"
+            step_callback(mock_output2)
+            assert "via raw attr" in mock_enqueue.call_args[1]["content"]
 
-            # Create mock AgentFinish with "Final Answer:" pattern
-            mock_step_output = MagicMock()
-            mock_step_output.output = "Final Answer: This is the final answer"
-            mock_step_output.agent = MagicMock()
-            mock_step_output.agent.role = "Test Agent"
-            mock_step_output.__class__.__name__ = "AgentFinish"
-
-            step_callback(mock_step_output)
-
-            # Trace SHOULD be created for "Final Answer:" pattern
-            mock_queue.put_nowait.assert_called_once()
-            trace_data = mock_queue.put_nowait.call_args[0][0]
-
-            # Verify trace structure
-            assert trace_data["job_id"] == job_id
-            assert trace_data["event_type"] == "agent_final_answer"
-            assert trace_data["event_context"] == "final_answer"
-            assert "Final Answer:" in trace_data["output_content"]
-
-    def test_group_context_in_traces(self):
-        """Test that group context is properly included in traces when created."""
+    def test_group_context_in_logs(self):
+        """Test that group context is properly included in logs."""
         from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
 
-        job_id = "test_job_123"
-        config = {"model": "test-model"}
-
-        # Create mock group context
         mock_group_context = MagicMock()
         mock_group_context.primary_group_id = "group_123"
         mock_group_context.group_email = "test@group.com"
 
-        with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_get_queue, \
-             patch("src.engines.crewai.callbacks.execution_callback.enqueue_log"):
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            step_callback, _ = create_execution_callbacks(
+                "test_job_123", {"model": "test"}, mock_group_context
+            )
 
-            mock_queue = MagicMock()
-            mock_get_queue.return_value = mock_queue
-
-            step_callback, _ = create_execution_callbacks(job_id, config, mock_group_context)
-
-            # Create AgentFinish with "Final Answer:" to trigger trace creation
             mock_output = MagicMock()
-            mock_output.output = "FINAL ANSWER: Test result"
-            mock_output.agent = MagicMock()
-            mock_output.agent.role = "Test Agent"
-            mock_output.__class__.__name__ = "AgentFinish"
-
+            mock_output.output = "Test result"
             step_callback(mock_output)
 
-            # Verify group context in trace
-            trace_data = mock_queue.put_nowait.call_args[0][0]
-            assert trace_data["group_id"] == "group_123"
-            assert trace_data["group_email"] == "test@group.com"
+            kwargs = mock_enqueue.call_args[1]
+            assert kwargs["group_context"] == mock_group_context
 
-    def test_trace_isolation_by_job_id(self):
-        """Test that traces are isolated by job ID."""
+    def test_log_isolation_by_job_id(self):
+        """Test that logs are isolated by job ID."""
         from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
 
-        job_1 = "execution_1"
-        job_2 = "execution_2"
-        config = {"model": "test"}
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            step_1, _ = create_execution_callbacks("execution_1", {}, None)
+            step_2, _ = create_execution_callbacks("execution_2", {}, None)
 
-        with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_get_queue, \
-             patch("src.engines.crewai.callbacks.execution_callback.enqueue_log"):
-
-            mock_queue = MagicMock()
-            mock_get_queue.return_value = mock_queue
-
-            # Create callbacks for different executions
-            step_1, _ = create_execution_callbacks(job_1, config, None)
-            step_2, _ = create_execution_callbacks(job_2, config, None)
-
-            # Create AgentFinish outputs with "Final Answer:" to trigger trace creation
             mock_output_1 = MagicMock()
-            mock_output_1.output = "Final Answer: identical output"
-            mock_output_1.agent = MagicMock()
-            mock_output_1.agent.role = "Same Agent"
-            mock_output_1.__class__.__name__ = "AgentFinish"
-
+            mock_output_1.output = "identical output"
             mock_output_2 = MagicMock()
-            mock_output_2.output = "Final Answer: identical output"
-            mock_output_2.agent = MagicMock()
-            mock_output_2.agent.role = "Same Agent"
-            mock_output_2.__class__.__name__ = "AgentFinish"
+            mock_output_2.output = "identical output"
 
-            # Call both callbacks
             step_1(mock_output_1)
             step_2(mock_output_2)
 
-            # Verify separate traces with different job IDs
-            assert mock_queue.put_nowait.call_count == 2
-
-            calls = mock_queue.put_nowait.call_args_list
-            trace_1 = calls[0][0][0]
-            trace_2 = calls[1][0][0]
-
-            # Traces should have different job IDs but same content
-            assert trace_1["job_id"] == job_1
-            assert trace_2["job_id"] == job_2
-            assert trace_1["job_id"] != trace_2["job_id"]
-
-            # But same event type
-            assert trace_1["event_type"] == trace_2["event_type"]
+            assert mock_enqueue.call_count == 2
+            calls = mock_enqueue.call_args_list
+            assert calls[0][1]["execution_id"] == "execution_1"
+            assert calls[1][1]["execution_id"] == "execution_2"
 
 
 class TestCallbackCrewIntegration:
@@ -242,89 +156,58 @@ class TestCallbackCrewIntegration:
         """Test that crew callbacks are created correctly."""
         from src.engines.crewai.callbacks.execution_callback import create_crew_callbacks
 
-        job_id = "test_job"
-        config = {"model": "test"}
+        callbacks = create_crew_callbacks("test_job", {"model": "test"}, None)
 
-        callbacks = create_crew_callbacks(job_id, config, None)
-
-        # Verify all required callbacks exist
         assert "on_start" in callbacks
         assert "on_complete" in callbacks
         assert "on_error" in callbacks
-
-        # Verify they're callable
         assert callable(callbacks["on_start"])
         assert callable(callbacks["on_complete"])
         assert callable(callbacks["on_error"])
 
-    def test_crew_start_callback_creates_log_only(self):
-        """Test crew start callback creates execution log but not trace.
-
-        Traces for crew_started are now handled by logging_callbacks.py via
-        CrewKickoffStartedEvent on the event bus.
-        """
+    def test_crew_start_callback_creates_log(self):
+        """Test crew start callback creates execution log."""
         from src.engines.crewai.callbacks.execution_callback import create_crew_callbacks
 
-        job_id = "test_job"
-        config = {"model": "test"}
-
-        with patch("src.engines.crewai.callbacks.execution_callback.enqueue_log") as mock_enqueue:
-            callbacks = create_crew_callbacks(job_id, config, None)
-
-            # Call start callback
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            callbacks = create_crew_callbacks("test_job", {"model": "test"}, None)
             callbacks["on_start"]()
 
-            # Verify log was enqueued
             mock_enqueue.assert_called_once()
-            call_args = mock_enqueue.call_args
-            kwargs = call_args[1] if len(call_args) > 1 else call_args.kwargs
-            assert kwargs["execution_id"] == job_id
+            kwargs = mock_enqueue.call_args[1]
+            assert kwargs["execution_id"] == "test_job"
             assert "CREW STARTED" in kwargs["content"]
 
-    def test_crew_complete_callback_creates_log_only(self):
-        """Test crew completion callback creates execution log but not trace.
-
-        Traces for crew_completed are now handled by logging_callbacks.py via
-        CrewKickoffCompletedEvent on the event bus.
-        """
+    def test_crew_complete_callback_creates_log(self):
+        """Test crew completion callback creates execution log."""
         from src.engines.crewai.callbacks.execution_callback import create_crew_callbacks
 
-        job_id = "test_job"
-        config = {"model": "test"}
-        result = "Test execution result"
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            callbacks = create_crew_callbacks("test_job", {"model": "test"}, None)
+            callbacks["on_complete"]("Test result")
 
-        with patch("src.engines.crewai.callbacks.execution_callback.enqueue_log") as mock_enqueue:
-            callbacks = create_crew_callbacks(job_id, config, None)
-
-            # Call completion callback
-            callbacks["on_complete"](result)
-
-            # Verify log was enqueued
             mock_enqueue.assert_called_once()
-            call_args = mock_enqueue.call_args
-            kwargs = call_args[1] if len(call_args) > 1 else call_args.kwargs
-            assert kwargs["execution_id"] == job_id
+            kwargs = mock_enqueue.call_args[1]
+            assert kwargs["execution_id"] == "test_job"
             assert "CREW COMPLETED" in kwargs["content"]
 
     def test_crew_error_callback(self):
         """Test crew error callback functionality."""
         from src.engines.crewai.callbacks.execution_callback import create_crew_callbacks
 
-        job_id = "test_job"
-        config = {"model": "test"}
-        error = Exception("Test error")
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            callbacks = create_crew_callbacks("test_job", {"model": "test"}, None)
+            callbacks["on_error"](Exception("Test error"))
 
-        with patch("src.engines.crewai.callbacks.execution_callback.enqueue_log") as mock_enqueue:
-            callbacks = create_crew_callbacks(job_id, config, None)
-
-            # Call error callback
-            callbacks["on_error"](error)
-
-            # Verify log was enqueued
             mock_enqueue.assert_called_once()
-            call_args = mock_enqueue.call_args
-            kwargs = call_args[1] if len(call_args) > 1 else call_args.kwargs
-            assert kwargs["execution_id"] == job_id
+            kwargs = mock_enqueue.call_args[1]
+            assert kwargs["execution_id"] == "test_job"
             assert "CREW FAILED" in kwargs["content"]
             assert "Test error" in kwargs["content"]
 
@@ -332,42 +215,24 @@ class TestCallbackCrewIntegration:
 class TestTaskCallback:
     """Test cases for task callback functionality."""
 
-    def test_task_callback_creates_log_only(self):
-        """Test task callback creates execution log but not trace.
-
-        Traces for task_completed are now handled by logging_callbacks.py via
-        TaskCompletedEvent on the event bus.
-        """
+    def test_task_callback_creates_log(self):
+        """Test task callback creates execution log."""
         from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
 
-        job_id = "test_job"
-        config = {"model": "test"}
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            _, task_callback = create_execution_callbacks("test_job", {"model": "test"}, None)
 
-        with patch("src.engines.crewai.callbacks.execution_callback.get_trace_queue") as mock_get_queue, \
-             patch("src.engines.crewai.callbacks.execution_callback.enqueue_log") as mock_enqueue_log:
-
-            mock_queue = MagicMock()
-            mock_get_queue.return_value = mock_queue
-
-            _, task_callback = create_execution_callbacks(job_id, config, None)
-
-            # Create mock task output
             mock_task_output = MagicMock()
             mock_task_output.raw = "Task result"
             mock_task_output.description = "Test task description"
-            mock_task_output.agent = MagicMock()
-            mock_task_output.agent.role = "Test Agent"
-
             task_callback(mock_task_output)
 
-            # Execution log should be created
-            mock_enqueue_log.assert_called_once()
-            call_kwargs = mock_enqueue_log.call_args[1]
-            assert call_kwargs["execution_id"] == job_id
-            assert "[TASK COMPLETED]" in call_kwargs["content"]
-
-            # Trace should NOT be created (handled by event bus)
-            mock_queue.put_nowait.assert_not_called()
+            mock_enqueue.assert_called_once()
+            kwargs = mock_enqueue.call_args[1]
+            assert kwargs["execution_id"] == "test_job"
+            assert "TASK COMPLETED" in kwargs["content"]
 
 
 class TestConfigSanitization:
@@ -377,7 +242,6 @@ class TestConfigSanitization:
         """Test that sensitive config data is sanitized."""
         from src.engines.crewai.callbacks.execution_callback import log_crew_initialization
 
-        job_id = "test_job"
         config_with_secrets = {
             "model": "test-model",
             "api_keys": {"secret": "hidden"},
@@ -386,19 +250,15 @@ class TestConfigSanitization:
             "normal_field": "visible"
         }
 
-        with patch("src.engines.crewai.callbacks.execution_callback.enqueue_log") as mock_enqueue:
-            log_crew_initialization(job_id, config_with_secrets, None)
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            log_crew_initialization("test_job", config_with_secrets, None)
 
             mock_enqueue.assert_called_once()
-            call_args = mock_enqueue.call_args
-            kwargs = call_args[1] if len(call_args) > 1 else call_args.kwargs
-            content = kwargs["content"]
-
-            # Should include safe fields
+            content = mock_enqueue.call_args[1]["content"]
             assert "test-model" in content
             assert "visible" in content
-
-            # Should exclude sensitive fields
             assert "secret" not in content
             assert "hidden" not in content
 
@@ -406,20 +266,365 @@ class TestConfigSanitization:
         """Test handling of empty or None config."""
         from src.engines.crewai.callbacks.execution_callback import log_crew_initialization
 
-        job_id = "test_job"
-
-        with patch("src.engines.crewai.callbacks.execution_callback.enqueue_log") as mock_enqueue:
-            # Test with None config
-            log_crew_initialization(job_id, None, None)
-
-            # Should not raise exception
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            log_crew_initialization("test_job", None, None)
             mock_enqueue.assert_called_once()
 
-            # Test with empty config
             mock_enqueue.reset_mock()
-            log_crew_initialization(job_id, {}, None)
-
+            log_crew_initialization("test_job", {}, None)
             mock_enqueue.assert_called_once()
-            call_args = mock_enqueue.call_args
-            kwargs = call_args[1] if len(call_args) > 1 else call_args.kwargs
-            assert kwargs["execution_id"] == job_id
+            assert mock_enqueue.call_args[1]["execution_id"] == "test_job"
+
+
+
+# ---------------------------------------------------------------------------
+# TraceManager.ensure_writer_started and stop_writer tests
+# ---------------------------------------------------------------------------
+
+_START_WRITER_PATCH = "src.services.execution_logs_service.start_logs_writer"
+_STOP_WRITER_PATCH = "src.services.execution_logs_service.stop_logs_writer"
+
+
+def _reset_trace_manager():
+    """Reset all TraceManager class-level state between tests."""
+    TraceManager._logs_writer_task = None
+    TraceManager._shutdown_event = None
+    TraceManager._writer_started = False
+    TraceManager._lock = None
+    TraceManager._writer_loop = None
+
+
+def _make_task_mock(done=False):
+    """Create a MagicMock that behaves like an asyncio.Task for done() checks."""
+    task = MagicMock()
+    task.done.return_value = done
+    return task
+
+
+@pytest.fixture(autouse=False)
+def clean_trace_manager():
+    """Fixture that resets TraceManager state before and after each test."""
+    _reset_trace_manager()
+    yield
+    _reset_trace_manager()
+
+
+class TestTraceManagerEnsureWriterStarted:
+    """Tests for TraceManager.ensure_writer_started (lines 36-65)."""
+
+    @pytest.mark.asyncio
+    async def test_first_call_starts_writer(self, clean_trace_manager):
+        """Test that the first call creates lock, shutdown event, and starts writer."""
+        mock_task = _make_task_mock(done=False)
+
+        with patch(
+            _START_WRITER_PATCH,
+            new_callable=AsyncMock,
+            return_value=mock_task,
+        ) as mock_start:
+            await TraceManager.ensure_writer_started()
+
+            mock_start.assert_called_once()
+            assert TraceManager._writer_started is True
+            assert TraceManager._logs_writer_task is mock_task
+            assert TraceManager._shutdown_event is not None
+            assert TraceManager._lock is not None
+            assert TraceManager._writer_loop is asyncio.get_running_loop()
+
+    @pytest.mark.asyncio
+    async def test_second_call_skips_start_when_task_running(self, clean_trace_manager):
+        """Test that a second call does not restart writer if task is still running."""
+        mock_task = _make_task_mock(done=False)
+
+        with patch(
+            _START_WRITER_PATCH,
+            new_callable=AsyncMock,
+            return_value=mock_task,
+        ) as mock_start:
+            await TraceManager.ensure_writer_started()
+            assert mock_start.call_count == 1
+
+            # Second call -- task is not done, should hit the else branch (line 63-65)
+            await TraceManager.ensure_writer_started()
+            assert mock_start.call_count == 1
+            assert TraceManager._writer_started is True
+
+    @pytest.mark.asyncio
+    async def test_restarts_when_task_done(self, clean_trace_manager):
+        """Test that writer is restarted when existing task is done."""
+        done_task = _make_task_mock(done=True)
+        new_task = _make_task_mock(done=False)
+
+        loop = asyncio.get_running_loop()
+        TraceManager._logs_writer_task = done_task
+        TraceManager._writer_loop = loop
+        TraceManager._lock = asyncio.Lock()
+        TraceManager._shutdown_event = asyncio.Event()
+
+        with patch(
+            _START_WRITER_PATCH,
+            new_callable=AsyncMock,
+            return_value=new_task,
+        ) as mock_start:
+            await TraceManager.ensure_writer_started()
+
+            mock_start.assert_called_once()
+            assert TraceManager._logs_writer_task is new_task
+            assert TraceManager._writer_started is True
+
+    @pytest.mark.asyncio
+    async def test_loop_change_resets_state(self, clean_trace_manager):
+        """Test that a loop change detection resets writer state."""
+        old_loop = MagicMock()
+        TraceManager._writer_loop = old_loop
+        TraceManager._writer_started = True
+        TraceManager._logs_writer_task = _make_task_mock(done=False)
+        TraceManager._lock = MagicMock()
+
+        mock_task = _make_task_mock(done=False)
+
+        with patch(
+            _START_WRITER_PATCH,
+            new_callable=AsyncMock,
+            return_value=mock_task,
+        ) as mock_start:
+            await TraceManager.ensure_writer_started()
+
+            mock_start.assert_called_once()
+            assert TraceManager._writer_started is True
+            assert TraceManager._writer_loop is asyncio.get_running_loop()
+
+    @pytest.mark.asyncio
+    async def test_lock_recreated_on_loop_change(self, clean_trace_manager):
+        """Test that lock is recreated when loop changes."""
+        old_loop = MagicMock()
+        old_lock = MagicMock()
+        TraceManager._writer_loop = old_loop
+        TraceManager._lock = old_lock
+
+        mock_task = _make_task_mock(done=False)
+
+        with patch(
+            _START_WRITER_PATCH,
+            new_callable=AsyncMock,
+            return_value=mock_task,
+        ):
+            await TraceManager.ensure_writer_started()
+
+            assert isinstance(TraceManager._lock, asyncio.Lock)
+            assert TraceManager._lock is not old_lock
+
+
+class TestTraceManagerStopWriter:
+    """Tests for TraceManager.stop_writer (lines 70-120)."""
+
+    @pytest.mark.asyncio
+    async def test_stop_writer_normal_success(self, clean_trace_manager):
+        """Test normal stop when writer is running and stop succeeds."""
+        loop = asyncio.get_running_loop()
+        mock_task = _make_task_mock(done=False)
+
+        TraceManager._writer_loop = loop
+        TraceManager._logs_writer_task = mock_task
+        TraceManager._writer_started = True
+        TraceManager._shutdown_event = asyncio.Event()
+        TraceManager._lock = asyncio.Lock()
+
+        with patch(
+            _STOP_WRITER_PATCH,
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as mock_stop:
+            await TraceManager.stop_writer()
+
+            mock_stop.assert_called_once_with(timeout=5.0)
+            assert TraceManager._shutdown_event.is_set()
+            assert TraceManager._logs_writer_task is None
+            assert TraceManager._writer_started is False
+            assert TraceManager._writer_loop is None
+
+    @pytest.mark.asyncio
+    async def test_stop_writer_normal_failure(self, clean_trace_manager):
+        """Test normal stop when stop_logs_writer returns False."""
+        loop = asyncio.get_running_loop()
+        mock_task = _make_task_mock(done=False)
+
+        TraceManager._writer_loop = loop
+        TraceManager._logs_writer_task = mock_task
+        TraceManager._writer_started = True
+        TraceManager._shutdown_event = asyncio.Event()
+        TraceManager._lock = asyncio.Lock()
+
+        with patch(
+            _STOP_WRITER_PATCH,
+            new_callable=AsyncMock,
+            return_value=False,
+        ) as mock_stop:
+            await TraceManager.stop_writer()
+
+            mock_stop.assert_called_once_with(timeout=5.0)
+            assert TraceManager._logs_writer_task is None
+            assert TraceManager._writer_started is False
+
+    @pytest.mark.asyncio
+    async def test_stop_writer_task_not_running(self, clean_trace_manager):
+        """Test stop when writer task is not running (None)."""
+        loop = asyncio.get_running_loop()
+        TraceManager._writer_loop = loop
+        TraceManager._logs_writer_task = None
+        TraceManager._writer_started = True
+        TraceManager._shutdown_event = asyncio.Event()
+        TraceManager._lock = asyncio.Lock()
+
+        with patch(
+            _STOP_WRITER_PATCH,
+            new_callable=AsyncMock,
+        ) as mock_stop:
+            await TraceManager.stop_writer()
+
+            mock_stop.assert_not_called()
+            assert TraceManager._writer_started is False
+            assert TraceManager._writer_loop is None
+
+    @pytest.mark.asyncio
+    async def test_stop_writer_task_already_done(self, clean_trace_manager):
+        """Test stop when writer task exists but is already done."""
+        loop = asyncio.get_running_loop()
+        mock_task = _make_task_mock(done=True)
+
+        TraceManager._writer_loop = loop
+        TraceManager._logs_writer_task = mock_task
+        TraceManager._writer_started = True
+        TraceManager._shutdown_event = asyncio.Event()
+        TraceManager._lock = asyncio.Lock()
+
+        with patch(
+            _STOP_WRITER_PATCH,
+            new_callable=AsyncMock,
+        ) as mock_stop:
+            await TraceManager.stop_writer()
+
+            mock_stop.assert_not_called()
+            assert TraceManager._writer_started is False
+
+    @pytest.mark.asyncio
+    async def test_stop_writer_loop_mismatch(self, clean_trace_manager):
+        """Test stop_writer with loop mismatch forces cleanup."""
+        old_loop = MagicMock()
+        mock_task = _make_task_mock(done=False)
+
+        TraceManager._writer_loop = old_loop
+        TraceManager._logs_writer_task = mock_task
+        TraceManager._writer_started = True
+        TraceManager._shutdown_event = asyncio.Event()
+        TraceManager._lock = asyncio.Lock()
+
+        await TraceManager.stop_writer()
+
+        mock_task.cancel.assert_called_once()
+        assert TraceManager._logs_writer_task is None
+        assert TraceManager._writer_started is False
+        assert TraceManager._writer_loop is None
+        assert TraceManager._shutdown_event is None
+        assert TraceManager._lock is None
+
+    @pytest.mark.asyncio
+    async def test_stop_writer_loop_mismatch_cancel_exception(self, clean_trace_manager):
+        """Test stop_writer with loop mismatch when cancel raises exception."""
+        old_loop = MagicMock()
+        mock_task = _make_task_mock(done=False)
+        mock_task.cancel.side_effect = RuntimeError("cannot cancel")
+
+        TraceManager._writer_loop = old_loop
+        TraceManager._logs_writer_task = mock_task
+        TraceManager._writer_started = True
+        TraceManager._shutdown_event = asyncio.Event()
+        TraceManager._lock = asyncio.Lock()
+
+        await TraceManager.stop_writer()
+
+        mock_task.cancel.assert_called_once()
+        assert TraceManager._logs_writer_task is None
+        assert TraceManager._writer_started is False
+        assert TraceManager._writer_loop is None
+
+    @pytest.mark.asyncio
+    async def test_stop_writer_loop_mismatch_task_already_done(self, clean_trace_manager):
+        """Test loop mismatch path when task is already done (skips cancel)."""
+        old_loop = MagicMock()
+        mock_task = _make_task_mock(done=True)
+
+        TraceManager._writer_loop = old_loop
+        TraceManager._logs_writer_task = mock_task
+        TraceManager._writer_started = True
+        TraceManager._shutdown_event = asyncio.Event()
+        TraceManager._lock = asyncio.Lock()
+
+        await TraceManager.stop_writer()
+
+        mock_task.cancel.assert_not_called()
+        assert TraceManager._logs_writer_task is None
+        assert TraceManager._writer_started is False
+
+    @pytest.mark.asyncio
+    async def test_stop_writer_lock_is_none(self, clean_trace_manager):
+        """Test stop_writer creates a lock when lock is None."""
+        loop = asyncio.get_running_loop()
+        TraceManager._writer_loop = loop
+        TraceManager._logs_writer_task = None
+        TraceManager._writer_started = False
+        TraceManager._shutdown_event = None
+        TraceManager._lock = None
+
+        await TraceManager.stop_writer()
+
+        assert isinstance(TraceManager._lock, asyncio.Lock)
+        assert TraceManager._writer_started is False
+        assert TraceManager._writer_loop is None
+
+    @pytest.mark.asyncio
+    async def test_stop_writer_shutdown_event_is_none(self, clean_trace_manager):
+        """Test stop_writer when shutdown_event is None (skips set)."""
+        loop = asyncio.get_running_loop()
+        TraceManager._writer_loop = loop
+        TraceManager._logs_writer_task = None
+        TraceManager._writer_started = True
+        TraceManager._shutdown_event = None
+        TraceManager._lock = asyncio.Lock()
+
+        await TraceManager.stop_writer()
+
+        assert TraceManager._writer_started is False
+        assert TraceManager._writer_loop is None
+
+    @pytest.mark.asyncio
+    async def test_stop_writer_no_prior_state(self, clean_trace_manager):
+        """Test stop_writer when no prior state exists (clean slate)."""
+        await TraceManager.stop_writer()
+
+        assert TraceManager._writer_started is False
+        assert TraceManager._writer_loop is None
+
+    @pytest.mark.asyncio
+    async def test_stop_writer_get_running_loop_raises(self, clean_trace_manager):
+        """Test stop_writer when get_running_loop raises RuntimeError (lines 72-73)."""
+        mock_task = _make_task_mock(done=False)
+        old_loop = MagicMock()
+        TraceManager._writer_loop = old_loop
+        TraceManager._logs_writer_task = mock_task
+        TraceManager._writer_started = True
+        TraceManager._shutdown_event = asyncio.Event()
+        TraceManager._lock = asyncio.Lock()
+
+        with patch(
+            "src.engines.crewai.trace_management.asyncio.get_running_loop",
+            side_effect=RuntimeError("no running loop"),
+        ):
+            # current_loop becomes None due to RuntimeError
+            # loop_mismatch is False because current_loop is None
+            # Falls through to normal lock path
+            await TraceManager.stop_writer()
+
+        assert TraceManager._writer_started is False
