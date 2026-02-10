@@ -1,0 +1,10 @@
+{
+  "name": "kasal-deploy",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "prebuild": "mkdir -p frontend/public/docs && cp docs/*.md frontend/public/docs/ 2>/dev/null || true",
+    "build": "cd frontend && npm install --include=dev && npm run build",
+    "postbuild": "rm -rf frontend_static && cp -r frontend/dist frontend_static && mkdir -p frontend_static/docs && cp docs/*.md frontend_static/docs/ 2>/dev/null || true"
+  }
+}
