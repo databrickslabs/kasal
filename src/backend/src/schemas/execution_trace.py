@@ -11,22 +11,26 @@ from pydantic import BaseModel, Field, ConfigDict
 
 class ExecutionTraceItem(BaseModel):
     """Schema for an execution trace entry."""
-    
+
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: int
     run_id: Optional[int] = None
     job_id: Optional[str] = None
-    timestamp: Optional[datetime] = None
     created_at: Optional[datetime] = None
     event_source: Optional[str] = None
     event_context: Optional[str] = None
     event_type: Optional[str] = None
-    input_data: Optional[Dict[str, Any]] = None
-    output_data: Optional[Dict[str, Any]] = None
     output: Optional[Any] = None  # Accept any type of output (dict or string)
     trace_metadata: Optional[Dict[str, Any]] = None  # Metadata including task_id
-    extra_data: Optional[Dict[str, Any]] = None  # Alias for trace_metadata for compatibility
+    # OTel span hierarchy fields
+    span_id: Optional[str] = None
+    trace_id: Optional[str] = None
+    parent_span_id: Optional[str] = None
+    # OTel-native fields
+    span_name: Optional[str] = None
+    status_code: Optional[str] = None
+    duration_ms: Optional[int] = None
     
 class ExecutionTraceList(BaseModel):
     """Schema for a paginated list of execution traces."""
