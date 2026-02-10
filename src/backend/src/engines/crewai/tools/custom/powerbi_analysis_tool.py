@@ -1507,7 +1507,7 @@ class PowerBIAnalysisTool(BaseTool):
 
         Handles:
         - NOT NULL → ISBLANK(column) = FALSE
-        - NOT STARTS WITH 'X' → FILTER(VALUES(column), NOT(STARTSWITH(column, "X")))
+        - NOT STARTS WITH 'X' → FILTER(VALUES(column), NOT(LEFT(column, LEN("X")) = "X"))
         - = 'Value' → column = "Value"
         - IN (val1, val2) → column IN {"val1", "val2"}
         """
@@ -1523,8 +1523,9 @@ class PowerBIAnalysisTool(BaseTool):
             if filter_desc.startswith("NOT STARTS WITH"):
                 # Extract the value
                 value = filter_desc.replace("NOT STARTS WITH", "").strip().strip("'\"")
-                # Use FILTER() for proper DAX filter context
-                return f'FILTER(VALUES({filter_name}), NOT(STARTSWITH({filter_name}, "{value}")))'
+                # Use LEFT() instead of STARTSWITH() - STARTSWITH not supported by Power BI API
+                prefix_length = len(value)
+                return f'FILTER(VALUES({filter_name}), NOT(LEFT({filter_name}, {prefix_length}) = "{value}"))'
 
             # Handle equals
             if filter_desc.startswith("= "):
@@ -2035,6 +2036,39 @@ class PowerBIAnalysisTool(BaseTool):
 - **Wrong**: `SUMMARIZECOLUMNS(Column, "Name", [Measure], FILTER(...))`
 - Return ONLY the DAX query - no explanations, no markdown code blocks
 
+#### String Prefix Filtering (CRITICAL - STARTSWITH NOT SUPPORTED)
+**NEVER use STARTSWITH() function** - Power BI API does not recognize this function and will return "Failed to resolve name 'STARTSWITH'" error.
+
+❌ **WRONG - Using STARTSWITH (not supported):**
+```dax
+FILTER(VALUES(Table[Column]), STARTSWITH(Table[Column], "7"))
+FILTER(VALUES(Table[Column]), NOT(STARTSWITH(Table[Column], "7")))
+```
+
+✅ **CORRECT - Use LEFT() function instead:**
+```dax
+FILTER(VALUES(Table[Column]), LEFT(Table[Column], 1) = "7")
+FILTER(VALUES(Table[Column]), LEFT(Table[Column], LEN("ABC")) = "ABC")
+FILTER(VALUES(Table[Column]), NOT(LEFT(Table[Column], 1) = "7"))
+```
+
+✅ **ALTERNATIVE - Use comparison operators for single character:**
+```dax
+FILTER(VALUES(Table[Column]), Table[Column] >= "7" && Table[Column] < "8")
+FILTER(VALUES(Table[Column]), NOT(Table[Column] >= "7" && Table[Column] < "8"))
+```
+
+✅ **ALTERNATIVE - Use SEARCH() function:**
+```dax
+FILTER(VALUES(Table[Column]), SEARCH("ABC", Table[Column], 1, 0) = 1)
+```
+
+**Examples:**
+- ✅ LEFT(account_code, 1) = "7" (check if starts with "7")
+- ✅ LEFT(account_code, 3) = "ABC" (check if starts with "ABC")
+- ✅ NOT(LEFT(account_code, 1) = "7") (exclude codes starting with "7")
+- ❌ STARTSWITH(account_code, "7") ← Will cause "Failed to resolve name 'STARTSWITH'" error
+
 #### Multi-Table Filtering (CRITICAL)
 **NEVER use ALL() with columns from different tables** - this causes "must be from the same table" error
 
@@ -2488,6 +2522,17 @@ Your previous attempt(s) to generate a DAX query failed. Analyze the errors and 
 6. **"OR operator" not working**:
    - ❌ Don't use: `Column = "Value1 OR Value2"`
    - ✅ Use: `Column IN ("Value1", "Value2")` or `Column IN {"Value1", "Value2"}`
+
+7. **"Failed to resolve name 'STARTSWITH'"**:
+   - ❌ NEVER use STARTSWITH() function - not supported by Power BI API
+   - ✅ Use LEFT() function instead: `LEFT(Column, 1) = "7"` or `LEFT(Column, LEN("ABC")) = "ABC"`
+   - ✅ Use comparison operators: `Column >= "7" && Column < "8"`
+   - ✅ Use SEARCH() function: `SEARCH("ABC", Column, 1, 0) = 1`
+   - **Example Fix:**
+     - Wrong: `STARTSWITH(account_code, "7")`
+     - Right: `LEFT(account_code, 1) = "7"`
+     - Wrong: `NOT(STARTSWITH(account_code, "7"))`
+     - Right: `NOT(LEFT(account_code, 1) = "7")`
 
 ### Step 4: Generate Different Query
 - **DO NOT repeat the same query** - try a different approach
