@@ -23,6 +23,16 @@ class ExecutionTrace(Base):
     trace_metadata = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
+    # OTel span hierarchy columns
+    span_id = Column(String(32), nullable=True, index=True)
+    trace_id = Column(String(32), nullable=True, index=True)
+    parent_span_id = Column(String(32), nullable=True)
+
+    # OTel-native fields
+    span_name = Column(String(200), nullable=True)       # Raw OTel span name (e.g. "CrewAI.task.execute")
+    status_code = Column(String(10), nullable=True)       # OTel status: "OK", "ERROR", "UNSET"
+    duration_ms = Column(Integer, nullable=True)           # Span duration in milliseconds
+
     # Group fields (formerly multi-tenant)
     group_id = Column(String(100), index=True, nullable=True)  # Group isolation
     group_email = Column(String(255), index=True, nullable=True)  # User email for audit
