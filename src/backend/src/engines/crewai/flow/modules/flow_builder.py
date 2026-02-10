@@ -540,8 +540,8 @@ class FlowBuilder:
                 logger.warning(f"  ⏭️  Skipping listener crew {crew_name} - no listen targets")
                 continue
 
-            # Find the starting point method(s) to listen to
-            # Match listen_to_task_ids to starting point methods
+            # Find the method(s) to listen to
+            # First check starting point methods
             method_names = []
             for starting_point_info in starting_points:
                 sp_method_name, sp_task_ids, sp_task_objects, sp_crew_name, sp_crew_data = starting_point_info
@@ -553,7 +553,20 @@ class FlowBuilder:
                             logger.info(f"  Found starting point {sp_method_name} matches listen target {sp_task_id}")
                         break
 
-            logger.info(f"  Matched {len(method_names)} starting point methods: {method_names}")
+            # Then check other listener crew methods (enables listener-to-listener chaining)
+            if not method_names:
+                for other_listener_info in listener_crews:
+                    ol_method_name, ol_crew_id, ol_task_ids, ol_tasks, ol_crew_name, ol_listen_to, ol_condition, ol_crew_data = other_listener_info
+                    if ol_method_name == method_name:
+                        continue  # Skip self
+                    for ol_task_id in ol_task_ids:
+                        if str(ol_task_id) in [str(tid) for tid in listen_to_task_ids]:
+                            if ol_method_name not in method_names:
+                                method_names.append(ol_method_name)
+                                logger.info(f"  Found listener {ol_method_name} (crew '{ol_crew_name}') matches listen target {ol_task_id}")
+                            break
+
+            logger.info(f"  Matched {len(method_names)} methods: {method_names}")
 
             # Default to first starting point if no matches found
             default_start_method = starting_points[0][0] if starting_points else "starting_point_0"
