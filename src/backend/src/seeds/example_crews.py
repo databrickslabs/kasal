@@ -43,7 +43,7 @@ DYNAMIC_CREW_AGENT = {
     "tools": [],
     "tool_configs": {},
     "max_iter": 25,
-    "max_rpm": 1,
+    "max_rpm": 10,  # Changed from 1 to 10 to avoid artificial rate limiting delays
     "max_execution_time": 300,
     "verbose": False,
     "allow_delegation": False,
@@ -207,7 +207,7 @@ STATIC_CREW_AGENT = {
     "tools": ["74"],  # Optional additional tool
     "tool_configs": None,
     "max_iter": 25,
-    "max_rpm": 1,
+    "max_rpm": 10,  # Changed from 1 to 10 to avoid artificial rate limiting delays
     "max_execution_time": 300,
     "verbose": False,
     "allow_delegation": False,
