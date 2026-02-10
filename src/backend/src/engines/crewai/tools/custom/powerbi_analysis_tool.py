@@ -19,10 +19,15 @@ import json
 import re
 from typing import Any, Optional, Type, Dict, List
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 import httpx
+
+# Import cache service and database session factory
+from src.services.powerbi_semantic_model_cache_service import PowerBISemanticModelCacheService
+from src.db.session import async_session_factory
 
 logger = logging.getLogger(__name__)
 
@@ -528,52 +533,145 @@ class PowerBIAnalysisTool(BaseTool):
             results["errors"].append(f"Authentication error: {str(e)}")
             return self._format_output(results, output_format)
 
-        # Step 2: Extract model context (measures, relationships)
+        # Step 1.5: Check cache for today's semantic model metadata
+        # This caches: measures, relationships, schema, sample_data, default_filters
+        # User inputs (business_mappings, field_synonyms, active_filters) are always fresh from config
+        cache_hit = False
+        cached_metadata = None
+        group_id = config.get("group_id", "default")
+        report_id = config.get("report_id")
+
+        # Initialize model_context (will be populated from cache or fresh fetch)
+        model_context = {
+            "measures": [],
+            "relationships": [],
+            "tables": [],
+            "columns": [],
+            "sample_data": {}
+        }
+
         try:
-            model_context = await self._extract_model_context(
-                workspace_id, dataset_id, access_token, config
-            )
-            logger.info(f"Model context extracted: {len(model_context['measures'])} measures, {len(model_context['relationships'])} relationships")
-
-            # Step 2b: Enrich model context with metadata (Microsoft Copilot-style)
-            # This adds column descriptions, sample values, and enhanced metadata
-            try:
-                model_context = await self._enrich_model_context_with_metadata(
-                    model_context, workspace_id, dataset_id, access_token, config
+            async with async_session_factory() as session:
+                cache_service = PowerBISemanticModelCacheService(session)
+                cached_metadata = await cache_service.get_cached_metadata(
+                    group_id=group_id,
+                    dataset_id=dataset_id,
+                    workspace_id=workspace_id,
+                    report_id=report_id
                 )
-                logger.info("[Context Enrichment] Model context enriched with metadata")
-            except Exception as e:
-                logger.warning(f"[Context Enrichment] Metadata enrichment failed (continuing with basic context): {e}")
 
-            # Step 2c: Auto-extract default filters from report (if report_id provided)
-            # These are report-level filters that apply to all pages
-            # They are MERGED with any user-provided active_filters
-            report_id = config.get("report_id")
-            if report_id:
-                try:
-                    report_level_filters = await self._extract_default_filters(
-                        workspace_id, report_id, access_token
-                    )
-                    if report_level_filters:
-                        # Get existing active_filters (user-provided or empty)
+            if cached_metadata:
+                cache_hit = True
+                logger.info(f"✨ [CACHE HIT] Using cached metadata for dataset {dataset_id} (date: {date.today()})")
+                logger.info(f"   Cached: {len(cached_metadata.get('measures', []))} measures, "
+                           f"{len(cached_metadata.get('relationships', []))} relationships, "
+                           f"{len(cached_metadata.get('sample_data', {}))} sample columns")
+
+                # Load model context from cache
+                model_context = {
+                    "measures": cached_metadata.get("measures", []),
+                    "relationships": cached_metadata.get("relationships", []),
+                    "tables": cached_metadata.get("schema", {}).get("tables", []),
+                    "columns": cached_metadata.get("schema", {}).get("columns", []),
+                    "sample_data": cached_metadata.get("sample_data", {})
+                }
+
+                # Load default filters from cache (if report_id was provided)
+                if report_id and "default_filters" in cached_metadata:
+                    cached_filters = cached_metadata["default_filters"]
+                    if cached_filters:
+                        # Merge cached report-level filters with user-provided active_filters
                         existing_filters = config.get("active_filters", {})
                         if not existing_filters:
                             existing_filters = {}
-
-                        # Merge: report-level filters first, then user filters (user filters take precedence)
-                        merged_filters = {**report_level_filters, **existing_filters}
-
+                        merged_filters = {**cached_filters, **existing_filters}
                         config["active_filters"] = merged_filters
-                        logger.info(f"[Context Enrichment] Auto-extracted {len(report_level_filters)} report-level filters")
-                        logger.info(f"[Context Enrichment] Total active filters: {len(merged_filters)} (report-level + user-provided)")
-                except Exception as e:
-                    logger.warning(f"[Context Enrichment] Failed to extract default filters (continuing without): {e}")
+                        logger.info(f"   Loaded {len(cached_filters)} default filters from cache")
 
-            results["model_context"] = model_context
+            else:
+                logger.info(f"⚡ [CACHE MISS] Fetching fresh metadata for dataset {dataset_id}")
 
         except Exception as e:
-            results["errors"].append(f"Model extraction error: {str(e)}")
-            logger.error(f"Model extraction failed: {e}")
+            logger.warning(f"[Cache] Cache check failed, fetching fresh data: {e}")
+            cache_hit = False
+
+        # Step 2: Extract model context (measures, relationships) - ONLY if not cached
+        if not cache_hit:
+            try:
+                model_context = await self._extract_model_context(
+                    workspace_id, dataset_id, access_token, config
+                )
+                logger.info(f"Model context extracted: {len(model_context['measures'])} measures, {len(model_context['relationships'])} relationships")
+
+                # Step 2b: Enrich model context with metadata (Microsoft Copilot-style)
+                # This adds column descriptions, sample values, and enhanced metadata
+                try:
+                    model_context = await self._enrich_model_context_with_metadata(
+                        model_context, workspace_id, dataset_id, access_token, config
+                    )
+                    logger.info("[Context Enrichment] Model context enriched with metadata")
+                except Exception as e:
+                    logger.warning(f"[Context Enrichment] Metadata enrichment failed (continuing with basic context): {e}")
+
+                # Step 2c: Auto-extract default filters from report (if report_id provided)
+                # These are report-level filters that apply to all pages
+                # They are MERGED with any user-provided active_filters
+                if report_id:
+                    try:
+                        report_level_filters = await self._extract_default_filters(
+                            workspace_id, report_id, access_token
+                        )
+                        if report_level_filters:
+                            # Get existing active_filters (user-provided or empty)
+                            existing_filters = config.get("active_filters", {})
+                            if not existing_filters:
+                                existing_filters = {}
+
+                            # Merge: report-level filters first, then user filters (user filters take precedence)
+                            merged_filters = {**report_level_filters, **existing_filters}
+
+                            config["active_filters"] = merged_filters
+                            logger.info(f"[Context Enrichment] Auto-extracted {len(report_level_filters)} report-level filters")
+                            logger.info(f"[Context Enrichment] Total active filters: {len(merged_filters)} (report-level + user-provided)")
+                    except Exception as e:
+                        logger.warning(f"[Context Enrichment] Failed to extract default filters (continuing without): {e}")
+
+                # Step 2d: Save to cache for next time (same day, same dataset)
+                try:
+                    async with async_session_factory() as session:
+                        cache_service = PowerBISemanticModelCacheService(session)
+
+                        # Build metadata dict for caching
+                        cache_metadata = cache_service.build_metadata_dict(
+                            measures=model_context.get("measures", []),
+                            relationships=model_context.get("relationships", []),
+                            schema={
+                                "tables": model_context.get("tables", []),
+                                "columns": model_context.get("columns", [])
+                            },
+                            sample_data=model_context.get("sample_data", {}),
+                            default_filters=config.get("active_filters") if report_id else None
+                        )
+
+                        await cache_service.save_metadata(
+                            group_id=group_id,
+                            dataset_id=dataset_id,
+                            workspace_id=workspace_id,
+                            metadata=cache_metadata,
+                            report_id=report_id
+                        )
+
+                        logger.info(f"💾 [CACHE SAVED] Metadata cached for dataset {dataset_id} (date: {date.today()})")
+
+                except Exception as e:
+                    logger.warning(f"[Cache] Failed to save cache (continuing without): {e}")
+
+            except Exception as e:
+                results["errors"].append(f"Model extraction error: {str(e)}")
+                logger.error(f"Model extraction failed: {e}")
+
+        # Set model context in results (either from cache or fresh fetch)
+        results["model_context"] = model_context
 
         # Step 3: Generate DAX using LLM with retry mechanism
         max_retries = config.get("max_dax_retries", 5)
