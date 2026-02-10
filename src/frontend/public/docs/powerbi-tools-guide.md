@@ -8,7 +8,7 @@ Kasal provides seven specialized tools for migrating different aspects of Power 
 
 | Tool | ID | Purpose | SVP Type | Details |
 |------|----|---------|----------|---------|
-| **Comprehensive Analysis Tool** | 72 | Answer business questions via intelligent DAX generation with self-correction | **Admin API**  | [Full Guide](./tool-comprehensive-analysis.md) |
+| **Comprehensive Analysis Tool** | 72 | Answer business questions via intelligent DAX generation with self-correction | **Admin API** | [Full Guide](./tool-comprehensive-analysis.md) |
 | **Measure Conversion Pipeline** | 73 | Convert DAX measures to UC Metrics/SQL | Non-Admin API | [Full Guide](./tool-measure-conversion.md) |
 | **M-Query Conversion Pipeline** | 74 | Convert M-Query/Power Query to SQL views | **Admin API** | [Full Guide](./tool-mquery-conversion.md) |
 | **Power BI Relationships Tool** | 75 | Extract relationships as FK constraints | Non-Admin API | [Full Guide](./tool-relationships-conversion.md) |
