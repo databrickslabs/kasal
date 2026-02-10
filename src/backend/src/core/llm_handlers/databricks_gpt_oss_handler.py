@@ -320,11 +320,19 @@ class DatabricksGPTOSSLLM(LLM):
             logger.error(f"Error in GPT-OSS call: {e}")
             raise
     
-    def _handle_non_streaming_response(self, params, callbacks=None, available_functions=None, from_task=None, from_agent=None):
+    def _handle_non_streaming_response(self, params, callbacks=None, available_functions=None, from_task=None, from_agent=None, response_model=None, **kwargs):
         """
         Override to filter parameters and handle GPT-OSS response format.
+
+        Args:
+            response_model: Optional response model (ignored, for compatibility with structured outputs)
+            **kwargs: Additional arguments (ignored for compatibility)
         """
-        # Filter out unsupported parameters
+        # Filter out unsupported parameters (like response_model from structured outputs)
+        if response_model is not None:
+            logger.warning(f"[DatabricksGPTOSSLLM] Ignoring unsupported response_model parameter in _handle_non_streaming_response")
+
+        # Filter out unsupported parameters from params dict
         if isinstance(params, dict):
             params = DatabricksGPTOSSHandler.filter_unsupported_params(params)
             logger.info(f"[_handle_non_streaming_response] Filtered params for GPT-OSS")
@@ -645,16 +653,25 @@ class DatabricksRetryLLM(LLM):
             raise last_error
         return ""
 
-    def _handle_non_streaming_response(self, params, callbacks=None, available_functions=None, from_task=None, from_agent=None):
+    def _handle_non_streaming_response(self, params, callbacks=None, available_functions=None, from_task=None, from_agent=None, response_model=None, **kwargs):
         """
         Override to add retry logic for empty responses in non-streaming mode.
 
         Rate limit errors get special treatment with longer backoffs (30s, 60s, 120s)
         and more retries (5 vs 3) since they just need time for quota to reset.
+
+        Args:
+            response_model: Optional response model (ignored, for compatibility with structured outputs)
+            **kwargs: Additional arguments (ignored for compatibility)
         """
         import time
 
         crew_log = self._get_crew_logger()
+
+        # Filter out unsupported parameters (like response_model from structured outputs)
+        if response_model is not None:
+            crew_log.warning(f"[DatabricksRetryLLM] Ignoring unsupported response_model parameter in _handle_non_streaming_response")
+
         last_error = None
         is_rate_limit = False
         attempt = 0
