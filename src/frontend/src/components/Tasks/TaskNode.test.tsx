@@ -15,6 +15,7 @@ import { ThemeProvider, createTheme } from '@mui/material';
 import TaskNode from './TaskNode';
 
 // Mock ReactFlow
+const mockSetNodes = vi.fn();
 vi.mock('reactflow', () => ({
   Handle: ({ position, type, id, style }: { position: string; type: string; id: string; style?: object }) => (
     <div data-testid={`handle-${type}-${id || position}`} data-position={position} style={style} />
@@ -26,7 +27,7 @@ vi.mock('reactflow', () => ({
     Right: 'right',
   },
   useReactFlow: () => ({
-    setNodes: vi.fn(),
+    setNodes: mockSetNodes,
     setEdges: vi.fn(),
     getNodes: vi.fn(() => []),
     getEdges: vi.fn(() => []),
@@ -71,14 +72,29 @@ vi.mock('../../api/ToolService', () => ({
   Tool: {},
 }));
 
+// Mock TaskService
+const mockUpdateTask = vi.fn(() => Promise.resolve({ id: 'task-123', tools: [] }));
+vi.mock('../../api/TaskService', () => ({
+  Task: {},
+  TaskService: {
+    updateTask: (...args: unknown[]) => mockUpdateTask(...args),
+  },
+}));
+
 // Mock child components
 vi.mock('./TaskForm', () => ({
   default: () => <div data-testid="task-form">Task Form</div>,
 }));
 
 vi.mock('./QuickToolSelectionDialog', () => ({
-  default: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="tool-dialog">Tool Dialog</div> : null,
+  default: ({ open, onSelectTools }: { open: boolean; onSelectTools: (tools: string[]) => void }) =>
+    open ? (
+      <div data-testid="tool-dialog">
+        <button data-testid="select-tools-btn" onClick={() => onSelectTools(['tool-a', 'tool-b'])}>
+          Select Tools
+        </button>
+      </div>
+    ) : null,
 }));
 
 const theme = createTheme();
@@ -298,6 +314,72 @@ describe('TaskNode', () => {
       await waitFor(() => {
         expect(screen.getByTestId('tool-dialog')).toBeInTheDocument();
       });
+    });
+
+    it('should persist tool selection to backend when task has a taskId', async () => {
+      mockUpdateTask.mockResolvedValueOnce({ id: 'task-123', tools: ['tool-a', 'tool-b'] });
+      renderTaskNode();
+
+      // Open tool dialog
+      fireEvent.click(screen.getByText('Tools: 2'));
+      await waitFor(() => {
+        expect(screen.getByTestId('tool-dialog')).toBeInTheDocument();
+      });
+
+      // Select tools via the mock dialog button
+      fireEvent.click(screen.getByTestId('select-tools-btn'));
+
+      await waitFor(() => {
+        expect(mockUpdateTask).toHaveBeenCalledWith('task-123', { tools: ['tool-a', 'tool-b'] });
+      });
+    });
+
+    it('should not call backend when task has no taskId', async () => {
+      renderTaskNode({
+        data: {
+          ...defaultProps.data,
+          taskId: '',
+        },
+      });
+
+      // Open tool dialog
+      fireEvent.click(screen.getByText('Tools: 2'));
+      await waitFor(() => {
+        expect(screen.getByTestId('tool-dialog')).toBeInTheDocument();
+      });
+
+      // Select tools
+      fireEvent.click(screen.getByTestId('select-tools-btn'));
+
+      // setNodes should still be called (local state update)
+      expect(mockSetNodes).toHaveBeenCalled();
+      // But backend should NOT be called
+      expect(mockUpdateTask).not.toHaveBeenCalled();
+    });
+
+    it('should update local node state even if backend call fails', async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockUpdateTask.mockRejectedValueOnce(new Error('Network error'));
+      renderTaskNode();
+
+      // Open tool dialog
+      fireEvent.click(screen.getByText('Tools: 2'));
+      await waitFor(() => {
+        expect(screen.getByTestId('tool-dialog')).toBeInTheDocument();
+      });
+
+      // Select tools
+      fireEvent.click(screen.getByTestId('select-tools-btn'));
+
+      // Local state should still be updated
+      expect(mockSetNodes).toHaveBeenCalled();
+
+      // Backend was called but failed
+      await waitFor(() => {
+        expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to persist tool selection:', expect.any(Error));
+      });
+
+      consoleErrorSpy.mockRestore();
     });
   });
 
