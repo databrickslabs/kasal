@@ -48,12 +48,12 @@ class FlowExecutionRepository:
         )
         
         self.session.add(execution)
-        await self.session.commit()
+        await self.session.flush()
         await self.session.refresh(execution)
-        
+
         logger.info(f"Created flow execution with ID {execution.id} for flow {execution.flow_id}, job {execution.job_id}")
         return execution
-    
+
     async def get(self, execution_id: int) -> Optional[FlowExecution]:
         """
         Get a flow execution by ID.
@@ -144,14 +144,14 @@ class FlowExecutionRepository:
         )
         
         result = await self.session.execute(stmt)
-        await self.session.commit()
-        
+        await self.session.flush()
+
         updated = result.scalars().first()
         if updated:
             logger.info(f"Updated flow execution {execution_id} with status {execution_data.status}")
-        
+
         return updated
-        
+
     async def get_all(self) -> List[FlowExecution]:
         """
         Get all flow executions.
@@ -177,7 +177,7 @@ class FlowExecutionRepository:
 
         stmt = sql_delete(FlowExecution).where(FlowExecution.id == execution_id)
         result = await self.session.execute(stmt)
-        await self.session.commit()
+        await self.session.flush()
 
         deleted = result.rowcount > 0
         if deleted:
@@ -214,9 +214,9 @@ class FlowNodeExecutionRepository:
         )
         
         self.session.add(node_execution)
-        await self.session.commit()
+        await self.session.flush()
         await self.session.refresh(node_execution)
-        
+
         logger.info(f"Created node execution with ID {node_execution.id} for node {node_execution.node_id}")
         return node_execution
     
@@ -283,8 +283,8 @@ class FlowNodeExecutionRepository:
         )
         
         result = await self.session.execute(stmt)
-        await self.session.commit()
-        
+        await self.session.flush()
+
         updated = result.scalars().first()
         if updated:
             logger.info(f"Updated node execution {node_execution_id} with status {node_execution_data.status}")
@@ -310,7 +310,7 @@ class FlowNodeExecutionRepository:
 
         stmt = sql_delete(FlowNodeExecution).where(FlowNodeExecution.id == node_execution_id)
         result = await self.session.execute(stmt)
-        await self.session.commit()
+        await self.session.flush()
 
         deleted = result.rowcount > 0
         if deleted:

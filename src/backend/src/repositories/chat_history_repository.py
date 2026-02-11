@@ -192,7 +192,6 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
                 await self.session.delete(message)
             
             await self.session.flush()
-            await self.session.commit()
             return True
         except Exception as e:
             await self.session.rollback()

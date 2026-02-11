@@ -66,7 +66,7 @@ class PowerBIConfigRepository(BaseRepository[PowerBIConfig]):
         if group_id is not None:
             query = query.where(self.model.group_id == group_id)
         await self.session.execute(query)
-        await self.session.commit()  # Make sure the changes are committed
+        await self.session.flush()
 
     async def create_config(self, config_data: dict) -> PowerBIConfig:
         """
@@ -94,6 +94,5 @@ class PowerBIConfigRepository(BaseRepository[PowerBIConfig]):
         db_config = PowerBIConfig(**db_data)
         self.session.add(db_config)
         await self.session.flush()
-        await self.session.commit()  # Make sure the changes are committed
 
         return db_config

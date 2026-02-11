@@ -93,7 +93,7 @@ class ToolRepository(BaseRepository[Tool]):
 
             # Toggle the enabled status
             tool.enabled = not tool.enabled
-            await self.session.commit()
+            await self.session.flush()
             await self.session.refresh(tool)
             return tool
         except Exception as e:
@@ -120,7 +120,7 @@ class ToolRepository(BaseRepository[Tool]):
                 return None
 
             tool.config = config
-            await self.session.commit()
+            await self.session.flush()
             await self.session.refresh(tool)
             return tool
         except Exception as e:
@@ -140,7 +140,7 @@ class ToolRepository(BaseRepository[Tool]):
             if not tool:
                 return None
             tool.config = config
-            await self.session.commit()
+            await self.session.flush()
             await self.session.refresh(tool)
             return tool
         except Exception as e:
@@ -160,7 +160,7 @@ class ToolRepository(BaseRepository[Tool]):
             # Update all tools where enabled is False to True
             stmt = update(self.model).where(self.model.enabled == False).values(enabled=True)
             await self.session.execute(stmt)
-            await self.session.commit()
+            await self.session.flush()
             
             # Return all tools (now enabled)
             return await self.list()
@@ -182,7 +182,7 @@ class ToolRepository(BaseRepository[Tool]):
             # Update all tools where enabled is True to False
             stmt = update(self.model).where(self.model.enabled == True).values(enabled=False)
             await self.session.execute(stmt)
-            await self.session.commit()
+            await self.session.flush()
             
             # Return all tools (now disabled)
             return await self.list()
