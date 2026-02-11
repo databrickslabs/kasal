@@ -86,9 +86,8 @@ class MemoryBackendBaseService:
             if len(all_backends) == 1:
                 await repo.set_default(group_id, backend.id)
             
-            await self.session.commit()
             return backend
-            
+
         except Exception as e:
             await self.session.rollback()
             logger.error(f"Error creating memory backend: {e}")
@@ -186,9 +185,8 @@ class MemoryBackendBaseService:
                 if hasattr(backend, key) and key != "backend_type":  # backend_type already handled
                     setattr(backend, key, value)
             
-            await self.session.commit()
             return backend
-            
+
         except Exception as e:
             await self.session.rollback()
             logger.error(f"Error updating memory backend: {e}")
@@ -226,7 +224,6 @@ class MemoryBackendBaseService:
                         break
             
             await repo.delete(backend_id)
-            await self.session.commit()
             return True
             
         except Exception as e:
@@ -248,8 +245,6 @@ class MemoryBackendBaseService:
         try:
             repo = self.repository
             success = await repo.set_default(group_id, backend_id)
-            if success:
-                await self.session.commit()
             return success
         except Exception as e:
             await self.session.rollback()
@@ -318,7 +313,6 @@ class MemoryBackendBaseService:
             }
             
             backend = await repo.create(disabled_config)
-            await self.session.commit()
             
             return {
                 "success": True,
@@ -360,9 +354,8 @@ class MemoryBackendBaseService:
                     deleted_count += 1
                     logger.info(f"Deleted disabled configuration: {backend.id}")
             
-            await self.session.commit()
             return deleted_count
-            
+
         except Exception as e:
             logger.error(f"Error deleting disabled configurations: {e}")
             raise
