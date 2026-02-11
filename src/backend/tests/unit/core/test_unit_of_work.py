@@ -25,7 +25,7 @@ class TestUnitOfWork:
         assert uow.api_key_repository is None
         assert uow.model_config_repository is None
         assert uow.template_repository is None
-        assert uow.task_tracking_repository is None
+
         assert uow.schema_repository is None
         assert uow.databricks_config_repository is None
         assert uow.mcp_server_repository is None
@@ -48,23 +48,22 @@ class TestUnitOfWork:
                 with patch('src.repositories.api_key_repository.ApiKeyRepository') as mock_api_key_repo:
                     with patch('src.repositories.model_config_repository.ModelConfigRepository') as mock_model_config_repo:
                         with patch('src.repositories.template_repository.TemplateRepository') as mock_template_repo:
-                            with patch('src.repositories.task_tracking_repository.TaskTrackingRepository') as mock_task_tracking_repo:
-                                with patch('src.repositories.schema_repository.SchemaRepository') as mock_schema_repo:
-                                    with patch('src.repositories.databricks_config_repository.DatabricksConfigRepository') as mock_databricks_config_repo:
-                                        with patch('src.repositories.mcp_repository.MCPServerRepository') as mock_mcp_server_repo:
-                                            with patch('src.repositories.mcp_repository.MCPSettingsRepository') as mock_mcp_settings_repo:
-                                                with patch('src.repositories.engine_config_repository.EngineConfigRepository') as mock_engine_config_repo:
-                                                    uow = UnitOfWork()
-                                                    
-                                                    # Act
-                                                    result = await uow.__aenter__()
-                                                    
-                                                    # Assert
-                                                    assert result == uow
-                                                    assert uow._session == mock_session_context
-                                                    # Verify repositories were created (simplified check)
-                                                    assert uow.tool_repository is not None
-                                                    assert uow.api_key_repository is not None
+                            with patch('src.repositories.schema_repository.SchemaRepository') as mock_schema_repo:
+                                with patch('src.repositories.databricks_config_repository.DatabricksConfigRepository') as mock_databricks_config_repo:
+                                    with patch('src.repositories.mcp_repository.MCPServerRepository') as mock_mcp_server_repo:
+                                        with patch('src.repositories.mcp_repository.MCPSettingsRepository') as mock_mcp_settings_repo:
+                                            with patch('src.repositories.engine_config_repository.EngineConfigRepository') as mock_engine_config_repo:
+                                                uow = UnitOfWork()
+
+                                                # Act
+                                                result = await uow.__aenter__()
+
+                                                # Assert
+                                                assert result == uow
+                                                assert uow._session == mock_session_context
+                                                # Verify repositories were created (simplified check)
+                                                assert uow.tool_repository is not None
+                                                assert uow.api_key_repository is not None
     
     @pytest.mark.asyncio
     async def test_aexit_success_commit(self):
@@ -126,7 +125,7 @@ class TestUnitOfWork:
         uow.api_key_repository = Mock()
         uow.model_config_repository = Mock()
         uow.template_repository = Mock()
-        uow.task_tracking_repository = Mock()
+
         uow.schema_repository = Mock()
         uow.databricks_config_repository = Mock()
         uow.mcp_server_repository = Mock()
@@ -141,7 +140,7 @@ class TestUnitOfWork:
         assert uow.api_key_repository is None
         assert uow.model_config_repository is None
         assert uow.template_repository is None
-        assert uow.task_tracking_repository is None
+
         assert uow.schema_repository is None
         assert uow.databricks_config_repository is None
         assert uow.mcp_server_repository is None
@@ -191,19 +190,18 @@ class TestUnitOfWork:
                 with patch('src.repositories.api_key_repository.ApiKeyRepository'):
                     with patch('src.repositories.model_config_repository.ModelConfigRepository'):
                         with patch('src.repositories.template_repository.TemplateRepository'):
-                            with patch('src.repositories.task_tracking_repository.TaskTrackingRepository'):
-                                with patch('src.repositories.schema_repository.SchemaRepository'):
-                                    with patch('src.repositories.databricks_config_repository.DatabricksConfigRepository'):
-                                        with patch('src.repositories.mcp_repository.MCPServerRepository'):
-                                            with patch('src.repositories.mcp_repository.MCPSettingsRepository'):
-                                                with patch('src.repositories.engine_config_repository.EngineConfigRepository'):
-                                                    # Act
-                                                    async with UnitOfWork() as uow:
-                                                        assert uow.tool_repository is not None
-                                                        assert uow._session == mock_session_context
-                                                    
-                                                    # Assert - the context manager worked
-                                                    # (detailed assertions are covered in other tests)
+                            with patch('src.repositories.schema_repository.SchemaRepository'):
+                                with patch('src.repositories.databricks_config_repository.DatabricksConfigRepository'):
+                                    with patch('src.repositories.mcp_repository.MCPServerRepository'):
+                                        with patch('src.repositories.mcp_repository.MCPSettingsRepository'):
+                                            with patch('src.repositories.engine_config_repository.EngineConfigRepository'):
+                                                # Act
+                                                async with UnitOfWork() as uow:
+                                                    assert uow.tool_repository is not None
+                                                    assert uow._session == mock_session_context
+
+                                                # Assert - the context manager worked
+                                                # (detailed assertions are covered in other tests)
 
 
 @pytest.mark.skip(reason="SyncUnitOfWork is deprecated; async-only architecture now")
@@ -231,7 +229,7 @@ class TestSyncUnitOfWork:
         assert uow.api_key_repository is None
         assert uow.model_config_repository is None
         assert uow.template_repository is None
-        assert uow.task_tracking_repository is None
+
         assert uow.schema_repository is None
         assert uow.databricks_config_repository is None
         assert uow.mcp_server_repository is None
@@ -249,23 +247,22 @@ class TestSyncUnitOfWork:
                 with patch('src.repositories.api_key_repository.ApiKeyRepository') as mock_api_key_repo:
                     with patch('src.repositories.model_config_repository.ModelConfigRepository') as mock_model_config_repo:
                         with patch('src.repositories.template_repository.TemplateRepository') as mock_template_repo:
-                            with patch('src.repositories.task_tracking_repository.TaskTrackingRepository') as mock_task_tracking_repo:
-                                with patch('src.repositories.schema_repository.SchemaRepository') as mock_schema_repo:
-                                    with patch('src.repositories.databricks_config_repository.DatabricksConfigRepository') as mock_databricks_config_repo:
-                                        with patch('src.repositories.mcp_repository.MCPServerRepository') as mock_mcp_server_repo:
-                                            with patch('src.repositories.mcp_repository.MCPSettingsRepository') as mock_mcp_settings_repo:
-                                                with patch('src.repositories.engine_config_repository.EngineConfigRepository') as mock_engine_config_repo:
-                                                    uow = SyncUnitOfWork()
-                                                    
-                                                    # Act
-                                                    uow.initialize()
-                                                    
-                                                    # Assert
-                                                    assert uow._initialized is True
-                                                    assert uow._session == mock_session
-                                                    # Verify repositories were created (simplified check)
-                                                    assert uow.tool_repository is not None
-                                                    assert uow.api_key_repository is not None
+                            with patch('src.repositories.schema_repository.SchemaRepository') as mock_schema_repo:
+                                with patch('src.repositories.databricks_config_repository.DatabricksConfigRepository') as mock_databricks_config_repo:
+                                    with patch('src.repositories.mcp_repository.MCPServerRepository') as mock_mcp_server_repo:
+                                        with patch('src.repositories.mcp_repository.MCPSettingsRepository') as mock_mcp_settings_repo:
+                                            with patch('src.repositories.engine_config_repository.EngineConfigRepository') as mock_engine_config_repo:
+                                                uow = SyncUnitOfWork()
+
+                                                # Act
+                                                uow.initialize()
+
+                                                # Assert
+                                                assert uow._initialized is True
+                                                assert uow._session == mock_session
+                                                # Verify repositories were created (simplified check)
+                                                assert uow.tool_repository is not None
+                                                assert uow.api_key_repository is not None
     
     def test_initialize_already_initialized(self):
         """Test that multiple initialization calls don't reinitialize."""
@@ -277,20 +274,19 @@ class TestSyncUnitOfWork:
                 with patch('src.repositories.api_key_repository.ApiKeyRepository'):
                     with patch('src.repositories.model_config_repository.ModelConfigRepository'):
                         with patch('src.repositories.template_repository.TemplateRepository'):
-                            with patch('src.repositories.task_tracking_repository.TaskTrackingRepository'):
-                                with patch('src.repositories.schema_repository.SchemaRepository'):
-                                    with patch('src.repositories.databricks_config_repository.DatabricksConfigRepository'):
-                                        with patch('src.repositories.mcp_repository.MCPServerRepository'):
-                                            with patch('src.repositories.mcp_repository.MCPSettingsRepository'):
-                                                with patch('src.repositories.engine_config_repository.EngineConfigRepository'):
-                                                    uow = SyncUnitOfWork()
-                                                    uow.initialize()
-                                                    
-                                                    # Act
-                                                    uow.initialize()  # Second call
-                                                    
-                                                    # Assert
-                                                    mock_session_local.assert_called_once()  # Only called once
+                            with patch('src.repositories.schema_repository.SchemaRepository'):
+                                with patch('src.repositories.databricks_config_repository.DatabricksConfigRepository'):
+                                    with patch('src.repositories.mcp_repository.MCPServerRepository'):
+                                        with patch('src.repositories.mcp_repository.MCPSettingsRepository'):
+                                            with patch('src.repositories.engine_config_repository.EngineConfigRepository'):
+                                                uow = SyncUnitOfWork()
+                                                uow.initialize()
+
+                                                # Act
+                                                uow.initialize()  # Second call
+
+                                                # Assert
+                                                mock_session_local.assert_called_once()  # Only called once
     
     def test_commit_success(self):
         """Test successful commit."""
@@ -449,25 +445,23 @@ class TestSyncUnitOfWork:
                 with patch('src.repositories.api_key_repository.ApiKeyRepository') as mock_api_key_repo:
                     with patch('src.repositories.model_config_repository.ModelConfigRepository') as mock_model_config_repo:
                         with patch('src.repositories.template_repository.TemplateRepository') as mock_template_repo:
-                            with patch('src.repositories.task_tracking_repository.TaskTrackingRepository') as mock_task_tracking_repo:
-                                with patch('src.repositories.schema_repository.SchemaRepository') as mock_schema_repo:
-                                    with patch('src.repositories.databricks_config_repository.DatabricksConfigRepository') as mock_databricks_config_repo:
-                                        with patch('src.repositories.mcp_repository.MCPServerRepository') as mock_mcp_server_repo:
-                                            with patch('src.repositories.mcp_repository.MCPSettingsRepository') as mock_mcp_settings_repo:
-                                                with patch('src.repositories.engine_config_repository.EngineConfigRepository') as mock_engine_config_repo:
-                                                    uow = SyncUnitOfWork()
-                                                    
-                                                    # Act
-                                                    uow.initialize()
-                                                    
-                                                    # Assert
-                                                    assert uow.tool_repository is not None
-                                                    assert uow.api_key_repository is not None
-                                                    assert uow.model_config_repository is not None
-                                                    assert uow.template_repository is not None
-                                                    assert uow.task_tracking_repository is not None
-                                                    assert uow.schema_repository is not None
-                                                    assert uow.databricks_config_repository is not None
-                                                    assert uow.mcp_server_repository is not None
-                                                    assert uow.mcp_settings_repository is not None
-                                                    assert uow.engine_config_repository is not None
+                            with patch('src.repositories.schema_repository.SchemaRepository') as mock_schema_repo:
+                                with patch('src.repositories.databricks_config_repository.DatabricksConfigRepository') as mock_databricks_config_repo:
+                                    with patch('src.repositories.mcp_repository.MCPServerRepository') as mock_mcp_server_repo:
+                                        with patch('src.repositories.mcp_repository.MCPSettingsRepository') as mock_mcp_settings_repo:
+                                            with patch('src.repositories.engine_config_repository.EngineConfigRepository') as mock_engine_config_repo:
+                                                uow = SyncUnitOfWork()
+
+                                                # Act
+                                                uow.initialize()
+
+                                                # Assert
+                                                assert uow.tool_repository is not None
+                                                assert uow.api_key_repository is not None
+                                                assert uow.model_config_repository is not None
+                                                assert uow.template_repository is not None
+                                                assert uow.schema_repository is not None
+                                                assert uow.databricks_config_repository is not None
+                                                assert uow.mcp_server_repository is not None
+                                                assert uow.mcp_settings_repository is not None
+                                                assert uow.engine_config_repository is not None
