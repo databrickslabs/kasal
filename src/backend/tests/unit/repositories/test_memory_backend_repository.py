@@ -219,7 +219,7 @@ class TestDeleteAllByGroupId:
 
         assert result == 2
         assert mock_session.delete.call_count == 2
-        mock_session.commit.assert_called_once()
+        mock_session.flush.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_returns_zero_when_no_backends(self, repo, mock_session):

@@ -157,7 +157,6 @@ async def test_force_delete_flow_commits_transaction():
     flow_id = uuid.uuid4()
     ok = await svc.force_delete_flow_with_executions(flow_id)
     assert ok is True
-    assert svc.session.committed is True
 
 
 @pytest.mark.asyncio

@@ -159,7 +159,7 @@ class TestPowerBIConfigRepositoryDeactivateAll:
 
         # Should be called twice: once for update, once for commit
         assert mock_async_session.execute.call_count == 1
-        mock_async_session.commit.assert_called_once()
+        mock_async_session.flush.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_deactivate_all_no_group_filter(self, powerbi_config_repository, mock_async_session):
@@ -170,7 +170,7 @@ class TestPowerBIConfigRepositoryDeactivateAll:
         await powerbi_config_repository.deactivate_all()
 
         assert mock_async_session.execute.call_count == 1
-        mock_async_session.commit.assert_called_once()
+        mock_async_session.flush.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_deactivate_all_database_error(self, powerbi_config_repository, mock_async_session):
@@ -199,9 +199,8 @@ class TestPowerBIConfigRepositoryCreateConfig:
         # Verify config was added to session
         mock_async_session.add.assert_called_once()
 
-        # Verify flush and commit were called
-        mock_async_session.flush.assert_called_once()
-        assert mock_async_session.commit.call_count >= 1
+        # Verify flush was called (deactivate_all + create_config both flush)
+        assert mock_async_session.flush.call_count >= 1
 
         # Verify returned config has expected attributes
         assert isinstance(result, PowerBIConfig)
@@ -221,7 +220,7 @@ class TestPowerBIConfigRepositoryCreateConfig:
         result = await powerbi_config_repository.create_config(config_data)
 
         mock_async_session.add.assert_called_once()
-        mock_async_session.flush.assert_called_once()
+        assert mock_async_session.flush.call_count >= 1
 
     @pytest.mark.asyncio
     async def test_create_config_none_data_error(self, powerbi_config_repository):
@@ -269,4 +268,4 @@ class TestPowerBIConfigRepositoryMultiTenancy:
 
         # Verify execute was called with a query
         assert mock_async_session.execute.call_count == 1
-        mock_async_session.commit.assert_called_once()
+        mock_async_session.flush.assert_called_once()

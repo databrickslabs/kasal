@@ -137,7 +137,7 @@ class TestDatabricksConfigRepositoryDeactivateAll:
         await databricks_config_repository.deactivate_all()
         
         mock_async_session.execute.assert_called_once()
-        mock_async_session.commit.assert_called_once()
+        mock_async_session.flush.assert_called_once()
         
         # Verify the update query was constructed correctly
         call_args = mock_async_session.execute.call_args[0][0]
@@ -153,7 +153,7 @@ class TestDatabricksConfigRepositoryDeactivateAll:
         
         # Should still execute the query even if no rows are affected
         mock_async_session.execute.assert_called_once()
-        mock_async_session.commit.assert_called_once()
+        mock_async_session.flush.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_deactivate_all_database_error(self, databricks_config_repository, mock_async_session):
@@ -164,15 +164,15 @@ class TestDatabricksConfigRepositoryDeactivateAll:
             await databricks_config_repository.deactivate_all()
     
     @pytest.mark.asyncio
-    async def test_deactivate_all_commit_error(self, databricks_config_repository, mock_async_session):
-        """Test deactivate all with commit error."""
+    async def test_deactivate_all_flush_error(self, databricks_config_repository, mock_async_session):
+        """Test deactivate all with flush error."""
         mock_result = MagicMock()
         mock_async_session.execute.return_value = mock_result
-        mock_async_session.commit.side_effect = Exception("Commit failed")
-        
-        with pytest.raises(Exception, match="Commit failed"):
+        mock_async_session.flush.side_effect = Exception("Flush failed")
+
+        with pytest.raises(Exception, match="Flush failed"):
             await databricks_config_repository.deactivate_all()
-        
+
         mock_async_session.execute.assert_called_once()
 
 
@@ -195,7 +195,7 @@ class TestDatabricksConfigRepositoryCreateConfig:
                 mock_config_class.assert_called_once_with(**sample_config_data)
                 mock_async_session.add.assert_called_once_with(created_config)
                 mock_async_session.flush.assert_called_once()
-                mock_async_session.commit.assert_called_once()
+                mock_async_session.flush.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_create_config_with_complex_data(self, databricks_config_repository, mock_async_session):
@@ -263,16 +263,16 @@ class TestDatabricksConfigRepositoryCreateConfig:
                     await databricks_config_repository.create_config(sample_config_data)
     
     @pytest.mark.asyncio
-    async def test_create_config_commit_error(self, databricks_config_repository, mock_async_session, sample_config_data):
+    async def test_create_config_flush_error(self, databricks_config_repository, mock_async_session, sample_config_data):
         """Test create config when commit fails."""
         with patch('src.repositories.databricks_config_repository.DatabricksConfig') as mock_config_class:
             created_config = MockDatabricksConfig(**sample_config_data)
             mock_config_class.return_value = created_config
             
             with patch.object(databricks_config_repository, 'deactivate_all'):
-                mock_async_session.commit.side_effect = Exception("Commit failed")
+                mock_async_session.flush.side_effect = Exception("Flush failed")
                 
-                with pytest.raises(Exception, match="Commit failed"):
+                with pytest.raises(Exception, match="Flush failed"):
                     await databricks_config_repository.create_config(sample_config_data)
 
 
@@ -315,7 +315,7 @@ class TestDatabricksConfigRepositoryIntegration:
         mock_async_session.execute.return_value = mock_deactivate_result
         
         await databricks_config_repository.deactivate_all()
-        mock_async_session.commit.assert_called_once()
+        mock_async_session.flush.assert_called_once()
         
         # Reset mock for get operation
         mock_async_session.reset_mock()
@@ -438,9 +438,9 @@ class TestDatabricksConfigRepositoryEdgeCases:
         await databricks_config_repository.deactivate_all()
         await databricks_config_repository.deactivate_all()
         
-        # Should execute and commit each time
+        # Should execute and flush each time
         assert mock_async_session.execute.call_count == 3
-        assert mock_async_session.commit.call_count == 3
+        assert mock_async_session.flush.call_count == 3
     
     @pytest.mark.asyncio
     async def test_get_active_config_multiple_calls(self, databricks_config_repository, mock_async_session, sample_databricks_configs):

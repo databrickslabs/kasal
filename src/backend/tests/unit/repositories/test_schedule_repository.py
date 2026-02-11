@@ -128,7 +128,7 @@ class TestScheduleRepositoryCreate:
                 assert result == created_schedule
                 mock_schedule_class.assert_called_once()
                 mock_async_session.add.assert_called_once_with(created_schedule)
-                mock_async_session.commit.assert_called_once()
+                mock_async_session.flush.assert_called_once()
                 mock_async_session.refresh.assert_called_once_with(created_schedule)
                 
                 # Verify next_run_at was calculated
@@ -157,9 +157,9 @@ class TestScheduleRepositoryCreate:
         with patch('src.repositories.schedule_repository.calculate_next_run_from_last'):
             with patch('src.repositories.schedule_repository.Schedule') as mock_schedule_class:
                 mock_schedule_class.return_value = MockSchedule(**sample_schedule_data)
-                mock_async_session.commit.side_effect = Exception("Commit failed")
+                mock_async_session.flush.side_effect = Exception("Flush failed")
                 
-                with pytest.raises(Exception, match="Commit failed"):
+                with pytest.raises(Exception, match="Flush failed"):
                     await schedule_repository.create(sample_schedule_data)
 
 
@@ -335,7 +335,7 @@ class TestScheduleRepositoryUpdate:
             assert result == schedule
             assert schedule.name == "New Name"
             assert schedule.description == "Updated description"
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
             mock_async_session.refresh.assert_called_once_with(schedule)
     
     @pytest.mark.asyncio
@@ -371,7 +371,7 @@ class TestScheduleRepositoryUpdate:
         schedule = MockSchedule(id=1)
         
         with patch.object(schedule_repository, 'find_by_id', return_value=schedule):
-            mock_async_session.commit.side_effect = Exception("Update failed")
+            mock_async_session.flush.side_effect = Exception("Update failed")
             
             with pytest.raises(Exception, match="Update failed"):
                 await schedule_repository.update(1, {"name": "New Name"})
@@ -390,7 +390,7 @@ class TestScheduleRepositoryDelete:
             
             assert result is True
             mock_async_session.delete.assert_called_once_with(schedule)
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_delete_not_found(self, schedule_repository, mock_async_session):
@@ -433,7 +433,7 @@ class TestScheduleRepositoryToggleActive:
                 assert schedule.is_active is True
                 assert schedule.next_run_at == new_next_run
                 mock_calc_next.assert_called_once_with(schedule.cron_expression, schedule.last_run_at)
-                mock_async_session.commit.assert_called_once()
+                mock_async_session.flush.assert_called_once()
                 mock_async_session.refresh.assert_called_once_with(schedule)
     
     @pytest.mark.asyncio
@@ -449,7 +449,7 @@ class TestScheduleRepositoryToggleActive:
                 assert schedule.is_active is False
                 # Should not recalculate next run time when deactivating
                 mock_calc_next.assert_not_called()
-                mock_async_session.commit.assert_called_once()
+                mock_async_session.flush.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_toggle_active_not_found(self, schedule_repository, mock_async_session):
@@ -487,7 +487,7 @@ class TestScheduleRepositoryUpdateAfterExecution:
                 assert schedule.next_run_at == new_next_run
                 # The service calls calculate_next_run_from_last with timezone-naive datetime
                 mock_calc_next.assert_called_once_with(schedule.cron_expression, expected_time)
-                mock_async_session.commit.assert_called_once()
+                mock_async_session.flush.assert_called_once()
                 mock_async_session.refresh.assert_called_once_with(schedule)
     
     @pytest.mark.asyncio
@@ -509,7 +509,7 @@ class TestScheduleRepositoryUpdateAfterExecution:
         
         with patch.object(schedule_repository, 'find_by_id', return_value=schedule):
             with patch('src.repositories.schedule_repository.calculate_next_run_from_last'):
-                mock_async_session.commit.side_effect = Exception("Update failed")
+                mock_async_session.flush.side_effect = Exception("Update failed")
                 
                 with pytest.raises(Exception, match="Update failed"):
                     await schedule_repository.update_after_execution(1, execution_time)
@@ -637,7 +637,7 @@ class TestScheduleRepositoryEdgeCases:
             
             assert result == schedule
             assert schedule.name == "Original Name"  # Should remain unchanged
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_toggle_active_multiple_times(self, schedule_repository, mock_async_session):
@@ -658,7 +658,7 @@ class TestScheduleRepositoryEdgeCases:
                 result3 = await schedule_repository.toggle_active(1)
                 assert result3.is_active is False
                 
-                assert mock_async_session.commit.call_count == 3
+                assert mock_async_session.flush.call_count == 3
     
     @pytest.mark.asyncio
     async def test_find_due_schedules_boundary_time(self, schedule_repository, mock_async_session):

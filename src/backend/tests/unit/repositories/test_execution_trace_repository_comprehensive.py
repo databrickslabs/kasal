@@ -68,7 +68,7 @@ class TestCreateTrace:
 
         mock_session.add.assert_called_once()
         mock_session.flush.assert_called()
-        mock_session.commit.assert_called()
+        mock_session.flush.assert_called()
 
     @pytest.mark.asyncio
     async def test_create_trace_sets_run_id_from_job(self, repository, mock_session):
@@ -115,7 +115,7 @@ class TestCreateTrace:
         mock_result = MagicMock()
         mock_result.scalars.return_value.first.return_value = MagicMock(id=1)
         mock_session.execute = AsyncMock(return_value=mock_result)
-        mock_session.commit = AsyncMock(side_effect=SQLAlchemyError("DB error"))
+        mock_session.flush = AsyncMock(side_effect=SQLAlchemyError("DB error"))
 
         with pytest.raises(SQLAlchemyError):
             await repository.create(trace_data)
@@ -129,7 +129,7 @@ class TestCreateTrace:
         await repository._create(trace_data)
 
         mock_session.add.assert_called_once()
-        mock_session.commit.assert_called()
+        mock_session.flush.assert_called()
 
 
 class TestGetTraceMethods:
@@ -342,7 +342,7 @@ class TestDeleteTraceMethods:
         result = await repository.delete_by_id(1)
 
         assert result == 1
-        mock_session.commit.assert_called()
+        mock_session.flush.assert_called()
 
     @pytest.mark.asyncio
     async def test_delete_by_id_not_found(self, repository, mock_session):
@@ -365,7 +365,7 @@ class TestDeleteTraceMethods:
         result = await repository.delete_by_run_id(1)
 
         assert result == 5
-        mock_session.commit.assert_called()
+        mock_session.flush.assert_called()
 
     @pytest.mark.asyncio
     async def test_delete_by_job_id(self, repository, mock_session):
@@ -377,7 +377,7 @@ class TestDeleteTraceMethods:
         result = await repository.delete_by_job_id('test-job-123')
 
         assert result == 3
-        mock_session.commit.assert_called()
+        mock_session.flush.assert_called()
 
     @pytest.mark.asyncio
     async def test_delete_all(self, repository, mock_session):
@@ -389,7 +389,7 @@ class TestDeleteTraceMethods:
         result = await repository.delete_all()
 
         assert result == 100
-        mock_session.commit.assert_called()
+        mock_session.flush.assert_called()
 
     @pytest.mark.asyncio
     async def test_delete_handles_database_error(self, repository, mock_session):

@@ -198,7 +198,7 @@ class TestExecutionRepository:
         
         assert result == mock_execution
         mock_session.execute.assert_called_once()
-        mock_session.commit.assert_called_once()
+        mock_session.flush.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_update_execution_status_not_found(self, mock_session):
