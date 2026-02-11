@@ -131,8 +131,8 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
                 delete(ApiKey).where(ApiKey.id == id)
             )
             
-            # Commit the transaction
-            await self.session.commit()
+            # Flush to ensure changes are visible
+            await self.session.flush()
             
             # Check if any rows were deleted
             if result.rowcount > 0:

@@ -106,9 +106,9 @@ class FlowRepository(BaseRepository[Flow]):
             """)
             result = await self.session.execute(flow_delete_query, {"flow_id": flow_id})
             
-            # Commit all changes
-            await self.session.commit()
-            
+            # Flush all changes
+            await self.session.flush()
+
             logger.info(f"Successfully deleted flow {flow_id} and all its executions")
             return True
             
@@ -143,9 +143,9 @@ class FlowRepository(BaseRepository[Flow]):
             await self.session.execute(flow_delete_query)
             logger.info("Deleted all flows")
 
-            # Commit the changes
-            await self.session.commit()
-            
+            # Flush the changes
+            await self.session.flush()
+
         except Exception as e:
             # Roll back on error
             await self.session.rollback()

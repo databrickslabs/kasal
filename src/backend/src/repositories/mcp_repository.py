@@ -164,7 +164,7 @@ class MCPServerRepository(BaseRepository[MCPServer]):
 
             # Toggle the enabled status
             server.enabled = not server.enabled
-            await self.session.commit()
+            await self.session.flush()
             await self.session.refresh(server)
             return server
         except Exception as e:
@@ -191,7 +191,7 @@ class MCPServerRepository(BaseRepository[MCPServer]):
 
             # Toggle the global enabled status
             server.global_enabled = not server.global_enabled
-            await self.session.commit()
+            await self.session.flush()
             await self.session.refresh(server)
             return server
         except Exception as e:
@@ -232,7 +232,7 @@ class MCPSettingsRepository(BaseRepository[MCPSettings]):
             # Create default settings
             settings = MCPSettings(global_enabled=False)
             self.session.add(settings)
-            await self.session.commit()
+            await self.session.flush()
             await self.session.refresh(settings)
 
         return settings
@@ -249,7 +249,7 @@ class MCPSettingsRepository(BaseRepository[MCPSettings]):
         """
         settings = await self.get_settings()
         settings.global_enabled = enabled
-        await self.session.commit()
+        await self.session.flush()
         await self.session.refresh(settings)
         return settings
 
@@ -265,7 +265,7 @@ class MCPSettingsRepository(BaseRepository[MCPSettings]):
         """
         settings = await self.get_settings()
         settings.individual_enabled = enabled
-        await self.session.commit()
+        await self.session.flush()
         await self.session.refresh(settings)
         return settings
 
@@ -288,7 +288,7 @@ class MCPSettingsRepository(BaseRepository[MCPSettings]):
         if individual_enabled is not None:
             settings.individual_enabled = individual_enabled
 
-        await self.session.commit()
+        await self.session.flush()
         await self.session.refresh(settings)
         return settings
 

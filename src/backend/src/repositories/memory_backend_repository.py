@@ -121,7 +121,7 @@ class MemoryBackendRepository(BaseRepository[MemoryBackend]):
             backend = await self.get(backend_id)
             if backend and backend.group_id == group_id:
                 backend.is_default = True
-                await self.session.commit()
+                await self.session.flush()
                 return True
             
             return False
@@ -190,7 +190,7 @@ class MemoryBackendRepository(BaseRepository[MemoryBackend]):
             for backend in backends:
                 await self.session.delete(backend)
             
-            await self.session.commit()
+            await self.session.flush()
             logger.info(f"Deleted {count} memory backend configurations for group {group_id}")
             return count
         except Exception as e:

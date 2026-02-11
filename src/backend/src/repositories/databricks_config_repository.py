@@ -86,8 +86,8 @@ class DatabricksConfigRepository(BaseRepository[DatabricksConfig]):
         if group_id is not None:
             query = query.where(self.model.group_id == group_id)
         await self.session.execute(query)
-        await self.session.commit()  # Make sure the changes are committed
-    
+        await self.session.flush()
+
     async def create_config(self, config_data: dict) -> DatabricksConfig:
         """
         Create a new Databricks configuration.
@@ -109,6 +109,5 @@ class DatabricksConfigRepository(BaseRepository[DatabricksConfig]):
         db_config = DatabricksConfig(**config_data)
         self.session.add(db_config)
         await self.session.flush()
-        await self.session.commit()  # Make sure the changes are committed
-        
+
         return db_config 
