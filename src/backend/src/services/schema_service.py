@@ -2,7 +2,7 @@ from typing import List, Optional, Dict, Any
 import logging
 import json
 
-from fastapi import HTTPException, status
+from src.core.exceptions import KasalError, NotFoundError, ConflictError, BadRequestError
 
 from src.repositories.schema_repository import SchemaRepository
 from src.schemas.schema import SchemaCreate, SchemaUpdate, SchemaResponse, SchemaListResponse
@@ -61,12 +61,9 @@ class SchemaService:
         schema = await self.repository.find_by_name(name)
         if not schema:
             logger.warning(f"Schema with name '{name}' not found")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Schema with name '{name}' not found"
-            )
+            raise NotFoundError(detail=f"Schema with name '{name}' not found")
         return SchemaResponse.model_validate(schema)
-    
+
     async def get_schemas_by_type(self, schema_type: str) -> SchemaListResponse:
         """
         Get schemas by type using repository injection.
@@ -100,10 +97,7 @@ class SchemaService:
         existing_schema = await self.repository.find_by_name(schema_data.name)
         if existing_schema:
             logger.warning(f"Schema with name '{schema_data.name}' already exists")
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Schema with name '{schema_data.name}' already exists"
-            )
+            raise ConflictError(detail=f"Schema with name '{schema_data.name}' already exists")
 
         # Handle legacy schema_json field if provided
         schema_dict = schema_data.model_dump()
@@ -117,10 +111,7 @@ class SchemaService:
             self._validate_json_fields(schema_dict)
         except ValueError as e:
             logger.warning(f"JSON validation failed: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid JSON format: {str(e)}"
-            )
+            raise BadRequestError(detail=f"Invalid JSON format: {str(e)}")
 
         # Create schema
         try:
@@ -128,10 +119,7 @@ class SchemaService:
             return SchemaResponse.model_validate(schema)
         except Exception as e:
             logger.error(f"Error creating schema: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error creating schema: {str(e)}"
-            )
+            raise KasalError(detail=f"Error creating schema: {str(e)}")
     
     async def update_schema(self, name: str, schema_data: SchemaUpdate) -> SchemaResponse:
         """
@@ -151,10 +139,7 @@ class SchemaService:
         schema = await self.repository.find_by_name(name)
         if not schema:
             logger.warning(f"Schema with name '{name}' not found for update")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Schema with name '{name}' not found"
-            )
+            raise NotFoundError(detail=f"Schema with name '{name}' not found")
 
         # Prepare update data
         update_data = schema_data.model_dump(exclude_unset=True, by_alias=True)
@@ -172,10 +157,7 @@ class SchemaService:
             self._validate_json_fields(update_data)
         except ValueError as e:
             logger.warning(f"JSON validation failed: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid JSON format: {str(e)}"
-            )
+            raise BadRequestError(detail=f"Invalid JSON format: {str(e)}")
 
         # Update schema
         try:
@@ -184,10 +166,7 @@ class SchemaService:
             return SchemaResponse.model_validate(updated_schema)
         except Exception as e:
             logger.error(f"Error updating schema: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error updating schema: {str(e)}"
-            )
+            raise KasalError(detail=f"Error updating schema: {str(e)}")
     
     async def delete_schema(self, name: str) -> bool:
         """
@@ -206,10 +185,7 @@ class SchemaService:
         schema = await self.repository.find_by_name(name)
         if not schema:
             logger.warning(f"Schema with name '{name}' not found for deletion")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Schema with name '{name}' not found"
-            )
+            raise NotFoundError(detail=f"Schema with name '{name}' not found")
 
         # Delete schema
         await self.repository.delete(schema.id)

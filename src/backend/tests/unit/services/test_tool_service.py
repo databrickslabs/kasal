@@ -10,7 +10,7 @@ tool CRUD operations, tool enabling/disabling, and configuration management.
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from fastapi import HTTPException
+from src.core.exceptions import KasalError, NotFoundError, ForbiddenError, BadRequestError
 
 from src.services.tool_service import ToolService
 from src.schemas.tool import ToolCreate, ToolUpdate, ToolResponse, ToolListResponse, ToggleResponse
@@ -172,7 +172,7 @@ class TestToolService:
         """Test tool retrieval by ID when tool not found."""
         mock_repository.get.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await tool_service.get_tool_by_id(999)
 
         assert exc_info.value.status_code == 404
@@ -197,7 +197,7 @@ class TestToolService:
 
         tool_create = ToolCreate(**tool_create_data)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await tool_service.create_tool(tool_create)
 
         assert exc_info.value.status_code == 500
@@ -224,7 +224,7 @@ class TestToolService:
 
         tool_update = ToolUpdate(**tool_update_data)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await tool_service.update_tool(999, tool_update)
 
         assert exc_info.value.status_code == 404
@@ -238,7 +238,7 @@ class TestToolService:
 
         tool_update = ToolUpdate(**tool_update_data)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await tool_service.update_tool(1, tool_update)
 
         assert exc_info.value.status_code == 500
@@ -261,7 +261,7 @@ class TestToolService:
         """Test tool deletion when tool not found."""
         mock_repository.get.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await tool_service.delete_tool(999)
 
         assert exc_info.value.status_code == 404
@@ -273,7 +273,7 @@ class TestToolService:
         mock_repository.get.return_value = mock_tool
         mock_repository.delete.side_effect = Exception("Deletion failed")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await tool_service.delete_tool(1)
 
         assert exc_info.value.status_code == 500
@@ -297,7 +297,7 @@ class TestToolService:
         """Test tool toggle when tool not found."""
         mock_repository.toggle_enabled.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await tool_service.toggle_tool_enabled(999)
 
         assert exc_info.value.status_code == 404
@@ -308,7 +308,7 @@ class TestToolService:
         """Test tool toggle with error."""
         mock_repository.toggle_enabled.side_effect = Exception("Toggle failed")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await tool_service.toggle_tool_enabled(1)
 
         assert exc_info.value.status_code == 500
@@ -371,7 +371,7 @@ class TestToolService:
         new_config = {"new_setting": "new_value"}
         mock_repository.update_configuration_by_title.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await tool_service.update_tool_configuration_by_title("Nonexistent Tool", new_config)
 
         assert exc_info.value.status_code == 404
@@ -383,7 +383,7 @@ class TestToolService:
         new_config = {"new_setting": "new_value"}
         mock_repository.update_configuration_by_title.side_effect = Exception("Update failed")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await tool_service.update_tool_configuration_by_title("Test Tool", new_config)
 
         assert exc_info.value.status_code == 500
@@ -467,7 +467,7 @@ class TestToolService:
 
         with patch('src.services.tool_service.logger') as mock_logger:
             tool_create = ToolCreate(**tool_create_data)
-            with pytest.raises(HTTPException):
+            with pytest.raises(KasalError):
                 await tool_service.create_tool(tool_create)
 
         # Verify error was logged

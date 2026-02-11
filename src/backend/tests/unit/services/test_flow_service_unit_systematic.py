@@ -2,7 +2,7 @@ import pytest
 import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
-from fastapi import HTTPException
+from src.core.exceptions import KasalError, NotFoundError, BadRequestError
 
 from src.services.flow_service import FlowService as Svc
 
@@ -60,7 +60,7 @@ async def test_get_flow_not_found_raises_404(monkeypatch):
     fake_repo = FakeRepo(None)
     fake_repo._get = None
     monkeypatch.setattr('src.services.flow_service.FlowRepository', lambda session: fake_repo)
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(NotFoundError) as exc:
         await svc.get_flow(uuid.uuid4())
     assert exc.value.status_code == 404
 
@@ -90,7 +90,7 @@ async def test_update_flow_not_found_raises_404(monkeypatch):
     fake_repo._get = None
     monkeypatch.setattr('src.services.flow_service.FlowRepository', lambda session: fake_repo)
     upd = SimpleNamespace(name="NewFlow", flow_config={'actions': []}, nodes=None, edges=None)
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(NotFoundError) as exc:
         await svc.update_flow(uuid.uuid4(), upd)
     assert exc.value.status_code == 404
 
@@ -114,7 +114,7 @@ async def test_delete_flow_not_found_raises_404(monkeypatch):
     fake_repo = FakeRepo(None)
     fake_repo._get = None
     monkeypatch.setattr('src.services.flow_service.FlowRepository', lambda session: fake_repo)
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(NotFoundError) as exc:
         await svc.delete_flow(uuid.uuid4())
     assert exc.value.status_code == 404
 
@@ -126,7 +126,7 @@ async def test_delete_flow_with_executions_raises_400(monkeypatch):
     flow = SimpleNamespace(id=uuid.uuid4())
     fake_repo._get = flow
     monkeypatch.setattr('src.services.flow_service.FlowRepository', lambda session: fake_repo)
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(BadRequestError) as exc:
         await svc.delete_flow(flow.id)
     assert exc.value.status_code == 400
     assert "3 execution records" in str(exc.value.detail)
@@ -146,7 +146,7 @@ async def test_delete_flow_no_executions_succeeds(monkeypatch):
 @pytest.mark.asyncio
 async def test_force_delete_flow_not_found_raises_404():
     svc = Svc(FakeSession(execution_count=0))
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(NotFoundError) as exc:
         await svc.force_delete_flow_with_executions(uuid.uuid4())
     assert exc.value.status_code == 404
 

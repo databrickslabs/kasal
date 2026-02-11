@@ -12,7 +12,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch, Mock
 from datetime import datetime, timezone
 
-from fastapi import HTTPException, status
+from src.core.exceptions import KasalError, NotFoundError, BadRequestError
 
 from src.services.scheduler_service import SchedulerService
 from src.schemas.schedule import ScheduleCreate, ScheduleCreateFromExecution, ScheduleUpdate, ScheduleResponse, ScheduleListResponse, ToggleResponse, CrewConfig
@@ -140,10 +140,10 @@ class TestSchedulerService:
         with patch('src.services.scheduler_service.calculate_next_run_from_last') as mock_calc:
             mock_calc.side_effect = ValueError("Invalid cron expression")
 
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(BadRequestError) as exc_info:
                 await scheduler_service.create_schedule(schedule_data)
 
-            assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+            assert exc_info.value.status_code == 400
             assert "Invalid cron expression" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
@@ -181,10 +181,10 @@ class TestSchedulerService:
 
         scheduler_service.execution_history_repository.find_by_id.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await scheduler_service.create_schedule_from_execution(schedule_data)
 
-        assert exc_info.value.status_code == status.HTTP_404_NOT_FOUND
+        assert exc_info.value.status_code == 404
         assert "not found" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
@@ -203,10 +203,10 @@ class TestSchedulerService:
         )
         scheduler_service.execution_history_repository.find_by_id.return_value = mock_execution
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(BadRequestError) as exc_info:
             await scheduler_service.create_schedule_from_execution(schedule_data)
 
-        assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+        assert exc_info.value.status_code == 400
         assert "does not contain valid" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
@@ -222,10 +222,10 @@ class TestSchedulerService:
         scheduler_service.execution_history_repository.find_by_id.return_value = mock_execution_history
         scheduler_service.repository.create.side_effect = ValueError("Invalid cron expression")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(BadRequestError) as exc_info:
             await scheduler_service.create_schedule_from_execution(schedule_data)
 
-        assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+        assert exc_info.value.status_code == 400
         assert "Invalid cron expression" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
@@ -241,10 +241,10 @@ class TestSchedulerService:
         scheduler_service.execution_history_repository.find_by_id.return_value = mock_execution_history
         scheduler_service.repository.create.side_effect = Exception("Database error")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await scheduler_service.create_schedule_from_execution(schedule_data)
 
-        assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert exc_info.value.status_code == 500
         assert "Failed to create schedule from execution" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
@@ -290,10 +290,10 @@ class TestSchedulerService:
         """Test schedule retrieval when schedule not found."""
         scheduler_service.repository.find_by_id.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await scheduler_service.get_schedule_by_id(999)
 
-        assert exc_info.value.status_code == status.HTTP_404_NOT_FOUND
+        assert exc_info.value.status_code == 404
         assert "not found" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
@@ -325,10 +325,10 @@ class TestSchedulerService:
         )
         scheduler_service.repository.update.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await scheduler_service.update_schedule(999, schedule_data)
 
-        assert exc_info.value.status_code == status.HTTP_404_NOT_FOUND
+        assert exc_info.value.status_code == 404
 
     @pytest.mark.asyncio
     async def test_delete_schedule_success(self, scheduler_service):
@@ -345,10 +345,10 @@ class TestSchedulerService:
         """Test schedule deletion when schedule not found."""
         scheduler_service.repository.delete.return_value = False
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await scheduler_service.delete_schedule(999)
 
-        assert exc_info.value.status_code == status.HTTP_404_NOT_FOUND
+        assert exc_info.value.status_code == 404
 
     @pytest.mark.asyncio
     async def test_toggle_schedule_success(self, scheduler_service, mock_schedule):
@@ -365,10 +365,10 @@ class TestSchedulerService:
         """Test schedule toggle when schedule not found."""
         scheduler_service.repository.toggle_active.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await scheduler_service.toggle_schedule(999)
 
-        assert exc_info.value.status_code == status.HTTP_404_NOT_FOUND
+        assert exc_info.value.status_code == 404
 
     @pytest.mark.asyncio
     async def test_run_schedule_job_success(self, scheduler_service):
@@ -501,10 +501,10 @@ class TestSchedulerService:
         job_update = SchedulerJobUpdate(name="updated_job")
         scheduler_service.repository.find_by_id.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await scheduler_service.update_job(999, job_update)
 
-        assert exc_info.value.status_code == status.HTTP_404_NOT_FOUND
+        assert exc_info.value.status_code == 404
 
     @pytest.mark.asyncio
     async def test_start_scheduler(self, scheduler_service):
@@ -587,10 +587,10 @@ class TestSchedulerService:
         scheduler_service.repository.create.side_effect = Exception("Database error")
 
         with patch('src.services.scheduler_service.calculate_next_run_from_last'):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(KasalError) as exc_info:
                 await scheduler_service.create_schedule(schedule_data)
 
-            assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+            assert exc_info.value.status_code == 500
             assert "Failed to create schedule" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
@@ -604,10 +604,10 @@ class TestSchedulerService:
         )
         scheduler_service.repository.update.side_effect = Exception("Database error")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await scheduler_service.update_schedule(1, schedule_data)
 
-        assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert exc_info.value.status_code == 500
         assert "Failed to update schedule" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
@@ -615,10 +615,10 @@ class TestSchedulerService:
         """Test schedule deletion with general exception handling."""
         scheduler_service.repository.delete.side_effect = Exception("Database error")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await scheduler_service.delete_schedule(1)
 
-        assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert exc_info.value.status_code == 500
         assert "Failed to delete schedule" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
@@ -626,8 +626,8 @@ class TestSchedulerService:
         """Test schedule toggle with general exception handling."""
         scheduler_service.repository.toggle_active.side_effect = Exception("Database error")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await scheduler_service.toggle_schedule(1)
 
-        assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert exc_info.value.status_code == 500
         assert "Failed to toggle schedule" in str(exc_info.value.detail)

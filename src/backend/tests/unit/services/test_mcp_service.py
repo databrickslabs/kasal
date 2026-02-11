@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch, Mock
 from datetime import datetime
 from contextlib import asynccontextmanager
 
-from fastapi import HTTPException, status
+from src.core.exceptions import KasalError, NotFoundError, ConflictError
 
 from src.services.mcp_service import MCPService
 
@@ -280,10 +280,10 @@ class TestGetServerById:
         """Test server not found error."""
         mock_server_repository.get = AsyncMock(return_value=None)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await mcp_service.get_server_by_id(999)
 
-        assert exc_info.value.status_code == status.HTTP_404_NOT_FOUND
+        assert exc_info.value.status_code == 404
         assert "not found" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
@@ -366,10 +366,10 @@ class TestCreateServer:
         existing_server = MockMCPServer(id=1, name="existing_server")
         mock_server_repository.find_by_name = AsyncMock(return_value=existing_server)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ConflictError) as exc_info:
             await mcp_service.create_server(server_data)
 
-        assert exc_info.value.status_code == status.HTTP_409_CONFLICT
+        assert exc_info.value.status_code == 409
         assert "already exists" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
@@ -386,10 +386,10 @@ class TestCreateServer:
         mock_server_repository.create = AsyncMock(side_effect=Exception("Database error"))
 
         with patch('src.services.mcp_service.EncryptionUtils.encrypt_value', return_value="encrypted_key"):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(KasalError) as exc_info:
                 await mcp_service.create_server(server_data)
 
-            assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+            assert exc_info.value.status_code == 500
             assert "Failed to create MCP server" in str(exc_info.value.detail)
 
 
@@ -432,10 +432,10 @@ class TestUpdateServer:
         server_data = MCPServerUpdate(name="updated_server")
         mock_server_repository.get = AsyncMock(return_value=None)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await mcp_service.update_server(999, server_data)
 
-        assert exc_info.value.status_code == status.HTTP_404_NOT_FOUND
+        assert exc_info.value.status_code == 404
         assert "not found" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
@@ -470,10 +470,10 @@ class TestUpdateServer:
         mock_server_repository.get = AsyncMock(return_value=existing_server)
         mock_server_repository.update = AsyncMock(side_effect=Exception("Database error"))
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await mcp_service.update_server(1, server_data)
 
-        assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert exc_info.value.status_code == 500
         assert "Failed to update MCP server" in str(exc_info.value.detail)
 
 
@@ -497,10 +497,10 @@ class TestDeleteServer:
         """Test delete server when server not found."""
         mock_server_repository.get = AsyncMock(return_value=None)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await mcp_service.delete_server(999)
 
-        assert exc_info.value.status_code == status.HTTP_404_NOT_FOUND
+        assert exc_info.value.status_code == 404
         assert "not found" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
@@ -510,10 +510,10 @@ class TestDeleteServer:
         mock_server_repository.get = AsyncMock(return_value=existing_server)
         mock_server_repository.delete = AsyncMock(side_effect=Exception("Database error"))
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await mcp_service.delete_server(1)
 
-        assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert exc_info.value.status_code == 500
         assert "Failed to delete MCP server" in str(exc_info.value.detail)
 
 
@@ -538,10 +538,10 @@ class TestToggleServerEnabled:
         """Test toggle when server not found."""
         mock_server_repository.toggle_enabled = AsyncMock(return_value=None)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await mcp_service.toggle_server_enabled(999)
 
-        assert exc_info.value.status_code == status.HTTP_404_NOT_FOUND
+        assert exc_info.value.status_code == 404
         assert "not found" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
@@ -549,10 +549,10 @@ class TestToggleServerEnabled:
         """Test toggle with database error."""
         mock_server_repository.toggle_enabled = AsyncMock(side_effect=Exception("Database error"))
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await mcp_service.toggle_server_enabled(1)
 
-        assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert exc_info.value.status_code == 500
         assert "Failed to toggle MCP server" in str(exc_info.value.detail)
 
 
@@ -1055,10 +1055,10 @@ class TestGetSettings:
         """Test settings retrieval with error."""
         mock_settings_repository.get_settings = AsyncMock(side_effect=Exception("Database error"))
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await mcp_service.get_settings()
 
-        assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert exc_info.value.status_code == 500
         assert "Error getting MCP settings" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
@@ -1069,10 +1069,10 @@ class TestGetSettings:
 
         # Mock model_validate to raise an exception
         with patch.object(MCPSettingsResponse, 'model_validate', side_effect=Exception("Validation error")):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(KasalError) as exc_info:
                 await mcp_service.get_settings()
 
-            assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+            assert exc_info.value.status_code == 500
             assert "Error getting MCP settings" in str(exc_info.value.detail)
 
 
@@ -1102,10 +1102,10 @@ class TestUpdateSettings:
         settings_data = MCPSettingsUpdate(global_enabled=False)
         mock_settings_repository.get_settings = AsyncMock(side_effect=Exception("Database error"))
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await mcp_service.update_settings(settings_data)
 
-        assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert exc_info.value.status_code == 500
         assert "Error updating MCP settings" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
@@ -1120,10 +1120,10 @@ class TestUpdateSettings:
 
         # Mock model_validate to raise an exception
         with patch.object(MCPSettingsResponse, 'model_validate', side_effect=Exception("Validation error")):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(KasalError) as exc_info:
                 await mcp_service.update_settings(settings_data)
 
-            assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+            assert exc_info.value.status_code == 500
             assert "Error updating MCP settings" in str(exc_info.value.detail)
 
 
@@ -1131,17 +1131,17 @@ class TestErrorHandling:
     """Test comprehensive error handling."""
 
     @pytest.mark.asyncio
-    async def test_http_exception_propagation(self, mcp_service, mock_server_repository):
-        """Test that HTTPExceptions are properly propagated."""
-        mock_server_repository.get = AsyncMock(side_effect=HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+    async def test_kasal_error_propagation(self, mcp_service, mock_server_repository):
+        """Test that KasalErrors are properly propagated."""
+        from src.core.exceptions import ForbiddenError
+        mock_server_repository.get = AsyncMock(side_effect=ForbiddenError(
             detail="Access denied"
         ))
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ForbiddenError) as exc_info:
             await mcp_service.get_server_by_id(1)
 
-        assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
+        assert exc_info.value.status_code == 403
         assert exc_info.value.detail == "Access denied"
 
     @pytest.mark.asyncio

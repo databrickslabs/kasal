@@ -265,30 +265,30 @@ class TestExecuteFlow:
 
     @pytest.mark.asyncio
     async def test_execute_flow_handles_http_exception(self, execution_service):
-        """Test execute_flow re-raises HTTPException."""
-        from fastapi import HTTPException
+        """Test execute_flow re-raises KasalError."""
+        from src.core.exceptions import KasalError, NotFoundError
 
         execution_service.crewai_execution_service = MagicMock()
         execution_service.crewai_execution_service.run_flow_execution = AsyncMock(
-            side_effect=HTTPException(status_code=404, detail="Flow not found")
+            side_effect=NotFoundError(detail="Flow not found")
         )
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await execution_service.execute_flow(flow_id=uuid.uuid4())
 
         assert exc_info.value.status_code == 404
 
     @pytest.mark.asyncio
     async def test_execute_flow_handles_unexpected_error(self, execution_service):
-        """Test execute_flow wraps unexpected errors in HTTPException."""
-        from fastapi import HTTPException
+        """Test execute_flow wraps unexpected errors in KasalError."""
+        from src.core.exceptions import KasalError
 
         execution_service.crewai_execution_service = MagicMock()
         execution_service.crewai_execution_service.run_flow_execution = AsyncMock(
             side_effect=ValueError("Unexpected error")
         )
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await execution_service.execute_flow(flow_id=uuid.uuid4())
 
         assert exc_info.value.status_code == 500
@@ -319,14 +319,14 @@ class TestGetExecutionsByFlow:
     @pytest.mark.asyncio
     async def test_get_executions_by_flow_handles_error(self, execution_service):
         """Test get_executions_by_flow handles errors gracefully."""
-        from fastapi import HTTPException
+        from src.core.exceptions import KasalError
 
         execution_service.crewai_execution_service = MagicMock()
         execution_service.crewai_execution_service.get_flow_executions_by_flow = AsyncMock(
             side_effect=ValueError("Database error")
         )
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await execution_service.get_executions_by_flow(uuid.uuid4())
 
         assert exc_info.value.status_code == 500

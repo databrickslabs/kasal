@@ -1,7 +1,7 @@
 from typing import List, Optional, Dict, Any
 import logging
 
-from fastapi import HTTPException, status
+from src.core.exceptions import KasalError, NotFoundError, ForbiddenError, BadRequestError
 
 from src.repositories.tool_repository import ToolRepository
 from src.repositories.group_tool_repository import GroupToolRepository
@@ -169,10 +169,7 @@ class ToolService:
         tool = await self.repository.get(tool_id)
         if not tool:
             logger.warning(f"Tool with ID {tool_id} not found")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Tool with ID {tool_id} not found"
-            )
+            raise NotFoundError(detail=f"Tool with ID {tool_id} not found")
         return ToolResponse.model_validate(tool)
 
     async def get_tool_with_group_check(self, tool_id: int, group_context: GroupContext) -> ToolResponse:
@@ -196,10 +193,7 @@ class ToolService:
         tool = await self.repository.get(tool_id)
         if not tool:
             logger.warning(f"Tool with ID {tool_id} not found")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Tool with ID {tool_id} not found"
-            )
+            raise NotFoundError(detail=f"Tool with ID {tool_id} not found")
 
         # Check group authorization
         # Allow access if:
@@ -208,10 +202,7 @@ class ToolService:
         if tool.group_id is not None:  # Only check authorization for non-default tools
             if not group_context or not group_context.group_ids or tool.group_id not in group_context.group_ids:
                 logger.warning(f"Tool with ID {tool_id} not authorized for group")
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,  # Return 404 not 403 to avoid information leakage
-                    detail=f"Tool with ID {tool_id} not found"
-                )
+                raise NotFoundError(detail=f"Tool with ID {tool_id} not found")  # Return 404 not 403 to avoid information leakage
 
         return ToolResponse.model_validate(tool)
 
@@ -234,10 +225,7 @@ class ToolService:
             return ToolResponse.model_validate(tool)
         except Exception as e:
             logger.error(f"Failed to create tool: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to create tool: {str(e)}"
-            )
+            raise KasalError(detail=f"Failed to create tool: {str(e)}")
 
     async def create_tool_with_group(self, tool_data: ToolCreate, group_context: GroupContext) -> ToolResponse:
         """
@@ -266,10 +254,7 @@ class ToolService:
             return ToolResponse.model_validate(tool)
         except Exception as e:
             logger.error(f"Failed to create tool: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to create tool: {str(e)}"
-            )
+            raise KasalError(detail=f"Failed to create tool: {str(e)}")
 
     async def update_tool(self, tool_id: int, tool_data: ToolUpdate) -> ToolResponse:
         """
@@ -289,10 +274,7 @@ class ToolService:
         tool = await self.repository.get(tool_id)
         if not tool:
             logger.warning(f"Tool with ID {tool_id} not found for update")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Tool with ID {tool_id} not found"
-            )
+            raise NotFoundError(detail=f"Tool with ID {tool_id} not found")
 
         try:
             # Update tool
@@ -301,10 +283,7 @@ class ToolService:
             return ToolResponse.model_validate(updated_tool)
         except Exception as e:
             logger.error(f"Failed to update tool: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to update tool: {str(e)}"
-            )
+            raise KasalError(detail=f"Failed to update tool: {str(e)}")
 
     async def update_tool_with_group_check(self, tool_id: int, tool_data: ToolUpdate, group_context: GroupContext) -> ToolResponse:
         """
@@ -325,19 +304,13 @@ class ToolService:
         tool = await self.repository.get(tool_id)
         if not tool:
             logger.warning(f"Tool with ID {tool_id} not found for update")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Tool with ID {tool_id} not found"
-            )
+            raise NotFoundError(detail=f"Tool with ID {tool_id} not found")
 
         # Check group authorization
         if group_context and group_context.group_ids:
             if tool.group_id is not None and tool.group_id not in group_context.group_ids:
                 logger.warning(f"Tool with ID {tool_id} not authorized for group")
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,  # Return 404 not 403 to avoid information leakage
-                    detail=f"Tool with ID {tool_id} not found"
-                )
+                raise NotFoundError(detail=f"Tool with ID {tool_id} not found")  # Return 404 not 403 to avoid information leakage
 
         try:
             # Update tool
@@ -346,10 +319,7 @@ class ToolService:
             return ToolResponse.model_validate(updated_tool)
         except Exception as e:
             logger.error(f"Failed to update tool: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to update tool: {str(e)}"
-            )
+            raise KasalError(detail=f"Failed to update tool: {str(e)}")
 
     async def delete_tool(self, tool_id: int) -> bool:
         """
@@ -368,10 +338,7 @@ class ToolService:
         tool = await self.repository.get(tool_id)
         if not tool:
             logger.warning(f"Tool with ID {tool_id} not found for deletion")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Tool with ID {tool_id} not found"
-            )
+            raise NotFoundError(detail=f"Tool with ID {tool_id} not found")
 
         try:
             # Delete tool
@@ -379,10 +346,7 @@ class ToolService:
             return True
         except Exception as e:
             logger.error(f"Failed to delete tool: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to delete tool: {str(e)}"
-            )
+            raise KasalError(detail=f"Failed to delete tool: {str(e)}")
 
     async def delete_tool_with_group_check(self, tool_id: int, group_context: GroupContext) -> bool:
         """
@@ -402,19 +366,13 @@ class ToolService:
         tool = await self.repository.get(tool_id)
         if not tool:
             logger.warning(f"Tool with ID {tool_id} not found for deletion")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Tool with ID {tool_id} not found"
-            )
+            raise NotFoundError(detail=f"Tool with ID {tool_id} not found")
 
         # Check group authorization
         if group_context and group_context.group_ids:
             if tool.group_id is not None and tool.group_id not in group_context.group_ids:
                 logger.warning(f"Tool with ID {tool_id} not authorized for group")
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,  # Return 404 not 403 to avoid information leakage
-                    detail=f"Tool with ID {tool_id} not found"
-                )
+                raise NotFoundError(detail=f"Tool with ID {tool_id} not found")  # Return 404 not 403 to avoid information leakage
 
         try:
             # Delete tool
@@ -422,10 +380,7 @@ class ToolService:
             return True
         except Exception as e:
             logger.error(f"Failed to delete tool: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to delete tool: {str(e)}"
-            )
+            raise KasalError(detail=f"Failed to delete tool: {str(e)}")
 
     async def toggle_tool_enabled(self, tool_id: int) -> ToggleResponse:
         """
@@ -445,24 +400,18 @@ class ToolService:
             tool = await self.repository.toggle_enabled(tool_id)
             if not tool:
                 logger.warning(f"Tool with ID {tool_id} not found for toggle")
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Tool with ID {tool_id} not found"
-                )
+                raise NotFoundError(detail=f"Tool with ID {tool_id} not found")
 
             status_text = "enabled" if tool.enabled else "disabled"
             return ToggleResponse(
                 message=f"Tool {status_text} successfully",
                 enabled=tool.enabled
             )
-        except HTTPException:
+        except KasalError:
             raise
         except Exception as e:
             logger.error(f"Failed to toggle tool: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to toggle tool: {str(e)}"
-            )
+            raise KasalError(detail=f"Failed to toggle tool: {str(e)}")
 
     async def toggle_tool_enabled_with_group_check(self, tool_id: int, group_context: GroupContext) -> ToggleResponse:
         """
@@ -490,18 +439,12 @@ class ToolService:
             tool = await self.repository.get(tool_id)
             if not tool:
                 logger.warning(f"Tool with ID {tool_id} not found for toggle")
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Tool with ID {tool_id} not found"
-                )
+                raise NotFoundError(detail=f"Tool with ID {tool_id} not found")
 
             # Must have a valid group context to toggle tools
             if not group_context or not group_context.group_ids:
                 logger.warning(f"No group context provided for toggling tool {tool_id}")
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Group context required to toggle tools"
-                )
+                raise ForbiddenError(detail="Group context required to toggle tools")
 
             primary_group_id = group_context.primary_group_id
 
@@ -539,10 +482,7 @@ class ToolService:
             # For group-specific tools, check authorization
             if tool.group_id is not None and tool.group_id not in group_context.group_ids:
                 logger.warning(f"Tool with ID {tool_id} not authorized for group")
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,  # Return 404 not 403 to avoid information leakage
-                    detail=f"Tool with ID {tool_id} not found"
-                )
+                raise NotFoundError(detail=f"Tool with ID {tool_id} not found")  # Return 404 not 403 to avoid information leakage
 
             # Toggle the group-specific tool
             toggled_tool = await self.repository.toggle_enabled(tool_id)
@@ -552,14 +492,11 @@ class ToolService:
                 message=f"Tool {status_text} successfully",
                 enabled=toggled_tool.enabled
             )
-        except HTTPException:
+        except KasalError:
             raise
         except Exception as e:
             logger.error(f"Failed to toggle tool: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to toggle tool: {str(e)}"
-            )
+            raise KasalError(detail=f"Failed to toggle tool: {str(e)}")
 
     # Removed enable_all_tools and disable_all_tools methods for security reasons
     # Individual tool enabling now requires security disclaimer confirmation
@@ -605,19 +542,13 @@ class ToolService:
             updated_tool = await self.repository.update_configuration_by_title(title, config)
             if not updated_tool:
                 logger.warning(f"Tool with title '{title}' not found for configuration update")
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Tool with title '{title}' not found"
-                )
+                raise NotFoundError(detail=f"Tool with title '{title}' not found")
             return ToolResponse.model_validate(updated_tool)
-        except HTTPException:
+        except KasalError:
             raise
         except Exception as e:
             logger.error(f"Failed to update tool configuration by title: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to update tool configuration by title: {str(e)}"
-            )
+            raise KasalError(detail=f"Failed to update tool configuration by title: {str(e)}")
 
     async def get_all_tool_configurations_for_group(self, group_context: GroupContext) -> Dict[str, Dict[str, Any]]:
         """
@@ -653,10 +584,7 @@ class ToolService:
         - Else: create a new group tool with the provided title and config.
         """
         if not group_context or not group_context.primary_group_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Group context required to update tool configuration"
-            )
+            raise ForbiddenError(detail="Group context required to update tool configuration")
         group_id = group_context.primary_group_id
 
         existing_group_tool = await self.repository.find_by_title_and_group(title, group_id)

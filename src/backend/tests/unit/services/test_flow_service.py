@@ -10,7 +10,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 
-from fastapi import HTTPException
+from src.core.exceptions import KasalError, NotFoundError, BadRequestError
 
 from src.services.flow_service import FlowService
 from src.models.flow import Flow
@@ -180,11 +180,11 @@ class TestFlowService:
             
             flow_create = FlowCreate(**invalid_data)
             
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(BadRequestError) as exc_info:
                 await flow_service.create_flow(flow_create)
-            
+
             assert exc_info.value.status_code == 400
-    
+
     @pytest.mark.asyncio
     async def test_create_flow_general_error(self, flow_service, flow_create_data):
         """Test flow creation with general error."""
@@ -195,9 +195,9 @@ class TestFlowService:
             
             flow_create = FlowCreate(**flow_create_data)
             
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(KasalError) as exc_info:
                 await flow_service.create_flow(flow_create)
-            
+
             assert exc_info.value.status_code == 500
             assert "Error creating flow" in str(exc_info.value.detail)
     
@@ -226,9 +226,9 @@ class TestFlowService:
             MockRepository.return_value = mock_repo
             mock_repo.get.return_value = None
             
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(NotFoundError) as exc_info:
                 await flow_service.get_flow(flow_id)
-            
+
             assert exc_info.value.status_code == 404
             assert "Flow not found" in str(exc_info.value.detail)
     
@@ -320,9 +320,9 @@ class TestFlowService:
             
             flow_update = FlowUpdate(**flow_update_data)
             
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(NotFoundError) as exc_info:
                 await flow_service.update_flow(flow_id, flow_update)
-            
+
             assert exc_info.value.status_code == 404
             assert "Flow not found" in str(exc_info.value.detail)
     
@@ -339,12 +339,12 @@ class TestFlowService:
             
             flow_update = FlowUpdate(**flow_update_data)
             
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(KasalError) as exc_info:
                 await flow_service.update_flow(flow_id, flow_update)
-            
+
             # ValueError is caught and re-raised as 500 error in the actual implementation
             assert exc_info.value.status_code == 500
-    
+
     @pytest.mark.asyncio
     async def test_update_flow_general_error(self, flow_service, flow_update_data, mock_flow):
         """Test flow update with general error."""
@@ -358,9 +358,9 @@ class TestFlowService:
             
             flow_update = FlowUpdate(**flow_update_data)
             
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(KasalError) as exc_info:
                 await flow_service.update_flow(flow_id, flow_update)
-            
+
             assert exc_info.value.status_code == 500
     
     @pytest.mark.asyncio
@@ -395,9 +395,9 @@ class TestFlowService:
             MockRepository.return_value = mock_repo
             mock_repo.get.return_value = None
             
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(NotFoundError) as exc_info:
                 await flow_service.delete_flow(flow_id)
-            
+
             assert exc_info.value.status_code == 404
             assert "Flow not found" in str(exc_info.value.detail)
     
@@ -416,9 +416,9 @@ class TestFlowService:
             mock_result.scalar_one.return_value = 5  # Has executions
             flow_service.session.execute = AsyncMock(return_value=mock_result)
             
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(BadRequestError) as exc_info:
                 await flow_service.delete_flow(flow_id)
-            
+
             assert exc_info.value.status_code == 400
             assert "execution records" in str(exc_info.value.detail)
     
@@ -491,9 +491,9 @@ class TestFlowService:
         
         flow_create = FlowCreate(**flow_create_data)
         
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(BadRequestError) as exc_info:
             await flow_service.create_flow(flow_create)
-        
+
         assert exc_info.value.status_code == 400
         assert "Invalid listener format" in str(exc_info.value.detail)
     
@@ -507,9 +507,9 @@ class TestFlowService:
         
         flow_create = FlowCreate(**flow_create_data)
         
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(BadRequestError) as exc_info:
             await flow_service.create_flow(flow_create)
-        
+
         assert exc_info.value.status_code == 400
         assert "Missing required fields in listener" in str(exc_info.value.detail)
     
@@ -523,9 +523,9 @@ class TestFlowService:
         
         flow_create = FlowCreate(**flow_create_data)
         
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(BadRequestError) as exc_info:
             await flow_service.create_flow(flow_create)
-        
+
         assert exc_info.value.status_code == 400
         assert "Invalid action format" in str(exc_info.value.detail)
     
@@ -539,9 +539,9 @@ class TestFlowService:
         
         flow_create = FlowCreate(**flow_create_data)
         
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(BadRequestError) as exc_info:
             await flow_service.create_flow(flow_create)
-        
+
         assert exc_info.value.status_code == 400
         assert "Missing required fields in action" in str(exc_info.value.detail)
     
@@ -600,7 +600,7 @@ class TestFlowService:
             
             flow_create = FlowCreate(**flow_create_data)
             
-            with pytest.raises(HTTPException):
+            with pytest.raises(KasalError):
                 await flow_service.create_flow(flow_create)
             
             # Verify error was logged
