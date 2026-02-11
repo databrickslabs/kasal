@@ -310,13 +310,10 @@ class FlowService:
             # Delete the flow itself
             flow_delete_query = text("DELETE FROM flows WHERE id = :flow_id")
             result = await self.session.execute(flow_delete_query, {"flow_id": flow_id})
-            
-            # Commit the transaction
-            await self.session.commit()
-            
+
             logger.info(f"Successfully deleted flow {flow_id} with all its executions")
             return True
-            
+
         except KasalError:
             await self.session.rollback()
             raise
@@ -394,10 +391,7 @@ class FlowService:
             # Delete the flow itself
             flow_delete_query = text("DELETE FROM flows WHERE id = :flow_id")
             result = await self.session.execute(flow_delete_query, {"flow_id": flow_id})
-            
-            # Commit the transaction
-            await self.session.commit()
-            
+
             logger.info(f"Successfully deleted flow {flow_id} with all its executions (group verified)")
             return True
 

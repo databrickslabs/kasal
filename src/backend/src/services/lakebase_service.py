@@ -160,7 +160,6 @@ class LakebaseService(BaseService):
             if not config.get("enabled", False):
                 logger.info("Lakebase disabled - deleting configuration from database")
                 await self.config_repository.delete_by_key("lakebase")
-                await self.session.commit()
                 logger.info("Lakebase configuration deleted. System will use PostgreSQL/SQLite.")
 
                 # Return a minimal config showing it's disabled
@@ -178,7 +177,6 @@ class LakebaseService(BaseService):
 
             # Save to database using repository
             await self.config_repository.upsert("lakebase", config)
-            await self.session.commit()
 
             logger.info(f"Lakebase configuration saved: enabled={config.get('enabled')}")
             return config
