@@ -4,6 +4,7 @@ Unit tests for ExecutionTraceRouter.
 Tests the functionality of execution trace/debugging endpoints.
 """
 import pytest
+from datetime import datetime
 from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi import HTTPException
 from src.dependencies.admin_auth import (
@@ -499,3 +500,222 @@ class TestExecutionTraceRouter:
                 limit=25,
                 offset=5
             )
+
+    # Test high limit acceptance (limit up to 15000)
+    def test_get_traces_accepts_high_limit(self, client, mock_group_context):
+        """Test that trace endpoints accept limit values up to 15000."""
+        with patch('src.api.execution_trace_router.ExecutionTraceService.get_traces_by_job_id') as mock_get_traces:
+            mock_get_traces.return_value = {
+                "job_id": "job-123",
+                "traces": []
+            }
+
+            response = client.get("/traces/job/job-123?limit=1500")
+            assert response.status_code == 200
+            mock_get_traces.assert_called_once_with(
+                group_context=mock_group_context,
+                job_id="job-123",
+                limit=1500,
+                offset=0
+            )
+
+    def test_get_traces_rejects_limit_over_max(self, client, mock_group_context):
+        """Test that trace endpoints reject limit values over 15000."""
+        response = client.get("/traces/job/job-123?limit=20000")
+        assert response.status_code == 422
+
+    # Test get_current_crew_node_states endpoint
+    def test_get_crew_node_states_success(self, client, mock_group_context):
+        """Test successful retrieval of crew node states with task events."""
+        mock_trace_started = MagicMock()
+        mock_trace_started.event_type = "task_started"
+        mock_trace_started.trace_metadata = {
+            "crew_name": "research_crew",
+            "agent_role": "Researcher"
+        }
+        mock_trace_started.event_context = "Research Task"
+        mock_trace_started.created_at = datetime(2024, 1, 1, 10, 0, 0)
+
+        mock_trace_completed = MagicMock()
+        mock_trace_completed.event_type = "task_completed"
+        mock_trace_completed.trace_metadata = {
+            "crew_name": "research_crew",
+            "agent_role": "Researcher"
+        }
+        mock_trace_completed.event_context = "Research Task"
+        mock_trace_completed.created_at = datetime(2024, 1, 1, 10, 5, 0)
+
+        mock_result = MagicMock()
+        mock_result.traces = [mock_trace_started, mock_trace_completed]
+
+        with patch('src.api.execution_trace_router.ExecutionTraceService.get_traces_by_job_id') as mock_get_traces:
+            mock_get_traces.return_value = mock_result
+
+            response = client.get("/traces/job/job-123/crew-node-states")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert "research_crew" in data
+            assert data["research_crew"]["status"] == "completed"
+
+    def test_get_crew_node_states_with_failure(self, client, mock_group_context):
+        """Test crew node states when a task fails."""
+        mock_trace_started = MagicMock()
+        mock_trace_started.event_type = "task_started"
+        mock_trace_started.trace_metadata = {
+            "crew_name": "data_crew",
+            "agent_role": "Analyst"
+        }
+        mock_trace_started.event_context = "Analysis Task"
+        mock_trace_started.created_at = datetime(2024, 1, 1, 10, 0, 0)
+
+        mock_trace_failed = MagicMock()
+        mock_trace_failed.event_type = "task_failed"
+        mock_trace_failed.trace_metadata = {
+            "crew_name": "data_crew",
+            "agent_role": "Analyst",
+            "error": "Context window overflow"
+        }
+        mock_trace_failed.event_context = "Analysis Task"
+        mock_trace_failed.output = None
+        mock_trace_failed.created_at = datetime(2024, 1, 1, 10, 3, 0)
+
+        mock_result = MagicMock()
+        mock_result.traces = [mock_trace_started, mock_trace_failed]
+
+        with patch('src.api.execution_trace_router.ExecutionTraceService.get_traces_by_job_id') as mock_get_traces:
+            mock_get_traces.return_value = mock_result
+
+            response = client.get("/traces/job/job-123/crew-node-states")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert "data_crew" in data
+            assert data["data_crew"]["status"] == "failed"
+            assert data["data_crew"]["error"] == "Context window overflow"
+
+    def test_get_crew_node_states_not_found(self, client, mock_group_context):
+        """Test crew node states when job not found."""
+        with patch('src.api.execution_trace_router.ExecutionTraceService.get_traces_by_job_id') as mock_get_traces:
+            mock_get_traces.return_value = None
+
+            response = client.get("/traces/job/nonexistent/crew-node-states")
+
+            assert response.status_code == 404
+
+    def test_get_crew_node_states_error_from_output(self, client, mock_group_context):
+        """Test crew node states extracts error from output.extra_data when trace_metadata has no error."""
+        mock_trace_started = MagicMock()
+        mock_trace_started.event_type = "task_started"
+        mock_trace_started.trace_metadata = {"crew_name": "my_crew"}
+        mock_trace_started.event_context = "Task1"
+        mock_trace_started.created_at = datetime(2024, 1, 1, 10, 0, 0)
+
+        mock_trace_failed = MagicMock()
+        mock_trace_failed.event_type = "task_failed"
+        mock_trace_failed.trace_metadata = {"crew_name": "my_crew"}
+        mock_trace_failed.event_context = "Task1"
+        mock_trace_failed.output = {"extra_data": {"error": "LLM rate limit exceeded"}}
+        mock_trace_failed.created_at = datetime(2024, 1, 1, 10, 1, 0)
+
+        mock_result = MagicMock()
+        mock_result.traces = [mock_trace_started, mock_trace_failed]
+
+        with patch('src.api.execution_trace_router.ExecutionTraceService.get_traces_by_job_id') as mock_get_traces:
+            mock_get_traces.return_value = mock_result
+
+            response = client.get("/traces/job/job-123/crew-node-states")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["my_crew"]["status"] == "failed"
+            assert data["my_crew"]["error"] == "LLM rate limit exceeded"
+
+    # Test get_current_task_states endpoint
+    def test_get_task_states_success(self, client, mock_group_context):
+        """Test successful retrieval of task states."""
+        mock_trace_started = MagicMock()
+        mock_trace_started.event_type = "task_started"
+        mock_trace_started.trace_metadata = {"task_id": "task-uuid-1"}
+        mock_trace_started.event_context = "Research Task"
+        mock_trace_started.created_at = datetime(2024, 1, 1, 10, 0, 0)
+
+        mock_trace_completed = MagicMock()
+        mock_trace_completed.event_type = "task_completed"
+        mock_trace_completed.trace_metadata = {"task_id": "task-uuid-1"}
+        mock_trace_completed.event_context = "Research Task"
+        mock_trace_completed.created_at = datetime(2024, 1, 1, 10, 5, 0)
+
+        mock_result = MagicMock()
+        mock_result.traces = [mock_trace_started, mock_trace_completed]
+
+        with patch('src.api.execution_trace_router.ExecutionTraceService.get_traces_by_job_id') as mock_get_traces:
+            mock_get_traces.return_value = mock_result
+
+            response = client.get("/traces/job/job-123/task-states")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert "task-uuid-1" in data
+            assert data["task-uuid-1"]["status"] == "completed"
+            assert data["task-uuid-1"]["task_name"] == "Research Task"
+
+    def test_get_task_states_with_failure(self, client, mock_group_context):
+        """Test task states when a task fails."""
+        mock_trace_started = MagicMock()
+        mock_trace_started.event_type = "task_started"
+        mock_trace_started.trace_metadata = {"task_id": "task-uuid-2"}
+        mock_trace_started.event_context = "Analysis Task"
+        mock_trace_started.created_at = datetime(2024, 1, 1, 10, 0, 0)
+
+        mock_trace_failed = MagicMock()
+        mock_trace_failed.event_type = "task_failed"
+        mock_trace_failed.trace_metadata = {"task_id": "task-uuid-2"}
+        mock_trace_failed.event_context = "Analysis Task"
+        mock_trace_failed.created_at = datetime(2024, 1, 1, 10, 3, 0)
+
+        mock_result = MagicMock()
+        mock_result.traces = [mock_trace_started, mock_trace_failed]
+
+        with patch('src.api.execution_trace_router.ExecutionTraceService.get_traces_by_job_id') as mock_get_traces:
+            mock_get_traces.return_value = mock_result
+
+            response = client.get("/traces/job/job-123/task-states")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert "task-uuid-2" in data
+            assert data["task-uuid-2"]["status"] == "failed"
+
+    def test_get_task_states_not_found(self, client, mock_group_context):
+        """Test task states when job not found."""
+        with patch('src.api.execution_trace_router.ExecutionTraceService.get_traces_by_job_id') as mock_get_traces:
+            mock_get_traces.return_value = None
+
+            response = client.get("/traces/job/nonexistent/task-states")
+
+            assert response.status_code == 404
+
+    def test_get_task_states_fallback_task_id(self, client, mock_group_context):
+        """Test task states generates fallback task_id from event_context when no task_id in metadata."""
+        mock_trace_started = MagicMock()
+        mock_trace_started.event_type = "task_started"
+        mock_trace_started.trace_metadata = {}
+        mock_trace_started.event_context = "Unnamed Task"
+        mock_trace_started.created_at = datetime(2024, 1, 1, 10, 0, 0)
+
+        mock_result = MagicMock()
+        mock_result.traces = [mock_trace_started]
+
+        with patch('src.api.execution_trace_router.ExecutionTraceService.get_traces_by_job_id') as mock_get_traces:
+            mock_get_traces.return_value = mock_result
+
+            response = client.get("/traces/job/job-123/task-states")
+
+            assert response.status_code == 200
+            data = response.json()
+            # Should have a generated task_id based on hash of event_context
+            assert len(data) == 1
+            task_data = list(data.values())[0]
+            assert task_data["status"] == "running"
+            assert task_data["task_name"] == "Unnamed Task"

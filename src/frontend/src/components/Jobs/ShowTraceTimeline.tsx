@@ -620,8 +620,8 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
          (t.event_source === 'flow' && t.event_type === 'flow_started'))
       ),
       end: sorted.filter(t =>
-        ((t.event_source === 'crew' && (t.event_type === 'crew_completed' || t.event_type === 'execution_completed')) ||
-         (t.event_source === 'flow' && t.event_type === 'flow_completed'))
+        (t.event_source === 'crew' && (t.event_type === 'crew_completed' || t.event_type === 'execution_completed')) ||
+        (t.event_source === 'flow' && t.event_type === 'flow_completed')
       )
     };
 
@@ -741,14 +741,17 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
       // Skip global events (crew/flow/system), task orchestration events, task events, and Task Execution Planner for agent grouping
       // Task Execution Planner is handled separately as crew-level planning
       // "system"/"System" events are crew-level internal calls (e.g., final output synthesis)
+      // EXCEPTION: error/failure events are never skipped — they must appear in the timeline
+      const isErrorEvent = trace.event_type?.includes('failed') || trace.event_type?.includes('error');
       const src = trace.event_source?.toLowerCase();
-      if (src === 'crew' ||
+      if (!isErrorEvent && (
+          src === 'crew' ||
           src === 'flow' ||
           src === 'task' ||
           src === 'system' ||
           trace.event_source === 'Task Orchestrator' ||
           trace.event_source === 'Task Execution Planner' ||
-          trace.event_context === 'task_management') {
+          trace.event_context === 'task_management')) {
         return;
       }
 
@@ -769,12 +772,22 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
         agent = taskIdToAgent.get(traceTaskId)!;
       }
 
-      // For LLM calls, extract agent from extra_data if available
-      if (trace.event_type === 'llm_call' && trace.extra_data && typeof trace.extra_data === 'object') {
+      // For LLM calls or error events, extract agent from extra_data/metadata if available
+      if ((trace.event_type === 'llm_call' || isErrorEvent) && trace.extra_data && typeof trace.extra_data === 'object') {
         const extraData = trace.extra_data as Record<string, unknown>;
         const agentRole = extraData.agent_role as string;
         if (agentRole && agentRole !== 'UnknownAgent-str' && agentRole !== 'Unknown Agent') {
           agent = agentRole;
+        }
+      }
+      // For error events, also try trace_metadata.agent_role
+      if (isErrorEvent && (agent === 'crew' || agent === 'task' || agent === 'system' || agent === 'Unknown Agent')) {
+        const meta = trace.trace_metadata && typeof trace.trace_metadata === 'object'
+          ? trace.trace_metadata as Record<string, unknown>
+          : null;
+        const metaRole = meta?.agent_role as string;
+        if (metaRole && metaRole !== 'Unknown Agent') {
+          agent = metaRole;
         }
       }
 
@@ -1957,21 +1970,23 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
 
             {/* Global End Events */}
             {processedTraces.globalEvents.end.map((event, idx) => (
-              <Box key={idx} sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-                <CheckCircleIcon color="success" />
-                <Typography variant="body2" color="text.secondary">
-                  {event.event_type.replace(/_/g, ' ').toUpperCase()}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {new Date(event.created_at).toLocaleTimeString()}
-                </Typography>
-                {processedTraces.totalDuration && (
-                  <Chip
-                    size="small"
-                    label={`Total: ${formatDuration(processedTraces.totalDuration)}`}
-                    color="primary"
-                  />
-                )}
+              <Box key={idx} sx={{ mt: 2 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <CheckCircleIcon color="success" />
+                  <Typography variant="body2" color="text.secondary">
+                    {event.event_type.replace(/_/g, ' ').toUpperCase()}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {new Date(event.created_at).toLocaleTimeString()}
+                  </Typography>
+                  {processedTraces.totalDuration && (
+                    <Chip
+                      size="small"
+                      label={`Total: ${formatDuration(processedTraces.totalDuration)}`}
+                      color="primary"
+                    />
+                  )}
+                </Box>
               </Box>
             ))}
             </>)}
