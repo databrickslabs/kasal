@@ -8,7 +8,7 @@ Tests the core functionality of Databricks integration operations.
 """
 import pytest
 import os
-import requests
+import httpx
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 
@@ -284,10 +284,13 @@ class TestDatabricksService:
         databricks_service.repository.get_active_config.return_value = mock_databricks_config
         databricks_service.secrets_service.get_personal_access_token = AsyncMock(return_value="test-token")
 
-        with patch('requests.get') as mock_get:
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_get.return_value = mock_response
+        mock_client = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_client.get.return_value = mock_response
+        with patch('src.services.databricks_service.httpx.AsyncClient') as MockAsyncClient:
+            MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
             result = await databricks_service.check_databricks_connection()
 
@@ -303,11 +306,14 @@ class TestDatabricksService:
         databricks_service.repository.get_active_config.return_value = mock_databricks_config
         databricks_service.secrets_service.get_personal_access_token = AsyncMock(return_value="test-token")
 
-        with patch('requests.get') as mock_get:
-            mock_response = MagicMock()
-            mock_response.status_code = 401
-            mock_response.text = "Unauthorized"
-            mock_get.return_value = mock_response
+        mock_client = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+        mock_response.text = "Unauthorized"
+        mock_client.get.return_value = mock_response
+        with patch('src.services.databricks_service.httpx.AsyncClient') as MockAsyncClient:
+            MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
             result = await databricks_service.check_databricks_connection()
 
@@ -626,15 +632,18 @@ class TestDatabricksService:
         databricks_service.repository.get_active_config.return_value = mock_databricks_config
         databricks_service.secrets_service.get_personal_access_token = AsyncMock(return_value="test-token")
 
-        with patch('requests.get') as mock_get:
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_get.return_value = mock_response
+        mock_client = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_client.get.return_value = mock_response
+        with patch('src.services.databricks_service.httpx.AsyncClient') as MockAsyncClient:
+            MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
             result = await databricks_service.check_databricks_connection()
 
             # Verify the URL was properly formatted
-            call_args = mock_get.call_args[0][0]
+            call_args = mock_client.get.call_args[0][0]
             assert call_args.startswith("https://test.databricks.com/api/2.0/sql/warehouses")
 
     @pytest.mark.asyncio
@@ -644,13 +653,16 @@ class TestDatabricksService:
         mock_databricks_config.apps_enabled = False
         databricks_service.repository.get_active_config.return_value = mock_databricks_config
 
+        mock_client = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_client.get.return_value = mock_response
         with patch('src.utils.databricks_auth.get_databricks_auth_headers', new_callable=AsyncMock) as mock_auth, \
-             patch('requests.get') as mock_get:
+             patch('src.services.databricks_service.httpx.AsyncClient') as MockAsyncClient:
 
+            MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_auth.return_value = ({"Authorization": "Bearer oauth-token"}, None)
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_get.return_value = mock_response
 
             result = await databricks_service.check_databricks_connection()
 
@@ -699,10 +711,13 @@ class TestDatabricksService:
         databricks_service.repository.get_active_config.return_value = mock_databricks_config
         databricks_service.secrets_service.get_personal_access_token = AsyncMock(return_value="test-token")
 
-        with patch('requests.get') as mock_get:
-            mock_response = MagicMock()
-            mock_response.status_code = 403
-            mock_get.return_value = mock_response
+        mock_client = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 403
+        mock_client.get.return_value = mock_response
+        with patch('src.services.databricks_service.httpx.AsyncClient') as MockAsyncClient:
+            MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
             result = await databricks_service.check_databricks_connection()
 
@@ -718,11 +733,14 @@ class TestDatabricksService:
         databricks_service.repository.get_active_config.return_value = mock_databricks_config
         databricks_service.secrets_service.get_personal_access_token = AsyncMock(return_value="test-token")
 
-        with patch('requests.get') as mock_get:
-            mock_response = MagicMock()
-            mock_response.status_code = 500
-            mock_response.text = "Internal Server Error"
-            mock_get.return_value = mock_response
+        mock_client = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.text = "Internal Server Error"
+        mock_client.get.return_value = mock_response
+        with patch('src.services.databricks_service.httpx.AsyncClient') as MockAsyncClient:
+            MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
             result = await databricks_service.check_databricks_connection()
 
@@ -738,7 +756,12 @@ class TestDatabricksService:
         databricks_service.repository.get_active_config.return_value = mock_databricks_config
         databricks_service.secrets_service.get_personal_access_token = AsyncMock(return_value="test-token")
 
-        with patch('requests.get', side_effect=requests.exceptions.ConnectionError("Connection failed")):
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = httpx.ConnectError("Connection failed")
+        with patch('src.services.databricks_service.httpx.AsyncClient') as MockAsyncClient:
+            MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
+
             result = await databricks_service.check_databricks_connection()
 
             assert result["status"] == "error"
@@ -753,7 +776,12 @@ class TestDatabricksService:
         databricks_service.repository.get_active_config.return_value = mock_databricks_config
         databricks_service.secrets_service.get_personal_access_token = AsyncMock(return_value="test-token")
 
-        with patch('requests.get', side_effect=requests.exceptions.Timeout("Request timeout")):
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = httpx.TimeoutException("Request timeout")
+        with patch('src.services.databricks_service.httpx.AsyncClient') as MockAsyncClient:
+            MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
+
             result = await databricks_service.check_databricks_connection()
 
             assert result["status"] == "error"
@@ -768,7 +796,12 @@ class TestDatabricksService:
         databricks_service.repository.get_active_config.return_value = mock_databricks_config
         databricks_service.secrets_service.get_personal_access_token = AsyncMock(return_value="test-token")
 
-        with patch('requests.get', side_effect=Exception("Unexpected error")):
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = Exception("Unexpected error")
+        with patch('src.services.databricks_service.httpx.AsyncClient') as MockAsyncClient:
+            MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
+
             result = await databricks_service.check_databricks_connection()
 
             assert result["status"] == "error"

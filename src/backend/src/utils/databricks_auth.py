@@ -209,7 +209,7 @@ This pattern allows graceful fallback and clear error reporting.
 
 import os
 import logging
-import requests
+import httpx
 import json
 import contextlib
 from typing import Optional, Tuple, Dict
@@ -638,14 +638,14 @@ class DatabricksAuth:
             }
             
             # Make the token request
-            response = requests.post(
-                token_url,
-                auth=auth,
-                data=data,
-                headers=headers,
-                timeout=30
-            )
-            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    token_url,
+                    auth=auth,
+                    data=data,
+                    headers=headers,
+                )
+
             if response.status_code == 200:
                 token_data = response.json()
                 access_token = token_data.get('access_token')
@@ -681,8 +681,9 @@ class DatabricksAuth:
                 "Content-Type": "application/json"
             }
             
-            response = requests.get(url, headers=headers, timeout=10)
-            
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(url, headers=headers)
+
             if response.status_code == 200:
                 user_data = response.json()
                 username = user_data.get("userName", "Unknown")

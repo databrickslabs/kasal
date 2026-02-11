@@ -1,6 +1,6 @@
 import os
 import logging
-import requests
+import httpx
 import base64
 from typing import Dict, Tuple, Optional, Any
 
@@ -388,8 +388,9 @@ class DatabricksService:
                 }
             
             # Make the actual API call to test connection
-            response = requests.get(test_url, headers=headers, timeout=10)
-            
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(test_url, headers=headers)
+
             if response.status_code == 200:
                 return {
                     "status": "success",
@@ -420,14 +421,14 @@ class DatabricksService:
                     "message": f"Connection failed with status {response.status_code}: {response.text}",
                     "connected": False
                 }
-                
-        except requests.exceptions.ConnectionError:
+
+        except httpx.ConnectError:
             return {
                 "status": "error",
                 "message": f"Failed to connect to {workspace_url} - check workspace URL",
                 "connected": False
             }
-        except requests.exceptions.Timeout:
+        except httpx.TimeoutException:
             return {
                 "status": "error",
                 "message": "Connection timeout - check network and workspace URL",
