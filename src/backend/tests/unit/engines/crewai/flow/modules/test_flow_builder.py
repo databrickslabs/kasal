@@ -1229,7 +1229,7 @@ class TestRouterMethods:
             fc.update(flow_config_extra)
 
         with patch.multiple(MODULE, **p):
-            flow = asyncio.get_event_loop().run_until_complete(
+            flow = asyncio.run(
                 FlowBuilder._create_dynamic_flow(
                     sp, [], routers, {}, all_tasks,
                     flow_config=fc,
@@ -1522,7 +1522,7 @@ class TestRouterBuildEvalContext:
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
 
         with patch.multiple(MODULE, **p):
-            flow = asyncio.get_event_loop().run_until_complete(
+            flow = asyncio.run(
                 FlowBuilder._create_dynamic_flow(
                     sp, [], [router_cfg], {}, {"t1": task1},
                     flow_config={"state": {}, "persistence": {}},
@@ -2518,7 +2518,7 @@ class TestMergeHelpers:
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
 
         with patch.multiple(MODULE, **p):
-            flow = asyncio.get_event_loop().run_until_complete(
+            flow = asyncio.run(
                 FlowBuilder._create_dynamic_flow(
                     sp, [], [router_cfg], {}, {"t1": task1},
                     flow_config={"state": {}, "persistence": {}},
@@ -2730,7 +2730,7 @@ class TestStateJsonParseException:
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
 
         with patch.multiple(MODULE, **p):
-            flow = asyncio.get_event_loop().run_until_complete(
+            flow = asyncio.run(
                 FlowBuilder._create_dynamic_flow(
                     sp, [], [router_cfg], {}, {"t1": task1},
                     flow_config={"state": {}, "persistence": {}},
