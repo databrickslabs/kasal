@@ -266,7 +266,7 @@ class TestEngineConfigRepositoryToggleEnabled:
             
             assert result is True
             assert config.enabled is True
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_toggle_enabled_engine_not_found(self, engine_config_repository, mock_async_session):
@@ -287,7 +287,7 @@ class TestEngineConfigRepositoryToggleEnabled:
             
             assert result is True
             assert config.enabled is False
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_toggle_enabled_database_error(self, engine_config_repository, mock_async_session):
@@ -295,9 +295,9 @@ class TestEngineConfigRepositoryToggleEnabled:
         config = MockEngineConfig(engine_name="crewai")
         
         with patch.object(engine_config_repository, 'find_by_engine_name', return_value=config):
-            mock_async_session.commit.side_effect = Exception("Commit failed")
+            mock_async_session.flush.side_effect = Exception("Flush failed")
             
-            with pytest.raises(Exception, match="Commit failed"):
+            with pytest.raises(Exception, match="Flush failed"):
                 await engine_config_repository.toggle_enabled("crewai", True)
             
             mock_async_session.rollback.assert_called_once()
@@ -316,7 +316,7 @@ class TestEngineConfigRepositoryUpdateConfigValue:
             
             assert result is True
             assert config.config_value == "true"
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_update_config_value_not_found(self, engine_config_repository, mock_async_session):
@@ -333,7 +333,7 @@ class TestEngineConfigRepositoryUpdateConfigValue:
         config = MockEngineConfig(engine_name="crewai", config_key="flow_enabled")
         
         with patch.object(engine_config_repository, 'find_by_engine_and_key', return_value=config):
-            mock_async_session.commit.side_effect = Exception("Update failed")
+            mock_async_session.flush.side_effect = Exception("Update failed")
             
             with pytest.raises(Exception, match="Update failed"):
                 await engine_config_repository.update_config_value("crewai", "flow_enabled", "true")

@@ -213,7 +213,7 @@ class TestMCPServerRepositoryToggleEnabled:
             
             assert result == server
             assert server.enabled is False  # Should be toggled
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
             mock_async_session.refresh.assert_called_once_with(server)
     
     @pytest.mark.asyncio
@@ -226,7 +226,7 @@ class TestMCPServerRepositoryToggleEnabled:
             
             assert result == server
             assert server.enabled is True  # Should be toggled
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
             mock_async_session.refresh.assert_called_once_with(server)
     
     @pytest.mark.asyncio
@@ -245,10 +245,10 @@ class TestMCPServerRepositoryToggleEnabled:
         server = sample_mcp_servers[0]
         
         with patch.object(mcp_server_repository, 'get', return_value=server):
-            mock_async_session.commit.side_effect = Exception("Commit failed")
+            mock_async_session.flush.side_effect = Exception("Flush failed")
             
             with patch('logging.error') as mock_logger:
-                with pytest.raises(Exception, match="Commit failed"):
+                with pytest.raises(Exception, match="Flush failed"):
                     await mcp_server_repository.toggle_enabled(1)
                 
                 mock_logger.assert_called_once()
@@ -308,7 +308,7 @@ class TestMCPSettingsRepositoryGetSettings:
             
             assert result == mock_settings
             mock_async_session.add.assert_called_once_with(mock_settings)
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
             mock_async_session.refresh.assert_called_once_with(mock_settings)
             mock_settings_class.assert_called_once_with(global_enabled=False)
     
@@ -334,7 +334,7 @@ class TestMCPSettingsRepositoryUpdateGlobalEnabled:
             
             assert result == sample_mcp_settings
             assert sample_mcp_settings.global_enabled is True
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
             mock_async_session.refresh.assert_called_once_with(sample_mcp_settings)
     
     @pytest.mark.asyncio
@@ -347,7 +347,7 @@ class TestMCPSettingsRepositoryUpdateGlobalEnabled:
             
             assert result == sample_mcp_settings
             assert sample_mcp_settings.global_enabled is False
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
             mock_async_session.refresh.assert_called_once_with(sample_mcp_settings)
     
     @pytest.mark.asyncio
@@ -360,7 +360,7 @@ class TestMCPSettingsRepositoryUpdateGlobalEnabled:
             
             assert result == sample_mcp_settings
             assert sample_mcp_settings.global_enabled is True
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
             mock_async_session.refresh.assert_called_once_with(sample_mcp_settings)
     
     @pytest.mark.asyncio
@@ -371,12 +371,12 @@ class TestMCPSettingsRepositoryUpdateGlobalEnabled:
                 await mcp_settings_repository.update_global_enabled(True)
     
     @pytest.mark.asyncio
-    async def test_update_global_enabled_commit_error(self, mcp_settings_repository, mock_async_session, sample_mcp_settings):
-        """Test update global enabled with commit error."""
+    async def test_update_global_enabled_flush_error(self, mcp_settings_repository, mock_async_session, sample_mcp_settings):
+        """Test update global enabled with flush error."""
         with patch.object(mcp_settings_repository, 'get_settings', return_value=sample_mcp_settings):
-            mock_async_session.commit.side_effect = Exception("Commit failed")
+            mock_async_session.flush.side_effect = Exception("Flush failed")
             
-            with pytest.raises(Exception, match="Commit failed"):
+            with pytest.raises(Exception, match="Flush failed"):
                 await mcp_settings_repository.update_global_enabled(True)
 
 
@@ -561,7 +561,7 @@ class TestMCPRepositoryIntegration:
             
             assert toggle_result == server_to_toggle
             assert server_to_toggle.enabled != original_status
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_get_settings_then_update_workflow(self, mcp_settings_repository, mock_async_session, sample_mcp_settings):
@@ -578,7 +578,7 @@ class TestMCPRepositoryIntegration:
             
             assert updated_settings == sample_mcp_settings
             assert settings.global_enabled != original_enabled
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
 
 
 class TestMCPRepositoryErrorHandling:
@@ -605,13 +605,13 @@ class TestMCPRepositoryErrorHandling:
         """Test get settings when creating default settings fails."""
         mock_empty_result = MockResult([])
         mock_async_session.execute.return_value = mock_empty_result
-        mock_async_session.commit.side_effect = Exception("Commit failed")
+        mock_async_session.flush.side_effect = Exception("Flush failed")
         
         with patch('src.repositories.mcp_repository.MCPSettings') as mock_settings_class:
             mock_settings = MockMCPSettings()
             mock_settings_class.return_value = mock_settings
             
-            with pytest.raises(Exception, match="Commit failed"):
+            with pytest.raises(Exception, match="Flush failed"):
                 await mcp_settings_repository.get_settings()
     
     def test_sync_repository_query_error(self, sync_mcp_server_repository, mock_sync_session):
@@ -642,7 +642,7 @@ class TestMCPRepositoryEdgeCases:
             
             assert result1 == server
             assert result2 == server
-            assert mock_async_session.commit.call_count == 2
+            assert mock_async_session.flush.call_count == 2
     
     @pytest.mark.asyncio
     async def test_update_global_enabled_boolean_coercion(self, mcp_settings_repository, mock_async_session, sample_mcp_settings):
@@ -686,5 +686,5 @@ class TestMCPRepositoryEdgeCases:
             # Verify default settings were created with correct values
             mock_settings_class.assert_called_once_with(global_enabled=False)
             mock_async_session.add.assert_called_once_with(mock_settings)
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
             mock_async_session.refresh.assert_called_once_with(mock_settings)

@@ -191,7 +191,7 @@ class TestToolRepositoryToggleEnabled:
             
             assert result == tool
             assert tool.enabled is False  # Should be toggled
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
             mock_async_session.refresh.assert_called_once_with(tool)
     
     @pytest.mark.asyncio
@@ -204,7 +204,7 @@ class TestToolRepositoryToggleEnabled:
             
             assert result == tool
             assert tool.enabled is True  # Should be toggled
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
             mock_async_session.refresh.assert_called_once_with(tool)
     
     @pytest.mark.asyncio
@@ -223,9 +223,9 @@ class TestToolRepositoryToggleEnabled:
         tool = MockTool(id=1, enabled=True)
         
         with patch.object(tool_repository, 'get', return_value=tool):
-            mock_async_session.commit.side_effect = Exception("Commit failed")
+            mock_async_session.flush.side_effect = Exception("Flush failed")
             
-            with pytest.raises(Exception, match="Commit failed"):
+            with pytest.raises(Exception, match="Flush failed"):
                 await tool_repository.toggle_enabled(1)
             
             mock_async_session.rollback.assert_called_once()
@@ -245,7 +245,7 @@ class TestToolRepositoryUpdateConfigurationByTitle:
             
             assert result == tool
             assert tool.config == new_config
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
             mock_async_session.refresh.assert_called_once_with(tool)
     
     @pytest.mark.asyncio
@@ -271,7 +271,7 @@ class TestToolRepositoryUpdateConfigurationByTitle:
             
             assert result == tool
             assert tool.config == {}
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_update_configuration_by_title_database_error(self, tool_repository, mock_async_session):
@@ -280,7 +280,7 @@ class TestToolRepositoryUpdateConfigurationByTitle:
         new_config = {"new": "config"}
         
         with patch.object(tool_repository, 'find_by_title', return_value=tool):
-            mock_async_session.commit.side_effect = Exception("Update failed")
+            mock_async_session.flush.side_effect = Exception("Update failed")
             
             with pytest.raises(Exception, match="Update failed"):
                 await tool_repository.update_configuration_by_title("test_tool", new_config)
@@ -305,7 +305,7 @@ class TestToolRepositoryEnableAll:
             assert len(result) == len(sample_tools)
             assert all(tool.enabled for tool in result)
             mock_async_session.execute.assert_called_once()
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
             
             # Verify the update statement was constructed correctly
             call_args = mock_async_session.execute.call_args[0][0]
@@ -323,7 +323,7 @@ class TestToolRepositoryEnableAll:
             
             assert result == []
             mock_async_session.execute.assert_called_once()
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_enable_all_database_error(self, tool_repository, mock_async_session):
@@ -353,7 +353,7 @@ class TestToolRepositoryDisableAll:
             assert len(result) == len(sample_tools)
             assert all(not tool.enabled for tool in result)
             mock_async_session.execute.assert_called_once()
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
             
             # Verify the update statement was constructed correctly
             call_args = mock_async_session.execute.call_args[0][0]
@@ -371,7 +371,7 @@ class TestToolRepositoryDisableAll:
             
             assert result == []
             mock_async_session.execute.assert_called_once()
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_disable_all_database_error(self, tool_repository, mock_async_session):
@@ -528,7 +528,7 @@ class TestToolRepositoryIntegration:
                 assert config_result == tool
                 assert tool.config == new_config
                 # Verify both operations committed
-                assert mock_async_session.commit.call_count == 2
+                assert mock_async_session.flush.call_count == 2
 
 
 class TestToolRepositoryErrorHandling:
@@ -581,12 +581,12 @@ class TestToolRepositoryErrorHandling:
             mock_async_session.rollback.assert_called_once()
     
     @pytest.mark.asyncio
-    async def test_disable_all_commit_error(self, tool_repository, mock_async_session):
-        """Test disable all with commit error."""
+    async def test_disable_all_flush_error(self, tool_repository, mock_async_session):
+        """Test disable all with flush error."""
         mock_async_session.execute.return_value = MagicMock()
-        mock_async_session.commit.side_effect = Exception("Commit failed")
+        mock_async_session.flush.side_effect = Exception("Flush failed")
         
-        with pytest.raises(Exception, match="Commit failed"):
+        with pytest.raises(Exception, match="Flush failed"):
             await tool_repository.disable_all()
         
         mock_async_session.rollback.assert_called_once()
@@ -614,7 +614,7 @@ class TestToolRepositoryEdgeCases:
             assert result3.enabled is False
             
             # Should have committed 3 times
-            assert mock_async_session.commit.call_count == 3
+            assert mock_async_session.flush.call_count == 3
     
     @pytest.mark.asyncio
     async def test_update_configuration_none_config(self, tool_repository, mock_async_session):
@@ -626,7 +626,7 @@ class TestToolRepositoryEdgeCases:
             
             assert result == tool
             assert tool.config is None
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_enable_disable_all_empty_database(self, tool_repository, mock_async_session):
@@ -644,7 +644,7 @@ class TestToolRepositoryEdgeCases:
             
             # Should have executed updates even with empty database
             assert mock_async_session.execute.call_count == 2
-            assert mock_async_session.commit.call_count == 2
+            assert mock_async_session.flush.call_count == 2
     
     @pytest.mark.asyncio
     async def test_find_by_title_case_sensitivity(self, tool_repository, mock_async_session):
@@ -695,4 +695,4 @@ class TestToolRepositoryEdgeCases:
             assert tool.config == complex_config
             assert tool.config["api"]["auth"]["type"] == "bearer"
             assert tool.config["settings"]["features"] == ["feature1", "feature2"]
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()

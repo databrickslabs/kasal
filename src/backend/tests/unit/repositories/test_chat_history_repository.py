@@ -321,7 +321,7 @@ class TestChatHistoryRepository:
         assert result is True
         assert mock_session.delete.call_count == 2  # Two messages deleted
         mock_session.flush.assert_called_once()
-        mock_session.commit.assert_called_once()
+        mock_session.flush.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_delete_session_no_messages_found(self, chat_history_repository, mock_session):

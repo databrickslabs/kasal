@@ -165,7 +165,6 @@ class TestAgentRepositoryUpdate:
         assert agent.name == "New Name"
         assert agent.role == "Senior Developer"
         mock_async_session.flush.assert_called_once()
-        mock_async_session.commit.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_update_not_found(self, agent_repository, mock_async_session):
@@ -192,7 +191,6 @@ class TestAgentRepositoryUpdate:
         assert result == agent
         assert agent.name == "Original Name"  # Unchanged
         mock_async_session.flush.assert_called_once()
-        mock_async_session.commit.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_update_exception_handling(self, agent_repository, mock_async_session):
@@ -223,7 +221,6 @@ class TestAgentRepositoryDelete:
         assert result is True
         mock_async_session.delete.assert_called_once_with(agent)
         mock_async_session.flush.assert_called_once()
-        mock_async_session.commit.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_delete_not_found(self, agent_repository, mock_async_session):
@@ -343,7 +340,6 @@ class TestAgentRepositoryDeleteAll:
         
         mock_async_session.execute.assert_called_once()
         mock_async_session.flush.assert_called_once()
-        mock_async_session.commit.assert_called_once()
         
         # Verify the delete statement was constructed correctly
         call_args = mock_async_session.execute.call_args[0][0]
@@ -450,7 +446,6 @@ class TestAgentRepositoryIntegration:
         assert agent.name == "Updated Name"
         assert mock_async_session.execute.call_count == 1  # One call for update's internal get
         mock_async_session.flush.assert_called_once()
-        mock_async_session.commit.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_get_then_delete_flow(self, agent_repository, mock_async_session):
@@ -465,7 +460,6 @@ class TestAgentRepositoryIntegration:
         assert mock_async_session.execute.call_count == 1  # One call for delete's internal get
         mock_async_session.delete.assert_called_once_with(agent)
         mock_async_session.flush.assert_called_once()
-        mock_async_session.commit.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_find_by_name_with_actual_query_structure(self, agent_repository, mock_async_session):
