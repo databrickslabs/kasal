@@ -8,7 +8,7 @@ This module:
 4. Provides context to the LLM for better task generation
 """
 import logging
-import requests
+import httpx
 import os
 import json
 from pathlib import Path
@@ -48,7 +48,8 @@ async def fetch_url(url: str) -> str:
     """Fetch content from a URL."""
     try:
         logger.info(f"Fetching content from {url}")
-        response = requests.get(url)
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url)
         response.raise_for_status()
         return response.text
     except Exception as e:

@@ -2,7 +2,7 @@ import logging
 import os
 import time
 from typing import Dict, List, Optional
-import requests
+import httpx
 from src.core.exceptions import KasalError, NotFoundError, BadRequestError, UnauthorizedError
 
 from src.repositories.powerbi_config_repository import PowerBIConfigRepository
@@ -246,7 +246,8 @@ class PowerBIService:
             logger.info(f"Executing DAX query against semantic model: {semantic_model_id}")
             logger.debug(f"Query: {dax_query[:200]}...")  # Log first 200 chars
 
-            response = requests.post(datasets_url, headers=headers, json=body, timeout=30)
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(datasets_url, headers=headers, json=body)
 
             if response.status_code != 200:
                 error_msg = f"Power BI API error (status {response.status_code}): {response.text}"
@@ -258,7 +259,7 @@ class PowerBIService:
             results = response.json().get("results", [])
             return results
 
-        except requests.exceptions.RequestException as e:
+        except httpx.RequestError as e:
             logger.error(f"Request error when calling Power BI API: {e}", exc_info=True)
             raise KasalError(detail=f"Failed to execute DAX query: {str(e)}")
 
