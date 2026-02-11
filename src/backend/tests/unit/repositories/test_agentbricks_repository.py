@@ -1224,10 +1224,13 @@ class TestRepositoryCleanup:
 
     def test_del_with_running_loop(self):
         """Test __del__ schedules client close when event loop is running."""
+        import gc
+        gc.collect()  # Finalize any stale repo instances before patching
         repo = AgentBricksRepository(auth_config=AgentBricksAuthConfig(host="test.databricks.com"))
         mock_loop = MagicMock()
         with patch("asyncio.get_running_loop", return_value=mock_loop):
             repo.__del__()
+            repo._client = None  # Prevent second call during GC
         mock_loop.create_task.assert_called_once()
 
     def test_del_without_running_loop(self):

@@ -1,582 +1,419 @@
-import pytest
-pytest.skip("Legacy documentation embeddings router tests reference removed dependency hooks; skipping.", allow_module_level=True)
+"""Unit tests for documentation_embeddings_router endpoints.
 
-"""Unit tests for documentation embeddings router."""
+Tests all endpoints using direct async function calls with mocked service
+dependencies and TestClient for seed-all and list-view integration tests.
+"""
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from fastapi import HTTPException
-from fastapi.testclient import TestClient
+from types import SimpleNamespace
 from datetime import datetime
 
-from src.main import app
-from src.schemas.documentation_embedding import (
-    DocumentationEmbedding as DocumentationEmbeddingSchema,
-    DocumentationEmbeddingCreate,
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from src.api.documentation_embeddings_router import (
+    create_documentation_embedding,
+    search_documentation_embeddings,
+    get_documentation_embeddings,
+    get_recent_documentation_embeddings,
+    get_documentation_embedding,
+    delete_documentation_embedding,
+    seed_all_documentation_embeddings,
+    router,
+    get_documentation_embedding_service,
 )
-from src.models.documentation_embedding import DocumentationEmbedding
-from src.services.documentation_embedding_service import DocumentationEmbeddingService
+from src.core.exceptions import NotFoundError
+from src.schemas.documentation_embedding import DocumentationEmbeddingCreate
+from src.utils.user_context import GroupContext
 
-client = TestClient(app)
+from tests.unit.router.conftest import register_exception_handlers
 
 
-@pytest.fixture
-def sample_embedding_data():
-    """Create sample embedding data."""
-    return DocumentationEmbeddingCreate(
-        source="test_source",
-        title="Test Documentation",
-        content="This is test documentation content",
-        embedding=[0.1, 0.2, 0.3, 0.4, 0.5],
-        doc_metadata={"category": "test", "version": "1.0"}
+def gc():
+    """Create a valid GroupContext for testing."""
+    return GroupContext(
+        group_ids=["g1"],
+        group_email="u@x.com",
+        email_domain="x.com",
+        user_role="admin",
     )
 
 
-@pytest.fixture
-def sample_documentation_embedding():
-    """Create a sample documentation embedding model."""
-    return DocumentationEmbedding(
-        id=1,
-        source="test_source",
-        title="Test Documentation",
-        content="This is test documentation content",
-        embedding=[0.1, 0.2, 0.3, 0.4, 0.5],
-        doc_metadata={"category": "test", "version": "1.0"},
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow()
+def make_embedding(eid=1, source="test_src", title="Test Doc"):
+    """Create a mock documentation embedding object."""
+    now = datetime.utcnow()
+    return SimpleNamespace(
+        id=eid,
+        source=source,
+        title=title,
+        content="Test content",
+        embedding=[0.1, 0.2, 0.3],
+        doc_metadata={"category": "test"},
+        created_at=now,
+        updated_at=now,
     )
 
 
-@pytest.fixture
-def mock_uow():
-    """Create a mock UnitOfWork."""
-    uow = AsyncMock()
-    uow.commit = AsyncMock()
-    return uow
-
-
-@pytest.fixture
-def mock_uow_context():
-    """Create a mock UnitOfWork context manager."""
-    uow_instance = AsyncMock()
-    uow_instance.__aenter__ = AsyncMock()
-    uow_instance.__aexit__ = AsyncMock(return_value=None)
-    return uow_instance
-
-
-@pytest.fixture
-def mock_documentation_service():
-    """Create a mock DocumentationEmbeddingService."""
-    service = AsyncMock(spec=DocumentationEmbeddingService)
-    return service
-
+# ---------------------------------------------------------------------------
+# POST /documentation-embeddings/
+# ---------------------------------------------------------------------------
 
 class TestCreateDocumentationEmbedding:
-    """Test cases for create_documentation_embedding endpoint."""
+    """Tests for create_documentation_embedding endpoint."""
 
-    def test_create_documentation_embedding_success(self, sample_embedding_data, sample_documentation_embedding, mock_uow, mock_documentation_service):
-        """Test successful creation of documentation embedding."""
-        mock_documentation_service.create_documentation_embedding.return_value = sample_documentation_embedding
+    @pytest.mark.asyncio
+    async def test_create_success(self):
+        svc = AsyncMock()
+        emb = make_embedding()
+        svc.create_documentation_embedding = AsyncMock(return_value=emb)
 
-        with patch('src.api.documentation_embeddings_router.UnitOfWork') as mock_uow_class:
-            mock_uow_class.return_value.__aenter__.return_value = mock_uow
-            mock_uow_class.return_value.__aexit__.return_value = None
-            with patch('src.api.documentation_embeddings_router.DocumentationEmbeddingService') as mock_service_class:
-                mock_service_class.return_value = mock_documentation_service
-                response = client.post("/api/v1/documentation-embeddings/", json=sample_embedding_data.model_dump())
+        create_data = DocumentationEmbeddingCreate(
+            source="src",
+            title="T",
+            content="C",
+            embedding=[0.1],
+        )
 
-        assert response.status_code == 200
-        result = response.json()
-        assert result["id"] == 1
-        assert result["source"] == "test_source"
-        assert result["title"] == "Test Documentation"
-        # Verify that create_documentation_embedding was called with the right arguments
-        args, kwargs = mock_documentation_service.create_documentation_embedding.call_args
-        assert args[0].source == "test_source"
-        assert kwargs.get("user_token") is None  # No auth headers provided
-        # Commit is not called here because it's handled by the UnitOfWork context manager
+        result = await create_documentation_embedding(
+            embedding=create_data,
+            service=svc,
+            group_context=gc(),
+            x_forwarded_access_token=None,
+            x_auth_request_access_token=None,
+        )
 
-    def test_create_documentation_embedding_with_auth_headers(self, sample_embedding_data, sample_documentation_embedding, mock_uow, mock_documentation_service):
-        """Test creation with authentication headers."""
-        mock_documentation_service.create_documentation_embedding.return_value = sample_documentation_embedding
+        assert result.id == 1
+        svc.create_documentation_embedding.assert_called_once_with(
+            create_data, user_token=None
+        )
 
-        with patch('src.api.documentation_embeddings_router.UnitOfWork') as mock_uow_class:
-            mock_uow_class.return_value.__aenter__.return_value = mock_uow
-            mock_uow_class.return_value.__aexit__.return_value = None
-            with patch('src.api.documentation_embeddings_router.DocumentationEmbeddingService') as mock_service_class:
-                mock_service_class.return_value = mock_documentation_service
-                headers = {
-                    "X-Forwarded-Access-Token": "test-token-123",
-                    "X-Auth-Request-Access-Token": "oauth-token-456"
-                }
-                response = client.post("/api/v1/documentation-embeddings/", json=sample_embedding_data.model_dump(), headers=headers)
+    @pytest.mark.asyncio
+    async def test_create_with_oauth_token_priority(self):
+        svc = AsyncMock()
+        svc.create_documentation_embedding = AsyncMock(return_value=make_embedding())
 
-        assert response.status_code == 200
-        # Verify OAuth2-Proxy token takes priority
-        args, kwargs = mock_documentation_service.create_documentation_embedding.call_args
-        assert kwargs.get("user_token") == "oauth-token-456"
+        create_data = DocumentationEmbeddingCreate(
+            source="src",
+            title="T",
+            content="C",
+            embedding=[0.1],
+        )
 
-    def test_create_documentation_embedding_with_databricks_token_only(self, sample_embedding_data, sample_documentation_embedding, mock_uow, mock_documentation_service):
-        """Test creation with only Databricks Apps token."""
-        mock_documentation_service.create_documentation_embedding.return_value = sample_documentation_embedding
+        await create_documentation_embedding(
+            embedding=create_data,
+            service=svc,
+            group_context=gc(),
+            x_forwarded_access_token="forwarded-token",
+            x_auth_request_access_token="oauth-token",
+        )
 
-        with patch('src.api.documentation_embeddings_router.UnitOfWork') as mock_uow_class:
-            mock_uow_class.return_value.__aenter__.return_value = mock_uow
-            mock_uow_class.return_value.__aexit__.return_value = None
-            with patch('src.api.documentation_embeddings_router.DocumentationEmbeddingService') as mock_service_class:
-                mock_service_class.return_value = mock_documentation_service
-                headers = {"X-Forwarded-Access-Token": "databricks-token-789"}
-                response = client.post("/api/v1/documentation-embeddings/", json=sample_embedding_data.model_dump(), headers=headers)
+        # OAuth2-Proxy token takes priority
+        svc.create_documentation_embedding.assert_called_once_with(
+            create_data, user_token="oauth-token"
+        )
 
-        assert response.status_code == 200
-        # Verify Databricks token is used when OAuth2-Proxy token is absent
-        args, kwargs = mock_documentation_service.create_documentation_embedding.call_args
-        assert kwargs.get("user_token") == "databricks-token-789"
+    @pytest.mark.asyncio
+    async def test_create_with_forwarded_token_only(self):
+        svc = AsyncMock()
+        svc.create_documentation_embedding = AsyncMock(return_value=make_embedding())
 
-    def test_create_documentation_embedding_error(self, sample_embedding_data, mock_uow, mock_documentation_service):
-        """Test error handling during creation."""
-        mock_documentation_service.create_documentation_embedding.side_effect = Exception("Database error")
+        create_data = DocumentationEmbeddingCreate(
+            source="src",
+            title="T",
+            content="C",
+            embedding=[0.1],
+        )
 
-        with patch('src.api.documentation_embeddings_router.UnitOfWork') as mock_uow_class:
-            mock_uow_class.return_value.__aenter__.return_value = mock_uow
-            mock_uow_class.return_value.__aexit__.return_value = None
-            with patch('src.api.documentation_embeddings_router.DocumentationEmbeddingService') as mock_service_class:
-                mock_service_class.return_value = mock_documentation_service
-                response = client.post("/api/v1/documentation-embeddings/", json=sample_embedding_data.model_dump())
+        await create_documentation_embedding(
+            embedding=create_data,
+            service=svc,
+            group_context=gc(),
+            x_forwarded_access_token="db-token",
+            x_auth_request_access_token=None,
+        )
 
-        assert response.status_code == 500
-        assert "Database error" in response.json()["detail"]
+        svc.create_documentation_embedding.assert_called_once_with(
+            create_data, user_token="db-token"
+        )
 
+
+# ---------------------------------------------------------------------------
+# GET /documentation-embeddings/search
+# ---------------------------------------------------------------------------
 
 class TestSearchDocumentationEmbeddings:
-    """Test cases for search_documentation_embeddings endpoint."""
+    """Tests for search_documentation_embeddings endpoint."""
 
-    def test_search_embeddings_success(self, sample_documentation_embedding, mock_uow, mock_documentation_service):
-        """Test successful search of documentation embeddings."""
-        query_embedding = [0.1, 0.2, 0.3, 0.4, 0.5]
-        mock_documentation_service.search_similar_embeddings.return_value = [sample_documentation_embedding]
+    @pytest.mark.asyncio
+    async def test_search_returns_results(self):
+        svc = AsyncMock()
+        embs = [make_embedding(1), make_embedding(2)]
+        svc.search_similar_embeddings = AsyncMock(return_value=embs)
 
-        with patch('src.api.documentation_embeddings_router.UnitOfWork') as mock_uow_class:
-            mock_uow_class.return_value.__aenter__.return_value = mock_uow
-            mock_uow_class.return_value.__aexit__.return_value = None
-            with patch('src.api.documentation_embeddings_router.DocumentationEmbeddingService') as mock_service_class:
-                mock_service_class.return_value = mock_documentation_service
-                response = client.get("/api/v1/documentation-embeddings/search", params={"query_embedding": query_embedding, "limit": 5})
-
-        assert response.status_code == 200
-        result = response.json()
-        assert len(result) == 1
-        assert result[0]["id"] == 1
-        mock_documentation_service.search_similar_embeddings.assert_called_once_with(
-            query_embedding=query_embedding,
-            limit=5
+        result = await search_documentation_embeddings(
+            service=svc,
+            query_embedding=[0.1, 0.2],
+            limit=5,
+            group_context=gc(),
         )
 
-    def test_search_embeddings_with_custom_limit(self, sample_documentation_embedding, mock_uow, mock_documentation_service):
-        """Test search with custom limit."""
-        query_embedding = [0.1, 0.2, 0.3, 0.4, 0.5]
-        embeddings = [sample_documentation_embedding] * 10
-        mock_documentation_service.search_similar_embeddings.return_value = embeddings
-
-        with patch('src.api.documentation_embeddings_router.UnitOfWork') as mock_uow_class:
-            mock_uow_class.return_value.__aenter__.return_value = mock_uow
-            mock_uow_class.return_value.__aexit__.return_value = None
-            with patch('src.api.documentation_embeddings_router.DocumentationEmbeddingService') as mock_service_class:
-                mock_service_class.return_value = mock_documentation_service
-                response = client.get("/api/v1/documentation-embeddings/search", params={"query_embedding": query_embedding, "limit": 10})
-
-        assert response.status_code == 200
-        result = response.json()
-        assert len(result) == 10
-        mock_documentation_service.search_similar_embeddings.assert_called_once_with(
-            query_embedding=query_embedding,
-            limit=10
+        assert len(result) == 2
+        svc.search_similar_embeddings.assert_called_once_with(
+            query_embedding=[0.1, 0.2], limit=5
         )
 
-    def test_search_embeddings_error(self, mock_uow, mock_documentation_service):
-        """Test error handling during search."""
-        query_embedding = [0.1, 0.2, 0.3, 0.4, 0.5]
-        mock_documentation_service.search_similar_embeddings.side_effect = Exception("Search error")
+    @pytest.mark.asyncio
+    async def test_search_empty_results(self):
+        svc = AsyncMock()
+        svc.search_similar_embeddings = AsyncMock(return_value=[])
 
-        with patch('src.api.documentation_embeddings_router.UnitOfWork') as mock_uow_class:
-            mock_uow_class.return_value.__aenter__.return_value = mock_uow
-            mock_uow_class.return_value.__aexit__.return_value = None
-            with patch('src.api.documentation_embeddings_router.DocumentationEmbeddingService') as mock_service_class:
-                mock_service_class.return_value = mock_documentation_service
-                response = client.get("/api/v1/documentation-embeddings/search", params={"query_embedding": query_embedding})
+        result = await search_documentation_embeddings(
+            service=svc,
+            query_embedding=[0.5],
+            limit=10,
+            group_context=gc(),
+        )
 
-        assert response.status_code == 500
-        assert "Search error" in response.json()["detail"]
+        assert result == []
 
+
+# ---------------------------------------------------------------------------
+# GET /documentation-embeddings/
+# ---------------------------------------------------------------------------
 
 class TestGetDocumentationEmbeddings:
-    """Test cases for get_documentation_embeddings endpoint."""
+    """Tests for get_documentation_embeddings endpoint (list view)."""
 
-    def test_get_embeddings_no_filter(self, sample_documentation_embedding):
-        """Test getting embeddings without filters."""
-        # Create a mock object with the necessary attributes
-        mock_embedding = MagicMock()
-        mock_embedding.id = 1
-        mock_embedding.source = "test_source"
-        mock_embedding.title = "Test Documentation"
-        mock_embedding.content = "Test content"
-        mock_embedding.doc_metadata = {}
-        mock_embedding.created_at = sample_documentation_embedding.created_at
-        mock_embedding.updated_at = sample_documentation_embedding.updated_at
-        mock_embedding.embedding = [0.1, 0.2, 0.3]
+    @pytest.mark.asyncio
+    async def test_list_no_filter(self):
+        svc = AsyncMock()
+        svc.get_documentation_embeddings = AsyncMock(
+            return_value=[make_embedding()]
+        )
 
-        # Create mock service that returns expected data
-        mock_service = AsyncMock()
-        mock_service.get_documentation_embeddings.return_value = [mock_embedding]
+        result = await get_documentation_embeddings(
+            service=svc, skip=0, limit=100, source=None, title=None,
+            group_context=gc(),
+        )
 
-        # Create mock UOW
-        mock_uow = AsyncMock()
-
-        with patch('src.api.documentation_embeddings_router.UnitOfWork') as mock_uow_class:
-            # Make UnitOfWork() return an async context manager
-            mock_uow_context = AsyncMock()
-            mock_uow_context.__aenter__.return_value = mock_uow
-            mock_uow_context.__aexit__.return_value = None
-            mock_uow_class.return_value = mock_uow_context
-
-            with patch('src.api.documentation_embeddings_router.DocumentationEmbeddingService') as mock_service_class:
-                # Make DocumentationEmbeddingService(uow) return our mock service
-                mock_service_class.return_value = mock_service
-
-                response = client.get("/api/v1/documentation-embeddings/")
-
-        assert response.status_code == 200
-        result = response.json()
         assert len(result) == 1
+        assert result[0]["embedding"] == []  # cleared for list view
         assert result[0]["id"] == 1
-        assert result[0]["embedding"] == []  # Embeddings cleared for list view
-        mock_service.get_documentation_embeddings.assert_called_once_with(0, 100)
+        svc.get_documentation_embeddings.assert_called_once_with(0, 100)
 
-    def test_get_embeddings_with_source_filter(self, sample_documentation_embedding):
-        """Test getting embeddings filtered by source."""
-        # Create a mock object with the necessary attributes
-        mock_embedding = MagicMock()
-        mock_embedding.id = 1
-        mock_embedding.source = "test_source"
-        mock_embedding.title = "Test Documentation"
-        mock_embedding.content = "Test content"
-        mock_embedding.doc_metadata = {}
-        mock_embedding.created_at = sample_documentation_embedding.created_at
-        mock_embedding.updated_at = sample_documentation_embedding.updated_at
-        mock_embedding.embedding = [0.1, 0.2, 0.3]
+    @pytest.mark.asyncio
+    async def test_list_by_source(self):
+        svc = AsyncMock()
+        svc.search_by_source = AsyncMock(return_value=[make_embedding()])
 
-        # Create mock service
-        mock_service = AsyncMock()
-        mock_service.search_by_source.return_value = [mock_embedding]
+        result = await get_documentation_embeddings(
+            service=svc, skip=0, limit=100, source="my_source", title=None,
+            group_context=gc(),
+        )
 
-        # Create mock UOW
-        mock_uow = AsyncMock()
-
-        with patch('src.api.documentation_embeddings_router.UnitOfWork') as mock_uow_class:
-            mock_uow_context = AsyncMock()
-            mock_uow_context.__aenter__.return_value = mock_uow
-            mock_uow_context.__aexit__.return_value = None
-            mock_uow_class.return_value = mock_uow_context
-
-            with patch('src.api.documentation_embeddings_router.DocumentationEmbeddingService') as mock_service_class:
-                mock_service_class.return_value = mock_service
-                response = client.get("/api/v1/documentation-embeddings/?source=test_source")
-
-        assert response.status_code == 200
-        result = response.json()
         assert len(result) == 1
-        assert result[0]["source"] == "test_source"
-        mock_service.search_by_source.assert_called_once_with("test_source", 0, 100)
+        svc.search_by_source.assert_called_once_with("my_source", 0, 100)
 
-    def test_get_embeddings_with_title_filter(self, sample_documentation_embedding):
-        """Test getting embeddings filtered by title."""
-        # Create a mock object with the necessary attributes
-        mock_embedding = MagicMock()
-        mock_embedding.id = 1
-        mock_embedding.source = "test_source"
-        mock_embedding.title = "Test Documentation"
-        mock_embedding.content = "Test content"
-        mock_embedding.doc_metadata = {}
-        mock_embedding.created_at = sample_documentation_embedding.created_at
-        mock_embedding.updated_at = sample_documentation_embedding.updated_at
-        mock_embedding.embedding = [0.1, 0.2, 0.3]
+    @pytest.mark.asyncio
+    async def test_list_by_title(self):
+        svc = AsyncMock()
+        svc.search_by_title = AsyncMock(return_value=[make_embedding()])
 
-        mock_service = AsyncMock()
-        mock_service.search_by_title.return_value = [mock_embedding]
+        result = await get_documentation_embeddings(
+            service=svc, skip=0, limit=100, source=None, title="Doc",
+            group_context=gc(),
+        )
 
-        mock_uow = AsyncMock()
-
-        with patch('src.api.documentation_embeddings_router.UnitOfWork') as mock_uow_class:
-            mock_uow_context = AsyncMock()
-            mock_uow_context.__aenter__.return_value = mock_uow
-            mock_uow_context.__aexit__.return_value = None
-            mock_uow_class.return_value = mock_uow_context
-
-            with patch('src.api.documentation_embeddings_router.DocumentationEmbeddingService') as mock_service_class:
-                mock_service_class.return_value = mock_service
-                response = client.get("/api/v1/documentation-embeddings/?title=Test")
-
-        assert response.status_code == 200
-        result = response.json()
         assert len(result) == 1
-        assert result[0]["title"] == "Test Documentation"
-        mock_service.search_by_title.assert_called_once_with("Test", 0, 100)
+        svc.search_by_title.assert_called_once_with("Doc", 0, 100)
 
-    def test_get_embeddings_with_pagination(self, sample_documentation_embedding):
-        """Test getting embeddings with pagination."""
-        # Create a mock object with the necessary attributes
-        mock_embedding = MagicMock()
-        mock_embedding.id = 1
-        mock_embedding.source = "test_source"
-        mock_embedding.title = "Test Documentation"
-        mock_embedding.content = "Test content"
-        mock_embedding.doc_metadata = {}
-        mock_embedding.created_at = sample_documentation_embedding.created_at
-        mock_embedding.updated_at = sample_documentation_embedding.updated_at
-        mock_embedding.embedding = [0.1, 0.2, 0.3]
+    @pytest.mark.asyncio
+    async def test_list_source_takes_priority_over_title(self):
+        """When both source and title are provided, source filter wins."""
+        svc = AsyncMock()
+        svc.search_by_source = AsyncMock(return_value=[])
 
-        mock_service = AsyncMock()
-        mock_service.get_documentation_embeddings.return_value = [mock_embedding]
+        result = await get_documentation_embeddings(
+            service=svc, skip=0, limit=100, source="src", title="title",
+            group_context=gc(),
+        )
 
-        mock_uow = AsyncMock()
+        assert result == []
+        svc.search_by_source.assert_called_once()
 
-        with patch('src.api.documentation_embeddings_router.UnitOfWork') as mock_uow_class:
-            mock_uow_context = AsyncMock()
-            mock_uow_context.__aenter__.return_value = mock_uow
-            mock_uow_context.__aexit__.return_value = None
-            mock_uow_class.return_value = mock_uow_context
+    @pytest.mark.asyncio
+    async def test_list_with_pagination(self):
+        svc = AsyncMock()
+        svc.get_documentation_embeddings = AsyncMock(return_value=[])
 
-            with patch('src.api.documentation_embeddings_router.DocumentationEmbeddingService') as mock_service_class:
-                mock_service_class.return_value = mock_service
-                response = client.get("/api/v1/documentation-embeddings/?skip=10&limit=20")
+        await get_documentation_embeddings(
+            service=svc, skip=10, limit=20, source=None, title=None,
+            group_context=gc(),
+        )
 
-        assert response.status_code == 200
-        result = response.json()
-        assert len(result) == 1
-        mock_service.get_documentation_embeddings.assert_called_once_with(10, 20)
-
-    def test_get_embeddings_error(self):
-        """Test error handling when getting embeddings."""
-        mock_service = AsyncMock()
-        mock_service.get_documentation_embeddings.side_effect = Exception("Database error")
-
-        mock_uow = AsyncMock()
-
-        with patch('src.api.documentation_embeddings_router.UnitOfWork') as mock_uow_class:
-            mock_uow_context = AsyncMock()
-            mock_uow_context.__aenter__.return_value = mock_uow
-            mock_uow_context.__aexit__.return_value = None
-            mock_uow_class.return_value = mock_uow_context
-
-            with patch('src.api.documentation_embeddings_router.DocumentationEmbeddingService') as mock_service_class:
-                mock_service_class.return_value = mock_service
-                response = client.get("/api/v1/documentation-embeddings/")
-                # The error should be handled and return a 500 status
-                assert response.status_code == 500
+        svc.get_documentation_embeddings.assert_called_once_with(10, 20)
 
 
-class TestGetDocumentationEmbeddingById:
-    """Test cases for get_documentation_embedding endpoint."""
-
-    def test_get_embedding_by_id_success(self, sample_documentation_embedding, mock_uow, mock_documentation_service):
-        """Test successfully getting embedding by ID."""
-        mock_documentation_service.get_documentation_embedding.return_value = sample_documentation_embedding
-
-        with patch('src.api.documentation_embeddings_router.UnitOfWork') as mock_uow_class:
-            mock_uow_class.return_value.__aenter__.return_value = mock_uow
-            mock_uow_class.return_value.__aexit__.return_value = None
-            with patch('src.api.documentation_embeddings_router.DocumentationEmbeddingService') as mock_service_class:
-                mock_service_class.return_value = mock_documentation_service
-                response = client.get("/api/v1/documentation-embeddings/1")
-
-        assert response.status_code == 200
-        result = response.json()
-        assert result["id"] == 1
-        assert result["source"] == "test_source"
-        mock_documentation_service.get_documentation_embedding.assert_called_once_with(1)
-
-    def test_get_embedding_by_id_not_found(self, mock_uow, mock_documentation_service):
-        """Test getting non-existent embedding."""
-        mock_documentation_service.get_documentation_embedding.return_value = None
-
-        with patch('src.api.documentation_embeddings_router.UnitOfWork') as mock_uow_class:
-            mock_uow_class.return_value.__aenter__.return_value = mock_uow
-            mock_uow_class.return_value.__aexit__.return_value = None
-            with patch('src.api.documentation_embeddings_router.DocumentationEmbeddingService') as mock_service_class:
-                mock_service_class.return_value = mock_documentation_service
-                response = client.get("/api/v1/documentation-embeddings/999")
-
-        assert response.status_code == 404
-        assert "Documentation embedding not found" in response.json()["detail"]
-
-    def test_get_embedding_by_id_error(self, mock_uow, mock_documentation_service):
-        """Test error handling when getting by ID."""
-        mock_documentation_service.get_documentation_embedding.side_effect = Exception("Database error")
-
-        with patch('src.api.documentation_embeddings_router.UnitOfWork') as mock_uow_class:
-            mock_uow_class.return_value.__aenter__.return_value = mock_uow
-            mock_uow_class.return_value.__aexit__.return_value = None
-            with patch('src.api.documentation_embeddings_router.DocumentationEmbeddingService') as mock_service_class:
-                mock_service_class.return_value = mock_documentation_service
-                response = client.get("/api/v1/documentation-embeddings/1")
-
-        assert response.status_code == 500
-        assert "Database error" in response.json()["detail"]
-
-
-class TestDeleteDocumentationEmbedding:
-    """Test cases for delete_documentation_embedding endpoint."""
-
-    def test_delete_embedding_success(self, mock_uow, mock_documentation_service):
-        """Test successful deletion of embedding."""
-        mock_documentation_service.delete_documentation_embedding.return_value = True
-
-        with patch('src.api.documentation_embeddings_router.UnitOfWork') as mock_uow_class:
-            mock_uow_class.return_value.__aenter__.return_value = mock_uow
-            mock_uow_class.return_value.__aexit__.return_value = None
-            with patch('src.api.documentation_embeddings_router.DocumentationEmbeddingService') as mock_service_class:
-                mock_service_class.return_value = mock_documentation_service
-                response = client.delete("/api/v1/documentation-embeddings/1")
-
-        assert response.status_code == 200
-        result = response.json()
-        assert result["message"] == "Documentation embedding deleted successfully"
-        mock_documentation_service.delete_documentation_embedding.assert_called_once_with(1)
-        mock_uow.commit.assert_called_once()
-
-    def test_delete_embedding_not_found(self, mock_uow, mock_documentation_service):
-        """Test deleting non-existent embedding."""
-        mock_documentation_service.delete_documentation_embedding.return_value = False
-
-        with patch('src.api.documentation_embeddings_router.UnitOfWork') as mock_uow_class:
-            mock_uow_class.return_value.__aenter__.return_value = mock_uow
-            mock_uow_class.return_value.__aexit__.return_value = None
-            with patch('src.api.documentation_embeddings_router.DocumentationEmbeddingService') as mock_service_class:
-                mock_service_class.return_value = mock_documentation_service
-                response = client.delete("/api/v1/documentation-embeddings/999")
-
-        assert response.status_code == 404
-        assert "Documentation embedding not found" in response.json()["detail"]
-
-    def test_delete_embedding_error(self, mock_uow, mock_documentation_service):
-        """Test error handling during deletion."""
-        mock_documentation_service.delete_documentation_embedding.side_effect = Exception("Database error")
-
-        with patch('src.api.documentation_embeddings_router.UnitOfWork') as mock_uow_class:
-            mock_uow_class.return_value.__aenter__.return_value = mock_uow
-            mock_uow_class.return_value.__aexit__.return_value = None
-            with patch('src.api.documentation_embeddings_router.DocumentationEmbeddingService') as mock_service_class:
-                mock_service_class.return_value = mock_documentation_service
-                response = client.delete("/api/v1/documentation-embeddings/1")
-
-        assert response.status_code == 500
-        assert "Database error" in response.json()["detail"]
-
+# ---------------------------------------------------------------------------
+# GET /documentation-embeddings/recent
+# ---------------------------------------------------------------------------
 
 class TestGetRecentDocumentationEmbeddings:
-    """Test cases for get_recent_documentation_embeddings endpoint."""
+    """Tests for get_recent_documentation_embeddings endpoint."""
 
-    def test_get_recent_embeddings_success(self, sample_documentation_embedding, mock_uow, mock_documentation_service):
-        """Test successfully getting recent embeddings."""
-        recent_embeddings = [sample_documentation_embedding] * 5
-        mock_documentation_service.get_recent_embeddings.return_value = recent_embeddings
+    @pytest.mark.asyncio
+    async def test_recent_returns_results(self):
+        svc = AsyncMock()
+        embs = [make_embedding(i) for i in range(5)]
+        svc.get_recent_embeddings = AsyncMock(return_value=embs)
 
-        with patch('src.api.documentation_embeddings_router.UnitOfWork') as mock_uow_class:
-            mock_uow_class.return_value.__aenter__.return_value = mock_uow
-            mock_uow_class.return_value.__aexit__.return_value = None
-            with patch('src.api.documentation_embeddings_router.DocumentationEmbeddingService') as mock_service_class:
-                mock_service_class.return_value = mock_documentation_service
-                response = client.get("/api/v1/documentation-embeddings/recent?limit=5")
+        result = await get_recent_documentation_embeddings(
+            service=svc, limit=5, group_context=gc(),
+        )
 
-        assert response.status_code == 200
-        result = response.json()
         assert len(result) == 5
-        mock_documentation_service.get_recent_embeddings.assert_called_once_with(5)
+        svc.get_recent_embeddings.assert_called_once_with(5)
 
-    def test_get_recent_embeddings_custom_limit(self, sample_documentation_embedding, mock_uow, mock_documentation_service):
-        """Test getting recent embeddings with custom limit."""
-        recent_embeddings = [sample_documentation_embedding] * 20
-        mock_documentation_service.get_recent_embeddings.return_value = recent_embeddings
 
-        with patch('src.api.documentation_embeddings_router.UnitOfWork') as mock_uow_class:
-            mock_uow_class.return_value.__aenter__.return_value = mock_uow
-            mock_uow_class.return_value.__aexit__.return_value = None
-            with patch('src.api.documentation_embeddings_router.DocumentationEmbeddingService') as mock_service_class:
-                mock_service_class.return_value = mock_documentation_service
-                response = client.get("/api/v1/documentation-embeddings/recent?limit=20")
+# ---------------------------------------------------------------------------
+# GET /documentation-embeddings/{embedding_id}
+# ---------------------------------------------------------------------------
 
-        assert response.status_code == 200
-        result = response.json()
-        assert len(result) == 20
-        mock_documentation_service.get_recent_embeddings.assert_called_once_with(20)
+class TestGetDocumentationEmbeddingById:
+    """Tests for get_documentation_embedding endpoint."""
 
-    def test_get_recent_embeddings_error(self, mock_uow, mock_documentation_service):
-        """Test error handling when getting recent embeddings."""
-        mock_documentation_service.get_recent_embeddings.side_effect = Exception("Database error")
+    @pytest.mark.asyncio
+    async def test_get_by_id_success(self):
+        svc = AsyncMock()
+        emb = make_embedding(42)
+        svc.get_documentation_embedding = AsyncMock(return_value=emb)
 
-        with patch('src.api.documentation_embeddings_router.UnitOfWork') as mock_uow_class:
-            mock_uow_class.return_value.__aenter__.return_value = mock_uow
-            mock_uow_class.return_value.__aexit__.return_value = None
-            with patch('src.api.documentation_embeddings_router.DocumentationEmbeddingService') as mock_service_class:
-                mock_service_class.return_value = mock_documentation_service
-                response = client.get("/api/v1/documentation-embeddings/recent")
+        result = await get_documentation_embedding(
+            embedding_id=42, service=svc, group_context=gc(),
+        )
 
-        assert response.status_code == 500
-        assert "Database error" in response.json()["detail"]
+        assert result.id == 42
 
+    @pytest.mark.asyncio
+    async def test_get_by_id_not_found(self):
+        svc = AsyncMock()
+        svc.get_documentation_embedding = AsyncMock(return_value=None)
+
+        with pytest.raises(NotFoundError):
+            await get_documentation_embedding(
+                embedding_id=999, service=svc, group_context=gc(),
+            )
+
+
+# ---------------------------------------------------------------------------
+# DELETE /documentation-embeddings/{embedding_id}
+# ---------------------------------------------------------------------------
+
+class TestDeleteDocumentationEmbedding:
+    """Tests for delete_documentation_embedding endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_delete_success(self):
+        svc = AsyncMock()
+        svc.delete_documentation_embedding = AsyncMock(return_value=True)
+
+        result = await delete_documentation_embedding(
+            embedding_id=1, service=svc, group_context=gc(),
+        )
+
+        assert result["message"] == "Documentation embedding deleted successfully"
+
+    @pytest.mark.asyncio
+    async def test_delete_not_found(self):
+        svc = AsyncMock()
+        svc.delete_documentation_embedding = AsyncMock(return_value=False)
+
+        with pytest.raises(NotFoundError):
+            await delete_documentation_embedding(
+                embedding_id=999, service=svc, group_context=gc(),
+            )
+
+
+# ---------------------------------------------------------------------------
+# POST /documentation-embeddings/seed-all
+# ---------------------------------------------------------------------------
 
 class TestSeedAllDocumentationEmbeddings:
-    """Test cases for seed_all_documentation_embeddings endpoint."""
+    """Tests for seed_all_documentation_embeddings endpoint."""
 
-    def test_seed_all_success(self):
-        """Test successful re-seeding of documentation."""
-        with patch('src.seeds.documentation.seed_documentation_embeddings') as mock_seed:
-            mock_seed.return_value = None
-            response = client.post("/api/v1/documentation-embeddings/seed-all")
+    @pytest.mark.asyncio
+    async def test_seed_all_success(self):
+        with patch(
+            "src.api.documentation_embeddings_router.seed_documentation_embeddings",
+            new_callable=AsyncMock,
+            create=True,
+        ) as mock_seed:
+            # Patch the import inside the function
+            with patch(
+                "src.seeds.documentation.seed_documentation_embeddings",
+                new_callable=AsyncMock,
+            ) as mock_inner_seed:
+                result = await seed_all_documentation_embeddings(
+                    group_context=gc(),
+                    x_forwarded_access_token=None,
+                    x_auth_request_access_token=None,
+                )
 
-        assert response.status_code == 200
-        result = response.json()
         assert result["success"] is True
         assert "successfully" in result["message"]
-        # Verify seed function was called with user_token=None (no headers)
-        mock_seed.assert_called_once_with(user_token=None)
 
-    def test_seed_all_with_auth_headers(self):
-        """Test re-seeding with authentication headers."""
-        with patch('src.seeds.documentation.seed_documentation_embeddings') as mock_seed:
-            mock_seed.return_value = None
-            headers = {
-                "X-Forwarded-Access-Token": "test-token",
-                "X-Auth-Request-Access-Token": "oauth-token"
-            }
-            response = client.post("/api/v1/documentation-embeddings/seed-all", headers=headers)
+    @pytest.mark.asyncio
+    async def test_seed_all_with_oauth_token(self):
+        with patch(
+            "src.seeds.documentation.seed_documentation_embeddings",
+            new_callable=AsyncMock,
+        ) as mock_seed:
+            result = await seed_all_documentation_embeddings(
+                group_context=gc(),
+                x_forwarded_access_token="db-token",
+                x_auth_request_access_token="oauth-token",
+            )
 
-        assert response.status_code == 200
-        result = response.json()
         assert result["success"] is True
-        # Verify OAuth2-Proxy token takes priority
         mock_seed.assert_called_once_with(user_token="oauth-token")
 
-    def test_seed_all_with_databricks_token_only(self):
-        """Test re-seeding with only Databricks Apps token."""
-        with patch('src.seeds.documentation.seed_documentation_embeddings') as mock_seed:
-            mock_seed.return_value = None
-            headers = {"X-Forwarded-Access-Token": "databricks-token"}
-            response = client.post("/api/v1/documentation-embeddings/seed-all", headers=headers)
+    @pytest.mark.asyncio
+    async def test_seed_all_error_returns_failure(self):
+        with patch(
+            "src.seeds.documentation.seed_documentation_embeddings",
+            new_callable=AsyncMock,
+            side_effect=Exception("Seeding error"),
+        ):
+            result = await seed_all_documentation_embeddings(
+                group_context=gc(),
+                x_forwarded_access_token=None,
+                x_auth_request_access_token=None,
+            )
 
-        assert response.status_code == 200
-        result = response.json()
-        assert result["success"] is True
-        # Verify Databricks token is used
-        mock_seed.assert_called_once_with(user_token="databricks-token")
-
-    def test_seed_all_error(self):
-        """Test error handling during re-seeding."""
-        with patch('src.seeds.documentation.seed_documentation_embeddings') as mock_seed:
-            mock_seed.side_effect = Exception("Seeding error")
-            response = client.post("/api/v1/documentation-embeddings/seed-all")
-
-        assert response.status_code == 200  # Note: endpoint returns 200 even on error
-        result = response.json()
         assert result["success"] is False
         assert "Failed" in result["message"]
         assert "Seeding error" in result["message"]
+
+
+# ---------------------------------------------------------------------------
+# Router configuration
+# ---------------------------------------------------------------------------
+
+class TestRouterConfiguration:
+    """Tests for router prefix and tags."""
+
+    def test_router_config(self):
+        assert router.prefix == "/documentation-embeddings"
+        assert "documentation-embeddings" in router.tags
+
+    def test_router_has_expected_endpoints(self):
+        route_paths = [route.path for route in router.routes]
+        expected = [
+            "/documentation-embeddings/",
+            "/documentation-embeddings/search",
+            "/documentation-embeddings/recent",
+            "/documentation-embeddings/{embedding_id}",
+            "/documentation-embeddings/seed-all",
+        ]
+        for path in expected:
+            assert path in route_paths, f"Missing route: {path}"

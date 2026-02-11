@@ -1,209 +1,178 @@
-import pytest
-pytest.skip("Legacy agent generation router tests assume old service factory methods; skipping.", allow_module_level=True)
-
 """
 Unit tests for agent generation API router.
 
-Tests the functionality of the agent generation API endpoints.
+Tests the /agent-generation/generate POST endpoint with mocked
+AgentGenerationService and dependency overrides.
 """
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
-from src.dependencies.admin_auth import (
-    require_authenticated_user, get_authenticated_user, get_admin_user
-)
-
 import pytest
+from unittest.mock import AsyncMock, patch
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.agent_generation_router import router, AgentPrompt
-from src.services.agent_generation_service import AgentGenerationService
+from src.core.dependencies import get_group_context
+from src.db.database_router import get_smart_db_session
+from src.utils.user_context import GroupContext
+from tests.unit.router.conftest import register_exception_handlers
 
 
-@pytest.fixture
-def app():
-    """Create a FastAPI app for testing."""
-    app = FastAPI()
-    app.include_router(router)
-    return app
-
-
-
-@pytest.fixture
-def mock_current_user():
-    """Create a mock authenticated user."""
-    from src.models.enums import UserRole, UserStatus
-    from datetime import datetime
-
-    class MockUser:
-        def __init__(self):
-            self.id = "current-user-123"
-            self.username = "testuser"
-            self.email = "test@example.com"
-            self.role = UserRole.REGULAR
-            self.status = UserStatus.ACTIVE
-            self.created_at = datetime.utcnow()
-            self.updated_at = datetime.utcnow()
-
-    return MockUser()
-
-
-@pytest.fixture
-def client(app):
-    """Create a test client for the app."""
-    # Override authentication dependencies for testing
-    app.dependency_overrides[require_authenticated_user] = lambda: mock_current_user
-    app.dependency_overrides[get_authenticated_user] = lambda: mock_current_user
-    app.dependency_overrides[get_admin_user] = lambda: mock_current_user
-
-
-    return TestClient(app)
+def _group_context():
+    return GroupContext(
+        group_ids=["g1"],
+        group_email="u@example.com",
+        email_domain="example.com",
+        user_role="admin",
+    )
 
 
 @pytest.fixture
 def mock_agent_generation_service():
-    """Create a mock agent generation service."""
-    service_mock = MagicMock(spec=AgentGenerationService)
-    # Configure the async methods
-    service_mock.generate_agent = AsyncMock()
-    return service_mock
+    """Create a mock AgentGenerationService instance."""
+    svc = AsyncMock()
+    svc.generate_agent = AsyncMock()
+    return svc
 
 
-@pytest.mark.asyncio
-async def test_generate_agent_success(client, mock_agent_generation_service):
-    """Test successful agent generation."""
-    # Configure the mock service to return a valid agent config
-    mock_agent_config = {
-        "name": "Research Agent",
-        "role": "Research Assistant",
-        "goal": "Find relevant information from the web",
-        "backstory": "I am Kasal specialized in research",
-        "tools": ["web_search", "document_analyzer"],
-        "advanced_config": {
-            "llm": "gpt-4o-mini",
-            "max_iter": 25
+@pytest.fixture
+def client(mock_agent_generation_service):
+    """Create a TestClient with dependency overrides and service patch."""
+    app = FastAPI()
+    app.include_router(router)
+    register_exception_handlers(app)
+
+    async def override_group_context():
+        return _group_context()
+
+    async def override_session():
+        return AsyncMock()
+
+    app.dependency_overrides[get_group_context] = override_group_context
+    app.dependency_overrides[get_smart_db_session] = override_session
+
+    with patch(
+        "src.api.agent_generation_router.AgentGenerationService",
+        return_value=mock_agent_generation_service,
+    ):
+        yield TestClient(app)
+
+
+class TestGenerateAgent:
+    """Tests for POST /agent-generation/generate."""
+
+    def test_success_returns_agent_config(self, client, mock_agent_generation_service):
+        """Successful generation returns 200 with agent configuration dict."""
+        expected = {
+            "name": "Research Agent",
+            "role": "Research Assistant",
+            "goal": "Find relevant information",
+            "backstory": "Specialized in research",
+            "tools": ["web_search"],
+            "advanced_config": {"llm": "test-model", "max_iter": 25},
         }
-    }
-    mock_agent_generation_service.generate_agent.return_value = mock_agent_config
+        mock_agent_generation_service.generate_agent.return_value = expected
 
-    # Configure the create mock to return our service mock
-    with patch.object(
-        AgentGenerationService,
-        "create",
-        return_value=mock_agent_generation_service
-    ):
-        # Make the request
         response = client.post(
             "/agent-generation/generate",
             json={
-                "prompt": "Create a research agent that can search the web",
-                "model": "gpt-4o-mini",
-                "tools": ["web_search", "document_analyzer"]
-            }
+                "prompt": "Create a research agent",
+                "model": "test-model",
+                "tools": ["web_search"],
+            },
         )
 
-        # Assert response
         assert response.status_code == 200
+        assert response.json() == expected
+        mock_agent_generation_service.generate_agent.assert_called_once()
+        call_kwargs = mock_agent_generation_service.generate_agent.call_args.kwargs
+        assert call_kwargs["prompt_text"] == "Create a research agent"
+        assert call_kwargs["model"] == "test-model"
+        assert call_kwargs["tools"] == ["web_search"]
 
-        # Validate response content
-        result = response.json()
-        assert result == mock_agent_config
+    def test_default_model_and_empty_tools(self, client, mock_agent_generation_service):
+        """When model and tools are omitted, defaults are applied."""
+        mock_agent_generation_service.generate_agent.return_value = {"name": "Agent"}
 
-        # Verify service method was called with correct parameters
-        # Note: The actual call includes group_context parameter
-        call_args = mock_agent_generation_service.generate_agent.call_args
-        assert call_args is not None
-        assert call_args.kwargs['prompt_text'] == "Create a research agent that can search the web"
-        assert call_args.kwargs['model'] == "gpt-4o-mini"
-        assert call_args.kwargs['tools'] == ["web_search", "document_analyzer"]
-
-
-@pytest.mark.asyncio
-async def test_generate_agent_with_default_model(client, mock_agent_generation_service):
-    """Test agent generation with default model parameter."""
-    mock_agent_config = {
-        "name": "Simple Agent",
-        "role": "Assistant",
-        "goal": "Help the user",
-        "backstory": "I'm a helpful assistant",
-        "tools": [],
-        "advanced_config": {
-            "llm": "databricks-llama-4-maverick"
-        }
-    }
-    mock_agent_generation_service.generate_agent.return_value = mock_agent_config
-
-    with patch.object(
-        AgentGenerationService,
-        "create",
-        return_value=mock_agent_generation_service
-    ):
-        # Make a request with only prompt, use default model
         response = client.post(
             "/agent-generation/generate",
-            json={
-                "prompt": "Create a simple agent"
-            }
+            json={"prompt": "Simple agent"},
         )
 
-        # Assert response
         assert response.status_code == 200
+        call_kwargs = mock_agent_generation_service.generate_agent.call_args.kwargs
+        assert call_kwargs["model"] == "databricks-llama-4-maverick"
+        assert call_kwargs["tools"] == []
 
-        # Validate service call - should use default model
-        # Note: The actual call includes group_context parameter
-        assert mock_agent_generation_service.generate_agent.called
-        call_args = mock_agent_generation_service.generate_agent.call_args
-        assert call_args[1]['prompt_text'] == "Create a simple agent"
-        assert call_args[1]['model'] == "databricks-llama-4-maverick"  # Default model
-        assert call_args[1]['tools'] == []
-        assert 'group_context' in call_args[1]
-
-
-@pytest.mark.asyncio
-async def test_generate_agent_validation_error(client, mock_agent_generation_service):
-    """Test agent generation with validation error."""
-    # Configure mock to raise ValueError
-    mock_agent_generation_service.generate_agent.side_effect = ValueError("Invalid prompt")
-
-    with patch.object(
-        AgentGenerationService,
-        "create",
-        return_value=mock_agent_generation_service
-    ):
-        # Make the request
+    def test_missing_prompt_returns_422(self, client, mock_agent_generation_service):
+        """Missing required 'prompt' field returns 422 validation error."""
         response = client.post(
             "/agent-generation/generate",
-            json={
-                "prompt": "Invalid prompt",
-                "model": "gpt-4o-mini"
-            }
+            json={"model": "test-model"},
         )
 
-        # Assert response code and detail
+        assert response.status_code == 422
+
+    def test_empty_body_returns_422(self, client, mock_agent_generation_service):
+        """Empty request body returns 422 validation error."""
+        response = client.post("/agent-generation/generate", json={})
+
+        assert response.status_code == 422
+
+    def test_service_value_error_returns_400(self, client, mock_agent_generation_service):
+        """ValueError raised by service is mapped to 400."""
+        mock_agent_generation_service.generate_agent.side_effect = ValueError(
+            "Invalid prompt"
+        )
+
+        response = client.post(
+            "/agent-generation/generate",
+            json={"prompt": "bad prompt"},
+        )
+
         assert response.status_code == 400
         assert response.json()["detail"] == "Invalid prompt"
 
-
-@pytest.mark.asyncio
-async def test_generate_agent_general_error(client, mock_agent_generation_service):
-    """Test agent generation with general error."""
-    # Configure mock to raise general exception
-    mock_agent_generation_service.generate_agent.side_effect = Exception("Service unavailable")
-
-    with patch.object(
-        AgentGenerationService,
-        "create",
-        return_value=mock_agent_generation_service
+    def test_service_unhandled_error_returns_500(
+        self, client, mock_agent_generation_service
     ):
-        # Make the request
-        response = client.post(
-            "/agent-generation/generate",
-            json={
-                "prompt": "Generate agent",
-                "model": "gpt-4o-mini"
-            }
+        """Unhandled exception from service is caught as 500."""
+        mock_agent_generation_service.generate_agent.side_effect = RuntimeError(
+            "boom"
         )
 
-        # Assert response code and detail
+        response = client.post(
+            "/agent-generation/generate",
+            json={"prompt": "generate"},
+        )
+
         assert response.status_code == 500
-        assert response.json()["detail"] == "Failed to generate agent configuration"
+
+    def test_group_context_passed_to_service(
+        self, client, mock_agent_generation_service
+    ):
+        """GroupContext is forwarded to the service call."""
+        mock_agent_generation_service.generate_agent.return_value = {}
+
+        client.post(
+            "/agent-generation/generate",
+            json={"prompt": "test"},
+        )
+
+        call_kwargs = mock_agent_generation_service.generate_agent.call_args.kwargs
+        gc = call_kwargs["group_context"]
+        assert gc.group_ids == ["g1"]
+        assert gc.group_email == "u@example.com"
+
+
+class TestAgentPromptSchema:
+    """Tests for the AgentPrompt request model."""
+
+    def test_defaults(self):
+        prompt = AgentPrompt(prompt="hello")
+        assert prompt.model == "databricks-llama-4-maverick"
+        assert prompt.tools == []
+
+    def test_custom_values(self):
+        prompt = AgentPrompt(prompt="x", model="custom", tools=["t1", "t2"])
+        assert prompt.model == "custom"
+        assert prompt.tools == ["t1", "t2"]
