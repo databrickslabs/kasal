@@ -55,10 +55,10 @@ class AgentConfig:
             # Create api_keys_service for tool factory to access API keys from database
             tool_factory = None
             try:
-                from src.db.session import async_session_factory
+                from src.db.session import request_scoped_session
                 from src.services.api_keys_service import ApiKeysService
 
-                async with async_session_factory() as session:
+                async with request_scoped_session() as session:
                     group_id = factory_config.get('group_id')
                     api_keys_service = ApiKeysService(session, group_id=group_id)
                     # Create tool factory with proper context
@@ -100,7 +100,7 @@ class AgentConfig:
             if effective_tool_configs:
                 logger.info(f"Loading MCP tools from tool_configs for agent {agent_data.name}")
                 try:
-                    from src.db.session import async_session_factory
+                    from src.db.session import request_scoped_session
                     from src.services.mcp_service import MCPService
                     from src.engines.crewai.tools.mcp_integration import MCPIntegration
 
@@ -124,7 +124,7 @@ class AgentConfig:
                     elif hasattr(agent_data, 'group_id') and agent_data.group_id:
                         agent_config['group_id'] = agent_data.group_id
 
-                    async with async_session_factory() as session:
+                    async with request_scoped_session() as session:
                         mcp_service = MCPService(session)
                         mcp_tools = await MCPIntegration.create_mcp_tools_for_agent(
                             agent_config,

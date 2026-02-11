@@ -233,7 +233,7 @@ class TestGetDatabricksWorkspaceHost:
             "src.services.databricks_service.DatabricksService",
             return_value=mock_service,
         ), patch(
-            "src.db.session.async_session_factory",
+            "src.db.session.request_scoped_session",
             return_value=mock_session,
         ):
             host, error = await get_databricks_workspace_host()
@@ -256,7 +256,7 @@ class TestGetDatabricksWorkspaceHost:
             "src.services.databricks_service.DatabricksService",
             return_value=mock_service,
         ), patch(
-            "src.db.session.async_session_factory",
+            "src.db.session.request_scoped_session",
             return_value=mock_session,
         ):
             host, error = await get_databricks_workspace_host()
@@ -275,7 +275,7 @@ class TestGetDatabricksWorkspaceHost:
             "src.services.databricks_service.DatabricksService",
             return_value=mock_service,
         ), patch(
-            "src.db.session.async_session_factory",
+            "src.db.session.request_scoped_session",
             return_value=mock_session,
         ):
             host, error = await get_databricks_workspace_host()
@@ -288,7 +288,7 @@ class TestGetDatabricksWorkspaceHost:
             "src.services.databricks_service.DatabricksService",
             side_effect=Exception("db error"),
         ), patch(
-            "src.db.session.async_session_factory",
+            "src.db.session.request_scoped_session",
             side_effect=Exception("db error"),
         ):
             host, error = await get_databricks_workspace_host()

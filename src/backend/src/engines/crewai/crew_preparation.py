@@ -950,9 +950,9 @@ class CrewPreparation:
             # Get the group_id from config
             group_id = self.config.get('group_id', 'default')
 
-            from src.db.session import async_session_factory
+            from src.db.session import request_scoped_session
 
-            async with async_session_factory() as session:
+            async with request_scoped_session() as session:
                 agent_service = AgentService(session)
                 group_context = GroupContext(group_ids=[group_id])
 

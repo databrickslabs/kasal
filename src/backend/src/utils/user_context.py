@@ -282,9 +282,9 @@ class GroupContext:
             # Import here to avoid circular imports
             from src.services.group_service import GroupService
             from src.services.user_service import UserService
-            from src.db.session import async_session_factory
+            from src.db.session import request_scoped_session
 
-            async with async_session_factory() as session:
+            async with request_scoped_session() as session:
                 # Get or create the user
                 user_service = UserService(session)
                 user = await user_service.get_or_create_user_by_email(email)
@@ -324,9 +324,9 @@ class GroupContext:
             # Import here to avoid circular imports
             from src.services.group_service import GroupService
             from src.services.user_service import UserService
-            from src.db.session import async_session_factory
+            from src.db.session import request_scoped_session
 
-            async with async_session_factory() as session:
+            async with request_scoped_session() as session:
                 # Get or create the user
                 logger.info(f"[USER CONTEXT DEBUG] Creating UserService and calling get_or_create_user_by_email for {email}")
                 user_service = UserService(session)

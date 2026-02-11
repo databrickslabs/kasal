@@ -23,7 +23,7 @@ from src.engines.crewai.crewai_engine_service import CrewAIEngineService
 from src.services.execution_status_service import ExecutionStatusService
 from src.engines.crewai.crewai_flow_service import CrewAIFlowService
 from src.utils.user_context import GroupContext
-from src.db.session import async_session_factory
+from src.db.session import request_scoped_session
 from src.services.agent_service import AgentService
 from src.services.task_service import TaskService
 
@@ -107,7 +107,7 @@ class CrewAIExecutionService:
             if config.agents_yaml and isinstance(config.agents_yaml, dict):
                 # Get agent service to fetch tool_configs
                 try:
-                    async with async_session_factory() as session:
+                    async with request_scoped_session() as session:
                         agent_service = AgentService(session)
                         
                         for agent_id, agent_config in config.agents_yaml.items():
@@ -194,7 +194,7 @@ class CrewAIExecutionService:
             if config.tasks_yaml and isinstance(config.tasks_yaml, dict):
                 # Get task service to fetch tool_configs
                 try:
-                    async with async_session_factory() as session:
+                    async with request_scoped_session() as session:
                         task_service = TaskService(session)
                         
                         for task_id, task_config in config.tasks_yaml.items():
@@ -605,10 +605,10 @@ class CrewAIExecutionService:
                 flow_logger.info(f"No nodes provided but flow_id exists: {flow_id}. Loading flow data from repository")
                 try:
                     # Get repository instance through async factory function with session
-                    from src.db.session import async_session_factory
+                    from src.db.session import request_scoped_session
                     from src.repositories.flow_repository import FlowRepository
 
-                    async with async_session_factory() as db:
+                    async with request_scoped_session() as db:
                         flow_repository = FlowRepository(db)
 
                         # Find flow by ID using async method
@@ -663,8 +663,8 @@ class CrewAIExecutionService:
                 execution_config['group_id'] = group_context.primary_group_id  # For background task API key loading
 
             # Create a database session for flow execution
-            from src.db.session import async_session_factory
-            async with async_session_factory() as session:
+            from src.db.session import request_scoped_session
+            async with request_scoped_session() as session:
                 # Create a flow service instance with session
                 flow_service = CrewAIFlowService(session)
 
@@ -747,8 +747,8 @@ class CrewAIExecutionService:
         crew_logger.info(f"Getting flow execution {execution_id}")
 
         # Create a database session for flow execution retrieval
-        from src.db.session import async_session_factory
-        async with async_session_factory() as session:
+        from src.db.session import request_scoped_session
+        async with request_scoped_session() as session:
             # Create a flow service instance with session
             flow_service = CrewAIFlowService(session)
 
@@ -772,8 +772,8 @@ class CrewAIExecutionService:
         crew_logger.info(f"Getting executions for flow {flow_id}")
 
         # Create a database session for flow executions retrieval
-        from src.db.session import async_session_factory
-        async with async_session_factory() as session:
+        from src.db.session import request_scoped_session
+        async with request_scoped_session() as session:
             # Create a flow service instance with session
             flow_service = CrewAIFlowService(session)
 
