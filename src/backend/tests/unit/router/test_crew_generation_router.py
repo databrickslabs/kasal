@@ -1,244 +1,205 @@
-import pytest
-pytest.skip("Legacy crew generation router tests assume old service factory methods; skipping.", allow_module_level=True)
-
 """
 Unit tests for crew generation API router.
 
-Tests the functionality of the crew generation API endpoints.
+Tests the /crew/create-crew POST endpoint with mocked
+CrewGenerationService and dependency overrides.
 """
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
-from src.dependencies.admin_auth import (
-    require_authenticated_user, get_authenticated_user, get_admin_user
-)
-
 import pytest
+from unittest.mock import AsyncMock, patch
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.crew_generation_router import router
-from src.schemas.crew import CrewGenerationRequest, CrewCreationResponse
-from src.services.crew_generation_service import CrewGenerationService
+from src.core.dependencies import get_group_context
+from src.db.database_router import get_smart_db_session
+from src.utils.user_context import GroupContext
+from tests.unit.router.conftest import register_exception_handlers
+
+
+def _group_context():
+    return GroupContext(
+        group_ids=["g1"],
+        group_email="u@example.com",
+        email_domain="example.com",
+        user_role="admin",
+    )
 
 
 @pytest.fixture
-def app():
-    """Create a FastAPI app for testing."""
+def mock_crew_service():
+    """Create a mock CrewGenerationService instance."""
+    svc = AsyncMock()
+    svc.create_crew_complete = AsyncMock()
+    return svc
+
+
+@pytest.fixture
+def client(mock_crew_service):
+    """Create a TestClient with dependency overrides and service patch."""
     app = FastAPI()
     app.include_router(router)
-    return app
+    register_exception_handlers(app)
+
+    async def override_group_context():
+        return _group_context()
+
+    async def override_session():
+        return AsyncMock()
+
+    app.dependency_overrides[get_group_context] = override_group_context
+    app.dependency_overrides[get_smart_db_session] = override_session
+
+    with patch(
+        "src.api.crew_generation_router.CrewGenerationService",
+        return_value=mock_crew_service,
+    ):
+        yield TestClient(app)
 
 
+class TestCreateCrew:
+    """Tests for POST /crew/create-crew."""
 
-@pytest.fixture
-def mock_current_user():
-    """Create a mock authenticated user."""
-    from src.models.enums import UserRole, UserStatus
-    from datetime import datetime
+    def test_success_returns_agents_and_tasks(self, client, mock_crew_service):
+        """Successful crew creation returns 200 with agents and tasks lists."""
+        mock_crew_service.create_crew_complete.return_value = {
+            "agents": [
+                {
+                    "id": "a1",
+                    "name": "Researcher",
+                    "role": "Research Assistant",
+                    "goal": "Find info",
+                    "backstory": "Expert researcher",
+                }
+            ],
+            "tasks": [
+                {
+                    "id": "t1",
+                    "name": "Research Topic",
+                    "description": "Research thoroughly",
+                    "assigned_agent": "a1",
+                }
+            ],
+        }
 
-    class MockUser:
-        def __init__(self):
-            self.id = "current-user-123"
-            self.username = "testuser"
-            self.email = "test@example.com"
-            self.role = UserRole.REGULAR
-            self.status = UserStatus.ACTIVE
-            self.created_at = datetime.utcnow()
-            self.updated_at = datetime.utcnow()
-
-    return MockUser()
-
-
-@pytest.fixture
-def client(app):
-    """Create a test client for the app."""
-    # Override authentication dependencies for testing
-    app.dependency_overrides[require_authenticated_user] = lambda: mock_current_user
-    app.dependency_overrides[get_authenticated_user] = lambda: mock_current_user
-    app.dependency_overrides[get_admin_user] = lambda: mock_current_user
-
-
-    return TestClient(app)
-
-
-@pytest.fixture
-def mock_crew_generation_service():
-    """Create a mock crew generation service."""
-    service_mock = MagicMock(spec=CrewGenerationService)
-    # Configure the async methods
-    service_mock.create_crew_complete = AsyncMock()
-    return service_mock
-
-
-@pytest.mark.asyncio
-async def test_create_crew_success(client, mock_crew_generation_service):
-    """Test successful crew creation."""
-    # Configure the mock service to return a valid crew setup
-    mock_crew_result = {
-        "agents": [
-            {
-                "id": "abc123",
-                "name": "Researcher",
-                "role": "Research Assistant",
-                "goal": "Find relevant information",
-                "backstory": "I am a specialized research assistant",
-                "tools": ["web_search", "document_analyzer"]
+        response = client.post(
+            "/crew/create-crew",
+            json={
+                "prompt": "Create a research crew",
+                "model": "test-model",
+                "tools": ["web_search"],
             },
-            {
-                "id": "def456",
-                "name": "Writer",
-                "role": "Content Creator",
-                "goal": "Create compelling content",
-                "backstory": "I create high-quality content from research",
-                "tools": ["text_editor"]
-            }
-        ],
-        "tasks": [
-            {
-                "id": "task123",
-                "name": "Research Topic",
-                "description": "Research the given topic thoroughly",
-                "assigned_agent": "abc123"
-            },
-            {
-                "id": "task456",
-                "name": "Create Report",
-                "description": "Create a detailed report based on research",
-                "assigned_agent": "def456",
-                "context": ["task123"]
-            }
-        ]
-    }
-    mock_crew_generation_service.create_crew_complete.return_value = mock_crew_result
-
-    # Configure the create mock to return our service mock
-    with patch.object(
-        CrewGenerationService,
-        "create",
-        return_value=mock_crew_generation_service
-    ):
-        # Make the request
-        response = client.post(
-            "/crew/create-crew",
-            json={
-                "prompt": "Create a research and writing crew",
-                "model": "gpt-4o-mini",
-                "tools": ["web_search", "document_analyzer", "text_editor"]
-            }
         )
 
-        # Assert response
         assert response.status_code == 200
+        data = response.json()
+        assert "agents" in data
+        assert "tasks" in data
+        assert len(data["agents"]) == 1
+        assert len(data["tasks"]) == 1
+        assert data["agents"][0]["name"] == "Researcher"
 
-        # Validate response content
-        result = response.json()
-        assert "agents" in result
-        assert "tasks" in result
-        assert len(result["agents"]) == 2
-        assert len(result["tasks"]) == 2
+    def test_minimal_request_with_defaults(self, client, mock_crew_service):
+        """Request with only required 'prompt' uses schema defaults."""
+        mock_crew_service.create_crew_complete.return_value = {
+            "agents": [],
+            "tasks": [],
+        }
 
-        # Verify service method was called with correct parameters
-        mock_crew_generation_service.create_crew_complete.assert_called_once()
-        call_args = mock_crew_generation_service.create_crew_complete.call_args[0][0]
-        assert call_args.prompt == "Create a research and writing crew"
-        assert call_args.model == "gpt-4o-mini"
-        assert call_args.tools == ["web_search", "document_analyzer", "text_editor"]
-
-
-@pytest.mark.asyncio
-async def test_create_crew_with_minimal_params(client, mock_crew_generation_service):
-    """Test crew creation with minimal parameters."""
-    # Configure mock service response
-    mock_crew_result = {
-        "agents": [
-            {
-                "id": "abc123",
-                "name": "General Assistant",
-                "role": "Assistant",
-                "goal": "Help with tasks",
-                "backstory": "I am a general-purpose assistant",
-                "tools": []
-            }
-        ],
-        "tasks": [
-            {
-                "id": "task123",
-                "name": "Basic Task",
-                "description": "Complete a simple task",
-                "assigned_agent": "abc123"
-            }
-        ]
-    }
-    mock_crew_generation_service.create_crew_complete.return_value = mock_crew_result
-
-    # Configure the create mock to return our service mock
-    with patch.object(
-        CrewGenerationService,
-        "create",
-        return_value=mock_crew_generation_service
-    ):
-        # Make the request with only the required prompt
         response = client.post(
             "/crew/create-crew",
-            json={
-                "prompt": "Create a simple assistant crew"
-            }
+            json={"prompt": "Simple crew"},
         )
 
-        # Assert response
         assert response.status_code == 200
+        data = response.json()
+        assert data["agents"] == []
+        assert data["tasks"] == []
 
-        # Validate service call - should use default values for optional params
-        mock_crew_generation_service.create_crew_complete.assert_called_once()
-        call_args = mock_crew_generation_service.create_crew_complete.call_args[0][0]
-        assert call_args.prompt == "Create a simple assistant crew"
-        assert call_args.model is None  # Default in schema
-        assert call_args.tools == []  # Default in schema
+        # Verify the request object passed to service
+        call_args = mock_crew_service.create_crew_complete.call_args
+        request_arg = call_args[0][0]
+        assert request_arg.prompt == "Simple crew"
+        assert request_arg.model is None
+        assert request_arg.tools == []
 
-
-@pytest.mark.asyncio
-async def test_create_crew_validation_error(client, mock_crew_generation_service):
-    """Test crew creation with validation error."""
-    # Configure mock to raise ValueError
-    mock_crew_generation_service.create_crew_complete.side_effect = ValueError("Invalid crew configuration")
-
-    with patch.object(
-        CrewGenerationService,
-        "create",
-        return_value=mock_crew_generation_service
-    ):
-        # Make the request
+    def test_missing_prompt_returns_422(self, client, mock_crew_service):
+        """Missing required 'prompt' field returns 422."""
         response = client.post(
             "/crew/create-crew",
-            json={
-                "prompt": "Create an invalid crew"
-            }
+            json={"model": "some-model"},
         )
 
-        # Assert response code and detail
+        assert response.status_code == 422
+
+    def test_empty_body_returns_422(self, client, mock_crew_service):
+        """Empty request body returns 422."""
+        response = client.post("/crew/create-crew", json={})
+
+        assert response.status_code == 422
+
+    def test_service_value_error_returns_400(self, client, mock_crew_service):
+        """ValueError raised by service is mapped to 400."""
+        mock_crew_service.create_crew_complete.side_effect = ValueError(
+            "Invalid crew configuration"
+        )
+
+        response = client.post(
+            "/crew/create-crew",
+            json={"prompt": "bad crew"},
+        )
+
         assert response.status_code == 400
         assert response.json()["detail"] == "Invalid crew configuration"
 
+    def test_service_unhandled_error_returns_500(self, client, mock_crew_service):
+        """Unhandled exception from service is caught as 500."""
+        mock_crew_service.create_crew_complete.side_effect = RuntimeError("boom")
 
-@pytest.mark.asyncio
-async def test_create_crew_general_error(client, mock_crew_generation_service):
-    """Test crew creation with general error."""
-    # Configure mock to raise general exception
-    mock_crew_generation_service.create_crew_complete.side_effect = Exception("Service unavailable")
-
-    with patch.object(
-        CrewGenerationService,
-        "create",
-        return_value=mock_crew_generation_service
-    ):
-        # Make the request
         response = client.post(
             "/crew/create-crew",
-            json={
-                "prompt": "Create a crew"
-            }
+            json={"prompt": "crew"},
         )
 
-        # Assert response code and detail
         assert response.status_code == 500
-        assert "Error creating crew" in response.json()["detail"]
+
+    def test_group_context_passed_to_service(self, client, mock_crew_service):
+        """GroupContext is forwarded as the second argument to create_crew_complete."""
+        mock_crew_service.create_crew_complete.return_value = {
+            "agents": [],
+            "tasks": [],
+        }
+
+        client.post(
+            "/crew/create-crew",
+            json={"prompt": "test crew"},
+        )
+
+        call_args = mock_crew_service.create_crew_complete.call_args
+        gc = call_args[0][1]
+        assert gc.group_ids == ["g1"]
+        assert gc.group_email == "u@example.com"
+
+    def test_multiple_agents_and_tasks(self, client, mock_crew_service):
+        """Response correctly serializes multiple agents and tasks."""
+        mock_crew_service.create_crew_complete.return_value = {
+            "agents": [
+                {"id": "a1", "name": "Agent1"},
+                {"id": "a2", "name": "Agent2"},
+                {"id": "a3", "name": "Agent3"},
+            ],
+            "tasks": [
+                {"id": "t1", "name": "Task1"},
+                {"id": "t2", "name": "Task2"},
+            ],
+        }
+
+        response = client.post(
+            "/crew/create-crew",
+            json={"prompt": "Multi-agent crew"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["agents"]) == 3
+        assert len(data["tasks"]) == 2

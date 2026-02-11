@@ -1,462 +1,339 @@
-import pytest
-pytest.skip("Legacy schemas router tests patch async services with non-awaitable mocks; skipping.", allow_module_level=True)
+"""Unit tests for schemas_router endpoints.
 
-"""
-Unit tests for SchemasRouter.
-
-Tests the functionality of schema management endpoints.
+Tests all CRUD endpoints using direct async function calls with mocked
+SchemaService dependencies.
 """
 import pytest
-from unittest.mock import AsyncMock, patch
-from src.dependencies.admin_auth import (
-    require_authenticated_user, get_authenticated_user, get_admin_user
+from unittest.mock import AsyncMock, MagicMock
+from types import SimpleNamespace
+from datetime import datetime
+
+from fastapi import HTTPException
+
+from src.api.schemas_router import (
+    get_all_schemas,
+    get_schemas_by_type,
+    get_schema_by_name,
+    create_schema,
+    update_schema,
+    delete_schema,
+    router,
 )
-
-from fastapi.testclient import TestClient
-
-
-@pytest.fixture
-def app():
-    """Create a FastAPI app."""
-    from fastapi import FastAPI
-    from src.api.schemas_router import router
-
-    app = FastAPI()
-    app.include_router(router)
-
-    return app
+from src.schemas.schema import SchemaCreate, SchemaUpdate, SchemaListResponse
+from src.utils.user_context import GroupContext
 
 
-
-@pytest.fixture
-def mock_current_user():
-    """Create a mock authenticated user."""
-    from src.models.enums import UserRole, UserStatus
-    from datetime import datetime
-
-    class MockUser:
-        def __init__(self):
-            self.id = "current-user-123"
-            self.username = "testuser"
-            self.email = "test@example.com"
-            self.role = UserRole.REGULAR
-            self.status = UserStatus.ACTIVE
-            self.created_at = datetime.utcnow()
-            self.updated_at = datetime.utcnow()
-
-    return MockUser()
+def gc():
+    """Create a valid GroupContext for testing."""
+    return GroupContext(
+        group_ids=["g1"],
+        group_email="u@x.com",
+        email_domain="x.com",
+        user_role="admin",
+    )
 
 
-@pytest.fixture
-def client(app, mock_current_user):
-    """Create a test client."""
-    # Override authentication dependencies for testing
-    app.dependency_overrides[require_authenticated_user] = lambda: mock_current_user
-    app.dependency_overrides[get_authenticated_user] = lambda: mock_current_user
-    app.dependency_overrides[get_admin_user] = lambda: mock_current_user
+def make_schema(sid=1, name="test_schema"):
+    """Create a mock schema response object."""
+    now = datetime.utcnow()
+    return SimpleNamespace(
+        id=sid,
+        name=name,
+        description="A test schema",
+        schema_type="data_model",
+        schema_definition={"type": "object"},
+        field_descriptions={},
+        keywords=["test"],
+        tools=[],
+        example_data=None,
+        created_at=now,
+        updated_at=now,
+    )
 
-    return TestClient(app)
+
+def make_list_response(schemas=None, count=None):
+    """Create a mock SchemaListResponse."""
+    schemas = schemas or []
+    return SimpleNamespace(
+        schemas=schemas,
+        count=count if count is not None else len(schemas),
+    )
 
 
-class TestSchemasRouter:
-    """Test cases for schema management endpoints."""
+# ---------------------------------------------------------------------------
+# GET /schemas
+# ---------------------------------------------------------------------------
 
-    @patch('src.api.schemas_router.SchemaService')
-    def test_get_schemas_success(self, mock_service_class, client):
-        """Test successful schemas retrieval."""
-        from datetime import datetime
-        from unittest.mock import MagicMock
+class TestGetAllSchemas:
+    """Tests for get_all_schemas endpoint."""
 
-        # Create a mock response object with the right attributes
-        mock_response = MagicMock()
-        mock_response.count = 2
-        mock_response.schemas = [
-            {
-                "id": 1,
-                "name": "user_schema",
-                "description": "Schema for user data",
-                "schema_type": "data_model",
-                "schema_definition": {"type": "object"},
-                "field_descriptions": {},
-                "keywords": ["user"],
-                "tools": [],
-                "example_data": None,
-                "created_at": datetime.now(),
-                "updated_at": datetime.now()
-            },
-            {
-                "id": 2,
-                "name": "task_schema",
-                "description": "Schema for task data",
-                "schema_type": "data_model",
-                "schema_definition": {"type": "object"},
-                "field_descriptions": {},
-                "keywords": ["task"],
-                "tools": [],
-                "example_data": None,
-                "created_at": datetime.now(),
-                "updated_at": datetime.now()
-            }
+    @pytest.mark.asyncio
+    async def test_returns_all_schemas(self):
+        svc = AsyncMock()
+        resp = make_list_response([make_schema(1), make_schema(2)], 2)
+        svc.get_all_schemas = AsyncMock(return_value=resp)
+
+        result = await get_all_schemas(service=svc, group_context=gc())
+
+        assert result.count == 2
+        assert len(result.schemas) == 2
+        svc.get_all_schemas.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_list(self):
+        svc = AsyncMock()
+        svc.get_all_schemas = AsyncMock(return_value=make_list_response())
+
+        result = await get_all_schemas(service=svc, group_context=gc())
+
+        assert result.count == 0
+        assert result.schemas == []
+
+    @pytest.mark.asyncio
+    async def test_propagates_exception(self):
+        svc = AsyncMock()
+        svc.get_all_schemas = AsyncMock(side_effect=Exception("db error"))
+
+        with pytest.raises(Exception, match="db error"):
+            await get_all_schemas(service=svc, group_context=gc())
+
+
+# ---------------------------------------------------------------------------
+# GET /schemas/by-type/{schema_type}
+# ---------------------------------------------------------------------------
+
+class TestGetSchemasByType:
+    """Tests for get_schemas_by_type endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_returns_matching_schemas(self):
+        svc = AsyncMock()
+        resp = make_list_response([make_schema()], 1)
+        svc.get_schemas_by_type = AsyncMock(return_value=resp)
+
+        result = await get_schemas_by_type(
+            schema_type="data_model", service=svc, group_context=gc()
+        )
+
+        assert result.count == 1
+        svc.get_schemas_by_type.assert_called_once_with("data_model")
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_for_unknown_type(self):
+        svc = AsyncMock()
+        svc.get_schemas_by_type = AsyncMock(return_value=make_list_response())
+
+        result = await get_schemas_by_type(
+            schema_type="nonexistent", service=svc, group_context=gc()
+        )
+
+        assert result.count == 0
+
+
+# ---------------------------------------------------------------------------
+# GET /schemas/{schema_name}
+# ---------------------------------------------------------------------------
+
+class TestGetSchemaByName:
+    """Tests for get_schema_by_name endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_returns_schema(self):
+        svc = AsyncMock()
+        schema_obj = make_schema(1, "user_schema")
+        svc.get_schema_by_name = AsyncMock(return_value=schema_obj)
+
+        result = await get_schema_by_name(
+            schema_name="user_schema", service=svc, group_context=gc()
+        )
+
+        assert result.name == "user_schema"
+        svc.get_schema_by_name.assert_called_once_with("user_schema")
+
+    @pytest.mark.asyncio
+    async def test_not_found_raises(self):
+        svc = AsyncMock()
+        svc.get_schema_by_name = AsyncMock(
+            side_effect=HTTPException(status_code=404, detail="Schema not found")
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await get_schema_by_name(
+                schema_name="missing", service=svc, group_context=gc()
+            )
+
+        assert exc_info.value.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /schemas
+# ---------------------------------------------------------------------------
+
+class TestCreateSchema:
+    """Tests for create_schema endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_create_success(self):
+        svc = AsyncMock()
+        new_schema = make_schema(3, "new_schema")
+        svc.create_schema = AsyncMock(return_value=new_schema)
+
+        schema_data = SchemaCreate(
+            name="new_schema",
+            description="New",
+            schema_type="data_model",
+            schema_definition={"type": "object"},
+        )
+
+        result = await create_schema(
+            schema_data=schema_data, service=svc, group_context=gc()
+        )
+
+        assert result.name == "new_schema"
+        assert result.id == 3
+        svc.create_schema.assert_called_once_with(schema_data)
+
+    @pytest.mark.asyncio
+    async def test_create_duplicate_raises(self):
+        svc = AsyncMock()
+        svc.create_schema = AsyncMock(
+            side_effect=HTTPException(status_code=400, detail="Schema already exists")
+        )
+
+        schema_data = SchemaCreate(
+            name="existing",
+            description="Dup",
+            schema_type="data_model",
+            schema_definition={"type": "object"},
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await create_schema(
+                schema_data=schema_data, service=svc, group_context=gc()
+            )
+
+        assert exc_info.value.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# PUT /schemas/{schema_name}
+# ---------------------------------------------------------------------------
+
+class TestUpdateSchema:
+    """Tests for update_schema endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_update_success(self):
+        svc = AsyncMock()
+        updated = make_schema(1, "updated_schema")
+        updated.description = "Updated desc"
+        svc.update_schema = AsyncMock(return_value=updated)
+
+        update_data = SchemaUpdate(description="Updated desc")
+
+        result = await update_schema(
+            schema_name="updated_schema",
+            schema_data=update_data,
+            service=svc,
+            group_context=gc(),
+        )
+
+        assert result.description == "Updated desc"
+        svc.update_schema.assert_called_once_with("updated_schema", update_data)
+
+    @pytest.mark.asyncio
+    async def test_update_not_found(self):
+        svc = AsyncMock()
+        svc.update_schema = AsyncMock(
+            side_effect=HTTPException(status_code=404, detail="Schema not found")
+        )
+
+        update_data = SchemaUpdate(description="X")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await update_schema(
+                schema_name="missing",
+                schema_data=update_data,
+                service=svc,
+                group_context=gc(),
+            )
+
+        assert exc_info.value.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# DELETE /schemas/{schema_name}
+# ---------------------------------------------------------------------------
+
+class TestDeleteSchema:
+    """Tests for delete_schema endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_delete_success(self):
+        svc = AsyncMock()
+        svc.delete_schema = AsyncMock(return_value=None)
+
+        result = await delete_schema(
+            schema_name="to_delete", service=svc, group_context=gc()
+        )
+
+        assert result is None
+        svc.delete_schema.assert_called_once_with("to_delete")
+
+    @pytest.mark.asyncio
+    async def test_delete_not_found(self):
+        svc = AsyncMock()
+        svc.delete_schema = AsyncMock(
+            side_effect=HTTPException(status_code=404, detail="Schema not found")
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await delete_schema(
+                schema_name="missing", service=svc, group_context=gc()
+            )
+
+        assert exc_info.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_delete_propagates_error(self):
+        svc = AsyncMock()
+        svc.delete_schema = AsyncMock(side_effect=RuntimeError("db error"))
+
+        with pytest.raises(RuntimeError, match="db error"):
+            await delete_schema(
+                schema_name="schema1", service=svc, group_context=gc()
+            )
+
+
+# ---------------------------------------------------------------------------
+# Router configuration
+# ---------------------------------------------------------------------------
+
+class TestRouterConfiguration:
+    """Tests for router prefix and tags."""
+
+    def test_router_config(self):
+        assert router.prefix == "/schemas"
+        assert "schemas" in router.tags
+
+    def test_router_has_expected_endpoints(self):
+        route_paths = [route.path for route in router.routes]
+        expected = [
+            "/schemas",
+            "/schemas/by-type/{schema_type}",
+            "/schemas/{schema_name}",
         ]
-
-        async def mock_get_all_schemas():
-            return mock_response
-
-        mock_service_class.get_all_schemas = mock_get_all_schemas
-
-        response = client.get("/schemas")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["count"] == 2
-        assert len(data["schemas"]) == 2
-        assert data["schemas"][0]["name"] == "user_schema"
-
-    @patch('src.api.schemas_router.SchemaService')
-    def test_create_schema_success(self, mock_service_class, client):
-        """Test successful schema creation."""
-        from datetime import datetime
-        async def mock_create_schema(schema_data):
-            from unittest.mock import MagicMock
-            mock_schema = MagicMock()
-            mock_schema.name = "new_schema"
-            mock_schema.id = 3
-            mock_schema.description = "A new schema"
-            mock_schema.schema_type = "data_model"
-            mock_schema.schema_definition = {"type": "object", "properties": {"field1": {"type": "string"}}}
-            mock_schema.field_descriptions = {"field1": "A string field"}
-            mock_schema.keywords = ["new"]
-            mock_schema.tools = []
-            mock_schema.example_data = {"field1": "example"}
-            mock_schema.created_at = datetime.now()
-            mock_schema.updated_at = datetime.now()
-            return mock_schema
-
-        mock_service_class.create_schema = mock_create_schema
-
-        schema_data = {
-            "name": "new_schema",
-            "description": "A new schema",
-            "schema_type": "data_model",
-            "schema_definition": {"type": "object", "properties": {"field1": {"type": "string"}}},
-            "field_descriptions": {"field1": "A string field"},
-            "keywords": ["new"],
-            "tools": [],
-            "example_data": {"field1": "example"}
-        }
-
-        response = client.post("/schemas", json=schema_data)
-
-        assert response.status_code == 201
-        data = response.json()
-        assert data["name"] == "new_schema"
-
-    @patch('src.api.schemas_router.SchemaService')
-    def test_get_schema_by_name_success(self, mock_service_class, client):
-        """Test successful schema retrieval by name."""
-        from datetime import datetime
-        async def mock_get_schema_by_name(schema_name):
-            from unittest.mock import MagicMock
-            mock_schema = MagicMock()
-            mock_schema.name = "user_schema"
-            mock_schema.id = 1
-            mock_schema.description = "Schema for user data"
-            mock_schema.schema_type = "data_model"
-            mock_schema.schema_definition = {"type": "object"}
-            mock_schema.field_descriptions = {}
-            mock_schema.keywords = ["user"]
-            mock_schema.tools = []
-            mock_schema.example_data = None
-            mock_schema.created_at = datetime.now()
-            mock_schema.updated_at = datetime.now()
-            return mock_schema
-
-        mock_service_class.get_schema_by_name = mock_get_schema_by_name
-
-        response = client.get("/schemas/user_schema")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["name"] == "user_schema"
-
-    @patch('src.api.schemas_router.SchemaService')
-    def test_get_schema_by_name_not_found(self, mock_service_class, client):
-        """Test schema retrieval by name when not found."""
-        from fastapi import HTTPException
-
-        async def mock_get_schema_by_name(schema_name):
-            raise HTTPException(status_code=404, detail="Schema not found")
-
-        mock_service_class.get_schema_by_name = mock_get_schema_by_name
-
-        response = client.get("/schemas/nonexistent_schema")
-
-        assert response.status_code == 404
-        data = response.json()
-        assert "Schema not found" in data["detail"]
-
-    @patch('src.api.schemas_router.SchemaService')
-    def test_get_schemas_by_type_success(self, mock_service_class, client):
-        """Test successful schemas retrieval by type."""
-        from datetime import datetime
-        from unittest.mock import MagicMock
-
-        # Create a mock response object
-        mock_response = MagicMock()
-        mock_response.count = 1
-        mock_response.schemas = [
-            {
-                "id": 1,
-                "name": "user_schema",
-                "description": "Schema for user data",
-                "schema_type": "data_model",
-                "schema_definition": {"type": "object"},
-                "field_descriptions": {},
-                "keywords": ["user"],
-                "tools": [],
-                "example_data": None,
-                "created_at": datetime.now(),
-                "updated_at": datetime.now()
-            }
-        ]
-
-        async def mock_get_schemas_by_type(schema_type):
-            return mock_response
-
-        mock_service_class.get_schemas_by_type = mock_get_schemas_by_type
-
-        response = client.get("/schemas/by-type/data_model")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["count"] == 1
-        assert len(data["schemas"]) == 1
-        assert data["schemas"][0]["schema_type"] == "data_model"
-
-    @patch('src.api.schemas_router.SchemaService')
-    def test_create_schema_failure(self, mock_service_class, client):
-        """Test schema creation failure."""
-        from fastapi import HTTPException
-
-        async def mock_create_schema(schema_data):
-            raise HTTPException(status_code=400, detail="Schema already exists")
-
-        mock_service_class.create_schema = mock_create_schema
-
-        schema_data = {
-            "name": "existing_schema",
-            "description": "A schema that already exists",
-            "schema_type": "data_model",
-            "schema_definition": {"type": "object"},
-            "field_descriptions": {},
-            "keywords": [],
-            "tools": [],
-            "example_data": None
-        }
-
-        response = client.post("/schemas", json=schema_data)
-
-        assert response.status_code == 400
-        data = response.json()
-        assert "Schema already exists" in data["detail"]
-
-    @patch('src.api.schemas_router.SchemaService')
-    def test_update_schema_success(self, mock_service_class, client):
-        """Test successful schema update."""
-        from datetime import datetime
-
-        async def mock_update_schema(schema_name, schema_data):
-            from unittest.mock import MagicMock
-            mock_schema = MagicMock()
-            mock_schema.name = "updated_schema"
-            mock_schema.id = 1
-            mock_schema.description = "Updated description"
-            mock_schema.schema_type = "data_model"
-            mock_schema.schema_definition = {"type": "object", "properties": {"field1": {"type": "string"}}}
-            mock_schema.field_descriptions = {"field1": "Updated field description"}
-            mock_schema.keywords = ["updated"]
-            mock_schema.tools = []
-            mock_schema.example_data = {"field1": "updated_example"}
-            mock_schema.created_at = datetime.now()
-            mock_schema.updated_at = datetime.now()
-            return mock_schema
-
-        mock_service_class.update_schema = mock_update_schema
-
-        update_data = {
-            "description": "Updated description",
-            "schema_definition": {"type": "object", "properties": {"field1": {"type": "string"}}},
-            "field_descriptions": {"field1": "Updated field description"},
-            "keywords": ["updated"],
-            "example_data": {"field1": "updated_example"}
-        }
-
-        response = client.put("/schemas/updated_schema", json=update_data)
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["name"] == "updated_schema"
-        assert data["description"] == "Updated description"
-
-    @patch('src.api.schemas_router.SchemaService')
-    def test_update_schema_failure(self, mock_service_class, client):
-        """Test schema update failure."""
-        from fastapi import HTTPException
-
-        async def mock_update_schema(schema_name, schema_data):
-            raise HTTPException(status_code=404, detail="Schema not found")
-
-        mock_service_class.update_schema = mock_update_schema
-
-        update_data = {
-            "description": "Updated description"
-        }
-
-        response = client.put("/schemas/nonexistent_schema", json=update_data)
-
-        assert response.status_code == 404
-        data = response.json()
-        assert "Schema not found" in data["detail"]
-
-    @patch('src.api.schemas_router.SchemaService')
-    def test_delete_schema_success(self, mock_service_class, client):
-        """Test successful schema deletion."""
-        async def mock_delete_schema(schema_name):
-            return None  # Successful deletion returns None
-
-        mock_service_class.delete_schema = mock_delete_schema
-
-        response = client.delete("/schemas/test_schema")
-
-        assert response.status_code == 204
-        assert response.content == b""  # No content for 204 status
-
-    @patch('src.api.schemas_router.SchemaService')
-    def test_delete_schema_failure(self, mock_service_class, client):
-        """Test schema deletion failure."""
-        from fastapi import HTTPException
-
-        async def mock_delete_schema(schema_name):
-            raise HTTPException(status_code=404, detail="Schema not found")
-
-        mock_service_class.delete_schema = mock_delete_schema
-
-        response = client.delete("/schemas/nonexistent_schema")
-
-        assert response.status_code == 404
-        data = response.json()
-        assert "Schema not found" in data["detail"]
-
-    @patch('src.api.schemas_router.SchemaService')
-    def test_get_schemas_by_type_empty_result(self, mock_service_class, client):
-        """Test schemas retrieval by type with empty result."""
-        from unittest.mock import MagicMock
-
-        # Create a mock response object with no schemas
-        mock_response = MagicMock()
-        mock_response.count = 0
-        mock_response.schemas = []
-
-        async def mock_get_schemas_by_type(schema_type):
-            return mock_response
-
-        mock_service_class.get_schemas_by_type = mock_get_schemas_by_type
-
-        response = client.get("/schemas/by-type/nonexistent_type")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["count"] == 0
-        assert len(data["schemas"]) == 0
-
-    @patch('src.api.schemas_router.SchemaService')
-    def test_get_all_schemas_empty_result(self, mock_service_class, client):
-        """Test all schemas retrieval with empty result."""
-        from unittest.mock import MagicMock
-
-        # Create a mock response object with no schemas
-        mock_response = MagicMock()
-        mock_response.count = 0
-        mock_response.schemas = []
-
-        async def mock_get_all_schemas():
-            return mock_response
-
-        mock_service_class.get_all_schemas = mock_get_all_schemas
-
-        response = client.get("/schemas")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["count"] == 0
-        assert len(data["schemas"]) == 0
-
-    @patch('src.api.schemas_router.SchemaService')
-    def test_create_schema_with_minimal_data(self, mock_service_class, client):
-        """Test schema creation with minimal required data."""
-        from datetime import datetime
-
-        async def mock_create_schema(schema_data):
-            from unittest.mock import MagicMock
-            mock_schema = MagicMock()
-            mock_schema.name = "minimal_schema"
-            mock_schema.id = 4
-            mock_schema.description = "Minimal schema"
-            mock_schema.schema_type = "basic"
-            mock_schema.schema_definition = {"type": "object"}
-            mock_schema.field_descriptions = {}
-            mock_schema.keywords = []
-            mock_schema.tools = []
-            mock_schema.example_data = None
-            mock_schema.created_at = datetime.now()
-            mock_schema.updated_at = datetime.now()
-            return mock_schema
-
-        mock_service_class.create_schema = mock_create_schema
-
-        schema_data = {
-            "name": "minimal_schema",
-            "description": "Minimal schema",
-            "schema_type": "basic",
-            "schema_definition": {"type": "object"}
-        }
-
-        response = client.post("/schemas", json=schema_data)
-
-        assert response.status_code == 201
-        data = response.json()
-        assert data["name"] == "minimal_schema"
-
-    @patch('src.api.schemas_router.SchemaService')
-    def test_update_schema_with_minimal_data(self, mock_service_class, client):
-        """Test schema update with minimal data."""
-        from datetime import datetime
-
-        async def mock_update_schema(schema_name, schema_data):
-            from unittest.mock import MagicMock
-            mock_schema = MagicMock()
-            mock_schema.name = "minimal_updated"
-            mock_schema.id = 1
-            mock_schema.description = "Minimally updated"
-            mock_schema.schema_type = "basic"
-            mock_schema.schema_definition = {"type": "object"}
-            mock_schema.field_descriptions = {}
-            mock_schema.keywords = []
-            mock_schema.tools = []
-            mock_schema.example_data = None
-            mock_schema.created_at = datetime.now()
-            mock_schema.updated_at = datetime.now()
-            return mock_schema
-
-        mock_service_class.update_schema = mock_update_schema
-
-        update_data = {
-            "description": "Minimally updated"
-        }
-
-        response = client.put("/schemas/minimal_updated", json=update_data)
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["name"] == "minimal_updated"
-        assert data["description"] == "Minimally updated"
+        for path in expected:
+            assert path in route_paths, f"Missing route: {path}"
+
+    def test_expected_methods(self):
+        methods_by_path = {}
+        for route in router.routes:
+            for method in route.methods:
+                methods_by_path.setdefault(route.path, set()).add(method)
+
+        assert "GET" in methods_by_path["/schemas"]
+        assert "POST" in methods_by_path["/schemas"]
+        assert "GET" in methods_by_path["/schemas/{schema_name}"]
+        assert "PUT" in methods_by_path["/schemas/{schema_name}"]
+        assert "DELETE" in methods_by_path["/schemas/{schema_name}"]
