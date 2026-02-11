@@ -223,7 +223,8 @@ export const TraceService = {
       
       // The API returns an object with a 'traces' field for both endpoints:
       // ExecutionTraceResponseByRunId or ExecutionTraceResponseByJobId
-      const response = await apiClient.get(endpoint);
+      // Use limit=500 (API max) to ensure error events at the end of long executions are included
+      const response = await apiClient.get(endpoint, { params: { limit: 1500 } });
       
       // Check if the response contains a traces field (from the API schemas)
       if (response.data && response.data.traces && Array.isArray(response.data.traces)) {
