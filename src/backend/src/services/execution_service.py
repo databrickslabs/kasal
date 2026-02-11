@@ -34,7 +34,7 @@ import concurrent.futures
 import asyncio
 from typing import Dict, Any, Optional, List, Union
 from datetime import datetime, UTC
-from fastapi import HTTPException, status
+from src.core.exceptions import KasalError
 from sqlalchemy.orm import Session
 
 from src.core.logger import LoggerManager
@@ -160,14 +160,13 @@ class ExecutionService:
             )
             logger.info(f"Flow execution started successfully: {result}")
             return result
-        except HTTPException:
-            # Re-raise HTTP exceptions
+        except KasalError:
+            # Re-raise Kasal exceptions
             raise
         except Exception as e:
             error_msg = f"Unexpected error in execute_flow: {str(e)}"
             logger.error(error_msg, exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            raise KasalError(
                 detail=error_msg
             )
     
@@ -185,8 +184,7 @@ class ExecutionService:
             return await self.crewai_execution_service.get_flow_execution(execution_id)
         except Exception as e:
             logger.error(f"Error getting execution: {str(e)}", exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            raise KasalError(
                 detail=f"Error getting execution: {str(e)}"
             )
     
@@ -204,8 +202,7 @@ class ExecutionService:
             return await self.crewai_execution_service.get_flow_executions_by_flow(str(flow_id))
         except Exception as e:
             logger.error(f"Error getting executions: {str(e)}", exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            raise KasalError(
                 detail=f"Error getting executions: {str(e)}"
             )
 
@@ -1053,9 +1050,8 @@ class ExecutionService:
 
         except Exception as e:
             logger.error(f"[ExecutionService.create_execution] Error during initial creation for execution: {str(e)}", exc_info=True)
-            # Re-raise as HTTPException for the API boundary
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            # Re-raise as KasalError for the API boundary
+            raise KasalError(
                 detail=f"Failed to create execution: {str(e)}"
             )
     

@@ -4,7 +4,7 @@ import requests
 import base64
 from typing import Dict, Tuple, Optional, Any
 
-from fastapi import HTTPException
+from src.core.exceptions import KasalError
 
 from src.repositories.databricks_config_repository import DatabricksConfigRepository
 from src.schemas.databricks_config import DatabricksConfigCreate, DatabricksConfigResponse
@@ -109,7 +109,7 @@ class DatabricksService:
             }
         except Exception as e:
             logger.error(f"Error setting Databricks configuration: {e}")
-            raise HTTPException(status_code=500, detail=f"Error setting Databricks configuration: {str(e)}")
+            raise KasalError(detail=f"Error setting Databricks configuration: {str(e)}")
     
     async def get_databricks_config(self) -> Optional[DatabricksConfigResponse]:
         """
@@ -148,11 +148,11 @@ class DatabricksService:
                 knowledge_chunk_size=config.knowledge_chunk_size if hasattr(config, 'knowledge_chunk_size') else 1000,
                 knowledge_chunk_overlap=config.knowledge_chunk_overlap if hasattr(config, 'knowledge_chunk_overlap') else 200
             )
-        except HTTPException:
+        except KasalError:
             raise
         except Exception as e:
             logger.error(f"Error getting Databricks configuration: {e}")
-            raise HTTPException(status_code=500, detail=f"Error getting Databricks configuration: {str(e)}")
+            raise KasalError(detail=f"Error getting Databricks configuration: {str(e)}")
     
     async def check_personal_token_required(self) -> Dict:
         """
@@ -194,7 +194,7 @@ class DatabricksService:
             }
         except Exception as e:
             logger.error(f"Error checking personal token requirement: {e}")
-            raise HTTPException(status_code=500, detail=f"Error checking personal token requirement: {str(e)}")
+            raise KasalError(detail=f"Error checking personal token requirement: {str(e)}")
 
     # Methods for Databricks token management
     

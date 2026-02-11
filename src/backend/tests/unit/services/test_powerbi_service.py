@@ -10,7 +10,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 
-from fastapi import HTTPException
+from src.core.exceptions import KasalError, NotFoundError, BadRequestError, UnauthorizedError
 
 # Ensure azure.identity is mockable even when not installed
 if 'azure' not in sys.modules:
@@ -140,7 +140,7 @@ class TestPowerBIServiceExecuteDAXQuery:
         """Test DAX query execution when no config exists."""
         powerbi_service.repository.get_active_config.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await powerbi_service.execute_dax_query(valid_dax_query_request)
 
         assert exc_info.value.status_code == 404
@@ -152,7 +152,7 @@ class TestPowerBIServiceExecuteDAXQuery:
         mock_powerbi_config.is_enabled = False
         powerbi_service.repository.get_active_config.return_value = mock_powerbi_config
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(BadRequestError) as exc_info:
             await powerbi_service.execute_dax_query(valid_dax_query_request)
 
         assert exc_info.value.status_code == 400
@@ -166,7 +166,7 @@ class TestPowerBIServiceExecuteDAXQuery:
 
         query_request = DAXQueryRequest(dax_query="EVALUATE 'Sales'")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(BadRequestError) as exc_info:
             await powerbi_service.execute_dax_query(query_request)
 
         assert exc_info.value.status_code == 400
@@ -228,7 +228,7 @@ class TestPowerBIServiceTokenGeneration:
     async def test_generate_token_missing_credentials(self, powerbi_service, mock_powerbi_config):
         """Test token generation with missing credentials."""
         with patch.dict('os.environ', {}, clear=True):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(UnauthorizedError) as exc_info:
                 await powerbi_service._generate_token(mock_powerbi_config)
 
             assert exc_info.value.status_code == 401
@@ -244,7 +244,7 @@ class TestPowerBIServiceTokenGeneration:
                 'POWERBI_USERNAME': 'test@example.com',
                 'POWERBI_PASSWORD': 'test-password'
             }):
-                with pytest.raises(HTTPException) as exc_info:
+                with pytest.raises(UnauthorizedError) as exc_info:
                     await powerbi_service._generate_token(mock_powerbi_config)
 
                 assert exc_info.value.status_code == 401
@@ -280,7 +280,7 @@ class TestPowerBIServiceExecuteQuery:
             mock_response.text = "Bad Request"
             mock_post.return_value = mock_response
 
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(KasalError) as exc_info:
                 await powerbi_service._execute_query(
                     token="test-token",
                     semantic_model_id="test-model",
@@ -296,7 +296,7 @@ class TestPowerBIServiceExecuteQuery:
             import requests
             mock_post.side_effect = requests.exceptions.Timeout("Request timeout")
 
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(KasalError) as exc_info:
                 await powerbi_service._execute_query(
                     token="test-token",
                     semantic_model_id="test-model",

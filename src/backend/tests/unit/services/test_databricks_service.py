@@ -12,7 +12,7 @@ import requests
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 
-from fastapi import HTTPException
+from src.core.exceptions import KasalError
 
 from src.services.databricks_service import DatabricksService
 from src.schemas.databricks_config import DatabricksConfigCreate, DatabricksConfigResponse
@@ -103,7 +103,7 @@ class TestDatabricksService:
 
         config_create = DatabricksConfigCreate(**valid_config_data)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await databricks_service.set_databricks_config(config_create)
 
         assert exc_info.value.status_code == 500
@@ -126,7 +126,7 @@ class TestDatabricksService:
         """Test databricks configuration retrieval when not found."""
         databricks_service.repository.get_active_config.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await databricks_service.get_databricks_config()
 
         assert exc_info.value.status_code == 404
@@ -137,7 +137,7 @@ class TestDatabricksService:
         """Test databricks configuration retrieval with general error."""
         databricks_service.repository.get_active_config.side_effect = Exception("Database error")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await databricks_service.get_databricks_config()
 
         assert exc_info.value.status_code == 500
@@ -428,7 +428,7 @@ class TestDatabricksService:
         """Test personal token check with general error."""
         databricks_service.repository.get_active_config.side_effect = Exception("Database error")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await databricks_service.check_personal_token_required()
 
         assert exc_info.value.status_code == 500

@@ -10,7 +10,7 @@ invalidation on mutations. See src/core/cache.py for cache implementation.
 
 import logging
 from typing import Dict, Any, Optional, List
-from fastapi import HTTPException, status
+from src.core.exceptions import KasalError, NotFoundError, ForbiddenError
 
 from src.utils.model_config import get_model_config
 from src.core.logger import LoggerManager
@@ -338,8 +338,7 @@ class ModelConfigService:
 
         except Exception as e:
             logger.error(f"Error getting model configuration: {str(e)}")
-            raise HTTPException(
-                status_code=500,
+            raise KasalError(
                 detail=f"Failed to get model configuration: {str(e)}"
             )
     # Group-aware methods for multi-tenant support
@@ -498,8 +497,7 @@ class ModelConfigService:
             # Must have a valid group context to toggle models
             if not group_context or not group_context.group_ids:
                 logger.warning(f"No group context provided for toggling model {key}")
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
+                raise ForbiddenError(
                     detail="Group context required to toggle models"
                 )
 
@@ -545,8 +543,7 @@ class ModelConfigService:
             # For group-specific models, check authorization
             if target_model.group_id not in group_context.group_ids:
                 logger.warning(f"Model with key {key} not authorized for group")
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,  # Return 404 not 403 to avoid information leakage
+                raise NotFoundError(
                     detail=f"Model with key {key} not found"
                 )
 
@@ -555,11 +552,10 @@ class ModelConfigService:
             await _invalidate_cache()
             return await self.repository.find_by_key_and_group(key, target_model.group_id)
 
-        except HTTPException:
+        except KasalError:
             raise
         except Exception as e:
             logger.error(f"Failed to toggle model: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            raise KasalError(
                 detail=f"Failed to toggle model: {str(e)}"
             )

@@ -1114,13 +1114,12 @@ class LakebaseService(BaseService):
         Raises:
             HTTPException: If Lakebase is not enabled
         """
-        from fastapi import HTTPException
+        from src.core.exceptions import BadRequestError
 
         # Check if Lakebase is enabled
         config = await self.get_config()
         if not config.get("enabled", False):
-            raise HTTPException(
-                status_code=400,
+            raise BadRequestError(
                 detail="Lakebase is not enabled. Please configure and enable Lakebase first."
             )
 

@@ -3,7 +3,7 @@ import logging
 import aiohttp
 import asyncio
 
-from fastapi import HTTPException, status
+from src.core.exceptions import KasalError, NotFoundError, ConflictError
 
 from src.repositories.mcp_repository import MCPServerRepository, MCPSettingsRepository
 from src.schemas.mcp import (
@@ -186,7 +186,7 @@ class MCPService:
         """
         base = await self.server_repository.get(server_id)
         if not base:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"MCP server with ID {server_id} not found")
+            raise NotFoundError(detail=f"MCP server with ID {server_id} not found")
         # If the provided server is already group-scoped and matches, just enable and return
         if getattr(base, 'group_id', None) == group_id:
             updated = await self.server_repository.update(server_id, {"enabled": True})
@@ -281,8 +281,7 @@ class MCPService:
         server = await self.server_repository.get(server_id)
         if not server:
             logger.warning(f"MCP server with ID {server_id} not found")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+            raise NotFoundError(
                 detail=f"MCP server with ID {server_id} not found"
             )
 
@@ -318,8 +317,7 @@ class MCPService:
             existing_server = await self.server_repository.find_by_name(server_data.name)
             if existing_server:
                 logger.warning(f"MCP server with name '{server_data.name}' already exists")
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
+                raise ConflictError(
                     detail=f"MCP server with name '{server_data.name}' already exists"
                 )
 
@@ -346,12 +344,11 @@ class MCPService:
             server_response.api_key = server_data.api_key  # Include the original API key in the response
 
             return server_response
-        except HTTPException:
+        except KasalError:
             raise
         except Exception as e:
             logger.error(f"Failed to create MCP server: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            raise KasalError(
                 detail=f"Failed to create MCP server: {str(e)}"
             )
 
@@ -373,8 +370,7 @@ class MCPService:
         server = await self.server_repository.get(server_id)
         if not server:
             logger.warning(f"MCP server with ID {server_id} not found for update")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+            raise NotFoundError(
                 detail=f"MCP server with ID {server_id} not found"
             )
 
@@ -404,8 +400,7 @@ class MCPService:
             return server_response
         except Exception as e:
             logger.error(f"Failed to update MCP server: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            raise KasalError(
                 detail=f"Failed to update MCP server: {str(e)}"
             )
 
@@ -426,8 +421,7 @@ class MCPService:
         server = await self.server_repository.get(server_id)
         if not server:
             logger.warning(f"MCP server with ID {server_id} not found for deletion")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+            raise NotFoundError(
                 detail=f"MCP server with ID {server_id} not found"
             )
 
@@ -437,8 +431,7 @@ class MCPService:
             return True
         except Exception as e:
             logger.error(f"Failed to delete MCP server: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            raise KasalError(
                 detail=f"Failed to delete MCP server: {str(e)}"
             )
 
@@ -460,8 +453,7 @@ class MCPService:
             server = await self.server_repository.toggle_enabled(server_id)
             if not server:
                 logger.warning(f"MCP server with ID {server_id} not found for toggle")
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
+                raise NotFoundError(
                     detail=f"MCP server with ID {server_id} not found"
                 )
 
@@ -470,12 +462,11 @@ class MCPService:
                 message=f"MCP server {status_text} successfully",
                 enabled=server.enabled
             )
-        except HTTPException:
+        except KasalError:
             raise
         except Exception as e:
             logger.error(f"Failed to toggle MCP server: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            raise KasalError(
                 detail=f"Failed to toggle MCP server: {str(e)}"
             )
 
@@ -497,8 +488,7 @@ class MCPService:
             server = await self.server_repository.toggle_global_enabled(server_id)
             if not server:
                 logger.warning(f"MCP server with ID {server_id} not found for global toggle")
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
+                raise NotFoundError(
                     detail=f"MCP server with ID {server_id} not found"
                 )
 
@@ -507,12 +497,11 @@ class MCPService:
                 message=f"MCP server {status_text} successfully",
                 enabled=server.global_enabled
             )
-        except HTTPException:
+        except KasalError:
             raise
         except Exception as e:
             logger.error(f"Failed to toggle MCP server global status: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            raise KasalError(
                 detail=f"Failed to toggle MCP server global status: {str(e)}"
             )
 
@@ -741,8 +730,7 @@ class MCPService:
             return MCPSettingsResponse.model_validate(settings)
         except Exception as e:
             logger.error(f"Error getting MCP settings: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            raise KasalError(
                 detail=f"Error getting MCP settings: {str(e)}"
             )
 
@@ -767,7 +755,6 @@ class MCPService:
             return MCPSettingsResponse.model_validate(updated_settings)
         except Exception as e:
             logger.error(f"Error updating MCP settings: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            raise KasalError(
                 detail=f"Error updating MCP settings: {str(e)}"
             )
