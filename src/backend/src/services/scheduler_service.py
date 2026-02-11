@@ -578,6 +578,7 @@ class SchedulerService:
                 # Update schedule after execution
                 repo = ScheduleRepository(session)
                 await repo.update_after_execution(schedule_id, execution_time)
+                await session.commit()
 
                 logger_manager.scheduler.info(
                     f"Successfully ran {execution_type} schedule {schedule_id}."
@@ -590,6 +591,7 @@ class SchedulerService:
                 async with async_session_factory() as error_session:
                     repo = ScheduleRepository(error_session)
                     await repo.update_after_execution(schedule_id, execution_time)
+                    await error_session.commit()
             except Exception as update_error:
                 logger_manager.scheduler.error(f"Error updating schedule {schedule_id} after job failure: {update_error}")
     

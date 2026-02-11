@@ -381,6 +381,7 @@ class CrewMemoryService:
             async with request_scoped_session() as session:
                 trace_service = ExecutionTraceService(session)
                 await trace_service.create_trace(trace_data)
+                await session.commit()
                 logger.info(f"Emitted memory backend validation error trace for job {job_id}")
 
         except Exception as trace_error:
