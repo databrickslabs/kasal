@@ -48,7 +48,6 @@ from src.api.task_generation_router import router as task_generation_router
 
 # DISABLED: Local file uploads are not allowed - use Databricks volumes instead
 # from src.api.upload_router import router as upload_router
-from src.api.task_tracking_router import router as task_tracking_router
 from src.api.tasks_router import router as tasks_router
 from src.api.template_generation_router import router as template_generation_router
 from src.api.templates_router import router as templates_router
@@ -80,7 +79,6 @@ api_router.include_router(schemas_router)
 api_router.include_router(tools_router)
 # DISABLED: Local file uploads are not allowed - use Databricks volumes instead
 # api_router.include_router(upload_router)
-api_router.include_router(task_tracking_router)
 api_router.include_router(scheduler_router)
 api_router.include_router(agent_generation_router)
 api_router.include_router(connections_router)
@@ -126,7 +124,6 @@ __all__ = [
     "schemas_router",
     "tools_router",
     # "upload_router",  # DISABLED: Local file uploads not allowed
-    "task_tracking_router",
     "scheduler_router",
     "agent_generation_router",
     "connections_router",

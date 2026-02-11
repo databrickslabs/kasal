@@ -12,8 +12,6 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from src.engines.crewai.callbacks.base import CrewAICallback
-from src.services.task_tracking_service import TaskTrackingService
-from src.schemas.task_tracking import TaskStatusEnum
 from src.repositories.output_combiner_repository import OutputCombinerRepository, get_output_combiner_repository
 
 logger = logging.getLogger(__name__)
