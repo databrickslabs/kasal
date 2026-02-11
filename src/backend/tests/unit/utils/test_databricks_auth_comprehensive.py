@@ -155,7 +155,7 @@ class TestLoadConfig:
         mock_session.__aexit__ = AsyncMock(return_value=False)
         with patch.object(auth, "_check_oauth_environment"), \
              patch("src.services.databricks_service.DatabricksService", return_value=mock_service), \
-             patch("src.db.session.async_session_factory", return_value=mock_session):
+             patch("src.db.session.request_scoped_session", return_value=mock_session):
             result = await auth._load_config()
         assert result is True
         assert auth._workspace_host == "https://myhost.databricks.com"
@@ -170,7 +170,7 @@ class TestLoadConfig:
         mock_session.__aexit__ = AsyncMock(return_value=False)
         with patch.object(auth, "_check_oauth_environment"), \
              patch("src.services.databricks_service.DatabricksService", return_value=mock_service), \
-             patch("src.db.session.async_session_factory", return_value=mock_session):
+             patch("src.db.session.request_scoped_session", return_value=mock_session):
             result = await auth._load_config()
         assert result is True
 
@@ -699,7 +699,7 @@ class TestGetAuthContext:
                  patch("src.utils.databricks_auth._clean_environment") as mc, \
                  patch("src.utils.databricks_auth.WorkspaceClient", side_effect=Exception("obo fail")), \
                  patch("src.services.api_keys_service.ApiKeysService"), \
-                 patch("src.db.session.async_session_factory", return_value=mock_session), \
+                 patch("src.db.session.request_scoped_session", return_value=mock_session), \
                  patch("src.utils.user_context.UserContext") as mock_uc:
                 mc.return_value.__enter__ = Mock(return_value=None)
                 mc.return_value.__exit__ = Mock(return_value=False)
@@ -726,7 +726,7 @@ class TestGetAuthContext:
         try:
             with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
                  patch("src.services.api_keys_service.ApiKeysService", return_value=mock_service), \
-                 patch("src.db.session.async_session_factory", return_value=mock_session), \
+                 patch("src.db.session.request_scoped_session", return_value=mock_session), \
                  patch("src.utils.user_context.UserContext"), \
                  patch("src.utils.encryption_utils.EncryptionUtils") as enc:
                 enc.decrypt_value.return_value = "decrypted"
@@ -754,7 +754,7 @@ class TestGetAuthContext:
         try:
             with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
                  patch("src.services.api_keys_service.ApiKeysService", return_value=mock_service), \
-                 patch("src.db.session.async_session_factory", return_value=mock_session), \
+                 patch("src.db.session.request_scoped_session", return_value=mock_session), \
                  patch("src.utils.user_context.UserContext") as mock_uc, \
                  patch("src.utils.encryption_utils.EncryptionUtils") as enc:
                 mock_uc.get_group_context.return_value = mock_group_ctx
@@ -776,7 +776,7 @@ class TestGetAuthContext:
         try:
             with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
                  patch("src.services.api_keys_service.ApiKeysService"), \
-                 patch("src.db.session.async_session_factory", return_value=mock_session), \
+                 patch("src.db.session.request_scoped_session", return_value=mock_session), \
                  patch("src.utils.user_context.UserContext") as mock_uc:
                 mock_uc.get_group_context.side_effect = Exception("no context")
                 assert await get_auth_context() is None
@@ -798,7 +798,7 @@ class TestGetAuthContext:
         try:
             with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
                  patch("src.services.api_keys_service.ApiKeysService", return_value=mock_service), \
-                 patch("src.db.session.async_session_factory", return_value=mock_session), \
+                 patch("src.db.session.request_scoped_session", return_value=mock_session), \
                  patch("src.utils.user_context.UserContext"):
                 assert await get_auth_context(group_id="grp") is None
         finally:
@@ -821,7 +821,7 @@ class TestGetAuthContext:
         try:
             with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
                  patch("src.services.api_keys_service.ApiKeysService", return_value=mock_service), \
-                 patch("src.db.session.async_session_factory", return_value=mock_session), \
+                 patch("src.db.session.request_scoped_session", return_value=mock_session), \
                  patch("src.utils.user_context.UserContext"):
                 assert await get_auth_context(group_id="grp") is None
         finally:
@@ -859,7 +859,7 @@ class TestGetAuthContext:
                  patch.object(_databricks_auth, "_is_service_token_expired", return_value=True), \
                  patch.object(_databricks_auth, "_refresh_service_token", new_callable=AsyncMock, return_value="spn"), \
                  patch("src.services.api_keys_service.ApiKeysService"), \
-                 patch("src.db.session.async_session_factory", return_value=mock_session), \
+                 patch("src.db.session.request_scoped_session", return_value=mock_session), \
                  patch("src.utils.user_context.UserContext") as uc:
                 uc.get_group_context.return_value = None
                 result = await get_auth_context()
@@ -881,7 +881,7 @@ class TestGetAuthContext:
             with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
                  patch.object(_databricks_auth, "_is_service_token_expired", return_value=False), \
                  patch("src.services.api_keys_service.ApiKeysService"), \
-                 patch("src.db.session.async_session_factory", return_value=mock_session), \
+                 patch("src.db.session.request_scoped_session", return_value=mock_session), \
                  patch("src.utils.user_context.UserContext") as uc:
                 uc.get_group_context.return_value = None
                 result = await get_auth_context()
@@ -903,7 +903,7 @@ class TestGetAuthContext:
                  patch.object(_databricks_auth, "_is_service_token_expired", return_value=True), \
                  patch.object(_databricks_auth, "_refresh_service_token", new_callable=AsyncMock, return_value=None), \
                  patch("src.services.api_keys_service.ApiKeysService"), \
-                 patch("src.db.session.async_session_factory", return_value=mock_session), \
+                 patch("src.db.session.request_scoped_session", return_value=mock_session), \
                  patch("src.utils.user_context.UserContext") as uc:
                 uc.get_group_context.return_value = None
                 assert await get_auth_context() is None

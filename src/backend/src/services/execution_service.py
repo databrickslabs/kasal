@@ -881,11 +881,11 @@ class ExecutionService:
                         exec_logger.info(f"[ExecutionService.create_execution] No flow_id or nodes/edges provided for execution_id: {execution_id}, trying to find most recent flow from database")
                         try:
                             # Use async query for the most recent flow from the database
-                            from src.db.session import async_session_factory
+                            from src.db.session import request_scoped_session
                             from src.models.flow import Flow
                             from sqlalchemy import select, desc
 
-                            async with async_session_factory() as db:
+                            async with request_scoped_session() as db:
                                 # Get the most recent flow using async query
                                 stmt = select(Flow).order_by(desc(Flow.created_at)).limit(1)
                                 result = await db.execute(stmt)
@@ -1104,10 +1104,10 @@ class ExecutionService:
             ]
             
             # Use ExecutionRepository to check for active executions
-            from src.db.session import async_session_factory
+            from src.db.session import request_scoped_session
             from src.repositories.execution_repository import ExecutionRepository
             
-            async with async_session_factory() as db:
+            async with request_scoped_session() as db:
                 repo = ExecutionRepository(db)
                 
                 # Get executions with group filtering

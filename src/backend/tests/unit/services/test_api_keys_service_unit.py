@@ -53,10 +53,10 @@ def _build_service(group_id="grp_1"):
     return service, repo
 
 
-def _mock_async_session_factory():
+def _mock_request_scoped_session():
     """
     Build a mock that works as an async context manager, mimicking
-    ``async with async_session_factory() as session:``.
+    ``async with request_scoped_session() as session:``.
     Returns (factory_mock, session_mock) so callers can configure
     the session mock's repository behaviour.
     """
@@ -449,9 +449,9 @@ class TestGetApiKeyValue:
     @pytest.mark.asyncio
     async def test_returns_decrypted_value(self):
         fake_key = _make_api_key(encrypted_value="enc_val")
-        factory_mock, mock_session = _mock_async_session_factory()
+        factory_mock, mock_session = _mock_request_scoped_session()
 
-        with patch("src.db.session.async_session_factory", factory_mock), \
+        with patch("src.db.session.request_scoped_session", factory_mock), \
              patch("src.services.api_keys_service.ApiKeyRepository") as RepoClass, \
              patch("src.services.api_keys_service.EncryptionUtils") as EU:
             repo_mock = AsyncMock()
@@ -472,9 +472,9 @@ class TestGetApiKeyValue:
 
     @pytest.mark.asyncio
     async def test_returns_none_when_key_not_found(self):
-        factory_mock, mock_session = _mock_async_session_factory()
+        factory_mock, mock_session = _mock_request_scoped_session()
 
-        with patch("src.db.session.async_session_factory", factory_mock), \
+        with patch("src.db.session.request_scoped_session", factory_mock), \
              patch("src.services.api_keys_service.ApiKeyRepository") as RepoClass, \
              patch("src.services.api_keys_service.EncryptionUtils"):
             repo_mock = AsyncMock()
@@ -490,9 +490,9 @@ class TestGetApiKeyValue:
     @pytest.mark.asyncio
     async def test_returns_none_on_decryption_error(self):
         fake_key = _make_api_key(encrypted_value="bad")
-        factory_mock, mock_session = _mock_async_session_factory()
+        factory_mock, mock_session = _mock_request_scoped_session()
 
-        with patch("src.db.session.async_session_factory", factory_mock), \
+        with patch("src.db.session.request_scoped_session", factory_mock), \
              patch("src.services.api_keys_service.ApiKeyRepository") as RepoClass, \
              patch("src.services.api_keys_service.EncryptionUtils") as EU:
             repo_mock = AsyncMock()
@@ -509,9 +509,9 @@ class TestGetApiKeyValue:
     @pytest.mark.asyncio
     async def test_handles_string_as_first_argument(self):
         """When db is passed as a string, it is treated as key_name."""
-        factory_mock, mock_session = _mock_async_session_factory()
+        factory_mock, mock_session = _mock_request_scoped_session()
 
-        with patch("src.db.session.async_session_factory", factory_mock), \
+        with patch("src.db.session.request_scoped_session", factory_mock), \
              patch("src.services.api_keys_service.ApiKeyRepository") as RepoClass, \
              patch("src.services.api_keys_service.EncryptionUtils") as EU:
             repo_mock = AsyncMock()
@@ -903,9 +903,9 @@ class TestGetProviderApiKey:
     @pytest.mark.asyncio
     async def test_returns_decrypted_key(self):
         fake_key = _make_api_key(encrypted_value="enc_openai")
-        factory_mock, mock_session = _mock_async_session_factory()
+        factory_mock, mock_session = _mock_request_scoped_session()
 
-        with patch("src.db.session.async_session_factory", factory_mock), \
+        with patch("src.db.session.request_scoped_session", factory_mock), \
              patch("src.services.api_keys_service.ApiKeyRepository") as RepoClass, \
              patch("src.services.api_keys_service.EncryptionUtils") as EU:
             repo_mock = AsyncMock()
@@ -925,9 +925,9 @@ class TestGetProviderApiKey:
 
     @pytest.mark.asyncio
     async def test_returns_none_when_key_not_found(self):
-        factory_mock, mock_session = _mock_async_session_factory()
+        factory_mock, mock_session = _mock_request_scoped_session()
 
-        with patch("src.db.session.async_session_factory", factory_mock), \
+        with patch("src.db.session.request_scoped_session", factory_mock), \
              patch("src.services.api_keys_service.ApiKeyRepository") as RepoClass, \
              patch("src.services.api_keys_service.EncryptionUtils"):
             repo_mock = AsyncMock()
@@ -941,9 +941,9 @@ class TestGetProviderApiKey:
     @pytest.mark.asyncio
     async def test_returns_none_on_decryption_error(self):
         fake_key = _make_api_key(encrypted_value="bad")
-        factory_mock, mock_session = _mock_async_session_factory()
+        factory_mock, mock_session = _mock_request_scoped_session()
 
-        with patch("src.db.session.async_session_factory", factory_mock), \
+        with patch("src.db.session.request_scoped_session", factory_mock), \
              patch("src.services.api_keys_service.ApiKeyRepository") as RepoClass, \
              patch("src.services.api_keys_service.EncryptionUtils") as EU:
             repo_mock = AsyncMock()
@@ -960,7 +960,7 @@ class TestGetProviderApiKey:
         """Test the outer try/except that catches session factory errors."""
         factory_mock = MagicMock(side_effect=Exception("session factory broke"))
 
-        with patch("src.db.session.async_session_factory", factory_mock):
+        with patch("src.db.session.request_scoped_session", factory_mock):
             result = await ApiKeysService.get_provider_api_key("openai", group_id="grp_1")
 
         assert result is None
@@ -968,9 +968,9 @@ class TestGetProviderApiKey:
     @pytest.mark.asyncio
     async def test_uppercases_provider_name(self):
         """Verify provider name is uppercased when building key_name."""
-        factory_mock, mock_session = _mock_async_session_factory()
+        factory_mock, mock_session = _mock_request_scoped_session()
 
-        with patch("src.db.session.async_session_factory", factory_mock), \
+        with patch("src.db.session.request_scoped_session", factory_mock), \
              patch("src.services.api_keys_service.ApiKeyRepository") as RepoClass, \
              patch("src.services.api_keys_service.EncryptionUtils"):
             repo_mock = AsyncMock()

@@ -253,8 +253,8 @@ class ApiKeysService(BaseService):
             )
 
         # Create a service instance using session factory
-        from src.db.session import async_session_factory
-        async with async_session_factory() as session:
+        from src.db.session import request_scoped_session
+        async with request_scoped_session() as session:
             service = cls(session, group_id=group_id)
 
             # Find the API key
@@ -535,8 +535,8 @@ class ApiKeysService(BaseService):
 
         try:
             # Create a service instance using session factory
-            from src.db.session import async_session_factory
-            async with async_session_factory() as session:
+            from src.db.session import request_scoped_session
+            async with request_scoped_session() as session:
                 service = cls(session, group_id=group_id)
 
                 # Find the API key by name (provider name with _API_KEY suffix)

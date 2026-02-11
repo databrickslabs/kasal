@@ -77,8 +77,8 @@ except ImportError:
 # Setup logger
 logger = logging.getLogger(__name__)
 
-# Import async session factory once
-from src.db.session import async_session_factory
+# Import request-scoped session helper
+from src.db.session import request_scoped_session
 from src.services.tool_service import ToolService
 from src.services.api_keys_service import ApiKeysService
 from src.schemas.tool import ToolUpdate
@@ -148,11 +148,11 @@ class ToolFactory:
             # Check for Databricks config in database
             try:
                 from src.services.databricks_service import DatabricksService
-                from src.db.session import async_session_factory
+                from src.db.session import request_scoped_session
                 
                 group_id = self.config.get('group_id', 'default') if isinstance(self.config, dict) else 'default'
                 
-                async with async_session_factory() as session:
+                async with request_scoped_session() as session:
                     service = DatabricksService(session)
                     config = await service.get_databricks_config(group_id=group_id)
                     
@@ -301,10 +301,10 @@ class ToolFactory:
         try:
             # Get services using session factory
             from src.services.tool_service import ToolService
-            from src.db.session import async_session_factory
+            from src.db.session import request_scoped_session
             from src.utils.user_context import GroupContext
 
-            async with async_session_factory() as session:
+            async with request_scoped_session() as session:
                 # Create tool service with session
                 tool_service = ToolService(session)
 
@@ -512,10 +512,10 @@ class ToolFactory:
     async def _update_tool_config_async(self, tool_identifier, tool_info, config_update):
         """Async implementation of tool config update"""
         # Get services using session factory
-        from src.db.session import async_session_factory
+        from src.db.session import request_scoped_session
         from src.services.tool_service import ToolService
 
-        async with async_session_factory() as session:
+        async with request_scoped_session() as session:
             # Create tool service with session
             tool_service = ToolService(session)
 
@@ -820,10 +820,10 @@ class ToolFactory:
                         try:
                             # Try to get from DatabricksService configuration
                             from src.services.databricks_service import DatabricksService
-                            from src.db.session import async_session_factory
+                            from src.db.session import request_scoped_session
 
                             async def get_databricks_config():
-                                async with async_session_factory() as session:
+                                async with request_scoped_session() as session:
                                     service = DatabricksService(session)
                                     config = await service.get_databricks_config()
                                     if config and config.workspace_url:

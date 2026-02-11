@@ -59,7 +59,7 @@ class TestCreateAgentDateAwareness:
 
         with patch('src.engines.crewai.helpers.agent_helpers.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.async_session_factory') as mock_session_factory:
+             patch('src.db.session.request_scoped_session') as mock_session_factory:
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -101,7 +101,7 @@ class TestCreateAgentDateAwareness:
 
         with patch('src.engines.crewai.helpers.agent_helpers.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.async_session_factory') as mock_session_factory:
+             patch('src.db.session.request_scoped_session') as mock_session_factory:
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -143,7 +143,7 @@ class TestCreateAgentDateAwareness:
 
         with patch('src.engines.crewai.helpers.agent_helpers.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.async_session_factory') as mock_session_factory:
+             patch('src.db.session.request_scoped_session') as mock_session_factory:
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -184,7 +184,7 @@ class TestCreateAgentDateAwareness:
 
         with patch('src.engines.crewai.helpers.agent_helpers.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.async_session_factory') as mock_session_factory:
+             patch('src.db.session.request_scoped_session') as mock_session_factory:
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -224,7 +224,7 @@ class TestCreateAgentDateAwareness:
 
         with patch('src.engines.crewai.helpers.agent_helpers.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.async_session_factory') as mock_session_factory:
+             patch('src.db.session.request_scoped_session') as mock_session_factory:
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -264,7 +264,7 @@ class TestCreateAgentDateAwareness:
 
         with patch('src.engines.crewai.helpers.agent_helpers.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.async_session_factory') as mock_session_factory:
+             patch('src.db.session.request_scoped_session') as mock_session_factory:
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -304,7 +304,7 @@ class TestCreateAgentDateAwareness:
 
         with patch('src.engines.crewai.helpers.agent_helpers.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.async_session_factory') as mock_session_factory:
+             patch('src.db.session.request_scoped_session') as mock_session_factory:
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -349,7 +349,7 @@ class TestCreateAgentDateAwareness:
 
         with patch('src.engines.crewai.helpers.agent_helpers.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.async_session_factory') as mock_session_factory:
+             patch('src.db.session.request_scoped_session') as mock_session_factory:
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -396,7 +396,7 @@ class TestCreateAgentDateAwareness:
 
         with patch('src.engines.crewai.helpers.agent_helpers.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.async_session_factory') as mock_session_factory:
+             patch('src.db.session.request_scoped_session') as mock_session_factory:
 
             mock_agent_instance = MagicMock()
             mock_agent_instance.role = agent_config["role"]
@@ -468,7 +468,7 @@ class TestCreateAgentDateFormatVariations:
 
         with patch('src.engines.crewai.helpers.agent_helpers.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.async_session_factory') as mock_session_factory:
+             patch('src.db.session.request_scoped_session') as mock_session_factory:
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -508,7 +508,7 @@ class TestCreateAgentDateFormatVariations:
 
         with patch('src.engines.crewai.helpers.agent_helpers.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.async_session_factory') as mock_session_factory:
+             patch('src.db.session.request_scoped_session') as mock_session_factory:
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -577,7 +577,7 @@ class TestCreateAgentDateAwarenessWithOtherParams:
 
         with patch('src.engines.crewai.helpers.agent_helpers.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.async_session_factory') as mock_session_factory:
+             patch('src.db.session.request_scoped_session') as mock_session_factory:
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -626,7 +626,7 @@ class TestCreateAgentDateAwarenessWithOtherParams:
 
         with patch('src.engines.crewai.helpers.agent_helpers.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.async_session_factory') as mock_session_factory:
+             patch('src.db.session.request_scoped_session') as mock_session_factory:
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -682,7 +682,7 @@ class TestCreateAgentDateAwarenessWithOtherParams:
 
         with patch('src.engines.crewai.helpers.agent_helpers.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.async_session_factory') as mock_session_factory:
+             patch('src.db.session.request_scoped_session') as mock_session_factory:
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance

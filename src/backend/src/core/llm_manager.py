@@ -607,14 +607,14 @@ class LLMManager:
             Exception: For other configuration errors
         """
         # Get model configuration from database using ModelConfigService
-        from src.db.session import async_session_factory
+        from src.db.session import request_scoped_session
 
         # Try to get group_id for multi-tenant isolation (optional at this stage)
         # For Databricks with OBO, group_id is not needed
         # For other providers, group_id will be required when fetching API keys
         group_id = LLMManager._get_group_id_from_context(required=False)
 
-        async with async_session_factory() as session:
+        async with request_scoped_session() as session:
             model_config_service = ModelConfigService(session, group_id=group_id)
             model_config_dict = await model_config_service.get_model_config(model)
             
@@ -762,9 +762,9 @@ class LLMManager:
             raise ValueError("group_id is REQUIRED for configure_crewai_llm (multi-tenant isolation)")
 
         # Get model configuration using ModelConfigService
-        from src.db.session import async_session_factory
+        from src.db.session import request_scoped_session
 
-        async with async_session_factory() as session:
+        async with request_scoped_session() as session:
             model_config_service = ModelConfigService(session, group_id=group_id)
             model_config_dict = await model_config_service.get_model_config(model_name)
         
@@ -961,11 +961,11 @@ class LLMManager:
 
         # Determine if MLflow is enabled for this group
         try:
-            from src.db.session import async_session_factory
+            from src.db.session import request_scoped_session
             from src.services.mlflow_service import MLflowService
 
             enabled = False
-            async with async_session_factory() as db:
+            async with request_scoped_session() as db:
                 svc = MLflowService(db, group_id=group_id)
                 enabled = await svc.is_enabled()
 

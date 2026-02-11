@@ -1,4 +1,4 @@
-from typing import AsyncGenerator, Generator
+from typing import AsyncGenerator, Generator, Optional
 import os
 import logging
 import re
@@ -9,6 +9,7 @@ import asyncio
 import time
 from functools import wraps
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 
 from sqlalchemy import text, event
 from sqlalchemy.ext.asyncio import (
@@ -339,6 +340,31 @@ async_session_factory = async_sessionmaker(
     autoflush=False,  # Disable autoflush to prevent SQLite locking issues
     autocommit=False,  # Explicit transaction control
 )
+
+# ContextVar holding the current request-scoped session (set by DI providers)
+_request_session: ContextVar[Optional[AsyncSession]] = ContextVar(
+    '_request_session', default=None
+)
+
+
+@asynccontextmanager
+async def request_scoped_session():
+    """Get the current request-scoped session or create a standalone one.
+
+    Inside an HTTP request (where ``get_db()`` or ``get_smart_db_session()``
+    has set the ContextVar), this yields the *same* session so that all
+    service-layer code participates in the single request transaction.
+
+    Outside a request (background tasks, seeds, scripts) the ContextVar is
+    unset, so a fresh standalone session is created and cleaned up normally.
+    """
+    existing = _request_session.get(None)
+    if existing is not None:
+        yield existing
+    else:
+        async with async_session_factory() as session:
+            yield session
+
 
 # Create separate session factories for pooled and nullpool engines
 pooled_session_factory = None
@@ -673,6 +699,9 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         try:
             # Use the selected session factory
             async with smart_session_factory() as session:
+                # Publish session into ContextVar so that
+                # request_scoped_session() returns the same session
+                token = _request_session.set(session)
                 try:
                     yield session
                     # Commit the transaction if no exception occurred
@@ -692,6 +721,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
                     await session.rollback()
                     raise
                 finally:
+                    _request_session.reset(token)
                     # Ensure session is properly closed
                     await session.close()
         except OperationalError as e:

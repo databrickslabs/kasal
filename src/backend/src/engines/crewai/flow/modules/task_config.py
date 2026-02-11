@@ -218,11 +218,11 @@ class TaskConfig:
             # Fallback to direct database query if repository not available or agent not found
             if not agent_data:
                 try:
-                    from src.db.session import async_session_factory
+                    from src.db.session import request_scoped_session
                     from sqlalchemy import select
                     from src.models.agent import Agent as AgentModel
 
-                    async with async_session_factory() as db:
+                    async with request_scoped_session() as db:
                         stmt = select(AgentModel).filter(AgentModel.id == task_data.agent_id)
                         result = await db.execute(stmt)
                         agent_data = result.scalar_one_or_none()
@@ -268,11 +268,11 @@ class TaskConfig:
                         # Fallback to direct database query
                         if not agent_data:
                             try:
-                                from src.db.session import async_session_factory
+                                from src.db.session import request_scoped_session
                                 from sqlalchemy import select
                                 from src.models.agent import Agent as AgentModel
 
-                                async with async_session_factory() as db:
+                                async with request_scoped_session() as db:
                                     stmt = select(AgentModel).filter(AgentModel.id == inferred_agent_id)
                                     result = await db.execute(stmt)
                                     agent_data = result.scalar_one_or_none()
@@ -314,10 +314,10 @@ class TaskConfig:
         # Create api_keys_service for tool factory to access API keys from database
         api_keys_service = None
         try:
-            from src.db.session import async_session_factory
+            from src.db.session import request_scoped_session
             from src.services.api_keys_service import ApiKeysService
 
-            async with async_session_factory() as session:
+            async with request_scoped_session() as session:
                 group_id = factory_config.get('group_id')
                 api_keys_service = ApiKeysService(session, group_id=group_id)
                 # Create tool factory with proper context

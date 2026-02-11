@@ -265,8 +265,8 @@ class CrewAIEngineService(BaseEngineService):
                     api_keys_service = ApiKeysService(session, group_id=group_id)
                 else:
                     # Fallback: create a new session if none provided
-                    from src.db.session import async_session_factory
-                    async with async_session_factory() as db_session:
+                    from src.db.session import request_scoped_session
+                    async with request_scoped_session() as db_session:
                         tool_service = ToolService(db_session)
                         api_keys_service = ApiKeysService(db_session, group_id=group_id)
 

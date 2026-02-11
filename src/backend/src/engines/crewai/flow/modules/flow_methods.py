@@ -132,10 +132,10 @@ async def get_model_context_limits(agent, group_context) -> tuple[int, int]:
             return default_context_window, default_max_output
 
         # Use ModelConfigService to get model configuration
-        from src.db.session import async_session_factory
+        from src.db.session import request_scoped_session
         from src.services.model_config_service import ModelConfigService
 
-        async with async_session_factory() as session:
+        async with request_scoped_session() as session:
             model_config_service = ModelConfigService(session, group_id)
             model_config = await model_config_service.find_by_key(model_name)
 
@@ -1032,7 +1032,7 @@ class FlowMethodFactory:
         async def hitl_gate_method(self, previous_output=None):
             """HITL gate method - pauses flow for human approval."""
             from src.engines.crewai.flow.exceptions import FlowPausedForApprovalException
-            from src.db.session import async_session_factory
+            from src.db.session import request_scoped_session
             from src.services.hitl_service import HITLService
             from src.services.hitl_webhook_service import HITLWebhookService
             from src.repositories.hitl_repository import HITLApprovalRepository
@@ -1072,7 +1072,7 @@ class FlowMethodFactory:
 
             # Check if there's already an APPROVED approval for this gate
             # This happens when resuming after approval
-            async with async_session_factory() as session:
+            async with request_scoped_session() as session:
                 hitl_repo = HITLApprovalRepository(session)
                 existing_approvals = await hitl_repo.get_all_for_execution(job_id, group_id)
 
@@ -1150,7 +1150,7 @@ class FlowMethodFactory:
                         logger.warning(f"   Could not store flow_uuid in state: {e}")
 
             # Create HITL approval request
-            async with async_session_factory() as session:
+            async with request_scoped_session() as session:
                 hitl_service = HITLService(session)
                 webhook_service = HITLWebhookService(session)
 

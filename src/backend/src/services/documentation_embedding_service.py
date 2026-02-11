@@ -46,8 +46,8 @@ class DocumentationEmbeddingService:
                 repository = MemoryBackendRepository(self.session)
                 all_backends = await repository.get_all()
             else:
-                from src.db.session import async_session_factory
-                async with async_session_factory() as session:
+                from src.db.session import request_scoped_session
+                async with request_scoped_session() as session:
                     repository = MemoryBackendRepository(session)
                     all_backends = await repository.get_all()
 
