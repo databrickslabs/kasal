@@ -1489,7 +1489,7 @@ class ProcessFlowExecutor:
         from sqlalchemy.pool import NullPool
 
         postgres_user = settings.POSTGRES_USER or 'postgres'
-        postgres_password = settings.POSTGRES_PASSWORD or 'postgres'
+        postgres_password = settings.POSTGRES_PASSWORD
         postgres_server = settings.POSTGRES_SERVER or 'localhost'
         postgres_port = settings.POSTGRES_PORT or '5432'
         postgres_db = settings.POSTGRES_DB or 'kasal'

@@ -69,12 +69,6 @@ class Settings(BaseSettings):
             # Use asyncpg for sync operations too - avoid psycopg2 dependency
             return f"postgresql+asyncpg://{info.data.get('POSTGRES_USER')}:{info.data.get('POSTGRES_PASSWORD')}@{info.data.get('POSTGRES_SERVER')}:{info.data.get('POSTGRES_PORT', 5432)}/{info.data.get('POSTGRES_DB') or ''}"
 
-    # Security settings
-    SECRET_KEY: str = "development_secret_key"
-    ALGORITHM: str = "HS256"
-    # 60 minutes * 24 hours * 8 days = 8 days
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8
-    
     # API Documentation
     DOCS_ENABLED: bool = True
     
@@ -85,7 +79,7 @@ class Settings(BaseSettings):
     # Server settings
     SERVER_HOST: str = "0.0.0.0"
     SERVER_PORT: int = 8000
-    DEBUG_MODE: bool = True
+    DEBUG_MODE: bool = False
 
     # Add the following setting to control database seeding
     AUTO_SEED_DATABASE: bool = True
