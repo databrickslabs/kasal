@@ -848,8 +848,8 @@ class FlowBuilder:
                         def auto_convert_dict(d):
                             """Recursively convert string numerics in a dict."""
                             if not isinstance(d, dict):
-                                return d
-                            return {k: auto_convert_value(v) if not isinstance(v, dict) else auto_convert_dict(v) for k, v in d.items()}
+                                return auto_convert_value(d)
+                            return {k: auto_convert_dict(v) for k, v in d.items()}
 
                         # Safe helper functions for condition evaluation
                         def safe_int(val, default=0):
