@@ -226,11 +226,10 @@ def create_callback_from_string(callback_name: str, task_key: str, callback_conf
 
 
 async def create_task(
-    task_key: str, 
-    task_config: dict, 
-    agent: Agent, 
+    task_key: str,
+    task_config: dict,
+    agent: Agent,
     tools: List[Any] = None,
-    output_dir: Optional[str] = None, 
     config: dict = None,
     tool_service = None,
     tool_factory = None,
@@ -238,17 +237,16 @@ async def create_task(
 ) -> Task:
     """
     Creates a Task instance from the provided configuration.
-    
+
     Args:
         task_key: The unique identifier for the task
         task_config: Dictionary containing task configuration
         agent: The agent that will perform this task
         tools: Optional list of tools to make available for this task specifically
-        output_dir: Optional directory for output files
         config: Global configuration dictionary containing API keys
         tool_service: Optional tool service for resolving tool IDs to names
         tool_factory: Optional tool factory for creating tool instances
-        
+
     Returns:
         Task: A configured CrewAI Task instance
     """

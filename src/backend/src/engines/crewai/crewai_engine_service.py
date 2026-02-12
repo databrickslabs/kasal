@@ -45,7 +45,6 @@ from src.engines.crewai.execution_runner import run_crew, run_crew_in_process, u
 from src.engines.crewai.flow.flow_execution_runner import run_flow_in_process
 from src.engines.crewai.config_adapter import normalize_config, normalize_flow_config
 from src.engines.crewai.crew_preparation import CrewPreparation
-from src.engines.crewai.flow_preparation import FlowPreparation
 from src.services.tool_service import ToolService
 from src.engines.crewai.tools.tool_factory import ToolFactory
 

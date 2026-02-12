@@ -84,7 +84,6 @@ def adapt_config(config: CrewConfig) -> Dict[str, Any]:
         },
         "model": config.model or "gpt-4o",
         "max_rpm": config.inputs.get("max_rpm", 10) if config.inputs else 10,
-        "output_dir": config.inputs.get("output_dir", None) if config.inputs else None,
         # Include the original frontend configuration for logging
         "original_config": {
             "model": config.model,
