@@ -1,7 +1,7 @@
 import pytest
 from types import SimpleNamespace
 from datetime import datetime
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch, Mock
 
 from src.services.mcp_service import MCPService
 from src.schemas.mcp import MCPTestConnectionRequest
@@ -136,4 +136,331 @@ async def test_settings_and_test_connection_shim():
     req = MCPTestConnectionRequest(server_url="https://example.com", api_key="k", server_type="unknown")
     res = await svc.test_connection(req)
     assert res.success is False and "Unsupported" in res.message
+
+
+# --- Streamable HTTP connection tests ---
+
+def _mock_mcp_session(tool_count=2):
+    """Helper to create a mock MCP ClientSession with list_tools."""
+    mock_tool = Mock()
+    mock_tool.name = "test_tool"
+    mock_tool.description = "A test tool"
+    mock_tools_result = Mock()
+    mock_tools_result.tools = [mock_tool] * tool_count
+
+    mock_session = AsyncMock()
+    mock_session.initialize = AsyncMock()
+    mock_session.list_tools = AsyncMock(return_value=mock_tools_result)
+    return mock_session
+
+
+@pytest.mark.asyncio
+async def test_streamable_connection_success():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/mcp", api_key="tok", server_type="streamable"
+    )
+
+    mock_session = _mock_mcp_session(tool_count=3)
+
+    with patch("src.services.mcp_service.streamablehttp_client", create=True) as mock_connect, \
+         patch("src.services.mcp_service.ClientSession", create=True) as mock_cs:
+        # Patch the inline imports used by the method
+        import src.services.mcp_service as mod
+
+        mock_connect_cm = AsyncMock()
+        mock_connect_cm.__aenter__.return_value = (Mock(), Mock(), None)
+        mock_cs_cm = AsyncMock()
+        mock_cs_cm.__aenter__.return_value = mock_session
+
+        with patch.dict("sys.modules", {}):
+            with patch("mcp.client.streamable_http.streamablehttp_client") as real_mock:
+                with patch("mcp.ClientSession") as real_cs:
+                    real_mock.return_value.__aenter__.return_value = (Mock(), Mock(), None)
+                    real_cs.return_value.__aenter__.return_value = mock_session
+
+                    res = await svc._test_streamable_connection(req)
+
+    assert res.success is True
+    assert "3 tools" in res.message
+
+
+@pytest.mark.asyncio
+async def test_streamable_connection_failure():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/mcp", api_key="tok", server_type="streamable"
+    )
+
+    with patch("mcp.client.streamable_http.streamablehttp_client") as mock_connect:
+        mock_connect.side_effect = ConnectionError("Connection refused")
+        res = await svc._test_streamable_connection(req)
+
+    assert res.success is False
+    assert "refused" in res.message.lower()
+
+
+@pytest.mark.asyncio
+async def test_streamable_connection_auth_failure():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/mcp", api_key="bad", server_type="streamable"
+    )
+
+    with patch("mcp.client.streamable_http.streamablehttp_client") as mock_connect:
+        mock_connect.side_effect = Exception("HTTP 401 Unauthorized")
+        res = await svc._test_streamable_connection(req)
+
+    assert res.success is False
+    assert "Authentication failed" in res.message
+
+
+# --- SSE connection tests ---
+
+@pytest.mark.asyncio
+async def test_sse_connection_success():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/sse", api_key="tok", server_type="sse"
+    )
+
+    mock_session = _mock_mcp_session(tool_count=5)
+
+    with patch("mcp.client.sse.sse_client") as mock_connect:
+        with patch("mcp.ClientSession") as mock_cs:
+            mock_connect.return_value.__aenter__.return_value = (Mock(), Mock())
+            mock_cs.return_value.__aenter__.return_value = mock_session
+
+            res = await svc._test_sse_connection(req)
+
+    assert res.success is True
+    assert "5 tools" in res.message
+
+
+@pytest.mark.asyncio
+async def test_sse_connection_failure():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/sse", api_key="tok", server_type="sse"
+    )
+
+    with patch("mcp.client.sse.sse_client") as mock_connect:
+        mock_connect.side_effect = OSError("Connection refused")
+        res = await svc._test_sse_connection(req)
+
+    assert res.success is False
+    assert "refused" in res.message.lower()
+
+
+# --- Streamable: OBO auth branch ---
+
+@pytest.mark.asyncio
+async def test_streamable_connection_obo_auth_success():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/mcp", api_key="", server_type="streamable",
+        auth_type="databricks_obo"
+    )
+
+    mock_session = _mock_mcp_session(tool_count=2)
+
+    with patch("src.utils.databricks_auth.get_mcp_auth_headers", new_callable=AsyncMock) as mock_obo:
+        mock_obo.return_value = ({"Authorization": "Bearer obo-token"}, None)
+        with patch("mcp.client.streamable_http.streamablehttp_client") as mock_connect:
+            with patch("mcp.ClientSession") as mock_cs:
+                mock_connect.return_value.__aenter__.return_value = (Mock(), Mock(), None)
+                mock_cs.return_value.__aenter__.return_value = mock_session
+                res = await svc._test_streamable_connection(req)
+
+    assert res.success is True
+    assert "2 tools" in res.message
+
+
+@pytest.mark.asyncio
+async def test_streamable_connection_obo_auth_fails():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/mcp", api_key="", server_type="streamable",
+        auth_type="databricks_obo"
+    )
+
+    mock_session = _mock_mcp_session(tool_count=0)
+
+    with patch("src.utils.databricks_auth.get_mcp_auth_headers", new_callable=AsyncMock) as mock_obo:
+        mock_obo.return_value = (None, "OBO failed")
+        with patch("mcp.client.streamable_http.streamablehttp_client") as mock_connect:
+            with patch("mcp.ClientSession") as mock_cs:
+                mock_connect.return_value.__aenter__.return_value = (Mock(), Mock(), None)
+                mock_cs.return_value.__aenter__.return_value = mock_session
+                res = await svc._test_streamable_connection(req)
+
+    assert res.success is True  # Still connects, just no OBO headers
+
+
+@pytest.mark.asyncio
+async def test_streamable_connection_obo_auth_exception():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/mcp", api_key="", server_type="streamable",
+        auth_type="databricks_obo"
+    )
+
+    mock_session = _mock_mcp_session(tool_count=1)
+
+    with patch("src.utils.databricks_auth.get_mcp_auth_headers", new_callable=AsyncMock) as mock_obo:
+        mock_obo.side_effect = RuntimeError("import error")
+        with patch("mcp.client.streamable_http.streamablehttp_client") as mock_connect:
+            with patch("mcp.ClientSession") as mock_cs:
+                mock_connect.return_value.__aenter__.return_value = (Mock(), Mock(), None)
+                mock_cs.return_value.__aenter__.return_value = mock_session
+                res = await svc._test_streamable_connection(req)
+
+    assert res.success is True
+
+
+# --- Streamable: timeout and generic error branches ---
+
+@pytest.mark.asyncio
+async def test_streamable_connection_timeout():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/mcp", api_key="tok", server_type="streamable",
+        timeout_seconds=5
+    )
+
+    with patch("mcp.client.streamable_http.streamablehttp_client") as mock_connect:
+        mock_connect.side_effect = Exception("connection timeout exceeded")
+        res = await svc._test_streamable_connection(req)
+
+    assert res.success is False
+    assert "timed out" in res.message.lower()
+
+
+@pytest.mark.asyncio
+async def test_streamable_connection_generic_error():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/mcp", api_key="tok", server_type="streamable"
+    )
+
+    with patch("mcp.client.streamable_http.streamablehttp_client") as mock_connect:
+        mock_connect.side_effect = Exception("some weird MCP error")
+        res = await svc._test_streamable_connection(req)
+
+    assert res.success is False
+    assert "some weird MCP error" in res.message
+
+
+# --- SSE: OBO auth branch ---
+
+@pytest.mark.asyncio
+async def test_sse_connection_obo_auth_success():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/sse", api_key="", server_type="sse",
+        auth_type="databricks_obo"
+    )
+
+    mock_session = _mock_mcp_session(tool_count=4)
+
+    with patch("src.utils.databricks_auth.get_mcp_auth_headers", new_callable=AsyncMock) as mock_obo:
+        mock_obo.return_value = ({"Authorization": "Bearer obo-tok"}, None)
+        with patch("mcp.client.sse.sse_client") as mock_connect:
+            with patch("mcp.ClientSession") as mock_cs:
+                mock_connect.return_value.__aenter__.return_value = (Mock(), Mock())
+                mock_cs.return_value.__aenter__.return_value = mock_session
+                res = await svc._test_sse_connection(req)
+
+    assert res.success is True
+    assert "4 tools" in res.message
+
+
+@pytest.mark.asyncio
+async def test_sse_connection_obo_auth_fails():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/sse", api_key="", server_type="sse",
+        auth_type="databricks_obo"
+    )
+
+    mock_session = _mock_mcp_session(tool_count=0)
+
+    with patch("src.utils.databricks_auth.get_mcp_auth_headers", new_callable=AsyncMock) as mock_obo:
+        mock_obo.return_value = (None, "OBO failed")
+        with patch("mcp.client.sse.sse_client") as mock_connect:
+            with patch("mcp.ClientSession") as mock_cs:
+                mock_connect.return_value.__aenter__.return_value = (Mock(), Mock())
+                mock_cs.return_value.__aenter__.return_value = mock_session
+                res = await svc._test_sse_connection(req)
+
+    assert res.success is True
+
+
+@pytest.mark.asyncio
+async def test_sse_connection_obo_auth_exception():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/sse", api_key="", server_type="sse",
+        auth_type="databricks_obo"
+    )
+
+    mock_session = _mock_mcp_session(tool_count=1)
+
+    with patch("src.utils.databricks_auth.get_mcp_auth_headers", new_callable=AsyncMock) as mock_obo:
+        mock_obo.side_effect = RuntimeError("import error")
+        with patch("mcp.client.sse.sse_client") as mock_connect:
+            with patch("mcp.ClientSession") as mock_cs:
+                mock_connect.return_value.__aenter__.return_value = (Mock(), Mock())
+                mock_cs.return_value.__aenter__.return_value = mock_session
+                res = await svc._test_sse_connection(req)
+
+    assert res.success is True
+
+
+# --- SSE: auth failure, timeout, generic error branches ---
+
+@pytest.mark.asyncio
+async def test_sse_connection_auth_failure():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/sse", api_key="bad", server_type="sse"
+    )
+
+    with patch("mcp.client.sse.sse_client") as mock_connect:
+        mock_connect.side_effect = Exception("HTTP 401 Unauthorized")
+        res = await svc._test_sse_connection(req)
+
+    assert res.success is False
+    assert "Authentication failed" in res.message
+
+
+@pytest.mark.asyncio
+async def test_sse_connection_timeout():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/sse", api_key="tok", server_type="sse",
+        timeout_seconds=5
+    )
+
+    with patch("mcp.client.sse.sse_client") as mock_connect:
+        mock_connect.side_effect = Exception("connection timeout exceeded")
+        res = await svc._test_sse_connection(req)
+
+    assert res.success is False
+    assert "timed out" in res.message.lower()
+
+
+@pytest.mark.asyncio
+async def test_sse_connection_generic_error():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/sse", api_key="tok", server_type="sse"
+    )
+
+    with patch("mcp.client.sse.sse_client") as mock_connect:
+        mock_connect.side_effect = Exception("unexpected MCP error")
+        res = await svc._test_sse_connection(req)
+
+    assert res.success is False
+    assert "unexpected MCP error" in res.message
 
