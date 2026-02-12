@@ -4,23 +4,23 @@
 
 // Common embedding models with their dimensions
 export const EMBEDDING_MODELS = [
-  { 
-    name: 'Databricks BGE Large (English)', 
-    value: 'databricks-bge-large-en', 
+  {
+    name: 'Databricks GTE Large (English)',
+    value: 'databricks-gte-large-en',
     dimension: 1024,
-    description: 'High quality embeddings optimized for English text'
+    description: 'Best Databricks native embedding model (8192 token context)'
   },
-  { 
-    name: 'Databricks GTE Large (English)', 
-    value: 'databricks-gte-large-en', 
-    dimension: 768,
-    description: 'General purpose embeddings for English text'
+  {
+    name: 'Databricks BGE Large (English)',
+    value: 'databricks-bge-large-en',
+    dimension: 1024,
+    description: 'Normalized embeddings for English text (512 token context)'
   },
-  { 
-    name: 'OpenAI text-embedding-3-small', 
-    value: 'text-embedding-3-small', 
-    dimension: 1536,
-    description: 'Cost-effective OpenAI embeddings'
+  {
+    name: 'OpenAI text-embedding-3-large',
+    value: 'text-embedding-3-large',
+    dimension: 3072,
+    description: 'High quality OpenAI embeddings'
   }
 ];
 
