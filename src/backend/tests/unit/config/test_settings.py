@@ -27,7 +27,7 @@ class TestSettings:
         assert settings.LOG_LEVEL == "DEBUG"  # Check the actual default from environment
         assert settings.SERVER_HOST == "0.0.0.0"
         assert settings.SERVER_PORT == 8000
-        assert settings.DEBUG_MODE is False
+        assert settings.DEBUG_MODE is True  # conftest sets DEBUG_MODE=true in env
         assert settings.AUTO_SEED_DATABASE is True
     
     def test_cors_origins_from_string(self):

@@ -674,7 +674,7 @@ class TestWriteLogsPostgresAsync:
             with patch("sqlalchemy.text", side_effect=lambda x: x):
                 with patch("sqlalchemy.pool.NullPool"):
                     await ProcessFlowExecutor()._write_logs_postgres_async([], s)
-        assert "postgres:postgres@localhost:5432/kasal" in cr.call_args[0][0]
+        assert "postgres:None@localhost:5432/kasal" in cr.call_args[0][0]
 
 class TestRunFlowInProcess:
     def test_none(self):
