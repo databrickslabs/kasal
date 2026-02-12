@@ -65,8 +65,7 @@ class TestCrewPreparation:
                 "reasoning": False
             },
             "model": "gpt-4",
-            "max_rpm": 10,
-            "output_dir": "/tmp/output"
+            "max_rpm": 10
         }
     
     @pytest.fixture

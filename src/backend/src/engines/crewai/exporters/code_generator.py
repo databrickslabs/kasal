@@ -287,10 +287,6 @@ class CodeGenerator:
             code_parts.append('    # Load environment variables\n')
             code_parts.append('    load_dotenv()\n')
             code_parts.append('    \n')
-            code_parts.append('    # Ensure output directory exists\n')
-            code_parts.append("    output_dir = Path(__file__).parent.parent.parent / 'output'\n")
-            code_parts.append('    output_dir.mkdir(exist_ok=True)\n')
-            code_parts.append('    \n')
             code_parts.append('    # Define inputs\n')
             code_parts.append(f'    inputs = {{\n')
             for key, value in sample_inputs.items():

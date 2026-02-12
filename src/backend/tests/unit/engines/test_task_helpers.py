@@ -380,45 +380,6 @@ class TestCreateTask:
             assert "output_file" not in call_args[1]
 
     @pytest.mark.asyncio
-    async def test_create_task_ignores_output_dir(self, mock_agent, mock_tools_list):
-        """Test that output_dir parameter does not cause output files to be created"""
-        task_config = {
-            "description": "Test task",
-            "expected_output": "Test output",
-            "output_file_enabled": True,
-            "output_filename": "test_output.md"
-        }
-
-        with patch('src.engines.crewai.helpers.task_helpers.Task') as mock_task_class, \
-             patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
-             patch('src.services.mcp_service.MCPService') as mock_mcp:
-
-            # Setup UoW to return empty MCP servers
-            mock_uow_instance = AsyncMock()
-            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
-
-            mock_mcp_service = AsyncMock()
-            mock_mcp.from_unit_of_work.return_value = mock_mcp_service
-            mock_mcp_service.get_enabled_servers.return_value = None
-
-            mock_task_instance = MagicMock()
-            mock_task_class.return_value = mock_task_instance
-
-            result = await create_task(
-                task_key="test_task",
-                task_config=task_config,
-                agent=mock_agent,
-                tools=mock_tools_list,
-                output_dir="./test_output"
-            )
-
-            assert result == mock_task_instance
-
-            # Verify output_file was NOT set on the task
-            call_args = mock_task_class.call_args
-            assert "output_file" not in call_args[1]
-
-    @pytest.mark.asyncio
     async def test_create_task_with_markdown_enabled(self, mock_agent, mock_tools_list):
         """Test task creation with markdown enabled"""
         task_config = {

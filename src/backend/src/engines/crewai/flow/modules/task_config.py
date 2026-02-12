@@ -80,14 +80,7 @@ class TaskConfig:
             if task_output_callback:
                 # Use callback instead of output_callback in newer versions of crewAI
                 task.callback = task_output_callback
-                # Configure process output handler if available
-                try:
-                    from src.engines.crewai.helpers.task_callbacks import configure_process_output_handler
-                    if hasattr(task, 'process'):
-                        task.process = configure_process_output_handler(task.process, task_output_callback)
-                except Exception as e:
-                    logger.warning(f"Error configuring output handler: {e}")
-            
+
             # Add other parameters one by one if they exist
             if hasattr(task_data, 'async_execution'):
                 task.async_execution = bool(task_data.async_execution)

@@ -522,7 +522,7 @@ class TestCreateTask:
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
             ))
 
-            task = await create_task(task_key, task_config, agent, output_dir="/test/output")
+            task = await create_task(task_key, task_config, agent)
 
         assert task.output_file is None
 

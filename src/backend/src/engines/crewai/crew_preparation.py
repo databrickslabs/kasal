@@ -549,7 +549,6 @@ class CrewPreparation:
                     task_key=task_name,
                     task_config=task_config,
                     agent=agent,
-                    output_dir=self.config.get('output_dir'),
                     config=self.config,
                     tool_service=self.tool_service,
                     tool_factory=self.tool_factory,
