@@ -344,6 +344,83 @@ DEFAULT_MODELS = {
         "context_window": 128000,
         "max_output_tokens": 16384
     },
+    "databricks-claude-haiku-4-5": {
+        "name": "databricks-claude-haiku-4-5",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 200000,
+        "max_output_tokens": 8192
+    },
+    "databricks-claude-opus-4-1": {
+        "name": "databricks-claude-opus-4-1",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 200000,
+        "max_output_tokens": 32000
+    },
+    "databricks-claude-opus-4-6": {
+        "name": "databricks-claude-opus-4-6",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 200000,
+        "max_output_tokens": 32000
+    },
+    "databricks-gemini-3-flash": {
+        "name": "databricks-gemini-3-flash",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1000000,
+        "max_output_tokens": 65536
+    },
+    "databricks-gpt-5": {
+        "name": "databricks-gpt-5",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 400000,
+        "max_output_tokens": 128000
+    },
+    "databricks-gpt-5-1": {
+        "name": "databricks-gpt-5-1",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 400000,
+        "max_output_tokens": 128000
+    },
+    "databricks-gpt-5-1-codex-max": {
+        "name": "databricks-gpt-5-1-codex-max",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 400000,
+        "max_output_tokens": 128000
+    },
+    "databricks-gpt-5-1-codex-mini": {
+        "name": "databricks-gpt-5-1-codex-mini",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 400000,
+        "max_output_tokens": 64000
+    },
+    "databricks-gpt-5-mini": {
+        "name": "databricks-gpt-5-mini",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 200000,
+        "max_output_tokens": 64000
+    },
+    "databricks-gpt-5-nano": {
+        "name": "databricks-gpt-5-nano",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 128000,
+        "max_output_tokens": 32000
+    },
+    "databricks-meta-llama-3-1-8b-instruct": {
+        "name": "databricks-meta-llama-3-1-8b-instruct",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 128000,
+        "max_output_tokens": 4096
+    },
     "o3-deep-research": {
         "name": "o3-deep-research-2025-06-26",
         "temperature": 1,

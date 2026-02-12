@@ -312,6 +312,30 @@ class KasalDBSpanExporter(SpanExporter):
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._total_exported = 0
 
+        # Dedicated NullPool engine for thread-pool workers.
+        # NullPool closes connections immediately when sessions end,
+        # preventing MissingGreenlet errors that occur when aiosqlite
+        # connections outlive the asyncio.run() event loop in worker threads.
+        from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+        from sqlalchemy.pool import NullPool
+        from src.config.settings import settings
+
+        connect_args = {}
+        if str(settings.DATABASE_URI).startswith("sqlite"):
+            connect_args["check_same_thread"] = False
+
+        self._thread_engine = create_async_engine(
+            str(settings.DATABASE_URI),
+            poolclass=NullPool,
+            connect_args=connect_args,
+        )
+        self._thread_session_factory = async_sessionmaker(
+            self._thread_engine,
+            expire_on_commit=False,
+            autoflush=False,
+            autocommit=False,
+        )
+
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
         logger.info(
             f"[OTel-DB][{self._job_id}] export() called with {len(spans)} span(s)"
@@ -388,26 +412,29 @@ class KasalDBSpanExporter(SpanExporter):
 
         Creates a new asyncio event loop in the thread (safe — ThreadPoolExecutor
         threads never have a pre-existing loop) and uses ExecutionTraceService
-        through get_smart_db_session for proper service → repository → DB flow.
+        through a dedicated NullPool session factory.  NullPool ensures every
+        connection is closed before asyncio.run() tears down the event loop,
+        preventing MissingGreenlet errors from dangling aiosqlite connections.
         """
         import asyncio
 
         async def _write_async():
-            from src.db.database_router import get_smart_db_session
             from src.services.execution_trace_service import ExecutionTraceService
 
             written = 0
-            for record in records:
-                try:
-                    # Clean output for JSON serialization
-                    output = record.get("output", {})
-                    if output:
-                        cleaned = json.loads(json.dumps(output, cls=UUIDEncoder))
-                    else:
-                        cleaned = {}
+            async with self._thread_session_factory() as session:
+                svc = ExecutionTraceService(session)
+                for record in records:
+                    try:
+                        # Clean output for JSON serialization
+                        output = record.get("output", {})
+                        if output:
+                            cleaned = json.loads(
+                                json.dumps(output, cls=UUIDEncoder)
+                            )
+                        else:
+                            cleaned = {}
 
-                    async for session in get_smart_db_session():
-                        svc = ExecutionTraceService(session)
                         await svc.create_trace(
                             {
                                 "job_id": record["job_id"],
@@ -427,16 +454,20 @@ class KasalDBSpanExporter(SpanExporter):
                             }
                         )
                         written += 1
-                except ValueError as ve:
-                    logger.warning(
-                        f"[OTel-DB][{self._job_id}] ValueError writing trace "
-                        f"(job may not exist yet): {ve}"
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"[OTel-DB][{self._job_id}] Failed to write trace: {e}",
-                        exc_info=True,
-                    )
+                    except ValueError as ve:
+                        logger.warning(
+                            f"[OTel-DB][{self._job_id}] ValueError writing trace "
+                            f"(job may not exist yet): {ve}"
+                        )
+                    except Exception as e:
+                        logger.error(
+                            f"[OTel-DB][{self._job_id}] Failed to write trace: {e}",
+                            exc_info=True,
+                        )
+
+                # Explicit commit — not using get_db() DI which auto-commits
+                if written:
+                    await session.commit()
 
             if written:
                 logger.info(

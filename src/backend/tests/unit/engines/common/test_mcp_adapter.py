@@ -1,5 +1,7 @@
 """Unit tests for MCPAdapter."""
 
+import asyncio
+import time
 import pytest
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
 from typing import Dict, Any, List
@@ -130,7 +132,7 @@ class TestMCPAdapter:
                 assert tools[0]['description'] == 'Test tool description'
                 assert tools[0]['adapter'] == adapter
                 
-                mock_connect.assert_called_once_with(adapter.server_url, headers={'Authorization': 'Bearer token'})
+                mock_connect.assert_called_once_with(adapter.server_url, headers={'Authorization': 'Bearer token'}, timeout=30)
                 mock_session.initialize.assert_called_once()
                 mock_session.list_tools.assert_called_once()
     
@@ -354,5 +356,467 @@ class TestMCPTool:
     def test_str_representation(self, tool_wrapper):
         """Test string representation of MCPTool."""
         tool = MCPTool(tool_wrapper)
-        
+
         assert str(tool) == "MCPTool(name=test_tool, description=A test tool)"
+
+
+class TestMCPAdapterRetry:
+    """Test retry logic in MCPAdapter.execute_tool."""
+
+    @pytest.fixture
+    def adapter(self) -> MCPAdapter:
+        return MCPAdapter({
+            'url': 'https://test.mcp.server/api/mcp/',
+            'timeout_seconds': 5,
+            'max_retries': 3,
+            'rate_limit': 0,  # disable rate limiting for retry tests
+            'headers': {'Authorization': 'Bearer test-token'}
+        })
+
+    @pytest.mark.asyncio
+    async def test_retry_succeeds_on_second_attempt(self, adapter):
+        """Transient error on first attempt, success on second."""
+        mock_result = Mock()
+
+        mock_session = AsyncMock()
+        mock_session.initialize = AsyncMock()
+        mock_session.call_tool = AsyncMock(return_value=mock_result)
+
+        call_count = 0
+
+        class FakeConnect:
+            async def __aenter__(self_inner):
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    raise ConnectionError("transient failure")
+                return (Mock(), Mock(), None)
+
+            async def __aexit__(self_inner, *args):
+                pass
+
+        with patch('mcp.client.streamable_http.streamablehttp_client', return_value=FakeConnect()):
+            with patch('mcp.ClientSession') as mock_cs:
+                mock_cs.return_value.__aenter__.return_value = mock_session
+                with patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
+                    result = await adapter.execute_tool('test_tool', {})
+
+        assert result == mock_result
+        assert call_count == 2
+        mock_sleep.assert_called_once_with(1)  # 2^0 = 1
+
+    @pytest.mark.asyncio
+    async def test_retry_exhaustion_raises(self, adapter):
+        """All attempts fail with transient error -> raises last error."""
+        with patch('mcp.client.streamable_http.streamablehttp_client') as mock_connect:
+            mock_connect.side_effect = ConnectionError("persistent failure")
+            with patch('asyncio.sleep', new_callable=AsyncMock):
+                with pytest.raises(ConnectionError, match="persistent failure"):
+                    await adapter.execute_tool('test_tool', {})
+
+    @pytest.mark.asyncio
+    async def test_non_transient_error_no_retry(self, adapter):
+        """Non-transient errors (e.g. ValueError) are raised immediately without retry."""
+        mock_session = AsyncMock()
+        mock_session.initialize = AsyncMock()
+        mock_session.call_tool = AsyncMock(side_effect=ValueError("bad input"))
+
+        with patch('mcp.client.streamable_http.streamablehttp_client') as mock_connect:
+            with patch('mcp.ClientSession') as mock_cs:
+                mock_connect.return_value.__aenter__.return_value = (Mock(), Mock(), None)
+                mock_cs.return_value.__aenter__.return_value = mock_session
+                with pytest.raises(ValueError, match="bad input"):
+                    await adapter.execute_tool('test_tool', {})
+
+    @pytest.mark.asyncio
+    async def test_timeout_passed_to_client(self, adapter):
+        """Verify timeout_seconds is passed to streamablehttp_client."""
+        mock_session = AsyncMock()
+        mock_session.initialize = AsyncMock()
+        mock_session.call_tool = AsyncMock(return_value=Mock())
+
+        with patch('mcp.client.streamable_http.streamablehttp_client') as mock_connect:
+            with patch('mcp.ClientSession') as mock_cs:
+                mock_connect.return_value.__aenter__.return_value = (Mock(), Mock(), None)
+                mock_cs.return_value.__aenter__.return_value = mock_session
+
+                await adapter.execute_tool('test_tool', {})
+
+                mock_connect.assert_called_once_with(
+                    adapter.server_url,
+                    headers={'Authorization': 'Bearer test-token'},
+                    timeout=5
+                )
+
+
+class TestMCPAdapterRateLimit:
+    """Test rate limiting in MCPAdapter."""
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_waits_when_exceeded(self):
+        """When rate limit is hit, _wait_for_rate_limit should sleep."""
+        adapter = MCPAdapter({
+            'url': 'https://test.mcp.server/api/mcp/',
+            'rate_limit': 2,
+            'headers': {'Authorization': 'Bearer tok'}
+        })
+
+        now = time.monotonic()
+        # Simulate 2 calls within the last 60s
+        adapter._call_timestamps.append(now - 10)
+        adapter._call_timestamps.append(now - 5)
+
+        with patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
+            await adapter._wait_for_rate_limit()
+            # Should have been called with wait_time > 0
+            mock_sleep.assert_called_once()
+            wait_arg = mock_sleep.call_args[0][0]
+            assert wait_arg > 0
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_no_wait_when_under_limit(self):
+        """No waiting when under the rate limit."""
+        adapter = MCPAdapter({
+            'url': 'https://test.mcp.server/api/mcp/',
+            'rate_limit': 10,
+            'headers': {'Authorization': 'Bearer tok'}
+        })
+
+        now = time.monotonic()
+        adapter._call_timestamps.append(now - 5)
+
+        with patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
+            await adapter._wait_for_rate_limit()
+            mock_sleep.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_disabled_when_zero(self):
+        """Rate limiting is skipped when rate_limit <= 0."""
+        adapter = MCPAdapter({
+            'url': 'https://test.mcp.server/api/mcp/',
+            'rate_limit': 0,
+            'headers': {'Authorization': 'Bearer tok'}
+        })
+
+        # Fill timestamps - should still not wait
+        now = time.monotonic()
+        for i in range(100):
+            adapter._call_timestamps.append(now - 1)
+
+        with patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
+            await adapter._wait_for_rate_limit()
+            mock_sleep.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_old_timestamps_pruned(self):
+        """Timestamps older than 60s should be removed."""
+        adapter = MCPAdapter({
+            'url': 'https://test.mcp.server/api/mcp/',
+            'rate_limit': 5,
+            'headers': {'Authorization': 'Bearer tok'}
+        })
+
+        now = time.monotonic()
+        # Add old timestamps (>60s ago) and fresh ones
+        adapter._call_timestamps.append(now - 120)
+        adapter._call_timestamps.append(now - 90)
+        adapter._call_timestamps.append(now - 5)
+
+        await adapter._wait_for_rate_limit()
+
+        # Old ones should be pruned, only the recent one remains
+        assert len(adapter._call_timestamps) == 1
+
+
+class TestConvertParameters:
+    """Test _convert_parameters type conversion logic."""
+
+    @pytest.fixture
+    def adapter(self) -> MCPAdapter:
+        adapter = MCPAdapter({
+            'url': 'https://test.mcp.server/api/mcp/',
+            'headers': {'Authorization': 'Bearer tok'}
+        })
+        return adapter
+
+    def test_no_schema_returns_original(self, adapter):
+        """When no schema found for tool, return params as-is."""
+        params = {'a': '1'}
+        result = adapter._convert_parameters('unknown_tool', params)
+        assert result == params
+
+    def test_no_properties_returns_original(self, adapter):
+        """When schema has no properties, return params as-is."""
+        adapter._tool_schemas['tool'] = {'type': 'object'}
+        result = adapter._convert_parameters('tool', {'a': '1'})
+        assert result == {'a': '1'}
+
+    def test_convert_number(self, adapter):
+        """String to float conversion."""
+        adapter._tool_schemas['tool'] = {
+            'properties': {'val': {'type': 'number'}}
+        }
+        result = adapter._convert_parameters('tool', {'val': '3.14'})
+        assert result == {'val': 3.14}
+
+    def test_convert_number_non_string(self, adapter):
+        """Non-string number stays as float."""
+        adapter._tool_schemas['tool'] = {
+            'properties': {'val': {'type': 'number'}}
+        }
+        result = adapter._convert_parameters('tool', {'val': 5})
+        assert result == {'val': 5.0}
+
+    def test_convert_integer(self, adapter):
+        """String to int conversion."""
+        adapter._tool_schemas['tool'] = {
+            'properties': {'val': {'type': 'integer'}}
+        }
+        result = adapter._convert_parameters('tool', {'val': '42'})
+        assert result == {'val': 42}
+
+    def test_convert_integer_non_string(self, adapter):
+        """Non-string int stays as int."""
+        adapter._tool_schemas['tool'] = {
+            'properties': {'val': {'type': 'integer'}}
+        }
+        result = adapter._convert_parameters('tool', {'val': 7})
+        assert result == {'val': 7}
+
+    def test_convert_boolean_true(self, adapter):
+        """String 'true'/'1'/'yes' to True."""
+        adapter._tool_schemas['tool'] = {
+            'properties': {'flag': {'type': 'boolean'}}
+        }
+        for val in ('true', 'True', '1', 'yes'):
+            result = adapter._convert_parameters('tool', {'flag': val})
+            assert result == {'flag': True}, f"Failed for {val}"
+
+    def test_convert_boolean_false(self, adapter):
+        """Other strings convert to False."""
+        adapter._tool_schemas['tool'] = {
+            'properties': {'flag': {'type': 'boolean'}}
+        }
+        result = adapter._convert_parameters('tool', {'flag': 'false'})
+        assert result == {'flag': False}
+
+    def test_convert_boolean_non_string(self, adapter):
+        """Non-string bool stays as bool."""
+        adapter._tool_schemas['tool'] = {
+            'properties': {'flag': {'type': 'boolean'}}
+        }
+        result = adapter._convert_parameters('tool', {'flag': 1})
+        assert result == {'flag': True}
+
+    def test_convert_array_from_json_string(self, adapter):
+        """JSON string parsed to array."""
+        adapter._tool_schemas['tool'] = {
+            'properties': {'items': {'type': 'array'}}
+        }
+        result = adapter._convert_parameters('tool', {'items': '[1, 2, 3]'})
+        assert result == {'items': [1, 2, 3]}
+
+    def test_convert_array_invalid_json(self, adapter):
+        """Invalid JSON string for array is skipped."""
+        adapter._tool_schemas['tool'] = {
+            'properties': {'items': {'type': 'array'}}
+        }
+        result = adapter._convert_parameters('tool', {'items': 'not-json'})
+        assert 'items' not in result
+
+    def test_convert_array_non_string(self, adapter):
+        """Non-string array passed through."""
+        adapter._tool_schemas['tool'] = {
+            'properties': {'items': {'type': 'array'}}
+        }
+        result = adapter._convert_parameters('tool', {'items': [1, 2]})
+        assert result == {'items': [1, 2]}
+
+    def test_convert_object_from_json_string(self, adapter):
+        """JSON string parsed to object."""
+        adapter._tool_schemas['tool'] = {
+            'properties': {'config': {'type': 'object'}}
+        }
+        result = adapter._convert_parameters('tool', {'config': '{"a": 1}'})
+        assert result == {'config': {'a': 1}}
+
+    def test_convert_object_invalid_json(self, adapter):
+        """Invalid JSON string for object is skipped."""
+        adapter._tool_schemas['tool'] = {
+            'properties': {'config': {'type': 'object'}}
+        }
+        result = adapter._convert_parameters('tool', {'config': '{bad}'})
+        assert 'config' not in result
+
+    def test_convert_object_non_string(self, adapter):
+        """Non-string object passed through."""
+        adapter._tool_schemas['tool'] = {
+            'properties': {'config': {'type': 'object'}}
+        }
+        result = adapter._convert_parameters('tool', {'config': {'a': 1}})
+        assert result == {'config': {'a': 1}}
+
+    def test_string_type_passthrough(self, adapter):
+        """String type stays as-is."""
+        adapter._tool_schemas['tool'] = {
+            'properties': {'name': {'type': 'string'}}
+        }
+        result = adapter._convert_parameters('tool', {'name': 'hello'})
+        assert result == {'name': 'hello'}
+
+    def test_unknown_type_passthrough(self, adapter):
+        """Unknown type stays as-is."""
+        adapter._tool_schemas['tool'] = {
+            'properties': {'x': {'type': 'custom'}}
+        }
+        result = adapter._convert_parameters('tool', {'x': 'val'})
+        assert result == {'x': 'val'}
+
+    def test_no_type_in_schema(self, adapter):
+        """Parameter with no type in schema passes through."""
+        adapter._tool_schemas['tool'] = {
+            'properties': {'x': {}}
+        }
+        result = adapter._convert_parameters('tool', {'x': 'val'})
+        assert result == {'x': 'val'}
+
+    def test_skip_none_values(self, adapter):
+        """None values are skipped."""
+        adapter._tool_schemas['tool'] = {
+            'properties': {'a': {'type': 'string'}}
+        }
+        result = adapter._convert_parameters('tool', {'a': None})
+        assert result == {}
+
+    def test_skip_empty_string(self, adapter):
+        """Empty strings are skipped."""
+        adapter._tool_schemas['tool'] = {
+            'properties': {'a': {'type': 'string'}}
+        }
+        result = adapter._convert_parameters('tool', {'a': ''})
+        assert result == {}
+
+    def test_skip_null_string(self, adapter):
+        """'null' string values are skipped."""
+        adapter._tool_schemas['tool'] = {
+            'properties': {'a': {'type': 'string'}}
+        }
+        result = adapter._convert_parameters('tool', {'a': 'null'})
+        assert result == {}
+
+    def test_enum_validation_valid(self, adapter):
+        """Valid enum value passes."""
+        adapter._tool_schemas['tool'] = {
+            'properties': {'color': {'type': 'string', 'enum': ['red', 'blue']}}
+        }
+        result = adapter._convert_parameters('tool', {'color': 'red'})
+        assert result == {'color': 'red'}
+
+    def test_enum_validation_invalid(self, adapter):
+        """Invalid enum value is removed."""
+        adapter._tool_schemas['tool'] = {
+            'properties': {'color': {'type': 'string', 'enum': ['red', 'blue']}}
+        }
+        result = adapter._convert_parameters('tool', {'color': 'green'})
+        assert 'color' not in result
+
+    def test_conversion_error_skips_param(self, adapter):
+        """ValueError during conversion skips the parameter."""
+        adapter._tool_schemas['tool'] = {
+            'properties': {'val': {'type': 'integer'}}
+        }
+        result = adapter._convert_parameters('tool', {'val': 'not-a-number'})
+        assert 'val' not in result
+
+    def test_multiple_params_mixed(self, adapter):
+        """Multiple parameters with different types convert correctly."""
+        adapter._tool_schemas['tool'] = {
+            'properties': {
+                'count': {'type': 'integer'},
+                'name': {'type': 'string'},
+                'active': {'type': 'boolean'},
+                'skip': {'type': 'string'},
+            }
+        }
+        result = adapter._convert_parameters('tool', {
+            'count': '5',
+            'name': 'test',
+            'active': 'true',
+            'skip': None,
+        })
+        assert result == {'count': 5, 'name': 'test', 'active': True}
+
+    def test_skipped_params_logged(self, adapter):
+        """Parameters that are skipped get logged (coverage for log branch)."""
+        adapter._tool_schemas['tool'] = {
+            'properties': {'a': {'type': 'string'}}
+        }
+        # Pass a param not in properties (will be kept) + one None (will be skipped)
+        result = adapter._convert_parameters('tool', {'a': None, 'b': 'val'})
+        # 'a' skipped (None), 'b' kept (no type restriction)
+        assert 'a' not in result
+        assert result['b'] == 'val'
+
+    def test_outer_exception_returns_original(self, adapter):
+        """If an unexpected exception occurs, return original params."""
+        adapter._tool_schemas['tool'] = {
+            'properties': 'not-a-dict'  # Will cause iteration error
+        }
+        params = {'a': '1'}
+        result = adapter._convert_parameters('tool', params)
+        assert result == params
+
+
+class TestAdapterEdgeCases:
+    """Cover remaining edge cases for 100% coverage."""
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_popleft_after_wait(self):
+        """Cover the popleft branch after asyncio.sleep in _wait_for_rate_limit."""
+        adapter = MCPAdapter({
+            'url': 'https://test.mcp.server/api/mcp/',
+            'rate_limit': 1,
+            'headers': {'Authorization': 'Bearer tok'}
+        })
+
+        now = time.monotonic()
+        # One call at now-30s (inside window), at capacity
+        adapter._call_timestamps.append(now - 30)
+
+        async def fake_sleep(duration):
+            # After sleeping, the timestamp should be >60s old
+            # Simulate time passing by manipulating the deque
+            adapter._call_timestamps[0] = time.monotonic() - 120
+
+        with patch('asyncio.sleep', side_effect=fake_sleep):
+            await adapter._wait_for_rate_limit()
+
+        # The old timestamp should have been pruned after wait
+        assert len(adapter._call_timestamps) == 0
+
+    @pytest.mark.asyncio
+    async def test_get_auth_headers_exception(self):
+        """Cover exception handler in _get_authentication_headers."""
+        adapter = MCPAdapter({
+            'url': 'https://test.mcp.server/api/mcp/',
+        })
+
+        with patch('src.utils.databricks_auth.get_mcp_auth_headers', new_callable=AsyncMock) as mock_auth:
+            mock_auth.side_effect = RuntimeError("unexpected")
+            result = await adapter._get_authentication_headers()
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_stop_exception_handled(self):
+        """Cover exception handler in stop()."""
+        adapter = MCPAdapter({
+            'url': 'https://test.mcp.server/api/mcp/',
+        })
+
+        # Patch logger.info to raise, triggering the except branch
+        with patch('src.engines.common.mcp_adapter.logger') as mock_logger:
+            mock_logger.info.side_effect = RuntimeError("log error")
+            # Should not raise
+            await adapter.stop()
+            mock_logger.error.assert_called_once()
