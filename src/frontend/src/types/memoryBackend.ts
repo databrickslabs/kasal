@@ -79,7 +79,7 @@ export const DEFAULT_MEMORY_BACKEND_CONFIG: MemoryBackendConfig = {
 export const DEFAULT_DATABRICKS_CONFIG: DatabricksMemoryConfig = {
   endpoint_name: '',
   short_term_index: '',
-  embedding_dimension: 768,
+  embedding_dimension: 1024,
   auth_type: 'default',
 };
 
