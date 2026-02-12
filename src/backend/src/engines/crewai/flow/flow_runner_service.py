@@ -430,12 +430,6 @@ class FlowRunnerService:
                     }
                     logger.info(f"Constructed flow_data for dynamic flow with {len(nodes)} nodes and {len(flow_config.get('listeners', []))} listeners")
 
-                # Set up output directory for the flow
-                output_dir = os.path.join(os.getenv('OUTPUT_DIR', 'output'), job_id)
-                os.makedirs(output_dir, exist_ok=True)
-                backend_flow.output_dir = output_dir
-                logger.info(f"Set output directory to {output_dir}")
-
                 # Update status to RUNNING
                 await flow_execution_service.update_execution_status(
                     execution_id=execution_id,
@@ -867,12 +861,6 @@ class FlowRunnerService:
                 if config:
                     logger.info(f"Updating flow config with provided configuration")
                     backend_flow.config.update(config)
-
-                # Set up output directory for the flow
-                output_dir = os.path.join(os.getenv('OUTPUT_DIR', 'output'), job_id)
-                os.makedirs(output_dir, exist_ok=True)
-                backend_flow.output_dir = output_dir
-                logger.info(f"Set output directory to {output_dir}")
 
                 # Update status to RUNNING
                 await flow_execution_service.update_execution_status(

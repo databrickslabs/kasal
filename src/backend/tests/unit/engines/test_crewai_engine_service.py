@@ -141,28 +141,6 @@ class TestInitialize:
 
 
 # ---------------------------------------------------------------------------
-# _setup_output_directory()
-# ---------------------------------------------------------------------------
-
-class TestSetupOutputDirectory:
-
-    def test_returns_path_with_execution_id(self, service):
-        path = service._setup_output_directory("exec_42")
-        assert isinstance(path, str)
-        assert "exec_42" in path
-
-    def test_returns_base_path_without_id(self, service):
-        path = service._setup_output_directory()
-        assert isinstance(path, str)
-        assert "crew_outputs" in path
-
-    def test_fallback_on_exception(self, service):
-        with patch("pathlib.Path", side_effect=Exception("fail")):
-            path = service._setup_output_directory("exec_42")
-            assert "crew_outputs" in path
-
-
-# ---------------------------------------------------------------------------
 # _update_execution_status()
 # ---------------------------------------------------------------------------
 
@@ -314,8 +292,6 @@ class TestRunExecution:
         with patch(
             "src.engines.crewai.crewai_engine_service.normalize_config",
             return_value=sample_execution_config,
-        ), patch.object(
-            service, "_setup_output_directory", return_value="/tmp/out"
         ), patch(
             "src.engines.crewai.crewai_engine_service.TraceManager.ensure_writer_started",
             new_callable=AsyncMock,
@@ -348,8 +324,6 @@ class TestRunExecution:
         with patch(
             "src.engines.crewai.crewai_engine_service.normalize_config",
             side_effect=capture_normalize,
-        ), patch.object(
-            service, "_setup_output_directory", return_value="/tmp/out"
         ), patch(
             "src.engines.crewai.crewai_engine_service.TraceManager.ensure_writer_started",
             new_callable=AsyncMock,
@@ -377,8 +351,6 @@ class TestRunExecution:
         with patch(
             "src.engines.crewai.crewai_engine_service.normalize_config",
             return_value=sample_execution_config,
-        ), patch.object(
-            service, "_setup_output_directory", return_value="/tmp/out"
         ), patch(
             "src.engines.crewai.crewai_engine_service.TraceManager.ensure_writer_started",
             new_callable=AsyncMock,
@@ -396,8 +368,9 @@ class TestRunExecution:
 
     @pytest.mark.asyncio
     async def test_outer_exception_propagates(self, service, sample_execution_config):
-        with patch.object(
-            service, "_setup_output_directory", side_effect=Exception("boom")
+        with patch(
+            "src.engines.crewai.crewai_engine_service.normalize_config",
+            side_effect=Exception("boom"),
         ):
             with pytest.raises(Exception, match="boom"):
                 await service.run_execution("e", sample_execution_config)
@@ -414,8 +387,6 @@ class TestRunFlow:
         with patch(
             "src.engines.crewai.crewai_engine_service.normalize_flow_config",
             return_value=sample_flow_config,
-        ), patch.object(
-            service, "_setup_output_directory", return_value="/tmp/fout"
         ), patch(
             "src.engines.crewai.crewai_engine_service.TraceManager.ensure_writer_started",
             new_callable=AsyncMock,
@@ -435,8 +406,6 @@ class TestRunFlow:
         with patch(
             "src.engines.crewai.crewai_engine_service.normalize_flow_config",
             side_effect=lambda c: c,
-        ), patch.object(
-            service, "_setup_output_directory", return_value="/tmp/fout"
         ), patch(
             "src.engines.crewai.crewai_engine_service.TraceManager.ensure_writer_started",
             new_callable=AsyncMock,
