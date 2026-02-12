@@ -730,6 +730,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
         open={isLLMDialogOpen}
         onClose={() => setIsLLMDialogOpen(false)}
         onSelectLLM={handleLLMSelect}
+        currentLLM={data.llm}
       />
     </Box>
   );
