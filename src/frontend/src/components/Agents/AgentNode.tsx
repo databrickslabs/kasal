@@ -6,7 +6,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import CodeIcon from '@mui/icons-material/Code';
 import MemoryIcon from '@mui/icons-material/Memory';
-import { Agent } from '../../api/AgentService';
+import { Agent, AgentService } from '../../api/AgentService';
 import AgentForm from './AgentForm';
 import LLMSelectionDialog from './LLMSelectionDialog';
 import { ToolService } from '../../api/ToolService';
@@ -250,7 +250,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
   }, [id, setNodes, updateAgent, data.agentId]);
 
   // Handle LLM selection from the quick LLM dialog
-  const handleLLMSelect = useCallback((selectedLLM: string) => {
+  const handleLLMSelect = useCallback(async (selectedLLM: string) => {
     // Update the node data with the new LLM
     setNodes(nodes => nodes.map(node => {
       if (node.id === id) {
@@ -265,11 +265,18 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       return node;
     }));
 
-    // Update the agent store if we have an agent ID
+    // Update the agent store and persist to backend if we have an agent ID
     if (data.agentId && agentData) {
       const updatedAgent = { ...agentData, llm: selectedLLM };
       updateAgent(data.agentId, updatedAgent);
       setAgentData(updatedAgent);
+
+      // Persist the LLM change to the backend
+      try {
+        await AgentService.updateAgentFull(data.agentId, updatedAgent);
+      } catch (error) {
+        console.error('Failed to persist LLM change:', error);
+      }
     }
 
     // Mark tab as dirty since agent was modified
