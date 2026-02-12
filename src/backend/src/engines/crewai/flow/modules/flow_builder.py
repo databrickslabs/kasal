@@ -44,7 +44,7 @@ class FlowBuilder:
     """
     
     @staticmethod
-    async def build_flow(flow_data, repositories=None, callbacks=None, group_context=None, restore_uuid=None, resume_from_crew_sequence=None, resume_from_execution_id=None):
+    async def build_flow(flow_data, repositories=None, callbacks=None, group_context=None, restore_uuid=None, resume_from_crew_sequence=None, resume_from_execution_id=None, user_token=None, group_id=None):
         """
         Build a CrewAI flow from flow data.
 
@@ -58,6 +58,8 @@ class FlowBuilder:
                 When provided, crews with sequence <= this value will be skipped.
             resume_from_execution_id: Execution ID of checkpoint to resume from (optional).
                 Used to query execution traces for previous crew outputs.
+            user_token: User access token for OBO authentication (optional)
+            group_id: Group ID for multi-tenant isolation (optional)
 
         Returns:
             CrewAIFlow: A configured CrewAI Flow instance
@@ -244,7 +246,7 @@ class FlowBuilder:
 
             # Pass the processed listener_methods (with crew grouping) instead of raw listeners
             dynamic_flow = await FlowBuilder._create_dynamic_flow(
-                starting_point_methods, listener_methods, routers, all_agents, all_tasks, flow_config, callbacks, group_context, restore_uuid, resume_from_crew_sequence, checkpoint_outputs
+                starting_point_methods, listener_methods, routers, all_agents, all_tasks, flow_config, callbacks, group_context, restore_uuid, resume_from_crew_sequence, checkpoint_outputs, user_token=user_token, group_id=group_id
             )
 
             logger.info("="*100)
@@ -324,7 +326,7 @@ class FlowBuilder:
                     logger.info(f"  {variable} = {value}")
 
     @staticmethod
-    async def _create_dynamic_flow(starting_points, listener_crews, routers, all_agents, all_tasks, flow_config=None, callbacks=None, group_context=None, restore_uuid=None, resume_from_crew_sequence=None, checkpoint_outputs=None):
+    async def _create_dynamic_flow(starting_points, listener_crews, routers, all_agents, all_tasks, flow_config=None, callbacks=None, group_context=None, restore_uuid=None, resume_from_crew_sequence=None, checkpoint_outputs=None, user_token=None, group_id=None):
         """
         Create a dynamic flow class with all start, listener, and router methods.
 
@@ -345,6 +347,9 @@ class FlowBuilder:
             restore_uuid: UUID of a previous flow execution to resume from (optional)
             resume_from_crew_sequence: Crew sequence number to resume from (optional).
                 When provided, crews with sequence <= this value will be skipped.
+            checkpoint_outputs: Checkpoint outputs from previous execution (optional)
+            user_token: User access token for OBO authentication (optional)
+            group_id: Group ID for multi-tenant isolation (optional)
 
         Returns:
             CrewAIFlow: An instance of the dynamically created flow class
@@ -474,7 +479,9 @@ class FlowBuilder:
                     callbacks=callbacks,
                     group_context=group_context,
                     create_execution_callbacks=create_execution_callbacks,
-                    crew_data=crew_data
+                    crew_data=crew_data,
+                    user_token=user_token,
+                    group_id=group_id
                 )
                 logger.info(f"  ✅ Created start method '{method_name}' for crew '{crew_name}' with {len(crew_tasks)} sequential tasks")
             else:
@@ -715,7 +722,9 @@ class FlowBuilder:
                     group_context=group_context,
                     create_execution_callbacks=create_execution_callbacks,
                     crew_name=crew_name,
-                    crew_data=crew_data
+                    crew_data=crew_data,
+                    user_token=user_token,
+                    group_id=group_id
                 )
                 logger.info(f"  ✅ Created listener '{method_name}' for crew '{crew_name}' with {len(listener_tasks)} sequential tasks, listening to: {method_condition}")
 
