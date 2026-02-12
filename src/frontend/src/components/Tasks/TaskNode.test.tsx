@@ -87,10 +87,10 @@ vi.mock('./TaskForm', () => ({
 }));
 
 vi.mock('./QuickToolSelectionDialog', () => ({
-  default: ({ open, onSelectTools }: { open: boolean; onSelectTools: (tools: string[]) => void }) =>
+  default: ({ open, onApply }: { open: boolean; onApply: (tools: string[], mcpServers: string[]) => void }) =>
     open ? (
       <div data-testid="tool-dialog">
-        <button data-testid="select-tools-btn" onClick={() => onSelectTools(['tool-a', 'tool-b'])}>
+        <button data-testid="select-tools-btn" onClick={() => onApply(['tool-a', 'tool-b'], [])}>
           Select Tools
         </button>
       </div>
@@ -330,7 +330,10 @@ describe('TaskNode', () => {
       fireEvent.click(screen.getByTestId('select-tools-btn'));
 
       await waitFor(() => {
-        expect(mockUpdateTask).toHaveBeenCalledWith('task-123', { tools: ['tool-a', 'tool-b'] });
+        expect(mockUpdateTask).toHaveBeenCalledWith('task-123', {
+          tools: ['tool-a', 'tool-b'],
+          tool_configs: undefined,
+        });
       });
     });
 
@@ -376,7 +379,7 @@ describe('TaskNode', () => {
 
       // Backend was called but failed
       await waitFor(() => {
-        expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to persist tool selection:', expect.any(Error));
+        expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to persist tool/MCP selection:', expect.any(Error));
       });
 
       consoleErrorSpy.mockRestore();
