@@ -474,7 +474,7 @@ class TestFlowRunnerServiceFreshSession:
 
             result = await service._run_dynamic_flow(execution_id, job_id, config)
 
-            # Verify fresh session was created for failure update
+            # Verify fresh sessions: _safe_session + post_session (error span uses OTel pipeline)
             assert mock_factory.call_count == 2
             assert result["success"] is False
             assert result["error"] == "Test error"
@@ -539,3 +539,101 @@ class TestFlowRunnerServiceFreshSession:
             assert session_tracker[-1] is mock_post_session
 
             assert result["success"] is True
+
+
+class TestEmitErrorSpan:
+    """Test _emit_error_span OTel error emission in FlowRunnerService."""
+
+    def _make_service(self):
+        """Create a FlowRunnerService with mocked dependencies."""
+        from src.engines.crewai.flow.flow_runner_service import FlowRunnerService
+        with patch('src.engines.crewai.flow.flow_runner_service.FlowExecutionService') as mock_fes:
+            mock_fes.return_value = MagicMock()
+            return FlowRunnerService(MagicMock())
+
+    @pytest.mark.asyncio
+    async def test_emit_error_span_basic(self):
+        """Test _emit_error_span creates an OTel span with correct attributes."""
+        from src.engines.crewai.flow.flow_runner_service import FlowRunnerService
+
+        service = self._make_service()
+
+        mock_provider = MagicMock()
+        mock_span = MagicMock()
+        mock_tracer = MagicMock()
+        mock_tracer.start_as_current_span.return_value.__enter__ = MagicMock(return_value=mock_span)
+        mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(return_value=False)
+        mock_provider.get_tracer.return_value = mock_tracer
+
+        with patch('src.services.otel_tracing.otel_config.create_kasal_tracer_provider', return_value=mock_provider), \
+             patch('src.services.otel_tracing.db_exporter.KasalDBSpanExporter'):
+
+            await service._emit_error_span("job-123", "Something failed", group_id="grp-1")
+
+        mock_span.set_attribute.assert_any_call("kasal.event_type", "flow_execution_failed")
+        mock_span.set_attribute.assert_any_call("kasal.job_id", "job-123")
+        mock_span.set_attribute.assert_any_call("kasal.group_id", "grp-1")
+        mock_provider.shutdown.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_emit_error_span_with_group_email(self):
+        """Test _emit_error_span sets group_email attribute when provided."""
+        from src.engines.crewai.flow.flow_runner_service import FlowRunnerService
+
+        service = self._make_service()
+
+        mock_provider = MagicMock()
+        mock_span = MagicMock()
+        mock_tracer = MagicMock()
+        mock_tracer.start_as_current_span.return_value.__enter__ = MagicMock(return_value=mock_span)
+        mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(return_value=False)
+        mock_provider.get_tracer.return_value = mock_tracer
+
+        with patch('src.services.otel_tracing.otel_config.create_kasal_tracer_provider', return_value=mock_provider), \
+             patch('src.services.otel_tracing.db_exporter.KasalDBSpanExporter'):
+
+            await service._emit_error_span(
+                "job-456", "Error msg",
+                group_id="grp-2", group_email="user@example.com"
+            )
+
+        mock_span.set_attribute.assert_any_call("kasal.group_email", "user@example.com")
+        mock_provider.shutdown.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_emit_error_span_exception_handling(self):
+        """Test _emit_error_span catches and logs exceptions without raising."""
+        from src.engines.crewai.flow.flow_runner_service import FlowRunnerService
+
+        service = self._make_service()
+
+        with patch('src.services.otel_tracing.otel_config.create_kasal_tracer_provider',
+                   side_effect=RuntimeError("OTel init failed")):
+
+            # Should NOT raise — the method catches all exceptions
+            await service._emit_error_span("job-789", "Error msg")
+
+    @pytest.mark.asyncio
+    async def test_emit_error_span_no_group_context(self):
+        """Test _emit_error_span without group_id or group_email."""
+        from src.engines.crewai.flow.flow_runner_service import FlowRunnerService
+
+        service = self._make_service()
+
+        mock_provider = MagicMock()
+        mock_span = MagicMock()
+        mock_tracer = MagicMock()
+        mock_tracer.start_as_current_span.return_value.__enter__ = MagicMock(return_value=mock_span)
+        mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(return_value=False)
+        mock_provider.get_tracer.return_value = mock_tracer
+
+        with patch('src.services.otel_tracing.otel_config.create_kasal_tracer_provider', return_value=mock_provider), \
+             patch('src.services.otel_tracing.db_exporter.KasalDBSpanExporter') as mock_exporter:
+
+            await service._emit_error_span("job-no-group", "Error without group")
+
+        # group_context should be None — KasalDBSpanExporter gets None
+        mock_exporter.assert_called_once_with("job-no-group", None)
+        # group_id and group_email should NOT be set
+        set_attr_calls = [c[0] for c in mock_span.set_attribute.call_args_list]
+        assert ("kasal.group_id",) not in [(c[0],) for c in set_attr_calls if len(c) >= 1]

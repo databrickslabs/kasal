@@ -52,6 +52,50 @@ class FlowRunnerService:
         self.tool_repo = ToolRepository(db)
         self.crew_repo = CrewRepository(db)
 
+    async def _emit_error_span(self, job_id: str, error_msg: str, group_id: Optional[str] = None, group_email: Optional[str] = None):
+        """Emit an error span via OTel so it appears in the trace timeline.
+
+        Routes through the same OTel pipeline (TracerProvider → KasalDBSpanExporter)
+        as engine-level spans, so the error gets proper span_id / trace_id columns
+        and a consistent representation in the trace timeline.
+        """
+        try:
+            from types import SimpleNamespace
+            from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+            from opentelemetry.trace import StatusCode
+            from src.services.otel_tracing.otel_config import create_kasal_tracer_provider
+            from src.services.otel_tracing.db_exporter import KasalDBSpanExporter
+
+            group_context = None
+            if group_id or group_email:
+                group_context = SimpleNamespace(primary_group_id=group_id, group_email=group_email)
+
+            provider = create_kasal_tracer_provider(
+                job_id=job_id,
+                service_name="kasal-flow-runner",
+            )
+            provider.add_span_processor(
+                SimpleSpanProcessor(KasalDBSpanExporter(job_id, group_context))
+            )
+
+            tracer = provider.get_tracer("kasal.flow_runner")
+            with tracer.start_as_current_span("kasal.flow.execution_failed") as span:
+                span.set_attribute("kasal.event_type", "flow_execution_failed")
+                span.set_attribute("kasal.job_id", job_id)
+                span.set_attribute("kasal.task_name", "Flow execution error")
+                span.set_attribute("kasal.output_content", error_msg)
+                span.set_attribute("kasal.extra.error", error_msg)
+                if group_id:
+                    span.set_attribute("kasal.group_id", group_id)
+                if group_email:
+                    span.set_attribute("kasal.group_email", group_email)
+                span.set_status(StatusCode.ERROR, error_msg)
+
+            provider.shutdown()
+            logger.info(f"Emitted OTel error span for job {job_id}: {error_msg[:200]}")
+        except Exception as span_err:
+            logger.warning(f"Failed to emit OTel error span for job {job_id}: {span_err}")
+
     @staticmethod
     @asynccontextmanager
     async def _safe_session():
@@ -507,6 +551,7 @@ class FlowRunnerService:
                                 status=FlowExecutionStatus.FAILED,
                                 error=error_msg
                             )
+                            await self._emit_error_span(job_id, error_msg, group_id=config.get('group_id'))
                             logger.error(f"Dynamic flow execution {execution_id} failed: {error_msg}")
                             return {"success": False, "error": error_msg, "execution_id": execution_id}
 
@@ -574,6 +619,7 @@ class FlowRunnerService:
                             status=FlowExecutionStatus.FAILED,
                             error=str(kickoff_error)
                         )
+                    await self._emit_error_span(job_id, str(kickoff_error), group_id=config.get('group_id'))
                     return {"success": False, "error": str(kickoff_error), "execution_id": execution_id}
 
             except FlowPausedForApprovalException as pause_exc:
@@ -593,8 +639,9 @@ class FlowRunnerService:
                         )
                 except Exception as update_error:
                     logger.error(f"Error updating flow execution {execution_id} status: {update_error}", exc_info=True)
+                await self._emit_error_span(job_id, str(e), group_id=config.get('group_id'))
                 return {"success": False, "error": str(e), "execution_id": execution_id}
-    
+
     async def _get_required_providers(self, session: AsyncSession, config: Dict[str, Any], group_id: Optional[str] = None) -> List[str]:
         """
         Extract unique providers required for this flow execution based on configured models.
@@ -938,6 +985,7 @@ class FlowRunnerService:
                                 status=FlowExecutionStatus.FAILED,
                                 error=error_msg
                             )
+                            await self._emit_error_span(job_id, error_msg, group_id=config.get('group_id'))
                             logger.info(f"Updated flow execution {execution_id} with final status: FAILED")
                             return {"success": False, "error": error_msg, "execution_id": execution_id}
 
@@ -1004,6 +1052,7 @@ class FlowRunnerService:
                             status=FlowExecutionStatus.FAILED,
                             error=str(kickoff_error)
                         )
+                    await self._emit_error_span(job_id, str(kickoff_error), group_id=config.get('group_id'))
                     return {"success": False, "error": str(kickoff_error), "execution_id": execution_id}
 
             except FlowPausedForApprovalException:
@@ -1023,8 +1072,9 @@ class FlowRunnerService:
                         )
                 except Exception as update_error:
                     logger.error(f"Error updating flow execution {execution_id} status: {update_error}", exc_info=True)
+                await self._emit_error_span(job_id, str(e), group_id=config.get('group_id'))
                 return {"success": False, "error": str(e), "execution_id": execution_id}
-    
+
     async def get_flow_execution(self, execution_id: int) -> Dict[str, Any]:
         """
         Get flow execution details.
