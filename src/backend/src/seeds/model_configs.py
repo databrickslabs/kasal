@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 # Define default model configurations
 DEFAULT_MODELS = {
+    # --- OpenAI ---
     "gpt-4-turbo": {
         "name": "gpt-4-turbo-preview",
         "temperature": 0.7,
@@ -70,6 +71,21 @@ DEFAULT_MODELS = {
         "context_window": 400000,
         "max_output_tokens": 128000
     },
+    "o3-deep-research": {
+        "name": "o3-deep-research-2025-06-26",
+        "temperature": 1,
+        "provider": "openai",
+        "context_window": 200000,
+        "max_output_tokens": 100000
+    },
+    "o4-mini-deep-research": {
+        "name": "o4-mini-deep-research-2025-06-26",
+        "temperature": 1,
+        "provider": "openai",
+        "context_window": 200000,
+        "max_output_tokens": 100000
+    },
+    # --- Gemini ---
     "gemini-2.0-flash": {
         "name": "gemini-2.0-flash",
         "temperature": 0.7,
@@ -91,6 +107,7 @@ DEFAULT_MODELS = {
         "context_window": 1000000,
         "max_output_tokens": 64000
     },
+    # --- Anthropic ---
     "claude-3-5-sonnet-20241022": {
         "name": "claude-3-5-sonnet-20241022",
         "temperature": 0.7,
@@ -127,26 +144,27 @@ DEFAULT_MODELS = {
         "context_window": 200000,
         "max_output_tokens": 4096
     },
+    "claude-opus-4-20250514": {
+        "name": "claude-opus-4-20250514",
+        "temperature": 0.7,
+        "provider": "anthropic",
+        "context_window": 200000,
+        "max_output_tokens": 32000
+    },
+    "claude-sonnet-4": {
+        "name": "claude-sonnet-4-20250514",
+        "temperature": 0.7,
+        "provider": "anthropic",
+        "context_window": 200000,
+        "max_output_tokens": 8192
+    },
+    # --- Ollama ---
     "llama3.2:latest": {
         "name": "llama3.2:latest",
         "temperature": 0.7,
         "provider": "ollama",
         "context_window": 128000,
         "max_output_tokens": 4096
-    },
-    "databricks-llama-4-maverick": {
-        "name": "databricks-llama-4-maverick",
-        "temperature": 0.7,
-        "provider": "databricks",
-        "context_window": 128000,
-        "max_output_tokens": 8000
-    },
-    "databricks-claude-sonnet-4": {
-        "name": "databricks-claude-sonnet-4",
-        "temperature": 0.7,
-        "provider": "databricks",
-        "context_window": 200000,
-        "max_output_tokens": 64000
     },
     "llama2:13b": {
         "name": "llama2:13b",
@@ -168,97 +186,6 @@ DEFAULT_MODELS = {
         "provider": "ollama",
         "context_window": 8192,
         "max_output_tokens": 4096
-    },
-    "databricks-meta-llama-3-3-70b-instruct": {
-        "name": "databricks-meta-llama-3-3-70b-instruct",
-        "temperature": 0.7,
-        "provider": "databricks",
-        "context_window": 128000,
-        "max_output_tokens": 4096
-    },
-    "databricks-meta-llama-3-1-405b-instruct": {
-        "name": "databricks-meta-llama-3-1-405b-instruct",
-        "temperature": 0.7,
-        "provider": "databricks",
-        "context_window": 128000,
-        "max_output_tokens": 4096
-    },
-    "databricks-claude-3-7-sonnet": {
-        "name": "databricks-claude-3-7-sonnet",
-        "temperature": 0.7,
-        "provider": "databricks",
-        "context_window": 200000,
-        "max_output_tokens": 64000
-    },
-    "databricks-claude-sonnet-4-5": {
-        "name": "databricks-claude-sonnet-4-5",
-        "temperature": 0.7,
-        "provider": "databricks",
-        "context_window": 200000,
-        "max_output_tokens": 64000
-    },
-    "databricks-claude-opus-4-5": {
-        "name": "databricks-claude-opus-4-5",
-        "temperature": 0.7,
-        "provider": "databricks",
-        "context_window": 200000,
-        "max_output_tokens": 64000
-    },
-    "databricks-gemini-2-5-flash": {
-        "name": "databricks-gemini-2-5-flash",
-        "temperature": 0.7,
-        "provider": "databricks",
-        "context_window": 1048576,
-        "max_output_tokens": 65536
-    },
-    "databricks-gemini-2-5-pro": {
-        "name": "databricks-gemini-2-5-pro",
-        "temperature": 0.7,
-        "provider": "databricks",
-        "context_window": 1000000,
-        "max_output_tokens": 65536
-    },
-    "databricks-gemini-3-pro": {
-        "name": "databricks-gemini-3-pro",
-        "temperature": 0.7,
-        "provider": "databricks",
-        "context_window": 1000000,
-        "max_output_tokens": 65536
-    },
-    "databricks-qwen3-next-80b-a3b-instruct": {
-        "name": "databricks-qwen3-next-80b-a3b-instruct",
-        "temperature": 0.7,
-        "provider": "databricks",
-        "context_window": 262144,
-        "max_output_tokens": 16384
-    },
-    "databricks-gemma-3-12b": {
-        "name": "databricks-gemma-3-12b",
-        "temperature": 0.7,
-        "provider": "databricks",
-        "context_window": 128000,
-        "max_output_tokens": 8192
-    },
-    "databricks-gpt-5-2": {
-        "name": "databricks-gpt-5-2",
-        "temperature": 0.7,
-        "provider": "databricks",
-        "context_window": 400000,
-        "max_output_tokens": 128000
-    },
-    "claude-opus-4-20250514": {
-        "name": "claude-opus-4-20250514",
-        "temperature": 0.7,
-        "provider": "anthropic",
-        "context_window": 200000,
-        "max_output_tokens": 32000
-    },
-    "claude-sonnet-4": {
-        "name": "claude-sonnet-4-20250514",
-        "temperature": 0.7,
-        "provider": "anthropic",
-        "context_window": 200000,
-        "max_output_tokens": 8192
     },
     "llama3.2:3b-text-q8_0": {
         "name": "llama3.2:3b-text-q8_0",
@@ -288,6 +215,7 @@ DEFAULT_MODELS = {
         "context_window": 32768,
         "max_output_tokens": 4096
     },
+    # --- DeepSeek ---
     "deepseek-chat": {
         "name": "deepseek-chat",
         "temperature": 0.7,
@@ -330,19 +258,13 @@ DEFAULT_MODELS = {
         "context_window": 128000,
         "max_output_tokens": 4096
     },
-    "databricks-gpt-oss-120b": {
-        "name": "databricks-gpt-oss-120b",
+    # --- Databricks (sorted alphabetically) ---
+    "databricks-claude-3-7-sonnet": {
+        "name": "databricks-claude-3-7-sonnet",
         "temperature": 0.7,
         "provider": "databricks",
-        "context_window": 128000,
-        "max_output_tokens": 25000  # Maximum supported by Databricks endpoint
-    },
-    "databricks-gpt-oss-20b": {
-        "name": "databricks-gpt-oss-20b",
-        "temperature": 0.7,
-        "provider": "databricks",
-        "context_window": 128000,
-        "max_output_tokens": 16384
+        "context_window": 200000,
+        "max_output_tokens": 64000
     },
     "databricks-claude-haiku-4-5": {
         "name": "databricks-claude-haiku-4-5",
@@ -358,6 +280,13 @@ DEFAULT_MODELS = {
         "context_window": 200000,
         "max_output_tokens": 32000
     },
+    "databricks-claude-opus-4-5": {
+        "name": "databricks-claude-opus-4-5",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 200000,
+        "max_output_tokens": 64000
+    },
     "databricks-claude-opus-4-6": {
         "name": "databricks-claude-opus-4-6",
         "temperature": 0.7,
@@ -365,12 +294,54 @@ DEFAULT_MODELS = {
         "context_window": 200000,
         "max_output_tokens": 32000
     },
+    "databricks-claude-sonnet-4": {
+        "name": "databricks-claude-sonnet-4",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 200000,
+        "max_output_tokens": 64000
+    },
+    "databricks-claude-sonnet-4-5": {
+        "name": "databricks-claude-sonnet-4-5",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 200000,
+        "max_output_tokens": 64000
+    },
+    "databricks-gemini-2-5-flash": {
+        "name": "databricks-gemini-2-5-flash",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1048576,
+        "max_output_tokens": 65536
+    },
+    "databricks-gemini-2-5-pro": {
+        "name": "databricks-gemini-2-5-pro",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1000000,
+        "max_output_tokens": 65536
+    },
     "databricks-gemini-3-flash": {
         "name": "databricks-gemini-3-flash",
         "temperature": 0.7,
         "provider": "databricks",
         "context_window": 1000000,
         "max_output_tokens": 65536
+    },
+    "databricks-gemini-3-pro": {
+        "name": "databricks-gemini-3-pro",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1000000,
+        "max_output_tokens": 65536
+    },
+    "databricks-gemma-3-12b": {
+        "name": "databricks-gemma-3-12b",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 128000,
+        "max_output_tokens": 8192
     },
     "databricks-gpt-5": {
         "name": "databricks-gpt-5",
@@ -400,6 +371,13 @@ DEFAULT_MODELS = {
         "context_window": 400000,
         "max_output_tokens": 64000
     },
+    "databricks-gpt-5-2": {
+        "name": "databricks-gpt-5-2",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 400000,
+        "max_output_tokens": 128000
+    },
     "databricks-gpt-5-mini": {
         "name": "databricks-gpt-5-mini",
         "temperature": 0.7,
@@ -414,6 +392,34 @@ DEFAULT_MODELS = {
         "context_window": 128000,
         "max_output_tokens": 32000
     },
+    "databricks-gpt-oss-120b": {
+        "name": "databricks-gpt-oss-120b",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 128000,
+        "max_output_tokens": 25000  # Maximum supported by Databricks endpoint
+    },
+    "databricks-gpt-oss-20b": {
+        "name": "databricks-gpt-oss-20b",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 128000,
+        "max_output_tokens": 16384
+    },
+    "databricks-llama-4-maverick": {
+        "name": "databricks-llama-4-maverick",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 128000,
+        "max_output_tokens": 8000
+    },
+    "databricks-meta-llama-3-1-405b-instruct": {
+        "name": "databricks-meta-llama-3-1-405b-instruct",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 128000,
+        "max_output_tokens": 4096
+    },
     "databricks-meta-llama-3-1-8b-instruct": {
         "name": "databricks-meta-llama-3-1-8b-instruct",
         "temperature": 0.7,
@@ -421,20 +427,20 @@ DEFAULT_MODELS = {
         "context_window": 128000,
         "max_output_tokens": 4096
     },
-    "o3-deep-research": {
-        "name": "o3-deep-research-2025-06-26",
-        "temperature": 1,
-        "provider": "openai",
-        "context_window": 200000,
-        "max_output_tokens": 100000
+    "databricks-meta-llama-3-3-70b-instruct": {
+        "name": "databricks-meta-llama-3-3-70b-instruct",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 128000,
+        "max_output_tokens": 4096
     },
-    "o4-mini-deep-research": {
-        "name": "o4-mini-deep-research-2025-06-26",
-        "temperature": 1,
-        "provider": "openai",
-        "context_window": 200000,
-        "max_output_tokens": 100000
-    }
+    "databricks-qwen3-next-80b-a3b-instruct": {
+        "name": "databricks-qwen3-next-80b-a3b-instruct",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 262144,
+        "max_output_tokens": 16384
+    },
 }
 
 # Alias for backwards compatibility - some modules import MODEL_CONFIGS
@@ -641,6 +647,6 @@ async def seed():
         # Don't re-raise - allow other seeds to run
 
 # For backwards compatibility or direct command-line usage
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     import asyncio
-    asyncio.run(seed()) 
+    asyncio.run(seed())
