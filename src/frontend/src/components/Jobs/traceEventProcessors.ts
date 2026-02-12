@@ -566,6 +566,21 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
     return { type: 'hitl_response', description };
   },
 
+  // Flow Execution Failed — flow-level error (timeout, configuration, etc.)
+  flow_execution_failed: (trace: Trace): ProcessedEvent => {
+    const metadata = parseTraceMetadata(trace);
+    const extra = extractExtraData(trace);
+    const output = trace.output && typeof trace.output === 'object'
+      ? (trace.output as Record<string, unknown>)
+      : null;
+    let errorMsg = 'Flow execution failed';
+    const error = (metadata?.error as string) || (extra?.error as string) || (output?.content as string);
+    if (error) {
+      errorMsg = error.length > 200 ? error.substring(0, 197) + '...' : error;
+    }
+    return { type: 'error', description: errorMsg };
+  },
+
   // Crew Execution (instrumentor root span) — skip, bridge handles crew_started/completed
   crew_execution: (): ProcessedEvent | null => {
     return null;
@@ -637,6 +652,7 @@ export const ICON_CONFIG: Record<string, IconConfig> = {
   tool_error: { Component: ErrorOutlineIcon, color: 'error' },
   rate_limit: { Component: WarningAmberIcon, color: 'warning' },
   task_failed: { Component: ErrorOutlineIcon, color: 'error' },
+  flow_execution_failed: { Component: ErrorOutlineIcon, color: 'error' },
   error: { Component: ErrorOutlineIcon, color: 'error' },
   agent_reasoning: { Component: PreviewIcon, color: 'info' },
   guardrail: { Component: CheckCircleIcon, color: 'warning' },
@@ -681,6 +697,7 @@ export const CLICKABLE_TYPES = new Set([
   'hitl_response',
   'tool_error',
   'task_failed',
+  'flow_execution_failed',
   'memory_context',
   'memory_backend_error',
   'crew_planning',
