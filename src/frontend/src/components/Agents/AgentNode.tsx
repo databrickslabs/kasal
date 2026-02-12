@@ -56,9 +56,6 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
   const [isLLMDialogOpen, setIsLLMDialogOpen] = useState(false);
   const [tools, setTools] = useState<Tool[]>([]);
 
-  // Local selection state
-  const [isSelected, setIsSelected] = useState(false);
-
   // Tab dirty state management
   const { markCurrentTabDirty } = useTabDirtyState();
 
@@ -96,12 +93,6 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       console.error('Error loading tools:', error);
     }
   };
-
-  // Simple toggle function for selection
-  const toggleSelection = useCallback(() => {
-    console.log(`AgentNode ${id}: Toggling selection from ${isSelected} to ${!isSelected}`);
-    setIsSelected(prev => !prev);
-  }, [id, isSelected]);
 
   const handleDelete = useCallback(() => {
     setNodes(nodes => nodes.filter(node => node.id !== id));
@@ -312,10 +303,10 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
     event.preventDefault();
     event.stopPropagation();
 
-    // If any MUI Dialog is open, ignore canvas node clicks to prevent click-through
-    const hasOpenDialog = document.querySelectorAll('.MuiDialog-root').length > 0;
-    if (hasOpenDialog) {
-      console.log('AgentNode click ignored because a dialog is open');
+    // Ignore clicks that bubbled from a Portal (e.g., Dialog backdrop).
+    // React synthetic events bubble through Portals in the component tree,
+    // but the DOM target won't be inside the node element.
+    if (!event.currentTarget.contains(event.target as Node)) {
       return;
     }
 
@@ -325,19 +316,10 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
     const isActionButton = !!target.closest('.action-buttons');
 
     if (!isButton && !isActionButton) {
-      if (event.button === 0) {
-        // Left-click: Open agent form for editing
-        console.log(`AgentNode left-click on ${id} - opening edit form`);
-        handleEditClick();
-      } else if (event.button === 2) {
-        // Right-click: Enable dragging by selecting the node
-        console.log(`AgentNode right-click on ${id} - enabling drag mode`);
-        toggleSelection();
-      }
-    } else {
-      console.log(`AgentNode click on ${id} ignored - clicked on button or action button`);
+      // Left-click: Open agent form for editing
+      handleEditClick();
     }
-  }, [id, toggleSelection, handleEditClick]);
+  }, [id, handleEditClick]);
 
   // Handle context menu (right-click) to prevent browser default menu
   const handleContextMenu = useCallback((event: React.MouseEvent) => {
@@ -355,18 +337,12 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       justifyContent: 'space-between',
       gap: 0.1,
       position: 'relative',
-      background: (theme: Theme) => isSelected
-        ? `${theme.palette.primary.light}20` // Light background when selected
-        : theme.palette.background.paper,
+      background: (theme: Theme) => theme.palette.background.paper,
       borderRadius: '12px',
-      boxShadow: (theme: Theme) => isSelected
-        ? `0 0 0 2px ${theme.palette.primary.main}`
-        : `0 2px 4px ${theme.palette.mode === 'light'
-          ? 'rgba(0, 0, 0, 0.1)'
-          : 'rgba(0, 0, 0, 0.4)'}`,
-      border: (theme: Theme) => `1px solid ${isSelected
-        ? theme.palette.primary.main
-        : theme.palette.primary.light}`,
+      boxShadow: (theme: Theme) => `0 2px 4px ${theme.palette.mode === 'light'
+        ? 'rgba(0, 0, 0, 0.1)'
+        : 'rgba(0, 0, 0, 0.4)'}`,
+      border: (theme: Theme) => `1px solid ${theme.palette.primary.light}`,
       transition: 'all 0.3s ease',
       padding: '16px 8px',
       '&:hover': {
@@ -456,7 +432,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       data-agentid={data.agentId}
       data-nodeid={id}
       data-nodetype="agent"
-      data-selected={isSelected ? 'true' : 'false'}
+      data-selected="false"
     >
 
       {/* Target handles - only visible in hierarchical mode */}
