@@ -128,7 +128,7 @@ class CrewGenerationService:
         # Add tools context to the system message
         return system_message + tools_context
 
-    def _process_crew_setup(self, setup: Dict[str, Any], allowed_tools: List[Dict[str, Any]], tool_name_to_id_map: Dict[str, str]) -> Dict[str, Any]:
+    def _process_crew_setup(self, setup: Dict[str, Any], allowed_tools: List[Dict[str, Any]], tool_name_to_id_map: Dict[str, str], model: str = None) -> Dict[str, Any]:
         """
         Process and validate crew setup.
 
@@ -136,6 +136,7 @@ class CrewGenerationService:
             setup: Raw crew setup from LLM
             allowed_tools: List of allowed tools with descriptions
             tool_name_to_id_map: Mapping from tool names to their IDs
+            model: Model used for generation, will be assigned to each agent's llm field
 
         Returns:
             Processed crew setup
@@ -188,6 +189,12 @@ class CrewGenerationService:
                 if field not in agent:
                     logger.error(f"Agent '{agent_name}' is missing required field: {field}")
                     raise ValueError(f"Missing required field '{field}' in agent {i}")
+
+        # Assign the generation model to each agent so they use the dispatcher's model
+        if model:
+            for agent in setup['agents']:
+                agent['llm'] = model
+                logger.info(f"MODEL: Assigned model '{model}' to agent '{agent.get('name', 'Unknown')}'")
 
         # Filter agent tools to only include allowed tools and convert tool names to IDs
         for agent in setup['agents']:
@@ -550,7 +557,7 @@ class CrewGenerationService:
                 logger.info(f"CREATE CREW: Successfully parsed JSON")
 
                 # Process and validate LLM response with the tool name to ID mapping
-                processed_setup = self._process_crew_setup(crew_setup, tools_with_details, tool_name_to_id_map)
+                processed_setup = self._process_crew_setup(crew_setup, tools_with_details, tool_name_to_id_map, model=model)
 
             except Exception as e:
                 error_msg = f"Error generating crew: {str(e)}"
