@@ -1238,7 +1238,7 @@ class DatabricksVectorIndexRepository:
             
             # If we have filters or couldn't get count from stats, do a search
             # Use a dummy vector for counting
-            dummy_vector = [0.0] * 768  # Default dimension, will be ignored for count
+            dummy_vector = [0.0] * 1024  # Default dimension for databricks-gte-large-en
             
             # Search with filters to count matching documents
             search_result = await self.similarity_search(
