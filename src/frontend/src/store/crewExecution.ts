@@ -870,7 +870,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
 
     // Check if we need to show input variables dialog
     // Only check for variables in the nodes relevant to the execution type
-    const variablePattern = /\{([^}]+)\}/g;
+    const variablePattern = /\{([a-zA-Z_][a-zA-Z0-9_-]*)\}/g;
     const hasVariables = resolvedNodes.some(node => {
       // For crew execution, check agent and task nodes
       // For flow execution, we don't check for input variables (flows use crew configurations)

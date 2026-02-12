@@ -253,7 +253,7 @@ describe('crewExecution - handleRunClick node resolution', () => {
 
   describe('variable detection with resolved nodes', () => {
     it('should detect variables in resolved crew nodes, not stale store', () => {
-      const variablePattern = /\{([^}]+)\}/g;
+      const variablePattern = /\{([a-zA-Z_][a-zA-Z0-9_-]*)\}/g;
 
       // Crew nodes have variables
       const crewNodes = [
@@ -285,6 +285,79 @@ describe('crewExecution - handleRunClick node resolution', () => {
       });
 
       expect(hasVariables).toBe(true);
+    });
+  });
+
+  describe('variable pattern regex - identifier-only matching', () => {
+    // The regex used in handleRunClick to detect variables in node fields
+    const variablePattern = /\{([a-zA-Z_][a-zA-Z0-9_-]*)\}/g;
+
+    const testMatch = (input: string): string[] => {
+      variablePattern.lastIndex = 0;
+      const matches: string[] = [];
+      let match;
+      while ((match = variablePattern.exec(input)) !== null) {
+        matches.push(match[1]);
+      }
+      return matches;
+    };
+
+    it('should match simple identifiers like {topic}', () => {
+      expect(testMatch('Search for {topic}')).toEqual(['topic']);
+    });
+
+    it('should match identifiers with underscores like {user_name}', () => {
+      expect(testMatch('Hello {user_name}')).toEqual(['user_name']);
+    });
+
+    it('should match identifiers with hyphens like {date-range}', () => {
+      expect(testMatch('Filter by {date-range}')).toEqual(['date-range']);
+    });
+
+    it('should match identifiers starting with underscore', () => {
+      expect(testMatch('Use {_config}')).toEqual(['_config']);
+    });
+
+    it('should match multiple variables', () => {
+      expect(testMatch('{a} and {b} and {c}')).toEqual(['a', 'b', 'c']);
+    });
+
+    it('should NOT match CSS content like { overflow: hidden; }', () => {
+      expect(testMatch('.reveal { overflow: hidden; }')).toEqual([]);
+    });
+
+    it('should NOT match CSS with font-size like { font-size: 1.5em; }', () => {
+      expect(testMatch('.reveal h2 { font-size: 1.5em; margin-bottom: 0.4em; }')).toEqual([]);
+    });
+
+    it('should NOT match JS config like { width: 960, height: 700 }', () => {
+      expect(testMatch('Reveal.initialize({ width: 960, height: 700 })')).toEqual([]);
+    });
+
+    it('should NOT match content starting with a digit like {123}', () => {
+      expect(testMatch('Item {123}')).toEqual([]);
+    });
+
+    it('should NOT match content with spaces like { some text }', () => {
+      expect(testMatch('Use { some text } here')).toEqual([]);
+    });
+
+    it('should NOT match empty braces {}', () => {
+      expect(testMatch('Empty {} braces')).toEqual([]);
+    });
+
+    it('should NOT match content with colons like {key: value}', () => {
+      expect(testMatch('Object {key: value}')).toEqual([]);
+    });
+
+    it('should correctly handle mixed valid variables and CSS/JS braces', () => {
+      const input = 'Create a {format} presentation about {topic}. CSS: .h1 { font-size: 2em; } JS: init({ width: 960 })';
+      expect(testMatch(input)).toEqual(['format', 'topic']);
+    });
+
+    it('should handle the full reveal.js task description without false positives', () => {
+      const description = `Create a reveal.js presentation. Include CSS: .reveal .slides section { overflow: hidden; } .reveal h1 { font-size: 2.2em; margin-bottom: 0.5em; } .reveal h2 { font-size: 1.5em; margin-bottom: 0.4em; } .reveal ul { font-size: 0.85em; max-height: 60vh; overflow: hidden; margin-left: 1em; } .reveal li { margin: 0.4em 0; line-height: 1.3; } .reveal img { max-height: 45vh; max-width: 85%; display: block; margin: 0 auto; } .reveal p { font-size: 0.9em; max-height: 50vh; overflow: hidden; }. Initialize with: Reveal.initialize({ width: 960, height: 700, margin: 0.1, center: true, hash: true, slideNumber: true, transition: 'slide' }).`;
+      expect(testMatch(description)).toEqual([]);
     });
   });
 });
