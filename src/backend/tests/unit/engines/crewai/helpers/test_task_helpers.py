@@ -500,8 +500,8 @@ class TestCreateTask:
         assert "formatted in markdown" in task.expected_output
     
     @pytest.mark.asyncio
-    async def test_create_task_with_output_file(self):
-        """Test creating a task with output file configuration."""
+    async def test_create_task_ignores_output_file_enabled(self):
+        """Test that output_file_enabled in config does not produce output files."""
         task_key = "output_task"
         task_config = {
             "description": "Task description",
@@ -511,27 +511,24 @@ class TestCreateTask:
         }
         agent = Agent(
             role="TestRole",
-            goal="Test Goal", 
+            goal="Test Goal",
             backstory="Test Backstory",
             verbose=True
         )
-        output_dir = "/test/output"
-        
+
         with patch('src.core.unit_of_work.UnitOfWork'), \
-             patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('os.makedirs') as mock_makedirs:
+             patch('src.services.mcp_service.MCPService') as mock_mcp_service:
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
             ))
-            
-            task = await create_task(task_key, task_config, agent, output_dir=output_dir)
-        
-        assert task.output_file.endswith("test/output/custom_output.md")
-        mock_makedirs.assert_called_once_with(output_dir, exist_ok=True)
-    
+
+            task = await create_task(task_key, task_config, agent, output_dir="/test/output")
+
+        assert task.output_file is None
+
     @pytest.mark.asyncio
-    async def test_create_task_with_direct_output_file(self):
-        """Test creating a task with direct output_file in config."""
+    async def test_create_task_ignores_direct_output_file(self):
+        """Test that output_file in config is not passed to CrewAI Task."""
         task_key = "direct_output_task"
         task_config = {
             "description": "Task description",
@@ -540,22 +537,20 @@ class TestCreateTask:
         }
         agent = Agent(
             role="TestRole",
-            goal="Test Goal", 
+            goal="Test Goal",
             backstory="Test Backstory",
             verbose=True
         )
-        
+
         with patch('src.core.unit_of_work.UnitOfWork'), \
-             patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('os.makedirs') as mock_makedirs:
+             patch('src.services.mcp_service.MCPService') as mock_mcp_service:
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
             ))
-            
+
             task = await create_task(task_key, task_config, agent)
-        
-        assert task.output_file.endswith("direct/path/output.txt")
-        mock_makedirs.assert_called_once_with("/direct/path", exist_ok=True)
+
+        assert task.output_file is None
     
     @pytest.mark.asyncio
     async def test_create_task_with_guardrail(self):
@@ -2825,8 +2820,8 @@ class TestCreateTask:
         mock_configure.assert_called_once()
     
     @pytest.mark.asyncio
-    async def test_create_task_output_directory_creation_error(self):
-        """Test error handling when output directory creation fails."""
+    async def test_create_task_output_file_config_ignored(self):
+        """Test that output_file in config is ignored and no directories are created."""
         task_key = "dir_error_task"
         task_config = {
             "description": "Task description",
@@ -2835,24 +2830,21 @@ class TestCreateTask:
         }
         agent = Agent(
             role="TestRole",
-            goal="Test Goal", 
+            goal="Test Goal",
             backstory="Test Backstory",
             verbose=True
         )
-        
+
         with patch('src.core.unit_of_work.UnitOfWork'), \
-             patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('os.makedirs') as mock_makedirs:
+             patch('src.services.mcp_service.MCPService') as mock_mcp_service:
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
             ))
-            mock_makedirs.side_effect = OSError("Permission denied")
-            
-            # Should still create task despite directory creation error
+
             task = await create_task(task_key, task_config, agent)
-            
+
             assert isinstance(task, Task)
-            assert task.output_file.endswith("invalid/path/output.txt")
+            assert task.output_file is None
     
     @pytest.mark.asyncio
     async def test_create_task_tool_config_with_get_tool_config_by_name(self):
