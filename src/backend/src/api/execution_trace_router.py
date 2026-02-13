@@ -232,7 +232,7 @@ async def get_current_crew_node_states(
                         if isinstance(_extra, dict):
                             _error = _extra.get("error")
                     if _error:
-                        crew_states[crew_name]["error"] = str(_error)[:500]
+                        crew_states[crew_name]["error"] = str(_error)[:2000]
 
     return crew_states
 
