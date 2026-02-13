@@ -15,6 +15,8 @@ import {
   Tooltip,
   ToggleButton,
   ToggleButtonGroup,
+  Tab,
+  Tabs,
 } from '@mui/material';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -27,12 +29,16 @@ import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import HtmlIcon from '@mui/icons-material/Html';
 // import CloudIcon from '@mui/icons-material/Cloud';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import TimelineIcon from '@mui/icons-material/Timeline';
+import DescriptionIcon from '@mui/icons-material/Description';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ShowResultProps } from '../../types/common';
 import { ResultValue } from '../../types/result';
 import { generateRunPDF } from '../../utils/pdfGenerator';
 import { DatabricksService } from '../../api/DatabricksService';
+import { useTraceData } from '../../hooks/global/useTraceData';
+import TraceTimelineContent from './TraceTimelineContent';
 // import { Run } from '../../api/ExecutionHistoryService';
 
 // eslint-disable-next-line react/prop-types
@@ -42,9 +48,21 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
   const [viewMode, setViewMode] = useState<'code' | 'html'>('code');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [databricksVolumeInfo, setDatabricksVolumeInfo] = useState<{ path: string; workspaceUrl?: string } | null>(null);
+  const [activeTab, setActiveTab] = useState(0);
   const dialogRef = useRef<HTMLDivElement>(null);
   // Track if the dialog has been opened at least once
   const hasOpenedRef = useRef(false);
+
+  // Determine if trace tab should be shown (only when we have a job_id)
+  const hasTraceTab = !!run?.job_id;
+
+  // Lazy-loaded trace data — only fetched when trace tab is active
+  const traceData = useTraceData({
+    runId: run?.job_id || '',
+    jobId: run?.job_id,
+    runStatus: run?.status,
+    isActive: hasTraceTab && activeTab === 1 && open,
+  });
 
   // Function to check for Databricks volume information from configuration
   const checkForDatabricksVolumeInfo = useCallback(async (resultData: Record<string, unknown>) => {
@@ -159,6 +177,9 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
         // Check for Databricks volume information from configuration
         checkForDatabricksVolumeInfo(result);
       }
+    } else {
+      // Reset tab to Result when dialog closes — ensures trace tab unmounts and releases memory
+      setActiveTab(0);
     }
   }, [open, result, checkForDatabricksVolumeInfo]);
 
@@ -1049,90 +1070,126 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
         }
       }}
     >
-      <DialogTitle sx={{ px: 3, py: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        {/* View Mode Toggle - only show if HTML content is detected */}
-        {(() => {
-          const hasHTMLContent = Object.values(memoizedResult || {}).some(value =>
-            typeof value === 'string' && isHTML(value)
-          );
-          return hasHTMLContent ? (
-            <ToggleButtonGroup
-              value={viewMode}
-              exclusive
-              onChange={(_, newMode) => newMode && setViewMode(newMode)}
-              size="small"
-              sx={{ height: 32 }}
-            >
-              <ToggleButton value="code" aria-label="code view">
-                <CodeIcon sx={{ mr: 0.5, fontSize: 18 }} />
-                Code
-              </ToggleButton>
-              <ToggleButton value="html" aria-label="html view">
-                <WebIcon sx={{ mr: 0.5, fontSize: 18 }} />
-                HTML
-              </ToggleButton>
-            </ToggleButtonGroup>
-          ) : (
-            <Box />
-          );
-        })()}
+      <DialogTitle sx={{ px: 3, py: 1, pb: 0 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: hasTraceTab ? 0 : 1 }}>
+          {/* Left side: View Mode Toggle (only for result tab with HTML content) */}
+          {activeTab === 0 ? (() => {
+            const hasHTMLContent = Object.values(memoizedResult || {}).some(value =>
+              typeof value === 'string' && isHTML(value)
+            );
+            return hasHTMLContent ? (
+              <ToggleButtonGroup
+                value={viewMode}
+                exclusive
+                onChange={(_, newMode) => newMode && setViewMode(newMode)}
+                size="small"
+                sx={{ height: 32 }}
+              >
+                <ToggleButton value="code" aria-label="code view">
+                  <CodeIcon sx={{ mr: 0.5, fontSize: 18 }} />
+                  Code
+                </ToggleButton>
+                <ToggleButton value="html" aria-label="html view">
+                  <WebIcon sx={{ mr: 0.5, fontSize: 18 }} />
+                  HTML
+                </ToggleButton>
+              </ToggleButtonGroup>
+            ) : (
+              <Box />
+            );
+          })() : <Box />}
 
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <Tooltip title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}>
-            <IconButton
-              onClick={handleFullscreen}
-              size="small"
-              sx={{
-                color: 'text.secondary',
-                transition: 'all 0.2s',
-                '&:hover': {
-                  color: 'primary.main',
-                  backgroundColor: 'action.hover',
-                }
-              }}
-            >
-              {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
-            </IconButton>
-          </Tooltip>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            {activeTab === 0 && (
+              <>
+                <Tooltip title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}>
+                  <IconButton
+                    onClick={handleFullscreen}
+                    size="small"
+                    sx={{
+                      color: 'text.secondary',
+                      transition: 'all 0.2s',
+                      '&:hover': {
+                        color: 'primary.main',
+                        backgroundColor: 'action.hover',
+                      }
+                    }}
+                  >
+                    {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+                  </IconButton>
+                </Tooltip>
 
-          <Tooltip title={copied ? "Copied!" : "Copy to clipboard"}>
-            <IconButton
-              onClick={handleCopyToClipboard}
-              size="small"
-              sx={{
-                color: copied ? 'success.main' : 'text.secondary',
-                transition: 'all 0.2s',
-                '&:hover': {
-                  color: 'primary.main',
-                  backgroundColor: 'action.hover',
-                }
-              }}
-            >
-              {copied ? <CheckIcon /> : <ContentCopyIcon />}
-            </IconButton>
-          </Tooltip>
+                <Tooltip title={copied ? "Copied!" : "Copy to clipboard"}>
+                  <IconButton
+                    onClick={handleCopyToClipboard}
+                    size="small"
+                    sx={{
+                      color: copied ? 'success.main' : 'text.secondary',
+                      transition: 'all 0.2s',
+                      '&:hover': {
+                        color: 'primary.main',
+                        backgroundColor: 'action.hover',
+                      }
+                    }}
+                  >
+                    {copied ? <CheckIcon /> : <ContentCopyIcon />}
+                  </IconButton>
+                </Tooltip>
+              </>
+            )}
+          </Box>
         </Box>
+
+        {/* Tabs - only shown when trace tab is available */}
+        {hasTraceTab && (
+          <Tabs
+            value={activeTab}
+            onChange={(_, newValue) => setActiveTab(newValue)}
+            sx={{ borderBottom: 1, borderColor: 'divider', minHeight: 40 }}
+          >
+            <Tab
+              icon={<DescriptionIcon sx={{ fontSize: 18 }} />}
+              iconPosition="start"
+              label="Result"
+              sx={{ minHeight: 40, textTransform: 'none', fontWeight: 600 }}
+            />
+            <Tab
+              icon={<TimelineIcon sx={{ fontSize: 18 }} />}
+              iconPosition="start"
+              label="Trace Timeline"
+              sx={{ minHeight: 40, textTransform: 'none', fontWeight: 600 }}
+            />
+          </Tabs>
+        )}
       </DialogTitle>
       <DialogContent sx={{
-        px: viewMode === 'html' && Object.values(memoizedResult || {}).some(value =>
+        px: activeTab === 0 && viewMode === 'html' && Object.values(memoizedResult || {}).some(value =>
           typeof value === 'string' && isHTML(value)
-        ) ? 1 : 3,
-        py: viewMode === 'html' && Object.values(memoizedResult || {}).some(value =>
+        ) ? 1 : activeTab === 1 ? 0 : 3,
+        py: activeTab === 0 && viewMode === 'html' && Object.values(memoizedResult || {}).some(value =>
           typeof value === 'string' && isHTML(value)
-        ) ? 1 : 2,
+        ) ? 1 : activeTab === 1 ? 0 : 2,
         overflow: 'auto',
         display: 'flex',
         flexDirection: 'column',
       }}>
-        <Box sx={{
-          px: 0,
-          py: 0,
-          flexGrow: 1,
-          display: 'flex',
-          flexDirection: 'column',
-        }}>
-          {renderContent(memoizedResult)}
-        </Box>
+        {/* Result Tab */}
+        {activeTab === 0 && (
+          <Box sx={{
+            px: 0,
+            py: 0,
+            flexGrow: 1,
+            display: 'flex',
+            flexDirection: 'column',
+          }}>
+            {renderContent(memoizedResult)}
+          </Box>
+        )}
+
+        {/* Trace Timeline Tab — only mounted when active; unmounts when switching away to release memory */}
+        {activeTab === 1 && hasTraceTab && (
+          <TraceTimelineContent {...traceData} />
+        )}
       </DialogContent>
       <DialogActions sx={{ px: 3, py: 2, gap: 1 }}>
         {databricksVolumeInfo && (
@@ -1223,7 +1280,8 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
   return (
     prevProps.open === nextProps.open &&
     prevProps.onClose === nextProps.onClose &&
-    JSON.stringify(prevProps.result) === JSON.stringify(nextProps.result)
+    JSON.stringify(prevProps.result) === JSON.stringify(nextProps.result) &&
+    prevProps.run?.job_id === nextProps.run?.job_id
   );
 });
 
