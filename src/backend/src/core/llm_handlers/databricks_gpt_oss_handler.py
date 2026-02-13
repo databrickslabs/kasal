@@ -735,8 +735,10 @@ class DatabricksRetryLLM(LLM):
     def _sanitize_messages_for_databricks(messages):
         """Fix messages that would be rejected by Databricks API.
 
-        Databricks (Claude-based endpoints) rejects assistant messages where
-        ``content`` is None/empty when the message also carries ``tool_calls``.
+        Databricks (Claude-based endpoints) rejects:
+        1. Assistant messages where ``content`` is None/empty when the message also carries ``tool_calls``
+        2. Conversations that end with an assistant message (Claude requires ending with user message)
+
         CrewAI's retry logic can produce such messages when a tool-call-only
         response fails validation and is re-sent as conversation history.
 
@@ -770,6 +772,19 @@ class DatabricksRetryLLM(LLM):
                     i += 1
             else:
                 i += 1
+
+        # CRITICAL FIX: Claude models through Databricks do not support "assistant message prefill"
+        # This means conversations MUST end with a user message, not an assistant message.
+        # If the last message is from the assistant, add a continuation prompt.
+        if messages and messages[-1].get("role") == "assistant":
+            logger.info(
+                "[DatabricksRetryLLM] Claude model detected: conversation ends with assistant message. "
+                "Adding user continuation prompt to satisfy Claude API requirements."
+            )
+            messages.append({
+                "role": "user",
+                "content": "Please continue with your response."
+            })
 
         return messages
 
@@ -1180,6 +1195,45 @@ def _is_gemini_model(model: str) -> bool:
     return "gemini" in model.lower()
 
 
+def _merge_system_messages_for_gemini(messages, model):
+    """Merge multiple system messages into one for Gemini models.
+
+    Gemini models on Databricks reject conversations with more than one
+    system prompt.  CrewAI builds messages with multiple system entries
+    (agent backstory, task instructions, etc.).  This helper collapses
+    them into a single system message placed at the start of the list.
+
+    Modifies ``messages`` **in-place** and returns it for convenience.
+    """
+    if not messages or not isinstance(messages, list) or not _is_gemini_model(model):
+        return messages
+
+    system_contents = []
+    non_system = []
+    for msg in messages:
+        if isinstance(msg, dict) and msg.get("role") == "system":
+            content = msg.get("content", "")
+            if content:
+                system_contents.append(content if isinstance(content, str) else str(content))
+        else:
+            non_system.append(msg)
+
+    if len(system_contents) <= 1:
+        # Zero or one system message – nothing to merge
+        return messages
+
+    logger.info(
+        f"[Gemini] Merging {len(system_contents)} system messages into one "
+        f"({sum(len(c) for c in system_contents)} chars total)"
+    )
+
+    merged = {"role": "system", "content": "\n\n".join(system_contents)}
+    messages.clear()
+    messages.append(merged)
+    messages.extend(non_system)
+    return messages
+
+
 def _sanitize_tools_for_gemini(tools, model):
     """Remove ``$defs``/``$ref`` from tool function schemas for Gemini models.
 
@@ -1198,7 +1252,7 @@ def _sanitize_tools_for_gemini(tools, model):
 
 
 def apply_empty_content_fix():
-    """Patch litellm.completion to fix two Databricks-specific issues.
+    """Patch litellm.completion to fix Databricks-specific issues.
 
     1. **Empty assistant content** – Databricks (Claude-based) endpoints reject
        assistant messages where ``content`` is None/empty.  CrewAI's instructor
@@ -1210,17 +1264,25 @@ def apply_empty_content_fix():
        Schema ``$defs``/``$ref`` in tool parameter definitions.  CrewAI's
        instructor generates these from Pydantic models.
 
+    3. **Gemini multiple system prompts** – Gemini models on Databricks only
+       support a single system prompt.  CrewAI builds conversations with
+       multiple system messages (agent backstory, task instructions, etc.)
+       which must be merged into one.
+
     Patching at the litellm level ensures every code path is covered.
     """
     _original_completion = litellm.completion
 
     def _sanitized_completion(*args, **kwargs):
         messages = kwargs.get("messages")
+        model = kwargs.get("model", "")
+
         if messages and isinstance(messages, list):
             DatabricksRetryLLM._sanitize_messages_for_databricks(messages)
+            # Gemini: merge multiple system messages into one
+            _merge_system_messages_for_gemini(messages, model)
 
         # Resolve $ref/$defs in tool schemas for Gemini models
-        model = kwargs.get("model", "")
         tools = kwargs.get("tools")
         if tools and isinstance(tools, list):
             _sanitize_tools_for_gemini(tools, model)
@@ -1230,7 +1292,8 @@ def apply_empty_content_fix():
     litellm.completion = _sanitized_completion
     logger.info(
         "Patched litellm.completion: assistant messages with empty content "
-        "are sanitized and Gemini tool schemas are resolved before API calls"
+        "are sanitized, Gemini tool schemas are resolved, and Gemini system "
+        "messages are merged before API calls"
     )
 
 
