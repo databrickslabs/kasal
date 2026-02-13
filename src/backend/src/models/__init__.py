@@ -25,3 +25,5 @@ from src.models.group import Group, GroupUser
 from src.models.hitl_approval import HITLApproval, HITLWebhook, HITLApprovalStatus, HITLTimeoutAction, HITLRejectionAction
 from src.models.powerbi_context_config import PowerBIBusinessMapping, PowerBIFieldSynonym
 from src.models.powerbi_semantic_model_cache import PowerBISemanticModelCache
+from src.models.chat_history import ChatHistory
+from src.models.group_tool import GroupTool
