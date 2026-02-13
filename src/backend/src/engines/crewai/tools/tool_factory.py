@@ -93,9 +93,6 @@ except ImportError as e:
 # Power BI Relationships Tool
 try:
     from .custom.powerbi_relationships_tool import PowerBIRelationshipsTool
-    # DISABLED FOR LOCAL DEVELOPMENT - Azure AD authentication doesn't work locally
-    PowerBIRelationshipsTool = None
-    logging.info("PowerBIRelationshipsTool disabled for local development")
 except ImportError as e:
     PowerBIRelationshipsTool = None
     logging.warning(f"Could not import PowerBIRelationshipsTool: {e}")
