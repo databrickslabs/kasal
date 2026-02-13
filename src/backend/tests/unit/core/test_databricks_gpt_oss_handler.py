@@ -14,6 +14,7 @@ import logging
 from src.core.llm_handlers.databricks_gpt_oss_handler import (
     DatabricksGPTOSSHandler,
     DatabricksGPTOSSLLM,
+    DatabricksRetryLLM,
     apply_tool_calls_fix,
 )
 
@@ -337,6 +338,88 @@ class TestDatabricksGPTOSSLLM:
 
         result = llm._handle_non_streaming_response(params)
         assert result == ""
+
+
+class TestSanitizeMessagesForDatabricks:
+    """Test suite for DatabricksRetryLLM._sanitize_messages_for_databricks."""
+
+    def test_returns_none_for_none_input(self):
+        assert DatabricksRetryLLM._sanitize_messages_for_databricks(None) is None
+
+    def test_returns_empty_for_empty_list(self):
+        assert DatabricksRetryLLM._sanitize_messages_for_databricks([]) == []
+
+    def test_passthrough_for_non_list(self):
+        assert DatabricksRetryLLM._sanitize_messages_for_databricks("not a list") == "not a list"
+
+    def test_leaves_normal_messages_unchanged(self):
+        msgs = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there!"},
+        ]
+        DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
+        assert len(msgs) == 3
+        assert msgs[2]["content"] == "Hi there!"
+
+    def test_fixes_assistant_content_none_with_tool_calls(self):
+        msgs = [
+            {"role": "user", "content": "Do something"},
+            {"role": "assistant", "content": None, "tool_calls": [{"id": "1", "function": {"name": "f"}}]},
+        ]
+        DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
+        assert len(msgs) == 2
+        assert msgs[1]["content"] == "Calling tools."
+        assert msgs[1]["tool_calls"] == [{"id": "1", "function": {"name": "f"}}]
+
+    def test_fixes_assistant_empty_string_with_tool_calls(self):
+        msgs = [
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "1"}]},
+        ]
+        DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
+        assert msgs[0]["content"] == "Calling tools."
+
+    def test_fixes_assistant_whitespace_with_tool_calls(self):
+        msgs = [
+            {"role": "assistant", "content": "   ", "tool_calls": [{"id": "1"}]},
+        ]
+        DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
+        assert msgs[0]["content"] == "Calling tools."
+
+    def test_removes_assistant_empty_content_no_tool_calls(self):
+        msgs = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": None},
+            {"role": "user", "content": "Try again"},
+        ]
+        DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
+        assert len(msgs) == 2
+        assert msgs[0]["role"] == "user"
+        assert msgs[1]["content"] == "Try again"
+
+    def test_modifies_list_in_place(self):
+        original = [
+            {"role": "assistant", "content": None, "tool_calls": [{"id": "1"}]},
+        ]
+        result = DatabricksRetryLLM._sanitize_messages_for_databricks(original)
+        assert result is original
+        assert original[0]["content"] == "Calling tools."
+
+    def test_handles_non_dict_items(self):
+        msgs = ["plain string", {"role": "user", "content": "Hello"}]
+        DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
+        assert len(msgs) == 2
+        assert msgs[0] == "plain string"
+
+    def test_does_not_touch_user_or_system_messages(self):
+        msgs = [
+            {"role": "system", "content": None},
+            {"role": "user", "content": None},
+        ]
+        DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
+        assert len(msgs) == 2
+        assert msgs[0]["content"] is None
+        assert msgs[1]["content"] is None
 
 
 class TestApplyToolCallsFix:

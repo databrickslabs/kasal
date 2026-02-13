@@ -351,6 +351,10 @@ class DatabricksGPTOSSLLM(LLM):
             logger.info(f"[_handle_non_streaming_response] Filtered params for GPT-OSS")
             logger.info(f"[_handle_non_streaming_response] Model in params: {params.get('model', 'NOT SET')}")
 
+            # Sanitize empty content blocks that Databricks API rejects
+            if 'messages' in params:
+                params['messages'] = DatabricksRetryLLM._sanitize_messages_for_databricks(params['messages'])
+
             # Add system instruction for better responses if missing
             if 'messages' in params and params['messages']:
                 # Check if first message is system message
@@ -523,6 +527,46 @@ class DatabricksRetryLLM(LLM):
         """
         return self.RATE_LIMIT_MAX_RETRIES if is_rate_limit else self.MAX_RETRIES
 
+    @staticmethod
+    def _sanitize_messages_for_databricks(messages):
+        """Fix messages that would be rejected by Databricks API.
+
+        Databricks (Claude-based endpoints) rejects assistant messages where
+        ``content`` is None/empty when the message also carries ``tool_calls``.
+        CrewAI's retry logic can produce such messages when a tool-call-only
+        response fails validation and is re-sent as conversation history.
+
+        This method modifies the list **in-place** so that callers holding a
+        reference to the original list (e.g. after a shallow dict copy) still
+        see the fixes.  Returns the same list for convenience.
+        """
+        if not messages or not isinstance(messages, list):
+            return messages
+
+        i = 0
+        while i < len(messages):
+            msg = messages[i]
+            if not isinstance(msg, dict):
+                i += 1
+                continue
+
+            if msg.get("role") == "assistant":
+                content = msg.get("content")
+                has_tool_calls = bool(msg.get("tool_calls"))
+                content_is_empty = content is None or (isinstance(content, str) and not content.strip())
+
+                if content_is_empty and has_tool_calls:
+                    messages[i] = {**msg, "content": "Calling tools."}
+                    i += 1
+                elif content_is_empty and not has_tool_calls:
+                    messages.pop(i)
+                else:
+                    i += 1
+            else:
+                i += 1
+
+        return messages
+
     def _fix_message_format_for_llama(self, messages, crew_log):
         """
         Fix message format for Llama models only.
@@ -582,6 +626,8 @@ class DatabricksRetryLLM(LLM):
 
         # Fix message format for Llama 4 before making calls
         fixed_messages = self._fix_message_format_for_llama(messages, crew_log)
+        # Sanitize empty content blocks that Databricks API rejects
+        fixed_messages = self._sanitize_messages_for_databricks(fixed_messages)
         msg_count = len(fixed_messages) if isinstance(fixed_messages, list) else 1
 
         while True:
@@ -676,6 +722,10 @@ class DatabricksRetryLLM(LLM):
         last_error = None
         is_rate_limit = False
         attempt = 0
+
+        # Sanitize empty content blocks in messages that Databricks API rejects
+        if isinstance(params, dict) and 'messages' in params:
+            params['messages'] = self._sanitize_messages_for_databricks(params['messages'])
 
         while True:
             max_retries = self._get_max_retries(is_rate_limit)
