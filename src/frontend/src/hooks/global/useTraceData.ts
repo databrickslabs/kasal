@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { ProcessedTraces, TraceEvent } from '../../types/trace';
+import { ProcessedTraces, TraceEvent, RunConfig, RunConfigAgent, RunConfigTask } from '../../types/trace';
 import {
   processTraceEvent,
   extractOutputForDisplay,
@@ -371,13 +371,32 @@ function processTraces(rawTraces: Trace[]): ProcessedTraces {
     });
   });
 
+  // Extract run configuration from crew_started/execution_started trace metadata
+  let runConfig: RunConfig | undefined;
+  for (const trace of sorted) {
+    if (trace.trace_metadata && typeof trace.trace_metadata === 'object') {
+      const meta = trace.trace_metadata as Record<string, unknown>;
+      if (meta.crew_agents && Array.isArray(meta.crew_agents)) {
+        runConfig = {
+          crew_key: meta.crew_key as string | undefined,
+          crew_id: meta.crew_id as string | undefined,
+          crew_agents: meta.crew_agents as RunConfigAgent[],
+          crew_tasks: (meta.crew_tasks || []) as RunConfigTask[],
+          crew_inputs: meta.crew_inputs as Record<string, unknown> | undefined,
+        };
+        break;
+      }
+    }
+  }
+
   return {
     globalStart,
     globalEnd,
     totalDuration,
     agents,
     globalEvents,
-    crewPlanningEvents
+    crewPlanningEvents,
+    runConfig,
   };
 }
 

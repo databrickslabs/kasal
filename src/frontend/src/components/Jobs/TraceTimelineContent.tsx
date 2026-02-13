@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React, { memo, useState } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -35,12 +35,13 @@ import AssignmentIcon from '@mui/icons-material/Assignment';
 import PersonIcon from '@mui/icons-material/Person';
 import BuildIcon from '@mui/icons-material/Build';
 import TargetIcon from '@mui/icons-material/TrackChanges';
+import TuneIcon from '@mui/icons-material/Tune';
 import {
   isEventClickable,
   getEventIcon as getEventIconConfig,
 } from './traceEventProcessors';
 import { PaginatedOutput } from '../Common';
-import { ProcessedTraces } from '../../types/trace';
+import { ProcessedTraces, RunConfig } from '../../types/trace';
 
 // Interface for parsed task data
 interface ParsedTask {
@@ -272,6 +273,7 @@ const FormattedTaskDescription: React.FC<{ description: string }> = ({ descripti
 
 export interface TraceTimelineContentProps {
   processedTraces: ProcessedTraces | null;
+  runConfig?: RunConfig;
   loading: boolean;
   error: string | null;
   viewMode: 'summary' | 'timeline';
@@ -328,6 +330,7 @@ const getEventIcon = (type: string): JSX.Element => {
 
 const TraceTimelineContent = memo<TraceTimelineContentProps>(({
   processedTraces,
+  runConfig: runConfigProp,
   loading,
   error,
   viewMode,
@@ -346,10 +349,15 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
   formatTimeDelta,
   truncateTaskName,
 }) => {
+  const [runConfigOpen, setRunConfigOpen] = useState(false);
+
+  // Use runConfig from prop or from processedTraces
+  const runConfig = runConfigProp ?? processedTraces?.runConfig;
+
   return (
     <Box sx={{ contain: 'content' }}>
-      {/* View mode toggle */}
-      <Box sx={{ px: 2, pt: 2, pb: 1, display: 'flex', justifyContent: 'flex-start' }}>
+      {/* View mode toggle + Run Config button */}
+      <Box sx={{ px: 2, pt: 2, pb: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <ToggleButtonGroup
           value={viewMode}
           exclusive
@@ -365,6 +373,17 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
             Timeline
           </ToggleButton>
         </ToggleButtonGroup>
+        {runConfig && (
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<TuneIcon />}
+            onClick={() => setRunConfigOpen(true)}
+            sx={{ textTransform: 'none', fontWeight: 500 }}
+          >
+            Run Config
+          </Button>
+        )}
       </Box>
 
       {/* Content area */}
@@ -962,6 +981,210 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
           </Box>
         )}
       </Box>
+
+      {/* Run Configuration Dialog */}
+      <Dialog
+        open={runConfigOpen}
+        onClose={() => setRunConfigOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <TuneIcon color="primary" />
+            <Typography variant="h6">Run Configuration</Typography>
+          </Box>
+          <IconButton onClick={() => setRunConfigOpen(false)} size="small">
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          {runConfig && (
+            <Box sx={{ maxHeight: '60vh', overflow: 'auto' }}>
+              {/* Run Name from crew_inputs */}
+              {runConfig.crew_inputs?.run_name != null && (
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="caption" color="text.secondary">Run Name</Typography>
+                  <Typography variant="subtitle1" fontWeight="bold">
+                    {String(runConfig.crew_inputs.run_name)}
+                  </Typography>
+                </Box>
+              )}
+
+              {/* Crew Info */}
+              {(runConfig.crew_key || runConfig.crew_id) && (
+                <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap' }}>
+                  {runConfig.crew_key && (
+                    <Chip label={`Crew: ${runConfig.crew_key}`} size="small" color="primary" variant="outlined" />
+                  )}
+                  {runConfig.crew_id && (
+                    <Chip label={`ID: ${runConfig.crew_id.substring(0, 8)}...`} size="small" variant="outlined" />
+                  )}
+                </Box>
+              )}
+
+              {/* Agents Section */}
+              {runConfig.crew_agents.length > 0 && (
+                <Box sx={{ mb: 3 }}>
+                  <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <PersonIcon fontSize="small" color="primary" />
+                    Agents ({runConfig.crew_agents.length})
+                  </Typography>
+                  <Stack spacing={1.5}>
+                    {runConfig.crew_agents.map((agent, idx) => (
+                      <Card key={agent.id || idx} variant="outlined" sx={{ borderRadius: 2 }}>
+                        <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                            <Chip label={agent.role} size="small" color="secondary" icon={<PersonIcon />} />
+                            {agent.delegation_enabled && (
+                              <Chip label="Delegation" size="small" variant="outlined" color="info" />
+                            )}
+                            {agent.max_iter && (
+                              <Chip label={`Max Iter: ${agent.max_iter}`} size="small" variant="outlined" />
+                            )}
+                            {agent.max_rpm && (
+                              <Chip label={`Max RPM: ${agent.max_rpm}`} size="small" variant="outlined" />
+                            )}
+                          </Box>
+                          {agent.goal && (
+                            <Box sx={{ mb: 1 }}>
+                              <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                <TargetIcon fontSize="inherit" /> Goal
+                              </Typography>
+                              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                                {agent.goal}
+                              </Typography>
+                            </Box>
+                          )}
+                          {agent.backstory && (
+                            <Box sx={{ mb: 1 }}>
+                              <Typography variant="caption" color="text.secondary">Backstory</Typography>
+                              <Paper sx={{ p: 1, bgcolor: 'action.hover', borderRadius: 1 }}>
+                                <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', fontSize: '0.8rem' }}>
+                                  {agent.backstory}
+                                </Typography>
+                              </Paper>
+                            </Box>
+                          )}
+                          {agent.tools_names && agent.tools_names.length > 0 && (
+                            <Box>
+                              <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                <BuildIcon fontSize="inherit" /> Tools
+                              </Typography>
+                              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                                {agent.tools_names.map((tool, tIdx) => (
+                                  <Chip key={tIdx} label={tool} size="small" color="info" variant="outlined" icon={<BuildIcon />} />
+                                ))}
+                              </Box>
+                            </Box>
+                          )}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </Stack>
+                </Box>
+              )}
+
+              {/* Tasks Section */}
+              {runConfig.crew_tasks.length > 0 && (
+                <Box sx={{ mb: 3 }}>
+                  <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <AssignmentIcon fontSize="small" color="primary" />
+                    Tasks ({runConfig.crew_tasks.length})
+                  </Typography>
+                  <Stack spacing={1.5}>
+                    {runConfig.crew_tasks.map((task, idx) => (
+                      <Card key={task.id || idx} variant="outlined" sx={{ borderRadius: 2 }}>
+                        <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, flexWrap: 'wrap' }}>
+                            <Chip label={`Task ${idx + 1}`} size="small" color="primary" icon={<AssignmentIcon />} />
+                            <Chip label={task.agent_role} size="small" color="secondary" variant="outlined" icon={<PersonIcon />} />
+                            {task.async_execution && (
+                              <Chip label="Async" size="small" variant="outlined" color="warning" />
+                            )}
+                            {task.human_input && (
+                              <Chip label="Human Input" size="small" variant="outlined" color="info" />
+                            )}
+                          </Box>
+                          <Box sx={{ mb: 1 }}>
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                              <AssignmentIcon fontSize="inherit" /> Description
+                            </Typography>
+                            <Paper sx={{ p: 1, bgcolor: 'action.hover', borderRadius: 1 }}>
+                              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', fontSize: '0.8rem' }}>
+                                {task.description}
+                              </Typography>
+                            </Paper>
+                          </Box>
+                          {task.expected_output && (
+                            <Box sx={{ mb: 1 }}>
+                              <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                <CheckCircleIcon fontSize="inherit" /> Expected Output
+                              </Typography>
+                              <Paper sx={{ p: 1, bgcolor: 'success.main', color: 'success.contrastText', borderRadius: 1, opacity: 0.9 }}>
+                                <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', fontSize: '0.8rem' }}>
+                                  {task.expected_output}
+                                </Typography>
+                              </Paper>
+                            </Box>
+                          )}
+                          {task.tools_names && task.tools_names.length > 0 && (
+                            <Box>
+                              <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                <BuildIcon fontSize="inherit" /> Tools
+                              </Typography>
+                              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                                {task.tools_names.map((tool, tIdx) => (
+                                  <Chip key={tIdx} label={tool} size="small" color="info" variant="outlined" icon={<BuildIcon />} />
+                                ))}
+                              </Box>
+                            </Box>
+                          )}
+                          {task.context && task.context.length > 0 && (
+                            <Box sx={{ mt: 0.5 }}>
+                              <Typography variant="caption" color="text.secondary">Context Tasks</Typography>
+                              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                                {task.context.map((ctxId, cIdx) => (
+                                  <Chip key={cIdx} label={ctxId} size="small" variant="outlined" />
+                                ))}
+                              </Box>
+                            </Box>
+                          )}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </Stack>
+                </Box>
+              )}
+
+              {/* Additional Inputs Section */}
+              {runConfig.crew_inputs && Object.keys(runConfig.crew_inputs).filter(k => k !== 'run_name').length > 0 && (
+                <Box>
+                  <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 1 }}>
+                    Crew Inputs
+                  </Typography>
+                  <Paper sx={{ p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
+                    <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '0.8rem' }}>
+                      {JSON.stringify(
+                        Object.fromEntries(
+                          Object.entries(runConfig.crew_inputs).filter(([k]) => k !== 'run_name')
+                        ),
+                        null,
+                        2
+                      )}
+                    </pre>
+                  </Paper>
+                </Box>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRunConfigOpen(false)} size="small">
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Task Description Dialog */}
       <Dialog
