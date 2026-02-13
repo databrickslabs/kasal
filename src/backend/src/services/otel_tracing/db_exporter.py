@@ -64,6 +64,8 @@ SPAN_NAME_MAP: Dict[str, str] = {
     "kasal.mcp.tool_completed": "mcp_tool_completed",
     "kasal.hitl.feedback_requested": "hitl_feedback_requested",
     "kasal.hitl.feedback_received": "hitl_feedback_received",
+    # LLM retry backoff (emitted by DatabricksRetryLLM)
+    "kasal.llm.retry": "llm_retry",
 }
 
 
@@ -119,7 +121,9 @@ def _extract_event_source(span: ReadableSpan) -> str:
 
     # CrewAI instrumentor + kasal bridge + OpenInference graph node
     for key in (
-        "crewai.agent.role", "kasal.agent_name", "agent.role",
+        "crewai.agent.role",
+        "kasal.agent_name",
+        "agent.role",
         "graph.node.id",
     ):
         val = attrs.get(key)
@@ -148,7 +152,9 @@ def _extract_event_context(span: ReadableSpan) -> str:
     attrs = dict(span.attributes) if span.attributes else {}
 
     for key in (
-        "crewai.task.description", "kasal.task_name", "task.description",
+        "crewai.task.description",
+        "kasal.task_name",
+        "task.description",
         "formatted_description",
     ):
         val = attrs.get(key)
@@ -225,7 +231,7 @@ def _extract_output(span: ReadableSpan) -> Any:
     extra: Dict[str, Any] = {}
     for key, val in attrs.items():
         if key.startswith("kasal.extra."):
-            extra[key[len("kasal.extra."):]] = val
+            extra[key[len("kasal.extra.") :]] = val
     if extra:
         output["extra_data"] = extra
 
@@ -245,7 +251,7 @@ def _extract_trace_metadata(span: ReadableSpan) -> Dict[str, Any]:
     prefix = "kasal.extra."
     for key, val in attrs.items():
         if key.startswith(prefix) and val is not None:
-            metadata[key[len(prefix):]] = val
+            metadata[key[len(prefix) :]] = val
 
     # CrewAI instrumentor IDs
     for key, meta_key in (
@@ -386,9 +392,7 @@ class KasalDBSpanExporter(SpanExporter):
             ),
             # OTel-native fields
             "span_name": span.name,
-            "status_code": (
-                span.status.status_code.name if span.status else "UNSET"
-            ),
+            "status_code": (span.status.status_code.name if span.status else "UNSET"),
             "duration_ms": (
                 round((span.end_time - span.start_time) / 1_000_000)
                 if span.start_time and span.end_time
@@ -398,12 +402,8 @@ class KasalDBSpanExporter(SpanExporter):
 
         # Group context
         if self._group_context:
-            record["group_id"] = getattr(
-                self._group_context, "primary_group_id", None
-            )
-            record["group_email"] = getattr(
-                self._group_context, "group_email", None
-            )
+            record["group_id"] = getattr(self._group_context, "primary_group_id", None)
+            record["group_email"] = getattr(self._group_context, "group_email", None)
 
         return record
 
@@ -429,9 +429,7 @@ class KasalDBSpanExporter(SpanExporter):
                         # Clean output for JSON serialization
                         output = record.get("output", {})
                         if output:
-                            cleaned = json.loads(
-                                json.dumps(output, cls=UUIDEncoder)
-                            )
+                            cleaned = json.loads(json.dumps(output, cls=UUIDEncoder))
                         else:
                             cleaned = {}
 
