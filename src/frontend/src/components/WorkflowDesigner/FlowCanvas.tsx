@@ -43,7 +43,6 @@ import { useFlowExecutionStore } from '../../store/flowExecutionStore';
 import { CrewNode } from '../Flow';
 
 // Edge types
-import AnimatedEdge from '../Common/AnimatedEdge';
 import CrewEdge from '../Flow/CrewEdge';
 
 // Node and edge types configuration
@@ -51,8 +50,9 @@ const nodeTypes = {
   crewNode: CrewNode,
 };
 
+// Note: Only crewEdge is customized. 'default' edges use ReactFlow's built-in component
+// since ReactFlow doesn't allow overriding the 'default' edge type name.
 const edgeTypes = {
-  default: AnimatedEdge,
   crewEdge: CrewEdge
 };
 

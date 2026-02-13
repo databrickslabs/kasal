@@ -645,7 +645,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
             background: (theme: { palette: { mode: string } }) => theme.palette.mode === 'light'
               ? 'linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.4))'
               : 'linear-gradient(180deg, rgba(0,0,0,0.3), rgba(0,0,0,0.2))',
-            backdropFilter: 'blur(1px)',
+            // backdropFilter removed - was creating stacking context causing edges to render on top during pulsing
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
