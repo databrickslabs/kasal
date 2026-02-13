@@ -1143,15 +1143,74 @@ def apply_tool_calls_fix():
             logger.error(f"Failed to patch LLM.{method_name}: {e}")
 
 
-def apply_empty_content_fix():
-    """Patch litellm.completion to fix empty assistant content blocks.
+def _resolve_schema_refs(schema):
+    """Recursively resolve ``$ref`` references in a JSON Schema and remove ``$defs``.
 
-    Databricks (Claude-based) endpoints reject assistant messages where
-    ``content`` is None/empty.  CrewAI's instructor retry wraps
-    tool-call-only responses (content=None) back into the conversation,
-    and calls ``litellm.completion`` directly — bypassing our
-    DatabricksRetryLLM wrapper.  Patching at the litellm level ensures
-    every code path is covered.
+    Gemini models served via Databricks reject tool parameter schemas that
+    contain ``$defs`` and ``$ref`` (standard JSON Schema features).  This
+    helper inlines every ``$ref`` and strips ``$defs`` so the schema is
+    self-contained.
+    """
+    if not isinstance(schema, dict):
+        return schema
+
+    defs = schema.get("$defs") or schema.get("definitions") or {}
+
+    def _resolve(node):
+        if isinstance(node, dict):
+            if "$ref" in node:
+                ref_path = node["$ref"]  # e.g. "#/$defs/Foo"
+                ref_name = ref_path.rsplit("/", 1)[-1]
+                resolved = defs.get(ref_name, {})
+                # Merge any sibling keys (e.g. description) with the resolved def
+                merged = {**_resolve(resolved), **{k: v for k, v in node.items() if k != "$ref"}}
+                return merged
+            return {k: _resolve(v) for k, v in node.items() if k not in ("$defs", "definitions")}
+        if isinstance(node, list):
+            return [_resolve(item) for item in node]
+        return node
+
+    return _resolve(schema)
+
+
+def _is_gemini_model(model: str) -> bool:
+    """Check whether a model name refers to a Gemini model on Databricks."""
+    if not model:
+        return False
+    return "gemini" in model.lower()
+
+
+def _sanitize_tools_for_gemini(tools, model):
+    """Remove ``$defs``/``$ref`` from tool function schemas for Gemini models.
+
+    Modifies the tools list **in-place** when the model is Gemini.
+    """
+    if not tools or not _is_gemini_model(model):
+        return
+
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        func = tool.get("function") or {}
+        params = func.get("parameters")
+        if params and isinstance(params, dict) and ("$defs" in params or "$ref" in params or "definitions" in params):
+            func["parameters"] = _resolve_schema_refs(params)
+
+
+def apply_empty_content_fix():
+    """Patch litellm.completion to fix two Databricks-specific issues.
+
+    1. **Empty assistant content** – Databricks (Claude-based) endpoints reject
+       assistant messages where ``content`` is None/empty.  CrewAI's instructor
+       retry wraps tool-call-only responses (content=None) back into the
+       conversation and calls ``litellm.completion`` directly, bypassing our
+       DatabricksRetryLLM wrapper.
+
+    2. **Gemini $ref in tool schemas** – Gemini models on Databricks reject JSON
+       Schema ``$defs``/``$ref`` in tool parameter definitions.  CrewAI's
+       instructor generates these from Pydantic models.
+
+    Patching at the litellm level ensures every code path is covered.
     """
     _original_completion = litellm.completion
 
@@ -1159,12 +1218,19 @@ def apply_empty_content_fix():
         messages = kwargs.get("messages")
         if messages and isinstance(messages, list):
             DatabricksRetryLLM._sanitize_messages_for_databricks(messages)
+
+        # Resolve $ref/$defs in tool schemas for Gemini models
+        model = kwargs.get("model", "")
+        tools = kwargs.get("tools")
+        if tools and isinstance(tools, list):
+            _sanitize_tools_for_gemini(tools, model)
+
         return _original_completion(*args, **kwargs)
 
     litellm.completion = _sanitized_completion
     logger.info(
         "Patched litellm.completion: assistant messages with empty content "
-        "are sanitized before API calls"
+        "are sanitized and Gemini tool schemas are resolved before API calls"
     )
 
 

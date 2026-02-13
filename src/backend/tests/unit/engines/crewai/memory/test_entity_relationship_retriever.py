@@ -63,6 +63,14 @@ from src.engines.crewai.memory.entity_relationship_retriever import (
     RetrievalCandidate,
 )
 
+# Immediately restore original modules after our import so that other test
+# files collected later by pytest do not see the mocked crewai modules.
+for _mod_name, _original in _originals.items():
+    if _original is None:
+        sys.modules.pop(_mod_name, None)
+    else:
+        sys.modules[_mod_name] = _original
+
 
 @pytest.fixture
 def mock_memory_backend_service():
