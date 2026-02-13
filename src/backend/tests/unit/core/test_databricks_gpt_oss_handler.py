@@ -15,6 +15,7 @@ from src.core.llm_handlers.databricks_gpt_oss_handler import (
     DatabricksGPTOSSHandler,
     DatabricksGPTOSSLLM,
     DatabricksRetryLLM,
+    apply_empty_content_fix,
     apply_tool_calls_fix,
 )
 
@@ -420,6 +421,44 @@ class TestSanitizeMessagesForDatabricks:
         assert len(msgs) == 2
         assert msgs[0]["content"] is None
         assert msgs[1]["content"] is None
+
+
+class TestApplyEmptyContentFix:
+    """Test suite for apply_empty_content_fix litellm.completion patch."""
+
+    def test_sanitizes_messages_before_litellm_call(self):
+        """Verify litellm.completion receives sanitized messages."""
+        import litellm
+
+        captured_messages = []
+        original = litellm.completion
+
+        def capturing_completion(*args, **kwargs):
+            captured_messages.append(kwargs.get("messages", []))
+            raise RuntimeError("stop here")
+
+        litellm.completion = capturing_completion
+        apply_empty_content_fix()
+
+        try:
+            litellm.completion(
+                model="test",
+                messages=[
+                    {"role": "user", "content": "Hello"},
+                    {"role": "assistant", "content": None, "tool_calls": [{"id": "1"}]},
+                    {"role": "user", "content": "Retry"},
+                ],
+            )
+        except RuntimeError:
+            pass
+        finally:
+            litellm.completion = original
+            apply_empty_content_fix()
+
+        assert len(captured_messages) == 1
+        msgs = captured_messages[0]
+        assert msgs[1]["content"] == "Calling tools."
+        assert msgs[1]["tool_calls"] == [{"id": "1"}]
 
 
 class TestApplyToolCallsFix:

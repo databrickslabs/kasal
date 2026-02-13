@@ -837,6 +837,32 @@ def apply_tool_calls_fix():
             logger.error(f"Failed to patch LLM.{method_name}: {e}")
 
 
+def apply_empty_content_fix():
+    """Patch litellm.completion to fix empty assistant content blocks.
+
+    Databricks (Claude-based) endpoints reject assistant messages where
+    ``content`` is None/empty.  CrewAI's instructor retry wraps
+    tool-call-only responses (content=None) back into the conversation,
+    and calls ``litellm.completion`` directly — bypassing our
+    DatabricksRetryLLM wrapper.  Patching at the litellm level ensures
+    every code path is covered.
+    """
+    _original_completion = litellm.completion
+
+    def _sanitized_completion(*args, **kwargs):
+        messages = kwargs.get("messages")
+        if messages and isinstance(messages, list):
+            DatabricksRetryLLM._sanitize_messages_for_databricks(messages)
+        return _original_completion(*args, **kwargs)
+
+    litellm.completion = _sanitized_completion
+    logger.info(
+        "Patched litellm.completion: assistant messages with empty content "
+        "are sanitized before API calls"
+    )
+
+
 # Apply the monkey patches when this module is imported
 DatabricksGPTOSSHandler.apply_monkey_patch()
 apply_tool_calls_fix()
+apply_empty_content_fix()
