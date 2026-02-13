@@ -57,6 +57,14 @@ from unittest.mock import patch, AsyncMock
 
 from src.engines.crewai.memory.crewai_databricks_wrapper import CrewAIDatabricksWrapper
 
+# Immediately restore original modules after our import so that other test
+# files collected later by pytest do not see the mocked crewai modules.
+for _mod_name, _original in _originals.items():
+    if _original is None:
+        sys.modules.pop(_mod_name, None)
+    else:
+        sys.modules[_mod_name] = _original
+
 
 @pytest.fixture
 def mock_databricks_storage():

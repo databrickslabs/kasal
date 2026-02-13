@@ -54,6 +54,14 @@ import pytest
 from unittest.mock import patch, AsyncMock
 from src.engines.crewai.config.embedder_config_builder import EmbedderConfigBuilder
 
+# Immediately restore original modules after our import so that other test
+# files collected later by pytest do not see the mocked crewai modules.
+for _mod_name, _original in _originals.items():
+    if _original is None:
+        sys.modules.pop(_mod_name, None)
+    else:
+        sys.modules[_mod_name] = _original
+
 
 class TestEmbedderConfigBuilder:
     """Test EmbedderConfigBuilder class"""
