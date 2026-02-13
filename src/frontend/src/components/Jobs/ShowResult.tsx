@@ -1188,7 +1188,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
 
         {/* Trace Timeline Tab — only mounted when active; unmounts when switching away to release memory */}
         {activeTab === 1 && hasTraceTab && (
-          <TraceTimelineContent {...traceData} />
+          <TraceTimelineContent {...traceData} runConfig={traceData.processedTraces?.runConfig} />
         )}
       </DialogContent>
       <DialogActions sx={{ px: 3, py: 2, gap: 1 }}>

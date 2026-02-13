@@ -60,6 +60,39 @@ export interface GroupedTrace {
   }[];
 }
 
+export interface RunConfigAgent {
+  key: string;
+  id: string;
+  role: string;
+  goal: string;
+  backstory: string;
+  verbose?: boolean;
+  max_iter?: number;
+  max_rpm?: number;
+  delegation_enabled?: boolean;
+  tools_names?: string[];
+}
+
+export interface RunConfigTask {
+  id: string;
+  description: string;
+  expected_output: string;
+  agent_role: string;
+  agent_key: string;
+  async_execution?: boolean;
+  human_input?: boolean;
+  tools_names?: string[];
+  context?: string[] | null;
+}
+
+export interface RunConfig {
+  crew_key?: string;
+  crew_id?: string;
+  crew_agents: RunConfigAgent[];
+  crew_tasks: RunConfigTask[];
+  crew_inputs?: Record<string, unknown>;
+}
+
 export interface ProcessedTraces {
   globalStart?: Date;
   globalEnd?: Date;
@@ -70,6 +103,7 @@ export interface ProcessedTraces {
     end: Trace[];
   };
   crewPlanningEvents: TraceEvent[];
+  runConfig?: RunConfig;
 }
 
 export interface TaskDetails {
