@@ -211,7 +211,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Default to PostgreSQL if no DB type specified
+# Default to SQLite if no DB type specified (change to "postgres" if you prefer PostgreSQL)
 if [ -z "$DB_TYPE" ]; then
     DB_TYPE="postgres"
 fi
