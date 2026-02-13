@@ -261,6 +261,8 @@ def run_flow_in_process(
         # telemetry in the parent. Subprocess needs OTel enabled for both
         # Kasal's own trace pipeline AND (optionally) MLflow tracing.
         _os_crewai_env.environ["OTEL_SDK_DISABLED"] = "false"
+        # Keep CrewAI telemetry disabled to prevent HTTP requests to docs.crewai.com
+        _os_crewai_env.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
 
         # Configure subprocess logging
         async_logger = configure_subprocess_logging(execution_id, process_type="flow")
