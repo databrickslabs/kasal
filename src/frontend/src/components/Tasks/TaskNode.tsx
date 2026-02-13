@@ -397,23 +397,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
       position: 'relative',
       padding: 2,
       cursor: 'pointer',
-      background: (theme: Theme) => {
-        if (isPlanning || taskStatus?.status === 'planning') {
-          return `linear-gradient(135deg, ${theme.palette.warning.light}15, ${theme.palette.warning.main}10)`;
-        }
-        if (isRunning) {
-          return `linear-gradient(135deg, ${theme.palette.info.light}15, ${theme.palette.info.main}10)`;
-        }
-        if (isCompleted) {
-          return `linear-gradient(135deg, ${theme.palette.success.light}15, ${theme.palette.success.main}10)`;
-        }
-        if (isFailed) {
-          return `linear-gradient(135deg, ${theme.palette.error.light}15, ${theme.palette.error.main}10)`;
-        }
-        return isSelected
-          ? `${theme.palette.primary.light}20`
-          : theme.palette.background.paper;
-      },
+      background: (theme: Theme) => theme.palette.background.paper,
       borderRadius: '8px',
       border: '1px solid',
       borderColor: (theme: Theme) => {
@@ -748,7 +732,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
                 '0%': { backgroundPosition: '-200% 0' },
                 '100%': { backgroundPosition: '200% 0' },
               },
-              backdropFilter: 'blur(1px)',
+              // backdropFilter removed - was creating stacking context causing edges to render on top during pulsing
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',

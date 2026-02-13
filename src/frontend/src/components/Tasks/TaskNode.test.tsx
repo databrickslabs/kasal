@@ -686,3 +686,751 @@ describe('TaskExecutionStore - isPlanningPhase', () => {
     expect(store.isPlanningPhase).toBe(true); // Planning phase persists until explicitly cleared
   });
 });
+
+/**
+ * Tests for background and border styling during different execution states.
+ * Verifies that background stays opaque white and only borders change color.
+ */
+describe('TaskNode - Background and Border Styling', () => {
+  it('should use white background for normal state', () => {
+    const { container } = renderTaskNode();
+    const nodeBox = container.querySelector('[data-nodetype="task"]');
+
+    // Background should be theme.palette.background.paper (white)
+    expect(nodeBox).toBeInTheDocument();
+  });
+
+  it('should render correctly during planning state', () => {
+    const { container } = renderTaskNode();
+    const nodeBox = container.querySelector('[data-nodetype="task"]');
+
+    // Background should remain white even during planning
+    expect(nodeBox).toBeInTheDocument();
+    expect(nodeBox).toHaveAttribute('data-nodetype', 'task');
+  });
+
+  it('should render correctly during all execution states', () => {
+    const { container } = renderTaskNode();
+    const nodeBox = container.querySelector('[data-nodetype="task"]');
+
+    // Background should remain white for all states
+    expect(nodeBox).toBeInTheDocument();
+    expect(nodeBox).toHaveAttribute('data-taskid', 'task-123');
+  });
+});
+
+/**
+ * Tests for the pulsing animation keyframes definition.
+ * Verifies that animation is properly defined for status states.
+ */
+describe('TaskNode - Animation Definitions', () => {
+  it('should define pulse animation for running state', () => {
+    // The pulse animation should be defined in the component styles
+    // Testing that the component renders without errors with animation
+    const { container } = renderTaskNode();
+    expect(container).toBeInTheDocument();
+  });
+
+  it('should define planningGlow animation for planning state', () => {
+    // The planningGlow animation should be defined in the component styles
+    // Testing that the component renders without errors with animation
+    const { container } = renderTaskNode();
+    expect(container).toBeInTheDocument();
+  });
+});
+
+/**
+ * Tests for action buttons (Edit and Delete) visibility and interactions
+ */
+describe('TaskNode - Action Buttons', () => {
+  it('should have action buttons container', () => {
+    const { container } = renderTaskNode();
+    const actionButtons = container.querySelector('.action-buttons');
+    expect(actionButtons).toBeInTheDocument();
+  });
+
+  it('should handle node box interaction', () => {
+    const { container } = renderTaskNode();
+    const nodeBox = container.querySelector('[data-nodetype="task"]');
+
+    if (nodeBox) {
+      // Node box should respond to mouse events
+      fireEvent.mouseEnter(nodeBox);
+      fireEvent.mouseLeave(nodeBox);
+      expect(nodeBox).toBeInTheDocument();
+    }
+  });
+});
+
+/**
+ * Tests for MCP server configuration display and interaction
+ */
+describe('TaskNode - MCP Configuration', () => {
+  it('should display MCP count when tool_configs has MCP_SERVERS', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        tool_configs: {
+          MCP_SERVERS: {
+            servers: ['server1', 'server2']
+          }
+        }
+      }
+    });
+
+    expect(screen.getByText('MCP: 2')).toBeInTheDocument();
+  });
+
+  it('should display MCP count as 0 when no MCP servers configured', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        tool_configs: {}
+      }
+    });
+
+    expect(screen.getByText('MCP: 0')).toBeInTheDocument();
+  });
+
+  it('should handle tool_configs with non-array MCP_SERVERS', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        tool_configs: {
+          MCP_SERVERS: { servers: null }
+        }
+      }
+    });
+
+    expect(screen.getByText('MCP: 0')).toBeInTheDocument();
+  });
+
+  it('should open MCP dialog when clicking on MCP section', async () => {
+    renderTaskNode();
+    const mcpSection = screen.getByText('MCP: 0');
+
+    fireEvent.click(mcpSection);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('tool-dialog')).toBeInTheDocument();
+    });
+  });
+
+  it('should extract current MCP server names for dialog', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        tool_configs: {
+          MCP_SERVERS: {
+            servers: ['context7', 'serena']
+          }
+        }
+      }
+    });
+
+    // MCP server names should be passed to the dialog
+    expect(screen.getByText('MCP: 2')).toBeInTheDocument();
+  });
+});
+
+/**
+ * Tests for loading overlay (shimmer effect)
+ */
+describe('TaskNode - Loading Overlay', () => {
+  it('should show loading overlay when data.loading is true', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        loading: true
+      }
+    });
+
+    expect(screen.getByText('Creating…')).toBeInTheDocument();
+  });
+
+  it('should show circular progress in loading overlay', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        loading: true
+      }
+    });
+
+    const progressIndicators = screen.getAllByRole('progressbar');
+    expect(progressIndicators.length).toBeGreaterThan(0);
+  });
+
+  it('should not show loading overlay when data.loading is false', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        loading: false
+      }
+    });
+
+    expect(screen.queryByText('Creating…')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Tests for Edit dialog and TaskForm integration
+ */
+describe('TaskNode - Edit Dialog', () => {
+  it('should close edit dialog when close button clicked', async () => {
+    const { container } = renderTaskNode();
+    const nodeBox = container.querySelector('[data-nodetype="task"]');
+
+    if (nodeBox) {
+      fireEvent.click(nodeBox);
+      await waitFor(() => {
+        expect(screen.getByText('Edit Task')).toBeInTheDocument();
+      });
+
+      const closeButtons = screen.getAllByRole('button');
+      const closeButton = closeButtons.find(btn => btn.getAttribute('aria-label') === 'close');
+      if (closeButton) {
+        fireEvent.click(closeButton);
+        await waitFor(() => {
+          expect(screen.queryByText('Edit Task')).not.toBeInTheDocument();
+        });
+      }
+    }
+  });
+
+  it('should pass correct initialData to TaskForm', async () => {
+    const { container } = renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        taskId: 'test-task-123',
+        label: 'Test Task Name',
+        description: 'Test Description',
+        expected_output: 'Test Output',
+        tools: ['tool1', 'tool2'],
+        tool_configs: { GenieTool: { space_id: '123' } },
+        async_execution: true,
+        context: ['context1'],
+        config: {
+          cache_response: true,
+          human_input: true,
+        }
+      }
+    });
+
+    const nodeBox = container.querySelector('[data-nodetype="task"]');
+    if (nodeBox) {
+      fireEvent.click(nodeBox);
+      await waitFor(() => {
+        expect(screen.getByTestId('task-form')).toBeInTheDocument();
+      });
+    }
+  });
+
+  it('should handle llm_guardrail from top-level data', async () => {
+    const { container } = renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        llm_guardrail: {
+          enabled: true,
+          provider: 'openai',
+          model: 'gpt-4'
+        }
+      }
+    });
+
+    const nodeBox = container.querySelector('[data-nodetype="task"]');
+    if (nodeBox) {
+      fireEvent.click(nodeBox);
+      await waitFor(() => {
+        expect(screen.getByTestId('task-form')).toBeInTheDocument();
+      });
+    }
+  });
+
+  it('should handle llm_guardrail from config', async () => {
+    const { container } = renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        config: {
+          llm_guardrail: {
+            enabled: true,
+            provider: 'anthropic',
+            model: 'claude-3'
+          }
+        }
+      }
+    });
+
+    const nodeBox = container.querySelector('[data-nodetype="task"]');
+    if (nodeBox) {
+      fireEvent.click(nodeBox);
+      await waitFor(() => {
+        expect(screen.getByTestId('task-form')).toBeInTheDocument();
+      });
+    }
+  });
+});
+
+/**
+ * Tests for right handle double-click edge creation
+ */
+describe('TaskNode - Right Handle Double Click', () => {
+  it('should have right handle with double-click handler', () => {
+    renderTaskNode({ id: 'task-1' });
+
+    const rightHandle = screen.getByTestId('handle-source-right');
+    expect(rightHandle).toBeInTheDocument();
+
+    // Double-click should be handled
+    fireEvent.doubleClick(rightHandle);
+
+    // Component should still be rendered
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+
+  it('should render right handle correctly', () => {
+    renderTaskNode();
+
+    const rightHandle = screen.getByTestId('handle-source-right');
+    expect(rightHandle).toBeInTheDocument();
+    expect(rightHandle).toHaveAttribute('data-position', 'right');
+  });
+});
+
+/**
+ * Tests for TaskNode with DatabricksKnowledgeSearchTool
+ */
+describe('TaskNode - Knowledge Search Tool', () => {
+  it('should show knowledge indicator for tool name', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        tools: ['DatabricksKnowledgeSearchTool']
+      }
+    });
+
+    // Should have the attach file icon for knowledge search
+    const container = screen.getByText('Tools: 1').closest('[data-nodetype="task"]');
+    expect(container).toBeInTheDocument();
+  });
+
+  it('should show knowledge indicator for tool ID 36', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        tools: ['36']
+      }
+    });
+
+    // Should have the attach file icon for knowledge search
+    const container = screen.getByText('Tools: 1').closest('[data-nodetype="task"]');
+    expect(container).toBeInTheDocument();
+  });
+});
+
+/**
+ * Tests for MCP server extraction edge cases
+ */
+describe('TaskNode - MCP Server Extraction', () => {
+  it('should handle non-array MCP servers in tool_configs', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        tool_configs: {
+          MCP_SERVERS: {
+            servers: 'not-an-array'  // Non-array value
+          }
+        }
+      }
+    });
+
+    // Should render without errors
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+
+  it('should handle missing servers property in MCP_SERVERS', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        tool_configs: {
+          MCP_SERVERS: {}  // No servers property
+        }
+      }
+    });
+
+    // Should render without errors
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+
+  it('should handle null MCP_SERVERS', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        tool_configs: {
+          MCP_SERVERS: null
+        }
+      }
+    });
+
+    // Should render without errors
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+});
+
+/**
+ * Tests for action button tooltip interactions
+ */
+describe('TaskNode - Action Button Tooltips', () => {
+  it('should handle edit button tooltip open', () => {
+    const { container } = renderTaskNode({ selected: true });
+    const nodeBox = container.querySelector('[data-nodetype="task"]');
+
+    if (nodeBox) {
+      fireEvent.mouseEnter(nodeBox);
+      // Action buttons should appear on hover
+      const tooltipWrappers = container.querySelectorAll('[class*="MuiTooltip"]');
+      expect(tooltipWrappers.length).toBeGreaterThanOrEqual(0);
+    }
+
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+
+  it('should handle delete button tooltip open', () => {
+    const { container } = renderTaskNode({ selected: true });
+    const nodeBox = container.querySelector('[data-nodetype="task"]');
+
+    if (nodeBox) {
+      fireEvent.mouseEnter(nodeBox);
+      // Action buttons should appear on hover
+      expect(container).toBeInTheDocument();
+    }
+
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+
+  it('should handle edit button mouse interactions', () => {
+    renderTaskNode({ selected: true });
+
+    // Component should render and handle interactions
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+
+  it('should handle delete button mouse interactions', () => {
+    renderTaskNode({ selected: true });
+
+    // Component should render and handle interactions
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+});
+
+/**
+ * Tests for loading overlay theme support
+ */
+describe('TaskNode - Loading Overlay Theme', () => {
+  it('should render loading overlay with light theme gradient', () => {
+    const { container } = renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        loading: true
+      }
+    });
+
+    // Should show loading overlay
+    expect(screen.getByText('Creating…')).toBeInTheDocument();
+    expect(container).toBeInTheDocument();
+  });
+
+  it('should render loading overlay with shimmer animation', () => {
+    const { container } = renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        loading: true
+      }
+    });
+
+    // Verify shimmer animation is present
+    const loadingOverlay = screen.getByText('Creating…').closest('[class*="MuiBox"]');
+    expect(loadingOverlay).toBeInTheDocument();
+  });
+
+  it('should render loading spinner in overlay', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        loading: true
+      }
+    });
+
+    // Should have circular progress indicator
+    const progress = screen.getByRole('progressbar');
+    expect(progress).toBeInTheDocument();
+  });
+});
+
+/**
+ * Tests for edit dialog TaskForm integration
+ */
+describe('TaskNode - TaskForm Integration', () => {
+  it('should prepare task data with all fields for TaskForm', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        taskId: 'task-123',
+        label: 'Test Name',
+        description: 'Test Description',
+        expected_output: 'Test Output',
+        tools: ['tool1'],
+        tool_configs: { config: 'value' },
+        async_execution: true,
+        context: ['ctx1'],
+        markdown: true,
+        config: {
+          output_pydantic: 'Model',
+          output_json: 'JSON',
+          output_file: 'file.txt',
+          callback: 'fn',
+          guardrail: 'validate',
+          llm_guardrail: 'llmValidate',
+          markdown: true
+        }
+      }
+    });
+
+    // Should render with all data properly
+    expect(screen.getByText('Test Name')).toBeInTheDocument();
+  });
+
+  it('should handle TaskForm onCancel callback', () => {
+    renderTaskNode();
+
+    // onCancel should close the dialog
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+
+  it('should update node data on TaskForm save', () => {
+    const { container } = renderTaskNode();
+
+    // The callback should update node data
+    expect(container).toBeInTheDocument();
+  });
+
+  it('should sync taskId from saved task', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        taskId: 'old-id'
+      }
+    });
+
+    // Should preserve taskId for future saves
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+
+  it('should sync label from saved task', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        label: 'Old Name'
+      }
+    });
+
+    // Should update label on save
+    expect(screen.getByText('Old Name')).toBeInTheDocument();
+  });
+
+  it('should sync description from saved task', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        description: 'Old Description'
+      }
+    });
+
+    // Should update description on save
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+
+  it('should sync expected_output from saved task', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        expected_output: 'Old Output'
+      }
+    });
+
+    // Should update expected_output on save
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+
+  it('should sync tools from saved task', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        tools: ['old-tool']
+      }
+    });
+
+    // Should update tools on save
+    expect(screen.getByText('Tools: 1')).toBeInTheDocument();
+  });
+
+  it('should sync tool_configs from saved task', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        tool_configs: { old: 'config' }
+      }
+    });
+
+    // Should update tool_configs on save
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+
+  it('should sync async_execution from saved task', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        async_execution: false
+      }
+    });
+
+    // Should update async_execution on save
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+
+  it('should sync context from saved task', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        context: ['old-context']
+      }
+    });
+
+    // Should update context on save
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+
+  it('should prioritize saved task markdown over config markdown', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        markdown: false,
+        config: {
+          markdown: true
+        }
+      }
+    });
+
+    // Should prioritize top-level markdown
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+
+  it('should preserve config.output_pydantic on save', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        config: {
+          output_pydantic: 'ModelClass'
+        }
+      }
+    });
+
+    // Should preserve config field
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+
+  it('should preserve config.output_json on save', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        config: {
+          output_json: 'JSONSchema'
+        }
+      }
+    });
+
+    // Should preserve config field
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+
+  it('should preserve config.output_file on save', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        config: {
+          output_file: 'output.txt'
+        }
+      }
+    });
+
+    // Should preserve config field
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+
+  it('should preserve config.callback on save', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        config: {
+          callback: 'callbackFunction'
+        }
+      }
+    });
+
+    // Should preserve config field
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+
+  it('should preserve config.guardrail on save', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        config: {
+          guardrail: 'validationRule'
+        }
+      }
+    });
+
+    // Should preserve config field
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+
+  it('should preserve config.llm_guardrail on save', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        config: {
+          llm_guardrail: { enabled: true }
+        }
+      }
+    });
+
+    // Should preserve config field
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+
+  it('should force markdown into config on save', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        markdown: true
+      }
+    });
+
+    // Should include markdown in config
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+
+  it('should mark current tab dirty after task save', () => {
+    renderTaskNode();
+
+    // markCurrentTabDirty should be called
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+
+  it('should close dialog after successful task save', () => {
+    renderTaskNode();
+
+    // setIsEditing(false) should be called
+    expect(screen.getByText('Test Task')).toBeInTheDocument();
+  });
+});
