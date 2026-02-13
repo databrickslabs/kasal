@@ -284,7 +284,7 @@ def _extract_trace_metadata(span: ReadableSpan) -> Dict[str, Any]:
     for key in ("formatted_description", "formatted_expected_output"):
         val = attrs.get(key)
         if val:
-            metadata[key] = str(val)[:1000]
+            metadata[key] = str(val)
 
     return metadata
 

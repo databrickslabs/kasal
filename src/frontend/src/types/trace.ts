@@ -34,6 +34,44 @@ export interface Trace {
   duration_ms?: number;
 }
 
+// Shared trace processing interfaces (used by useTraceData hook and TraceTimelineContent)
+export interface TraceEvent {
+  type: string;
+  description: string;
+  timestamp: Date;
+  duration?: number;
+  output?: string | Record<string, unknown>;
+  extraData?: Record<string, unknown>;
+}
+
+export interface GroupedTrace {
+  agent: string;
+  startTime: Date;
+  endTime: Date;
+  duration: number;
+  agentEvents: TraceEvent[];
+  tasks: {
+    taskName: string;
+    taskId?: string;
+    startTime: Date;
+    endTime: Date;
+    duration: number;
+    events: TraceEvent[];
+  }[];
+}
+
+export interface ProcessedTraces {
+  globalStart?: Date;
+  globalEnd?: Date;
+  totalDuration?: number;
+  agents: GroupedTrace[];
+  globalEvents: {
+    start: Trace[];
+    end: Trace[];
+  };
+  crewPlanningEvents: TraceEvent[];
+}
+
 export interface TaskDetails {
   description: string;
   expected_output: string;
