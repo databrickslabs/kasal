@@ -31,10 +31,26 @@ logging.basicConfig(
 
 logger = logging.getLogger("deploy")
 
+def custom_ignore_function(excluded_dirs, excluded_patterns):
+    """Create a robust ignore function that excludes specific directories and patterns."""
+    def _ignore(directory, contents):
+        ignored = []
+        for item in contents:
+            # Ignore specific directory names
+            if item in excluded_dirs:
+                ignored.append(item)
+                logger.debug(f"Ignoring directory: {item}")
+            # Ignore patterns
+            elif any(Path(item).match(pattern) for pattern in excluded_patterns):
+                ignored.append(item)
+                logger.debug(f"Ignoring pattern match: {item}")
+        return ignored
+    return _ignore
+
 def clean_python_cache(root_dir):
     """Clean Python cache files and directories"""
     logger.info("Cleaning Python cache files...")
-    
+
     # Clean __pycache__ directories
     cache_dirs = list(root_dir.rglob("__pycache__"))
     for cache_dir in cache_dirs:
@@ -43,7 +59,7 @@ def clean_python_cache(root_dir):
             logger.debug(f"Removed cache directory: {cache_dir}")
         except Exception as e:
             logger.warning(f"Failed to remove {cache_dir}: {e}")
-    
+
     # Clean .pyc and .pyo files
     pyc_files = list(root_dir.rglob("*.pyc")) + list(root_dir.rglob("*.pyo"))
     for pyc_file in pyc_files:
@@ -52,7 +68,7 @@ def clean_python_cache(root_dir):
             logger.debug(f"Removed cache file: {pyc_file}")
         except Exception as e:
             logger.warning(f"Failed to remove {pyc_file}: {e}")
-    
+
     # Clean .pytest_cache directories
     pytest_cache_dirs = list(root_dir.rglob(".pytest_cache"))
     for cache_dir in pytest_cache_dirs:
@@ -61,7 +77,7 @@ def clean_python_cache(root_dir):
             logger.debug(f"Removed pytest cache: {cache_dir}")
         except Exception as e:
             logger.warning(f"Failed to remove {cache_dir}: {e}")
-    
+
     logger.info(f"Cache cleaning completed. Removed {len(cache_dirs)} __pycache__ directories, {len(pyc_files)} .pyc/.pyo files, and {len(pytest_cache_dirs)} .pytest_cache directories")
 
 def configure_oauth_scopes(app_name, exclude_dataplane=True):
@@ -360,18 +376,30 @@ starlette==0.40.0
                 shutil.rmtree(databricks_dist)
             databricks_dist.mkdir()
             
-            # Copy backend folder
-            logger.info("Copying backend folder...")
+            # Copy backend folder (MINIMAL - exclude migrations to reduce file count)
+            logger.info("Copying backend folder (MINIMAL mode - excluding migrations)...")
             backend_src = root_dir / "backend"
             backend_dst = databricks_dist / "backend"
             if backend_src.exists():
-                shutil.copytree(backend_src, backend_dst, ignore=shutil.ignore_patterns(
-                    '__pycache__', '*.pyc', '*.pyo', 'logs', '*.log',
-                    '.mypy_cache', '.pytest_cache', 'htmlcov', 'tests',
-                    '*.db', '*.db-shm', '*.db-wal', '*.backup', '.coverage',
-                    '.venv', 'venv', '.env', 'node_modules', '.git'
-                ))
-                logger.info(f"Copied backend folder")
+                # AGGRESSIVE exclusions to stay under Databricks Apps file limit
+                backend_excluded_dirs = {
+                    'venv', '.venv', 'node_modules', '.git', 'tests', 'logs',
+                    '__pycache__', '.pytest_cache', '.mypy_cache', 'htmlcov',
+                    'migrations',  # Exclude migrations - run alembic upgrade manually after deployment
+                    '.claude', 'tmp'
+                }
+                backend_excluded_patterns = [
+                    '*.pyc', '*.pyo', '*.log', '*.db', '*.db-shm', '*.db-wal',
+                    '*.backup', '.coverage', '.env', 'run_tests.py', 'run_seeders.py',
+                    'uv.lock'
+                ]
+                shutil.copytree(
+                    backend_src,
+                    backend_dst,
+                    ignore=custom_ignore_function(backend_excluded_dirs, backend_excluded_patterns)
+                )
+                logger.info(f"Copied backend folder (excluding: {backend_excluded_dirs})")
+                logger.warning("⚠️  MIGRATIONS EXCLUDED - You'll need to run migrations manually in the app after deployment")
             else:
                 logger.error("Backend folder not found!")
                 raise FileNotFoundError("Backend folder not found")
@@ -381,11 +409,14 @@ starlette==0.40.0
             frontend_src = root_dir / "frontend"
             frontend_dst = databricks_dist / "frontend"
             if frontend_src.exists():
-                shutil.copytree(frontend_src, frontend_dst, ignore=shutil.ignore_patterns(
-                    'node_modules', 'dist', 'coverage', '.env.local',
-                    '.env.development.local', '.env.test.local', '.env.production.local'
-                ))
-                logger.info("Copied frontend source folder")
+                frontend_excluded_dirs = {'node_modules', 'dist', 'coverage', 'build', '.git'}
+                frontend_excluded_patterns = ['.env.local', '.env.development.local', '.env.test.local', '.env.production.local']
+                shutil.copytree(
+                    frontend_src,
+                    frontend_dst,
+                    ignore=custom_ignore_function(frontend_excluded_dirs, frontend_excluded_patterns)
+                )
+                logger.info(f"Copied frontend source folder (excluding: {frontend_excluded_dirs})")
             else:
                 logger.error("Frontend source folder not found!")
                 raise FileNotFoundError("frontend/ folder not found")
@@ -395,10 +426,14 @@ starlette==0.40.0
             docs_src = root_dir / "docs"
             docs_dst = databricks_dist / "docs"
             if docs_src.exists():
-                shutil.copytree(docs_src, docs_dst, ignore=shutil.ignore_patterns(
-                    'archive', '*.pyc', '__pycache__'
-                ))
-                logger.info("Copied docs folder")
+                docs_excluded_dirs = {'archive', '__pycache__'}
+                docs_excluded_patterns = ['*.pyc']
+                shutil.copytree(
+                    docs_src,
+                    docs_dst,
+                    ignore=custom_ignore_function(docs_excluded_dirs, docs_excluded_patterns)
+                )
+                logger.info(f"Copied docs folder (excluding: {docs_excluded_dirs})")
             else:
                 logger.warning("docs/ folder not found, skipping")
 
