@@ -336,8 +336,17 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
     return { type: 'memory_retrieval', description };
   },
 
-  // Memory Retrieval Completed - skip
-  memory_retrieval_completed: (): ProcessedEvent | null => null,
+  // Memory Retrieval Completed - aggregated memory context
+  memory_retrieval_completed: (trace: Trace): ProcessedEvent => {
+    const metadata = parseTraceMetadata(trace);
+    const extra = extractExtraData(trace);
+    const retrievalTime = (metadata?.retrieval_time_ms as number) || (extra?.retrieval_time_ms as number);
+    let description = 'Memory Context Retrieved';
+    if (retrievalTime !== undefined) {
+      description += ` — ${Math.round(retrievalTime)}ms`;
+    }
+    return { type: 'memory_context', description };
+  },
 
   // Memory Context Retrieved
   memory_context_retrieved: (trace: Trace): ProcessedEvent => {
