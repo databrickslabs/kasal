@@ -12,8 +12,6 @@ import traceback
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-import litellm
-
 from src.utils.prompt_utils import robust_json_parser
 from src.services.template_service import TemplateService
 from src.schemas.connection import ConnectionRequest, ConnectionResponse
@@ -198,21 +196,15 @@ class ConnectionService:
                 {"role": "user", "content": user_message}
             ]
             
-            # Configure litellm using the LLMManager
-            model_params = await LLMManager.configure_litellm(model)
-            
             try:
-                # Generate completion with LLMManager wrapper (handles GPT-5/deep research models)
-                response = await LLMManager.acompletion(
-                    **model_params,
+                # Generate completion via unified LLMManager.completion()
+                content = await LLMManager.completion(
                     messages=messages,
+                    model=model,
                     temperature=0.7,
-                    max_tokens=4000
+                    max_tokens=4000,
                 )
-                
-                # Extract content from response
-                content = response["choices"][0]["message"]["content"]
-                
+
                 # Log the successful interaction
                 await self._log_llm_interaction(
                     endpoint='generate-connections',
@@ -220,11 +212,11 @@ class ConnectionService:
                     response=content,
                     model=model
                 )
-                
+
             except Exception as e:
                 error_msg = f"Error generating completion: {str(e)}"
                 logger.error(error_msg)
-                
+
                 # Log failed interaction
                 await self._log_llm_interaction(
                     endpoint='generate-connections',
@@ -234,7 +226,7 @@ class ConnectionService:
                     status='error',
                     error_message=error_msg
                 )
-                
+
                 raise ValueError(f"Failed to generate connections: {str(e)}")
             
             # Parse and process the response

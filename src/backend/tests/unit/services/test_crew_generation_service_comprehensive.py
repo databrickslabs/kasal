@@ -63,7 +63,7 @@ def _tool_id_map():
 
 def _crew_complete_patches(service, gtd_return=None, ppt_return="sys", pcs_return=None,
                            model_params=None, llm_content="{}", rjp_return=None,
-                           acompletion_side_effect=None, crew_repo_return=None):
+                           completion_side_effect=None, crew_repo_return=None):
     """Return a context-manager style set of patches for create_crew_complete tests.
 
     Returns a dict of mock objects after entering all patches.
@@ -100,13 +100,10 @@ def _crew_complete_patches(service, gtd_return=None, ppt_return="sys", pcs_retur
 
             ms[1].return_value = gtd_return          # _get_tool_details
             ms[2].return_value = ppt_return           # _prepare_prompt_template
-            ms[3].configure_litellm = AsyncMock(return_value=model_params)
-            if acompletion_side_effect:
-                ms[3].acompletion = AsyncMock(side_effect=acompletion_side_effect)
+            if completion_side_effect:
+                ms[3].completion = AsyncMock(side_effect=completion_side_effect)
             else:
-                ms[3].acompletion = AsyncMock(return_value={
-                    "choices": [{"message": {"content": llm_content}}]
-                })
+                ms[3].completion = AsyncMock(return_value=llm_content)
             ms[4].return_value = rjp_return           # robust_json_parser
             ms[5].return_value = pcs_return            # _process_crew_setup
 
@@ -1114,10 +1111,7 @@ class TestCreateCrewComplete:
 
             gtd.return_value = [tool_detail]
             ppt.return_value = "system prompt"
-            lm.configure_litellm = AsyncMock(return_value={"model": "test-model"})
-            lm.acompletion = AsyncMock(return_value={
-                "choices": [{"message": {"content": '{"agents":[],"tasks":[]}'}}]
-            })
+            lm.completion = AsyncMock(return_value='{"agents":[],"tasks":[]}')
             rjp.return_value = {
                 "agents": [{"name": "A1", "role": "r", "goal": "g", "backstory": "b", "tools": ["ToolA"]}],
                 "tasks": [{"name": "T1", "description": "d", "agent": "A1", "tools": ["ToolA"]}],
@@ -1152,10 +1146,9 @@ class TestCreateCrewComplete:
 
         with _crew_complete_patches(self.service) as m, \
              patch.dict(os.environ, {"CREW_MODEL": "env-model"}):
-            m["lm"].configure_litellm = AsyncMock(return_value={"model": "env-model"})
             self.crew_repo.create_crew_entities = AsyncMock(return_value={"agents": [], "tasks": []})
             await self.service.create_crew_complete(req)
-            m["lm"].configure_litellm.assert_awaited_once_with("env-model")
+            m["lm"].completion.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_model_default_fallback(self):
@@ -1163,10 +1156,9 @@ class TestCreateCrewComplete:
 
         with _crew_complete_patches(self.service) as m:
             os.environ.pop("CREW_MODEL", None)
-            m["lm"].configure_litellm = AsyncMock(return_value={"model": "databricks-llama-4-maverick"})
             self.crew_repo.create_crew_entities = AsyncMock(return_value={"agents": [], "tasks": []})
             await self.service.create_crew_complete(req)
-            m["lm"].configure_litellm.assert_awaited_once_with("databricks-llama-4-maverick")
+            m["lm"].completion.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_llm_call_exception_raises_valueerror(self):
@@ -1178,8 +1170,7 @@ class TestCreateCrewComplete:
              patch("src.services.crew_generation_service.LLMManager") as lm:
             gtd.return_value = []
             ppt.return_value = "sys"
-            lm.configure_litellm = AsyncMock(return_value={"model": "m"})
-            lm.acompletion = AsyncMock(side_effect=RuntimeError("api error"))
+            lm.completion = AsyncMock(side_effect=RuntimeError("api error"))
 
             with pytest.raises(ValueError, match="Error generating crew"):
                 await self.service.create_crew_complete(req)

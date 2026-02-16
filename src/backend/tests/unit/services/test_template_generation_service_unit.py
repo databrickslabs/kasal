@@ -50,11 +50,6 @@ GOOD_LLM_JSON = json.dumps(
 )
 
 
-def _make_llm_response(content: str) -> dict:
-    """Build a minimal litellm-style response dict."""
-    return {"choices": [{"message": {"content": content}}]}
-
-
 def _build_request(**overrides) -> TemplateGenerationRequest:
     defaults = {
         "role": "Data Analyst",
@@ -220,10 +215,7 @@ class TestGenerateTemplatesHappyPath:
             MockTS.return_value = mock_ts_inst
 
             # LLMManager
-            MockLLM.configure_litellm = AsyncMock(return_value={"model": "test-model"})
-            MockLLM.acompletion = AsyncMock(
-                return_value=_make_llm_response(GOOD_LLM_JSON)
-            )
+            MockLLM.completion = AsyncMock(return_value=GOOD_LLM_JSON)
 
             # robust_json_parser
             mock_parser.return_value = {
@@ -266,10 +258,7 @@ class TestGenerateTemplatesHappyPath:
             mock_ts_inst.get_template_content = AsyncMock(return_value=SYSTEM_MESSAGE)
             MockTS.return_value = mock_ts_inst
 
-            MockLLM.configure_litellm = AsyncMock(return_value={"model": "test-model"})
-            MockLLM.acompletion = AsyncMock(
-                return_value=_make_llm_response("irrelevant")
-            )
+            MockLLM.completion = AsyncMock(return_value="irrelevant")
 
             mock_parser.return_value = {
                 "System Template": "sys",
@@ -310,10 +299,7 @@ class TestGenerateTemplatesHappyPath:
             mock_ts_inst.get_template_content = AsyncMock(return_value=SYSTEM_MESSAGE)
             MockTS.return_value = mock_ts_inst
 
-            MockLLM.configure_litellm = AsyncMock(return_value={"model": "test-model"})
-            MockLLM.acompletion = AsyncMock(
-                return_value=_make_llm_response("irrelevant")
-            )
+            MockLLM.completion = AsyncMock(return_value="irrelevant")
 
             mock_parser.return_value = {
                 "System_Template": "sys_t",
@@ -355,10 +341,7 @@ class TestGenerateTemplatesHappyPath:
             mock_ts_inst.get_template_content = AsyncMock(return_value=SYSTEM_MESSAGE)
             MockTS.return_value = mock_ts_inst
 
-            MockLLM.configure_litellm = AsyncMock(return_value={"model": "test-model"})
-            MockLLM.acompletion = AsyncMock(
-                return_value=_make_llm_response(GOOD_LLM_JSON)
-            )
+            MockLLM.completion = AsyncMock(return_value=GOOD_LLM_JSON)
 
             mock_parser.return_value = {
                 "system_template": "a",
@@ -477,8 +460,8 @@ class TestGenerateTemplatesLLMCompletionErrors:
     """Errors during LLM completion calls."""
 
     @pytest.mark.asyncio
-    async def test_acompletion_raises_value_error(self, service):
-        """When LLMManager.acompletion fails, logs error and raises ValueError."""
+    async def test_completion_raises_value_error(self, service):
+        """When LLMManager.completion fails, logs error and raises ValueError."""
         request = _build_request()
         service.log_service.create_log = AsyncMock()
 
@@ -501,9 +484,7 @@ class TestGenerateTemplatesLLMCompletionErrors:
             mock_ts_inst.get_template_content = AsyncMock(return_value=SYSTEM_MESSAGE)
             MockTS.return_value = mock_ts_inst
 
-            MockLLM.configure_litellm = AsyncMock(return_value={"model": "test-model"})
-            MockLLM.acompletion = AsyncMock(
-                side_effect=RuntimeError("Rate limit exceeded")
+            MockLLM.completion = AsyncMock(side_effect=RuntimeError("Rate limit exceeded")
             )
 
             with pytest.raises(ValueError, match="Failed to generate templates"):
@@ -516,7 +497,7 @@ class TestGenerateTemplatesLLMCompletionErrors:
         assert "Error generating completion" in call_kwargs["error_message"]
 
     @pytest.mark.asyncio
-    async def test_acompletion_error_log_failure_does_not_mask_original(self, service):
+    async def test_completion_error_log_failure_does_not_mask_original(self, service):
         """If logging the error also fails, the original ValueError still propagates."""
         request = _build_request()
         service.log_service.create_log = AsyncMock(
@@ -542,9 +523,7 @@ class TestGenerateTemplatesLLMCompletionErrors:
             mock_ts_inst.get_template_content = AsyncMock(return_value=SYSTEM_MESSAGE)
             MockTS.return_value = mock_ts_inst
 
-            MockLLM.configure_litellm = AsyncMock(return_value={"model": "test-model"})
-            MockLLM.acompletion = AsyncMock(
-                side_effect=RuntimeError("LLM timeout")
+            MockLLM.completion = AsyncMock(side_effect=RuntimeError("LLM timeout")
             )
 
             with pytest.raises(ValueError, match="Failed to generate templates"):
@@ -582,10 +561,7 @@ class TestGenerateTemplatesJSONParseErrors:
             mock_ts_inst.get_template_content = AsyncMock(return_value=SYSTEM_MESSAGE)
             MockTS.return_value = mock_ts_inst
 
-            MockLLM.configure_litellm = AsyncMock(return_value={"model": "test-model"})
-            MockLLM.acompletion = AsyncMock(
-                return_value=_make_llm_response("not valid json at all")
-            )
+            MockLLM.completion = AsyncMock(return_value="not valid json at all")
 
             mock_parser.side_effect = ValueError(
                 "Could not parse response as JSON after multiple recovery attempts"
@@ -626,10 +602,7 @@ class TestGenerateTemplatesJSONParseErrors:
             mock_ts_inst.get_template_content = AsyncMock(return_value=SYSTEM_MESSAGE)
             MockTS.return_value = mock_ts_inst
 
-            MockLLM.configure_litellm = AsyncMock(return_value={"model": "test-model"})
-            MockLLM.acompletion = AsyncMock(
-                return_value=_make_llm_response("{invalid")
-            )
+            MockLLM.completion = AsyncMock(return_value="{invalid")
 
             mock_parser.side_effect = json.JSONDecodeError(
                 "Expecting value", "{invalid", 0
@@ -669,10 +642,7 @@ class TestGenerateTemplatesMissingFields:
             mock_ts_inst.get_template_content = AsyncMock(return_value=SYSTEM_MESSAGE)
             MockTS.return_value = mock_ts_inst
 
-            MockLLM.configure_litellm = AsyncMock(return_value={"model": "test-model"})
-            MockLLM.acompletion = AsyncMock(
-                return_value=_make_llm_response("irrelevant")
-            )
+            MockLLM.completion = AsyncMock(return_value="irrelevant")
 
             # system_template is missing
             mock_parser.return_value = {
@@ -710,10 +680,7 @@ class TestGenerateTemplatesMissingFields:
             mock_ts_inst.get_template_content = AsyncMock(return_value=SYSTEM_MESSAGE)
             MockTS.return_value = mock_ts_inst
 
-            MockLLM.configure_litellm = AsyncMock(return_value={"model": "test-model"})
-            MockLLM.acompletion = AsyncMock(
-                return_value=_make_llm_response("irrelevant")
-            )
+            MockLLM.completion = AsyncMock(return_value="irrelevant")
 
             mock_parser.return_value = {
                 "system_template": "a",
@@ -750,10 +717,7 @@ class TestGenerateTemplatesMissingFields:
             mock_ts_inst.get_template_content = AsyncMock(return_value=SYSTEM_MESSAGE)
             MockTS.return_value = mock_ts_inst
 
-            MockLLM.configure_litellm = AsyncMock(return_value={"model": "test-model"})
-            MockLLM.acompletion = AsyncMock(
-                return_value=_make_llm_response("irrelevant")
-            )
+            MockLLM.completion = AsyncMock(return_value="irrelevant")
 
             mock_parser.return_value = {
                 "system_template": "a",
@@ -791,10 +755,7 @@ class TestGenerateTemplatesMissingFields:
             mock_ts_inst.get_template_content = AsyncMock(return_value=SYSTEM_MESSAGE)
             MockTS.return_value = mock_ts_inst
 
-            MockLLM.configure_litellm = AsyncMock(return_value={"model": "test-model"})
-            MockLLM.acompletion = AsyncMock(
-                return_value=_make_llm_response("irrelevant")
-            )
+            MockLLM.completion = AsyncMock(return_value="irrelevant")
 
             mock_parser.return_value = {
                 "system_template": "",
@@ -833,10 +794,7 @@ class TestGenerateTemplatesMissingFields:
             mock_ts_inst.get_template_content = AsyncMock(return_value=SYSTEM_MESSAGE)
             MockTS.return_value = mock_ts_inst
 
-            MockLLM.configure_litellm = AsyncMock(return_value={"model": "test-model"})
-            MockLLM.acompletion = AsyncMock(
-                return_value=_make_llm_response("irrelevant")
-            )
+            MockLLM.completion = AsyncMock(return_value="irrelevant")
 
             # Empty dict from parser -- all fields will be None after normalization
             mock_parser.return_value = {}
@@ -854,8 +812,8 @@ class TestGenerateTemplatesEdgeCases:
     """Additional edge-case scenarios."""
 
     @pytest.mark.asyncio
-    async def test_configure_litellm_called_with_model_name(self, service):
-        """Verify configure_litellm receives the name from model_config dict."""
+    async def test_completion_called_with_model_name(self, service):
+        """Verify completion receives the name from model_config dict."""
         request = _build_request()
         service.log_service.create_log = AsyncMock()
 
@@ -882,12 +840,7 @@ class TestGenerateTemplatesEdgeCases:
             mock_ts_inst.get_template_content = AsyncMock(return_value=SYSTEM_MESSAGE)
             MockTS.return_value = mock_ts_inst
 
-            MockLLM.configure_litellm = AsyncMock(
-                return_value={"model": "special-model-v2"}
-            )
-            MockLLM.acompletion = AsyncMock(
-                return_value=_make_llm_response(GOOD_LLM_JSON)
-            )
+            MockLLM.completion = AsyncMock(return_value=GOOD_LLM_JSON)
 
             mock_parser.return_value = {
                 "system_template": "a",
@@ -897,11 +850,13 @@ class TestGenerateTemplatesEdgeCases:
 
             await service.generate_templates(request)
 
-        MockLLM.configure_litellm.assert_awaited_once_with("special-model-v2")
+        MockLLM.completion.assert_awaited_once()
+        call_kwargs = MockLLM.completion.call_args.kwargs
+        assert call_kwargs["model"] == "special-model-v2"
 
     @pytest.mark.asyncio
-    async def test_acompletion_receives_correct_params(self, service):
-        """Verify acompletion is called with model_params, messages, temperature, max_tokens."""
+    async def test_completion_receives_correct_params(self, service):
+        """Verify completion is called with messages, model, temperature, max_tokens."""
         request = _build_request()
         service.log_service.create_log = AsyncMock()
 
@@ -927,12 +882,7 @@ class TestGenerateTemplatesEdgeCases:
             mock_ts_inst.get_template_content = AsyncMock(return_value=SYSTEM_MESSAGE)
             MockTS.return_value = mock_ts_inst
 
-            MockLLM.configure_litellm = AsyncMock(
-                return_value={"model": "test-model", "api_key": "key123"}
-            )
-            MockLLM.acompletion = AsyncMock(
-                return_value=_make_llm_response(GOOD_LLM_JSON)
-            )
+            MockLLM.completion = AsyncMock(return_value=GOOD_LLM_JSON)
 
             mock_parser.return_value = {
                 "system_template": "a",
@@ -942,9 +892,8 @@ class TestGenerateTemplatesEdgeCases:
 
             await service.generate_templates(request)
 
-        call_kwargs = MockLLM.acompletion.call_args.kwargs
+        call_kwargs = MockLLM.completion.call_args.kwargs
         assert call_kwargs["model"] == "test-model"
-        assert call_kwargs["api_key"] == "key123"
         assert call_kwargs["temperature"] == 0.7
         assert call_kwargs["max_tokens"] == 4000
         assert len(call_kwargs["messages"]) == 2
@@ -983,10 +932,7 @@ class TestGenerateTemplatesEdgeCases:
             mock_ts_inst.get_template_content = AsyncMock(return_value=SYSTEM_MESSAGE)
             MockTS.return_value = mock_ts_inst
 
-            MockLLM.configure_litellm = AsyncMock(return_value={"model": "test-model"})
-            MockLLM.acompletion = AsyncMock(
-                return_value=_make_llm_response(GOOD_LLM_JSON)
-            )
+            MockLLM.completion = AsyncMock(return_value=GOOD_LLM_JSON)
 
             mock_parser.return_value = {
                 "system_template": "a",
@@ -996,7 +942,7 @@ class TestGenerateTemplatesEdgeCases:
 
             await service.generate_templates(request)
 
-        user_message = MockLLM.acompletion.call_args.kwargs["messages"][1]["content"]
+        user_message = MockLLM.completion.call_args.kwargs["messages"][1]["content"]
         assert "Architect" in user_message
         assert "Design systems" in user_message
         assert "20 years in software" in user_message
@@ -1029,10 +975,7 @@ class TestGenerateTemplatesEdgeCases:
             mock_ts_inst.get_template_content = AsyncMock(return_value=SYSTEM_MESSAGE)
             MockTS.return_value = mock_ts_inst
 
-            MockLLM.configure_litellm = AsyncMock(return_value={"model": "test-model"})
-            MockLLM.acompletion = AsyncMock(
-                return_value=_make_llm_response(GOOD_LLM_JSON)
-            )
+            MockLLM.completion = AsyncMock(return_value=GOOD_LLM_JSON)
 
             mock_parser.return_value = {
                 "system_template": "a",
@@ -1072,10 +1015,7 @@ class TestGenerateTemplatesEdgeCases:
             mock_ts_inst.get_template_content = AsyncMock(return_value=SYSTEM_MESSAGE)
             MockTS.return_value = mock_ts_inst
 
-            MockLLM.configure_litellm = AsyncMock(return_value={"model": "test-model"})
-            MockLLM.acompletion = AsyncMock(
-                return_value=_make_llm_response(GOOD_LLM_JSON)
-            )
+            MockLLM.completion = AsyncMock(return_value=GOOD_LLM_JSON)
 
             mock_parser.return_value = {
                 "system_template": "a",
@@ -1118,10 +1058,7 @@ class TestGenerateTemplatesEdgeCases:
             mock_ts_inst.get_template_content = AsyncMock(return_value=SYSTEM_MESSAGE)
             MockTS.return_value = mock_ts_inst
 
-            MockLLM.configure_litellm = AsyncMock(return_value={"model": "test-model"})
-            MockLLM.acompletion = AsyncMock(
-                return_value=_make_llm_response("content")
-            )
+            MockLLM.completion = AsyncMock(return_value="content")
 
             # Parser succeeds but returns valid data; we trigger an error after
             # by making TemplateGenerationResponse constructor fail via a TypeError
@@ -1170,10 +1107,7 @@ class TestGenerateTemplatesEdgeCases:
             mock_ts_inst.get_template_content = AsyncMock(return_value=SYSTEM_MESSAGE)
             MockTS.return_value = mock_ts_inst
 
-            MockLLM.configure_litellm = AsyncMock(return_value={"model": "test-model"})
-            MockLLM.acompletion = AsyncMock(
-                return_value=_make_llm_response("irrelevant")
-            )
+            MockLLM.completion = AsyncMock(return_value="irrelevant")
 
             mock_parser.return_value = {
                 "system_template": "lowercase_wins",
@@ -1191,8 +1125,8 @@ class TestGenerateTemplatesEdgeCases:
         assert result.response_template == "lowercase_response"
 
     @pytest.mark.asyncio
-    async def test_configure_litellm_error_propagates(self, service):
-        """When configure_litellm fails, the exception propagates through the outer handler."""
+    async def test_completion_error_propagates(self, service):
+        """When completion fails, the exception propagates through the outer handler."""
         request = _build_request()
 
         with (
@@ -1214,8 +1148,7 @@ class TestGenerateTemplatesEdgeCases:
             mock_ts_inst.get_template_content = AsyncMock(return_value=SYSTEM_MESSAGE)
             MockTS.return_value = mock_ts_inst
 
-            MockLLM.configure_litellm = AsyncMock(
-                side_effect=ValueError("provider not supported")
+            MockLLM.completion = AsyncMock(side_effect=ValueError("provider not supported")
             )
 
             with pytest.raises(ValueError, match="provider not supported"):
@@ -1253,10 +1186,7 @@ class TestGenerateTemplatesEdgeCases:
             )
             MockTS.return_value = mock_ts_inst
 
-            MockLLM.configure_litellm = AsyncMock(return_value={"model": "test-model"})
-            MockLLM.acompletion = AsyncMock(
-                return_value=_make_llm_response("llm output")
-            )
+            MockLLM.completion = AsyncMock(return_value="llm output")
 
             mock_parser.return_value = {
                 "system_template": "a",

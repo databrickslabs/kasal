@@ -22,15 +22,11 @@ async def test_generate_execution_name_success(monkeypatch):
         async def create_log(self, **kwargs):
             return True
 
-    # Stub LLMManager (now uses LLMManager.acompletion instead of litellm.acompletion directly)
+    # Stub LLMManager (now uses LLMManager.completion which returns a string directly)
     class FakeLLMManager:
         @staticmethod
-        async def configure_litellm(model: str):
-            return {"model": model}
-
-        @staticmethod
-        async def acompletion(**kwargs):
-            return {"choices": [{"message": {"content": "My Nice Name"}}]}
+        async def completion(messages, model, temperature=0.7, max_tokens=4000):
+            return "My Nice Name"
 
     monkeypatch.setattr(module, "LLMManager", FakeLLMManager, raising=True)
 
@@ -57,7 +53,7 @@ async def test_generate_execution_name_fallback_on_exception(monkeypatch):
 
     class FakeLLMManager:
         @staticmethod
-        async def configure_litellm(model: str):
+        async def completion(messages, model, temperature=0.7, max_tokens=4000):
             raise RuntimeError("boom")
 
     monkeypatch.setattr(module, "LLMManager", FakeLLMManager, raising=True)
@@ -66,4 +62,3 @@ async def test_generate_execution_name_fallback_on_exception(monkeypatch):
     req = ExecutionNameGenerationRequest(model="gpt-test", agents_yaml={}, tasks_yaml={})
     out = await svc.generate_execution_name(req)
     assert out.name.startswith("Execution-")
-
