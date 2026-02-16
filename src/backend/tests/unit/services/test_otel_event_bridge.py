@@ -329,6 +329,33 @@ class TestGetOutput:
         event = _make_event(output="")
         assert _get_output(event) == ""
 
+    def test_results_attribute(self):
+        event = _make_event(results=["item1", "item2"])
+        assert _get_output(event) == "['item1', 'item2']"
+
+    def test_value_attribute(self):
+        event = _make_event(value="saved memory value")
+        assert _get_output(event) == "saved memory value"
+
+    def test_memory_content_attribute(self):
+        event = _make_event(memory_content="aggregated memory response")
+        assert _get_output(event) == "aggregated memory response"
+
+    def test_priority_results_before_response(self):
+        """results should take priority over response."""
+        event = _make_event(results=["r1"], response="ignored")
+        assert _get_output(event) == "['r1']"
+
+    def test_priority_value_after_message(self):
+        """value comes after message in priority."""
+        event = _make_event(message="msg", value="val")
+        assert _get_output(event) == "msg"
+
+    def test_memory_content_last_resort(self):
+        """memory_content is last in priority chain."""
+        event = _make_event(memory_content="mem")
+        assert _get_output(event) == "mem"
+
 
 # ---------------------------------------------------------------------------
 # Tests: OTelEventBridge.__init__
@@ -1103,6 +1130,55 @@ class TestSetExtraAttributesMemoryFields:
         bridge._set_extra_attributes(span, event)
 
         span.set_attribute.assert_any_call("kasal.extra.score_threshold", 0.0)
+
+    def test_results_count_from_list(self):
+        tracer, span = _make_tracer()
+        bridge = OTelEventBridge(tracer, "job-rcnt")
+
+        event = _make_event(results=["r1", "r2", "r3"])
+        bridge._set_extra_attributes(span, event)
+
+        span.set_attribute.assert_any_call("kasal.extra.results_count", 3)
+
+    def test_results_count_empty_list(self):
+        tracer, span = _make_tracer()
+        bridge = OTelEventBridge(tracer, "job-rcnt0")
+
+        event = _make_event(results=[])
+        bridge._set_extra_attributes(span, event)
+
+        span.set_attribute.assert_any_call("kasal.extra.results_count", 0)
+
+    def test_results_count_from_tuple(self):
+        tracer, span = _make_tracer()
+        bridge = OTelEventBridge(tracer, "job-rcnt-t")
+
+        event = _make_event(results=("a", "b"))
+        bridge._set_extra_attributes(span, event)
+
+        span.set_attribute.assert_any_call("kasal.extra.results_count", 2)
+
+    def test_results_count_non_list_ignored(self):
+        """Non-list/tuple results (e.g. a string) should not set results_count."""
+        tracer, span = _make_tracer()
+        bridge = OTelEventBridge(tracer, "job-rcnt-str")
+
+        event = _make_event(results="some string result")
+        bridge._set_extra_attributes(span, event)
+
+        attr_keys = [c[0][0] for c in span.set_attribute.call_args_list]
+        assert "kasal.extra.results_count" not in attr_keys
+
+    def test_results_count_none_ignored(self):
+        """When results is not present, results_count should not be set."""
+        tracer, span = _make_tracer()
+        bridge = OTelEventBridge(tracer, "job-rcnt-none")
+
+        event = _make_event()
+        bridge._set_extra_attributes(span, event)
+
+        attr_keys = [c[0][0] for c in span.set_attribute.call_args_list]
+        assert "kasal.extra.results_count" not in attr_keys
 
 
 # ---------------------------------------------------------------------------

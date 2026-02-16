@@ -135,7 +135,8 @@ def _get_tool_name(event: Any) -> str:
 
 def _get_output(event: Any) -> str:
     """Extract output/result content from an event object."""
-    for attr in ("output", "result", "response", "content", "message"):
+    for attr in ("output", "result", "results", "response", "content",
+                 "message", "value", "memory_content"):
         val = getattr(event, attr, None)
         if val is not None:
             return str(val)
@@ -393,6 +394,12 @@ class OTelEventBridge:
         score_threshold = getattr(event, "score_threshold", None)
         if score_threshold is not None:
             span.set_attribute("kasal.extra.score_threshold", float(score_threshold))
+
+        # ── Memory results (query completed) ──
+        results = getattr(event, "results", None)
+        if results is not None:
+            if isinstance(results, (list, tuple)):
+                span.set_attribute("kasal.extra.results_count", len(results))
 
         # ── Tool fields ──
         tool_name = getattr(event, "tool_name", None) or getattr(event, "tool", None)
