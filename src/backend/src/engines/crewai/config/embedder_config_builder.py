@@ -242,9 +242,9 @@ class EmbedderConfigBuilder:
         if not databricks_endpoint:
             try:
                 from src.services.databricks_service import DatabricksService
-                from src.db.session import async_session_factory
+                from src.db.session import request_scoped_session
 
-                async with async_session_factory() as session:
+                async with request_scoped_session() as session:
                     databricks_service = DatabricksService(session)
                     db_config = await databricks_service.get_databricks_config()
                     if db_config and db_config.workspace_url:

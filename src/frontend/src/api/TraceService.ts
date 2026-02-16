@@ -43,6 +43,14 @@ interface BackendTraceData {
   created_at?: string;
   group_id?: string;
   group_email?: string;
+  // OTel span hierarchy fields
+  span_id?: string;
+  trace_id?: string;
+  parent_span_id?: string;
+  // OTel-native fields
+  span_name?: string;
+  status_code?: string;
+  duration_ms?: number;
   // Legacy/extra fields
   task_id?: string;
   timestamp?: string;
@@ -215,7 +223,8 @@ export const TraceService = {
       
       // The API returns an object with a 'traces' field for both endpoints:
       // ExecutionTraceResponseByRunId or ExecutionTraceResponseByJobId
-      const response = await apiClient.get(endpoint);
+      // Use limit=500 (API max) to ensure error events at the end of long executions are included
+      const response = await apiClient.get(endpoint, { params: { limit: 1500 } });
       
       // Check if the response contains a traces field (from the API schemas)
       if (response.data && response.data.traces && Array.isArray(response.data.traces)) {
@@ -234,6 +243,14 @@ export const TraceService = {
             created_at: trace.created_at || trace.timestamp || new Date().toISOString(),
             group_id: trace.group_id,
             group_email: trace.group_email,
+            // OTel span hierarchy
+            span_id: trace.span_id || undefined,
+            trace_id: trace.trace_id || undefined,
+            parent_span_id: trace.parent_span_id || undefined,
+            // OTel-native fields
+            span_name: trace.span_name || undefined,
+            status_code: trace.status_code || undefined,
+            duration_ms: trace.duration_ms ?? undefined,
             // Frontend-only fields
             task_id: trace.task_id || undefined,
             extra_data: trace.extra_data || undefined
@@ -255,6 +272,14 @@ export const TraceService = {
             created_at: item.created_at || item.timestamp || new Date().toISOString(),
             group_id: item.group_id,
             group_email: item.group_email,
+            // OTel span hierarchy
+            span_id: item.span_id || undefined,
+            trace_id: item.trace_id || undefined,
+            parent_span_id: item.parent_span_id || undefined,
+            // OTel-native fields
+            span_name: item.span_name || undefined,
+            status_code: item.status_code || undefined,
+            duration_ms: item.duration_ms ?? undefined,
             // Frontend-only fields
             task_id: item.task_id || undefined,
             extra_data: item.extra_data || undefined

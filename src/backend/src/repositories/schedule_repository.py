@@ -41,7 +41,7 @@ class ScheduleRepository:
         # Create schedule
         db_schedule = Schedule(**schedule_data)
         self.session.add(db_schedule)
-        await self.session.commit()
+        await self.session.flush()
         await self.session.refresh(db_schedule)
         
         return db_schedule
@@ -143,11 +143,11 @@ class ScheduleRepository:
                 schedule.last_run_at
             )
         
-        await self.session.commit()
+        await self.session.flush()
         await self.session.refresh(schedule)
-        
+
         return schedule
-    
+
     async def delete(self, schedule_id: int) -> bool:
         """
         Delete a schedule by ID.
@@ -165,8 +165,8 @@ class ScheduleRepository:
         
         # Delete the schedule
         await self.session.delete(schedule)
-        await self.session.commit()
-        
+        await self.session.flush()
+
         return True
     
     async def toggle_active(self, schedule_id: int) -> Optional[Schedule]:
@@ -194,11 +194,11 @@ class ScheduleRepository:
                 schedule.last_run_at
             )
         
-        await self.session.commit()
+        await self.session.flush()
         await self.session.refresh(schedule)
-        
+
         return schedule
-    
+
     async def update_after_execution(self, schedule_id: int, execution_time) -> Optional[Schedule]:
         """
         Update schedule after execution.
@@ -229,7 +229,7 @@ class ScheduleRepository:
             execution_time_naive
         )
         
-        await self.session.commit()
+        await self.session.flush()
         await self.session.refresh(schedule)
-        
-        return schedule 
+
+        return schedule

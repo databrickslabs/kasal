@@ -232,8 +232,8 @@ async def create_agent(
         from src.services.mcp_service import MCPService
         from src.engines.crewai.tools.mcp_integration import MCPIntegration
         
-        from src.db.session import async_session_factory
-        async with async_session_factory() as session:
+        from src.db.session import request_scoped_session
+        async with request_scoped_session() as session:
             mcp_service = MCPService(session)
             mcp_tools = await MCPIntegration.create_mcp_tools_for_agent(
                 agent_config, agent_key, mcp_service, config

@@ -250,7 +250,7 @@ class TestEmitIndexValidationTrace:
         error = DatabricksIndexValidationError("Missing indexes", validation_result)
 
         # Patch at the source location since imports happen inside the method
-        with patch('src.db.session.async_session_factory') as mock_session:
+        with patch('src.db.session.request_scoped_session') as mock_session:
             mock_session_instance = AsyncMock()
             mock_session.return_value.__aenter__.return_value = mock_session_instance
 
@@ -290,7 +290,7 @@ class TestEmitIndexValidationTrace:
         error = DatabricksIndexValidationError("Provisioning", validation_result)
 
         # Patch at the source location since imports happen inside the method
-        with patch('src.db.session.async_session_factory') as mock_session:
+        with patch('src.db.session.request_scoped_session') as mock_session:
             mock_session_instance = AsyncMock()
             mock_session.return_value.__aenter__.return_value = mock_session_instance
 
@@ -323,7 +323,7 @@ class TestEmitIndexValidationTrace:
         error = DatabricksIndexValidationError("Missing", validation_result)
 
         # Patch at the source location since imports happen inside the method
-        with patch('src.db.session.async_session_factory') as mock_session:
+        with patch('src.db.session.request_scoped_session') as mock_session:
             with patch('src.services.execution_trace_service.ExecutionTraceService') as MockTraceService:
                 await service._emit_index_validation_trace(error)
 
@@ -347,7 +347,7 @@ class TestEmitIndexValidationTrace:
         error = DatabricksIndexValidationError("Missing", validation_result)
 
         # Patch at the source location since imports happen inside the method
-        with patch('src.db.session.async_session_factory') as mock_session:
+        with patch('src.db.session.request_scoped_session') as mock_session:
             mock_session.return_value.__aenter__.side_effect = Exception("DB connection failed")
 
             # Should not raise - just log warning
@@ -370,7 +370,7 @@ class TestEmitIndexValidationTrace:
         error = DatabricksIndexValidationError("Missing", validation_result)
 
         # Patch at the source location since imports happen inside the method
-        with patch('src.db.session.async_session_factory') as mock_session:
+        with patch('src.db.session.request_scoped_session') as mock_session:
             mock_session_instance = AsyncMock()
             mock_session.return_value.__aenter__.return_value = mock_session_instance
 

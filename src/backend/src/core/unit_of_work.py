@@ -12,7 +12,6 @@ from src.repositories.tool_repository import ToolRepository
 from src.repositories.api_key_repository import ApiKeyRepository
 from src.repositories.model_config_repository import ModelConfigRepository
 from src.repositories.template_repository import TemplateRepository
-from src.repositories.task_tracking_repository import TaskTrackingRepository
 from src.repositories.schema_repository import SchemaRepository
 from src.repositories.databricks_config_repository import DatabricksConfigRepository
 from src.repositories.powerbi_config_repository import PowerBIConfigRepository
@@ -43,7 +42,6 @@ class UnitOfWork:
         self.api_key_repository: Optional[ApiKeyRepository] = None
         self.model_config_repository: Optional[ModelConfigRepository] = None
         self.template_repository: Optional[TemplateRepository] = None
-        self.task_tracking_repository: Optional[TaskTrackingRepository] = None
         self.schema_repository: Optional[SchemaRepository] = None
         self.databricks_config_repository: Optional[DatabricksConfigRepository] = None
         self.powerbi_config_repository: Optional[PowerBIConfigRepository] = None
@@ -72,7 +70,6 @@ class UnitOfWork:
         self.api_key_repository = ApiKeyRepository(session)
         self.model_config_repository = ModelConfigRepository(session)
         self.template_repository = TemplateRepository(session)
-        self.task_tracking_repository = TaskTrackingRepository(session)
         self.schema_repository = SchemaRepository(session)
         self.databricks_config_repository = DatabricksConfigRepository(session)
         self.powerbi_config_repository = PowerBIConfigRepository(session)
@@ -121,7 +118,6 @@ class UnitOfWork:
             self.api_key_repository = None
             self.model_config_repository = None
             self.template_repository = None
-            self.task_tracking_repository = None
             self.schema_repository = None
             self.databricks_config_repository = None
             self.powerbi_config_repository = None
@@ -174,7 +170,6 @@ class SyncUnitOfWork:
         self.api_key_repository = None
         self.model_config_repository = None
         self.template_repository = None
-        self.task_tracking_repository = None
         self.schema_repository = None
         self.databricks_config_repository = None
         self.powerbi_config_repository = None
@@ -199,7 +194,6 @@ class SyncUnitOfWork:
             self.api_key_repository = ApiKeyRepository(self._session)
             self.model_config_repository = ModelConfigRepository(self._session)
             self.template_repository = TemplateRepository(self._session)
-            self.task_tracking_repository = TaskTrackingRepository(None)
             self.schema_repository = SchemaRepository(self._session)
             self.databricks_config_repository = DatabricksConfigRepository(self._session)
             self.powerbi_config_repository = PowerBIConfigRepository(self._session)

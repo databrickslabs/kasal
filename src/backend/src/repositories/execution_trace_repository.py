@@ -49,9 +49,8 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             self.session.add(trace)
             # Flush to assign primary key before commit (important for some backends)
             await self.session.flush()
-            # Capture id early in case refresh fails post-commit
+            # Capture id early in case refresh fails
             _trace_id = getattr(trace, 'id', None)
-            await self.session.commit()
             # Best-effort refresh; not strictly needed with expire_on_commit=False
             try:
                 if getattr(trace, 'id', None) is None and _trace_id is not None:
@@ -239,7 +238,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         try:
             stmt = delete(ExecutionTrace).where(ExecutionTrace.id == trace_id)
             result = await self.session.execute(stmt)
-            await self.session.commit()
+            await self.session.flush()
             return result.rowcount
         except SQLAlchemyError as e:
             await self.session.rollback()
@@ -259,7 +258,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         try:
             stmt = delete(ExecutionTrace).where(ExecutionTrace.run_id == run_id)
             result = await self.session.execute(stmt)
-            await self.session.commit()
+            await self.session.flush()
             return result.rowcount
         except SQLAlchemyError as e:
             await self.session.rollback()
@@ -279,7 +278,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         try:
             stmt = delete(ExecutionTrace).where(ExecutionTrace.job_id == job_id)
             result = await self.session.execute(stmt)
-            await self.session.commit()
+            await self.session.flush()
             return result.rowcount
         except SQLAlchemyError as e:
             await self.session.rollback()
@@ -296,7 +295,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         try:
             stmt = delete(ExecutionTrace)
             result = await self.session.execute(stmt)
-            await self.session.commit()
+            await self.session.flush()
             return result.rowcount
         except SQLAlchemyError as e:
             await self.session.rollback()

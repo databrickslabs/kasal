@@ -314,7 +314,7 @@ class TestExecutionStatusService:
     @pytest.mark.asyncio
     async def test_create_execution_success(self, sample_execution_data):
         """Test successful execution creation."""
-        with patch('src.db.session.async_session_factory') as mock_session_factory:
+        with patch('src.db.session.request_scoped_session') as mock_session_factory:
             mock_session = AsyncMock()
             mock_session_factory.return_value.__aenter__.return_value = mock_session
             mock_session_factory.return_value.__aexit__.return_value = None
@@ -334,7 +334,7 @@ class TestExecutionStatusService:
     @pytest.mark.asyncio
     async def test_create_execution_with_group_context(self, sample_execution_data, mock_group_context):
         """Test execution creation with group context."""
-        with patch('src.db.session.async_session_factory') as mock_session_factory:
+        with patch('src.db.session.request_scoped_session') as mock_session_factory:
             mock_session = AsyncMock()
             mock_session_factory.return_value.__aenter__.return_value = mock_session
             mock_session_factory.return_value.__aexit__.return_value = None
@@ -360,7 +360,7 @@ class TestExecutionStatusService:
     @pytest.mark.asyncio
     async def test_create_execution_already_exists(self, sample_execution_data):
         """Test execution creation when record already exists."""
-        with patch('src.db.session.async_session_factory') as mock_session_factory:
+        with patch('src.db.session.request_scoped_session') as mock_session_factory:
             mock_session = AsyncMock()
             mock_session_factory.return_value.__aenter__.return_value = mock_session
             mock_session_factory.return_value.__aexit__.return_value = None
@@ -414,7 +414,7 @@ class TestExecutionStatusService:
     @pytest.mark.asyncio
     async def test_create_execution_database_exception(self, sample_execution_data):
         """Test execution creation when database operation raises exception."""
-        with patch('src.db.session.async_session_factory') as mock_session_factory:
+        with patch('src.db.session.request_scoped_session') as mock_session_factory:
             mock_session_factory.side_effect = Exception("Database connection error")
             
             result = await ExecutionStatusService.create_execution(sample_execution_data)
@@ -424,7 +424,7 @@ class TestExecutionStatusService:
     @pytest.mark.asyncio
     async def test_create_execution_repository_exception(self, sample_execution_data):
         """Test execution creation when repository operation raises exception."""
-        with patch('src.db.session.async_session_factory') as mock_session_factory:
+        with patch('src.db.session.request_scoped_session') as mock_session_factory:
             mock_session = AsyncMock()
             mock_session_factory.return_value.__aenter__.return_value = mock_session
             mock_session_factory.return_value.__aexit__.return_value = None
@@ -441,7 +441,7 @@ class TestExecutionStatusService:
     @pytest.mark.asyncio
     async def test_create_execution_with_group_context_filtering(self, sample_execution_data, mock_group_context):
         """Test execution creation with group context filtering."""
-        with patch('src.db.session.async_session_factory') as mock_session_factory:
+        with patch('src.db.session.request_scoped_session') as mock_session_factory:
             mock_session = AsyncMock()
             mock_session_factory.return_value.__aenter__.return_value = mock_session
             mock_session_factory.return_value.__aexit__.return_value = None

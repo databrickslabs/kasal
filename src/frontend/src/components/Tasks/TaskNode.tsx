@@ -10,7 +10,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
-import { Task } from '../../api/TaskService';
+import { Task, TaskService } from '../../api/TaskService';
 import { ToolService, Tool } from '../../api/ToolService';
 import TaskForm from './TaskForm';
 import QuickToolSelectionDialog from './QuickToolSelectionDialog';
@@ -283,11 +283,18 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
       return node;
     }));
 
+    // Persist to backend if task has a database ID
+    if (data.taskId) {
+      TaskService.updateTask(data.taskId, { tools: selectedTools }).catch(err => {
+        console.error('Failed to persist tool selection:', err);
+      });
+    }
+
     // Mark tab as dirty since task was modified
     markCurrentTabDirty();
 
     setIsToolDialogOpen(false);
-  }, [id, setNodes, markCurrentTabDirty]);
+  }, [id, data.taskId, setNodes, markCurrentTabDirty]);
 
   const iconStyles = {
     mr: 1.5,

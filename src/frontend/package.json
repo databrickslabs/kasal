@@ -43,7 +43,12 @@
     "tree-changes": "^0.5.1",
     "uuid": "^9.0.1",
     "web-vitals": "^3.5.2",
-    "yaml": "^2.8.2"
+    "yaml": "^2.8.2",
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.0",
+    "@mui/icons-material": "^5.17.1",
+    "@mui/material": "^5.17.1",
+    "@mui/types": "^7.2.13"
   },
   "scripts": {
     "start": "vite",
@@ -74,12 +79,7 @@
     ]
   },
   "devDependencies": {
-    "@emotion/react": "^11.14.0",
-    "@emotion/styled": "^11.14.0",
     "@eslint/js": "^9.17.0",
-    "@mui/icons-material": "^5.17.1",
-    "@mui/material": "^5.17.1",
-    "@mui/types": "^7.2.13",
     "@testing-library/cypress": "^10.0.1",
     "@testing-library/jest-dom": "^6.4.2",
     "@testing-library/react": "^14.2.1",

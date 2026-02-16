@@ -172,6 +172,9 @@ chromadb-*.lock
 router_layer
 service_layer
 
+# Frontend build output (built on Databricks Apps during deployment)
+src/frontend_static/
+
 # MLflow
 mlruns/
 .mlruns/

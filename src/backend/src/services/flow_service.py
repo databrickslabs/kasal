@@ -4,7 +4,7 @@ import uuid
 from typing import List, Dict, Any, Optional, Union
 from datetime import datetime
 
-from fastapi import HTTPException
+from src.core.exceptions import KasalError, NotFoundError, BadRequestError, ForbiddenError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
@@ -104,11 +104,11 @@ class FlowService:
 
         except ValueError as ve:
             logger.error(f"Validation error while creating flow: {str(ve)}")
-            raise HTTPException(status_code=400, detail=str(ve))
+            raise BadRequestError(detail=str(ve))
         except Exception as e:
             logger.error(f"Error creating flow: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error creating flow: {str(e)}")
-    
+            raise KasalError(detail=f"Error creating flow: {str(e)}")
+
     async def get_flow(self, flow_id: uuid.UUID) -> Flow:
         """
         Get a flow by ID.
@@ -123,7 +123,7 @@ class FlowService:
         flow = await repository.get(flow_id)
 
         if not flow:
-            raise HTTPException(status_code=404, detail="Flow not found")
+            raise NotFoundError(detail="Flow not found")
 
         return flow
 
@@ -145,15 +145,15 @@ class FlowService:
         flow = await repository.get(flow_id)
 
         if not flow:
-            raise HTTPException(status_code=404, detail="Flow not found")
+            raise NotFoundError(detail="Flow not found")
 
         # Check if user has access to this flow's group
         if flow.group_id and group_context and group_context.group_ids:
             if flow.group_id not in group_context.group_ids:
-                raise HTTPException(status_code=403, detail="Access denied to this flow")
+                raise ForbiddenError(detail="Access denied to this flow")
 
         return flow
-    
+
     async def get_all_flows_for_group(self, group_context) -> List[Flow]:
         """
         Get all flows for the user's groups.
@@ -215,8 +215,8 @@ class FlowService:
             flow = await repository.get(flow_id)
             
             if not flow:
-                raise HTTPException(status_code=404, detail="Flow not found")
-            
+                raise NotFoundError(detail="Flow not found")
+
             # Log the incoming flow data for debugging
             logger.info(f"Updating flow {flow_id} with name: {flow_in.name}")
             
@@ -251,12 +251,12 @@ class FlowService:
             # Update the flow
             updated_flow = await repository.update(flow_id, update_data)
             return updated_flow
-        except HTTPException:
+        except KasalError:
             raise
         except Exception as e:
             logger.error(f"Error updating flow: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error updating flow: {str(e)}")
-    
+            raise KasalError(detail=f"Error updating flow: {str(e)}")
+
     async def force_delete_flow_with_executions(self, flow_id: uuid.UUID) -> bool:
         """
         Force delete a flow by first removing any associated flow executions.
@@ -276,8 +276,8 @@ class FlowService:
             check_query = text("SELECT id FROM flows WHERE id = :flow_id")
             result = await self.session.execute(check_query, {"flow_id": flow_id})
             if not result.first():
-                raise HTTPException(status_code=404, detail="Flow not found")
-            
+                raise NotFoundError(detail="Flow not found")
+
             logger.info(f"Starting force deletion of flow {flow_id}")
 
             # First, find all execution history IDs for this flow
@@ -310,20 +310,17 @@ class FlowService:
             # Delete the flow itself
             flow_delete_query = text("DELETE FROM flows WHERE id = :flow_id")
             result = await self.session.execute(flow_delete_query, {"flow_id": flow_id})
-            
-            # Commit the transaction
-            await self.session.commit()
-            
+
             logger.info(f"Successfully deleted flow {flow_id} with all its executions")
             return True
-            
-        except HTTPException:
+
+        except KasalError:
             await self.session.rollback()
             raise
         except Exception as e:
             await self.session.rollback()
             logger.error(f"Error force deleting flow with executions: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error force deleting flow with executions: {str(e)}")
+            raise KasalError(detail=f"Error force deleting flow with executions: {str(e)}")
 
     async def force_delete_flow_with_executions_with_group_check(self, flow_id: uuid.UUID, group_context) -> bool:
         """
@@ -351,14 +348,14 @@ class FlowService:
             row = result.first()
             
             if not row:
-                raise HTTPException(status_code=404, detail="Flow not found")
-            
+                raise NotFoundError(detail="Flow not found")
+
             flow_group_id = row[1]
-            
+
             # Check if user has access to this flow's group
             if flow_group_id and group_context and group_context.group_ids:
                 if flow_group_id not in group_context.group_ids:
-                    raise HTTPException(status_code=403, detail="Access denied to this flow")
+                    raise ForbiddenError(detail="Access denied to this flow")
             
             logger.info(f"Starting force deletion of flow {flow_id} with group check")
 
@@ -394,20 +391,17 @@ class FlowService:
             # Delete the flow itself
             flow_delete_query = text("DELETE FROM flows WHERE id = :flow_id")
             result = await self.session.execute(flow_delete_query, {"flow_id": flow_id})
-            
-            # Commit the transaction
-            await self.session.commit()
-            
+
             logger.info(f"Successfully deleted flow {flow_id} with all its executions (group verified)")
             return True
 
-        except HTTPException:
+        except KasalError:
             await self.session.rollback()
             raise
         except Exception as e:
             await self.session.rollback()
             logger.error(f"Error force deleting flow with executions and group check: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error force deleting flow with executions: {str(e)}")
+            raise KasalError(detail=f"Error force deleting flow with executions: {str(e)}")
 
     # Backward compatibility methods (no group isolation)
 
@@ -428,18 +422,18 @@ class FlowService:
             # Validate listeners format
             for listener in flow_config.get("listeners", []):
                 if not isinstance(listener, dict):
-                    raise HTTPException(status_code=400, detail=f"Invalid listener format: {listener}")
+                    raise BadRequestError(detail=f"Invalid listener format: {listener}")
                 # Check for required fields in listener (only if listener is not empty)
                 if listener and not all(key in listener for key in ["name", "crewId"]):
-                    raise HTTPException(status_code=400, detail=f"Missing required fields in listener: {listener}")
+                    raise BadRequestError(detail=f"Missing required fields in listener: {listener}")
 
             # Validate actions format
             for action in flow_config.get("actions", []):
                 if not isinstance(action, dict):
-                    raise HTTPException(status_code=400, detail=f"Invalid action format: {action}")
+                    raise BadRequestError(detail=f"Invalid action format: {action}")
                 # Check for required fields in action (only if action is not empty)
                 if action and not all(key in action for key in ["crewId", "taskId"]):
-                    raise HTTPException(status_code=400, detail=f"Missing required fields in action: {action}")
+                    raise BadRequestError(detail=f"Missing required fields in action: {action}")
 
             # Generate a new UUID for the flow
             flow_uuid = str(uuid.uuid4())
@@ -473,12 +467,12 @@ class FlowService:
 
         except ValueError as ve:
             logger.error(f"Validation error while creating flow: {str(ve)}")
-            raise HTTPException(status_code=400, detail=str(ve))
-        except HTTPException:
+            raise BadRequestError(detail=str(ve))
+        except KasalError:
             raise
         except Exception as e:
             logger.error(f"Error creating flow: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error creating flow: {str(e)}")
+            raise KasalError(detail=f"Error creating flow: {str(e)}")
 
     async def get_all_flows(self) -> List[Flow]:
         """
@@ -507,7 +501,7 @@ class FlowService:
         flow = await repository.get(flow_id)
 
         if not flow:
-            raise HTTPException(status_code=404, detail="Flow not found")
+            raise NotFoundError(detail="Flow not found")
 
         # Check for execution records
         from src.models.execution_history import ExecutionHistory
@@ -520,8 +514,7 @@ class FlowService:
         execution_count = result.scalar_one()
 
         if execution_count > 0:
-            raise HTTPException(
-                status_code=400,
+            raise BadRequestError(
                 detail=f"Cannot delete flow with {execution_count} execution records. Use force delete instead."
             )
 

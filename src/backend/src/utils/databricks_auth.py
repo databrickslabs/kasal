@@ -209,7 +209,7 @@ This pattern allows graceful fallback and clear error reporting.
 
 import os
 import logging
-import requests
+import httpx
 import json
 import contextlib
 from typing import Optional, Tuple, Dict
@@ -365,9 +365,9 @@ class DatabricksAuth:
             # Try to load workspace host from database configuration
             try:
                 from src.services.databricks_service import DatabricksService
-                from src.db.session import async_session_factory
+                from src.db.session import request_scoped_session
 
-                async with async_session_factory() as session:
+                async with request_scoped_session() as session:
                     service = DatabricksService(session)
 
                     try:
@@ -638,14 +638,14 @@ class DatabricksAuth:
             }
             
             # Make the token request
-            response = requests.post(
-                token_url,
-                auth=auth,
-                data=data,
-                headers=headers,
-                timeout=30
-            )
-            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    token_url,
+                    auth=auth,
+                    data=data,
+                    headers=headers,
+                )
+
             if response.status_code == 200:
                 token_data = response.json()
                 access_token = token_data.get('access_token')
@@ -681,8 +681,9 @@ class DatabricksAuth:
                 "Content-Type": "application/json"
             }
             
-            response = requests.get(url, headers=headers, timeout=10)
-            
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(url, headers=headers)
+
             if response.status_code == 200:
                 user_data = response.json()
                 username = user_data.get("userName", "Unknown")
@@ -996,7 +997,7 @@ async def get_auth_context(
         pat_token = None
         try:
             from src.services.api_keys_service import ApiKeysService
-            from src.db.session import async_session_factory
+            from src.db.session import request_scoped_session
             from src.utils.user_context import UserContext
 
             # Get group_id for multi-tenant isolation
@@ -1020,7 +1021,7 @@ async def get_auth_context(
             if effective_group_id:
                 logger.info(f"[AUTH PAT] Attempting to load PAT from database with group_id={effective_group_id}")
                 logger.info("[AUTH PAT] ABOUT TO CREATE async_session_factory() - if hang occurs, it's here")
-                async with async_session_factory() as session:
+                async with request_scoped_session() as session:
                     logger.info("[AUTH PAT] async_session_factory() created successfully")
                     api_service = ApiKeysService(session, group_id=effective_group_id)
 

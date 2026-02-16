@@ -262,9 +262,9 @@ class ExecutionRepository(BaseRepository[ExecutionHistory]):
                 logger.warning(f"No execution found with job_id {job_id} during status update.")
                 return None
 
-            # Explicitly commit the transaction
-            await self.session.commit()
-            logger.debug(f"Successfully committed status update for job_id {job_id} to {status}")
+            # Flush to make changes visible within the session
+            await self.session.flush()
+            logger.debug(f"Successfully flushed status update for job_id {job_id} to {status}")
             
             return updated_execution
             

@@ -89,38 +89,40 @@ class CrewRepository(BaseRepository[Crew]):
     async def delete_by_group(self, id: UUID, group_ids: List[str]) -> bool:
         """
         Delete a crew by ID, ensuring it belongs to one of the specified groups.
-        
+
         Args:
             id: ID of the crew to delete
             group_ids: List of group IDs to filter by
-            
+
         Returns:
             True if crew was deleted, False if not found or doesn't belong to group
         """
         if not group_ids:
             return False
-        
+
         # First check if the crew exists and belongs to the group
         crew = await self.get_by_group(id, group_ids)
         if not crew:
             return False
-        
-        # Delete the crew
+
+        # Delete the crew and flush to ensure SQL is issued (autoflush=False)
         await self.session.delete(crew)
+        await self.session.flush()
         return True
-    
+
     async def delete_all_by_group(self, group_ids: List[str]) -> None:
         """
         Delete all crews for the given group IDs.
-        
+
         Args:
             group_ids: List of group IDs to filter by
         """
         if not group_ids:
             return
-        
+
         query = delete(self.model).where(self.model.group_id.in_(group_ids))
         await self.session.execute(query)
+        await self.session.flush()
     
     async def delete_all(self) -> None:
         """

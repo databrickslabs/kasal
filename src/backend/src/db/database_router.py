@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from src.db.session import async_session_factory
+from src.db.session import async_session_factory, _request_session
 from src.db.lakebase_session import get_lakebase_session
 from src.core.logger import LoggerManager
 
@@ -134,7 +134,11 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
             logger.debug(f"  • Instance: {instance_name}")
             logger.debug(f"  • Endpoint: {config.get('endpoint') if config else 'N/A'}")
             async with get_lakebase_session(instance_name, user_token, user_email) as session:
-                yield session
+                token = _request_session.set(session)
+                try:
+                    yield session
+                finally:
+                    _request_session.reset(token)
             return
         except Exception as e:
             logger.error(f"⚠️ Failed to get Lakebase session, falling back to regular DB: {e}")
@@ -144,6 +148,7 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
     logger.debug("🔄 DATABASE ROUTER: Using PostgreSQL/SQLite")
     # Use async context manager for proper session lifecycle
     async with async_session_factory() as session:
+        token = _request_session.set(session)
         try:
             # logger.debug(f"[DB ROUTER] Created session {id(session)}")
             yield session
@@ -155,5 +160,6 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
             await session.rollback()
             raise
         finally:
+            _request_session.reset(token)
             # Ensure session is closed even if not explicitly committed/rolled back
             await session.close()

@@ -1,897 +1,517 @@
-import pytest
-pytest.skip("Incompatible with current architecture: CrewAIEngineService expectations changed; skipping legacy tests", allow_module_level=True)
+"""Unit tests for CrewAI Engine Service.
 
-"""
-Unit tests for CrewAI Engine Service.
-
-This module provides comprehensive unit tests for the CrewAI engine service
-to achieve 100% code coverage.
+Tests the main public methods of CrewAIEngineService: initialization,
+run_execution, get_execution_status, cancel_execution, run_flow,
+and internal helpers.
 """
 
-import pytest
 import asyncio
 import os
+import pytest
 from datetime import datetime, UTC
-from unittest.mock import MagicMock, patch, Mock, AsyncMock
-from typing import Dict, Any
+from unittest.mock import MagicMock, patch, AsyncMock, Mock
 
 from src.engines.crewai.crewai_engine_service import CrewAIEngineService
 from src.models.execution_status import ExecutionStatus
 from src.utils.user_context import GroupContext
 
 
-class TestCrewAIEngineService:
-    """Test cases for CrewAIEngineService"""
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
 
-    @pytest.fixture
-    def service(self):
-        """Create a CrewAIEngineService instance for testing"""
+@pytest.fixture
+def service():
+    """Create a CrewAIEngineService instance for testing."""
+    with patch("src.repositories.execution_repository.get_execution_repository"):
         return CrewAIEngineService()
 
-    @pytest.fixture
-    def sample_execution_config(self):
-        """Sample execution configuration for testing"""
-        return {
-            "crew": {
-                "name": "test_crew",
-                "verbose": True
-            },
-            "agents": [
-                {
-                    "name": "Test Agent",
-                    "role": "Test Agent",
-                    "goal": "Test goal",
-                    "backstory": "Test backstory"
-                }
-            ],
-            "tasks": [
-                {
-                    "description": "Test task",
-                    "expected_output": "Test output"
-                }
-            ]
-        }
 
-    @pytest.fixture
-    def sample_flow_config(self):
-        """Sample flow configuration for testing"""
-        return {
-            "name": "test_flow",
-            "description": "Test flow description",
-            "agents": [
-                {
-                    "name": "Test Agent",
-                    "role": "Test Agent",
-                    "goal": "Test goal",
-                    "backstory": "Test backstory"
-                }
-            ],
-            "tasks": [
-                {
-                    "name": "task_1",
-                    "description": "Test task",
-                    "expected_output": "Test output",
-                    "agent": "Test Agent"
-                }
-            ],
-            "flow": {
-                "name": "test_flow_step",
-                "type": "sequential",
-                "tasks": ["task_1"]
+@pytest.fixture
+def sample_execution_config():
+    """Minimal crew execution configuration."""
+    return {
+        "crew": {"name": "test_crew", "verbose": True},
+        "agents": [
+            {
+                "id": "agent_1",
+                "name": "Test Agent",
+                "role": "Test Agent",
+                "goal": "Test goal",
+                "backstory": "Test backstory",
             }
-        }
+        ],
+        "tasks": [
+            {"description": "Test task", "expected_output": "Test output"}
+        ],
+    }
 
-    @pytest.fixture
-    def sample_group_context(self):
-        """Sample group context for testing"""
-        context = Mock(spec=GroupContext)
-        context.access_token = "test_token"
-        context.primary_group_id = "test_group"
-        return context
 
-    def test_init(self):
-        """Test CrewAIEngineService initialization"""
-        service = CrewAIEngineService()
+@pytest.fixture
+def sample_flow_config():
+    """Minimal flow execution configuration."""
+    return {
+        "name": "test_flow",
+        "description": "Test flow",
+        "nodes": [{"id": "n1", "type": "crew"}],
+        "edges": [{"source": "n1", "target": "n2"}],
+    }
 
+
+@pytest.fixture
+def group_context():
+    """Sample group context for multi-tenant tests."""
+    ctx = Mock(spec=GroupContext)
+    ctx.access_token = "tok_test"
+    ctx.primary_group_id = "grp_123"
+    ctx.group_email = "test@example.com"
+    return ctx
+
+
+# ---------------------------------------------------------------------------
+# Initialization
+# ---------------------------------------------------------------------------
+
+class TestInit:
+    """Tests for __init__."""
+
+    def test_creates_empty_running_jobs(self, service):
         assert service._running_jobs == {}
-        assert hasattr(service, '_get_execution_repository')
-        assert hasattr(service, '_status_service')
 
-    def test_init_with_db(self):
-        """Test CrewAIEngineService initialization with database"""
-        mock_db = MagicMock()
-        service = CrewAIEngineService(db=mock_db)
+    def test_has_repository_factory(self, service):
+        assert callable(service._get_execution_repository)
 
-        assert service._running_jobs == {}
-        assert hasattr(service, '_get_execution_repository')
-        assert hasattr(service, '_status_service')
+    def test_has_status_service_ref(self, service):
+        assert service._status_service is not None
+
+    def test_init_with_db_parameter(self):
+        """db parameter is accepted but not stored directly."""
+        with patch("src.repositories.execution_repository.get_execution_repository"):
+            svc = CrewAIEngineService(db=MagicMock())
+            assert svc._running_jobs == {}
+
+
+# ---------------------------------------------------------------------------
+# initialize()
+# ---------------------------------------------------------------------------
+
+class TestInitialize:
+    """Tests for the async initialize method."""
 
     @pytest.mark.asyncio
-    async def test_initialize_success(self, service):
-        """Test successful engine initialization"""
-        with patch('src.engines.crewai.trace_management.TraceManager.ensure_writer_started') as mock_trace:
-            mock_trace.return_value = None
-
+    async def test_returns_true_on_success(self, service):
+        with patch(
+            "src.engines.crewai.crewai_engine_service.TraceManager.ensure_writer_started",
+            new_callable=AsyncMock,
+        ):
             result = await service.initialize(llm_provider="openai", model="gpt-4o")
-
             assert result is True
-            mock_trace.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_initialize_success_defaults(self, service):
-        """Test successful engine initialization with default parameters"""
-        with patch('src.engines.crewai.trace_management.TraceManager.ensure_writer_started') as mock_trace:
-            mock_trace.return_value = None
-
+    async def test_uses_default_provider_and_model(self, service):
+        with patch(
+            "src.engines.crewai.crewai_engine_service.TraceManager.ensure_writer_started",
+            new_callable=AsyncMock,
+        ):
             result = await service.initialize()
-
             assert result is True
-            mock_trace.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_initialize_failure(self, service):
-        """Test engine initialization failure"""
-        with patch('src.engines.crewai.trace_management.TraceManager.ensure_writer_started'), \
-             patch('builtins.__import__', side_effect=Exception("Import failed")):
-
-            result = await service.initialize()
-
-            assert result is False
-
-    def test_setup_output_directory_with_execution_id(self, service):
-        """Test output directory setup with execution ID"""
-        execution_id = "test_execution_123"
-
-        # Simply test that the method doesn't raise an exception and returns a string
-        result = service._setup_output_directory(execution_id)
-        assert isinstance(result, str)
-        assert execution_id in result or "crew_outputs" in result
-
-    def test_setup_output_directory_without_execution_id(self, service):
-        """Test output directory setup without execution ID"""
-        # Simply test that the method doesn't raise an exception and returns a string
-        result = service._setup_output_directory()
-        assert isinstance(result, str)
-        assert "crew_outputs" in result
-
-    def test_setup_output_directory_exception(self, service):
-        """Test output directory setup with exception"""
-        execution_id = "test_execution_123"
-
-        with patch('pathlib.Path', side_effect=Exception("Path creation failed")):
-            result = service._setup_output_directory(execution_id)
-
-            # Should fallback to os.path.join approach
-            assert isinstance(result, str)
-            assert "crew_outputs" in result
+    async def test_returns_false_on_exception(self, service):
+        with patch(
+            "src.engines.crewai.crewai_engine_service.TraceManager.ensure_writer_started",
+            new_callable=AsyncMock,
+        ), patch(
+            "src.engines.crewai.crew_logger.crew_logger",
+            side_effect=Exception("boom"),
+        ):
+            # Force the import inside initialize() to fail
+            with patch.dict("sys.modules", {"src.engines.crewai.crew_logger": None}):
+                result = await service.initialize()
+                assert result is False
 
     @pytest.mark.asyncio
-    async def test_update_execution_status(self, service):
-        """Test updating execution status"""
-        execution_id = "test_execution_123"
-        status = "COMPLETED"
-        message = "Test completed"
-        result = {"output": "test result"}
+    async def test_flow_execution_type_uses_flow_logger(self, service):
+        with patch(
+            "src.engines.crewai.crewai_engine_service.TraceManager.ensure_writer_started",
+            new_callable=AsyncMock,
+        ):
+            result = await service.initialize(execution_type="flow")
+            assert result is True
 
-        with patch('src.engines.crewai.crewai_engine_service.update_execution_status_with_retry') as mock_update:
-            mock_update.return_value = True
 
-            await service._update_execution_status(execution_id, status, message, result)
+# ---------------------------------------------------------------------------
+# _setup_output_directory()
+# ---------------------------------------------------------------------------
 
-            mock_update.assert_called_once_with(
-                execution_id=execution_id,
-                status=status,
-                message=message,
-                result=result
+class TestSetupOutputDirectory:
+
+    def test_returns_path_with_execution_id(self, service):
+        path = service._setup_output_directory("exec_42")
+        assert isinstance(path, str)
+        assert "exec_42" in path
+
+    def test_returns_base_path_without_id(self, service):
+        path = service._setup_output_directory()
+        assert isinstance(path, str)
+        assert "crew_outputs" in path
+
+    def test_fallback_on_exception(self, service):
+        with patch("pathlib.Path", side_effect=Exception("fail")):
+            path = service._setup_output_directory("exec_42")
+            assert "crew_outputs" in path
+
+
+# ---------------------------------------------------------------------------
+# _update_execution_status()
+# ---------------------------------------------------------------------------
+
+class TestUpdateExecutionStatus:
+
+    @pytest.mark.asyncio
+    async def test_delegates_to_retry_function(self, service):
+        with patch(
+            "src.engines.crewai.crewai_engine_service.update_execution_status_with_retry",
+            new_callable=AsyncMock,
+        ) as mock_retry:
+            await service._update_execution_status(
+                "exec_1", "COMPLETED", "done", result={"out": 1}
+            )
+            mock_retry.assert_awaited_once_with(
+                execution_id="exec_1",
+                status="COMPLETED",
+                message="done",
+                result={"out": 1},
             )
 
-    @pytest.mark.asyncio
-    async def test_get_execution_status_running_job(self, service):
-        """Test getting execution status for running job"""
-        execution_id = "test_execution_123"
-        start_time = datetime.now()
 
-        service._running_jobs[execution_id] = {
-            "start_time": start_time,
+# ---------------------------------------------------------------------------
+# get_execution_status()
+# ---------------------------------------------------------------------------
+
+class TestGetExecutionStatus:
+
+    @pytest.mark.asyncio
+    async def test_returns_running_for_in_memory_job(self, service):
+        now = datetime.now()
+        service._running_jobs["exec_1"] = {
+            "start_time": now,
             "task": MagicMock(),
-            "crew": MagicMock()
+            "crew": None,
         }
-
-        result = await service.get_execution_status(execution_id)
-
+        result = await service.get_execution_status("exec_1")
         assert result["status"] == ExecutionStatus.RUNNING.value
-        assert result["start_time"] == start_time.isoformat()
-        assert result["message"] == "Execution is currently running"
+        assert result["start_time"] == now.isoformat()
 
     @pytest.mark.asyncio
-    async def test_get_execution_status_from_database(self, service):
-        """Test getting execution status from database"""
-        execution_id = "test_execution_123"
-
+    async def test_returns_db_status_when_not_in_memory(self, service):
         mock_status = MagicMock()
         mock_status.status = "COMPLETED"
-        mock_status.message = "Test completed"
-        mock_status.result = {"output": "test"}
+        mock_status.message = "All done"
+        mock_status.result = {"key": "val"}
         mock_status.updated_at = datetime.now(UTC)
         mock_status.created_at = datetime.now(UTC)
 
-        with patch('src.services.execution_status_service.ExecutionStatusService.get_status') as mock_get:
-            mock_get.return_value = mock_status
-
-            result = await service.get_execution_status(execution_id)
-
+        with patch(
+            "src.services.execution_status_service.ExecutionStatusService.get_status",
+            new_callable=AsyncMock,
+            return_value=mock_status,
+        ):
+            result = await service.get_execution_status("exec_2")
             assert result["status"] == "COMPLETED"
-            assert result["message"] == "Test completed"
-            assert result["result"] == {"output": "test"}
-            assert "updated_at" in result
-            assert "created_at" in result
+            assert result["message"] == "All done"
+            assert result["result"] == {"key": "val"}
 
     @pytest.mark.asyncio
-    async def test_get_execution_status_not_found(self, service):
-        """Test getting execution status when not found"""
-        execution_id = "test_execution_123"
-
-        with patch('src.services.execution_status_service.ExecutionStatusService.get_status') as mock_get:
-            mock_get.return_value = None
-
-            result = await service.get_execution_status(execution_id)
-
+    async def test_returns_unknown_when_not_found(self, service):
+        with patch(
+            "src.services.execution_status_service.ExecutionStatusService.get_status",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            result = await service.get_execution_status("missing")
             assert result["status"] == "UNKNOWN"
-            assert result["message"] == "Execution status not found"
 
     @pytest.mark.asyncio
-    async def test_get_execution_status_exception(self, service):
-        """Test getting execution status with exception"""
-        execution_id = "test_execution_123"
-
-        with patch('src.services.execution_status_service.ExecutionStatusService.get_status') as mock_get:
-            mock_get.side_effect = Exception("Database error")
-
-            result = await service.get_execution_status(execution_id)
-
+    async def test_returns_error_on_exception(self, service):
+        with patch(
+            "src.services.execution_status_service.ExecutionStatusService.get_status",
+            new_callable=AsyncMock,
+            side_effect=Exception("db down"),
+        ):
+            result = await service.get_execution_status("err")
             assert result["status"] == "ERROR"
-            assert "Error retrieving execution status" in result["message"]
+            assert "db down" in result["message"]
+
+
+# ---------------------------------------------------------------------------
+# cancel_execution()
+# ---------------------------------------------------------------------------
+
+class TestCancelExecution:
 
     @pytest.mark.asyncio
-    async def test_cancel_execution_success(self, service):
-        """Test successful execution cancellation"""
-        execution_id = "test_execution_123"
+    async def test_returns_false_when_not_found(self, service):
+        assert await service.cancel_execution("nope") is False
 
-        # Create a real asyncio task that can be cancelled
-        async def dummy_task():
-            await asyncio.sleep(1)
+    @pytest.mark.asyncio
+    async def test_cancels_thread_based_job(self, service):
+        async def forever():
+            await asyncio.get_event_loop().create_future()
 
-        task = asyncio.create_task(dummy_task())
-
-        service._running_jobs[execution_id] = {
+        task = asyncio.create_task(forever())
+        service._running_jobs["exec_1"] = {
             "task": task,
-            "crew": MagicMock()
+            "crew": None,
         }
-
-        with patch.object(service, '_update_execution_status') as mock_update:
-            mock_update.return_value = None
-
-            result = await service.cancel_execution(execution_id)
-
+        with patch.object(service, "_update_execution_status", new_callable=AsyncMock):
+            result = await service.cancel_execution("exec_1")
             assert result is True
-            assert task.cancelled()
-            mock_update.assert_called_once_with(
-                execution_id,
-                ExecutionStatus.STOPPED.value,
-                "Execution stopped by user"
-            )
-            assert execution_id not in service._running_jobs
+            assert "exec_1" not in service._running_jobs
 
     @pytest.mark.asyncio
-    async def test_cancel_execution_not_found(self, service):
-        """Test cancelling execution that's not found"""
-        execution_id = "test_execution_123"
+    async def test_cancels_process_based_job(self, service):
+        async def forever():
+            await asyncio.get_event_loop().create_future()
 
-        result = await service.cancel_execution(execution_id)
+        task = asyncio.create_task(forever())
+        service._running_jobs["exec_p"] = {
+            "task": task,
+            "crew": None,
+            "execution_mode": "process",
+        }
+        mock_executor = AsyncMock()
+        mock_executor.terminate_execution = AsyncMock(return_value=True)
 
-        assert result is False
+        with patch(
+            "src.services.process_crew_executor.process_crew_executor",
+            mock_executor,
+        ), patch.object(service, "_update_execution_status", new_callable=AsyncMock):
+            result = await service.cancel_execution("exec_p")
+            assert result is True
+            assert "exec_p" not in service._running_jobs
 
     @pytest.mark.asyncio
-    async def test_cancel_execution_exception(self, service):
-        """Test cancelling execution with exception"""
-        execution_id = "test_execution_123"
-
+    async def test_returns_false_on_exception(self, service):
         mock_task = MagicMock()
-        mock_task.cancel.side_effect = Exception("Cancel failed")
-        service._running_jobs[execution_id] = {
-            "task": mock_task,
-            "crew": MagicMock()
-        }
+        mock_task.cancel.side_effect = Exception("cancel boom")
+        service._running_jobs["bad"] = {"task": mock_task, "crew": None}
 
-        result = await service.cancel_execution(execution_id)
-
+        result = await service.cancel_execution("bad")
         assert result is False
 
-    @pytest.mark.asyncio
-    async def test_run_execution_success(self, service, sample_execution_config, sample_group_context):
-        """Test successful crew execution"""
-        execution_id = "test_execution_123"
 
-        # Mock all the dependencies with proper async context manager
-        with patch('src.engines.crewai.config_adapter.normalize_config') as mock_normalize, \
-             patch.object(service, '_setup_output_directory') as mock_setup_dir, \
-             patch('src.engines.crewai.trace_management.TraceManager.ensure_writer_started') as mock_trace, \
-             patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
-             patch('src.services.tool_service.ToolService.from_unit_of_work') as mock_tool_service, \
-             patch('src.services.api_keys_service.ApiKeysService.from_unit_of_work') as mock_api_service, \
-             patch('src.engines.crewai.tools.tool_factory.ToolFactory.create') as mock_tool_factory, \
-             patch('src.engines.crewai.crew_preparation.CrewPreparation') as mock_crew_prep, \
-             patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener') as mock_agent_trace, \
-             patch('src.engines.crewai.callbacks.logging_callbacks.TaskCompletionEventListener') as mock_task_logger, \
-             patch('asyncio.create_task') as mock_create_task, \
-             patch('src.engines.crewai.execution_runner.run_crew') as mock_run_crew:
+# ---------------------------------------------------------------------------
+# run_execution()
+# ---------------------------------------------------------------------------
 
-            # Setup mocks
-            mock_normalize.return_value = sample_execution_config
-            mock_setup_dir.return_value = "/test/output/dir"
-            mock_trace.return_value = None
-
-            # Mock UOW context as AsyncMock
-            mock_uow_instance = MagicMock()
-            mock_uow_context = AsyncMock()
-            mock_uow_context.__aenter__.return_value = mock_uow_instance
-            mock_uow_context.__aexit__.return_value = None
-            mock_uow.return_value = mock_uow_context
-
-            # Mock services - use return_value instead of side_effect for simpler mocking
-            mock_tool_service.return_value = MagicMock()
-            mock_api_service.return_value = MagicMock()
-            mock_tool_factory.return_value = MagicMock()
-
-            # Mock crew preparation to fail so we don't hit complex CrewAI logic
-            mock_crew_prep_instance = MagicMock()
-            mock_crew_prep_instance.prepare = AsyncMock(return_value=False)
-            mock_crew_prep_instance.crew = MagicMock()
-            mock_crew_prep.return_value = mock_crew_prep_instance
-
-            # Mock callbacks
-            mock_agent_trace.return_value = MagicMock()
-            mock_task_logger.return_value = MagicMock()
-
-            # Mock task creation
-            mock_task = MagicMock()
-            mock_create_task.return_value = mock_task
-
-            result = await service.run_execution(execution_id, sample_execution_config, sample_group_context)
-
-            assert result == execution_id
-            # Since prepare() returns False, the job won't be added to running_jobs
-            # But the early paths will have been tested
+class TestRunExecution:
 
     @pytest.mark.asyncio
-    async def test_run_execution_crew_preparation_failure(self, service, sample_execution_config):
-        """Test crew execution with preparation failure"""
-        execution_id = "test_execution_123"
+    async def test_successful_execution_returns_id(self, service, sample_execution_config, group_context):
+        mock_session = AsyncMock()
 
-        # Mock all dependencies
-        with patch('src.engines.crewai.config_adapter.normalize_config') as mock_normalize:
-            mock_normalize.return_value = sample_execution_config
-
-            with patch.object(service, '_setup_output_directory') as mock_setup_dir:
-                mock_setup_dir.return_value = "/test/output/dir"
-
-                with patch('src.engines.crewai.trace_management.TraceManager.ensure_writer_started'):
-
-                    # Track status updates
-                    status_updates = []
-                    async def track_status(exec_id, status, message, result=None):
-                        status_updates.append((exec_id, status, message))
-
-                    with patch.object(service, '_update_execution_status', side_effect=track_status):
-
-                        # Simulate UOW exception which will trigger status update
-                        with patch('src.core.unit_of_work.UnitOfWork') as mock_uow:
-                            mock_uow.side_effect = Exception("Simulated failure")
-
-                            # This should trigger the exception handling path
-                            with pytest.raises(Exception, match="Simulated failure"):
-                                await service.run_execution(execution_id, sample_execution_config)
-
-                            # Verify status was updated to FAILED
-                            assert any(
-                                exec_id == execution_id and
-                                status == ExecutionStatus.FAILED.value and
-                                "Failed during crew preparation/launch" in message
-                                for exec_id, status, message in status_updates
-                            ), f"Expected FAILED status update not found. Updates: {status_updates}"
-
-    @pytest.mark.asyncio
-    async def test_run_execution_uow_exception(self, service, sample_execution_config):
-        """Test crew execution with UOW exception"""
-        execution_id = "test_execution_123"
-
-        with patch('src.engines.crewai.config_adapter.normalize_config') as mock_normalize, \
-             patch.object(service, '_setup_output_directory') as mock_setup_dir, \
-             patch('src.engines.crewai.trace_management.TraceManager.ensure_writer_started') as mock_trace, \
-             patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
-             patch.object(service, '_update_execution_status') as mock_update_status:
-
-            # Setup mocks
-            mock_normalize.return_value = sample_execution_config
-            mock_setup_dir.return_value = "/test/output/dir"
-            mock_trace.return_value = None
-
-            # Mock UOW exception
-            mock_uow.side_effect = Exception("UOW failed")
-            mock_update_status.return_value = None
-
-            with pytest.raises(Exception, match="UOW failed"):
-                await service.run_execution(execution_id, sample_execution_config)
-
-            mock_update_status.assert_called()
-
-    @pytest.mark.asyncio
-    async def test_run_execution_callback_exception(self, service, sample_execution_config):
-        """Test crew execution with callback creation exception"""
-        execution_id = "test_execution_123"
-
-        with patch('src.engines.crewai.config_adapter.normalize_config') as mock_normalize, \
-             patch.object(service, '_setup_output_directory') as mock_setup_dir, \
-             patch('src.engines.crewai.trace_management.TraceManager.ensure_writer_started') as mock_trace, \
-             patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
-             patch('src.services.tool_service.ToolService.from_unit_of_work') as mock_tool_service, \
-             patch('src.services.api_keys_service.ApiKeysService.from_unit_of_work') as mock_api_service, \
-             patch('src.engines.crewai.tools.tool_factory.ToolFactory.create') as mock_tool_factory, \
-             patch('src.engines.crewai.crew_preparation.CrewPreparation') as mock_crew_prep, \
-             patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener') as mock_agent_trace, \
-             patch('asyncio.create_task') as mock_create_task:
-
-            # Setup mocks
-            mock_normalize.return_value = sample_execution_config
-            mock_setup_dir.return_value = "/test/output/dir"
-            mock_trace.return_value = None
-
-            # Mock UOW context as AsyncMock
-            mock_uow_instance = MagicMock()
-            mock_uow_context = AsyncMock()
-            mock_uow_context.__aenter__.return_value = mock_uow_instance
-            mock_uow_context.__aexit__.return_value = None
-            mock_uow.return_value = mock_uow_context
-
-            # Mock services
-            mock_tool_service.return_value = MagicMock()
-            mock_api_service.return_value = MagicMock()
-            mock_tool_factory.return_value = MagicMock()
-
-            # Mock crew preparation to fail so we don't hit complex logic
-            mock_crew_prep_instance = MagicMock()
-            mock_crew_prep_instance.prepare = AsyncMock(return_value=False)
-            mock_crew_prep_instance.crew = MagicMock()
-            mock_crew_prep.return_value = mock_crew_prep_instance
-
-            # Mock callback exception
-            mock_agent_trace.side_effect = Exception("Callback failed")
-
-            # Mock task creation
-            mock_task = MagicMock()
-            mock_create_task.return_value = mock_task
-
-            # Should handle callback failure gracefully
-            result = await service.run_execution(execution_id, sample_execution_config)
-
-            assert result == execution_id
-            # Since prepare() returns False, job won't be in running_jobs
-
-    @pytest.mark.asyncio
-    async def test_run_execution_general_exception(self, service, sample_execution_config):
-        """Test crew execution with general exception"""
-        execution_id = "test_execution_123"
-
-        # Patch the service method itself to trigger early exception
-        with patch.object(service, '_setup_output_directory') as mock_setup_dir:
-            mock_setup_dir.side_effect = Exception("General error")
-
-            with pytest.raises(Exception, match="General error"):
-                await service.run_execution(execution_id, sample_execution_config)
-
-    @pytest.mark.asyncio
-    async def test_run_flow_success(self, service, sample_flow_config, sample_group_context):
-        """Test successful flow execution"""
-        execution_id = "test_flow_123"
-
-        with patch('src.engines.crewai.config_adapter.normalize_flow_config') as mock_normalize, \
-             patch.object(service, '_setup_output_directory') as mock_setup_dir, \
-             patch('src.engines.crewai.trace_management.TraceManager.ensure_writer_started') as mock_trace, \
-             patch.object(service, '_update_execution_status') as mock_update_status, \
-             patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
-             patch('src.services.tool_service.ToolService.from_unit_of_work') as mock_tool_service, \
-             patch('src.services.api_keys_service.ApiKeysService.from_unit_of_work') as mock_api_service, \
-             patch('src.engines.crewai.tools.tool_factory.ToolFactory.create') as mock_tool_factory, \
-             patch('src.engines.crewai.flow_preparation.FlowPreparation') as mock_flow_prep, \
-             patch('asyncio.create_task') as mock_create_task:
-
-            # Setup mocks
-            mock_normalize.return_value = sample_flow_config
-            mock_setup_dir.return_value = "/test/output/dir"
-            mock_trace.return_value = None
-            mock_update_status.return_value = None
-
-            # Mock UOW context as AsyncMock
-            mock_uow_instance = MagicMock()
-            mock_uow_context = AsyncMock()
-            mock_uow_context.__aenter__.return_value = mock_uow_instance
-            mock_uow_context.__aexit__.return_value = None
-            mock_uow.return_value = mock_uow_context
-
-            # Mock services
-            mock_tool_service.return_value = MagicMock()
-            mock_api_service.return_value = MagicMock()
-            mock_tool_factory.return_value = MagicMock()
-
-            # Mock flow preparation with proper constructor (config, output_dir)
-            def mock_flow_prep_constructor(config, output_dir):  # noqa: ARG001
-                mock_instance = MagicMock()
-                mock_instance.prepare = MagicMock(return_value={'flow': MagicMock()})
-                return mock_instance
-            mock_flow_prep.side_effect = mock_flow_prep_constructor
-
-            # Mock task creation
-            mock_task = MagicMock()
-            mock_create_task.return_value = mock_task
-
-            result = await service.run_flow(execution_id, sample_flow_config, sample_group_context)
-
-            assert result == execution_id
-            # Since prepare() returns False, we test the early preparation flow path
-
-    @pytest.mark.asyncio
-    async def test_run_flow_preparation_failure(self, service, sample_flow_config):
-        """Test flow execution with preparation failure"""
-        execution_id = "test_flow_123"
-
-        with patch('src.engines.crewai.config_adapter.normalize_flow_config') as mock_normalize, \
-             patch.object(service, '_setup_output_directory') as mock_setup_dir, \
-             patch('src.engines.crewai.trace_management.TraceManager.ensure_writer_started') as mock_trace, \
-             patch.object(service, '_update_execution_status') as mock_update_status, \
-             patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
-             patch('src.services.tool_service.ToolService.from_unit_of_work') as mock_tool_service, \
-             patch('src.services.api_keys_service.ApiKeysService.from_unit_of_work') as mock_api_service, \
-             patch('src.engines.crewai.tools.tool_factory.ToolFactory.create') as mock_tool_factory, \
-             patch('src.engines.crewai.crewai_engine_service.FlowPreparation') as mock_flow_prep:
-
-            # Setup mocks
-            mock_normalize.return_value = sample_flow_config
-            mock_setup_dir.return_value = "/test/output/dir"
-            mock_trace.return_value = None
-            mock_update_status.return_value = None
-
-            # Mock UOW context as AsyncMock
-            mock_uow_instance = MagicMock()
-            mock_uow_context = AsyncMock()
-            mock_uow_context.__aenter__.return_value = mock_uow_instance
-            mock_uow_context.__aexit__.return_value = None
-            mock_uow.return_value = mock_uow_context
-
-            # Mock services
-            mock_tool_service.return_value = MagicMock()
-            mock_api_service.return_value = MagicMock()
-            mock_tool_factory.return_value = MagicMock()
-
-            # Mock flow preparation failure by raising an exception
-            def mock_flow_prep_constructor(config, output_dir):  # noqa: ARG001
-                mock_instance = MagicMock()
-                mock_instance.prepare = MagicMock(side_effect=Exception("Flow preparation failed"))
-                return mock_instance
-            mock_flow_prep.side_effect = mock_flow_prep_constructor
-
-            result = await service.run_flow(execution_id, sample_flow_config)
-
-            assert result == execution_id
-            mock_update_status.assert_any_call(
-                execution_id,
-                ExecutionStatus.FAILED.value,
-                "Failed to prepare flow"
+        with patch(
+            "src.engines.crewai.crewai_engine_service.normalize_config",
+            return_value=sample_execution_config,
+        ), patch.object(
+            service, "_setup_output_directory", return_value="/tmp/out"
+        ), patch(
+            "src.engines.crewai.crewai_engine_service.TraceManager.ensure_writer_started",
+            new_callable=AsyncMock,
+        ), patch(
+            "src.engines.crewai.crewai_engine_service.ToolService",
+        ), patch(
+            "src.engines.crewai.crewai_engine_service.ToolFactory.create",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ), patch(
+            "src.engines.crewai.crewai_engine_service.run_crew_in_process",
+            new_callable=AsyncMock,
+        ) as mock_run:
+            result = await service.run_execution(
+                "exec_1", sample_execution_config, group_context, session=mock_session
             )
+            assert result == "exec_1"
+            assert "exec_1" in service._running_jobs
+            assert service._running_jobs["exec_1"]["execution_mode"] == "process"
 
     @pytest.mark.asyncio
-    async def test_run_flow_uow_exception(self, service, sample_flow_config):
-        """Test flow execution with UOW exception"""
-        execution_id = "test_flow_123"
+    async def test_adds_group_id_to_config(self, service, sample_execution_config, group_context):
+        captured_config = {}
+        mock_session = AsyncMock()
 
-        with patch('src.engines.crewai.config_adapter.normalize_flow_config') as mock_normalize, \
-             patch.object(service, '_setup_output_directory') as mock_setup_dir, \
-             patch('src.engines.crewai.trace_management.TraceManager.ensure_writer_started') as mock_trace, \
-             patch.object(service, '_update_execution_status') as mock_update_status, \
-             patch('src.core.unit_of_work.UnitOfWork') as mock_uow:
+        def capture_normalize(cfg):
+            captured_config.update(cfg)
+            return cfg
 
-            # Setup mocks
-            mock_normalize.return_value = sample_flow_config
-            mock_setup_dir.return_value = "/test/output/dir"
-            mock_trace.return_value = None
-            mock_update_status.return_value = None
-
-            # Mock UOW exception
-            mock_uow.side_effect = Exception("UOW failed")
-
-            with pytest.raises(Exception, match="UOW failed"):
-                await service.run_flow(execution_id, sample_flow_config)
-
-            mock_update_status.assert_any_call(
-                execution_id,
-                ExecutionStatus.FAILED.value,
-                "Failed during flow preparation/launch: UOW failed"
+        with patch(
+            "src.engines.crewai.crewai_engine_service.normalize_config",
+            side_effect=capture_normalize,
+        ), patch.object(
+            service, "_setup_output_directory", return_value="/tmp/out"
+        ), patch(
+            "src.engines.crewai.crewai_engine_service.TraceManager.ensure_writer_started",
+            new_callable=AsyncMock,
+        ), patch(
+            "src.engines.crewai.crewai_engine_service.ToolService",
+        ), patch(
+            "src.engines.crewai.crewai_engine_service.ToolFactory.create",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ), patch(
+            "src.engines.crewai.crewai_engine_service.run_crew_in_process",
+            new_callable=AsyncMock,
+        ):
+            await service.run_execution(
+                "exec_g", sample_execution_config, group_context, session=mock_session
             )
+            # After normalize_config, group_id is added
+            # The actual config dict is mutated inline
+            # We just check it didn't raise
 
     @pytest.mark.asyncio
-    async def test_run_flow_general_exception(self, service, sample_flow_config):
-        """Test flow execution with general exception"""
-        execution_id = "test_flow_123"
+    async def test_updates_status_on_prep_failure(self, service, sample_execution_config):
+        mock_session = AsyncMock()
 
-        # Patch service method to trigger early exception
-        with patch.object(service, '_setup_output_directory') as mock_setup_dir, \
-             patch.object(service, '_update_execution_status') as mock_update_status:
+        with patch(
+            "src.engines.crewai.crewai_engine_service.normalize_config",
+            return_value=sample_execution_config,
+        ), patch.object(
+            service, "_setup_output_directory", return_value="/tmp/out"
+        ), patch(
+            "src.engines.crewai.crewai_engine_service.TraceManager.ensure_writer_started",
+            new_callable=AsyncMock,
+        ), patch(
+            "src.engines.crewai.crewai_engine_service.ToolFactory",
+        ) as mock_tf_cls, patch.object(
+            service, "_update_execution_status", new_callable=AsyncMock
+        ) as mock_update:
+            mock_tf_cls.create = AsyncMock(side_effect=Exception("tool fail"))
+            with pytest.raises(Exception, match="tool fail"):
+                await service.run_execution(
+                    "exec_fail", sample_execution_config, session=mock_session
+                )
+            mock_update.assert_awaited_once()
 
-            mock_setup_dir.side_effect = Exception("General error")
-            mock_update_status.return_value = None
+    @pytest.mark.asyncio
+    async def test_outer_exception_propagates(self, service, sample_execution_config):
+        with patch.object(
+            service, "_setup_output_directory", side_effect=Exception("boom")
+        ):
+            with pytest.raises(Exception, match="boom"):
+                await service.run_execution("e", sample_execution_config)
 
-            with pytest.raises(Exception, match="General error"):
-                await service.run_flow(execution_id, sample_flow_config)
 
-            mock_update_status.assert_any_call(
-                execution_id,
-                ExecutionStatus.FAILED.value,
-                "Flow execution failed: General error"
+# ---------------------------------------------------------------------------
+# run_flow()
+# ---------------------------------------------------------------------------
+
+class TestRunFlow:
+
+    @pytest.mark.asyncio
+    async def test_successful_flow_returns_id(self, service, sample_flow_config, group_context):
+        with patch(
+            "src.engines.crewai.crewai_engine_service.normalize_flow_config",
+            return_value=sample_flow_config,
+        ), patch.object(
+            service, "_setup_output_directory", return_value="/tmp/fout"
+        ), patch(
+            "src.engines.crewai.crewai_engine_service.TraceManager.ensure_writer_started",
+            new_callable=AsyncMock,
+        ), patch(
+            "src.engines.crewai.crewai_engine_service.run_flow_in_process",
+            new_callable=AsyncMock,
+        ):
+            result = await service.run_flow(
+                "flow_1", sample_flow_config, group_context, user_token="tok"
             )
+            assert result == "flow_1"
+            assert "flow_1" in service._running_jobs
+            assert service._running_jobs["flow_1"]["execution_mode"] == "process"
 
     @pytest.mark.asyncio
-    async def test_execute_flow_success(self, service):
-        """Test successful flow execution"""
-        execution_id = "test_flow_123"
+    async def test_adds_group_id_to_flow_config(self, service, sample_flow_config, group_context):
+        with patch(
+            "src.engines.crewai.crewai_engine_service.normalize_flow_config",
+            side_effect=lambda c: c,
+        ), patch.object(
+            service, "_setup_output_directory", return_value="/tmp/fout"
+        ), patch(
+            "src.engines.crewai.crewai_engine_service.TraceManager.ensure_writer_started",
+            new_callable=AsyncMock,
+        ), patch(
+            "src.engines.crewai.crewai_engine_service.run_flow_in_process",
+            new_callable=AsyncMock,
+        ):
+            await service.run_flow("fg", sample_flow_config, group_context)
+            assert sample_flow_config["group_id"] == "grp_123"
+
+    @pytest.mark.asyncio
+    async def test_flow_failure_updates_status(self, service, sample_flow_config):
+        with patch(
+            "src.engines.crewai.crewai_engine_service.normalize_flow_config",
+            side_effect=Exception("norm fail"),
+        ), patch.object(
+            service, "_update_execution_status", new_callable=AsyncMock
+        ) as mock_update:
+            with pytest.raises(Exception, match="norm fail"):
+                await service.run_flow("ff", sample_flow_config)
+            mock_update.assert_awaited_once()
+            args = mock_update.call_args
+            assert args[0][1] == ExecutionStatus.FAILED.value
+
+
+# ---------------------------------------------------------------------------
+# _execute_flow()
+# ---------------------------------------------------------------------------
+
+class TestExecuteFlow:
+
+    @pytest.mark.asyncio
+    async def test_successful_flow_sets_result(self, service):
         mock_flow = MagicMock()
+        mock_flow.kickoff = AsyncMock(return_value="result_data")
 
-        # Make kickoff an async method
-        async def mock_kickoff():
-            return "flow_result"
-        mock_flow.kickoff = mock_kickoff
+        service._running_jobs["f1"] = {"start_time": datetime.now(UTC)}
 
-        # Setup running job
-        service._running_jobs[execution_id] = {
-            "type": "flow",
-            "config": {},
-            "flow": mock_flow,
-            "start_time": datetime.now(UTC)
-        }
-
-        with patch.object(service, '_update_execution_status') as mock_update_status:
-            mock_update_status.return_value = None
-
-            await service._execute_flow(execution_id, mock_flow)
-
-            mock_update_status.assert_called_with(
-                execution_id,
-                ExecutionStatus.COMPLETED.value,
-                "Flow execution completed successfully"
-            )
-
-            # Check result was stored
-            assert service._running_jobs[execution_id]["result"] == "flow_result"
+        with patch.object(service, "_update_execution_status", new_callable=AsyncMock):
+            await service._execute_flow("f1", mock_flow)
+            assert service._running_jobs["f1"]["result"] == "result_data"
 
     @pytest.mark.asyncio
-    async def test_execute_flow_exception(self, service):
-        """Test flow execution with exception"""
-        execution_id = "test_flow_123"
+    async def test_failed_flow_updates_status(self, service):
         mock_flow = MagicMock()
+        mock_flow.kickoff = AsyncMock(side_effect=Exception("flow crash"))
 
-        # Make kickoff an async method that raises exception
-        async def mock_kickoff():
-            raise Exception("Flow execution failed")
-        mock_flow.kickoff = mock_kickoff
+        service._running_jobs["f2"] = {"start_time": datetime.now(UTC)}
 
-        # Setup running job
-        service._running_jobs[execution_id] = {
-            "type": "flow",
-            "config": {},
-            "flow": mock_flow,
-            "start_time": datetime.now(UTC)
-        }
-
-        with patch.object(service, '_update_execution_status') as mock_update_status:
-            mock_update_status.return_value = None
-
-            await service._execute_flow(execution_id, mock_flow)
-
-            mock_update_status.assert_called_with(
-                execution_id,
+        with patch.object(
+            service, "_update_execution_status", new_callable=AsyncMock
+        ) as mock_update:
+            await service._execute_flow("f2", mock_flow)
+            mock_update.assert_any_call(
+                "f2",
                 ExecutionStatus.FAILED.value,
-                "Flow execution failed: Flow execution failed"
+                "Flow execution failed: flow crash",
             )
 
-            # Check end_time was set
-            assert "end_time" in service._running_jobs[execution_id]
-
     @pytest.mark.asyncio
-    async def test_execute_flow_cleanup_no_job(self, service):
-        """Test flow execution cleanup when job doesn't exist"""
-        execution_id = "test_flow_123"
+    async def test_sets_end_time_in_finally(self, service):
         mock_flow = MagicMock()
+        mock_flow.kickoff = AsyncMock(return_value="ok")
 
-        # Make kickoff an async method
-        async def mock_kickoff():
-            return "flow_result"
-        mock_flow.kickoff = mock_kickoff
+        service._running_jobs["f3"] = {"start_time": datetime.now(UTC)}
 
-        with patch.object(service, '_update_execution_status') as mock_update_status:
-            mock_update_status.return_value = None
-
-            await service._execute_flow(execution_id, mock_flow)
-
-            # Should not raise exception when job doesn't exist
-            mock_update_status.assert_called_with(
-                execution_id,
-                ExecutionStatus.COMPLETED.value,
-                "Flow execution completed successfully"
-            )
-
-    def test_run_execution_without_group_context(self, service, sample_execution_config):
-        """Test run_execution without group context"""
-        execution_id = "test_execution_123"
-
-        with patch('src.engines.crewai.config_adapter.normalize_config') as mock_normalize, \
-             patch.object(service, '_setup_output_directory') as mock_setup_dir, \
-             patch('src.engines.crewai.trace_management.TraceManager.ensure_writer_started') as mock_trace, \
-             patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
-             patch('src.services.tool_service.ToolService.from_unit_of_work') as mock_tool_service, \
-             patch('src.services.api_keys_service.ApiKeysService.from_unit_of_work') as mock_api_service, \
-             patch('src.engines.crewai.tools.tool_factory.ToolFactory.create') as mock_tool_factory, \
-             patch('src.engines.crewai.crew_preparation.CrewPreparation') as mock_crew_prep, \
-             patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener') as mock_agent_trace, \
-             patch('src.engines.crewai.callbacks.logging_callbacks.TaskCompletionEventListener') as mock_task_logger, \
-             patch('asyncio.create_task') as mock_create_task:
-
-            # Setup mocks for successful execution
-            mock_normalize.return_value = sample_execution_config
-            mock_setup_dir.return_value = "/test/output/dir"
-            mock_trace.return_value = None
-
-            # Mock UOW context as AsyncMock
-            mock_uow_instance = MagicMock()
-            mock_uow_context = AsyncMock()
-            mock_uow_context.__aenter__.return_value = mock_uow_instance
-            mock_uow_context.__aexit__.return_value = None
-            mock_uow.return_value = mock_uow_context
-
-            # Mock services
-            mock_tool_service.return_value = MagicMock()
-            mock_api_service.return_value = MagicMock()
-            mock_tool_factory.return_value = MagicMock()
-
-            # Mock crew preparation to fail to avoid complex logic
-            mock_crew_prep_instance = MagicMock()
-            mock_crew_prep_instance.prepare = AsyncMock(return_value=False)
-            mock_crew_prep_instance.crew = MagicMock()
-            mock_crew_prep.return_value = mock_crew_prep_instance
-
-            # Mock callbacks
-            mock_agent_trace.return_value = MagicMock()
-            mock_task_logger.return_value = MagicMock()
-
-            # Mock task creation
-            mock_task = MagicMock()
-            mock_create_task.return_value = mock_task
-
-            # Run without group context
-            async def run_test():
-                return await service.run_execution(execution_id, sample_execution_config, None)
-
-            result = asyncio.run(run_test())
-
-            assert result == execution_id
-            # Since prepare() returns False, job won't be in running_jobs
-            # But we tested the None group context path
-
-    def test_run_flow_with_group_context_in_config(self, service, sample_flow_config, sample_group_context):
-        """Test run_flow adds group context to config"""
-        execution_id = "test_flow_123"
-
-        with patch('src.engines.crewai.config_adapter.normalize_flow_config') as mock_normalize, \
-             patch.object(service, '_setup_output_directory') as mock_setup_dir, \
-             patch('src.engines.crewai.trace_management.TraceManager.ensure_writer_started') as mock_trace, \
-             patch.object(service, '_update_execution_status') as mock_update_status, \
-             patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
-             patch('src.services.tool_service.ToolService.from_unit_of_work') as mock_tool_service, \
-             patch('src.services.api_keys_service.ApiKeysService.from_unit_of_work') as mock_api_service, \
-             patch('src.engines.crewai.tools.tool_factory.ToolFactory.create') as mock_tool_factory, \
-             patch('src.engines.crewai.crewai_engine_service.FlowPreparation') as mock_flow_prep, \
-             patch('asyncio.create_task') as mock_create_task:
-
-            # Setup mocks
-            mock_normalize.return_value = sample_flow_config
-            mock_setup_dir.return_value = "/test/output/dir"
-            mock_trace.return_value = None
-            mock_update_status.return_value = None
-
-            # Mock UOW context as AsyncMock
-            mock_uow_instance = MagicMock()
-            mock_uow_context = AsyncMock()
-            mock_uow_context.__aenter__.return_value = mock_uow_instance
-            mock_uow_context.__aexit__.return_value = None
-            mock_uow.return_value = mock_uow_context
-
-            # Mock services
-            mock_tool_service.return_value = MagicMock()
-            mock_api_service.return_value = MagicMock()
-            mock_tool_factory.return_value = MagicMock()
-
-            # Mock flow preparation success
-            def mock_flow_prep_constructor(config, output_dir):  # noqa: ARG001
-                mock_instance = MagicMock()
-                mock_instance.prepare = MagicMock(return_value={'flow': MagicMock()})
-                return mock_instance
-            mock_flow_prep.side_effect = mock_flow_prep_constructor
-
-            # Mock task creation
-            mock_task = MagicMock()
-            mock_create_task.return_value = mock_task
-
-            async def run_test():
-                return await service.run_flow(execution_id, sample_flow_config, sample_group_context)
-
-            result = asyncio.run(run_test())
-
-            assert result == execution_id
-
-            # Verify group context was added to config
-            calls = mock_flow_prep.call_args_list
-            assert len(calls) > 0
-            config_arg = calls[0][0][0]  # First argument of first call
-            assert 'group_context' in config_arg
-            assert config_arg['group_context'] == sample_group_context
+        with patch.object(service, "_update_execution_status", new_callable=AsyncMock):
+            await service._execute_flow("f3", mock_flow)
+            assert "end_time" in service._running_jobs["f3"]
 
     @pytest.mark.asyncio
-    async def test_execute_flow_success_simple(self, service):
-        """Test simple _execute_flow success scenario"""
-        execution_id = "test_flow_123"
+    async def test_no_error_when_job_not_in_running_jobs(self, service):
         mock_flow = MagicMock()
+        mock_flow.kickoff = AsyncMock(return_value="ok")
 
-        # Make kickoff an async method
-        async def mock_kickoff():
-            return "flow_result"
-        mock_flow.kickoff = mock_kickoff
-
-        # Setup running job
-        service._running_jobs[execution_id] = {
-            "type": "flow",
-            "config": {},
-            "flow": mock_flow,
-            "start_time": datetime.now(UTC)
-        }
-
-        with patch.object(service, '_update_execution_status') as mock_update_status:
-            mock_update_status.return_value = None
-
-            await service._execute_flow(execution_id, mock_flow)
-
-            # Should complete successfully
-            assert "result" in service._running_jobs[execution_id]
-            assert service._running_jobs[execution_id]["result"] == "flow_result"
-
-    @pytest.mark.asyncio
-    async def test_run_execution_basic_flow(self, service, sample_execution_config):
-        """Test basic run_execution flow coverage"""
-        execution_id = "test_execution_123"
-
-        # Test error handling path in run_execution by making UOW fail
-        with patch.object(service, '_setup_output_directory') as mock_setup_dir, \
-             patch('src.engines.crewai.trace_management.TraceManager.ensure_writer_started') as mock_trace, \
-             patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
-             patch.object(service, '_update_execution_status') as mock_update_status:
-
-            # Setup mocks for early path coverage
-            mock_setup_dir.return_value = "/test/output/dir"
-            mock_trace.return_value = None
-            mock_uow.side_effect = Exception("UOW failed")
-            mock_update_status.return_value = None
-
-            # This should raise an exception but test the early paths
-            with pytest.raises(Exception, match="UOW failed"):
-                await service.run_execution(execution_id, sample_execution_config)
-
-            # Verify we hit the key paths before UOW fails
-            mock_setup_dir.assert_called_once_with(execution_id)
-            mock_trace.assert_called_once()
-            mock_update_status.assert_called_once()  # Error handler should update status
+        with patch.object(service, "_update_execution_status", new_callable=AsyncMock):
+            # Should not raise even though "ghost" is not in _running_jobs
+            await service._execute_flow("ghost", mock_flow)

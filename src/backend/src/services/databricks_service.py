@@ -1,10 +1,10 @@
 import os
 import logging
-import requests
+import httpx
 import base64
 from typing import Dict, Tuple, Optional, Any
 
-from fastapi import HTTPException
+from src.core.exceptions import KasalError
 
 from src.repositories.databricks_config_repository import DatabricksConfigRepository
 from src.schemas.databricks_config import DatabricksConfigCreate, DatabricksConfigResponse
@@ -109,7 +109,7 @@ class DatabricksService:
             }
         except Exception as e:
             logger.error(f"Error setting Databricks configuration: {e}")
-            raise HTTPException(status_code=500, detail=f"Error setting Databricks configuration: {str(e)}")
+            raise KasalError(detail=f"Error setting Databricks configuration: {str(e)}")
     
     async def get_databricks_config(self) -> Optional[DatabricksConfigResponse]:
         """
@@ -148,11 +148,11 @@ class DatabricksService:
                 knowledge_chunk_size=config.knowledge_chunk_size if hasattr(config, 'knowledge_chunk_size') else 1000,
                 knowledge_chunk_overlap=config.knowledge_chunk_overlap if hasattr(config, 'knowledge_chunk_overlap') else 200
             )
-        except HTTPException:
+        except KasalError:
             raise
         except Exception as e:
             logger.error(f"Error getting Databricks configuration: {e}")
-            raise HTTPException(status_code=500, detail=f"Error getting Databricks configuration: {str(e)}")
+            raise KasalError(detail=f"Error getting Databricks configuration: {str(e)}")
     
     async def check_personal_token_required(self) -> Dict:
         """
@@ -194,7 +194,7 @@ class DatabricksService:
             }
         except Exception as e:
             logger.error(f"Error checking personal token requirement: {e}")
-            raise HTTPException(status_code=500, detail=f"Error checking personal token requirement: {str(e)}")
+            raise KasalError(detail=f"Error checking personal token requirement: {str(e)}")
 
     # Methods for Databricks token management
     
@@ -388,8 +388,9 @@ class DatabricksService:
                 }
             
             # Make the actual API call to test connection
-            response = requests.get(test_url, headers=headers, timeout=10)
-            
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(test_url, headers=headers)
+
             if response.status_code == 200:
                 return {
                     "status": "success",
@@ -420,14 +421,14 @@ class DatabricksService:
                     "message": f"Connection failed with status {response.status_code}: {response.text}",
                     "connected": False
                 }
-                
-        except requests.exceptions.ConnectionError:
+
+        except httpx.ConnectError:
             return {
                 "status": "error",
                 "message": f"Failed to connect to {workspace_url} - check workspace URL",
                 "connected": False
             }
-        except requests.exceptions.Timeout:
+        except httpx.TimeoutException:
             return {
                 "status": "error",
                 "message": "Connection timeout - check network and workspace URL",

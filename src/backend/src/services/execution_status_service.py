@@ -330,7 +330,7 @@ class ExecutionStatusService:
         Returns:
             True if successful, False otherwise
         """
-        from src.db.session import async_session_factory
+        from src.db.session import request_scoped_session
         from src.repositories.execution_repository import ExecutionRepository
 
         # Validate job_id
@@ -372,7 +372,7 @@ class ExecutionStatusService:
                 return True
             else:
                 # Create database session internally (legacy path)
-                async with async_session_factory() as session:
+                async with request_scoped_session() as session:
                     # Create repository instance
                     repo = ExecutionRepository(session)
 

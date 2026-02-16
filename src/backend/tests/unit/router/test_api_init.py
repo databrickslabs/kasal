@@ -1,143 +1,38 @@
-import pytest
-pytest.skip("Legacy api __init__ router export tests expect removed routers (roles_router, databricks_role_router); skipping.", allow_module_level=True)
-
 """
-Unit tests for API module initialization.
+Unit tests for the API module initialization.
 
-Tests the functionality of the API router initialization and
-router inclusion logic.
+Verifies that the api_router is properly constructed, all expected
+sub-routers are included, and exports are consistent.
 """
 import pytest
-from unittest.mock import patch, MagicMock
 from fastapi import APIRouter
 
 
-class TestAPIInit:
-    """Test cases for API module initialization."""
+class TestAPIModuleImport:
+    """Verify the API module can be imported and has the expected structure."""
 
-    def test_api_router_creation(self):
-        """Test that the main API router is created correctly."""
+    def test_api_router_is_api_router_instance(self):
+        """api_router must be an APIRouter instance."""
         from src.api import api_router
 
         assert isinstance(api_router, APIRouter)
 
-    def test_all_routers_imported(self):
-        """Test that all expected routers are imported."""
-        from src.api import (
-            agents_router,
-            crews_router,
-            databricks_router,
-            databricks_knowledge_router,
-            flows_router,
-            healthcheck_router,
-            logs_router,
-            models_router,
-            databricks_secrets_router,
-            api_keys_router,
-            tasks_router,
-            templates_router,
-            schemas_router,
-            tools_router,
-            # upload_router,  # DISABLED: Local file uploads not allowed - use Databricks volumes instead
-            task_tracking_router,
-            scheduler_router,
-            agent_generation_router,
-            connections_router,
-            crew_generation_router,
-            task_generation_router,
-            template_generation_router,
-            executions_router,
-            execution_history_router,
-            execution_trace_router,
-            flow_execution_router,
-            mcp_router,
-            dispatcher_router,
-            engine_config_router,
-            databricks_role_router,
-            auth_router,
-            users_router,
-            roles_router,
-            privileges_router,
-            user_roles_router,
-            identity_providers_router,
-            group_router,
-            chat_history_router,
-            memory_backend_router,
-            documentation_embeddings_router,
-            database_management_router,
-            genie_router
-        )
-
-        # Test that all routers are APIRouter instances
-        routers = [
-            agents_router, crews_router, databricks_router, databricks_knowledge_router,
-            flows_router, healthcheck_router, logs_router, models_router,
-            databricks_secrets_router, api_keys_router, tasks_router, templates_router,
-            schemas_router, tools_router,  # upload_router removed - disabled functionality
-            task_tracking_router, scheduler_router,
-            agent_generation_router, connections_router, crew_generation_router,
-            task_generation_router, template_generation_router, executions_router,
-            execution_history_router, execution_trace_router, flow_execution_router,
-            mcp_router, dispatcher_router, engine_config_router, databricks_role_router,
-            auth_router, users_router, roles_router, privileges_router,
-            user_roles_router, identity_providers_router, group_router,
-            chat_history_router, memory_backend_router, documentation_embeddings_router,
-            database_management_router, genie_router
-        ]
-
-        for router in routers:
-            assert isinstance(router, APIRouter)
-
-    def test_execution_logs_router_imports(self):
-        """Test that execution logs routers are imported correctly."""
-        from src.api import runs_router, execution_logs_router
-
-        assert isinstance(runs_router, APIRouter)
-        assert isinstance(execution_logs_router, APIRouter)
-
-    def test_api_router_includes_all_routers(self):
-        """Test that the main API router includes all sub-routers."""
+    def test_api_router_has_routes(self):
+        """api_router must have at least one route registered."""
         from src.api import api_router
 
-        # Check that the router has the expected number of routes
-        # This is a basic check - in a real scenario, you might want to check specific routes
         assert len(api_router.routes) > 0
 
-    def test_router_prefixes_and_tags(self):
-        """Test that routers have appropriate prefixes and tags."""
-        from src.api import (
-            agents_router, crews_router, users_router, roles_router,
-            group_router
-        )
 
-        # Test agents router
-        assert agents_router.prefix == "/agents"
-        assert "agents" in agents_router.tags
+class TestSubRouterImports:
+    """Verify that individual sub-routers can be imported from src.api."""
 
-        # Test crews router
-        assert crews_router.prefix == "/crews"
-        assert "crews" in crews_router.tags
-
-        # Test users router
-        assert users_router.prefix == "/users"
-        assert "users" in users_router.tags
-
-        # Test roles router
-        assert roles_router.prefix == "/roles"
-        assert "roles" in roles_router.tags
-
-        # Test group router
-        assert group_router.prefix == "/groups"
-        assert "groups" in group_router.tags
-
-    def test_dunder_all_contains_expected_exports(self):
-        """Test that __all__ contains all expected router exports."""
-        from src.api import __all__ as api_all
-
-        expected_exports = [
-            "api_router",
+    @pytest.mark.parametrize(
+        "router_name",
+        [
             "agents_router",
             "crews_router",
+            "crews_export_router",
             "databricks_router",
             "databricks_knowledge_router",
             "flows_router",
@@ -150,8 +45,6 @@ class TestAPIInit:
             "templates_router",
             "schemas_router",
             "tools_router",
-            # "upload_router",  # DISABLED: Local file uploads not allowed - use Databricks volumes instead
-            "task_tracking_router",
             "scheduler_router",
             "agent_generation_router",
             "connections_router",
@@ -165,101 +58,140 @@ class TestAPIInit:
             "mcp_router",
             "dispatcher_router",
             "engine_config_router",
-            "auth_router",
             "users_router",
             "runs_router",
-            "roles_router",
-            "privileges_router",
-            "user_roles_router",
-            "identity_providers_router",
             "group_router",
-            "databricks_role_router",
             "chat_history_router",
             "memory_backend_router",
             "documentation_embeddings_router",
             "database_management_router",
-            "genie_router"
-        ]
-
-        for export in expected_exports:
-            assert export in api_all
-
-    def test_router_dependency_injection_setup(self):
-        """Test that routers are set up with proper dependency injection."""
-        # This is a more complex test that would verify the dependency injection setup
-        # For now, we'll just test that the routers can be imported without errors
-        try:
-            from src.api import api_router
-            from src.api.agents_router import router as agents_router
-            from src.api.users_router import router as users_router
-            from src.api.roles_router import router as roles_router
-
-            # Verify that these are APIRouter instances
-            assert isinstance(api_router, APIRouter)
-            assert isinstance(agents_router, APIRouter)
-            assert isinstance(users_router, APIRouter)
-            assert isinstance(roles_router, APIRouter)
-
-        except ImportError as e:
-            pytest.fail(f"Failed to import routers: {e}")
-
-    def test_user_management_routers_inclusion(self):
-        """Test that user management routers are properly included."""
-        from src.api import api_router
-
-        # Get all included routers
-        included_routers = [route.path for route in api_router.routes if hasattr(route, 'path')]
-
-        # Check that user management paths are included
-        # Note: This is a simplified check - actual route testing would be more complex
-        assert len(included_routers) > 0
-
-    def test_new_rbac_routers_inclusion(self):
-        """Test that new RBAC routers are properly included."""
-        from src.api import (
-            roles_router,
-            privileges_router,
-            user_roles_router,
-            group_router,
-            databricks_role_router
-        )
-
-        # Verify these are all APIRouter instances
-        rbac_routers = [
-            roles_router,
-            privileges_router,
-            user_roles_router,
-            group_router,
-            databricks_role_router
-        ]
-
-        for router in rbac_routers:
-            assert isinstance(router, APIRouter)
-
-    def test_api_module_structure(self):
-        """Test the overall structure of the API module."""
+            "genie_router",
+            "agentbricks_router",
+            "mlflow_router",
+            "hitl_router",
+            "sse_router",
+            "powerbi_router",
+            "group_tools_router",
+        ],
+    )
+    def test_sub_router_importable_and_is_api_router(self, router_name):
+        """Each sub-router must be importable and be an APIRouter instance."""
         import src.api as api_module
 
-        # Test that the module has the expected attributes
-        expected_attributes = [
-            'api_router',
-            'agents_router',
-            'users_router',
-            'roles_router',
-            'group_router'
-        ]
+        assert hasattr(api_module, router_name), f"{router_name} not found in src.api"
+        router_obj = getattr(api_module, router_name)
+        assert isinstance(router_obj, APIRouter), (
+            f"{router_name} is {type(router_obj)}, expected APIRouter"
+        )
 
-        for attr in expected_attributes:
-            assert hasattr(api_module, attr), f"Missing attribute: {attr}"
 
-    def test_router_error_handling_setup(self):
-        """Test that routers have proper error handling setup."""
-        from src.api.agents_router import router as agents_router
-        from src.api.users_router import router as users_router
+class TestDunderAll:
+    """Verify __all__ is consistent with actual module exports."""
 
-        # Check that routers have error responses configured
-        assert agents_router.responses is not None
-        assert 404 in agents_router.responses
-        assert users_router.responses is not None
-        # Users router has 401 for unauthorized instead of 404
-        assert 401 in users_router.responses
+    def test_dunder_all_exists(self):
+        """__all__ must be defined in src.api."""
+        from src.api import __all__ as api_all
+
+        assert isinstance(api_all, list)
+        assert len(api_all) > 0
+
+    def test_dunder_all_contains_api_router(self):
+        """__all__ must include 'api_router'."""
+        from src.api import __all__ as api_all
+
+        assert "api_router" in api_all
+
+    @pytest.mark.parametrize(
+        "expected_export",
+        [
+            "api_router",
+            "agents_router",
+            "crews_router",
+            "databricks_router",
+            "flows_router",
+            "healthcheck_router",
+            "models_router",
+            "tools_router",
+            "agent_generation_router",
+            "crew_generation_router",
+            "task_generation_router",
+            "template_generation_router",
+            "executions_router",
+            "execution_history_router",
+            "execution_trace_router",
+            "mcp_router",
+            "dispatcher_router",
+            "engine_config_router",
+            "users_router",
+            "group_router",
+            "database_management_router",
+            "genie_router",
+            "agentbricks_router",
+            "mlflow_router",
+            "hitl_router",
+            "sse_router",
+        ],
+    )
+    def test_expected_export_in_dunder_all(self, expected_export):
+        """Key exports must be present in __all__."""
+        from src.api import __all__ as api_all
+
+        assert expected_export in api_all
+
+    def test_all_dunder_all_entries_are_importable(self):
+        """Every name listed in __all__ must actually exist on the module."""
+        import src.api as api_module
+        from src.api import __all__ as api_all
+
+        for name in api_all:
+            assert hasattr(api_module, name), (
+                f"'{name}' listed in __all__ but not found on src.api"
+            )
+
+
+class TestRouterPrefixes:
+    """Verify selected routers have the expected prefix configuration."""
+
+    def test_agent_generation_router_prefix(self):
+        from src.api.agent_generation_router import router
+
+        assert router.prefix == "/agent-generation"
+
+    def test_crew_generation_router_prefix(self):
+        from src.api.crew_generation_router import router
+
+        assert router.prefix == "/crew"
+
+    def test_task_generation_router_prefix(self):
+        from src.api.task_generation_router import router
+
+        assert router.prefix == "/task-generation"
+
+    def test_template_generation_router_prefix(self):
+        from src.api.template_generation_router import router
+
+        assert router.prefix == "/template-generation"
+
+
+class TestRouterTags:
+    """Verify selected routers have meaningful tags configured."""
+
+    def test_agent_generation_router_tags(self):
+        from src.api.agent_generation_router import router
+
+        assert "Agent Generation" in router.tags
+
+    def test_crew_generation_router_tags(self):
+        from src.api.crew_generation_router import router
+
+        assert "crew" in router.tags
+
+    def test_task_generation_router_tags(self):
+        from src.api.task_generation_router import router
+
+        assert "task generation" in router.tags
+
+    def test_template_generation_router_tags(self):
+        from src.api.template_generation_router import router
+
+        assert "template generation" in router.tags

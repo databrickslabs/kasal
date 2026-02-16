@@ -245,7 +245,7 @@ class TestFlowRepositoryDeleteWithExecutions:
             assert result is True
             # New implementation only executes 2 queries
             assert mock_async_session.execute.call_count == 2
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_delete_with_executions_flow_not_found(self, flow_repository, mock_async_session):
@@ -279,7 +279,7 @@ class TestFlowRepositoryDeleteWithExecutions:
             assert result is True
             # Still executes 2 queries (delete executions + delete flow)
             assert mock_async_session.execute.call_count == 2
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_delete_with_executions_large_execution_list(self, flow_repository, mock_async_session):
@@ -301,7 +301,7 @@ class TestFlowRepositoryDeleteWithExecutions:
             assert result is True
             # New implementation doesn't chunk - just 2 queries
             assert mock_async_session.execute.call_count == 2
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_delete_with_executions_database_error(self, flow_repository, mock_async_session):
@@ -333,7 +333,7 @@ class TestFlowRepositoryDeleteAll:
 
         # New implementation: 2 delete operations (executions + flows)
         assert mock_async_session.execute.call_count == 2
-        mock_async_session.commit.assert_called_once()
+        mock_async_session.flush.assert_called_once()
 
         # Verify the order of deletions
         call_args_list = mock_async_session.execute.call_args_list
@@ -535,7 +535,7 @@ class TestFlowRepositoryIntegration:
             delete_result = await flow_repository.delete_with_executions(flow_to_delete.id)
 
             assert delete_result is True
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
 
 
 class TestFlowRepositoryErrorHandling:
@@ -575,7 +575,7 @@ class TestFlowRepositoryErrorHandling:
                 await flow_repository.delete_with_executions(flow_id)
     
     @pytest.mark.asyncio
-    async def test_delete_with_executions_commit_error(self, flow_repository, mock_async_session):
+    async def test_delete_with_executions_flush_error(self, flow_repository, mock_async_session):
         """Test delete with executions when commit fails."""
         flow_id = uuid.uuid4()
         flow = MockFlow(id=flow_id)
@@ -588,9 +588,9 @@ class TestFlowRepositoryErrorHandling:
                 mock_result_with_rowcount,  # Delete executions
                 MagicMock()                  # Delete flow
             ]
-            mock_async_session.commit.side_effect = Exception("Commit failed")
+            mock_async_session.flush.side_effect = Exception("Flush failed")
 
-            with pytest.raises(Exception, match="Commit failed"):
+            with pytest.raises(Exception, match="Flush failed"):
                 await flow_repository.delete_with_executions(flow_id)
 
             mock_async_session.rollback.assert_called_once()

@@ -51,4 +51,10 @@ protobuf>=5.29.0,<6.0.0  # mem0ai compatibility
 databricks-agents==1.4.0  # Pinned from uv.lock to prevent pip backtracking
 grpcio-status==1.70.0  # Pinned from uv.lock - compatible with protobuf <6.0.0
 
+# OpenTelemetry - Structured tracing with span hierarchy
+opentelemetry-sdk>=1.27.0,<2.0.0
+opentelemetry-api>=1.27.0,<2.0.0
+opentelemetry-exporter-otlp-proto-http>=1.27.0,<2.0.0
+openinference-instrumentation-crewai>=0.1.0,<1.0.0
+
 # Security - Prompt injection detection

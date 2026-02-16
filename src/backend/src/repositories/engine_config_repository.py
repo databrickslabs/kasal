@@ -110,19 +110,19 @@ class EngineConfigRepository(BaseRepository[EngineConfig]):
             # Update the config attributes
             config.enabled = enabled
             
-            # Commit the changes
-            await self.session.commit()
-            
+            # Flush the changes
+            await self.session.flush()
+
             # Return success
             return True
-                
+
         except Exception as e:
             # Log the error and rollback
             import logging
             logging.error(f"Error in toggle_enabled for {engine_name}: {str(e)}")
             await self.session.rollback()
             raise
-    
+
     async def update_config_value(self, engine_name: str, config_key: str, config_value: str) -> bool:
         """
         Update the configuration value for a specific engine and key.
@@ -144,12 +144,12 @@ class EngineConfigRepository(BaseRepository[EngineConfig]):
             # Update the config value
             config.config_value = config_value
             
-            # Commit the changes
-            await self.session.commit()
-            
+            # Flush the changes
+            await self.session.flush()
+
             # Return success
             return True
-                
+
         except Exception as e:
             # Log the error and rollback
             import logging

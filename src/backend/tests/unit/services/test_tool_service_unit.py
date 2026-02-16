@@ -66,7 +66,7 @@ async def test_get_enabled_tools_for_group_merges_config_and_filters():
     assert t.title == "A" and t.config.get("x") == 9 and t.config.get("z") == 3
 
 
-from fastapi import HTTPException
+from src.core.exceptions import KasalError, NotFoundError, ForbiddenError
 from src.schemas.tool import ToolListResponse, ToolResponse, ToolUpdate
 
 
@@ -77,7 +77,7 @@ async def test_get_tool_by_id_and_with_group_check_paths():
 
     # not found
     svc.repository.get = AsyncMock(return_value=None)
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(NotFoundError) as ei:
         await svc.get_tool_by_id(123)
     assert ei.value.status_code == 404
 
@@ -90,7 +90,7 @@ async def test_get_tool_by_id_and_with_group_check_paths():
     # group-specific tool forbidden for other groups (returns 404)
     tool_g2 = mk_tool(2, title="G", group_id="g2")
     svc.repository.get = AsyncMock(return_value=tool_g2)
-    with pytest.raises(HTTPException) as ei2:
+    with pytest.raises(NotFoundError) as ei2:
         await svc.get_tool_with_group_check(2, group_context=GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="editor"))
     assert ei2.value.status_code == 404
 
@@ -102,7 +102,7 @@ async def test_update_and_delete_tool_paths():
 
     # update: not found
     svc.repository.get = AsyncMock(return_value=None)
-    with pytest.raises(HTTPException):
+    with pytest.raises(NotFoundError):
         await svc.update_tool(5, ToolUpdate(description="z"))
 
     # update: success
@@ -116,7 +116,7 @@ async def test_update_and_delete_tool_paths():
     # update with group check: forbidden
     t_g2 = mk_tool(7, title="TG", group_id="g2")
     svc.repository.get = AsyncMock(return_value=t_g2)
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(NotFoundError) as ei:
         await svc.update_tool_with_group_check(7, ToolUpdate(description="x"), GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="editor"))
     assert ei.value.status_code == 404
 
@@ -129,7 +129,7 @@ async def test_update_and_delete_tool_paths():
 
     # delete: not found
     svc.repository.get = AsyncMock(return_value=None)
-    with pytest.raises(HTTPException):
+    with pytest.raises(NotFoundError):
         await svc.delete_tool(10)
 
     # delete: success
@@ -139,7 +139,7 @@ async def test_update_and_delete_tool_paths():
 
     # delete with group check: forbidden
     svc.repository.get = AsyncMock(return_value=mk_tool(11, group_id="g2"))
-    with pytest.raises(HTTPException) as ei3:
+    with pytest.raises(NotFoundError) as ei3:
         await svc.delete_tool_with_group_check(11, GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="editor"))
     assert ei3.value.status_code == 404
 
@@ -156,7 +156,7 @@ async def test_toggle_paths_base_and_group():
 
     # toggle (simple): not found
     svc.repository.toggle_enabled = AsyncMock(return_value=None)
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(NotFoundError) as ei:
         await svc.toggle_tool_enabled(1)
     assert ei.value.status_code == 404
 
@@ -185,7 +185,7 @@ async def test_toggle_paths_base_and_group():
 
     # toggle with group check: group tool forbidden for other groups
     svc.repository.get = AsyncMock(return_value=mk_tool(30, title="G", group_id="g2", enabled=True))
-    with pytest.raises(HTTPException) as ei2:
+    with pytest.raises(NotFoundError) as ei2:
         await svc.toggle_tool_enabled_with_group_check(30, GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="editor"))
     assert ei2.value.status_code == 404
 
@@ -203,7 +203,7 @@ async def test_config_endpoints():
 
     # update_tool_configuration_by_title not found
     svc.repository.update_configuration_by_title = AsyncMock(return_value=None)
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(NotFoundError) as ei:
         await svc.update_tool_configuration_by_title("Y", {"b": 2})
     assert ei.value.status_code == 404
 
@@ -228,7 +228,7 @@ async def test_config_endpoints():
     assert (await svc.get_tool_configuration_with_group_check("A", GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"))) == {"b": 1}
 
     # update_tool_configuration_group_scoped requires group context
-    with pytest.raises(HTTPException) as ei2:
+    with pytest.raises(ForbiddenError) as ei2:
         await svc.update_tool_configuration_group_scoped("A", {"q": 1}, None)
     assert ei2.value.status_code == 403
 

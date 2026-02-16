@@ -2,8 +2,8 @@ import logging
 import os
 import time
 from typing import Dict, List, Optional
-import requests
-from fastapi import HTTPException
+import httpx
+from src.core.exceptions import KasalError, NotFoundError, BadRequestError, UnauthorizedError
 
 from src.repositories.powerbi_config_repository import PowerBIConfigRepository
 from src.schemas.powerbi_config import DAXQueryRequest, DAXQueryResponse
@@ -45,24 +45,15 @@ class PowerBIService:
             # Get active Power BI configuration
             config = await self.repository.get_active_config(group_id=self.group_id)
             if not config:
-                raise HTTPException(
-                    status_code=404,
-                    detail="No active Power BI configuration found. Please configure Power BI connection first."
-                )
+                raise NotFoundError(detail="No active Power BI configuration found. Please configure Power BI connection first.")
 
             if not config.is_enabled:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Power BI integration is disabled. Please enable it in settings."
-                )
+                raise BadRequestError(detail="Power BI integration is disabled. Please enable it in settings.")
 
             # Use provided semantic model ID or default from config
             semantic_model_id = query_request.semantic_model_id or config.semantic_model_id
             if not semantic_model_id:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Semantic model ID is required. Provide it in the request or configure a default."
-                )
+                raise BadRequestError(detail="Semantic model ID is required. Provide it in the request or configure a default.")
 
             # Generate authentication token
             token = await self._generate_token(config)
@@ -87,7 +78,7 @@ class PowerBIService:
                 execution_time_ms=execution_time_ms
             )
 
-        except HTTPException:
+        except KasalError:
             raise
         except Exception as e:
             logger.error(f"Error executing DAX query: {e}", exc_info=True)
@@ -133,10 +124,7 @@ class PowerBIService:
 
         except Exception as e:
             logger.error(f"Error generating Power BI token: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=401,
-                detail=f"Failed to authenticate with Power BI: {str(e)}"
-            )
+            raise UnauthorizedError(detail=f"Failed to authenticate with Power BI: {str(e)}")
 
     async def _generate_token_device_code(self, tenant_id: str, client_id: str) -> str:
         """
@@ -258,24 +246,22 @@ class PowerBIService:
             logger.info(f"Executing DAX query against semantic model: {semantic_model_id}")
             logger.debug(f"Query: {dax_query[:200]}...")  # Log first 200 chars
 
-            response = requests.post(datasets_url, headers=headers, json=body, timeout=30)
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(datasets_url, headers=headers, json=body)
 
             if response.status_code != 200:
                 error_msg = f"Power BI API error (status {response.status_code}): {response.text}"
                 logger.error(error_msg)
-                raise HTTPException(status_code=response.status_code, detail=error_msg)
+                raise KasalError(detail=error_msg, status_code=response.status_code)
 
             logger.info(f"Successfully fetched response with status: {response.status_code}")
 
             results = response.json().get("results", [])
             return results
 
-        except requests.exceptions.RequestException as e:
+        except httpx.RequestError as e:
             logger.error(f"Request error when calling Power BI API: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to execute DAX query: {str(e)}"
-            )
+            raise KasalError(detail=f"Failed to execute DAX query: {str(e)}")
 
     def _postprocess_data(self, results: List) -> List[Dict]:
         """

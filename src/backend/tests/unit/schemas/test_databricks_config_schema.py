@@ -1,300 +1,272 @@
-import pytest
-pytest.skip("Legacy databricks config schema tests expect removed fields (secret_scope, etc.); skipping.", allow_module_level=True)
-
 """
-Unit tests for databricks_config schemas.
+Unit tests for databricks_config Pydantic schemas.
 
-Tests the functionality of Pydantic schemas for Databricks configuration
-including validation, serialization, and field constraints.
+Tests validation, defaults, required fields, and schema interactions.
 """
 import pytest
 from datetime import datetime
 from pydantic import ValidationError
 
 from src.schemas.databricks_config import (
-    DatabricksConfigBase, DatabricksConfigCreate, DatabricksConfigUpdate,
-    DatabricksConfigInDB, DatabricksConfigResponse, DatabricksTokenStatus
+    DatabricksConfigBase,
+    DatabricksConfigCreate,
+    DatabricksConfigUpdate,
+    DatabricksConfigInDB,
+    DatabricksConfigResponse,
+    DatabricksTokenStatus,
 )
 
 
 class TestDatabricksConfigBase:
     """Test cases for DatabricksConfigBase schema."""
 
-    def test_valid_databricks_config_base_defaults(self):
+    def test_defaults(self):
         """Test DatabricksConfigBase with default values."""
         config = DatabricksConfigBase()
         assert config.workspace_url == ""
         assert config.warehouse_id == ""
         assert config.catalog == ""
         assert config.db_schema == ""
-        assert config.secret_scope == ""
         assert config.enabled is True
+        assert config.mlflow_enabled is False
+        assert config.mlflow_experiment_name == "kasal-crew-execution-traces"
+        assert config.evaluation_enabled is False
+        assert config.evaluation_judge_model is None
+        assert config.volume_enabled is False
+        assert config.volume_path is None
+        assert config.volume_file_format == "json"
+        assert config.volume_create_date_dirs is True
+        assert config.knowledge_volume_enabled is False
+        assert config.knowledge_volume_path is None
+        assert config.knowledge_chunk_size == 1000
+        assert config.knowledge_chunk_overlap == 200
 
-    def test_valid_databricks_config_base_full(self):
+    def test_full_config(self):
         """Test DatabricksConfigBase with all fields specified."""
-        config_data = {
-            "workspace_url": "https://test.cloud.databricks.com",
-            "warehouse_id": "abc123def456",
-            "catalog": "main",
-            "schema": "default",  # Using alias
-            "secret_scope": "kasal-secrets",
-            "enabled": True
-        }
-        config = DatabricksConfigBase(**config_data)
-        assert config.workspace_url == "https://test.cloud.databricks.com"
-        assert config.warehouse_id == "abc123def456"
+        config = DatabricksConfigBase(
+            workspace_url="https://example.com",
+            warehouse_id="abc123",
+            catalog="main",
+            schema="default",
+            enabled=True,
+            mlflow_enabled=True,
+            mlflow_experiment_name="test-exp",
+            evaluation_enabled=True,
+            evaluation_judge_model="databricks:/endpoint",
+            volume_enabled=True,
+            volume_path="/volumes/test",
+            volume_file_format="parquet",
+            volume_create_date_dirs=False,
+            knowledge_volume_enabled=True,
+            knowledge_volume_path="/volumes/knowledge",
+            knowledge_chunk_size=500,
+            knowledge_chunk_overlap=100,
+        )
+        assert config.workspace_url == "https://example.com"
+        assert config.warehouse_id == "abc123"
         assert config.catalog == "main"
         assert config.db_schema == "default"
-        assert config.secret_scope == "kasal-secrets"
+        assert config.mlflow_enabled is True
+        assert config.mlflow_experiment_name == "test-exp"
+        assert config.evaluation_enabled is True
+        assert config.volume_enabled is True
+        assert config.volume_file_format == "parquet"
+        assert config.knowledge_chunk_size == 500
+
+    def test_schema_alias(self):
+        """Test that 'schema' alias maps to db_schema field."""
+        config = DatabricksConfigBase(schema="my_schema")
+        assert config.db_schema == "my_schema"
+
+    def test_boolean_conversion(self):
+        """Test boolean field conversions from string values."""
+        config = DatabricksConfigBase(enabled="true")
         assert config.enabled is True
 
-    def test_databricks_config_base_schema_alias(self):
-        """Test DatabricksConfigBase with schema field alias."""
-        # Using the alias 'schema'
-        config_data = {"schema": "test_schema"}
-        config = DatabricksConfigBase(**config_data)
-        assert config.db_schema == "test_schema"
-
-        # The alias takes precedence, so the actual field name gets default value
-        config_data = {"schema": "alias_schema", "db_schema": "direct_schema"}
-        config = DatabricksConfigBase(**config_data)
-        assert config.db_schema == "alias_schema"  # Alias wins
-
-    def test_databricks_config_base_boolean_conversions(self):
-        """Test DatabricksConfigBase boolean field conversions."""
-        config_data = {
-            "enabled": "true"
-        }
-        config = DatabricksConfigBase(**config_data)
-        assert config.enabled is True
-
-        config_data = {
-            "enabled": "false"
-        }
-        config = DatabricksConfigBase(**config_data)
-        assert config.enabled is False
-
-    def test_databricks_config_base_url_formats(self):
-        """Test DatabricksConfigBase with various URL formats."""
-        url_formats = [
-            "https://test.cloud.databricks.com",
-            "https://test.cloud.databricks.com/",
-            "https://company.cloud.databricks.com",
-            "https://adb-123456789.12.azuredatabricks.net",
-            "https://dbc-12345678-abcd.cloud.databricks.com"
-        ]
-
-        for url in url_formats:
-            config_data = {"workspace_url": url}
-            config = DatabricksConfigBase(**config_data)
-            assert config.workspace_url == url
+        config_false = DatabricksConfigBase(enabled="false")
+        assert config_false.enabled is False
 
 
 class TestDatabricksConfigCreate:
     """Test cases for DatabricksConfigCreate schema."""
 
-    def test_databricks_config_create_disabled(self):
-        """Test DatabricksConfigCreate when disabled."""
-        config_data = {"enabled": False}
-        config = DatabricksConfigCreate(**config_data)
+    def test_disabled_config_no_validation(self):
+        """Test that disabled config does not require warehouse_id, catalog, etc."""
+        config = DatabricksConfigCreate(enabled=False)
         assert config.enabled is False
-        # Should not raise validation errors when disabled
 
-    def test_databricks_config_create_valid_full(self):
-        """Test DatabricksConfigCreate with all required fields when enabled."""
-        config_data = {
-            "workspace_url": "https://test.cloud.databricks.com",
-            "warehouse_id": "abc123def456",
-            "catalog": "main",
-            "schema": "default",
-            "secret_scope": "kasal-secrets",
-            "enabled": True
-        }
-        config = DatabricksConfigCreate(**config_data)
-        assert config.workspace_url == "https://test.cloud.databricks.com"
-        assert config.warehouse_id == "abc123def456"
+    def test_valid_enabled_config(self):
+        """Test valid enabled config with all required fields."""
+        config = DatabricksConfigCreate(
+            warehouse_id="abc123",
+            catalog="main",
+            schema="default",
+            enabled=True,
+        )
+        assert config.warehouse_id == "abc123"
         assert config.catalog == "main"
         assert config.db_schema == "default"
-        assert config.secret_scope == "kasal-secrets"
         assert config.enabled is True
 
-    def test_databricks_config_create_validation_enabled_missing_fields(self):
-        """Test DatabricksConfigCreate validation when enabled but missing required fields."""
-        # Missing all required fields
-        config_data = {
-            "enabled": True
-        }
+    def test_enabled_missing_required_fields(self):
+        """Test validation error when enabled but missing required fields."""
         with pytest.raises(ValueError) as exc_info:
-            DatabricksConfigCreate(**config_data)
+            DatabricksConfigCreate(enabled=True)
 
-        error_message = str(exc_info.value)
-        assert "Invalid configuration" in error_message
-        assert "warehouse_id" in error_message
-        assert "catalog" in error_message
-        assert "db_schema" in error_message
-        assert "secret_scope" in error_message
+        error_msg = str(exc_info.value)
+        assert "warehouse_id" in error_msg
+        assert "catalog" in error_msg
+        assert "db_schema" in error_msg
 
-    def test_databricks_config_create_validation_partial_missing_fields(self):
-        """Test DatabricksConfigCreate validation with some missing fields."""
-        config_data = {
-            "warehouse_id": "abc123",
-            "catalog": "main",
-            # Missing db_schema and secret_scope
-            "enabled": True
-        }
+    def test_enabled_partial_missing(self):
+        """Test validation error with only some required fields provided."""
         with pytest.raises(ValueError) as exc_info:
-            DatabricksConfigCreate(**config_data)
+            DatabricksConfigCreate(
+                warehouse_id="abc123",
+                enabled=True,
+            )
 
-        # Check that the error mentions missing fields
-        error_message = str(exc_info.value)
-        assert "db_schema" in error_message
-        assert "secret_scope" in error_message
+        error_msg = str(exc_info.value)
+        assert "catalog" in error_msg
+        assert "db_schema" in error_msg
 
-    def test_databricks_config_create_validation_empty_strings(self):
-        """Test DatabricksConfigCreate validation with empty string fields."""
-        config_data = {
-            "warehouse_id": "",
-            "catalog": "main",
-            "schema": "",
-            "secret_scope": "secrets",
-            "enabled": True
-        }
+    def test_enabled_empty_strings_fail_validation(self):
+        """Test that empty strings for required fields fail validation."""
         with pytest.raises(ValueError) as exc_info:
-            DatabricksConfigCreate(**config_data)
+            DatabricksConfigCreate(
+                warehouse_id="",
+                catalog="main",
+                schema="",
+                enabled=True,
+            )
 
-        error_message = str(exc_info.value)
-        assert "warehouse_id" in error_message
-        assert "db_schema" in error_message
+        error_msg = str(exc_info.value)
+        assert "warehouse_id" in error_msg
+        assert "db_schema" in error_msg
 
-    def test_databricks_config_create_required_fields_property(self):
-        """Test the required_fields property."""
-        # When disabled
+    def test_required_fields_property_disabled(self):
+        """Test required_fields property when disabled."""
         config = DatabricksConfigCreate(enabled=False)
-        required = config.required_fields
-        assert required == []
+        assert config.required_fields == []
 
-        # When enabled - provide valid data to avoid validation error
+    def test_required_fields_property_enabled(self):
+        """Test required_fields property when enabled."""
         config = DatabricksConfigCreate(
+            warehouse_id="wh1",
+            catalog="cat1",
+            schema="sch1",
             enabled=True,
-            warehouse_id="test-wh",
-            catalog="test",
-            schema="test",
-            secret_scope="test-scope"
         )
-        required = config.required_fields
-        assert set(required) == {"warehouse_id", "catalog", "db_schema", "secret_scope"}
+        assert set(config.required_fields) == {"warehouse_id", "catalog", "db_schema"}
 
 
 class TestDatabricksConfigUpdate:
     """Test cases for DatabricksConfigUpdate schema."""
 
-    def test_databricks_config_update_all_optional(self):
-        """Test that all DatabricksConfigUpdate fields are optional."""
+    def test_all_fields_optional(self):
+        """Test that all update fields default to None."""
         update = DatabricksConfigUpdate()
         assert update.workspace_url is None
         assert update.warehouse_id is None
         assert update.catalog is None
         assert update.db_schema is None
-        assert update.secret_scope is None
         assert update.enabled is None
+        assert update.mlflow_enabled is None
+        assert update.mlflow_experiment_name is None
+        assert update.evaluation_enabled is None
+        assert update.evaluation_judge_model is None
+        assert update.volume_enabled is None
+        assert update.volume_path is None
+        assert update.volume_file_format is None
+        assert update.volume_create_date_dirs is None
+        assert update.knowledge_volume_enabled is None
+        assert update.knowledge_volume_path is None
+        assert update.knowledge_chunk_size is None
+        assert update.knowledge_chunk_overlap is None
 
-    def test_databricks_config_update_partial(self):
+    def test_partial_update(self):
         """Test DatabricksConfigUpdate with partial fields."""
-        update_data = {
-            "warehouse_id": "new-warehouse-123",
-            "enabled": False
-        }
-        update = DatabricksConfigUpdate(**update_data)
-        assert update.warehouse_id == "new-warehouse-123"
+        update = DatabricksConfigUpdate(
+            warehouse_id="new-wh",
+            enabled=False,
+        )
+        assert update.warehouse_id == "new-wh"
         assert update.enabled is False
         assert update.workspace_url is None
         assert update.catalog is None
 
-    def test_databricks_config_update_full(self):
+    def test_full_update(self):
         """Test DatabricksConfigUpdate with all fields."""
-        update_data = {
-            "workspace_url": "https://new.cloud.databricks.com",
-            "warehouse_id": "new-warehouse-456",
-            "catalog": "new_catalog",
-            "schema": "new_schema",
-            "secret_scope": "new-secrets",
-            "enabled": False
-        }
-        update = DatabricksConfigUpdate(**update_data)
-        assert update.workspace_url == "https://new.cloud.databricks.com"
-        assert update.warehouse_id == "new-warehouse-456"
+        update = DatabricksConfigUpdate(
+            workspace_url="https://example.com",
+            warehouse_id="new-wh",
+            catalog="new_catalog",
+            schema="new_schema",
+            enabled=False,
+        )
+        assert update.workspace_url == "https://example.com"
+        assert update.warehouse_id == "new-wh"
         assert update.catalog == "new_catalog"
         assert update.db_schema == "new_schema"
-        assert update.secret_scope == "new-secrets"
         assert update.enabled is False
 
-    def test_databricks_config_update_schema_alias(self):
-        """Test DatabricksConfigUpdate with schema field alias."""
-        update_data = {"schema": "updated_schema"}
-        update = DatabricksConfigUpdate(**update_data)
+    def test_schema_alias(self):
+        """Test schema alias in update schema."""
+        update = DatabricksConfigUpdate(schema="updated_schema")
         assert update.db_schema == "updated_schema"
 
 
 class TestDatabricksConfigInDB:
     """Test cases for DatabricksConfigInDB schema."""
 
-    def test_valid_databricks_config_in_db(self):
+    def test_valid_in_db(self):
         """Test DatabricksConfigInDB with all required fields."""
         now = datetime.now()
-        config_data = {
-            "id": 1,
-            "workspace_url": "https://db.cloud.databricks.com",
-            "warehouse_id": "wh123",
-            "catalog": "main",
-            "schema": "default",
-            "secret_scope": "secrets",
-            "enabled": True,
-            "is_active": True,
-            "created_at": now,
-            "updated_at": now
-        }
-        config = DatabricksConfigInDB(**config_data)
+        config = DatabricksConfigInDB(
+            id=1,
+            workspace_url="https://example.com",
+            warehouse_id="wh123",
+            catalog="main",
+            schema="default",
+            enabled=True,
+            is_active=True,
+            created_at=now,
+            updated_at=now,
+        )
         assert config.id == 1
-        assert config.workspace_url == "https://db.cloud.databricks.com"
-        assert config.warehouse_id == "wh123"
-        assert config.catalog == "main"
-        assert config.db_schema == "default"
-        assert config.secret_scope == "secrets"
-        assert config.enabled is True
+        assert config.workspace_url == "https://example.com"
         assert config.is_active is True
         assert config.created_at == now
         assert config.updated_at == now
 
-    def test_databricks_config_in_db_model_config(self):
-        """Test DatabricksConfigInDB model configuration."""
-        assert hasattr(DatabricksConfigInDB, 'model_config')
-        assert DatabricksConfigInDB.model_config['from_attributes'] is True
-        assert DatabricksConfigInDB.model_config['populate_by_name'] is True
+    def test_model_config_attributes(self):
+        """Test DatabricksConfigInDB model_config settings."""
+        assert DatabricksConfigInDB.model_config["from_attributes"] is True
+        assert DatabricksConfigInDB.model_config["populate_by_name"] is True
 
-    def test_databricks_config_in_db_missing_fields(self):
-        """Test DatabricksConfigInDB validation with missing fields."""
+    def test_missing_required_db_fields(self):
+        """Test validation with missing required DB fields."""
         with pytest.raises(ValidationError) as exc_info:
             DatabricksConfigInDB(
-                workspace_url="https://test.com",
-                warehouse_id="wh123"
+                workspace_url="https://example.com",
+                warehouse_id="wh123",
             )
 
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
-        assert "id" in missing_fields
-        assert "is_active" in missing_fields
-        assert "created_at" in missing_fields
-        assert "updated_at" in missing_fields
+        missing_field_locs = [e["loc"][0] for e in errors if e["type"] == "missing"]
+        assert "id" in missing_field_locs
+        assert "is_active" in missing_field_locs
+        assert "created_at" in missing_field_locs
+        assert "updated_at" in missing_field_locs
 
-    def test_databricks_config_in_db_datetime_conversion(self):
-        """Test DatabricksConfigInDB with datetime string conversion."""
-        config_data = {
-            "id": 2,
-            "is_active": True,
-            "created_at": "2023-01-01T12:00:00",
-            "updated_at": "2023-01-01T12:30:00"
-        }
-        config = DatabricksConfigInDB(**config_data)
+    def test_datetime_string_parsing(self):
+        """Test DatabricksConfigInDB with datetime string values."""
+        config = DatabricksConfigInDB(
+            id=2,
+            is_active=True,
+            created_at="2024-01-01T12:00:00",
+            updated_at="2024-01-01T12:30:00",
+        )
         assert config.id == 2
         assert isinstance(config.created_at, datetime)
         assert isinstance(config.updated_at, datetime)
@@ -303,205 +275,127 @@ class TestDatabricksConfigInDB:
 class TestDatabricksConfigResponse:
     """Test cases for DatabricksConfigResponse schema."""
 
-    def test_databricks_config_response_inheritance(self):
+    def test_inheritance_from_base(self):
         """Test that DatabricksConfigResponse inherits from DatabricksConfigBase."""
-        config_data = {
-            "workspace_url": "https://response.cloud.databricks.com",
-            "warehouse_id": "response-wh",
-            "catalog": "response_catalog",
-            "schema": "response_schema",
-            "secret_scope": "response-secrets",
-            "enabled": True
-        }
-        response = DatabricksConfigResponse(**config_data)
+        assert issubclass(DatabricksConfigResponse, DatabricksConfigBase)
 
-        # Should have all base class attributes
-        assert hasattr(response, 'workspace_url')
-        assert hasattr(response, 'warehouse_id')
-        assert hasattr(response, 'catalog')
-        assert hasattr(response, 'db_schema')
-        assert hasattr(response, 'secret_scope')
-        assert hasattr(response, 'enabled')
-
-        # Should behave like base class
-        assert response.workspace_url == "https://response.cloud.databricks.com"
-        assert response.warehouse_id == "response-wh"
-        assert response.catalog == "response_catalog"
-        assert response.db_schema == "response_schema"
-        assert response.secret_scope == "response-secrets"
-        assert response.enabled is True
-
-    def test_databricks_config_response_minimal(self):
-        """Test DatabricksConfigResponse with minimal data."""
+    def test_minimal_response(self):
+        """Test DatabricksConfigResponse with minimal (default) data."""
         response = DatabricksConfigResponse()
         assert response.workspace_url == ""
         assert response.warehouse_id == ""
         assert response.catalog == ""
         assert response.db_schema == ""
-        assert response.secret_scope == ""
         assert response.enabled is True
+
+    def test_full_response(self):
+        """Test DatabricksConfigResponse with full data."""
+        response = DatabricksConfigResponse(
+            workspace_url="https://example.com",
+            warehouse_id="wh1",
+            catalog="catalog1",
+            schema="schema1",
+            enabled=True,
+        )
+        assert response.workspace_url == "https://example.com"
+        assert response.warehouse_id == "wh1"
+        assert response.db_schema == "schema1"
 
 
 class TestDatabricksTokenStatus:
     """Test cases for DatabricksTokenStatus schema."""
 
-    def test_valid_databricks_token_status(self):
-        """Test DatabricksTokenStatus with valid data."""
-        status_data = {
-            "personal_token_required": True,
-            "message": "Personal access token is required for Databricks access"
-        }
-        status = DatabricksTokenStatus(**status_data)
+    def test_token_required(self):
+        """Test DatabricksTokenStatus when token is required."""
+        status = DatabricksTokenStatus(
+            personal_token_required=True,
+            message="Personal access token is required",
+        )
         assert status.personal_token_required is True
-        assert status.message == "Personal access token is required for Databricks access"
+        assert status.message == "Personal access token is required"
 
-    def test_databricks_token_status_not_required(self):
+    def test_token_not_required(self):
         """Test DatabricksTokenStatus when token is not required."""
-        status_data = {
-            "personal_token_required": False,
-            "message": "Databricks workspace is configured and accessible"
-        }
-        status = DatabricksTokenStatus(**status_data)
+        status = DatabricksTokenStatus(
+            personal_token_required=False,
+            message="Workspace is accessible",
+        )
         assert status.personal_token_required is False
-        assert status.message == "Databricks workspace is configured and accessible"
 
-    def test_databricks_token_status_missing_fields(self):
-        """Test DatabricksTokenStatus validation with missing fields."""
+    def test_missing_message_field(self):
+        """Test validation with missing message field."""
         with pytest.raises(ValidationError) as exc_info:
             DatabricksTokenStatus(personal_token_required=True)
 
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [e["loc"][0] for e in errors if e["type"] == "missing"]
         assert "message" in missing_fields
 
+    def test_missing_token_required_field(self):
+        """Test validation with missing personal_token_required field."""
         with pytest.raises(ValidationError) as exc_info:
-            DatabricksTokenStatus(message="Test message")
+            DatabricksTokenStatus(message="test")
 
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [e["loc"][0] for e in errors if e["type"] == "missing"]
         assert "personal_token_required" in missing_fields
 
-    def test_databricks_token_status_boolean_conversion(self):
-        """Test DatabricksTokenStatus boolean field conversion."""
-        status_data = {
-            "personal_token_required": "true",
-            "message": "Test message"
-        }
-        status = DatabricksTokenStatus(**status_data)
+    def test_boolean_coercion(self):
+        """Test boolean field coercion from non-boolean values."""
+        status = DatabricksTokenStatus(
+            personal_token_required="true",
+            message="Test",
+        )
         assert status.personal_token_required is True
 
-        status_data = {
-            "personal_token_required": 0,
-            "message": "Test message"
-        }
-        status = DatabricksTokenStatus(**status_data)
-        assert status.personal_token_required is False
+        status_false = DatabricksTokenStatus(
+            personal_token_required=0,
+            message="Test",
+        )
+        assert status_false.personal_token_required is False
 
 
-class TestSchemaIntegration:
-    """Integration tests for Databricks configuration schema interactions."""
+class TestSchemaLifecycleIntegration:
+    """Integration tests for the schema lifecycle."""
 
-    def test_databricks_config_lifecycle_workflow(self):
-        """Test complete Databricks configuration lifecycle."""
-        # Create configuration (disabled initially)
-        create_data = {
-            "enabled": False
-        }
-        create_schema = DatabricksConfigCreate(**create_data)
+    def test_create_update_response_workflow(self):
+        """Test the full create -> update -> response workflow."""
+        # Create disabled first
+        create = DatabricksConfigCreate(enabled=False)
+        assert create.enabled is False
 
-        # Update to enable with full configuration
-        update_data = {
-            "workspace_url": "https://company.cloud.databricks.com",
-            "warehouse_id": "abc123def456",
-            "catalog": "production",
-            "schema": "main",
-            "secret_scope": "prod-secrets",
-            "enabled": True
-        }
-        update_schema = DatabricksConfigUpdate(**update_data)
+        # Update to enabled
+        update = DatabricksConfigUpdate(
+            workspace_url="https://example.com",
+            warehouse_id="abc123",
+            catalog="production",
+            schema="main",
+            enabled=True,
+        )
+        assert update.enabled is True
 
-        # Database entity (simulating what would come from database)
+        # Simulate DB record
         now = datetime.now()
-        db_data = {
-            "id": 1,
-            "workspace_url": update_data["workspace_url"],
-            "warehouse_id": update_data["warehouse_id"],
-            "catalog": update_data["catalog"],
-            "schema": update_data["schema"],
-            "secret_scope": update_data["secret_scope"],
-            "enabled": update_data["enabled"],
-            "is_active": True,
-            "created_at": now,
-            "updated_at": now
-        }
-        db_config = DatabricksConfigInDB(**db_data)
-
-        # Response schema
-        response_data = {
-            "workspace_url": db_config.workspace_url,
-            "warehouse_id": db_config.warehouse_id,
-            "catalog": db_config.catalog,
-            "schema": db_config.db_schema,
-            "secret_scope": db_config.secret_scope,
-            "enabled": db_config.enabled
-        }
-        response_config = DatabricksConfigResponse(**response_data)
-
-        # Verify the complete workflow
-        assert create_schema.enabled is False
-        assert update_schema.enabled is True
+        db_config = DatabricksConfigInDB(
+            id=1,
+            workspace_url=update.workspace_url,
+            warehouse_id=update.warehouse_id,
+            catalog=update.catalog,
+            schema=update.db_schema,
+            enabled=update.enabled,
+            is_active=True,
+            created_at=now,
+            updated_at=now,
+        )
         assert db_config.id == 1
-        assert db_config.enabled is True
-        assert response_config.workspace_url == "https://company.cloud.databricks.com"
-        assert response_config.enabled is True
 
-    def test_databricks_validation_scenarios(self):
-        """Test various Databricks configuration validation scenarios."""
-        # Valid enabled configuration
-        valid_enabled = DatabricksConfigCreate(
-            workspace_url="https://test.cloud.databricks.com",
-            warehouse_id="wh123",
-            catalog="test",
-            schema="default",
-            secret_scope="test-secrets",
-            enabled=True
+        # Build response
+        response = DatabricksConfigResponse(
+            workspace_url=db_config.workspace_url,
+            warehouse_id=db_config.warehouse_id,
+            catalog=db_config.catalog,
+            schema=db_config.db_schema,
+            enabled=db_config.enabled,
         )
-        assert valid_enabled.enabled is True
-
-        # Valid disabled configuration (no validation required)
-        valid_disabled = DatabricksConfigCreate(enabled=False)
-        assert valid_disabled.enabled is False
-
-        # Invalid enabled configuration (missing required fields)
-        with pytest.raises(ValueError):
-            DatabricksConfigCreate(
-                workspace_url="https://test.com",
-                enabled=True
-                # Missing warehouse_id, catalog, schema, secret_scope
-            )
-
-    def test_databricks_token_status_scenarios(self):
-        """Test different Databricks token status scenarios."""
-        # Token required scenario
-        token_required = DatabricksTokenStatus(
-            personal_token_required=True,
-            message="Please configure your Databricks personal access token"
-        )
-        assert token_required.personal_token_required is True
-        assert "personal access token" in token_required.message.lower()
-
-        # Token not required scenario
-        token_not_required = DatabricksTokenStatus(
-            personal_token_required=False,
-            message="Databricks is properly configured and accessible"
-        )
-        assert token_not_required.personal_token_required is False
-        assert "configured" in token_not_required.message.lower()
-
-        # Error scenario
-        token_error = DatabricksTokenStatus(
-            personal_token_required=True,
-            message="Failed to connect to Databricks workspace. Please check your configuration."
-        )
-        assert token_error.personal_token_required is True
-        assert "failed" in token_error.message.lower()
+        assert response.workspace_url == "https://example.com"
+        assert response.enabled is True
