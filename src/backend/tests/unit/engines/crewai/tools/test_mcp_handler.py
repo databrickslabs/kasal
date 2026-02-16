@@ -1,465 +1,588 @@
-import pytest
-pytest.skip("Incompatible with current architecture: MCP handler Databricks config and loop mgmt changed; skipping legacy tests", allow_module_level=True)
+"""Unit tests for MCP handler functions.
 
-"""Unit tests for MCP handler functions."""
+Tests adapter management (register, stop, pool), Databricks API integration,
+CrewAI tool creation from MCP dictionaries, tool wrapping, and subprocess
+isolation logic.
+"""
 
-import pytest
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
 import asyncio
-from typing import Dict, Any
+import json
+import os
+import pytest
+from unittest.mock import (
+    AsyncMock,
+    MagicMock,
+    Mock,
+    patch,
+)
 
+import src.engines.crewai.tools.mcp_handler as mcp_handler
 from src.engines.crewai.tools.mcp_handler import (
     register_mcp_adapter,
     stop_all_adapters,
+    stop_mcp_adapter,
+    get_or_create_mcp_adapter,
     get_databricks_workspace_host,
     call_databricks_api,
     create_crewai_tool_from_mcp,
-    stop_mcp_adapter,
     wrap_mcp_tool,
     run_in_separate_process,
-    _active_mcp_adapters
 )
-from src.engines.common.mcp_adapter import MCPTool
 
 
-class TestMCPAdapterManagement:
-    """Test suite for MCP adapter management functions."""
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-    def test_register_mcp_adapter(self):
-        """Test registering an MCP adapter."""
-        # Clear any existing adapters
-        _active_mcp_adapters.clear()
+@pytest.fixture(autouse=True)
+def _reset_global_state():
+    """Ensure module-level dicts are clean before/after each test."""
+    mcp_handler._active_mcp_adapters.clear()
+    mcp_handler._mcp_connection_pool.clear()
+    yield
+    mcp_handler._active_mcp_adapters.clear()
+    mcp_handler._mcp_connection_pool.clear()
 
-        adapter_id = "test_adapter_1"
+
+# ===========================================================================
+# register_mcp_adapter
+# ===========================================================================
+
+class TestRegisterMCPAdapter:
+
+    def test_registers_adapter(self):
         adapter = Mock()
+        register_mcp_adapter("id_1", adapter)
+        assert mcp_handler._active_mcp_adapters["id_1"] is adapter
 
-        register_mcp_adapter(adapter_id, adapter)
+    def test_overwrites_existing_id(self):
+        adapter_a = Mock()
+        adapter_b = Mock()
+        register_mcp_adapter("id_1", adapter_a)
+        register_mcp_adapter("id_1", adapter_b)
+        assert mcp_handler._active_mcp_adapters["id_1"] is adapter_b
 
-        assert adapter_id in _active_mcp_adapters
-        assert _active_mcp_adapters[adapter_id] == adapter
+
+# ===========================================================================
+# get_or_create_mcp_adapter
+# ===========================================================================
+
+class TestGetOrCreateMCPAdapter:
 
     @pytest.mark.asyncio
-    async def test_stop_all_adapters(self):
-        """Test stopping all adapters."""
-        # Clear and add test adapters
-        _active_mcp_adapters.clear()
+    async def test_creates_new_adapter_when_pool_empty(self):
+        mock_adapter = MagicMock()
+        mock_adapter._initialized = True
 
-        adapter1 = AsyncMock()
-        adapter1.stop = AsyncMock()
-        adapter2 = AsyncMock()
-        adapter2.stop = AsyncMock()
+        with patch(
+            "src.engines.common.mcp_adapter.MCPAdapter",
+            return_value=mock_adapter,
+        ) as mock_cls:
+            mock_adapter.initialize = AsyncMock()
+            result = await get_or_create_mcp_adapter(
+                {"url": "http://example.com", "auth_type": "pat"},
+                adapter_id="a1",
+            )
+            assert result is mock_adapter
+            mock_adapter.initialize.assert_awaited_once()
+            # Also registered in both pool and active
+            assert "a1" in mcp_handler._active_mcp_adapters
 
-        _active_mcp_adapters['adapter1'] = adapter1
-        _active_mcp_adapters['adapter2'] = adapter2
+    @pytest.mark.asyncio
+    async def test_reuses_adapter_from_pool(self):
+        existing = MagicMock()
+        existing._initialized = True
+        mcp_handler._mcp_connection_pool["http://example.com_pat"] = existing
+
+        result = await get_or_create_mcp_adapter(
+            {"url": "http://example.com", "auth_type": "pat"},
+            adapter_id="a2",
+        )
+        assert result is existing
+        assert "a2" in mcp_handler._active_mcp_adapters
+
+    @pytest.mark.asyncio
+    async def test_removes_stale_adapter_from_pool(self):
+        stale = MagicMock()
+        stale._initialized = False
+        mcp_handler._mcp_connection_pool["http://example.com_pat"] = stale
+
+        fresh = MagicMock()
+        fresh._initialized = True
+        fresh.initialize = AsyncMock()
+
+        with patch(
+            "src.engines.common.mcp_adapter.MCPAdapter",
+            return_value=fresh,
+        ):
+            result = await get_or_create_mcp_adapter(
+                {"url": "http://example.com", "auth_type": "pat"}
+            )
+            assert result is fresh
+
+    @pytest.mark.asyncio
+    async def test_stdio_transport_pool_key(self):
+        adapter = MagicMock()
+        adapter._initialized = True
+        adapter.initialize = AsyncMock()
+
+        with patch(
+            "src.engines.common.mcp_adapter.MCPAdapter",
+            return_value=adapter,
+        ):
+            await get_or_create_mcp_adapter(
+                {"transport": "stdio", "command": ["python", "-m", "server"]}
+            )
+            assert "stdio_python -m server" in mcp_handler._mcp_connection_pool
+
+
+# ===========================================================================
+# stop_mcp_adapter
+# ===========================================================================
+
+class TestStopMCPAdapter:
+
+    @pytest.mark.asyncio
+    async def test_calls_async_stop(self):
+        adapter = AsyncMock()
+        adapter.stop = AsyncMock()
+        await stop_mcp_adapter(adapter)
+        adapter.stop.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_calls_async_close_when_no_stop(self):
+        adapter = MagicMock()
+        # Remove stop, keep close as async
+        del adapter.stop
+        adapter.close = AsyncMock()
+        await stop_mcp_adapter(adapter)
+        adapter.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_handles_none_adapter(self):
+        # Should not raise
+        await stop_mcp_adapter(None)
+
+    @pytest.mark.asyncio
+    async def test_handles_exception_gracefully(self):
+        adapter = AsyncMock()
+        adapter.stop = AsyncMock(side_effect=Exception("stop error"))
+        # Should not propagate
+        await stop_mcp_adapter(adapter)
+
+    @pytest.mark.asyncio
+    async def test_cleans_up_connections(self):
+        adapter = AsyncMock()
+        adapter.stop = AsyncMock()
+        conn = MagicMock()
+        adapter._connections = [conn]
+        await stop_mcp_adapter(adapter)
+        conn.close.assert_called_once()
+
+
+# ===========================================================================
+# stop_all_adapters
+# ===========================================================================
+
+class TestStopAllAdapters:
+
+    @pytest.mark.asyncio
+    async def test_stops_pooled_and_active_adapters(self):
+        pooled = AsyncMock()
+        pooled.stop = AsyncMock()
+        mcp_handler._mcp_connection_pool["key1"] = pooled
+
+        active = AsyncMock()
+        active.stop = AsyncMock()
+        mcp_handler._active_mcp_adapters["id1"] = active
 
         await stop_all_adapters()
 
-        adapter1.stop.assert_called_once()
-        adapter2.stop.assert_called_once()
-        assert len(_active_mcp_adapters) == 0
+        assert len(mcp_handler._active_mcp_adapters) == 0
+        assert len(mcp_handler._mcp_connection_pool) == 0
 
     @pytest.mark.asyncio
-    async def test_stop_all_adapters_with_error(self):
-        """Test stopping all adapters handles errors gracefully."""
-        _active_mcp_adapters.clear()
+    async def test_survives_errors(self):
+        bad = AsyncMock()
+        bad.stop = AsyncMock(side_effect=Exception("boom"))
+        mcp_handler._active_mcp_adapters["bad"] = bad
 
-        adapter1 = AsyncMock()
-        adapter1.stop = AsyncMock(side_effect=Exception("Stop failed"))
+        await stop_all_adapters()
+        assert len(mcp_handler._active_mcp_adapters) == 0
 
-        _active_mcp_adapters['adapter1'] = adapter1
 
-        # Should not raise exception even with error
-        try:
-            await stop_all_adapters()
-        except Exception:
-            pytest.fail("stop_all_adapters should not raise exception")
+# ===========================================================================
+# get_databricks_workspace_host
+# ===========================================================================
 
-        # The adapter should still be removed from tracking
-        # Actually the implementation resets the dictionary
-        assert len(_active_mcp_adapters) == 0
+class TestGetDatabricksWorkspaceHost:
 
     @pytest.mark.asyncio
-    async def test_stop_mcp_adapter_async(self):
-        """Test stopping an async MCP adapter."""
-        adapter = AsyncMock()
-        adapter.stop = AsyncMock()
+    async def test_strips_https_prefix(self):
+        mock_config = MagicMock()
+        mock_config.workspace_url = "https://ws.databricks.com/"
 
-        await stop_mcp_adapter(adapter)
+        mock_service = AsyncMock()
+        mock_service.get_databricks_config = AsyncMock(return_value=mock_config)
 
-        adapter.stop.assert_called_once()
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
 
-    @pytest.mark.asyncio
-    async def test_stop_mcp_adapter_sync(self):
-        """Test stopping a sync MCP adapter."""
-        adapter = Mock()
-        adapter.stop = Mock()
-
-        await stop_mcp_adapter(adapter)
-
-        adapter.stop.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_stop_mcp_adapter_with_close(self):
-        """Test stopping adapter that has close method."""
-        adapter = AsyncMock()
-        adapter.close = AsyncMock()
-        adapter.stop = Mock(side_effect=AttributeError)
-
-        await stop_mcp_adapter(adapter)
-
-        adapter.close.assert_called_once()
-
-
-class TestDatabricksIntegration:
-    """Test suite for Databricks integration functions."""
-
-    @pytest.mark.asyncio
-    async def test_get_databricks_workspace_host_success(self):
-        """Test getting Databricks workspace host successfully."""
-        mock_config = Mock()
-        mock_config.workspace_url = "https://test.databricks.com/"
-
-        with patch('src.core.unit_of_work.UnitOfWork') as mock_uow_class:
-            with patch('src.services.databricks_service.DatabricksService') as mock_service_class:
-                mock_uow = AsyncMock()
-                mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
-                mock_uow.__aexit__ = AsyncMock()
-                mock_uow_class.return_value = mock_uow
-
-                mock_service = AsyncMock()
-                mock_service.get_databricks_config = AsyncMock(return_value=mock_config)
-                mock_service_class.from_unit_of_work = AsyncMock(return_value=mock_service)
-
-                host, error = await get_databricks_workspace_host()
-
-                assert host == "test.databricks.com"
-                assert error is None
-
-    @pytest.mark.asyncio
-    async def test_get_databricks_workspace_host_no_config(self):
-        """Test getting workspace host when no config exists."""
-        with patch('src.core.unit_of_work.UnitOfWork') as mock_uow_class:
-            with patch('src.services.databricks_service.DatabricksService') as mock_service_class:
-                mock_uow = AsyncMock()
-                mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
-                mock_uow.__aexit__ = AsyncMock()
-                mock_uow_class.return_value = mock_uow
-
-                mock_service = AsyncMock()
-                mock_service.get_databricks_config = AsyncMock(return_value=None)
-                mock_service_class.from_unit_of_work = AsyncMock(return_value=mock_service)
-
-                host, error = await get_databricks_workspace_host()
-
-                assert host is None
-                assert error == "No workspace URL found in configuration"
-
-    @pytest.mark.asyncio
-    async def test_get_databricks_workspace_host_exception(self):
-        """Test getting workspace host handles exceptions."""
-        with patch('src.core.unit_of_work.UnitOfWork') as mock_uow_class:
-            mock_uow_class.side_effect = Exception("DB error")
-
+        with patch(
+            "src.services.databricks_service.DatabricksService",
+            return_value=mock_service,
+        ), patch(
+            "src.db.session.request_scoped_session",
+            return_value=mock_session,
+        ):
             host, error = await get_databricks_workspace_host()
+            assert host == "ws.databricks.com"
+            assert error is None
 
+    @pytest.mark.asyncio
+    async def test_strips_http_prefix(self):
+        mock_config = MagicMock()
+        mock_config.workspace_url = "http://ws.databricks.com"
+
+        mock_service = AsyncMock()
+        mock_service.get_databricks_config = AsyncMock(return_value=mock_config)
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "src.services.databricks_service.DatabricksService",
+            return_value=mock_service,
+        ), patch(
+            "src.db.session.request_scoped_session",
+            return_value=mock_session,
+        ):
+            host, error = await get_databricks_workspace_host()
+            assert host == "ws.databricks.com"
+
+    @pytest.mark.asyncio
+    async def test_returns_error_when_no_config(self):
+        mock_service = AsyncMock()
+        mock_service.get_databricks_config = AsyncMock(return_value=None)
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "src.services.databricks_service.DatabricksService",
+            return_value=mock_service,
+        ), patch(
+            "src.db.session.request_scoped_session",
+            return_value=mock_session,
+        ):
+            host, error = await get_databricks_workspace_host()
             assert host is None
-            assert "DB error" in error
+            assert "No workspace URL" in error
 
     @pytest.mark.asyncio
-    async def test_call_databricks_api_get(self):
-        """Test calling Databricks API with GET method."""
-        endpoint = "/api/2.0/test"
+    async def test_returns_error_on_exception(self):
+        with patch(
+            "src.services.databricks_service.DatabricksService",
+            side_effect=Exception("db error"),
+        ), patch(
+            "src.db.session.request_scoped_session",
+            side_effect=Exception("db error"),
+        ):
+            host, error = await get_databricks_workspace_host()
+            assert host is None
+            assert error is not None
 
-        with patch('src.engines.crewai.tools.mcp_handler.get_databricks_auth_headers', new_callable=AsyncMock) as mock_auth:
-            with patch('src.engines.crewai.tools.mcp_handler.get_databricks_workspace_host', new_callable=AsyncMock) as mock_host:
-                with patch('aiohttp.ClientSession') as mock_session_class:
-                    mock_auth.return_value = ({'Authorization': 'Bearer token'}, None)
-                    mock_host.return_value = ('test.databricks.com', None)
 
-                    # Mock response
-                    mock_response = AsyncMock()
-                    mock_response.json = AsyncMock(return_value={'result': 'success'})
-                    mock_response.raise_for_status = Mock()
+# ===========================================================================
+# call_databricks_api
+# ===========================================================================
 
-                    # Mock session with context manager
-                    mock_session = AsyncMock()
-                    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-                    mock_session.__aexit__ = AsyncMock()
-
-                    # Mock the get method to return a context manager
-                    mock_get_context = AsyncMock()
-                    mock_get_context.__aenter__ = AsyncMock(return_value=mock_response)
-                    mock_get_context.__aexit__ = AsyncMock()
-                    mock_session.get = Mock(return_value=mock_get_context)
-
-                    mock_session_class.return_value = mock_session
-
-                    result = await call_databricks_api(endpoint)
-
-                    assert result == {'result': 'success'}
-                    mock_session.get.assert_called_once()
+class TestCallDatabricksAPI:
 
     @pytest.mark.asyncio
-    async def test_call_databricks_api_auth_error(self):
-        """Test API call with authentication error."""
-        with patch('src.engines.crewai.tools.mcp_handler.get_databricks_auth_headers', new_callable=AsyncMock) as mock_auth:
-            mock_auth.return_value = (None, "Auth failed")
+    async def test_get_request_success(self):
+        mock_response = AsyncMock()
+        mock_response.json = AsyncMock(return_value={"ok": True})
+        mock_response.raise_for_status = MagicMock()
 
-            result = await call_databricks_api("/test")
+        mock_get_ctx = AsyncMock()
+        mock_get_ctx.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_get_ctx.__aexit__ = AsyncMock(return_value=False)
 
-            assert 'error' in result
-            assert "Auth failed" in result['error']
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(return_value=mock_get_ctx)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "src.engines.crewai.tools.mcp_handler.get_databricks_auth_headers",
+            new_callable=AsyncMock,
+            return_value=({"Authorization": "Bearer tok"}, None),
+        ), patch(
+            "src.engines.crewai.tools.mcp_handler.get_databricks_workspace_host",
+            new_callable=AsyncMock,
+            return_value=("ws.databricks.com", None),
+        ), patch("aiohttp.ClientSession", return_value=mock_session):
+            result = await call_databricks_api("/api/2.0/test")
+            assert result == {"ok": True}
+
+    @pytest.mark.asyncio
+    async def test_auth_error_returns_error_dict(self):
+        with patch(
+            "src.engines.crewai.tools.mcp_handler.get_databricks_auth_headers",
+            new_callable=AsyncMock,
+            return_value=(None, "auth failed"),
+        ):
+            result = await call_databricks_api("/api/2.0/test")
+            assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_host_error_returns_error_dict(self):
+        with patch(
+            "src.engines.crewai.tools.mcp_handler.get_databricks_auth_headers",
+            new_callable=AsyncMock,
+            return_value=({"Authorization": "Bearer tok"}, None),
+        ), patch(
+            "src.engines.crewai.tools.mcp_handler.get_databricks_workspace_host",
+            new_callable=AsyncMock,
+            return_value=(None, "no host"),
+        ):
+            result = await call_databricks_api("/api/2.0/test")
+            assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_unsupported_method(self):
+        with patch(
+            "src.engines.crewai.tools.mcp_handler.get_databricks_auth_headers",
+            new_callable=AsyncMock,
+            return_value=({"Authorization": "Bearer tok"}, None),
+        ), patch(
+            "src.engines.crewai.tools.mcp_handler.get_databricks_workspace_host",
+            new_callable=AsyncMock,
+            return_value=("ws.databricks.com", None),
+        ):
+            result = await call_databricks_api("/api", method="PATCH")
+            assert "error" in result
 
 
-class TestCrewAIToolCreation:
-    """Test suite for CrewAI tool creation from MCP."""
+# ===========================================================================
+# create_crewai_tool_from_mcp
+# ===========================================================================
 
-    @pytest.fixture
-    def mcp_tool_dict(self) -> Dict[str, Any]:
-        """Create a test MCP tool dictionary."""
-        return {
-            'name': 'test_tool',
-            'description': 'A test tool',
-            'input_schema': {
-                'properties': {
-                    'input': {
-                        'type': 'string',
-                        'description': 'Test input'
-                    }
+class TestCreateCrewAIToolFromMCP:
+
+    def test_creates_tool_with_schema(self):
+        mcp_dict = {
+            "name": "search",
+            "description": "Search tool",
+            "input_schema": {
+                "properties": {
+                    "query": {"type": "string", "description": "search query"},
                 },
-                'required': ['input']
+                "required": ["query"],
             },
-            'adapter': Mock()
+        }
+        with patch("src.engines.common.mcp_adapter.MCPTool") as MockMCPTool:
+            wrapper = MagicMock()
+            wrapper.name = "search"
+            wrapper.description = "Search tool"
+            wrapper.input_schema = mcp_dict["input_schema"]
+            MockMCPTool.return_value = wrapper
+
+            tool = create_crewai_tool_from_mcp(mcp_dict)
+            assert tool.name == "search"
+            assert hasattr(tool, "_run")
+            assert hasattr(tool, "args_schema")
+
+    def test_creates_dummy_field_when_no_properties(self):
+        mcp_dict = {
+            "name": "simple",
+            "description": "No params",
+            "input_schema": None,
+        }
+        with patch("src.engines.common.mcp_adapter.MCPTool") as MockMCPTool:
+            wrapper = MagicMock()
+            wrapper.name = "simple"
+            wrapper.description = "No params"
+            wrapper.input_schema = {}
+            MockMCPTool.return_value = wrapper
+
+            tool = create_crewai_tool_from_mcp(mcp_dict)
+            fields = (
+                tool.args_schema.model_fields
+                if hasattr(tool.args_schema, "model_fields")
+                else tool.args_schema.__fields__
+            )
+            assert "dummy" in fields
+
+    def test_tool_run_returns_text_from_result(self):
+        mcp_dict = {
+            "name": "echo",
+            "description": "Echo tool",
+            "input_schema": {"properties": {}, "required": []},
         }
 
-    def test_create_crewai_tool_from_mcp(self, mcp_tool_dict):
-        """Test creating CrewAI tool from MCP dictionary."""
-        with patch('src.engines.common.mcp_adapter.MCPTool') as mock_mcp_tool_class:
-            mock_mcp_tool = Mock()
-            mock_mcp_tool.name = 'test_tool'
-            mock_mcp_tool.description = 'A test tool'
-            mock_mcp_tool.input_schema = mcp_tool_dict['input_schema']
-            mock_mcp_tool_class.return_value = mock_mcp_tool
+        mock_result = MagicMock()
+        content_item = MagicMock()
+        content_item.text = "hello"
+        mock_result.content = [content_item]
 
-            tool = create_crewai_tool_from_mcp(mcp_tool_dict)
+        with patch("src.engines.common.mcp_adapter.MCPTool") as MockMCPTool:
+            wrapper = MagicMock()
+            wrapper.name = "echo"
+            wrapper.description = "Echo tool"
+            wrapper.input_schema = {"properties": {}, "required": []}
+            wrapper.execute = AsyncMock(return_value=mock_result)
+            MockMCPTool.return_value = wrapper
 
-            assert tool.name == 'test_tool'
-            # CrewAI may format the description, so just check if our description is in there
-            assert 'A test tool' in tool.description or tool.description == 'A test tool'
-            assert hasattr(tool, '_run')
-            assert hasattr(tool, 'args_schema')
+            tool = create_crewai_tool_from_mcp(mcp_dict)
 
-    def test_create_crewai_tool_no_schema(self):
-        """Test creating CrewAI tool with no input schema."""
-        mcp_tool_dict = {
-            'name': 'simple_tool',
-            'description': 'Simple tool',
-            'input_schema': None
+            # Simulate: no running loop -> uses new_event_loop
+            with patch("asyncio.get_running_loop", side_effect=RuntimeError):
+                result = tool._run()
+                assert "hello" in result
+
+    def test_tool_run_returns_error_on_exception(self):
+        mcp_dict = {
+            "name": "fail",
+            "description": "Fail tool",
+            "input_schema": {"properties": {}, "required": []},
         }
+        with patch("src.engines.common.mcp_adapter.MCPTool") as MockMCPTool:
+            wrapper = MagicMock()
+            wrapper.name = "fail"
+            wrapper.description = "Fail tool"
+            wrapper.input_schema = {"properties": {}, "required": []}
+            wrapper.execute = AsyncMock(side_effect=Exception("exec error"))
+            MockMCPTool.return_value = wrapper
 
-        with patch('src.engines.common.mcp_adapter.MCPTool') as mock_mcp_tool_class:
-            mock_mcp_tool = Mock()
-            mock_mcp_tool.name = 'simple_tool'
-            mock_mcp_tool.description = 'Simple tool'
-            mock_mcp_tool.input_schema = {}
-            mock_mcp_tool_class.return_value = mock_mcp_tool
+            tool = create_crewai_tool_from_mcp(mcp_dict)
 
-            tool = create_crewai_tool_from_mcp(mcp_tool_dict)
-
-            # Should have dummy field
-            fields = tool.args_schema.model_fields if hasattr(tool.args_schema, 'model_fields') else tool.args_schema.__fields__
-            assert 'dummy' in fields
-
-    def test_crewai_tool_execution(self, mcp_tool_dict):
-        """Test executing a created CrewAI tool."""
-        with patch('src.engines.common.mcp_adapter.MCPTool') as mock_mcp_tool_class:
-            mock_mcp_tool = Mock()
-            mock_mcp_tool.name = 'test_tool'
-            mock_mcp_tool.description = 'A test tool'
-            mock_mcp_tool.input_schema = mcp_tool_dict['input_schema']
-
-            # Mock execute method
-            async def mock_execute(params):
-                return Mock(content=[Mock(text="Success")])
-
-            mock_mcp_tool.execute = mock_execute
-            mock_mcp_tool_class.return_value = mock_mcp_tool
-
-            with patch('asyncio.run') as mock_asyncio_run:
-                mock_asyncio_run.return_value = Mock(content=[Mock(text="Success")])
-
-                tool = create_crewai_tool_from_mcp(mcp_tool_dict)
-
-                # Test execution
-                result = tool._run(input="test")
-                assert result == "Success"
-
-    def test_crewai_tool_execution_error(self, mcp_tool_dict):
-        """Test CrewAI tool execution with error."""
-        with patch('src.engines.common.mcp_adapter.MCPTool') as mock_mcp_tool_class:
-            mock_mcp_tool = Mock()
-            mock_mcp_tool.name = 'test_tool'
-            mock_mcp_tool.description = 'A test tool'
-            mock_mcp_tool.input_schema = mcp_tool_dict['input_schema']
-
-            # Mock execute to raise error
-            async def mock_execute(params):
-                raise Exception("Execution failed")
-
-            mock_mcp_tool.execute = mock_execute
-            mock_mcp_tool_class.return_value = mock_mcp_tool
-
-            with patch('asyncio.run') as mock_asyncio_run:
-                mock_asyncio_run.side_effect = Exception("Execution failed")
-
-                tool = create_crewai_tool_from_mcp(mcp_tool_dict)
-
-                # Test execution
-                result = tool._run(input="test")
+            with patch("asyncio.get_running_loop", side_effect=RuntimeError):
+                result = tool._run()
                 assert "Error:" in result
-                assert "Execution failed" in result
 
-    def test_create_crewai_tool_with_different_field_types(self):
-        """Test creating CrewAI tool with different field types."""
-        mcp_tool_dict = {
-            'name': 'complex_tool',
-            'description': 'Complex tool',
-            'input_schema': {
-                'properties': {
-                    'text_field': {'type': 'string', 'description': 'Text input'},
-                    'int_field': {'type': 'integer', 'description': 'Integer input'},
-                    'float_field': {'type': 'number', 'description': 'Float input'},
-                    'bool_field': {'type': 'boolean', 'description': 'Boolean input'}
-                }
-            }
-        }
 
-        with patch('src.engines.common.mcp_adapter.MCPTool') as mock_mcp_tool_class:
-            mock_mcp_tool = Mock()
-            mock_mcp_tool.name = 'complex_tool'
-            mock_mcp_tool.description = 'Complex tool'
-            mock_mcp_tool.input_schema = mcp_tool_dict['input_schema']
-            mock_mcp_tool_class.return_value = mock_mcp_tool
-
-            tool = create_crewai_tool_from_mcp(mcp_tool_dict)
-
-            # Check that the tool was created with proper field types
-            fields = tool.args_schema.model_fields if hasattr(tool.args_schema, 'model_fields') else tool.args_schema.__fields__
-            assert 'text_field' in fields
-            assert 'int_field' in fields
-            assert 'float_field' in fields
-            assert 'bool_field' in fields
-
-    def test_crewai_tool_execution_with_event_loop(self, mcp_tool_dict):
-        """Test executing CrewAI tool when event loop is already running."""
-        with patch('src.engines.common.mcp_adapter.MCPTool') as mock_mcp_tool_class:
-            mock_mcp_tool = Mock()
-            mock_mcp_tool.name = 'test_tool'
-            mock_mcp_tool.description = 'A test tool'
-            mock_mcp_tool.input_schema = mcp_tool_dict['input_schema']
-
-            # Mock execute method
-            async def mock_execute(params):
-                return Mock(content=[Mock(text="Success from thread")])
-
-            mock_mcp_tool.execute = mock_execute
-            mock_mcp_tool_class.return_value = mock_mcp_tool
-
-            # Mock the event loop check
-            with patch('asyncio.get_running_loop') as mock_get_loop:
-                mock_get_loop.return_value = Mock()  # Simulate existing event loop
-
-                with patch('concurrent.futures.ThreadPoolExecutor') as mock_executor_class:
-                    mock_executor = Mock()
-                    mock_future = Mock()
-                    mock_future.result.return_value = Mock(content=[Mock(text="Success from thread")])
-                    mock_executor.submit.return_value = mock_future
-                    mock_executor.__enter__ = Mock(return_value=mock_executor)
-                    mock_executor.__exit__ = Mock()
-                    mock_executor_class.return_value = mock_executor
-
-                    tool = create_crewai_tool_from_mcp(mcp_tool_dict)
-
-                    # Test execution
-                    result = tool._run(input="test")
-                    assert result == "Success from thread"
-
+# ===========================================================================
+# wrap_mcp_tool
+# ===========================================================================
 
 class TestWrapMCPTool:
-    """Test suite for wrap_mcp_tool function."""
 
-    @pytest.fixture
-    def mock_tool(self):
-        """Create a mock tool with _run method."""
-        tool = Mock()
-        tool.name = "test_tool"
-        tool._run = Mock(return_value="Success")
-        return tool
+    def test_standard_tool_direct_success(self):
+        tool = MagicMock()
+        tool.name = "std_tool"
+        original = MagicMock(return_value="ok")
+        tool._run = original
 
-    def test_wrap_mcp_tool_direct_execution(self, mock_tool):
-        """Test wrapping MCP tool with direct execution."""
-        # Store the original run method to check it gets called
-        original_run = mock_tool._run
+        wrapped = wrap_mcp_tool(tool)
+        result = wrapped._run(x=1)
+        assert result == "ok"
 
-        wrapped_tool = wrap_mcp_tool(mock_tool)
+    def test_standard_tool_fallback_on_event_loop_error(self):
+        tool = MagicMock()
+        tool.name = "std_tool"
+        tool._run = MagicMock(side_effect=RuntimeError("Event loop is closed"))
 
-        # The wrapped tool should be the same object
-        assert wrapped_tool == mock_tool
+        wrapped = wrap_mcp_tool(tool)
 
-        # The _run method should be replaced
-        assert wrapped_tool._run != original_run
+        with patch(
+            "src.engines.crewai.tools.mcp_handler.run_in_separate_process",
+            new_callable=AsyncMock,
+            return_value="process_result",
+        ):
+            result = wrapped._run(x=1)
+            assert result == "process_result"
 
-        # Test execution
-        result = wrapped_tool._run(test="param")
-        assert result == "Success"
-        # The original mock should have been called
-        original_run.assert_called_once_with(test="param")
-
-    def test_wrap_mcp_tool_genie_tool(self):
-        """Test wrapping Genie-specific MCP tool."""
-        tool = Mock()
+    def test_genie_tool_direct_success(self):
+        tool = MagicMock()
         tool.name = "get_space"
-        original_run = Mock(side_effect=Exception("Event loop issue"))
-        tool._run = original_run
+        original = MagicMock(return_value="space_data")
+        tool._run = original
 
-        with patch('asyncio.new_event_loop') as mock_new_loop:
-            with patch('asyncio.set_event_loop') as mock_set_loop:
-                mock_loop = Mock()
-                mock_loop.run_until_complete = Mock(return_value="Process result")
-                mock_loop.close = Mock()
-                mock_new_loop.return_value = mock_loop
+        wrapped = wrap_mcp_tool(tool)
+        result = wrapped._run(space_id="s1")
+        assert result == "space_data"
 
-                wrapped_tool = wrap_mcp_tool(tool)
+    def test_genie_tool_falls_back_to_process(self):
+        tool = MagicMock()
+        tool.name = "get_space"
+        tool._run = MagicMock(side_effect=Exception("loop error"))
 
-                # Should have modified _run method
-                assert wrapped_tool._run != original_run
+        wrapped = wrap_mcp_tool(tool)
 
-                # Test execution - should handle the error and use process
-                result = wrapped_tool._run(space_id="test_space")
-                assert mock_loop.run_until_complete.called
+        mock_loop = MagicMock()
+        mock_loop.run_until_complete = MagicMock(return_value="from_process")
+
+        with patch("asyncio.new_event_loop", return_value=mock_loop), \
+             patch("asyncio.set_event_loop"):
+            result = wrapped._run(space_id="s1")
+            assert mock_loop.run_until_complete.called
+
+
+# ===========================================================================
+# run_in_separate_process
+# ===========================================================================
+
+class TestRunInSeparateProcess:
 
     @pytest.mark.asyncio
-    async def test_run_in_separate_process(self):
-        """Test running tool in separate process."""
-        tool_name = "test_tool"
-        kwargs = {"param": "value"}
+    async def test_success(self):
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(
+            return_value=(b'{"result": "ok"}', b"")
+        )
 
-        with patch('asyncio.create_subprocess_exec') as mock_subprocess:
-            # Mock the process
-            mock_process = Mock()
-            mock_process.returncode = 0
-            mock_process.communicate = AsyncMock(return_value=(b'{"result": "success"}', b''))
-            mock_subprocess.return_value = mock_process
+        with patch(
+            "asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            return_value=mock_proc,
+        ):
+            result = await run_in_separate_process("tool_x", {"a": 1})
+            assert result == {"result": "ok"}
 
-            result = await run_in_separate_process(tool_name, kwargs)
+    @pytest.mark.asyncio
+    async def test_process_error(self):
+        mock_proc = MagicMock()
+        mock_proc.returncode = 1
+        mock_proc.communicate = AsyncMock(
+            return_value=(b"", b"some error")
+        )
 
-            assert result == {"result": "success"}
+        with patch(
+            "asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            return_value=mock_proc,
+        ):
+            result = await run_in_separate_process("tool_x", {})
+            assert "error" in result
 
-    def test_wrap_mcp_tool_no_run_method(self):
-        """Test wrapping tool without _run method."""
-        tool = Mock(spec=['name'])
-        tool.name = "test_tool"
+    @pytest.mark.asyncio
+    async def test_invalid_json_output(self):
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(
+            return_value=(b"not json", b"")
+        )
 
-        # wrap_mcp_tool expects a _run method, so this should raise an error
-        with pytest.raises(AttributeError):
-            wrapped_tool = wrap_mcp_tool(tool)
+        with patch(
+            "asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            return_value=mock_proc,
+        ):
+            result = await run_in_separate_process("tool_x", {})
+            assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_exception_during_subprocess_creation(self):
+        with patch(
+            "asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            side_effect=Exception("spawn fail"),
+        ):
+            result = await run_in_separate_process("tool_x", {})
+            assert "error" in result

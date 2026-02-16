@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 from typing import Dict, Any
 
-from fastapi import HTTPException
+from src.core.exceptions import KasalError, NotFoundError, ConflictError, BadRequestError
 from pydantic import Field
 
 from src.services.schema_service import SchemaService
@@ -132,7 +132,7 @@ class TestSchemaService:
         mock_repository.find_by_name.return_value = None
 
         # Execute and verify exception
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await schema_service.get_schema_by_name("nonexistent_schema")
 
         assert exc_info.value.status_code == 404
@@ -185,7 +185,7 @@ class TestSchemaService:
         schema_create = SchemaCreate(**sample_schema_data)
 
         # Execute and verify exception
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ConflictError) as exc_info:
             await schema_service.create_schema(schema_create)
 
         assert exc_info.value.status_code == 409
@@ -239,7 +239,7 @@ class TestSchemaService:
         schema_create = SchemaCreate(**schema_data)
 
         # Execute and verify exception
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(BadRequestError) as exc_info:
             await schema_service.create_schema(schema_create)
 
         assert exc_info.value.status_code == 400
@@ -256,7 +256,7 @@ class TestSchemaService:
         schema_create = SchemaCreate(**sample_schema_data)
 
         # Execute and verify exception
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await schema_service.create_schema(schema_create)
 
         assert exc_info.value.status_code == 500
@@ -293,7 +293,7 @@ class TestSchemaService:
         schema_update = SchemaUpdate(description="Updated Description")
 
         # Execute and verify exception
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await schema_service.update_schema("nonexistent_schema", schema_update)
 
         assert exc_info.value.status_code == 404
@@ -370,7 +370,7 @@ class TestSchemaService:
         schema_update = SchemaUpdate(**update_data)
 
         # Execute and verify exception
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(BadRequestError) as exc_info:
             await schema_service.update_schema("test_schema", schema_update)
 
         assert exc_info.value.status_code == 400
@@ -387,7 +387,7 @@ class TestSchemaService:
         schema_update = SchemaUpdate(description="Updated Description")
 
         # Execute and verify exception
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await schema_service.update_schema("test_schema", schema_update)
 
         assert exc_info.value.status_code == 500
@@ -414,7 +414,7 @@ class TestSchemaService:
         mock_repository.find_by_name.return_value = None
 
         # Execute and verify exception
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await schema_service.delete_schema("nonexistent_schema")
 
         assert exc_info.value.status_code == 404

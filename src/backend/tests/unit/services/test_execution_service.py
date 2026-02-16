@@ -11,7 +11,7 @@ import concurrent.futures
 from unittest.mock import AsyncMock, MagicMock, patch, Mock
 from datetime import datetime, UTC
 
-from fastapi import HTTPException, status
+from src.core.exceptions import KasalError, BadRequestError
 
 from src.services.execution_service import ExecutionService
 from src.schemas.execution import ExecutionStatus, CrewConfig, ExecutionNameGenerationRequest, ExecutionCreateResponse
@@ -143,13 +143,13 @@ class TestExecutionService:
     
     @pytest.mark.asyncio
     async def test_execute_flow_http_exception_propagation(self, execution_service):
-        """Test that HTTPExceptions are propagated."""
-        http_error = HTTPException(status_code=400, detail="Bad request")
-        execution_service.crewai_execution_service.run_flow_execution.side_effect = http_error
-        
-        with pytest.raises(HTTPException) as exc_info:
+        """Test that KasalErrors are propagated."""
+        kasal_error = BadRequestError(detail="Bad request")
+        execution_service.crewai_execution_service.run_flow_execution.side_effect = kasal_error
+
+        with pytest.raises(KasalError) as exc_info:
             await execution_service.execute_flow()
-        
+
         assert exc_info.value.status_code == 400
         assert exc_info.value.detail == "Bad request"
     
@@ -157,11 +157,11 @@ class TestExecutionService:
     async def test_execute_flow_general_exception_handling(self, execution_service):
         """Test general exception handling in flow execution."""
         execution_service.crewai_execution_service.run_flow_execution.side_effect = Exception("Database error")
-        
-        with pytest.raises(HTTPException) as exc_info:
+
+        with pytest.raises(KasalError) as exc_info:
             await execution_service.execute_flow()
-        
-        assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+
+        assert exc_info.value.status_code == 500
         assert "Unexpected error in execute_flow" in str(exc_info.value.detail)
     
     def test_get_execution_method_exists(self, execution_service):
@@ -191,11 +191,11 @@ class TestExecutionService:
         """Test error handling in get_executions_by_flow."""
         flow_id = uuid.uuid4()
         execution_service.crewai_execution_service.get_flow_executions_by_flow.side_effect = Exception("Database error")
-        
-        with pytest.raises(HTTPException) as exc_info:
+
+        with pytest.raises(KasalError) as exc_info:
             await execution_service.get_executions_by_flow(flow_id)
-        
-        assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+
+        assert exc_info.value.status_code == 500
         assert "Error getting executions" in str(exc_info.value.detail)
     
     def test_create_execution_id(self):

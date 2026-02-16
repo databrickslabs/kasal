@@ -117,7 +117,7 @@ class TestGetModelContextLimits:
         mock_group_context.primary_group_id = str(uuid.uuid4())
 
         # Patch at the source modules since imports happen inside the function
-        with patch('src.db.session.async_session_factory') as mock_session, \
+        with patch('src.db.session.request_scoped_session') as mock_session, \
              patch('src.services.model_config_service.ModelConfigService') as mock_service:
             mock_session.return_value.__aenter__ = AsyncMock()
             mock_session.return_value.__aexit__ = AsyncMock()
@@ -149,7 +149,7 @@ class TestGetModelContextLimits:
         mock_group_context.primary_group_id = str(uuid.uuid4())
 
         # Patch at the source modules since imports happen inside the function
-        with patch('src.db.session.async_session_factory') as mock_session, \
+        with patch('src.db.session.request_scoped_session') as mock_session, \
              patch('src.services.model_config_service.ModelConfigService') as mock_service:
             mock_session.return_value.__aenter__ = AsyncMock()
             mock_session.return_value.__aexit__ = AsyncMock()
@@ -202,7 +202,7 @@ class TestGetModelContextLimits:
         mock_group_context.primary_group_id = str(uuid.uuid4())
 
         # Patch at the source module since import happens inside the function
-        with patch('src.db.session.async_session_factory') as mock_session:
+        with patch('src.db.session.request_scoped_session') as mock_session:
             mock_session.side_effect = Exception("Database error")
 
             context_window, max_output = await get_model_context_limits(mock_agent, mock_group_context)
@@ -222,7 +222,7 @@ class TestGetModelContextLimits:
         mock_group_context.group_ids = [str(uuid.uuid4())]
 
         # Patch at the source modules since imports happen inside the function
-        with patch('src.db.session.async_session_factory') as mock_session, \
+        with patch('src.db.session.request_scoped_session') as mock_session, \
              patch('src.services.model_config_service.ModelConfigService') as mock_service:
             mock_session.return_value.__aenter__ = AsyncMock()
             mock_session.return_value.__aexit__ = AsyncMock()

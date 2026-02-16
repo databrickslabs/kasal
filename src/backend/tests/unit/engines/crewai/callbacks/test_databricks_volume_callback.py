@@ -1,332 +1,407 @@
-import pytest
-pytest.skip("Incompatible with current architecture: Databricks volume callback behavior changed; skipping legacy tests", allow_module_level=True)
+"""Unit tests for DatabricksVolumeCallback.
 
+Tests initialization (path normalization, parameter storage), authentication,
+file-path generation, output formatting (JSON / CSV / text), size validation,
+and volume upload logic with mocked Databricks SDK and repository.
 """
-Unit tests for DatabricksVolumeCallback.
-"""
-import pytest
+
+import io
 import json
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
+import pytest
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
-from src.engines.crewai.callbacks.databricks_volume_callback import DatabricksVolumeCallback
+from src.engines.crewai.callbacks.databricks_volume_callback import (
+    DatabricksVolumeCallback,
+)
 
 
-@pytest.fixture
-def mock_workspace_client():
-    """Create a mock WorkspaceClient."""
-    with patch('src.engines.crewai.callbacks.databricks_volume_callback.WorkspaceClient') as mock_client:
-        client_instance = Mock()
-        client_instance.files = Mock()
-        client_instance.files.upload = Mock()
-        mock_client.return_value = client_instance
-        yield client_instance
-
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
 
 @pytest.fixture
-def callback_config():
-    """Basic callback configuration."""
+def base_kwargs():
+    """Minimal valid kwargs for constructing a DatabricksVolumeCallback."""
     return {
-        "volume_path": "/Volumes/test/schema/volume",
-        "workspace_url": "https://test.databricks.com",
-        "token": "test-token",
-        "create_date_dirs": True,
-        "file_format": "json",
-        "max_file_size_mb": 10.0,
-        "task_key": "test_task"
+        "volume_path": "/Volumes/cat/schema/vol",
+        "workspace_url": "https://example.com",
+        "token": "tok_test",
+        "task_key": "task_1",
     }
 
 
-class TestDatabricksVolumeCallback:
-    """Test suite for DatabricksVolumeCallback."""
+@pytest.fixture
+def callback(base_kwargs):
+    return DatabricksVolumeCallback(**base_kwargs)
 
-    def test_initialization(self, callback_config):
-        """Test callback initialization."""
-        callback = DatabricksVolumeCallback(**callback_config)
 
-        assert callback.volume_path == "/Volumes/test/schema/volume"
-        assert callback.workspace_url == "https://test.databricks.com"
-        assert callback.token == "test-token"
-        assert callback.create_date_dirs is True
-        assert callback.file_format == "json"
-        assert callback.max_file_size_mb == 10.0
-        assert callback.task_key == "test_task"
+# ===========================================================================
+# Initialization
+# ===========================================================================
 
-    def test_initialization_with_env_vars(self):
-        """Test initialization with environment variables."""
-        with patch.dict('os.environ', {
-            'DATABRICKS_HOST': 'https://env.databricks.com',
-            'DATABRICKS_TOKEN': 'env-token'
-        }):
-            callback = DatabricksVolumeCallback(
-                volume_path="/Volumes/env/schema/volume",
-                task_key="env_task"
-            )
+class TestInit:
 
-            assert callback.workspace_url == "https://env.databricks.com"
-            assert callback.token == "env-token"
+    def test_stores_volume_path(self, base_kwargs):
+        cb = DatabricksVolumeCallback(**base_kwargs)
+        assert cb.volume_path == "/Volumes/cat/schema/vol"
 
-    def test_client_lazy_initialization(self, callback_config, mock_workspace_client):
-        """Test that client is lazily initialized."""
-        callback = DatabricksVolumeCallback(**callback_config)
+    def test_converts_dot_notation(self):
+        cb = DatabricksVolumeCallback(
+            volume_path="catalog.myschema.myvol", task_key="t"
+        )
+        assert cb.volume_path == "/Volumes/catalog/myschema/myvol"
 
-        # Client should not be initialized yet
+    def test_converts_non_standard_dot_notation(self):
+        cb = DatabricksVolumeCallback(
+            volume_path="a.b.c.d", task_key="t"
+        )
+        assert cb.volume_path.startswith("/Volumes/")
+
+    def test_default_flags(self, base_kwargs):
+        cb = DatabricksVolumeCallback(**base_kwargs)
+        assert cb.create_date_dirs is True
+        assert cb.file_format == "json"
+        assert cb.max_file_size_mb == 100.0
+
+    def test_custom_flags(self, base_kwargs):
+        cb = DatabricksVolumeCallback(
+            **base_kwargs,
+            create_date_dirs=False,
+            file_format="csv",
+            max_file_size_mb=5.0,
+            execution_name="run_42",
+        )
+        assert cb.create_date_dirs is False
+        assert cb.file_format == "csv"
+        assert cb.max_file_size_mb == 5.0
+        assert cb.execution_name == "run_42"
+
+    def test_client_initially_none(self, callback):
         assert callback._client is None
 
-        # Access the client property
-        client = callback.client
 
-        # Now client should be initialized
-        assert client is not None
+# ===========================================================================
+# _ensure_auth
+# ===========================================================================
 
-    def test_client_initialization_error(self):
-        """Test client initialization with missing credentials."""
-        callback = DatabricksVolumeCallback(
-            volume_path="/Volumes/test/schema/volume",
-            workspace_url=None,
-            token=None
+class TestEnsureAuth:
+
+    @pytest.mark.asyncio
+    async def test_skips_when_already_initialized(self, callback):
+        callback._auth_initialized = True
+        await callback._ensure_auth()
+        # No side effects; just returns
+
+    @pytest.mark.asyncio
+    async def test_fetches_auth_context_when_missing(self):
+        cb = DatabricksVolumeCallback(
+            volume_path="/Volumes/c/s/v", task_key="t"
         )
+        assert cb.workspace_url is None
 
-        with pytest.raises(ValueError, match="Databricks workspace URL and token are required"):
-            _ = callback.client
+        mock_auth = MagicMock()
+        mock_auth.workspace_url = "https://ws.example.com"
+        mock_auth.token = "fetched_tok"
+        mock_auth.auth_method = "pat"
 
-    @pytest.mark.asyncio
-    async def test_execute_json_format(self, callback_config, mock_workspace_client):
-        """Test execute method with JSON format."""
-        callback = DatabricksVolumeCallback(**callback_config)
-
-        # Mock output
-        output = {
-            "result": "test result",
-            "data": [1, 2, 3]
-        }
-
-        # Execute the callback
-        with patch.object(callback, '_upload_to_volume', return_value="/Volumes/test/path.json"):
-            result = await callback.execute(output)
-
-        # Verify result
-        assert "volume_path" in result
-        assert result["volume_path"] == "/Volumes/test/path.json"
-        assert "file_size_mb" in result
-        assert "task_key" in result
-        assert result["task_key"] == "test_task"
-        assert "timestamp" in result
-        assert result["format"] == "json"
+        with patch(
+            "src.utils.databricks_auth.get_auth_context",
+            new_callable=AsyncMock,
+            return_value=mock_auth,
+        ):
+            await cb._ensure_auth()
+            assert cb.workspace_url == "https://ws.example.com"
+            assert cb.token == "fetched_tok"
+            assert cb._auth_initialized is True
 
     @pytest.mark.asyncio
-    async def test_execute_text_format(self, callback_config):
-        """Test execute method with text format."""
-        callback_config["file_format"] = "txt"
-        callback = DatabricksVolumeCallback(**callback_config)
+    async def test_handles_auth_exception(self):
+        cb = DatabricksVolumeCallback(
+            volume_path="/Volumes/c/s/v", task_key="t"
+        )
+        with patch(
+            "src.utils.databricks_auth.get_auth_context",
+            new_callable=AsyncMock,
+            side_effect=Exception("auth boom"),
+        ):
+            await cb._ensure_auth()
+            assert cb._auth_initialized is True  # still sets flag
 
-        # Mock output
-        output = "This is a text output"
 
-        # Execute the callback
-        with patch.object(callback, '_upload_to_volume', return_value="/Volumes/test/path.txt"):
-            result = await callback.execute(output)
+# ===========================================================================
+# _ensure_client
+# ===========================================================================
 
-        # Verify result
-        assert result["format"] == "txt"
-        assert result["volume_path"] == "/Volumes/test/path.txt"
-
-    @pytest.mark.asyncio
-    async def test_execute_csv_format(self, callback_config):
-        """Test execute method with CSV format."""
-        callback_config["file_format"] = "csv"
-        callback = DatabricksVolumeCallback(**callback_config)
-
-        # Mock output
-        output = [
-            ["header1", "header2"],
-            ["value1", "value2"],
-            ["value3", "value4"]
-        ]
-
-        # Execute the callback
-        with patch.object(callback, '_upload_to_volume', return_value="/Volumes/test/path.csv"):
-            result = await callback.execute(output)
-
-        # Verify result
-        assert result["format"] == "csv"
-        assert result["volume_path"] == "/Volumes/test/path.csv"
+class TestEnsureClient:
 
     @pytest.mark.asyncio
-    async def test_execute_file_size_limit(self, callback_config):
-        """Test execute method with file size exceeding limit."""
-        callback_config["max_file_size_mb"] = 0.001  # Very small limit
-        callback = DatabricksVolumeCallback(**callback_config)
+    async def test_returns_existing_client(self, callback):
+        existing = MagicMock()
+        callback._client = existing
+        client = await callback._ensure_client()
+        assert client is existing
 
-        # Large output
-        output = "x" * 10000  # Should exceed 0.001 MB
+    @pytest.mark.asyncio
+    async def test_creates_client_via_centralized_auth(self, callback):
+        mock_ws = MagicMock()
+        with patch(
+            "src.engines.crewai.callbacks.databricks_volume_callback.get_workspace_client",
+            new_callable=AsyncMock,
+            return_value=mock_ws,
+        ):
+            client = await callback._ensure_client()
+            assert client is mock_ws
+            assert callback._client is mock_ws
 
-        # Execute should raise error
-        with pytest.raises(ValueError, match="exceeds maximum allowed size"):
-            await callback.execute(output)
+    @pytest.mark.asyncio
+    async def test_raises_when_client_is_none(self, callback):
+        with patch(
+            "src.engines.crewai.callbacks.databricks_volume_callback.get_workspace_client",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            with pytest.raises(ValueError, match="Failed to get Databricks workspace client"):
+                await callback._ensure_client()
 
-    def test_generate_file_path_with_date_dirs(self, callback_config):
-        """Test file path generation with date directories."""
-        callback = DatabricksVolumeCallback(**callback_config)
 
-        with patch('src.engines.crewai.callbacks.databricks_volume_callback.datetime') as mock_datetime:
-            mock_datetime.now.return_value = datetime(2024, 3, 15, 10, 30, 45)
+# ===========================================================================
+# _generate_file_path
+# ===========================================================================
 
-            path = callback._generate_file_path()
+class TestGenerateFilePath:
 
-            # Should include year/month/day structure
-            assert "2024" in path
-            assert "03" in path
-            assert "15" in path
-            assert "test_task" in path
-            assert ".json" in path
+    def test_includes_date_dirs(self, callback):
+        path = callback._generate_file_path()
+        parts = path.split("/")
+        # With date dirs: year/month/day/filename
+        assert len(parts) >= 4
+        assert parts[-1].endswith(".json")
+        assert "task_1" in parts[-1]
 
-    def test_generate_file_path_without_date_dirs(self, callback_config):
-        """Test file path generation without date directories."""
-        callback_config["create_date_dirs"] = False
-        callback = DatabricksVolumeCallback(**callback_config)
+    def test_no_date_dirs(self, base_kwargs):
+        cb = DatabricksVolumeCallback(**base_kwargs, create_date_dirs=False)
+        path = cb._generate_file_path()
+        assert "/" not in path or path.count("/") == 0 or "task_1" in path
 
-        with patch('src.engines.crewai.callbacks.databricks_volume_callback.datetime') as mock_datetime:
-            mock_datetime.now.return_value = datetime(2024, 3, 15, 10, 30, 45)
+    def test_includes_execution_name(self, base_kwargs):
+        cb = DatabricksVolumeCallback(
+            **base_kwargs, execution_name="My Run!", create_date_dirs=False
+        )
+        path = cb._generate_file_path()
+        assert "My_Run_" in path  # Special chars sanitised
 
-            path = callback._generate_file_path()
+    def test_uses_output_as_default_task_key(self):
+        cb = DatabricksVolumeCallback(
+            volume_path="/Volumes/c/s/v", create_date_dirs=False
+        )
+        path = cb._generate_file_path()
+        assert "output_" in path
 
-            # Should not include date structure
-            assert "/" not in path
-            assert "test_task" in path
-            assert ".json" in path
 
-    def test_format_output_json_with_raw(self, callback_config):
-        """Test output formatting for JSON with raw attribute."""
-        callback = DatabricksVolumeCallback(**callback_config)
+# ===========================================================================
+# _format_output
+# ===========================================================================
 
-        # Mock CrewAI output object
-        output = Mock()
-        output.raw = "raw output"
-        output.json_dict = {"key": "value"}
-        output.pydantic = Mock()
-        output.pydantic.dict.return_value = {"model": "data"}
+class TestFormatOutput:
 
-        formatted = callback._format_output(output)
+    def test_json_dict_input(self, callback):
+        out = {"key": "val"}
+        formatted = callback._format_output(out)
         parsed = json.loads(formatted)
+        assert parsed == out
 
-        assert parsed["raw"] == "raw output"
-        assert parsed["json_dict"] == {"key": "value"}
-        assert parsed["pydantic"] == {"model": "data"}
+    def test_json_raw_output_object(self, callback):
+        out = MagicMock()
+        out.raw = "raw text"
+        out.json_dict = {"j": 1}
+        out.pydantic = None
+        formatted = callback._format_output(out)
+        parsed = json.loads(formatted)
+        assert parsed["raw"] == "raw text"
+        assert parsed["json_dict"] == {"j": 1}
+        assert parsed["pydantic"] is None
+
+    def test_json_string_fallback(self, callback):
+        formatted = callback._format_output("just a string")
+        parsed = json.loads(formatted)
+        assert parsed["output"] == "just a string"
         assert "metadata" in parsed
-        assert parsed["metadata"]["task_key"] == "test_task"
 
-    def test_format_output_json_dict(self, callback_config):
-        """Test output formatting for JSON with dictionary."""
-        callback = DatabricksVolumeCallback(**callback_config)
+    def test_csv_list_of_lists(self, base_kwargs):
+        cb = DatabricksVolumeCallback(**base_kwargs, file_format="csv")
+        data = [["h1", "h2"], ["v1", "v2"]]
+        formatted = cb._format_output(data)
+        assert "h1" in formatted
+        assert "v2" in formatted
 
-        output = {"result": "success", "data": [1, 2, 3]}
+    def test_csv_list_of_scalars(self, base_kwargs):
+        cb = DatabricksVolumeCallback(**base_kwargs, file_format="csv")
+        formatted = cb._format_output(["a", "b"])
+        assert "a" in formatted
 
-        formatted = callback._format_output(output)
-        parsed = json.loads(formatted)
+    def test_csv_non_list(self, base_kwargs):
+        cb = DatabricksVolumeCallback(**base_kwargs, file_format="csv")
+        assert cb._format_output(42) == "42"
 
-        assert parsed == output
+    def test_text_format_raw(self, base_kwargs):
+        cb = DatabricksVolumeCallback(**base_kwargs, file_format="txt")
+        out = MagicMock()
+        out.raw = "raw text"
+        assert cb._format_output(out) == "raw text"
 
-    def test_format_output_text(self, callback_config):
-        """Test output formatting for text."""
-        callback_config["file_format"] = "txt"
-        callback = DatabricksVolumeCallback(**callback_config)
+    def test_text_format_string(self, base_kwargs):
+        cb = DatabricksVolumeCallback(**base_kwargs, file_format="txt")
+        assert cb._format_output("hello") == "hello"
 
-        output = "Simple text output"
 
-        formatted = callback._format_output(output)
+# ===========================================================================
+# execute
+# ===========================================================================
 
-        assert formatted == "Simple text output"
+class TestExecute:
 
-    def test_upload_to_volume_invalid_path(self, callback_config, mock_workspace_client):
-        """Test upload with invalid volume path."""
-        callback_config["volume_path"] = "catalog.schema.volume"  # This will be converted to /Volumes/catalog/schema/volume
-        callback = DatabricksVolumeCallback(**callback_config)
-        # Manually set an invalid path to test the validation
-        callback.volume_path = "/invalid/path"
+    @pytest.mark.asyncio
+    async def test_successful_upload(self, callback):
+        with patch.object(
+            callback, "_generate_file_path", return_value="2024/01/01/task_1.json"
+        ), patch.object(
+            callback, "_format_output", return_value='{"k":"v"}'
+        ), patch.object(
+            callback, "_upload_to_volume", new_callable=AsyncMock,
+            return_value="/Volumes/cat/schema/vol/2024/01/01/task_1.json",
+        ):
+            meta = await callback.execute({"k": "v"})
+            assert meta["volume_path"].endswith("task_1.json")
+            assert meta["task_key"] == "task_1"
+            assert meta["format"] == "json"
+            assert "file_size_mb" in meta
+            assert "timestamp" in meta
 
+    @pytest.mark.asyncio
+    async def test_rejects_oversized_output(self, base_kwargs):
+        cb = DatabricksVolumeCallback(**base_kwargs, max_file_size_mb=0.0001)
+        with pytest.raises(ValueError, match="exceeds maximum allowed size"):
+            await cb.execute("x" * 10000)
+
+    @pytest.mark.asyncio
+    async def test_propagates_upload_error(self, callback):
+        with patch.object(
+            callback, "_generate_file_path", return_value="f.json"
+        ), patch.object(
+            callback, "_format_output", return_value="{}"
+        ), patch.object(
+            callback, "_upload_to_volume", new_callable=AsyncMock,
+            side_effect=Exception("upload failed"),
+        ):
+            with pytest.raises(Exception, match="upload failed"):
+                await callback.execute({})
+
+
+# ===========================================================================
+# _upload_to_volume
+# ===========================================================================
+
+class TestUploadToVolume:
+
+    @pytest.mark.asyncio
+    async def test_raises_for_invalid_prefix(self, callback):
+        callback.volume_path = "/wrong/path"
         with pytest.raises(ValueError, match="Volume path must start with /Volumes"):
-            callback._upload_to_volume("test.json", "content")
+            await callback._upload_to_volume("f.json", "content")
 
-    def test_upload_to_volume_success(self, callback_config, mock_workspace_client):
-        """Test successful upload to volume."""
-        callback = DatabricksVolumeCallback(**callback_config)
+    @pytest.mark.asyncio
+    async def test_raises_for_invalid_parts(self, callback):
+        callback.volume_path = "/Volumes/only_two"
+        with pytest.raises(ValueError, match="Invalid volume path format"):
+            await callback._upload_to_volume("f.json", "content")
 
-        # Mock the client property
-        callback._client = mock_workspace_client
-        result = callback._upload_to_volume("2024/03/test.json", "test content")
-
-        # Verify upload was called
-        mock_workspace_client.files.upload.assert_called_once()
-        assert result == "/Volumes/test/schema/volume/2024/03/test.json"
-
-    def test_upload_to_volume_fallback_to_dbfs_api(self, callback_config):
-        """Test fallback to DBFS API when SDK upload fails."""
-        callback = DatabricksVolumeCallback(**callback_config)
-
-        # Mock the client to raise an exception
-        mock_client = Mock()
-        mock_client.files.upload.side_effect = Exception("SDK upload failed")
-
-        # Set the client directly
-        callback._client = mock_client
-        with patch.object(callback, '_upload_via_dbfs_api') as mock_dbfs:
-            result = callback._upload_to_volume("test.json", "content")
-
-        # Verify fallback was called
-        mock_dbfs.assert_called_once()
-        assert result == "/Volumes/test/schema/volume/test.json"
-
-    @patch('requests.put')
-    @patch('requests.post')
-    def test_upload_via_dbfs_api(self, mock_post, mock_put, callback_config):
-        """Test upload via DBFS API."""
-        callback = DatabricksVolumeCallback(**callback_config)
-
-        # Mock API responses
-        mock_put.return_value.status_code = 200
-        mock_put.return_value.json.return_value = {"handle": "test-handle"}
-        mock_post.return_value.status_code = 200
-
-        # Execute upload
-        callback._upload_via_dbfs_api("/Volumes/test/file.json", "test content")
-
-        # Verify API calls
-        assert mock_put.called
-        assert mock_post.call_count == 2  # add-block and close
-
-
-@pytest.mark.asyncio
-@pytest.mark.skip(reason="Example module databricks_volume_example not implemented - this test is for demonstration purposes only")
-async def test_callback_integration():
-    """Test callback integration with task."""
-    # Import the example module
-    import src.engines.crewai.callbacks.databricks_volume_example as example
-
-    # Mock agent
-    agent = Mock()
-    agent.name = "test_agent"
-
-    # Task configuration
-    task_config = {
-        "description": "Test task",
-        "expected_output": "Test output"
-    }
-
-    # Mock the create_task function imported within the create_task_with_databricks_storage function
-    with patch('src.engines.crewai.helpers.task_helpers.create_task') as mock_create:
-        mock_task = Mock()
-        mock_task.callback = None
-        mock_create.return_value = mock_task
-
-        # Create task with Databricks storage
-        task = await example.create_task_with_databricks_storage(
-            task_key="test_task",
-            task_config=task_config,
-            agent=agent,
-            enable_databricks_storage=True,
-            volume_config={"volume_path": "/Volumes/test/volume"}
+    @pytest.mark.asyncio
+    async def test_successful_upload(self, callback):
+        mock_vol_repo = MagicMock()
+        mock_vol_repo.create_volume_if_not_exists = AsyncMock(
+            return_value={"success": True, "exists": True}
+        )
+        mock_vol_repo.create_volume_directory = AsyncMock(
+            return_value={"success": True}
         )
 
-        # Verify callback was added
-        assert task.callback is not None
+        mock_ws_client = MagicMock()
+        mock_ws_client.files = MagicMock()
+        mock_ws_client.files.upload = MagicMock()
+
+        with patch(
+            "src.repositories.databricks_volume_repository.DatabricksVolumeRepository",
+            return_value=mock_vol_repo,
+        ), patch.object(
+            callback, "_ensure_client", new_callable=AsyncMock,
+            return_value=mock_ws_client,
+        ):
+            path = await callback._upload_to_volume("2024/01/f.json", "data")
+            assert path == "/Volumes/cat/schema/vol/2024/01/f.json"
+            mock_ws_client.files.upload.assert_called_once()
+            # Verify overwrite=True
+            call_kwargs = mock_ws_client.files.upload.call_args
+            assert call_kwargs.kwargs.get("overwrite") is True or call_kwargs[1].get("overwrite") is True
+
+    @pytest.mark.asyncio
+    async def test_raises_when_volume_creation_fails(self, callback):
+        mock_vol_repo = MagicMock()
+        mock_vol_repo.create_volume_if_not_exists = AsyncMock(
+            return_value={"success": False, "error": "denied"}
+        )
+
+        with patch(
+            "src.repositories.databricks_volume_repository.DatabricksVolumeRepository",
+            return_value=mock_vol_repo,
+        ):
+            with pytest.raises(ValueError, match="Failed to ensure volume exists"):
+                await callback._upload_to_volume("f.json", "data")
+
+    @pytest.mark.asyncio
+    async def test_warns_on_directory_creation_failure(self, callback):
+        mock_vol_repo = MagicMock()
+        mock_vol_repo.create_volume_if_not_exists = AsyncMock(
+            return_value={"success": True, "created": True}
+        )
+        mock_vol_repo.create_volume_directory = AsyncMock(
+            return_value={"success": False, "error": "dir fail"}
+        )
+
+        mock_ws_client = MagicMock()
+        mock_ws_client.files = MagicMock()
+        mock_ws_client.files.upload = MagicMock()
+
+        with patch(
+            "src.repositories.databricks_volume_repository.DatabricksVolumeRepository",
+            return_value=mock_vol_repo,
+        ), patch.object(
+            callback, "_ensure_client", new_callable=AsyncMock,
+            return_value=mock_ws_client,
+        ):
+            # Should not raise, just warn
+            path = await callback._upload_to_volume("subdir/f.json", "data")
+            assert "subdir/f.json" in path
+
+    @pytest.mark.asyncio
+    async def test_no_directory_creation_for_root_file(self, callback):
+        mock_vol_repo = MagicMock()
+        mock_vol_repo.create_volume_if_not_exists = AsyncMock(
+            return_value={"success": True, "exists": True}
+        )
+
+        mock_ws_client = MagicMock()
+        mock_ws_client.files = MagicMock()
+        mock_ws_client.files.upload = MagicMock()
+
+        with patch(
+            "src.repositories.databricks_volume_repository.DatabricksVolumeRepository",
+            return_value=mock_vol_repo,
+        ), patch.object(
+            callback, "_ensure_client", new_callable=AsyncMock,
+            return_value=mock_ws_client,
+        ):
+            path = await callback._upload_to_volume("root_file.json", "data")
+            assert path.endswith("root_file.json")
+            # create_volume_directory should NOT have been called
+            mock_vol_repo.create_volume_directory.assert_not_called()

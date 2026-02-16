@@ -142,9 +142,9 @@ async def get_databricks_workspace_host():
     """
     try:
         from src.services.databricks_service import DatabricksService
-        from src.db.session import async_session_factory
+        from src.db.session import request_scoped_session
 
-        async with async_session_factory() as session:
+        async with request_scoped_session() as session:
             service = DatabricksService(session)
             config = await service.get_databricks_config()
             

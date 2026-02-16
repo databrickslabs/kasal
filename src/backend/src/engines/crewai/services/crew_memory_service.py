@@ -53,9 +53,9 @@ class CrewMemoryService:
         logger.info("=" * 80)
         try:
             from src.services.memory_backend_service import MemoryBackendService
-            from src.db.session import async_session_factory
+            from src.db.session import request_scoped_session
 
-            async with async_session_factory() as session:
+            async with request_scoped_session() as session:
                 service = MemoryBackendService(session)
                 group_id = self.config.get('group_id')
                 logger.info(f"[fetch_memory_backend_config] Fetching config for group_id: {group_id}")
@@ -299,7 +299,7 @@ class CrewMemoryService:
         """
         try:
             from src.services.execution_trace_service import ExecutionTraceService
-            from src.db.session import async_session_factory
+            from src.db.session import request_scoped_session
             from datetime import datetime, timezone
 
             # Get job_id from config
@@ -378,9 +378,10 @@ class CrewMemoryService:
                 trace_data["group_id"] = group_id
 
             # Create the trace
-            async with async_session_factory() as session:
+            async with request_scoped_session() as session:
                 trace_service = ExecutionTraceService(session)
                 await trace_service.create_trace(trace_data)
+                await session.commit()
                 logger.info(f"Emitted memory backend validation error trace for job {job_id}")
 
         except Exception as trace_error:

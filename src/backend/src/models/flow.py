@@ -15,7 +15,7 @@ class Flow(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String, nullable=False)
-    crew_id = Column(UUID(as_uuid=True), ForeignKey("crews.id"), nullable=True)
+    crew_id = Column(UUID(as_uuid=True), ForeignKey("crews.id", ondelete="CASCADE"), nullable=True)
     nodes = Column(JSON, default=list)
     edges = Column(JSON, default=list)
     flow_config = Column(JSON, default=dict)

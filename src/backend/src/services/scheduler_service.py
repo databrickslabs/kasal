@@ -4,11 +4,11 @@ import uuid
 from typing import List, Dict, Any, Optional, Set
 from datetime import datetime, timezone
 
-from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
 
+from src.core.exceptions import KasalError, NotFoundError, BadRequestError
 from src.repositories.schedule_repository import ScheduleRepository
 from src.repositories.execution_history_repository import ExecutionHistoryRepository
 from src.schemas.schedule import ScheduleCreate, ScheduleCreateFromExecution, ScheduleUpdate, ScheduleResponse, ScheduleListResponse, ToggleResponse
@@ -81,17 +81,11 @@ class SchedulerService:
             return ScheduleResponse.model_validate(schedule)
         except ValueError as e:
             logger.error(f"Invalid cron expression: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid cron expression: {str(e)}"
-            )
+            raise BadRequestError(detail=f"Invalid cron expression: {str(e)}")
         except Exception as e:
             logger.error(f"Failed to create schedule: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to create schedule: {str(e)}"
-            )
-    
+            raise KasalError(detail=f"Failed to create schedule: {str(e)}")
+
     async def create_schedule_from_execution(self, schedule_data: ScheduleCreateFromExecution, group_context: GroupContext = None) -> ScheduleResponse:
         """
         Create a new schedule based on an existing execution.
@@ -111,10 +105,7 @@ class SchedulerService:
             # Get the execution history to extract the configuration
             execution = await self.execution_history_repository.find_by_id(schedule_data.execution_id)
             if not execution:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Execution with ID {schedule_data.execution_id} not found"
-                )
+                raise NotFoundError(detail=f"Execution with ID {schedule_data.execution_id} not found")
 
             # Parse the inputs from execution
             inputs = execution.inputs if execution.inputs else {}
@@ -146,10 +137,7 @@ class SchedulerService:
                 flow_id = inputs.get("flow_id") or getattr(execution, 'flow_id', None)
 
                 if not flow_id and not (nodes and edges):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Execution {schedule_data.execution_id} is a flow execution but does not contain flow_id or nodes/edges configuration"
-                    )
+                    raise BadRequestError(detail=f"Execution {schedule_data.execution_id} is a flow execution but does not contain flow_id or nodes/edges configuration")
 
                 schedule_dict["flow_id"] = flow_id
                 schedule_dict["nodes"] = nodes
@@ -166,10 +154,7 @@ class SchedulerService:
                 tasks_yaml = inputs.get("tasks_yaml", {})
 
                 if not agents_yaml or not tasks_yaml:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Execution {schedule_data.execution_id} does not contain valid agents_yaml or tasks_yaml configuration"
-                    )
+                    raise BadRequestError(detail=f"Execution {schedule_data.execution_id} does not contain valid agents_yaml or tasks_yaml configuration")
 
                 # Extract model from first agent's llm configuration if not in inputs
                 if not model and agents_yaml:
@@ -196,20 +181,14 @@ class SchedulerService:
             schedule = await self.repository.create(schedule_dict)
 
             return ScheduleResponse.model_validate(schedule)
-        except HTTPException:
+        except KasalError:
             raise
         except ValueError as e:
             logger.error(f"Invalid cron expression: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid cron expression: {str(e)}"
-            )
+            raise BadRequestError(detail=f"Invalid cron expression: {str(e)}")
         except Exception as e:
             logger.error(f"Failed to create schedule from execution: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to create schedule from execution: {str(e)}"
-            )
+            raise KasalError(detail=f"Failed to create schedule from execution: {str(e)}")
     
     async def get_all_schedules(self, group_context: GroupContext = None) -> ScheduleListResponse:
         """
@@ -250,12 +229,9 @@ class SchedulerService:
         """
         schedule = await self.repository.find_by_id(schedule_id)
         if not schedule:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Schedule with ID {schedule_id} not found"
-            )
+            raise NotFoundError(detail=f"Schedule with ID {schedule_id} not found")
         return ScheduleResponse.model_validate(schedule)
-    
+
     async def get_schedule_by_id_with_group_check(self, schedule_id: int, group_context: GroupContext = None) -> ScheduleResponse:
         """
         Get a schedule by ID with group isolation.
@@ -272,21 +248,15 @@ class SchedulerService:
         """
         schedule = await self.repository.find_by_id(schedule_id)
         if not schedule:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Schedule with ID {schedule_id} not found"
-            )
-        
+            raise NotFoundError(detail=f"Schedule with ID {schedule_id} not found")
+
         # Check group access
         if group_context and group_context.primary_group_id:
             if schedule.group_id != group_context.primary_group_id:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Schedule with ID {schedule_id} not found"
-                )
-        
+                raise NotFoundError(detail=f"Schedule with ID {schedule_id} not found")
+
         return ScheduleResponse.model_validate(schedule)
-    
+
     async def update_schedule(self, schedule_id: int, schedule_data: ScheduleUpdate) -> ScheduleResponse:
         """
         Update a schedule.
@@ -305,27 +275,18 @@ class SchedulerService:
             # Update schedule
             schedule = await self.repository.update(schedule_id, schedule_data.model_dump())
             if not schedule:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Schedule with ID {schedule_id} not found"
-                )
-            
+                raise NotFoundError(detail=f"Schedule with ID {schedule_id} not found")
+
             return ScheduleResponse.model_validate(schedule)
-        except HTTPException:
+        except KasalError:
             raise
         except ValueError as e:
             logger.error(f"Invalid cron expression: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid cron expression: {str(e)}"
-            )
+            raise BadRequestError(detail=f"Invalid cron expression: {str(e)}")
         except Exception as e:
             logger.error(f"Failed to update schedule: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to update schedule: {str(e)}"
-            )
-    
+            raise KasalError(detail=f"Failed to update schedule: {str(e)}")
+
     async def update_schedule_with_group_check(self, schedule_id: int, schedule_data: ScheduleUpdate, group_context: GroupContext = None) -> ScheduleResponse:
         """
         Update a schedule with group isolation.
@@ -345,36 +306,24 @@ class SchedulerService:
             # First check if schedule exists and belongs to group
             schedule = await self.repository.find_by_id(schedule_id)
             if not schedule:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Schedule with ID {schedule_id} not found"
-                )
-            
+                raise NotFoundError(detail=f"Schedule with ID {schedule_id} not found")
+
             # Check group access
             if group_context and group_context.primary_group_id:
                 if schedule.group_id != group_context.primary_group_id:
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"Schedule with ID {schedule_id} not found"
-                    )
-            
+                    raise NotFoundError(detail=f"Schedule with ID {schedule_id} not found")
+
             # Update schedule
             schedule = await self.repository.update(schedule_id, schedule_data.model_dump())
             return ScheduleResponse.model_validate(schedule)
-        except HTTPException:
+        except KasalError:
             raise
         except ValueError as e:
             logger.error(f"Invalid cron expression: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid cron expression: {str(e)}"
-            )
+            raise BadRequestError(detail=f"Invalid cron expression: {str(e)}")
         except Exception as e:
             logger.error(f"Failed to update schedule: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to update schedule: {str(e)}"
-            )
+            raise KasalError(detail=f"Failed to update schedule: {str(e)}")
     
     async def delete_schedule(self, schedule_id: int) -> Dict[str, str]:
         """
@@ -393,21 +342,15 @@ class SchedulerService:
             # Delete schedule
             deleted = await self.repository.delete(schedule_id)
             if not deleted:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Schedule with ID {schedule_id} not found"
-                )
-            
+                raise NotFoundError(detail=f"Schedule with ID {schedule_id} not found")
+
             return {"message": "Schedule deleted successfully"}
-        except HTTPException:
+        except KasalError:
             raise
         except Exception as e:
             logger.error(f"Failed to delete schedule: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to delete schedule: {str(e)}"
-            )
-    
+            raise KasalError(detail=f"Failed to delete schedule: {str(e)}")
+
     async def delete_schedule_with_group_check(self, schedule_id: int, group_context: GroupContext = None) -> Dict[str, str]:
         """
         Delete a schedule with group isolation.
@@ -426,30 +369,21 @@ class SchedulerService:
             # First check if schedule exists and belongs to group
             schedule = await self.repository.find_by_id(schedule_id)
             if not schedule:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Schedule with ID {schedule_id} not found"
-                )
-            
+                raise NotFoundError(detail=f"Schedule with ID {schedule_id} not found")
+
             # Check group access
             if group_context and group_context.primary_group_id:
                 if schedule.group_id != group_context.primary_group_id:
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"Schedule with ID {schedule_id} not found"
-                    )
-            
+                    raise NotFoundError(detail=f"Schedule with ID {schedule_id} not found")
+
             # Delete schedule
             deleted = await self.repository.delete(schedule_id)
             return {"message": "Schedule deleted successfully"}
-        except HTTPException:
+        except KasalError:
             raise
         except Exception as e:
             logger.error(f"Failed to delete schedule: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to delete schedule: {str(e)}"
-            )
+            raise KasalError(detail=f"Failed to delete schedule: {str(e)}")
     
     async def toggle_schedule(self, schedule_id: int) -> ToggleResponse:
         """
@@ -468,21 +402,15 @@ class SchedulerService:
             # Toggle schedule
             schedule = await self.repository.toggle_active(schedule_id)
             if not schedule:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Schedule with ID {schedule_id} not found"
-                )
-            
+                raise NotFoundError(detail=f"Schedule with ID {schedule_id} not found")
+
             return ToggleResponse.model_validate(schedule)
-        except HTTPException:
+        except KasalError:
             raise
         except Exception as e:
             logger.error(f"Failed to toggle schedule: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to toggle schedule: {str(e)}"
-            )
-    
+            raise KasalError(detail=f"Failed to toggle schedule: {str(e)}")
+
     async def toggle_schedule_with_group_check(self, schedule_id: int, group_context: GroupContext = None) -> ToggleResponse:
         """
         Toggle a schedule's active state with group isolation.
@@ -501,30 +429,21 @@ class SchedulerService:
             # First check if schedule exists and belongs to group
             schedule = await self.repository.find_by_id(schedule_id)
             if not schedule:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Schedule with ID {schedule_id} not found"
-                )
-            
+                raise NotFoundError(detail=f"Schedule with ID {schedule_id} not found")
+
             # Check group access
             if group_context and group_context.primary_group_id:
                 if schedule.group_id != group_context.primary_group_id:
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"Schedule with ID {schedule_id} not found"
-                    )
-            
+                    raise NotFoundError(detail=f"Schedule with ID {schedule_id} not found")
+
             # Toggle schedule
             schedule = await self.repository.toggle_active(schedule_id)
             return ToggleResponse.model_validate(schedule)
-        except HTTPException:
+        except KasalError:
             raise
         except Exception as e:
             logger.error(f"Failed to toggle schedule: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to toggle schedule: {str(e)}"
-            )
+            raise KasalError(detail=f"Failed to toggle schedule: {str(e)}")
     
     async def run_schedule_job(self, schedule_id: int, config: CrewConfig, execution_time: datetime) -> None:
         """
@@ -661,6 +580,7 @@ class SchedulerService:
                 # Update schedule after execution
                 repo = ScheduleRepository(session)
                 await repo.update_after_execution(schedule_id, execution_time)
+                await session.commit()
 
                 logger_manager.scheduler.info(
                     f"Successfully ran {execution_type} schedule {schedule_id}."
@@ -673,6 +593,7 @@ class SchedulerService:
                 async with async_session_factory() as error_session:
                     repo = ScheduleRepository(error_session)
                     await repo.update_after_execution(schedule_id, execution_time)
+                    await error_session.commit()
             except Exception as update_error:
                 logger_manager.scheduler.error(f"Error updating schedule {schedule_id} after job failure: {update_error}")
     
@@ -1038,11 +959,8 @@ class SchedulerService:
         # Get existing schedule
         existing_schedule = await self.repository.find_by_id(job_id)
         if not existing_schedule:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Job with ID {job_id} not found"
-            )
-        
+            raise NotFoundError(detail=f"Job with ID {job_id} not found")
+
         # Prepare update data
         update_data = {}
         if job_update.name is not None:
@@ -1051,7 +969,7 @@ class SchedulerService:
             update_data["cron_expression"] = job_update.schedule
         if job_update.enabled is not None:
             update_data["is_active"] = job_update.enabled
-            
+
         # Update job_data if provided
         if job_update.job_data is not None:
             if "agents" in job_update.job_data:
@@ -1064,10 +982,10 @@ class SchedulerService:
                 update_data["planning"] = job_update.job_data["planning"]
             if "model" in job_update.job_data:
                 update_data["model"] = job_update.job_data["model"]
-        
+
         # Update schedule
         updated_schedule = await self.repository.update(job_id, update_data)
-        
+
         # Convert to job response
         return SchedulerJobResponse(
             id=updated_schedule.id,
@@ -1087,7 +1005,7 @@ class SchedulerService:
             last_run_at=updated_schedule.last_run_at,
             next_run_at=updated_schedule.next_run_at
         )
-    
+
     async def update_job_with_group_check(self, job_id: int, job_update: SchedulerJobUpdate, group_context: GroupContext = None) -> SchedulerJobResponse:
         """
         Update a scheduler job with group isolation.
@@ -1106,18 +1024,12 @@ class SchedulerService:
         # Get existing schedule
         existing_schedule = await self.repository.find_by_id(job_id)
         if not existing_schedule:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Job with ID {job_id} not found"
-            )
-        
+            raise NotFoundError(detail=f"Job with ID {job_id} not found")
+
         # Check group access
         if group_context and group_context.primary_group_id:
             if existing_schedule.group_id != group_context.primary_group_id:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Job with ID {job_id} not found"
-                )
+                raise NotFoundError(detail=f"Job with ID {job_id} not found")
         
         # Prepare update data
         update_data = {}

@@ -92,7 +92,7 @@ class TestPrepareAndRunCrew:
             mock_engine._init_task.done.return_value = True
             mock_prepare.return_value = mock_engine
 
-            with patch('src.services.crewai_execution_service.async_session_factory') as mock_factory:
+            with patch('src.services.crewai_execution_service.request_scoped_session') as mock_factory:
                 mock_session = MagicMock()
                 mock_context = MagicMock()
                 mock_context.__aenter__ = AsyncMock(return_value=mock_session)
@@ -135,7 +135,7 @@ class TestPrepareAndRunCrew:
             mock_engine._init_task.done.return_value = True
             mock_prepare.return_value = mock_engine
 
-            with patch('src.services.crewai_execution_service.async_session_factory') as mock_factory:
+            with patch('src.services.crewai_execution_service.request_scoped_session') as mock_factory:
                 mock_session = MagicMock()
                 mock_context = MagicMock()
                 mock_context.__aenter__ = AsyncMock(return_value=mock_session)
@@ -593,7 +593,7 @@ class TestRunFlowExecution:
         mock_flow.edges = []
         mock_flow.flow_config = {}
 
-        with patch('src.services.crewai_execution_service.async_session_factory') as mock_factory:
+        with patch('src.services.crewai_execution_service.request_scoped_session') as mock_factory:
             mock_session = MagicMock()
             mock_context = MagicMock()
             mock_context.__aenter__ = AsyncMock(return_value=mock_session)
@@ -629,7 +629,7 @@ class TestRunFlowExecution:
         nodes = [{'id': 'node-1', 'type': 'crew'}]
         edges = []
 
-        with patch('src.services.crewai_execution_service.async_session_factory') as mock_factory:
+        with patch('src.services.crewai_execution_service.request_scoped_session') as mock_factory:
             mock_session = MagicMock()
             mock_context = MagicMock()
             mock_context.__aenter__ = AsyncMock(return_value=mock_session)
@@ -660,7 +660,7 @@ class TestRunFlowExecution:
         flow_id = str(uuid.uuid4())
         job_id = 'flow-job-3'
 
-        with patch('src.services.crewai_execution_service.async_session_factory') as mock_factory:
+        with patch('src.services.crewai_execution_service.request_scoped_session') as mock_factory:
             mock_session = MagicMock()
             mock_context = MagicMock()
             mock_context.__aenter__ = AsyncMock(return_value=mock_session)
@@ -696,7 +696,7 @@ class TestRunFlowExecution:
         job_id = 'flow-job-resume'
         nodes = [{'id': 'node-1'}]
 
-        with patch('src.services.crewai_execution_service.async_session_factory') as mock_factory:
+        with patch('src.services.crewai_execution_service.request_scoped_session') as mock_factory:
             mock_session = MagicMock()
             mock_context = MagicMock()
             mock_context.__aenter__ = AsyncMock(return_value=mock_session)
@@ -740,7 +740,7 @@ class TestGetFlowExecution:
         """Test getting flow execution details."""
         execution_id = 1
 
-        with patch('src.services.crewai_execution_service.async_session_factory') as mock_factory:
+        with patch('src.services.crewai_execution_service.request_scoped_session') as mock_factory:
             mock_session = MagicMock()
             mock_context = MagicMock()
             mock_context.__aenter__ = AsyncMock(return_value=mock_session)
@@ -764,7 +764,7 @@ class TestGetFlowExecution:
         """Test error handling in get_flow_execution."""
         execution_id = 1
 
-        with patch('src.services.crewai_execution_service.async_session_factory') as mock_factory:
+        with patch('src.services.crewai_execution_service.request_scoped_session') as mock_factory:
             mock_session = MagicMock()
             mock_context = MagicMock()
             mock_context.__aenter__ = AsyncMock(return_value=mock_session)
@@ -795,7 +795,7 @@ class TestGetFlowExecutionsByFlow:
         """Test getting flow executions by flow."""
         flow_id = str(uuid.uuid4())
 
-        with patch('src.services.crewai_execution_service.async_session_factory') as mock_factory:
+        with patch('src.services.crewai_execution_service.request_scoped_session') as mock_factory:
             mock_session = MagicMock()
             mock_context = MagicMock()
             mock_context.__aenter__ = AsyncMock(return_value=mock_session)

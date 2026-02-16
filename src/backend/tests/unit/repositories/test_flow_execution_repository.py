@@ -209,7 +209,7 @@ class TestFlowExecutionRepositoryCreate:
                 assert result == created_execution
                 mock_flow_execution_class.assert_called_once()
                 mock_async_session.add.assert_called_once_with(created_execution)
-                mock_async_session.commit.assert_called_once()
+                mock_async_session.flush.assert_called_once()
                 mock_async_session.refresh.assert_called_once_with(created_execution)
                 
                 # Verify datetime was set
@@ -241,9 +241,9 @@ class TestFlowExecutionRepositoryCreate:
     async def test_create_database_error(self, flow_execution_repository, mock_async_session, sample_flow_execution_create):
         """Test create with database error."""
         with patch('src.repositories.flow_execution_repository.FlowExecution'):
-            mock_async_session.commit.side_effect = Exception("Commit failed")
+            mock_async_session.flush.side_effect = Exception("Flush failed")
             
-            with pytest.raises(Exception, match="Commit failed"):
+            with pytest.raises(Exception, match="Flush failed"):
                 await flow_execution_repository.create(sample_flow_execution_create)
 
 
@@ -370,7 +370,7 @@ class TestFlowExecutionRepositoryUpdate:
             
             assert result == updated_execution
             mock_async_session.execute.assert_called_once()
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
             
             # Verify update statement construction
             call_args = mock_async_session.execute.call_args[0][0]
@@ -403,7 +403,7 @@ class TestFlowExecutionRepositoryUpdate:
         
         assert result is None
         mock_async_session.execute.assert_called_once()
-        mock_async_session.commit.assert_called_once()
+        mock_async_session.flush.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_update_partial_data(self, flow_execution_repository, mock_async_session):
@@ -451,16 +451,16 @@ class TestFlowNodeExecutionRepositoryCreate:
                 assert result == created_node_execution
                 mock_node_execution_class.assert_called_once()
                 mock_async_session.add.assert_called_once_with(created_node_execution)
-                mock_async_session.commit.assert_called_once()
+                mock_async_session.flush.assert_called_once()
                 mock_async_session.refresh.assert_called_once_with(created_node_execution)
     
     @pytest.mark.asyncio
     async def test_create_database_error(self, flow_node_execution_repository, mock_async_session, sample_flow_node_execution_create):
         """Test create with database error."""
         with patch('src.repositories.flow_execution_repository.FlowNodeExecution'):
-            mock_async_session.commit.side_effect = Exception("Commit failed")
+            mock_async_session.flush.side_effect = Exception("Flush failed")
             
-            with pytest.raises(Exception, match="Commit failed"):
+            with pytest.raises(Exception, match="Flush failed"):
                 await flow_node_execution_repository.create(sample_flow_node_execution_create)
 
 
@@ -536,7 +536,7 @@ class TestFlowNodeExecutionRepositoryUpdate:
             
             assert result == updated_node_execution
             mock_async_session.execute.assert_called_once()
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_update_terminal_status_sets_completed_at(self, flow_node_execution_repository, mock_async_session):
@@ -564,7 +564,7 @@ class TestFlowNodeExecutionRepositoryUpdate:
         
         assert result is None
         mock_async_session.execute.assert_called_once()
-        mock_async_session.commit.assert_called_once()
+        mock_async_session.flush.assert_called_once()
 
 
 class TestSyncFlowExecutionRepository:
@@ -943,7 +943,7 @@ class TestFlowExecutionRepositoryEdgeCases:
             
             assert result == updated_execution
             mock_async_session.execute.assert_called_once()
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_node_execution_update_with_error_field(self, flow_node_execution_repository, mock_async_session):
@@ -961,4 +961,4 @@ class TestFlowExecutionRepositoryEdgeCases:
             
             assert result == updated_node_execution
             mock_async_session.execute.assert_called_once()
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()

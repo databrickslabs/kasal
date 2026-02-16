@@ -113,7 +113,7 @@ class TestMemoryBackendBaseService:
         assert result.id == "backend-123"
         mock_uow.memory_backend_repository.get_by_name.assert_called_once_with(group_id, config.name)
         mock_uow.memory_backend_repository.create.assert_called_once()
-        service.session.commit.assert_called_once()
+        service.session.commit.assert_not_called()  # get_db() auto-commits
     
     @pytest.mark.asyncio
     async def test_create_memory_backend_duplicate_name(self, service, mock_uow, databricks_config):
@@ -254,7 +254,7 @@ class TestMemoryBackendBaseService:
         assert sample_backend.name == "Updated Backend"
         assert sample_backend.description == "Updated Description"
         assert sample_backend.enable_short_term == False
-        service.session.commit.assert_called_once()
+        service.session.commit.assert_not_called()  # get_db() auto-commits
     
     @pytest.mark.asyncio
     async def test_update_backend_type_clears_databricks_config(self, service, mock_uow, sample_backend):
@@ -290,7 +290,7 @@ class TestMemoryBackendBaseService:
         # Assert
         assert result is True
         mock_uow.memory_backend_repository.delete.assert_called_once_with(backend_id)
-        service.session.commit.assert_called_once()
+        service.session.commit.assert_not_called()  # get_db() auto-commits
     
     @pytest.mark.asyncio
     async def test_delete_last_backend_fails(self, service, mock_uow, sample_backend):
@@ -338,7 +338,7 @@ class TestMemoryBackendBaseService:
         # Assert
         assert result is True
         mock_uow.memory_backend_repository.set_default.assert_called_once_with(group_id, backend_id)
-        service.session.commit.assert_called_once()
+        service.session.commit.assert_not_called()  # get_db() auto-commits
     
     @pytest.mark.asyncio
     async def test_get_memory_stats(self, service, mock_uow, sample_backend):
@@ -377,7 +377,7 @@ class TestMemoryBackendBaseService:
         assert "Deleted 3 configurations" in result["message"]
         mock_uow.memory_backend_repository.delete_all_by_group_id.assert_called_once_with(group_id)
         mock_uow.memory_backend_repository.create.assert_called_once()
-        service.session.commit.assert_called_once()
+        service.session.commit.assert_not_called()  # get_db() auto-commits
     
     @pytest.mark.asyncio
     async def test_delete_disabled_configurations(self, service, mock_uow):
@@ -404,4 +404,4 @@ class TestMemoryBackendBaseService:
         # Assert
         assert result == 1
         mock_uow.memory_backend_repository.delete.assert_called_once_with("disabled-123")
-        service.session.commit.assert_called_once()
+        service.session.commit.assert_not_called()  # get_db() auto-commits

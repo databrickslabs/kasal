@@ -21,9 +21,17 @@ export interface Trace {
   created_at: string;
   group_id?: string;
   group_email?: string;
-  // Frontend-only fields from extra_data
+  // Frontend-only fields from extra_data (legacy, use trace_metadata instead)
   task_id?: string;
   extra_data?: Record<string, unknown>;
+  // OTel span hierarchy fields
+  span_id?: string;
+  trace_id?: string;
+  parent_span_id?: string;
+  // OTel-native fields
+  span_name?: string;
+  status_code?: string;
+  duration_ms?: number;
 }
 
 export interface TaskDetails {

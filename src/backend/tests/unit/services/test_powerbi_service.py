@@ -10,7 +10,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 
-from fastapi import HTTPException
+from src.core.exceptions import KasalError, NotFoundError, BadRequestError, UnauthorizedError
 
 # Ensure azure.identity is mockable even when not installed
 if 'azure' not in sys.modules:
@@ -29,7 +29,7 @@ from src.schemas.powerbi_config import DAXQueryRequest, DAXQueryResponse
 class MockPowerBIConfig:
     def __init__(self, id=1, tenant_id="test-tenant", client_id="test-client",
                  semantic_model_id="test-model", workspace_id="test-workspace",
-                 is_enabled=True, is_active=True,
+                 is_enabled=True, is_active=True, auth_method=None,
                  created_at=None, updated_at=None):
         self.id = id
         self.tenant_id = tenant_id
@@ -38,6 +38,7 @@ class MockPowerBIConfig:
         self.workspace_id = workspace_id
         self.is_enabled = is_enabled
         self.is_active = is_active
+        self.auth_method = auth_method
         self.created_at = created_at or datetime.utcnow()
         self.updated_at = updated_at or datetime.utcnow()
 
@@ -140,7 +141,7 @@ class TestPowerBIServiceExecuteDAXQuery:
         """Test DAX query execution when no config exists."""
         powerbi_service.repository.get_active_config.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await powerbi_service.execute_dax_query(valid_dax_query_request)
 
         assert exc_info.value.status_code == 404
@@ -152,7 +153,7 @@ class TestPowerBIServiceExecuteDAXQuery:
         mock_powerbi_config.is_enabled = False
         powerbi_service.repository.get_active_config.return_value = mock_powerbi_config
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(BadRequestError) as exc_info:
             await powerbi_service.execute_dax_query(valid_dax_query_request)
 
         assert exc_info.value.status_code == 400
@@ -166,7 +167,7 @@ class TestPowerBIServiceExecuteDAXQuery:
 
         query_request = DAXQueryRequest(dax_query="EVALUATE 'Sales'")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(BadRequestError) as exc_info:
             await powerbi_service.execute_dax_query(query_request)
 
         assert exc_info.value.status_code == 400
@@ -228,7 +229,7 @@ class TestPowerBIServiceTokenGeneration:
     async def test_generate_token_missing_credentials(self, powerbi_service, mock_powerbi_config):
         """Test token generation with missing credentials."""
         with patch.dict('os.environ', {}, clear=True):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(UnauthorizedError) as exc_info:
                 await powerbi_service._generate_token(mock_powerbi_config)
 
             assert exc_info.value.status_code == 401
@@ -244,10 +245,159 @@ class TestPowerBIServiceTokenGeneration:
                 'POWERBI_USERNAME': 'test@example.com',
                 'POWERBI_PASSWORD': 'test-password'
             }):
-                with pytest.raises(HTTPException) as exc_info:
+                with pytest.raises(UnauthorizedError) as exc_info:
                     await powerbi_service._generate_token(mock_powerbi_config)
 
                 assert exc_info.value.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_generate_token_device_code_branch(self, powerbi_service):
+        """Test _generate_token routes to device_code method when auth_method is device_code."""
+        config = MockPowerBIConfig(auth_method="device_code")
+
+        with patch.object(
+            powerbi_service, '_generate_token_device_code', return_value="device-code-token"
+        ) as mock_dc:
+            token = await powerbi_service._generate_token(config)
+
+            assert token == "device-code-token"
+            mock_dc.assert_called_once_with("test-tenant", "test-client")
+
+
+class TestPowerBIServiceDeviceCodeAuth:
+    """Test cases for _generate_token_device_code method."""
+
+    @pytest.mark.asyncio
+    async def test_generate_token_device_code_success(self, powerbi_service):
+        """Test successful device code authentication flow."""
+        with patch('azure.identity.DeviceCodeCredential') as MockDeviceCred:
+            mock_credential = MagicMock()
+            mock_token = MagicMock()
+            mock_token.token = "device-code-token-abc"
+            mock_credential.get_token.return_value = mock_token
+            MockDeviceCred.return_value = mock_credential
+
+            token = await powerbi_service._generate_token_device_code(
+                tenant_id="test-tenant",
+                client_id="test-client"
+            )
+
+            assert token == "device-code-token-abc"
+            MockDeviceCred.assert_called_once_with(
+                client_id="test-client",
+                tenant_id="test-tenant",
+            )
+            mock_credential.get_token.assert_called_once_with(
+                "https://analysis.windows.net/powerbi/api/.default"
+            )
+
+    @pytest.mark.asyncio
+    async def test_generate_token_device_code_failure(self, powerbi_service):
+        """Test device code authentication failure re-raises the exception."""
+        with patch('azure.identity.DeviceCodeCredential') as MockDeviceCred:
+            MockDeviceCred.side_effect = Exception("Device code auth failed")
+
+            with pytest.raises(Exception, match="Device code auth failed"):
+                await powerbi_service._generate_token_device_code(
+                    tenant_id="test-tenant",
+                    client_id="test-client"
+                )
+
+    @pytest.mark.asyncio
+    async def test_generate_token_device_code_get_token_failure(self, powerbi_service):
+        """Test device code flow when get_token raises an exception."""
+        with patch('azure.identity.DeviceCodeCredential') as MockDeviceCred:
+            mock_credential = MagicMock()
+            mock_credential.get_token.side_effect = Exception("Token request failed")
+            MockDeviceCred.return_value = mock_credential
+
+            with pytest.raises(Exception, match="Token request failed"):
+                await powerbi_service._generate_token_device_code(
+                    tenant_id="test-tenant",
+                    client_id="test-client"
+                )
+
+
+class TestPowerBIServiceUsernamePasswordSecretsService:
+    """Test cases for _generate_token_username_password with secrets service."""
+
+    @pytest.mark.asyncio
+    async def test_generate_token_username_password_from_secrets_service(self, powerbi_service):
+        """Test token generation retrieves credentials from secrets service."""
+        mock_secrets = AsyncMock()
+        mock_secrets.get_api_key = AsyncMock(side_effect=lambda key: {
+            "POWERBI_USERNAME": "secret-user@example.com",
+            "POWERBI_PASSWORD": "secret-password",
+            "POWERBI_CLIENT_SECRET": "secret-client-secret",
+        }.get(key))
+
+        # Set _secrets_service to a truthy value so the code enters the if block
+        powerbi_service._secrets_service = mock_secrets
+
+        config = MockPowerBIConfig()
+
+        with patch('azure.identity.UsernamePasswordCredential') as MockCred:
+            mock_credential = MagicMock()
+            mock_token = MagicMock()
+            mock_token.token = "secrets-service-token"
+            mock_credential.get_token.return_value = mock_token
+            MockCred.return_value = mock_credential
+
+            token = await powerbi_service._generate_token_username_password(
+                tenant_id="test-tenant",
+                client_id="test-client",
+                config=config
+            )
+
+            assert token == "secrets-service-token"
+            # Verify secrets service was queried
+            assert mock_secrets.get_api_key.call_count == 3
+            # Verify credential was created with secrets service values
+            MockCred.assert_called_once_with(
+                client_id="test-client",
+                username="secret-user@example.com",
+                password="secret-password",
+                tenant_id="test-tenant",
+                client_secret="secret-client-secret",
+            )
+
+    @pytest.mark.asyncio
+    async def test_generate_token_username_password_secrets_service_exception(self, powerbi_service):
+        """Test token generation falls back to env vars when secrets service raises."""
+        mock_secrets = AsyncMock()
+        mock_secrets.get_api_key = AsyncMock(side_effect=Exception("Secrets service unavailable"))
+
+        # Set _secrets_service to a truthy value so the code enters the if block
+        powerbi_service._secrets_service = mock_secrets
+
+        config = MockPowerBIConfig()
+
+        with patch('azure.identity.UsernamePasswordCredential') as MockCred:
+            mock_credential = MagicMock()
+            mock_token = MagicMock()
+            mock_token.token = "env-fallback-token"
+            mock_credential.get_token.return_value = mock_token
+            MockCred.return_value = mock_credential
+
+            with patch.dict('os.environ', {
+                'POWERBI_USERNAME': 'env-user@example.com',
+                'POWERBI_PASSWORD': 'env-password'
+            }):
+                token = await powerbi_service._generate_token_username_password(
+                    tenant_id="test-tenant",
+                    client_id="test-client",
+                    config=config
+                )
+
+                assert token == "env-fallback-token"
+                # Verify the credential was created with env var values after secrets failure
+                MockCred.assert_called_once_with(
+                    client_id="test-client",
+                    username="env-user@example.com",
+                    password="env-password",
+                    tenant_id="test-tenant",
+                    client_secret=None,
+                )
 
 
 class TestPowerBIServiceExecuteQuery:
@@ -256,11 +406,15 @@ class TestPowerBIServiceExecuteQuery:
     @pytest.mark.asyncio
     async def test_execute_query_success(self, powerbi_service, mock_power_bi_api_response):
         """Test successful Power BI API query execution."""
-        with patch('src.services.powerbi_service.requests.post') as mock_post:
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = mock_power_bi_api_response
-            mock_post.return_value = mock_response
+        mock_client = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = mock_power_bi_api_response
+        mock_client.post.return_value = mock_response
+
+        with patch('src.services.powerbi_service.httpx.AsyncClient') as MockAsyncClient:
+            MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
             result = await powerbi_service._execute_query(
                 token="test-token",
@@ -269,18 +423,22 @@ class TestPowerBIServiceExecuteQuery:
             )
 
             assert result == mock_power_bi_api_response["results"]
-            mock_post.assert_called_once()
+            mock_client.post.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_execute_query_api_error(self, powerbi_service):
         """Test Power BI API error handling."""
-        with patch('src.services.powerbi_service.requests.post') as mock_post:
-            mock_response = MagicMock()
-            mock_response.status_code = 400
-            mock_response.text = "Bad Request"
-            mock_post.return_value = mock_response
+        mock_client = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 400
+        mock_response.text = "Bad Request"
+        mock_client.post.return_value = mock_response
 
-            with pytest.raises(HTTPException) as exc_info:
+        with patch('src.services.powerbi_service.httpx.AsyncClient') as MockAsyncClient:
+            MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            with pytest.raises(KasalError) as exc_info:
                 await powerbi_service._execute_query(
                     token="test-token",
                     semantic_model_id="test-model",
@@ -292,11 +450,16 @@ class TestPowerBIServiceExecuteQuery:
     @pytest.mark.asyncio
     async def test_execute_query_timeout(self, powerbi_service):
         """Test Power BI API timeout handling."""
-        with patch('src.services.powerbi_service.requests.post') as mock_post:
-            import requests
-            mock_post.side_effect = requests.exceptions.Timeout("Request timeout")
+        import httpx
 
-            with pytest.raises(HTTPException) as exc_info:
+        mock_client = AsyncMock()
+        mock_client.post.side_effect = httpx.TimeoutException("Request timeout")
+
+        with patch('src.services.powerbi_service.httpx.AsyncClient') as MockAsyncClient:
+            MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            with pytest.raises(KasalError) as exc_info:
                 await powerbi_service._execute_query(
                     token="test-token",
                     semantic_model_id="test-model",

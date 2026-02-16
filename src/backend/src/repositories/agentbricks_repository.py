@@ -12,9 +12,7 @@ import asyncio
 import logging
 import time
 from typing import Optional, Dict, Any, List, Tuple
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+import httpx
 
 from src.schemas.agentbricks import (
     AgentBricksEndpoint,
@@ -48,20 +46,13 @@ class AgentBricksRepository:
         """
         self.auth_config = auth_config if auth_config is not None else None
         self._host = None
-        self._session = None
-        self._setup_session()
+        self._client: Optional[httpx.AsyncClient] = None
+        self._setup_client()
 
-    def _setup_session(self):
-        """Setup requests session with retry logic."""
-        self._session = requests.Session()
-        retry_strategy = Retry(
-            total=3,
-            backoff_factor=1,
-            status_forcelist=[429, 500, 502, 503, 504],
-        )
-        adapter = HTTPAdapter(max_retries=retry_strategy)
-        self._session.mount("https://", adapter)
-        self._session.mount("http://", adapter)
+    def _setup_client(self):
+        """Setup async HTTP client with retry logic."""
+        transport = httpx.AsyncHTTPTransport(retries=3)
+        self._client = httpx.AsyncClient(transport=transport, timeout=30.0)
 
     async def _get_host(self) -> str:
         """
@@ -220,7 +211,7 @@ class AgentBricksRepository:
             url = await self._make_url("/api/2.0/serving-endpoints")
             logger.info(f"Fetching serving endpoints from: {url}")
 
-            response = self._session.get(url, headers=headers, timeout=30)
+            response = await self._client.get(url, headers=headers)
 
             if response.status_code == 403:
                 logger.error(f"Permission denied: {response.text}")
@@ -368,7 +359,7 @@ class AgentBricksRepository:
 
             # Send request
             logger.debug(f"AgentBricks request payload: {payload}")
-            response = self._session.post(url, headers=headers, json=payload, timeout=120)
+            response = await self._client.post(url, headers=headers, json=payload, timeout=120)
 
             if response.status_code != 200:
                 error_msg = f"HTTP {response.status_code}: {response.text}"
@@ -483,7 +474,15 @@ class AgentBricksRepository:
                 error=str(e)
             )
 
+    async def aclose(self):
+        """Close the async HTTP client."""
+        if self._client:
+            await self._client.aclose()
+
     def __del__(self):
-        """Cleanup session on deletion."""
-        if self._session:
-            self._session.close()
+        """Cleanup client on deletion."""
+        if self._client and not self._client.is_closed:
+            try:
+                asyncio.get_running_loop().create_task(self._client.aclose())
+            except RuntimeError:
+                pass

@@ -256,9 +256,18 @@ def run_flow_in_process(
         _os_crewai_env.environ["CREWAI_CLOUD_TRACING_ENABLED"] = "false"
         _os_crewai_env.environ["CREWAI_VERBOSE"] = "false"
 
+        # CRITICAL: Enable OTel SDK in subprocess.
+        # main.py sets OTEL_SDK_DISABLED=true to suppress CrewAI's default
+        # telemetry in the parent. Subprocess needs OTel enabled for both
+        # Kasal's own trace pipeline AND (optionally) MLflow tracing.
+        _os_crewai_env.environ["OTEL_SDK_DISABLED"] = "false"
+
         # Configure subprocess logging
         async_logger = configure_subprocess_logging(execution_id, process_type="flow")
 
+        async_logger.info(
+            "[FLOW_SUBPROCESS] Set OTEL_SDK_DISABLED=false (enabling OTel trace pipeline)"
+        )
         async_logger.info(f"[FLOW_SUBPROCESS] Starting flow execution in subprocess (PID: {os.getpid()})")
 
         # Extract group_id from group_context for UserContext
@@ -331,11 +340,173 @@ def run_flow_in_process(
                 task_listener.setup_listeners(crewai_event_bus)
                 async_logger.info(f"[FLOW_SUBPROCESS] TaskCompletionEventListener registered for {execution_id}")
 
+                # Initialize OTel tracing (always-on, sole trace source)
+                otel_provider = None
+                try:
+                    from src.services.otel_tracing import (
+                        create_kasal_tracer_provider,
+                    )
+                    from opentelemetry import trace as _otel_trace
+                    from opentelemetry.sdk.trace.export import (
+                        SimpleSpanProcessor,
+                    )
+
+                    otel_provider = create_kasal_tracer_provider(
+                        job_id=execution_id,
+                        service_name="kasal-flow-engine",
+                    )
+
+                    # DB exporter + SSE processor
+                    from src.services.otel_tracing.db_exporter import (
+                        KasalDBSpanExporter,
+                    )
+                    from src.services.otel_tracing.sse_processor import (
+                        KasalSSESpanProcessor,
+                    )
+                    otel_provider.add_span_processor(
+                        SimpleSpanProcessor(
+                            KasalDBSpanExporter(
+                                execution_id, group_context
+                            )
+                        )
+                    )
+                    otel_provider.add_span_processor(
+                        KasalSSESpanProcessor(execution_id)
+                    )
+
+                    _otel_trace.set_tracer_provider(otel_provider)
+
+                    # Instrument CrewAI if instrumentor available
+                    try:
+                        from openinference.instrumentation.crewai import (
+                            CrewAIInstrumentor,
+                        )
+                        CrewAIInstrumentor().instrument(
+                            tracer_provider=otel_provider
+                        )
+                        async_logger.info(
+                            f"[FLOW_SUBPROCESS] OTel tracing enabled with CrewAI instrumentation for {execution_id}"
+                        )
+                    except ImportError:
+                        async_logger.info(
+                            f"[FLOW_SUBPROCESS] OTel tracing enabled (no CrewAI instrumentor) for {execution_id}"
+                        )
+
+                    # Register OTel Event Bridge on the CrewAI event bus
+                    try:
+                        from src.services.otel_tracing.event_bridge import (
+                            OTelEventBridge,
+                        )
+
+                        _bridge_tracer = otel_provider.get_tracer(
+                            "kasal-event-bridge"
+                        )
+                        _otel_bridge = OTelEventBridge(
+                            _bridge_tracer, execution_id, group_context
+                        )
+                        _otel_bridge.register(crewai_event_bus)
+                        async_logger.info(
+                            f"[FLOW_SUBPROCESS] OTel Event Bridge registered on event bus for {execution_id}"
+                        )
+                    except Exception as bridge_err:
+                        async_logger.warning(
+                            f"[FLOW_SUBPROCESS] OTel Event Bridge registration failed (non-fatal): {bridge_err}"
+                        )
+
+                    # Route OTel tracing loggers to flow.log for visibility
+                    for otel_logger_name in [
+                        "src.services.otel_tracing",
+                        "src.services.otel_tracing.db_exporter",
+                        "src.services.otel_tracing.otel_config",
+                        "src.services.otel_tracing.sse_processor",
+                        "src.services.otel_tracing.mlflow_exporter",
+                    ]:
+                        _otel_logger = logging.getLogger(otel_logger_name)
+                        _otel_logger.handlers = []
+                        for h in async_logger.handlers:
+                            _otel_logger.addHandler(h)
+                        _otel_logger.setLevel(logging.INFO)
+                        _otel_logger.propagate = False
+
+                except ImportError:
+                    async_logger.debug(
+                        "[FLOW_SUBPROCESS] OTel packages not available, skipping"
+                    )
+                except Exception as otel_err:
+                    async_logger.warning(
+                        f"[FLOW_SUBPROCESS] OTel initialization error (non-fatal): {otel_err}"
+                    )
+
                 async_logger.info(f"[FLOW_SUBPROCESS] Successfully initialized tracing and event listeners")
 
             except Exception as trace_init_error:
                 async_logger.error(f"[FLOW_SUBPROCESS] Failed to initialize TraceManager: {trace_init_error}", exc_info=True)
                 # Continue execution even if trace initialization fails
+
+            # Configure MLflow in subprocess (same as crew executor)
+            mlflow_result = None
+            try:
+                from src.db.session import async_session_factory
+                from src.services.databricks_service import DatabricksService
+
+                db_config = None
+                async with async_session_factory() as _db_session:
+                    databricks_service = DatabricksService(
+                        _db_session, group_id=group_id
+                    )
+                    db_config = await databricks_service.get_databricks_config()
+
+                if db_config:
+                    from src.services.otel_tracing.mlflow_setup import (
+                        configure_mlflow_in_subprocess,
+                    )
+
+                    mlflow_result = await configure_mlflow_in_subprocess(
+                        db_config=db_config,
+                        job_id=execution_id,
+                        execution_id=execution_id,
+                        group_id=group_id,
+                        group_context=group_context,
+                        async_logger=async_logger,
+                    )
+                    if mlflow_result.tracing_ready:
+                        async_logger.info(
+                            f"[FLOW_SUBPROCESS] MLflow tracing ready "
+                            f"(experiment={mlflow_result.experiment_name})"
+                        )
+                    elif mlflow_result.error:
+                        async_logger.warning(
+                            f"[FLOW_SUBPROCESS] MLflow setup warning: {mlflow_result.error}"
+                        )
+            except Exception as mlflow_init_err:
+                async_logger.warning(
+                    f"[FLOW_SUBPROCESS] MLflow initialization failed (non-fatal): {mlflow_init_err}"
+                )
+
+            # Add MLflow exporter to OTel pipeline (after mlflow_result is available)
+            if otel_provider and mlflow_result and mlflow_result.tracing_ready:
+                try:
+                    from opentelemetry.sdk.trace.export import (
+                        SimpleSpanProcessor,
+                    )
+                    from src.services.otel_tracing.mlflow_exporter import (
+                        KasalMLflowSpanExporter,
+                    )
+                    otel_provider.add_span_processor(
+                        SimpleSpanProcessor(
+                            KasalMLflowSpanExporter(
+                                execution_id, mlflow_result, group_context
+                            )
+                        )
+                    )
+                    mlflow_result.otel_exporter_active = True
+                    async_logger.info(
+                        f"[FLOW_SUBPROCESS] MLflow span exporter added to OTel pipeline for {execution_id}"
+                    )
+                except Exception as mlflow_otel_err:
+                    async_logger.warning(
+                        f"[FLOW_SUBPROCESS] Could not add MLflow exporter to OTel pipeline: {mlflow_otel_err}"
+                    )
 
             # Now run the actual flow execution
             try:
@@ -343,11 +514,9 @@ def run_flow_in_process(
                 from src.engines.crewai.flow.flow_runner_service import FlowRunnerService
 
                 async with safe_async_session() as session:
-                    # Create flow runner service with session
                     flow_runner = FlowRunnerService(session)
 
                     # Extract flow parameters from config
-                    # flow_id may be at top level or nested in inputs (from execution_service)
                     flow_id = flow_config.get('flow_id') or flow_config.get('inputs', {}).get('flow_id')
                     run_name = flow_config.get('run_name')
 
@@ -360,20 +529,71 @@ def run_flow_in_process(
                         async_logger.info(f"  flow_config['inputs'] keys: {list(flow_config.get('inputs', {}).keys())}")
                         async_logger.info(f"  flow_config['inputs']['flow_id']: {flow_config.get('inputs', {}).get('flow_id')}")
 
-                    # Call run_flow() which now uses await (not create_task) to ensure subprocess
-                    # waits for completion before capturing stdout in finally block
-                    result = await flow_runner.run_flow(
+                    # Execute the flow (wrapped in MLflow root trace if tracing is ready)
+                    from src.services.otel_tracing.mlflow_setup import (
+                        execute_with_mlflow_trace_async,
+                        post_execution_mlflow_cleanup,
+                    )
+
+                    result = await execute_with_mlflow_trace_async(
+                        kickoff_coro_fn=flow_runner.run_flow,
+                        mlflow_result=mlflow_result,
+                        flow_config=flow_config,
+                        inputs=flow_config.get("inputs"),
+                        async_logger=async_logger,
                         flow_id=flow_id,
                         job_id=execution_id,
                         run_name=run_name,
-                        config=flow_config
+                        config=flow_config,
                     )
 
                     async_logger.info(f"[FLOW_SUBPROCESS] Flow execution completed successfully")
+
+                    # CRITICAL: Flush the CrewAI event bus to ensure all event handlers
+                    # (agent execution started/completed, tool usage, etc.) complete their
+                    # work before we return.
+                    try:
+                        from crewai.events import crewai_event_bus as _event_bus
+                        async_logger.info("[FLOW_SUBPROCESS] Flushing CrewAI event bus to ensure all trace handlers complete...")
+                        flushed = _event_bus.flush(timeout=30.0)
+                        if flushed:
+                            async_logger.info("[FLOW_SUBPROCESS] Event bus flush completed - all handlers finished")
+                        else:
+                            async_logger.warning("[FLOW_SUBPROCESS] Event bus flush timed out - some handlers may not have completed")
+                    except Exception as flush_err:
+                        async_logger.warning(f"[FLOW_SUBPROCESS] Event bus flush error (non-fatal): {flush_err}")
+
+                    # Post-execution: MLflow flush → trace capture → stop writers
+                    await post_execution_mlflow_cleanup(
+                        mlflow_result=mlflow_result,
+                        execution_id=execution_id,
+                        group_id=group_id,
+                        async_logger=async_logger,
+                    )
+
                     return result
 
             except Exception as e:
                 async_logger.error(f"[FLOW_SUBPROCESS] Flow execution error: {e}", exc_info=True)
+                # Flush event bus even on error to capture partial traces
+                try:
+                    from crewai.events import crewai_event_bus as _event_bus
+                    _event_bus.flush(timeout=10.0)
+                except Exception:
+                    pass
+                # Flush MLflow on error too
+                try:
+                    from src.services.otel_tracing.mlflow_setup import (
+                        post_execution_mlflow_cleanup,
+                    )
+                    await post_execution_mlflow_cleanup(
+                        mlflow_result=mlflow_result,
+                        execution_id=execution_id,
+                        group_id=group_id,
+                        async_logger=async_logger,
+                    )
+                except Exception:
+                    pass
                 raise
 
         # Create new event loop for subprocess
@@ -492,6 +712,24 @@ def run_flow_in_process(
         finally:
             # Cleanup async resources before closing loop
             try:
+                # CRITICAL: Final flush of event bus to ensure all trace handlers complete
+                # This is essential for llm_request/llm_response traces that are written
+                # asynchronously by the event bus's thread pool
+                try:
+                    from crewai.events import crewai_event_bus as _cleanup_event_bus
+                    async_logger.info("[FLOW_SUBPROCESS] Final event bus flush before cleanup...")
+                    _cleanup_event_bus.flush(timeout=15.0)
+                    async_logger.info("[FLOW_SUBPROCESS] Event bus flush completed")
+                except Exception as eb_flush_err:
+                    async_logger.warning(f"[FLOW_SUBPROCESS] Event bus flush error: {eb_flush_err}")
+
+                # Shutdown OTel TracerProvider to flush remaining spans
+                try:
+                    from src.services.otel_tracing import shutdown_provider
+                    shutdown_provider()
+                except Exception as otel_shutdown_err:
+                    async_logger.debug(f"[FLOW_SUBPROCESS] OTel shutdown: {otel_shutdown_err}")
+
                 # CRITICAL: Stop TraceManager writer tasks first - these keep the subprocess alive
                 try:
                     from src.engines.crewai.trace_management import TraceManager

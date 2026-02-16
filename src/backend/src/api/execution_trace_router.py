@@ -55,7 +55,7 @@ ExecutionTraceServiceDep = Annotated[
 async def get_all_traces(
     service: ExecutionTraceServiceDep,
     group_context: GroupContextDep,
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(100, ge=1, le=15000),
     offset: int = Query(0, ge=0),
 ):
     """
@@ -63,7 +63,7 @@ async def get_all_traces(
 
     Args:
         group_context: Group context from headers for authorization
-        limit: Maximum number of traces to return (1-500)
+        limit: Maximum number of traces to return (1-15000)
         offset: Pagination offset
 
     Returns:
@@ -77,7 +77,7 @@ async def get_traces_by_run_id(
     run_id: int,
     service: ExecutionTraceServiceDep,
     group_context: GroupContextDep,
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(100, ge=1, le=15000),
     offset: int = Query(0, ge=0),
 ):
     """
@@ -87,7 +87,7 @@ async def get_traces_by_run_id(
         run_id: Database ID of the execution
         service: Execution trace service dependency
         group_context: Group context from headers for authorization
-        limit: Maximum number of traces to return (1-500)
+        limit: Maximum number of traces to return (1-15000)
         offset: Pagination offset
 
     Returns:
@@ -106,7 +106,7 @@ async def get_traces_by_job_id(
     job_id: str,
     service: ExecutionTraceServiceDep,
     group_context: GroupContextDep,
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(100, ge=1, le=15000),
     offset: int = Query(0, ge=0),
 ):
     """
@@ -116,7 +116,7 @@ async def get_traces_by_job_id(
         job_id: String ID of the execution (job_id)
         service: Execution trace service dependency
         group_context: Group context from headers for authorization
-        limit: Maximum number of traces to return (1-500)
+        limit: Maximum number of traces to return (1-15000)
         offset: Pagination offset
 
     Returns:
@@ -148,7 +148,7 @@ async def get_current_crew_node_states(
     """
     # Get all traces for the job with authorization check
     result = await service.get_traces_by_job_id(
-        group_context=group_context, job_id=job_id, limit=500, offset=0
+        group_context=group_context, job_id=job_id, limit=15000, offset=0
     )
     if not result:
         raise NotFoundError(f"Execution with job_id {job_id} not found or access denied")
@@ -223,6 +223,16 @@ async def get_current_crew_node_states(
                     crew_states[crew_name]["failed_at"] = (
                         trace.created_at.isoformat() if trace.created_at else None
                     )
+                    # Extract the error message so the UI can display it
+                    _error = None
+                    if trace.trace_metadata and isinstance(trace.trace_metadata, dict):
+                        _error = trace.trace_metadata.get("error")
+                    if not _error and trace.output and isinstance(trace.output, dict):
+                        _extra = trace.output.get("extra_data")
+                        if isinstance(_extra, dict):
+                            _error = _extra.get("error")
+                    if _error:
+                        crew_states[crew_name]["error"] = str(_error)[:500]
 
     return crew_states
 
@@ -245,7 +255,7 @@ async def get_current_task_states(
     """
     # Get all traces for the job with authorization check
     result = await service.get_traces_by_job_id(
-        group_context=group_context, job_id=job_id, limit=500, offset=0
+        group_context=group_context, job_id=job_id, limit=15000, offset=0
     )
     if not result:
         raise NotFoundError(f"Execution with job_id {job_id} not found or access denied")
