@@ -12,8 +12,6 @@ import os
 import traceback
 from typing import Dict, Any, List, Optional
 
-import litellm
-
 from src.utils.prompt_utils import robust_json_parser
 from src.services.template_service import TemplateService
 
@@ -247,21 +245,16 @@ class AgentGenerationService:
         # Add the user's prompt
         messages.append({"role": "user", "content": prompt_text})
         
-        # Configure litellm using the LLMManager
-        model_params = await LLMManager.configure_litellm(model)
-        
-        # Generate completion with litellm directly
+        # Generate completion via unified LLMManager.completion()
         try:
-            # Use LLMManager wrapper (handles GPT-5/deep research models)
-            response = await LLMManager.acompletion(
-                **model_params,
+            content = await LLMManager.completion(
                 messages=messages,
+                model=model,
                 temperature=0.2 if fast_planning else 0.7,
-                max_tokens=1200 if fast_planning else 4000
+                max_tokens=1200 if fast_planning else 4000,
             )
-            
-            # Extract and parse content
-            content = response["choices"][0]["message"]["content"]
+
+            # Parse content
             setup = robust_json_parser(content)
             
             # Validate and process the configuration

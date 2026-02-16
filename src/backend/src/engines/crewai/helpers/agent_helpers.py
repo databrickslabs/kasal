@@ -69,8 +69,6 @@ async def create_agent(
     try:
         # Import LLMManager and handlers
         from src.core.llm_manager import LLMManager
-        from src.core.llm_handlers.gpt5_handler import GPT5Handler
-        from src.core.llm_handlers.gpt5_llm_wrapper import GPT5CompatibleLLM
         
         if 'llm' in agent_config:
             # Check if LLM is a string (model name) or a dictionary (LLM config)
@@ -146,20 +144,27 @@ async def create_agent(
                         llm_kwargs['model'] = f'databricks/{model_in_kwargs}'
                         logger.info(f"Ensured databricks/ prefix for model: {llm_kwargs['model']}")
 
-                    # Use GPT5Handler to transform parameters if needed
+                    # Handle model-specific LLM creation
                     model_name = llm_kwargs.get('model', '')
-                    if GPT5Handler.is_gpt5_model(model_name):
-                        llm_kwargs = GPT5Handler.transform_params(llm_kwargs)
-                        logger.info(f"Applied GPT-5 parameter transformations for model: {model_name}")
-                        # Use GPT5CompatibleLLM for GPT-5 models
-                        llm = GPT5CompatibleLLM(**llm_kwargs)
-                    elif model_name.startswith('databricks/') or 'databricks' in model_name.lower():
-                        # Use DatabricksRetryLLM for Databricks models to ensure timeout handling
+                    model_lower = model_name.lower()
+                    is_databricks = model_name.startswith('databricks/') or 'databricks' in model_lower
+                    is_gpt5 = 'gpt-5' in model_lower or 'gpt5' in model_lower
+
+                    # GPT-5 models: swap max_tokens → max_completion_tokens, drop unsupported params
+                    if is_gpt5:
+                        if 'max_tokens' in llm_kwargs:
+                            llm_kwargs['max_completion_tokens'] = llm_kwargs.pop('max_tokens')
+                        llm_kwargs['additional_drop_params'] = ['stop', 'temperature', 'presence_penalty', 'frequency_penalty', 'logit_bias']
+                        llm_kwargs['timeout'] = 300
+
+                    if is_databricks:
                         from src.core.llm_handlers.databricks_gpt_oss_handler import DatabricksRetryLLM
                         llm = DatabricksRetryLLM(**llm_kwargs)
-                        logger.info(f"Using DatabricksRetryLLM for Databricks model: {model_name} (timeout: {DatabricksRetryLLM.REQUEST_TIMEOUT}s)")
+                        logger.info(f"Using DatabricksRetryLLM for Databricks model: {model_name}{' (GPT-5 drop_params + 300s timeout)' if is_gpt5 else ''}")
+                    elif is_gpt5:
+                        llm = LLM(**llm_kwargs)
+                        logger.info(f"Created LLM for GPT-5 model: {model_name} (with additional_drop_params)")
                     else:
-                        # Create the standard LLM for non-Databricks models
                         llm = LLM(**llm_kwargs)
                     logger.info(f"Created LLM instance for agent {agent_key} with model {llm_kwargs.get('model')}")
                 else:
@@ -170,7 +175,7 @@ async def create_agent(
                     if not group_id_param:
                         raise ValueError("group_id is REQUIRED for LLM configuration")
                     default_llm = await LLMManager.configure_crewai_llm("gpt-4o", group_id_param)
-                    
+
                     # Extract and merge parameters
                     llm_kwargs = {}
                     # Copy relevant parameters from default_llm
@@ -179,7 +184,7 @@ async def create_agent(
                             value = getattr(default_llm, attr)
                             if value is not None:
                                 llm_kwargs[attr] = value
-                    
+
                     for key, value in llm_config.items():
                         if value is not None:
                             llm_kwargs[key] = value
@@ -190,20 +195,26 @@ async def create_agent(
                         llm_kwargs['model'] = f'databricks/{model_in_kwargs}'
                         logger.info(f"Ensured databricks/ prefix for default model: {llm_kwargs['model']}")
 
-                    # Use GPT5Handler to transform parameters if needed
+                    # Handle model-specific LLM creation
                     model_name = llm_kwargs.get('model', '')
-                    if GPT5Handler.is_gpt5_model(model_name):
-                        llm_kwargs = GPT5Handler.transform_params(llm_kwargs)
-                        logger.info(f"Applied GPT-5 parameter transformations for model: {model_name}")
-                        # Use GPT5CompatibleLLM for GPT-5 models
-                        llm = GPT5CompatibleLLM(**llm_kwargs)
-                    elif model_name.startswith('databricks/') or 'databricks' in model_name.lower():
-                        # Use DatabricksRetryLLM for Databricks models to ensure timeout handling
+                    model_lower = model_name.lower()
+                    is_databricks = model_name.startswith('databricks/') or 'databricks' in model_lower
+                    is_gpt5 = 'gpt-5' in model_lower or 'gpt5' in model_lower
+
+                    if is_gpt5:
+                        if 'max_tokens' in llm_kwargs:
+                            llm_kwargs['max_completion_tokens'] = llm_kwargs.pop('max_tokens')
+                        llm_kwargs['additional_drop_params'] = ['stop', 'temperature', 'presence_penalty', 'frequency_penalty', 'logit_bias']
+                        llm_kwargs['timeout'] = 300
+
+                    if is_databricks:
                         from src.core.llm_handlers.databricks_gpt_oss_handler import DatabricksRetryLLM
                         llm = DatabricksRetryLLM(**llm_kwargs)
-                        logger.info(f"Using DatabricksRetryLLM for Databricks model: {model_name} (timeout: {DatabricksRetryLLM.REQUEST_TIMEOUT}s)")
+                        logger.info(f"Using DatabricksRetryLLM for Databricks model: {model_name}{' (GPT-5 drop_params + 300s timeout)' if is_gpt5 else ''}")
+                    elif is_gpt5:
+                        llm = LLM(**llm_kwargs)
+                        logger.info(f"Created LLM for GPT-5 model: {model_name} (with additional_drop_params)")
                     else:
-                        # Create the standard LLM for non-Databricks models
                         llm = LLM(**llm_kwargs)
         else:
             # Use default model

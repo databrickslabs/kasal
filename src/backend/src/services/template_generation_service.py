@@ -11,8 +11,6 @@ import traceback
 
 from typing import Optional
 
-import litellm
-
 from src.services.template_service import TemplateService
 from src.schemas.template_generation import TemplateGenerationRequest, TemplateGenerationResponse
 from src.services.log_service import LLMLogService
@@ -126,22 +124,18 @@ class TemplateGenerationService:
                 {"role": "user", "content": user_prompt}
             ]
             
-            # Configure litellm using the LLMManager
-            model_params = await LLMManager.configure_litellm(model_config["name"])
-            
             try:
-                # Generate completion with LLMManager wrapper (handles GPT-5/deep research models)
-                response = await LLMManager.acompletion(
-                    **model_params,
+                # Generate completion via unified LLMManager.completion()
+                content = await LLMManager.completion(
                     messages=messages,
+                    model=model_config["name"],
                     temperature=0.7,
-                    max_tokens=4000
+                    max_tokens=4000,
                 )
-                
-                content = response["choices"][0]["message"]["content"]
+
                 logger.info(f"Generated templates successfully")
                 logger.debug(f"Generated templates: {content}")
-                
+
                 # Log the successful interaction
                 await self._log_llm_interaction(
                     endpoint='generate-templates',
@@ -152,7 +146,7 @@ class TemplateGenerationService:
             except Exception as e:
                 error_msg = f"Error generating completion: {str(e)}"
                 logger.error(error_msg)
-                
+
                 # Log the error interaction
                 await self._log_llm_interaction(
                     endpoint='generate-templates',
@@ -162,7 +156,7 @@ class TemplateGenerationService:
                     status='error',
                     error_message=error_msg
                 )
-                
+
                 raise ValueError(f"Failed to generate templates: {str(e)}")
             
             # Parse the response as JSON using robust parser

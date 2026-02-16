@@ -14,8 +14,6 @@ import uuid
 from typing import Dict, Any, List, Tuple, Optional
 
 
-import litellm
-
 from src.utils.prompt_utils import robust_json_parser
 from src.services.template_service import TemplateService
 from src.services.tool_service import ToolService
@@ -518,28 +516,21 @@ class CrewGenerationService:
             # Add the user's prompt
             messages.append({"role": "user", "content": request.prompt})
 
-            # Configure litellm using the LLMManager
-            model_params = await LLMManager.configure_litellm(model)
-            logger.info(f"CREATE CREW: Configured LiteLLM with model: {model}")
+            logger.info(f"CREATE CREW: Configured LLM with model: {model}")
 
-            # Generate completion with litellm
+            # Generate completion via unified LLMManager.completion()
             try:
                 logger.info("CREATE CREW: Calling LLM API...")
-                # Use consistent max_tokens for all models to ensure detailed task descriptions
-                _model_id = model_params.get("model", "")
                 _max_tokens = 4000
-                logger.info(f"CREATE CREW: Using max_tokens={_max_tokens} for model={_model_id}")
+                logger.info(f"CREATE CREW: Using max_tokens={_max_tokens} for model={model}")
 
-                # Use LLMManager wrapper (handles GPT-5/deep research models)
-                response = await LLMManager.acompletion(
-                    **model_params,
+                content = await LLMManager.completion(
                     messages=messages,
+                    model=model,
                     temperature=0.7,
-                    max_tokens=_max_tokens
+                    max_tokens=_max_tokens,
                 )
 
-                # Extract and parse the content
-                content = response["choices"][0]["message"]["content"]
                 logger.info(f"CREATE CREW: Extracted content from LLM response (length: {len(content)})")
 
                 # Log the LLM interaction

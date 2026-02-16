@@ -10,8 +10,6 @@ import os
 from typing import Optional
 import re
 import traceback
-import litellm
-
 from typing import Any
 
 from src.schemas.task_generation import TaskGenerationRequest, TaskGenerationResponse
@@ -193,19 +191,13 @@ class TaskGenerationService:
         messages.append({"role": "user", "content": request.text})
         
         try:
-            # Configure litellm using the LLMManager
-            model_params = await LLMManager.configure_litellm(model)
-            
-            # Generate completion with LLMManager wrapper (handles GPT-5/deep research models)
-            response = await LLMManager.acompletion(
-                **model_params,
+            # Generate completion via unified LLMManager.completion()
+            content = await LLMManager.completion(
                 messages=messages,
+                model=model,
                 temperature=0.2 if fast_planning else 0.7,
-                max_tokens=1200 if fast_planning else 4000
+                max_tokens=1200 if fast_planning else 4000,
             )
-            
-            # Extract content from response
-            content = response["choices"][0]["message"]["content"]
             
             if not content:
                 raise ValueError("Empty content received from LLM")

@@ -13,7 +13,6 @@ import logging
 
 from src.core.llm_handlers.databricks_gpt_oss_handler import (
     DatabricksGPTOSSHandler,
-    DatabricksGPTOSSLLM,
     DatabricksRetryLLM,
     apply_empty_content_fix,
     apply_tool_calls_fix,
@@ -153,33 +152,6 @@ class TestDatabricksGPTOSSHandler:
         result = DatabricksGPTOSSHandler.extract_text_from_response(12345)
         assert result == "12345"
 
-    def test_filter_unsupported_params(self):
-        """Test filtering of unsupported parameters."""
-        params = {
-            "model": "gpt-oss",
-            "temperature": 0.7,
-            "stop": "STOP",
-            "stop_sequences": ["seq1"],
-            "stop_words": ["word1"],
-            "max_tokens": 100,
-        }
-        filtered = DatabricksGPTOSSHandler.filter_unsupported_params(params)
-
-        assert "model" in filtered
-        assert "temperature" in filtered
-        assert "max_tokens" in filtered
-        assert "stop" not in filtered
-        assert "stop_sequences" not in filtered
-        assert "stop_words" not in filtered
-
-    def test_filter_unsupported_params_preserves_original(self):
-        """Test that filtering doesn't modify the original params."""
-        params = {"stop": "STOP", "model": "test"}
-        filtered = DatabricksGPTOSSHandler.filter_unsupported_params(params)
-
-        assert "stop" in params  # Original unchanged
-        assert "stop" not in filtered  # Filtered removed
-
     @patch(
         "src.core.llm_handlers.databricks_gpt_oss_handler.DatabricksGPTOSSHandler.extract_text_from_response"
     )
@@ -205,199 +177,6 @@ class TestDatabricksGPTOSSHandler:
             pytest.fail(f"apply_monkey_patch raised unexpected exception: {e}")
 
 
-class TestDatabricksGPTOSSLLM:
-    """Test suite for DatabricksGPTOSSLLM wrapper."""
-
-    @pytest.fixture(autouse=True)
-    def mock_llm_factory(self, monkeypatch):
-        """Bypass LLM.__new__ factory to avoid OPENAI_API_KEY requirement.
-
-        CrewAI's LLM.__new__ is a factory that routes to native provider classes
-        (e.g. OpenAICompletion), which requires API keys. We bypass it so that
-        DatabricksGPTOSSLLM instances are created directly for unit testing.
-        """
-        monkeypatch.setenv("OPENAI_API_KEY", "sk-test-dummy-key-for-unit-tests")
-
-        original_init = DatabricksGPTOSSLLM.__init__
-
-        def patched_new(cls, *args, **kwargs):
-            return object.__new__(cls)
-
-        def patched_init(self, **kwargs):
-            # Skip parent LLM.__init__ but run DatabricksGPTOSSLLM's own setup
-            self._original_model_name = kwargs.get("model", "")
-
-        with patch(
-            "src.core.llm_handlers.databricks_gpt_oss_handler.LLM.__new__", patched_new
-        ):
-            with patch(
-                "src.core.llm_handlers.databricks_gpt_oss_handler.LLM.__init__",
-                lambda self, **kwargs: None,
-            ):
-                yield
-
-    @patch("src.core.llm_handlers.databricks_gpt_oss_handler.LLM.__init__")
-    def test_initialization(self, mock_llm_init):
-        """Test DatabricksGPTOSSLLM initialization."""
-        mock_llm_init.return_value = None
-
-        llm = DatabricksGPTOSSLLM(model="gpt-oss-test")
-        assert llm._original_model_name == "gpt-oss-test"
-        mock_llm_init.assert_called_once()
-
-    @patch(
-        "src.core.llm_handlers.databricks_gpt_oss_handler.LLM._prepare_completion_params"
-    )
-    @patch(
-        "src.core.llm_handlers.databricks_gpt_oss_handler.DatabricksGPTOSSHandler.filter_unsupported_params"
-    )
-    def test_prepare_completion_params(self, mock_filter, mock_parent_prepare):
-        """Test parameter preparation with filtering."""
-        mock_parent_prepare.return_value = {
-            "model": "test",
-            "messages": [{"role": "user", "content": "test"}],
-            "stop": "STOP",
-        }
-        mock_filter.return_value = {
-            "model": "test",
-            "messages": [{"role": "user", "content": "test"}],
-        }
-
-        llm = DatabricksGPTOSSLLM(model="gpt-oss-test")
-        messages = [{"role": "user", "content": "test"}]
-
-        result = llm._prepare_completion_params(messages)
-
-        mock_parent_prepare.assert_called_once()
-        mock_filter.assert_called_once()
-        assert "stop" not in result
-
-    @patch("src.core.llm_handlers.databricks_gpt_oss_handler.LLM.call")
-    @patch(
-        "src.core.llm_handlers.databricks_gpt_oss_handler.DatabricksGPTOSSHandler.filter_unsupported_params"
-    )
-    def test_call_method(self, mock_filter, mock_parent_call):
-        """Test the call method with parameter filtering."""
-        mock_filter.return_value = {"model": "test"}
-        mock_parent_call.return_value = "Response text"
-
-        llm = DatabricksGPTOSSLLM(model="gpt-oss-test")
-        messages = [{"role": "user", "content": "test"}]
-
-        result = llm.call(messages, stop="STOP")
-
-        mock_filter.assert_called_once()
-        mock_parent_call.assert_called_once()
-        assert result == "Response text"
-
-    @patch("src.core.llm_handlers.databricks_gpt_oss_handler.LLM.call")
-    def test_call_handles_empty_response(self, mock_parent_call):
-        """Test handling of empty responses."""
-        mock_parent_call.return_value = ""
-
-        llm = DatabricksGPTOSSLLM(model="gpt-oss-test")
-        messages = [{"role": "user", "content": "test"}]
-
-        result = llm.call(messages)
-        assert result == ""
-
-    @patch("src.core.llm_handlers.databricks_gpt_oss_handler.LLM.call")
-    def test_call_propagates_exceptions(self, mock_parent_call):
-        """Test that exceptions are propagated correctly."""
-        mock_parent_call.side_effect = Exception("Test error")
-
-        llm = DatabricksGPTOSSLLM(model="gpt-oss-test")
-        messages = [{"role": "user", "content": "test"}]
-
-        with pytest.raises(Exception) as exc_info:
-            llm.call(messages)
-        assert str(exc_info.value) == "Test error"
-
-    @patch(
-        "src.core.llm_handlers.databricks_gpt_oss_handler.LLM._handle_non_streaming_response"
-    )
-    def test_handle_non_streaming_response_with_system_message(
-        self, mock_parent_handle
-    ):
-        """Test that system message is added when missing."""
-        mock_parent_handle.return_value = "Response"
-
-        llm = DatabricksGPTOSSLLM(model="gpt-oss-test")
-        params = {"model": "test", "messages": [{"role": "user", "content": "test"}]}
-
-        result = llm._handle_non_streaming_response(params)
-
-        # Check that system message was inserted
-        assert params["messages"][0]["role"] == "system"
-        assert "helpful AI assistant" in params["messages"][0]["content"]
-        assert result == "Response"
-
-    @patch(
-        "src.core.llm_handlers.databricks_gpt_oss_handler.LLM._handle_non_streaming_response"
-    )
-    def test_handle_non_streaming_response_preserves_existing_system_message(
-        self, mock_parent_handle
-    ):
-        """Test that existing system message is preserved."""
-        mock_parent_handle.return_value = "Response"
-
-        llm = DatabricksGPTOSSLLM(model="gpt-oss-test")
-        params = {
-            "model": "test",
-            "messages": [
-                {"role": "system", "content": "Existing system"},
-                {"role": "user", "content": "test"},
-            ],
-        }
-
-        result = llm._handle_non_streaming_response(params)
-
-        # Check that original system message is preserved
-        assert params["messages"][0]["role"] == "system"
-        assert params["messages"][0]["content"] == "Existing system"
-        assert result == "Response"
-
-    @patch(
-        "src.core.llm_handlers.databricks_gpt_oss_handler.LLM._handle_non_streaming_response"
-    )
-    def test_handle_non_streaming_response_handles_type_error(self, mock_parent_handle):
-        """Test handling of TypeError when calling parent method."""
-        # First call raises TypeError, second succeeds
-        mock_parent_handle.side_effect = [
-            TypeError("unexpected keyword argument"),
-            "Response",
-        ]
-
-        llm = DatabricksGPTOSSLLM(model="gpt-oss-test")
-        params = {"model": "test", "messages": []}
-
-        result = llm._handle_non_streaming_response(
-            params,
-            callbacks=None,
-            available_functions=None,
-            from_task=None,
-            from_agent=None,
-        )
-
-        assert result == "Response"
-        assert mock_parent_handle.call_count == 2
-
-    @patch(
-        "src.core.llm_handlers.databricks_gpt_oss_handler.LLM._handle_non_streaming_response"
-    )
-    def test_handle_non_streaming_response_returns_empty_on_none(
-        self, mock_parent_handle
-    ):
-        """Test that None response returns empty string."""
-        mock_parent_handle.return_value = None
-
-        llm = DatabricksGPTOSSLLM(model="gpt-oss-test")
-        params = {"model": "test", "messages": []}
-
-        result = llm._handle_non_streaming_response(params)
-        assert result == ""
-
-
 class TestSanitizeMessagesForDatabricks:
     """Test suite for DatabricksRetryLLM._sanitize_messages_for_databricks."""
 
@@ -420,8 +199,10 @@ class TestSanitizeMessagesForDatabricks:
             {"role": "assistant", "content": "Hi there!"},
         ]
         DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
-        assert len(msgs) == 3
+        # Conversation ends with assistant → continuation prompt appended
+        assert len(msgs) == 4
         assert msgs[2]["content"] == "Hi there!"
+        assert msgs[3]["role"] == "user"
 
     def test_fixes_assistant_content_none_with_tool_calls(self):
         msgs = [
@@ -433,9 +214,11 @@ class TestSanitizeMessagesForDatabricks:
             },
         ]
         DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
-        assert len(msgs) == 2
+        # Content fixed + continuation prompt appended (ends with assistant)
+        assert len(msgs) == 3
         assert msgs[1]["content"] == "Calling tools."
         assert msgs[1]["tool_calls"] == [{"id": "1", "function": {"name": "f"}}]
+        assert msgs[2]["role"] == "user"
 
     def test_fixes_assistant_empty_string_with_tool_calls(self):
         msgs = [

@@ -8,11 +8,9 @@ GPT-OSS models return content as a list with reasoning blocks and text blocks,
 rather than a simple string, which requires special handling for CrewAI integration.
 """
 
-import os
 import time as _time_mod
 from typing import Any, Dict, List, Optional, Union
 from crewai import LLM
-import json
 import litellm
 
 # Use centralized logger
@@ -204,29 +202,6 @@ class DatabricksGPTOSSHandler:
         return str(content) if content else ""
 
     @staticmethod
-    def filter_unsupported_params(params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Filter out parameters that GPT-OSS models don't support.
-
-        Args:
-            params: Dictionary of parameters
-
-        Returns:
-            Filtered dictionary with unsupported parameters removed
-        """
-        unsupported = ["stop", "stop_sequences", "stop_words"]
-        filtered = params.copy()
-
-        for param in unsupported:
-            if param in filtered:
-                logger.debug(
-                    f"Removing unsupported parameter '{param}' for GPT-OSS model"
-                )
-                del filtered[param]
-
-        return filtered
-
-    @staticmethod
     def apply_monkey_patch():
         """
         Apply monkey patch to litellm's Databricks transformation to handle
@@ -324,199 +299,6 @@ class DatabricksGPTOSSHandler:
             logger.error(f"Failed to apply GPT-OSS patch: {e}")
 
 
-class DatabricksGPTOSSLLM(LLM):
-    """
-    Custom LLM wrapper for Databricks GPT-OSS models that handles their unique
-    response format and filters unsupported parameters.
-    """
-
-    def __init__(self, **kwargs):
-        """Initialize the Databricks GPT-OSS LLM wrapper."""
-        super().__init__(**kwargs)
-        self._original_model_name = kwargs.get("model", "")
-        logger.info(
-            f"Initialized DatabricksGPTOSSLLM wrapper for model: {self._original_model_name}"
-        )
-        print(f"[GPT-OSS INIT] Created wrapper for model: {self._original_model_name}")
-
-    def _prepare_completion_params(self, messages, tools=None):
-        """Override to log what parameters are being prepared."""
-        logger.info(
-            f"[_prepare_completion_params] Preparing params for {len(messages)} messages"
-        )
-        print(
-            f"[GPT-OSS DEBUG] Preparing completion params for {len(messages)} messages"
-        )
-
-        # Call parent method
-        params = super()._prepare_completion_params(messages, tools)
-
-        logger.info(
-            f"[_prepare_completion_params] Prepared params: model={params.get('model')}, has_messages={bool(params.get('messages'))}"
-        )
-        print(f"[GPT-OSS DEBUG] Prepared params: model={params.get('model')}")
-
-        # Filter out unsupported parameters
-        filtered_params = DatabricksGPTOSSHandler.filter_unsupported_params(params)
-
-        return filtered_params
-
-    def call(
-        self,
-        messages,
-        tools=None,
-        callbacks=None,
-        available_functions=None,
-        from_task=None,
-        from_agent=None,
-        **kwargs,
-    ):
-        """
-        Override the call method to handle GPT-OSS specific requirements.
-
-        Note: Signature updated for CrewAI 1.9.x compatibility with response_model support.
-        """
-        logger.info(f"DatabricksGPTOSSLLM.call() invoked with {len(messages)} messages")
-
-        # Filter out unsupported parameters
-        kwargs = DatabricksGPTOSSHandler.filter_unsupported_params(kwargs)
-
-        # Call the parent class method
-        try:
-            logger.info("Calling parent LLM.call()...")
-            result = super().call(
-                messages,
-                tools=tools,
-                callbacks=callbacks,
-                available_functions=available_functions,
-                from_task=from_task,
-                from_agent=from_agent,
-                **kwargs,
-            )
-
-            # Log the response for debugging
-            logger.info(
-                f"Parent call returned, result type: {type(result)}, empty: {result is None or result == ''}"
-            )
-
-            if result is None or result == "":
-                logger.warning(f"GPT-OSS call returned empty result")
-                logger.info(
-                    f"First message: {messages[0] if messages else 'No messages'}"
-                )
-                # Print to console for immediate visibility
-                print(f"[GPT-OSS DEBUG] Empty result from LLM call")
-            else:
-                logger.info(
-                    f"GPT-OSS call successful, response length: {len(str(result))}"
-                )
-                logger.info(f"Response preview: {str(result)[:100]}...")
-
-            return result
-
-        except Exception as e:
-            logger.error(f"Error in GPT-OSS call: {e}")
-            raise
-
-    def _handle_non_streaming_response(
-        self,
-        params,
-        callbacks=None,
-        available_functions=None,
-        from_task=None,
-        from_agent=None,
-        **kwargs,  # Accept additional kwargs for CrewAI 1.9.x compatibility (e.g., response_model)
-    ):
-        """
-        Override to filter parameters and handle GPT-OSS response format.
-
-        Note: Signature updated for CrewAI 1.9.x compatibility with response_model support.
-        """
-        # Filter out unsupported parameters
-        if isinstance(params, dict):
-            params = DatabricksGPTOSSHandler.filter_unsupported_params(params)
-            logger.info(f"[_handle_non_streaming_response] Filtered params for GPT-OSS")
-            logger.info(
-                f"[_handle_non_streaming_response] Model in params: {params.get('model', 'NOT SET')}"
-            )
-
-            # Sanitize empty content blocks that Databricks API rejects
-            if "messages" in params:
-                params["messages"] = (
-                    DatabricksRetryLLM._sanitize_messages_for_databricks(
-                        params["messages"]
-                    )
-                )
-
-            # Add system instruction for better responses if missing
-            if "messages" in params and params["messages"]:
-                # Check if first message is system message
-                if params["messages"][0].get("role") != "system":
-                    # Insert a system message to guide GPT-OSS
-                    system_msg = {
-                        "role": "system",
-                        "content": "You are a helpful AI assistant. Please provide clear, direct responses to complete the given tasks. Focus on the specific requirements and deliver actionable results.",
-                    }
-                    params["messages"].insert(0, system_msg)
-                    logger.info("Added system message for GPT-OSS guidance")
-
-        # Call parent method
-        try:
-            logger.info("[_handle_non_streaming_response] Calling parent method...")
-            logger.debug(f"[DEBUG] kwargs for parent: {list(kwargs.keys())}")
-
-            response = super()._handle_non_streaming_response(
-                params,
-                callbacks,
-                available_functions,
-                from_task,
-                from_agent,
-                **kwargs,
-            )
-
-            logger.info(
-                f"[_handle_non_streaming_response] Parent returned: type={type(response)}, empty={not response}"
-            )
-
-            # If response is None or empty, don't use fallback - let it fail properly
-            if response is None or response == "":
-                logger.warning(
-                    "GPT-OSS model returned empty response in _handle_non_streaming_response"
-                )
-                return ""
-
-            # Log the actual response for debugging
-            logger.info(
-                f"[_handle_non_streaming_response] Response preview: {str(response)[:100]}..."
-            )
-            return response
-
-        except TypeError as e:
-            # Handle signature mismatch across CrewAI versions: if the parent
-            # method does not accept the extra kwargs (e.g., response_model),
-            # retry without them.
-            logger.warning(
-                f"TypeError in GPT-OSS _handle_non_streaming_response, retrying without extra kwargs: {e}"
-            )
-            response = super()._handle_non_streaming_response(
-                params,
-                callbacks,
-                available_functions,
-                from_task,
-                from_agent,
-            )
-            if response is None or response == "":
-                return ""
-            return response
-
-        except Exception as e:
-            logger.error(f"Error in GPT-OSS _handle_non_streaming_response: {e}")
-            import traceback
-
-            traceback.print_exc()
-            raise
-
-
 class DatabricksRetryLLM(LLM):
     """
     Custom LLM wrapper for Databricks models that adds retry logic for empty responses.
@@ -559,6 +341,37 @@ class DatabricksRetryLLM(LLM):
         logger.info(
             f"Initialized DatabricksRetryLLM wrapper for model: {self._original_model_name} (timeout: {timeout_val}s, litellm.request_timeout: {litellm.request_timeout}s)"
         )
+
+    def supports_function_calling(self) -> bool:
+        """Check if this Databricks model supports native function calling (tool_calls).
+
+        litellm's model registry has supports_function_calling=None for
+        Databricks-hosted models, even when 'tools' IS in their
+        supported_openai_params.  We return True so CrewAI uses native
+        function calling (tool_calls) rather than the ReAct text pattern.
+
+        Native function calling is preferred because:
+        - GPT-5 reasoning models do not follow ReAct text format (they
+          hallucinate tool results instead of emitting Action:/Action Input:).
+        - Llama/Maverick and other Databricks models also support tool_calls.
+
+        To prevent infinite tool-call loops (GPT-5 keeps calling tools without
+        producing a final answer), call() enforces a MAX_TOOL_CALLS limit
+        that strips tools after N rounds, forcing text output.
+        """
+        return True
+
+    def supports_stop_words(self) -> bool:
+        """Check if this model supports the 'stop' parameter.
+
+        GPT-5 reasoning models reject 'stop', so return False for them
+        to prevent CrewAI from adding stop words to the request.
+        For other Databricks models, delegate to the parent.
+        """
+        model_lower = self._original_model_name.lower()
+        if "gpt-5" in model_lower or "gpt5" in model_lower:
+            return False
+        return super().supports_stop_words()
 
     def _get_crew_logger(self):
         """Get the crew logger for subprocess-compatible logging."""
@@ -857,6 +670,25 @@ class DatabricksRetryLLM(LLM):
         # Sanitize empty content blocks that Databricks API rejects
         fixed_messages = self._sanitize_messages_for_databricks(fixed_messages)
         msg_count = len(fixed_messages) if isinstance(fixed_messages, list) else 1
+
+        # --- Tool-call limiter: prevent infinite tool-calling loops ---
+        # Count tool-result messages in the conversation history.
+        # After MAX_TOOL_CALLS tool results, strip tools from the request
+        # to force the model to produce a text answer instead of more tool_calls.
+        # This is critical for GPT-5 which keeps requesting tool_calls indefinitely.
+        MAX_TOOL_CALLS = 8
+        if tools and isinstance(fixed_messages, list):
+            tool_result_count = sum(
+                1 for m in fixed_messages
+                if (isinstance(m, dict) and m.get("role") == "tool")
+                or (hasattr(m, "role") and getattr(m, "role", None) == "tool")
+            )
+            if tool_result_count >= MAX_TOOL_CALLS:
+                crew_log.warning(
+                    f"[DatabricksRetryLLM] Reached {tool_result_count} tool results "
+                    f"(limit: {MAX_TOOL_CALLS}). Stripping tools to force final text answer."
+                )
+                tools = None
 
         while True:
             max_retries = self._get_max_retries(is_rate_limit)
