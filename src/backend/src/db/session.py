@@ -721,7 +721,12 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
                     await session.rollback()
                     raise
                 finally:
-                    _request_session.reset(token)
+                    try:
+                        _request_session.reset(token)
+                    except ValueError:
+                        # Token created in a different async context (generator
+                        # GC'd or cancelled across tasks). Safe to ignore.
+                        pass
                     # Ensure session is properly closed
                     await session.close()
         except OperationalError as e:
