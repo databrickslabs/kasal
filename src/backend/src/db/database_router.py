@@ -138,7 +138,10 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
                 try:
                     yield session
                 finally:
-                    _request_session.reset(token)
+                    try:
+                        _request_session.reset(token)
+                    except ValueError:
+                        pass
             return
         except Exception as e:
             logger.error(f"⚠️ Failed to get Lakebase session, falling back to regular DB: {e}")
@@ -160,6 +163,12 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
             await session.rollback()
             raise
         finally:
-            _request_session.reset(token)
+            try:
+                _request_session.reset(token)
+            except ValueError:
+                # Token was created in a different async context (e.g. generator
+                # garbage-collected or cancelled in another Task). Safe to ignore
+                # because the ContextVar will fall out of scope with the task.
+                pass
             # Ensure session is closed even if not explicitly committed/rolled back
             await session.close()
