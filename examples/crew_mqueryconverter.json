@@ -1,39 +1,39 @@
 {
-  "id": "cde70286-78e2-4f86-9e7d-b492c2d3f381",
-  "name": "rel_conv_static",
+  "id": "5d8e1bca-b5ca-4968-81cd-cd03c009b922",
+  "name": "test_mquery",
   "agent_ids": [
-    "d99ab755-25c4-4225-8f5a-c1e894572dca"
+    "6b07ad5e-974d-46b1-abff-34d62f84f863"
   ],
   "task_ids": [
-    "906310c3-47f1-4efc-b9cc-219c8a6631d7"
+    "209bbc98-b9df-448a-9f06-7507eff995eb"
   ],
   "nodes": [
     {
-      "id": "task-906310c3-47f1-4efc-b9cc-219c8a6631d7",
+      "id": "task-209bbc98-b9df-448a-9f06-7507eff995eb",
       "type": "taskNode",
       "position": {
-        "x": 177.5664124241173,
-        "y": 299.3577308337301
+        "x": 368,
+        "y": 68
       },
       "data": {
-        "label": "Run PBI Relationship Conversion with Parameters",
+        "label": "Run MQuery Conversion with Parameters",
         "role": null,
         "goal": null,
         "backstory": null,
         "tools": [
-          "75"
+          "74"
         ],
         "tool_configs": {
-          "Power BI Relationships Tool": {
-            "workspace_id": "<YOUR_WORKSPACE_ID>",
-            "dataset_id": "<YOUR_DATASET_ID>",
-            "tenant_id": "<YOUR_TENANT_ID>",
-            "client_id": "<YOUR_CLIENT_ID>",
-            "client_secret": "<YOUR_CLIENT_SECRET>"
+          "M-Query Conversion Pipeline": {
+            "workspace_id": "your-workspace-id",
+            "dataset_id": "your-dataset-id",
+            "tenant_id": "00000000-0000-0000-0000-000000000000",
+            "client_id": "your-client-id",
+            "client_secret": "your-client-secret"
           }
         },
         "agentId": null,
-        "taskId": "906310c3-47f1-4efc-b9cc-219c8a6631d7",
+        "taskId": "209bbc98-b9df-448a-9f06-7507eff995eb",
         "llm": null,
         "function_calling_llm": null,
         "max_iter": null,
@@ -53,8 +53,8 @@
         "use_system_prompt": null,
         "respect_context_window": null,
         "type": "task",
-        "description": "Use the PBI Relationship Conversion Pipeline tool to convert the measure accordingly to the FROM and TO format defined in the tool-configuration.\n\nCall the PBI Relationship Conversion Pipeline tool to perform the conversion and return the generated SQL in the desired output format.",
-        "expected_output": "When everything is mappable, the agent should return something like a SQL‑style or object‑style file. While for Transformations containing errors in the parsing another SQL object with the error of the conversion should be output.",
+        "description": "IMMEDIATELY call the \"M-Query Conversion Pipeline\" with parameters defined in the input task form.\nALL required parameters (workspace_id, dataset_id, authentication credentials) are ALREADY PRE-CONFIGURED in the tool-task-form. You do NOT need to ask for them or provide them.\n\nDO NOT ask the user for any information. DO NOT explain what you need. Just call the tool NOW.\n\nAction required:\n  1. Call mquery_conversion_pipeline_tool()\n  2. Return the tool's output directly to the user",
+        "expected_output": "A comprehensive conversion report showing:\n1. Original M-Query expressions from Power BI\n2. Expression types (native_query, table_from_rows, etc.)\n3. Converted Databricks SQL statements\n4. Conversion notes and warnings\n5. Summary statistics",
         "icon": null,
         "advanced_config": null,
         "config": {
@@ -88,32 +88,32 @@
       "style": null
     },
     {
-      "id": "agent-d99ab755-25c4-4225-8f5a-c1e894572dca",
+      "id": "agent-6b07ad5e-974d-46b1-abff-34d62f84f863",
       "type": "agentNode",
       "position": {
-        "x": -75.61671469740637,
-        "y": 287.68299711815564
+        "x": 68,
+        "y": 73
       },
       "data": {
-        "label": "PBI Relationship Converter",
-        "role": "PBI Relationship Manager",
+        "label": "MQuery Converter",
+        "role": "Mquery Conversion Manager",
         "goal": "Translate given mquery definitions efficiently into the requested SQL syntax.\n\nYou will make sure that the action run will only trigger 1 time and not more.",
-        "backstory": "Experienced PBI and SQL Engineer with 10+ years of experience in managing, translating, and optimizing PBI semantic rleationships and translating them into SQL for Databricks.",
+        "backstory": "Experienced PBI and SQL Engineer with 10+ years of experience in managing, translating, and optimizing MQuery expressions and translating them into SQL for Databricks.",
         "tools": [
-          "75"
+          "74"
         ],
         "tool_configs": {},
-        "agentId": "d99ab755-25c4-4225-8f5a-c1e894572dca",
+        "agentId": "6b07ad5e-974d-46b1-abff-34d62f84f863",
         "taskId": null,
-        "llm": "databricks-llama-4-maverick",
+        "llm": "databricks-claude-sonnet-4",
         "function_calling_llm": null,
         "max_iter": 25,
-        "max_rpm": 10,
+        "max_rpm": 1,
         "max_execution_time": 300,
         "verbose": false,
         "allow_delegation": false,
-        "cache": true,
-        "memory": true,
+        "cache": false,
+        "memory": false,
         "embedder_config": {
           "provider": "databricks",
           "config": {
@@ -150,15 +150,15 @@
   ],
   "edges": [
     {
-      "source": "agent-d99ab755-25c4-4225-8f5a-c1e894572dca",
-      "target": "task-906310c3-47f1-4efc-b9cc-219c8a6631d7",
+      "source": "agent-6b07ad5e-974d-46b1-abff-34d62f84f863",
+      "target": "task-209bbc98-b9df-448a-9f06-7507eff995eb",
       "id": "reactflow__edge-agent-2d21de66-438d-4a70-8be0-f16dd0a8d4aa-task-c2c71f3e-89e8-4786-84dd-fd0e2f063ad1-right-left",
       "sourceHandle": null,
       "targetHandle": null
     }
   ],
-  "created_at": "2026-01-27T16:05:46.917117",
-  "updated_at": "2026-01-27T16:05:46.917118",
+  "created_at": "2026-02-17T13:28:17.646804",
+  "updated_at": "2026-02-17T13:28:17.646807",
   "process": "sequential",
   "planning": false,
   "planning_llm": null,
