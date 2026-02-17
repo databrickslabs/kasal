@@ -11,6 +11,7 @@ export interface DispatcherResponse {
     | 'execute_crew' | 'configure_crew' | 'conversation'
     | 'catalog_list' | 'catalog_load' | 'catalog_save' | 'catalog_schedule' | 'catalog_help'
     | 'flow_list' | 'flow_load' | 'flow_save'
+    | 'execute_flow'
     | 'unknown';
   confidence: number;
   extracted_info: Record<string, unknown>;

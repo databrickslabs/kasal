@@ -719,6 +719,7 @@ class DispatcherService:
             "catalog_list": "flow_list",
             "catalog_load": "flow_load",
             "catalog_save": "flow_save",
+            "execute_crew": "execute_flow",
         }
         if args.lower().startswith(("flow", "flows")) and intent in FLOW_INTENT_MAP:
             intent = FLOW_INTENT_MAP[intent]
@@ -1410,12 +1411,156 @@ Please analyze this message and provide your intent classification, considering 
                     )
 
                 elif dispatcher_response.intent == IntentType.EXECUTE_CREW:
-                    generation_result = {
-                        "type": "execute_crew",
-                        "message": "Executing crew...",
-                        "action": "execute_crew",
-                        "extracted_info": dispatcher_response.extracted_info,
-                    }
+                    run_name = dispatcher_response.extracted_info.get(
+                        "args", ""
+                    ).strip()
+                    crews = await self.catalog_service.find_by_group(group_context)
+
+                    if not run_name:
+                        # No name — execute whatever is on the canvas
+                        generation_result = {
+                            "type": "execute_crew",
+                            "plan": None,
+                            "message": "Executing crew on canvas...",
+                        }
+                    else:
+                        matches = [
+                            c for c in crews if run_name.lower() in c.name.lower()
+                        ]
+                        exact_matches = [
+                            c for c in matches if c.name.lower() == run_name.lower()
+                        ]
+                        if exact_matches:
+                            matches = exact_matches
+                        if len(matches) == 1:
+                            crew = matches[0]
+                            generation_result = {
+                                "type": "execute_crew",
+                                "plan": {
+                                    "id": str(crew.id),
+                                    "name": crew.name,
+                                    "nodes": crew.nodes or [],
+                                    "edges": crew.edges or [],
+                                    "process": crew.process,
+                                    "planning": crew.planning,
+                                    "planning_llm": crew.planning_llm,
+                                    "memory": crew.memory,
+                                    "verbose": crew.verbose,
+                                    "max_rpm": crew.max_rpm,
+                                },
+                                "message": f"Loading and executing crew '{crew.name}'...",
+                            }
+                        elif len(matches) > 1:
+                            unique_names = {c.name.lower() for c in matches}
+                            if len(unique_names) == 1:
+                                crew = sorted(
+                                    matches,
+                                    key=lambda c: c.updated_at or c.created_at,
+                                    reverse=True,
+                                )[0]
+                                generation_result = {
+                                    "type": "execute_crew",
+                                    "plan": {
+                                        "id": str(crew.id),
+                                        "name": crew.name,
+                                        "nodes": crew.nodes or [],
+                                        "edges": crew.edges or [],
+                                        "process": crew.process,
+                                        "planning": crew.planning,
+                                        "planning_llm": crew.planning_llm,
+                                        "memory": crew.memory,
+                                        "verbose": crew.verbose,
+                                        "max_rpm": crew.max_rpm,
+                                    },
+                                    "message": f"Loading and executing crew '{crew.name}'...",
+                                }
+                            else:
+                                generation_result = {
+                                    "type": "catalog_list",
+                                    "plans": [
+                                        {"id": str(c.id), "name": c.name}
+                                        for c in matches
+                                    ],
+                                    "message": f"Multiple crews match '{run_name}'. Please be more specific:",
+                                }
+                        else:
+                            generation_result = {
+                                "type": "execute_crew",
+                                "plan": None,
+                                "message": f"No crew found matching '{run_name}'.",
+                            }
+
+                elif dispatcher_response.intent == IntentType.EXECUTE_FLOW:
+                    run_name = dispatcher_response.extracted_info.get(
+                        "args", ""
+                    ).strip()
+                    flows = await self.flow_service.get_all_flows_for_group(
+                        group_context
+                    )
+
+                    if not run_name:
+                        # No name — execute whatever is on the canvas
+                        generation_result = {
+                            "type": "execute_flow",
+                            "flow": None,
+                            "message": "Executing flow on canvas...",
+                        }
+                    else:
+                        matches = [
+                            f for f in flows if run_name.lower() in f.name.lower()
+                        ]
+                        exact_matches = [
+                            f for f in matches if f.name.lower() == run_name.lower()
+                        ]
+                        if exact_matches:
+                            matches = exact_matches
+                        if len(matches) == 1:
+                            flow = matches[0]
+                            generation_result = {
+                                "type": "execute_flow",
+                                "flow": {
+                                    "id": str(flow.id),
+                                    "name": flow.name,
+                                    "nodes": flow.nodes or [],
+                                    "edges": flow.edges or [],
+                                    "flow_config": flow.flow_config or {},
+                                },
+                                "message": f"Loading and executing flow '{flow.name}'...",
+                            }
+                        elif len(matches) > 1:
+                            unique_names = {f.name.lower() for f in matches}
+                            if len(unique_names) == 1:
+                                flow = sorted(
+                                    matches,
+                                    key=lambda f: f.updated_at or f.created_at,
+                                    reverse=True,
+                                )[0]
+                                generation_result = {
+                                    "type": "execute_flow",
+                                    "flow": {
+                                        "id": str(flow.id),
+                                        "name": flow.name,
+                                        "nodes": flow.nodes or [],
+                                        "edges": flow.edges or [],
+                                        "flow_config": flow.flow_config or {},
+                                    },
+                                    "message": f"Loading and executing flow '{flow.name}'...",
+                                }
+                            else:
+                                generation_result = {
+                                    "type": "flow_list",
+                                    "flows": [
+                                        {"id": str(f.id), "name": f.name}
+                                        for f in matches
+                                    ],
+                                    "message": f"Multiple flows match '{run_name}'. Please be more specific:",
+                                }
+                        else:
+                            generation_result = {
+                                "type": "execute_flow",
+                                "flow": None,
+                                "message": f"No flow found matching '{run_name}'.",
+                            }
 
                 elif dispatcher_response.intent == IntentType.CONFIGURE_CREW:
                     config_type = dispatcher_response.extracted_info.get(

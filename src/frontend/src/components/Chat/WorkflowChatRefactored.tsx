@@ -1003,6 +1003,55 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             }));
             break;
           }
+          case 'execute_crew': {
+            const execResult = result.generation_result as { plan?: CatalogLoadResult['plan']; message: string };
+            if (execResult.plan?.nodes) {
+              // Load crew on canvas first
+              window.dispatchEvent(new CustomEvent('catalogLoadCrew', {
+                detail: {
+                  nodes: execResult.plan.nodes,
+                  edges: execResult.plan.edges,
+                  name: execResult.plan.name,
+                  id: execResult.plan.id,
+                },
+              }));
+              // Give canvas time to render, then trigger execution
+              setTimeout(() => {
+                if (onExecuteCrew) {
+                  onExecuteCrew();
+                }
+              }, 500);
+            } else if (!execResult.plan) {
+              // No name provided — execute whatever is on canvas
+              if (onExecuteCrew && hasCrewContent(nodes)) {
+                onExecuteCrew();
+              }
+            }
+            break;
+          }
+          case 'execute_flow': {
+            const execFlowResult = result.generation_result as { flow?: FlowLoadResult['flow']; message: string };
+            if (execFlowResult.flow?.nodes) {
+              // Load flow on canvas first
+              window.dispatchEvent(new CustomEvent('catalogLoadFlow', {
+                detail: {
+                  nodes: execFlowResult.flow.nodes,
+                  edges: execFlowResult.flow.edges,
+                  flowConfig: execFlowResult.flow.flow_config,
+                  name: execFlowResult.flow.name,
+                  id: execFlowResult.flow.id,
+                },
+              }));
+              // Give canvas time to render, then trigger flow execution
+              setTimeout(() => {
+                window.dispatchEvent(new CustomEvent('executeFlowEvent'));
+              }, 500);
+            } else if (!execFlowResult.flow) {
+              // No name provided — execute whatever is on canvas
+              window.dispatchEvent(new CustomEvent('executeFlowEvent'));
+            }
+            break;
+          }
         }
       }
     } catch (error) {
@@ -1177,6 +1226,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         return (flowGenResult.message as string) || 'Flow loaded.';
       }
       case 'flow_save':
+        return (generation_result as { message: string }).message;
+      case 'execute_crew':
+      case 'execute_flow':
         return (generation_result as { message: string }).message;
       default:
         return "Your request has been processed successfully.";
