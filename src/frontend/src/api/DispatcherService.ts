@@ -93,6 +93,11 @@ export interface FlowSaveResult {
   message: string;
 }
 
+export interface StreamingGenerationResult {
+  generation_id: string;
+  type: 'streaming';
+}
+
 export interface DispatchResult {
   dispatcher: DispatcherResponse;
   generation_result: unknown;

@@ -853,3 +853,86 @@ class TestTaskGenerationResponseWithGuardrail:
             llm_guardrail=None
         )
         assert response.llm_guardrail is None
+
+
+class TestTaskGenerationRequestAvailableTools:
+    """Test cases for the available_tools field on TaskGenerationRequest."""
+
+    def test_task_generation_request_available_tools(self):
+        """Test TaskGenerationRequest with the new optional available_tools field."""
+        tools = [
+            {"name": "SerperDevTool", "description": "Web search tool"},
+            {"name": "GenieTool", "description": "Internal data query tool"}
+        ]
+        request = TaskGenerationRequest(
+            text="Analyze quarterly sales data",
+            available_tools=tools
+        )
+        assert request.available_tools is not None
+        assert len(request.available_tools) == 2
+        assert request.available_tools[0]["name"] == "SerperDevTool"
+        assert request.available_tools[1]["description"] == "Internal data query tool"
+
+    def test_task_generation_request_available_tools_default_none(self):
+        """Test TaskGenerationRequest available_tools defaults to None."""
+        request = TaskGenerationRequest(text="Generate a task")
+        assert request.available_tools is None
+
+    def test_task_generation_request_available_tools_empty_list(self):
+        """Test TaskGenerationRequest with explicitly empty available_tools."""
+        request = TaskGenerationRequest(
+            text="Generate a task",
+            available_tools=[]
+        )
+        assert request.available_tools == []
+
+
+class TestTaskGenerationResponseToolsUnion:
+    """Test cases for the tools field accepting List[Union[str, Dict[str, Any]]]."""
+
+    def test_task_generation_response_tools_string_type(self):
+        """Test TaskGenerationResponse tools accepts a list of strings."""
+        response = TaskGenerationResponse(
+            name="string_tools_task",
+            description="Task with string tool names",
+            expected_output="Output with string tools",
+            tools=["SerperDevTool", "GenieTool", "ScrapeWebsiteTool"]
+        )
+        assert len(response.tools) == 3
+        assert all(isinstance(t, str) for t in response.tools)
+        assert response.tools[0] == "SerperDevTool"
+
+    def test_task_generation_response_tools_mixed_type(self):
+        """Test TaskGenerationResponse tools accepts mix of str and dict."""
+        response = TaskGenerationResponse(
+            name="mixed_tools_task",
+            description="Task with mixed tool types",
+            expected_output="Output with mixed tools",
+            tools=[
+                "SerperDevTool",
+                {"name": "GenieTool", "config": {"space_id": "abc123"}},
+                "ScrapeWebsiteTool"
+            ]
+        )
+        assert len(response.tools) == 3
+        assert isinstance(response.tools[0], str)
+        assert isinstance(response.tools[1], dict)
+        assert isinstance(response.tools[2], str)
+        assert response.tools[1]["name"] == "GenieTool"
+
+    def test_task_generation_response_tools_dict_type(self):
+        """Test TaskGenerationResponse tools accepts a list of dicts."""
+        response = TaskGenerationResponse(
+            name="dict_tools_task",
+            description="Task with dict tool configurations",
+            expected_output="Output with dict tools",
+            tools=[
+                {"name": "pandas", "type": "data_processing"},
+                {"name": "matplotlib", "type": "visualization"},
+                {"name": "scikit-learn", "type": "machine_learning"}
+            ]
+        )
+        assert len(response.tools) == 3
+        assert all(isinstance(t, dict) for t in response.tools)
+        assert response.tools[0]["name"] == "pandas"
+        assert response.tools[2]["type"] == "machine_learning"

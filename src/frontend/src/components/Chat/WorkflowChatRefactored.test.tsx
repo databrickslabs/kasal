@@ -853,6 +853,49 @@ describe('setMessages stale-closure fix', () => {
   });
 });
 
+describe('SSE onComplete and genie config message', () => {
+  const sseProps = {
+    onNodesGenerated: vi.fn(),
+    onLoadingStateChange: vi.fn(),
+    selectedModel: 'test-model',
+    selectedTools: [],
+    isVisible: true,
+    setSelectedModel: vi.fn(),
+    nodes: [] as Node[],
+    edges: [] as Edge[],
+    onExecuteCrew: vi.fn(),
+    onToggleCollapse: vi.fn(),
+    chatSessionId: 'test-session-123',
+    onOpenLogs: vi.fn(),
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('renders without errors when SSE hooks are present', () => {
+    // Smoke test verifying the component mounts correctly with the
+    // useCrewGenerationSSE hook wired in. The hook would add a message
+    // with metadata.type='genie_config_needed' when pending genie configs
+    // exist at onComplete time, but testing the full SSE flow requires
+    // deep integration testing. This verifies the component itself does
+    // not break with the new SSE integration.
+    render(<WorkflowChat {...sseProps} />);
+
+    expect(screen.getByText('Kasal')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Describe what you want to create...')).toBeInTheDocument();
+  });
+
+  // NOTE: Full integration test for onComplete adding genie_config_needed
+  // metadata messages would require mocking useCrewGenerationSSE deeply
+  // and simulating the SSE event stream. The actual behavior is:
+  // 1. useCrewGenerationSSE's onComplete fires
+  // 2. If pendingGenieConfigs has items, a message with
+  //    metadata: { type: 'genie_config_needed', configs: [...] }
+  //    is appended to the chat messages
+  // 3. ChatMessageItem renders GenieSpaceConfigPrompt for that message
+});
+
 describe('chatCommandClick event listener', () => {
   const defaultProps = {
     onNodesGenerated: vi.fn(),

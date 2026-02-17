@@ -13,7 +13,8 @@ from typing import List, Dict, Any
 from src.schemas.crew import (
     Position, Style, LLMGuardrailConfig, TaskConfig, NodeData, Node, Edge, CrewBase, CrewCreate,
     CrewUpdate, CrewInDBBase, Crew, CrewResponse, CrewGenerationRequest,
-    AgentConfig, Agent, Task, CrewGenerationResponse, CrewCreationResponse
+    AgentConfig, Agent, Task, CrewGenerationResponse, CrewCreationResponse,
+    CrewStreamingRequest, CrewStreamingResponse
 )
 
 
@@ -1134,3 +1135,66 @@ class TestSchemaIntegration:
         assert len(crew_update.agent_ids) == 2
         assert len(crew_update.nodes) == 1
         assert crew_update.nodes[0].data.label == "New Agent"
+
+
+class TestCrewStreamingRequest:
+    """Test cases for CrewStreamingRequest schema."""
+
+    def test_crew_streaming_request_valid(self):
+        """Test CrewStreamingRequest with prompt and optional model/tools."""
+        request = CrewStreamingRequest(
+            prompt="Build a marketing analysis crew",
+            model="gpt-4",
+            tools=["SerperDevTool", "ScrapeWebsiteTool"]
+        )
+        assert request.prompt == "Build a marketing analysis crew"
+        assert request.model == "gpt-4"
+        assert request.tools == ["SerperDevTool", "ScrapeWebsiteTool"]
+
+    def test_crew_streaming_request_prompt_required(self):
+        """Test CrewStreamingRequest raises ValidationError without prompt."""
+        with pytest.raises(ValidationError) as exc_info:
+            CrewStreamingRequest()
+
+        errors = exc_info.value.errors()
+        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        assert "prompt" in missing_fields
+
+    def test_crew_streaming_request_optional_fields(self):
+        """Test CrewStreamingRequest defaults: model=None, tools=[]."""
+        request = CrewStreamingRequest(prompt="Simple crew request")
+        assert request.model is None
+        assert request.tools == []
+
+    def test_crew_streaming_request_empty_tools(self):
+        """Test CrewStreamingRequest with explicitly empty tools list."""
+        request = CrewStreamingRequest(
+            prompt="Crew with no tools",
+            tools=[]
+        )
+        assert request.tools == []
+
+
+class TestCrewStreamingResponse:
+    """Test cases for CrewStreamingResponse schema."""
+
+    def test_crew_streaming_response_generation_id(self):
+        """Test CrewStreamingResponse validates generation_id field."""
+        response = CrewStreamingResponse(generation_id="gen-abc-123")
+        assert response.generation_id == "gen-abc-123"
+
+    def test_crew_streaming_response_missing_generation_id(self):
+        """Test CrewStreamingResponse raises ValidationError without generation_id."""
+        with pytest.raises(ValidationError) as exc_info:
+            CrewStreamingResponse()
+
+        errors = exc_info.value.errors()
+        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        assert "generation_id" in missing_fields
+
+    def test_crew_streaming_response_uuid_style_id(self):
+        """Test CrewStreamingResponse with UUID-style generation_id."""
+        response = CrewStreamingResponse(
+            generation_id="550e8400-e29b-41d4-a716-446655440000"
+        )
+        assert response.generation_id == "550e8400-e29b-41d4-a716-446655440000"

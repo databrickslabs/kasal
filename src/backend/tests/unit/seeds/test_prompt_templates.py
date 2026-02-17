@@ -14,6 +14,7 @@ from src.seeds.prompt_templates import (
     GENERATE_TASK_TEMPLATE,
     GENERATE_TEMPLATES_TEMPLATE,
     GENERATE_CREW_TEMPLATE,
+    GENERATE_CREW_PLAN_TEMPLATE,
     DETECT_INTENT_TEMPLATE,
     seed_async,
     seed,
@@ -239,3 +240,58 @@ class TestSeedEntryPoint:
                 )
                 # Should log the error
                 assert mock_logger.error.call_count >= 1
+
+
+class TestGenerateCrewPlanTemplate:
+    """Test cases for the generate_crew_plan template."""
+
+    def test_generate_crew_plan_template_exists(self):
+        """Test that generate_crew_plan template key exists in DEFAULT_TEMPLATES."""
+        names = [t["name"] for t in DEFAULT_TEMPLATES]
+        assert "generate_crew_plan" in names
+
+    def test_generate_crew_plan_template_has_json_structure(self):
+        """Test that generate_crew_plan template contains agents/tasks structure."""
+        assert "agents" in GENERATE_CREW_PLAN_TEMPLATE
+        assert "tasks" in GENERATE_CREW_PLAN_TEMPLATE
+        assert '"name"' in GENERATE_CREW_PLAN_TEMPLATE
+        assert '"role"' in GENERATE_CREW_PLAN_TEMPLATE
+        assert '"assigned_agent"' in GENERATE_CREW_PLAN_TEMPLATE
+
+    def test_generate_crew_plan_template_complexity_tiers(self):
+        """Test that generate_crew_plan template defines light/standard/complex tiers."""
+        assert "light" in GENERATE_CREW_PLAN_TEMPLATE
+        assert "standard" in GENERATE_CREW_PLAN_TEMPLATE
+        assert "complex" in GENERATE_CREW_PLAN_TEMPLATE
+
+    def test_generate_crew_plan_template_process_types(self):
+        """Test that generate_crew_plan template defines sequential/parallel process types."""
+        assert "sequential" in GENERATE_CREW_PLAN_TEMPLATE
+        assert "parallel" in GENERATE_CREW_PLAN_TEMPLATE
+
+    def test_generate_crew_plan_template_is_active(self):
+        """Test that generate_crew_plan template is active."""
+        plan_template = next(
+            t for t in DEFAULT_TEMPLATES if t["name"] == "generate_crew_plan"
+        )
+        assert plan_template["is_active"] is True
+
+    def test_generate_crew_plan_template_has_context_field(self):
+        """Test that generate_crew_plan template includes context dependency instructions."""
+        assert '"context"' in GENERATE_CREW_PLAN_TEMPLATE
+
+
+class TestTaskTemplateToolCatalog:
+    """Test cases for tool catalog and available tools in the task template."""
+
+    def test_task_template_tool_catalog(self):
+        """Test that GENERATE_TASK_TEMPLATE references key tools from the catalog."""
+        assert "GenieTool" in GENERATE_TASK_TEMPLATE
+        assert "SerperDevTool" in GENERATE_TASK_TEMPLATE
+        assert "ScrapeWebsiteTool" in GENERATE_TASK_TEMPLATE
+        assert "PerplexityTool" in GENERATE_TASK_TEMPLATE
+        assert "DatabricksKnowledgeSearchTool" in GENERATE_TASK_TEMPLATE
+
+    def test_task_template_available_tools_placeholder(self):
+        """Test that GENERATE_TASK_TEMPLATE references 'Available tools' for assignment."""
+        assert "Available tools" in GENERATE_TASK_TEMPLATE

@@ -11,6 +11,7 @@ import logging
 import os
 import traceback
 import uuid
+from collections import defaultdict
 from typing import Dict, Any, List, Tuple, Optional
 
 
@@ -18,13 +19,19 @@ from src.utils.prompt_utils import robust_json_parser
 from src.services.template_service import TemplateService
 from src.services.tool_service import ToolService
 
-from src.schemas.crew import CrewGenerationRequest, CrewGenerationResponse
+from src.schemas.crew import CrewGenerationRequest, CrewGenerationResponse, CrewStreamingRequest
+from src.schemas.task_generation import TaskGenerationRequest
+from src.schemas.task_generation import Agent as TaskGenAgent
 from src.repositories.log_repository import LLMLogRepository
 from src.services.log_service import LLMLogService
 from src.core.llm_manager import LLMManager
+from src.core.sse_manager import sse_manager, SSEEvent
+from src.core.exceptions import KasalError, BadRequestError
 from src.models.agent import Agent
 from src.models.task import Task
 from src.repositories.crew_generator_repository import CrewGeneratorRepository
+from src.services.agent_generation_service import AgentGenerationService
+from src.services.task_generation_service import TaskGenerationService
 from src.utils.user_context import GroupContext
 
 # Configure logging
@@ -749,3 +756,576 @@ class CrewGenerationService:
                     "description": f"A tool named {t if isinstance(t, str) else t.get('name', 'Unknown')}",
                     "id": t if isinstance(t, str) else t.get('id', t.get('name', 'Unknown'))}
                    for t in tool_identifiers]
+
+    # ------------------------------------------------------------------ #
+    #  Progressive / Streaming crew generation
+    # ------------------------------------------------------------------ #
+
+    async def create_crew_progressive(
+        self,
+        request: CrewStreamingRequest,
+        group_context: Optional[GroupContext],
+        generation_id: str,
+    ) -> None:
+        """
+        Progressively generate a crew, broadcasting SSE events as each entity
+        is created.
+
+        Phase 1 — Plan: Fast LLM call returning agent names/roles + task names.
+        Phase 2 — Agent details: Reuse AgentGenerationService per agent.
+        Phase 3 — Task details: Reuse TaskGenerationService per task.
+
+        IMPORTANT: This method runs as a background task after the HTTP response
+        has already been sent. The request-scoped DB session is closed by then,
+        so all database work uses an independent session created here.
+        """
+        from src.db.session import async_session_factory
+
+        try:
+            model = request.model or os.getenv("CREW_MODEL", "databricks-llama-4-maverick")
+
+            # ── Phase 1: Planning (LLM only, no DB writes) ───────────
+            logger.info(f"PROGRESSIVE [{generation_id}]: Phase 1 — Planning")
+            try:
+                plan = await self._generate_crew_plan(request, group_context, model)
+            except Exception as e:
+                logger.error(f"PROGRESSIVE [{generation_id}]: Planning failed: {e}")
+                await sse_manager.broadcast_to_job(generation_id, SSEEvent(
+                    data={"type": "generation_failed", "error": str(e)},
+                    event="generation_failed",
+                ))
+                return
+
+            plan_agents = plan.get("agents", [])
+            plan_tasks = plan.get("tasks", [])
+            process_type = plan.get("process_type", "sequential")
+            complexity = plan.get("complexity", "standard")
+
+            if not plan_agents:
+                await sse_manager.broadcast_to_job(generation_id, SSEEvent(
+                    data={"type": "generation_failed", "error": "Plan returned no agents"},
+                    event="generation_failed",
+                ))
+                return
+
+            # ── Enforce sequential dependency chain ────────────────
+            if process_type == "sequential":
+                for i, task in enumerate(plan_tasks):
+                    if i > 0 and not task.get("context"):
+                        prev_name = plan_tasks[i - 1].get("name", "")
+                        if prev_name:
+                            task["context"] = [prev_name]
+                            logger.info(
+                                f"PROGRESSIVE [{generation_id}]: Auto-chained "
+                                f"task '{task.get('name')}' → depends on '{prev_name}'"
+                            )
+
+            logger.info(
+                f"PROGRESSIVE [{generation_id}]: Plan — complexity={complexity}, "
+                f"process={process_type}, {len(plan_agents)} agents, {len(plan_tasks)} tasks"
+            )
+
+            # Broadcast plan_ready
+            await sse_manager.broadcast_to_job(generation_id, SSEEvent(
+                data={
+                    "type": "plan_ready",
+                    "agents": plan_agents,
+                    "tasks": plan_tasks,
+                    "process_type": process_type,
+                    "complexity": complexity,
+                },
+                event="plan_ready",
+            ))
+
+            # ── Phases 2-4: DB writes use an independent session ──────
+            # The request-scoped session is already closed by FastAPI DI,
+            # so we create a standalone session for all database operations.
+            async with async_session_factory() as session:
+                try:
+                    repo = CrewGeneratorRepository(session)
+                    agent_gen_service = AgentGenerationService(session)
+                    task_gen_service = TaskGenerationService(session)
+
+                    # ── Resolve workspace tools ───────────────────────
+                    tool_name_to_id_map: Dict[str, str] = {}
+                    available_tools_for_llm: List[Dict[str, str]] = []
+                    if request.tools:
+                        try:
+                            tool_service = ToolService(session)
+                            tools_with_details = await self._get_tool_details(
+                                request.tools, tool_service
+                            )
+                            tool_name_to_id_map = self._create_tool_name_to_id_map(
+                                tools_with_details
+                            )
+                            available_tools_for_llm = [
+                                {
+                                    "name": t.get('title') or t.get('name', ''),
+                                    "description": t.get('description', ''),
+                                }
+                                for t in tools_with_details
+                                if t.get('title') or t.get('name')
+                            ]
+                            logger.info(
+                                f"PROGRESSIVE [{generation_id}]: Resolved "
+                                f"{len(available_tools_for_llm)} workspace tools"
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                f"PROGRESSIVE [{generation_id}]: "
+                                f"Tool resolution failed, continuing without tools: {e}"
+                            )
+
+                    # ── Build reverse map: tool_id → tool_title ──────
+                    tool_id_to_title: Dict[str, str] = {
+                        v: k for k, v in tool_name_to_id_map.items()
+                    }
+
+                    # ── Group tasks by assigned agent for interleaved generation ──
+                    tasks_by_agent: Dict[str, List[Dict]] = defaultdict(list)
+                    unassigned_tasks: List[Dict] = []
+                    for task_plan in plan_tasks:
+                        assigned = task_plan.get("assigned_agent", "")
+                        if assigned:
+                            tasks_by_agent[assigned.lower()].append(task_plan)
+                        else:
+                            unassigned_tasks.append(task_plan)
+
+                    # ── Interleaved Phase: Agent → its Tasks → next Agent → its Tasks ──
+                    logger.info(f"PROGRESSIVE [{generation_id}]: Interleaved agent→task generation")
+                    agent_results: List[Dict[str, Any]] = []
+                    task_results: List[Dict[str, Any]] = []
+                    global_task_index = 0
+
+                    for i, agent_plan in enumerate(plan_agents):
+                        agent_name = agent_plan.get("name", f"Agent {i+1}")
+                        agent_role = agent_plan.get("role", "Specialist")
+                        try:
+                            prompt = (
+                                f"Create an agent named '{agent_name}' with role "
+                                f"'{agent_role}' for a crew that: {request.prompt}"
+                            )
+                            agent_config = await agent_gen_service.generate_agent(
+                                prompt_text=prompt,
+                                model=model,
+                                tools=[],
+                                group_context=group_context,
+                            )
+
+                            # Tools are assigned at the task level, not agent level
+                            agent_tool_ids: List[str] = []
+
+                            agent_data = {
+                                "name": agent_config.get("name", agent_name),
+                                "role": agent_config.get("role", agent_role),
+                                "goal": agent_config.get("goal", ""),
+                                "backstory": agent_config.get("backstory", ""),
+                                "llm": model,
+                                "tools": agent_tool_ids,
+                            }
+                            adv = agent_config.get("advanced_config", {})
+                            for key in (
+                                "function_calling_llm", "max_iter", "max_rpm",
+                                "verbose", "allow_delegation", "cache",
+                                "code_execution_mode", "max_retry_limit",
+                                "use_system_prompt", "respect_context_window",
+                            ):
+                                if key in adv:
+                                    agent_data[key] = adv[key]
+
+                            saved = await repo.create_single_agent(
+                                agent_data, group_context
+                            )
+                            # Commit each agent so it exists for FK constraints
+                            await session.commit()
+                            agent_results.append(saved)
+
+                            await sse_manager.broadcast_to_job(generation_id, SSEEvent(
+                                data={"type": "agent_detail", "index": i, "agent": saved},
+                                event="agent_detail",
+                            ))
+                            logger.info(f"PROGRESSIVE [{generation_id}]: Agent {i+1}/{len(plan_agents)} done — {saved.get('name')}")
+
+                        except Exception as e:
+                            logger.error(f"PROGRESSIVE [{generation_id}]: Agent '{agent_name}' failed: {e}")
+                            await session.rollback()
+                            await sse_manager.broadcast_to_job(generation_id, SSEEvent(
+                                data={
+                                    "type": "entity_error", "index": i,
+                                    "entity_type": "agent", "name": agent_name, "error": str(e),
+                                },
+                                event="entity_error",
+                            ))
+                            continue
+
+                        # ── Generate tasks assigned to this agent ──────
+                        agent_tasks = tasks_by_agent.get(agent_name.lower(), [])
+                        for task_plan in agent_tasks:
+                            task_name = task_plan.get("name", f"Task {global_task_index+1}")
+                            try:
+                                agent_context = self._find_agent_context(task_plan, agent_results)
+
+                                task_request = TaskGenerationRequest(
+                                    text=(
+                                        f"Create a task named '{task_name}' "
+                                        f"for a crew that: {request.prompt}"
+                                    ),
+                                    model=model,
+                                    agent=agent_context,
+                                    available_tools=available_tools_for_llm or None,
+                                )
+                                task_response = await task_gen_service.generate_task(
+                                    task_request, group_context
+                                )
+
+                                agent_id = self._resolve_agent_id(task_plan, agent_results)
+
+                                # Convert tool names to DB IDs
+                                task_tool_ids = [
+                                    tool_name_to_id_map[
+                                        t.get("name") if isinstance(t, dict) else str(t)
+                                    ]
+                                    for t in (task_response.tools or [])
+                                    if (t.get("name") if isinstance(t, dict) else str(t)) in tool_name_to_id_map
+                                ]
+
+                                task_data = {
+                                    "name": task_response.name,
+                                    "description": task_response.description,
+                                    "expected_output": task_response.expected_output,
+                                    "tools": task_tool_ids,
+                                    "tool_configs": {},
+                                    "async_execution": False,
+                                    "human_input": False,
+                                    "llm_guardrail": task_response.llm_guardrail.model_dump() if task_response.llm_guardrail else None,
+                                }
+
+                                task_saved = await repo.create_single_task(
+                                    task_data, agent_id, group_context
+                                )
+                                await session.commit()
+                                task_results.append({**task_saved, "_plan": task_plan})
+
+                                await sse_manager.broadcast_to_job(generation_id, SSEEvent(
+                                    data={"type": "task_detail", "index": global_task_index, "task": task_saved},
+                                    event="task_detail",
+                                ))
+                                logger.info(f"PROGRESSIVE [{generation_id}]: Task {global_task_index+1}/{len(plan_tasks)} done — {task_saved.get('name')}")
+
+                                # ── Detect GenieTool and suggest space ──
+                                needs_genie_config = any(
+                                    tool_id_to_title.get(tid) == 'GenieTool' for tid in task_tool_ids
+                                )
+                                if needs_genie_config:
+                                    suggested = await self._suggest_genie_space(
+                                        task_name=task_saved["name"],
+                                        task_description=task_saved.get("description", ""),
+                                    )
+                                    await sse_manager.broadcast_to_job(generation_id, SSEEvent(
+                                        data={
+                                            "type": "tool_config_needed",
+                                            "task_id": task_saved["id"],
+                                            "task_name": task_saved["name"],
+                                            "tool_name": "GenieTool",
+                                            "config_fields": ["spaceId"],
+                                            "suggested_space": suggested,
+                                        },
+                                        event="tool_config_needed",
+                                    ))
+
+                            except Exception as e:
+                                logger.error(f"PROGRESSIVE [{generation_id}]: Task '{task_name}' failed: {e}")
+                                await session.rollback()
+                                await sse_manager.broadcast_to_job(generation_id, SSEEvent(
+                                    data={
+                                        "type": "entity_error", "index": global_task_index,
+                                        "entity_type": "task", "name": task_name, "error": str(e),
+                                    },
+                                    event="entity_error",
+                                ))
+                            global_task_index += 1
+
+                    # ── Handle unassigned tasks at the end ──────────
+                    for task_plan in unassigned_tasks:
+                        task_name = task_plan.get("name", f"Task {global_task_index+1}")
+                        try:
+                            agent_context = self._find_agent_context(task_plan, agent_results)
+
+                            task_request = TaskGenerationRequest(
+                                text=(
+                                    f"Create a task named '{task_name}' "
+                                    f"for a crew that: {request.prompt}"
+                                ),
+                                model=model,
+                                agent=agent_context,
+                                available_tools=available_tools_for_llm or None,
+                            )
+                            task_response = await task_gen_service.generate_task(
+                                task_request, group_context
+                            )
+
+                            agent_id = self._resolve_agent_id(task_plan, agent_results)
+
+                            task_tool_ids = [
+                                tool_name_to_id_map[
+                                    t.get("name") if isinstance(t, dict) else str(t)
+                                ]
+                                for t in (task_response.tools or [])
+                                if (t.get("name") if isinstance(t, dict) else str(t)) in tool_name_to_id_map
+                            ]
+
+                            task_data = {
+                                "name": task_response.name,
+                                "description": task_response.description,
+                                "expected_output": task_response.expected_output,
+                                "tools": task_tool_ids,
+                                "tool_configs": {},
+                                "async_execution": False,
+                                "human_input": False,
+                                "llm_guardrail": task_response.llm_guardrail.model_dump() if task_response.llm_guardrail else None,
+                            }
+
+                            task_saved = await repo.create_single_task(
+                                task_data, agent_id, group_context
+                            )
+                            await session.commit()
+                            task_results.append({**task_saved, "_plan": task_plan})
+
+                            await sse_manager.broadcast_to_job(generation_id, SSEEvent(
+                                data={"type": "task_detail", "index": global_task_index, "task": task_saved},
+                                event="task_detail",
+                            ))
+                            logger.info(f"PROGRESSIVE [{generation_id}]: Task {global_task_index+1}/{len(plan_tasks)} done — {task_saved.get('name')}")
+
+                            # ── Detect GenieTool and suggest space ──
+                            needs_genie_config = any(
+                                tool_id_to_title.get(tid) == 'GenieTool' for tid in task_tool_ids
+                            )
+                            if needs_genie_config:
+                                suggested = await self._suggest_genie_space(
+                                    task_name=task_saved["name"],
+                                    task_description=task_saved.get("description", ""),
+                                )
+                                await sse_manager.broadcast_to_job(generation_id, SSEEvent(
+                                    data={
+                                        "type": "tool_config_needed",
+                                        "task_id": task_saved["id"],
+                                        "task_name": task_saved["name"],
+                                        "tool_name": "GenieTool",
+                                        "config_fields": ["spaceId"],
+                                        "suggested_space": suggested,
+                                    },
+                                    event="tool_config_needed",
+                                ))
+
+                        except Exception as e:
+                            logger.error(f"PROGRESSIVE [{generation_id}]: Task '{task_name}' failed: {e}")
+                            await session.rollback()
+                            await sse_manager.broadcast_to_job(generation_id, SSEEvent(
+                                data={
+                                    "type": "entity_error", "index": global_task_index,
+                                    "entity_type": "task", "name": task_name, "error": str(e),
+                                },
+                                event="entity_error",
+                            ))
+                        global_task_index += 1
+
+                    # ── Phase 4: Resolve task dependencies ────────────
+                    await self._resolve_progressive_dependencies(
+                        task_results, generation_id, repo
+                    )
+                    await session.commit()
+
+                except Exception as e:
+                    await session.rollback()
+                    raise
+
+            # Broadcast resolved dependencies so frontend can create
+            # task-to-task edges with real DB IDs.
+            for t in task_results:
+                resolved = t.get("context", [])
+                if resolved:
+                    await sse_manager.broadcast_to_job(generation_id, SSEEvent(
+                        data={
+                            "type": "dependencies_resolved",
+                            "task_id": t["id"],
+                            "task_name": t.get("name", ""),
+                            "context": resolved,
+                        },
+                        event="dependencies_resolved",
+                    ))
+
+            # ── Done ──────────────────────────────────────────────────
+            clean_tasks = [{k: v for k, v in t.items() if k != "_plan"} for t in task_results]
+            await sse_manager.broadcast_to_job(generation_id, SSEEvent(
+                data={
+                    "type": "generation_complete",
+                    "status": "completed",
+                    "agents": agent_results,
+                    "tasks": clean_tasks,
+                },
+                event="generation_complete",
+            ))
+            logger.info(f"PROGRESSIVE [{generation_id}]: Generation complete")
+
+        except Exception as e:
+            logger.error(f"PROGRESSIVE [{generation_id}]: Unexpected error: {e}")
+            logger.error(traceback.format_exc())
+            await sse_manager.broadcast_to_job(generation_id, SSEEvent(
+                data={"type": "generation_failed", "status": "failed", "error": str(e)},
+                event="generation_failed",
+            ))
+
+    # ── Progressive helpers ───────────────────────────────────────────
+
+    async def _suggest_genie_space(self, task_name: str, task_description: str) -> Optional[Dict]:
+        """Query Genie spaces and suggest the best match based on task context."""
+        try:
+            from src.repositories.genie_repository import GenieRepository
+            genie_repo = GenieRepository(session=None)
+
+            # Search using task name as query
+            response = await genie_repo.get_spaces(
+                search_query=task_name,
+                page_size=5,
+                enabled_only=True,
+            )
+
+            if response.spaces:
+                best = response.spaces[0]
+                return {"id": best.id, "name": best.name, "description": best.description or ""}
+
+            # Fallback: get first available space if search returned nothing
+            response = await genie_repo.get_spaces(page_size=1, enabled_only=True)
+            if response.spaces:
+                best = response.spaces[0]
+                return {"id": best.id, "name": best.name, "description": best.description or ""}
+
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to suggest Genie space: {e}")
+            return None
+
+    async def _generate_crew_plan(
+        self,
+        request: CrewStreamingRequest,
+        group_context: Optional[GroupContext],
+        model: str,
+    ) -> Dict[str, Any]:
+        """Fast LLM call to get crew outline (names/roles only)."""
+        system_message = await TemplateService.get_effective_template_content(
+            "generate_crew_plan", group_context
+        )
+        if not system_message:
+            raise KasalError("Required prompt template 'generate_crew_plan' not found")
+
+        messages = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": request.prompt},
+        ]
+
+        content = await LLMManager.completion(
+            messages=messages,
+            model=model,
+            temperature=0.3,
+            max_tokens=800,
+        )
+
+        await self._log_llm_interaction(
+            endpoint="generate-crew-plan",
+            prompt=f"System: {system_message}\nUser: {request.prompt}",
+            response=content,
+            model=model,
+            group_context=group_context,
+        )
+
+        plan = robust_json_parser(content)
+
+        if not isinstance(plan.get("agents"), list) or len(plan["agents"]) == 0:
+            raise BadRequestError("Plan returned no agents")
+
+        if not isinstance(plan.get("tasks"), list) or len(plan["tasks"]) == 0:
+            raise BadRequestError("Plan returned no tasks")
+
+        return plan
+
+    @staticmethod
+    def _find_agent_context(
+        task_plan: Dict[str, Any],
+        agent_results: List[Dict[str, Any]],
+    ) -> Optional[TaskGenAgent]:
+        """Build a TaskGenAgent for the task's assigned agent, if found."""
+        assigned = task_plan.get("assigned_agent", "")
+        if not assigned:
+            return None
+
+        for agent in agent_results:
+            if agent.get("name", "").lower() == assigned.lower():
+                return TaskGenAgent(
+                    name=agent["name"],
+                    role=agent.get("role", ""),
+                    goal=agent.get("goal", ""),
+                    backstory=agent.get("backstory", ""),
+                )
+        return None
+
+    @staticmethod
+    def _resolve_agent_id(
+        task_plan: Dict[str, Any],
+        agent_results: List[Dict[str, Any]],
+    ) -> Optional[str]:
+        """Resolve the assigned_agent name to a database agent ID."""
+        assigned = task_plan.get("assigned_agent", "")
+        if not assigned:
+            return agent_results[0]["id"] if agent_results else None
+
+        for agent in agent_results:
+            if agent.get("name", "").lower() == assigned.lower():
+                return agent["id"]
+
+        # Fallback: first agent
+        return agent_results[0]["id"] if agent_results else None
+
+    async def _resolve_progressive_dependencies(
+        self,
+        task_results: List[Dict[str, Any]],
+        generation_id: str,
+        repo: Optional["CrewGeneratorRepository"] = None,
+    ) -> None:
+        """Resolve task context references (names) to database IDs."""
+        effective_repo = repo or self.crew_generator_repository
+
+        task_name_to_id: Dict[str, str] = {}
+        for t in task_results:
+            name = t.get("name", "")
+            tid = t.get("id", "")
+            if name and tid:
+                task_name_to_id[name] = tid
+
+        for t in task_results:
+            plan = t.get("_plan", {})
+            context_refs = plan.get("context", [])
+            if not context_refs:
+                continue
+
+            resolved_ids = []
+            for ref in context_refs:
+                dep_id = task_name_to_id.get(ref)
+                if dep_id and dep_id != t.get("id"):
+                    resolved_ids.append(dep_id)
+
+            if resolved_ids:
+                try:
+                    await effective_repo.update_task_dependencies(
+                        t["id"], resolved_ids
+                    )
+                    t["context"] = resolved_ids
+                    logger.info(
+                        f"PROGRESSIVE [{generation_id}]: "
+                        f"Task '{t.get('name')}' dependencies: {resolved_ids}"
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"PROGRESSIVE [{generation_id}]: "
+                        f"Failed to set deps for '{t.get('name')}': {e}"
+                    )

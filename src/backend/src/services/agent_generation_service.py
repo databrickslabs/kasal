@@ -135,37 +135,40 @@ class AgentGenerationService:
             return ""
     
     async def generate_agent(self, prompt_text: str, model: str = None, tools: List[str] = None,
-                            group_context: Optional[GroupContext] = None, fast_planning: bool = True) -> Dict[str, Any]:
+                            group_context: Optional[GroupContext] = None, fast_planning: bool = True,
+                            available_tools: Optional[List[Dict]] = None) -> Dict[str, Any]:
         """
         Generate agent configuration from natural language description.
-        
+
         This method processes a natural language description of an agent
         and returns a structured configuration that can be used with CrewAI.
-        
+
         Args:
             prompt_text: Natural language description of the agent
             model: Model to use for generation, defaults to environment variable or "databricks-llama-4-maverick"
-            tools: List of tools available to the agent
+            tools: List of tools available to the agent (ignored — use available_tools)
             group_context: Optional group context for multi-group isolation
-            
+            available_tools: Optional list of dicts with 'name' and 'description' for tool selection
+
         Returns:
             Dict[str, Any]: Agent configuration in JSON format
-            
+
         Raises:
             ValueError: If there's a problem with the configuration
             Exception: For any other errors during generation
         """
         # Default values
         model = model or os.getenv("AGENT_MODEL", "databricks-llama-4-maverick")
-        # IMPORTANT: Do not assign any tools during generation
-        # Tools should be added manually after generation if needed
-        tools = []  # Always empty, ignoring the tools parameter
-        
-        logger.info(f"Generating agent with model: {model} and tools: {tools}")
-        
+        tools = tools or []
+
+        logger.info(f"Generating agent with model: {model}")
+
         try:
             # Get and prepare prompt template (composed with group/user overrides)
             system_message = await self._prepare_prompt_template(tools, group_context)
+
+            # Tools are assigned at the task level, not the agent level.
+            # Do not pass available tools to the agent generation prompt.
 
             # Documentation context disabled: skip vector search/embedding for agent generation
             documentation_context = None
@@ -187,7 +190,7 @@ class AgentGenerationService:
             except Exception as e:
                 # Just log the error, don't fail the request
                 logger.error(f"Failed to log interaction: {str(e)}")
-            
+
             return agent_config
             
         except Exception as e:
@@ -333,9 +336,7 @@ class AgentGenerationService:
                 if key not in setup["advanced_config"]:
                     setup["advanced_config"][key] = value
         
-        # IMPORTANT: Do not assign any tools during generation
-        # Tools should be added manually after generation if needed
-        # Always set tools to empty array regardless of what was requested or generated
+        # Tools are assigned at the task level, not the agent level
         setup["tools"] = []
         
         return setup 

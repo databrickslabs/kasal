@@ -26,7 +26,7 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 
-import DispatcherService, { DispatchResult, ConfigureCrewResult, CatalogListResult, CatalogLoadResult, FlowListResult, FlowLoadResult } from '../../api/DispatcherService';
+import DispatcherService, { DispatchResult, ConfigureCrewResult, CatalogListResult, CatalogLoadResult, FlowListResult, FlowLoadResult, StreamingGenerationResult } from '../../api/DispatcherService';
 import { useWorkflowStore } from '../../store/workflow';
 import { useCrewExecutionStore } from '../../store/crewExecution';
 import { useChatMessagesStore, deduplicateMessages } from '../../store/chatMessagesStore';
@@ -55,8 +55,15 @@ import {
   createAgentGenerationHandler,
   createTaskGenerationHandler,
   createCrewGenerationHandler,
-  handleConfigureCrew
+  handleConfigureCrew,
+  createCrewSkeletonHandler,
+  updateAgentNodeDetail,
+  updateTaskNodeDetail,
+  markNodeError,
+  addDependencyEdges,
+  IndexNodeIdMap,
 } from './utils/nodeGenerationHandlers';
+import { useCrewGenerationSSE, CrewGenerationSSEHandlers, ToolConfigNeededData } from '../../hooks/global/useCrewGenerationSSE';
 
 // Import hooks
 import { useChatSession } from './hooks/useChatSession';
@@ -406,6 +413,131 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     layoutManagerRef,
     inputRef
   );
+
+  // ── Progressive crew generation via SSE ──────────────────────────
+  const [generationId, setGenerationId] = useState<string | null>(null);
+  const indexMapRef = useRef<IndexNodeIdMap | null>(null);
+  const progressMsgIdRef = useRef<string | null>(null);
+  const pendingGenieConfigsRef = useRef<ToolConfigNeededData[]>([]);
+
+  /** Append a line to the single progress message instead of creating new ones. */
+  const appendProgressLine = useCallback((line: string) => {
+    const msgId = progressMsgIdRef.current;
+    if (!msgId) return;
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === msgId ? { ...m, content: m.content + '\n' + line } : m
+      )
+    );
+  }, [setMessages]);
+
+  const sseHandlers = useMemo<CrewGenerationSSEHandlers>(() => ({
+    onPlanReady: (plan) => {
+      const buildSkeleton = createCrewSkeletonHandler(
+        setNodes, setEdges, setLastExecutionJobId, setExecutingJobId, layoutManagerRef
+      );
+      indexMapRef.current = buildSkeleton(plan);
+      pendingGenieConfigsRef.current = [];
+
+      const processLabel = plan.process_type === 'parallel' ? 'parallel' : 'sequential';
+      const complexityLabel = plan.complexity || 'standard';
+      const msgId = `msg-progress-${Date.now()}`;
+      progressMsgIdRef.current = msgId;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: msgId,
+          type: 'assistant' as const,
+          content: `**Crew Plan** — ${complexityLabel} ${processLabel} · ${plan.agents.length} agents · ${plan.tasks.length} tasks`,
+          timestamp: new Date(),
+        },
+      ]);
+    },
+    onAgentDetail: (data) => {
+      if (indexMapRef.current) {
+        updateAgentNodeDetail(setNodes, setEdges, indexMapRef.current, selectedModel)(data);
+      }
+      const name = (data.agent.name as string) || `Agent ${data.index + 1}`;
+      const role = (data.agent.role as string) || '';
+      const goal = (data.agent.goal as string) || '';
+      const toolCount = Array.isArray(data.agent.tools) ? data.agent.tools.length : 0;
+      const toolsLabel = toolCount > 0 ? ` · ${toolCount} tool${toolCount > 1 ? 's' : ''}` : '';
+      appendProgressLine(`\n  **${name}** — ${role}${toolsLabel}\n     _${goal}_`);
+    },
+    onTaskDetail: (data) => {
+      if (indexMapRef.current) {
+        updateTaskNodeDetail(setNodes, setEdges, indexMapRef.current)(data);
+      }
+      const name = (data.task.name as string) || `Task ${data.index + 1}`;
+      const desc = (data.task.description as string) || '';
+      const shortDesc = desc.length > 120 ? desc.substring(0, 120) + '...' : desc;
+      appendProgressLine(`  ${data.index + 1}. **${name}**\n     ${shortDesc}`);
+    },
+    onEntityError: (data) => {
+      if (indexMapRef.current) {
+        markNodeError(setNodes, indexMapRef.current)(data);
+      }
+      appendProgressLine(`  ⚠ Failed to generate ${data.entity_type} "${data.name}"`);
+    },
+    onDependenciesResolved: (data) => {
+      addDependencyEdges(setNodes, setEdges)(data);
+    },
+    onToolConfigNeeded: (data) => {
+      pendingGenieConfigsRef.current = [...pendingGenieConfigsRef.current, data];
+    },
+    onComplete: () => {
+      setGenerationId(null);
+      setIsLoading(false);
+      indexMapRef.current = null;
+
+      // Append success line BEFORE clearing the ref so it still finds the message
+      appendProgressLine('\n✓ Crew generated successfully');
+      progressMsgIdRef.current = null;
+
+      // Show GenieTool config prompt if any tasks need it
+      const hasPendingConfigs = pendingGenieConfigsRef.current.length > 0;
+      if (hasPendingConfigs) {
+        const configMsgId = `msg-genie-config-${Date.now()}`;
+        const configsSnapshot = [...pendingGenieConfigsRef.current];
+        pendingGenieConfigsRef.current = [];
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: configMsgId,
+            type: 'assistant' as const,
+            content: '',
+            timestamp: new Date(),
+            metadata: { type: 'genie_config_needed', configs: configsSnapshot },
+          },
+        ]);
+      }
+
+      // Fit view to show all generated nodes.
+      // Use a longer delay when genie config prompts are shown so the
+      // user isn't disoriented by a viewport jump while reading the prompt.
+      setTimeout(() => {
+        window.dispatchEvent(new Event('fitViewToNodesInternal'));
+      }, hasPendingConfigs ? 100 : 300);
+    },
+    onFailed: (data) => {
+      setGenerationId(null);
+      setIsLoading(false);
+      indexMapRef.current = null;
+      progressMsgIdRef.current = null;
+      pendingGenieConfigsRef.current = [];
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `msg-fail-${Date.now()}`,
+          type: 'assistant' as const,
+          content: `Crew generation failed: ${data.error}`,
+          timestamp: new Date(),
+        },
+      ]);
+    },
+  }), [setNodes, setEdges, setLastExecutionJobId, setExecutingJobId, setMessages, selectedModel, layoutManagerRef, appendProgressLine]);
+
+  useCrewGenerationSSE(generationId, sseHandlers);
 
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
@@ -936,12 +1068,19 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             await handleTaskGenerated(result.generation_result as GeneratedTask);
             break;
           case 'generate_crew':
-            handleCrewGenerated(result.generation_result as GeneratedCrew);
+          case 'generate_plan': {
+            const genResult = result.generation_result as StreamingGenerationResult | GeneratedCrew;
+            if (genResult && typeof genResult === 'object' && 'type' in genResult && genResult.type === 'streaming') {
+              // Progressive SSE path
+              const streamResult = genResult as StreamingGenerationResult;
+              setGenerationId(streamResult.generation_id);
+              // Keep isLoading true — it will be cleared by onComplete/onFailed
+            } else {
+              // Legacy synchronous path (fallback)
+              handleCrewGenerated(genResult as GeneratedCrew);
+            }
             break;
-          case 'generate_plan':
-            // Plans work exactly like crews - use the same handler
-            handleCrewGenerated(result.generation_result as GeneratedCrew);
-            break;
+          }
           case 'configure_crew':
             handleConfigureCrew(result.generation_result as ConfigureCrewResult, inputRef);
             break;
@@ -1650,11 +1789,10 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             size="small"
             sx={{
               '& .MuiOutlinedInput-root': {
-                paddingRight: '120px',
+                paddingRight: '210px',
                 borderRadius: 1,
               },
               '& .MuiInputBase-inputMultiline': {
-                paddingRight: '20px',
                 overflowY: 'auto',
                 // Hide scrollbar but keep scroll functionality
                 scrollbarWidth: 'none', // Firefox

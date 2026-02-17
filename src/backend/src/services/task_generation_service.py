@@ -179,6 +179,16 @@ class TaskGenerationService:
             base_message += f"Backstory: {agent.backstory}\n"
             base_message += "\nEnsure the task aligns with this agent's expertise and goals."
 
+        # Include available tools — the template already has the full Tool Catalog with
+        # USE/DO NOT USE guidance. Here we just list which tools are enabled in this workspace.
+        if request.available_tools:
+            tool_names = ", ".join(t['name'] for t in request.available_tools)
+            base_message += (
+                f"\n\nAvailable tools for this task (only assign from this list): {tool_names}"
+                "\n\nRefer to the TOOL CATALOG above for when to use each tool."
+                " Assign at most 1-2 tools. If none are essential, return an empty tools array."
+            )
+
         # Documentation context disabled: skip vector search/embedding for task generation
         # (No documentation context injected)
 
@@ -269,6 +279,14 @@ class TaskGenerationService:
         # Set empty tools array if not present
         if "tools" not in setup:
             setup["tools"] = []
+
+        # Filter tools to only those in the available set
+        if request.available_tools and setup["tools"]:
+            allowed = {t['name'] for t in request.available_tools}
+            setup["tools"] = [
+                t for t in setup["tools"]
+                if (t.get("name") if isinstance(t, dict) else str(t)) in allowed
+            ]
 
         # Ensure advanced_config exists with defaults if not provided
         if "advanced_config" not in setup:

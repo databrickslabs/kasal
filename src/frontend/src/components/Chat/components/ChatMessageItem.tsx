@@ -22,6 +22,8 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { ChatMessage } from '../types';
 import { MessageContent } from './MessageRenderer';
 import { stripAnsiEscapes, isMarkdown } from '../utils/textProcessing';
+import { GenieSpaceConfigPrompt } from '../GenieSpaceConfigPrompt';
+import type { ToolConfigNeededData } from '../../../hooks/global/useCrewGenerationSSE';
 
 interface ChatMessageItemProps {
   message: ChatMessage;
@@ -58,9 +60,14 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
   };
 
   const renderMessageContent = () => {
+    // Genie space config prompt
+    if (message.metadata?.type === 'genie_config_needed' && Array.isArray(message.metadata.configs)) {
+      return <GenieSpaceConfigPrompt configs={message.metadata.configs as ToolConfigNeededData[]} />;
+    }
+
     // Process content to remove ANSI codes
     const processedContent = stripAnsiEscapes(message.content);
-    
+
     // Special handling for result messages
     if (message.type === 'result') {
       // Try to parse as JSON
