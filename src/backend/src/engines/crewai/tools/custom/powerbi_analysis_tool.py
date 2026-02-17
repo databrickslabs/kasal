@@ -705,19 +705,28 @@ class PowerBIAnalysisTool(BaseTool):
                             workspace_id, dataset_id, access_token, generated_dax
                         )
 
+                        # Defensive check: ensure execution_result is a dict
+                        if not isinstance(execution_result, dict):
+                            logger.error(f"[DAX EXECUTION] execution_result is not a dict! Type: {type(execution_result)}, Value: {execution_result}")
+                            execution_result = {
+                                "success": False,
+                                "error": f"Invalid execution result type: {type(execution_result).__name__}",
+                                "row_count": 0
+                            }
+
                         # Store attempt info
                         dax_attempts.append({
                             "attempt": attempt + 1,
                             "dax": generated_dax,
-                            "success": execution_result["success"],
+                            "success": execution_result.get("success", False),
                             "error": execution_result.get("error"),
                             "row_count": execution_result.get("row_count", 0)
                         })
 
                         # If successful, break out of retry loop
-                        if execution_result["success"]:
+                        if execution_result.get("success", False):
                             results["dax_execution"] = execution_result
-                            logger.info(f"✅ DAX execution successful on attempt {attempt + 1}: rows={execution_result['row_count']}")
+                            logger.info(f"✅ DAX execution successful on attempt {attempt + 1}: rows={execution_result.get('row_count', 0)}")
                             break
                         else:
                             # Failed - log and retry
