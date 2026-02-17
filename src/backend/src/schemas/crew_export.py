@@ -12,11 +12,13 @@ class ExportFormat(str, Enum):
     """Available export formats"""
     PYTHON_PROJECT = "python_project"
     DATABRICKS_NOTEBOOK = "databricks_notebook"
+    DATABRICKS_APP = "databricks_app"
 
 
 class DeploymentTarget(str, Enum):
     """Available deployment targets"""
     DATABRICKS_MODEL_SERVING = "databricks_model_serving"
+    DATABRICKS_APPS = "databricks_apps"
 
 
 class ExportOptions(BaseModel):
@@ -31,6 +33,10 @@ class ExportOptions(BaseModel):
     include_tracing: bool = Field(True, description="Include MLflow tracing/autolog (databricks_notebook only)")
     include_evaluation: bool = Field(True, description="Include MLflow evaluation cell (databricks_notebook only)")
     include_deployment: bool = Field(True, description="Include model deployment cell (databricks_notebook only)")
+
+    # Databricks App options
+    include_static_frontend: bool = Field(True, description="Include static frontend UI (databricks_app only)")
+    include_obo_auth: bool = Field(True, description="Include OBO authentication support (databricks_app only)")
 
 
 class CrewExportRequest(BaseModel):

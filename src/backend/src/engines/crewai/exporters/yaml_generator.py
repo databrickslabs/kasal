@@ -45,6 +45,11 @@ class YAMLGenerator:
             llm = model_override or agent.get('llm', 'databricks-llama-4-maverick')
             agent_config['llm'] = llm
 
+            # Add tools if present
+            agent_tools = agent.get('tools', [])
+            if agent_tools:
+                agent_config['tools'] = agent_tools
+
             # Add optional configurations if present
             optional_fields = [
                 'max_iter', 'max_rpm', 'max_execution_time', 'verbose',
@@ -183,6 +188,11 @@ class YAMLGenerator:
                             task_config['context'] = context_names
                     else:
                         task_config[field] = value
+
+            # Add tools if present
+            task_tools = task.get('tools', [])
+            if task_tools:
+                task_config['tools'] = task_tools
 
             # Add task config options if present
             if 'config' in task and isinstance(task['config'], dict):

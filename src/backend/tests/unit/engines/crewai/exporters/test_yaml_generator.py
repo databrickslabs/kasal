@@ -404,3 +404,109 @@ class TestAgentIdMapping:
         parsed = yaml.safe_load(result)
 
         assert parsed['task']['agent'] == 'test_agent'
+
+    def test_direct_agent_id_fallback(self, generator):
+        """Test that agent_id is used directly when not found in agent map."""
+        agents = [{'id': 'agent-known', 'name': 'Known Agent'}]
+        tasks = [
+            {
+                'id': 'task-1',
+                'name': 'Task',
+                'description': 'Desc',
+                'expected_output': 'Output',
+                'agent_id': 'unknown-agent-name',
+            }
+        ]
+
+        result = generator.generate_tasks_yaml(tasks, agents, include_comments=False)
+        parsed = yaml.safe_load(result)
+
+        # Should fall back to using agent_id directly
+        assert parsed['task']['agent'] == 'unknown-agent-name'
+
+    def test_null_agent_id(self, generator):
+        """Test that null agent_id results in default agent assignment."""
+        agents = [{'id': 'agent-1', 'name': 'Default Agent'}]
+        tasks = [
+            {
+                'id': 'task-1',
+                'name': 'Task',
+                'description': 'Desc',
+                'expected_output': 'Output',
+                'agent_id': None,
+            }
+        ]
+
+        result = generator.generate_tasks_yaml(tasks, agents, include_comments=False)
+        parsed = yaml.safe_load(result)
+
+        # Should assign the first agent as default since agent_id is None
+        assert parsed['task']['agent'] == 'default_agent'
+
+
+class TestTaskConfigMerging:
+    """Tests for task config dict merging into task YAML."""
+
+    @pytest.fixture
+    def generator(self):
+        return YAMLGenerator()
+
+    def test_task_config_dict_is_merged(self, generator):
+        """Test that task config dict entries appear in output."""
+        agents = [{'id': 'a1', 'name': 'Agent'}]
+        tasks = [
+            {
+                'id': 't1',
+                'name': 'Task',
+                'description': 'Desc',
+                'expected_output': 'Output',
+                'agent_id': 'a1',
+                'config': {'temperature': 0.5, 'max_tokens': 1000},
+            }
+        ]
+
+        result = generator.generate_tasks_yaml(tasks, agents, include_comments=False)
+        parsed = yaml.safe_load(result)
+
+        assert parsed['task']['temperature'] == 0.5
+        assert parsed['task']['max_tokens'] == 1000
+
+    def test_task_config_does_not_override_existing(self, generator):
+        """Test that config dict does not override existing task fields."""
+        agents = [{'id': 'a1', 'name': 'Agent'}]
+        tasks = [
+            {
+                'id': 't1',
+                'name': 'Task',
+                'description': 'Original description',
+                'expected_output': 'Output',
+                'agent_id': 'a1',
+                'config': {'description': 'Overridden description'},
+            }
+        ]
+
+        result = generator.generate_tasks_yaml(tasks, agents, include_comments=False)
+        parsed = yaml.safe_load(result)
+
+        # description should not be overridden by config
+        assert parsed['task']['description'] == 'Original description'
+
+    def test_task_config_none_values_skipped(self, generator):
+        """Test that None values in config dict are skipped."""
+        agents = [{'id': 'a1', 'name': 'Agent'}]
+        tasks = [
+            {
+                'id': 't1',
+                'name': 'Task',
+                'description': 'Desc',
+                'expected_output': 'Output',
+                'agent_id': 'a1',
+                'config': {'extra_key': None, 'real_key': 'value'},
+            }
+        ]
+
+        result = generator.generate_tasks_yaml(tasks, agents, include_comments=False)
+        parsed = yaml.safe_load(result)
+
+        assert 'extra_key' not in parsed['task']
+        assert parsed['task']['real_key'] == 'value'

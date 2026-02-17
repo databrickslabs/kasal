@@ -14,7 +14,9 @@ import {
   Alert,
   CircularProgress,
   Typography,
-  IconButton
+  IconButton,
+  ToggleButtonGroup,
+  ToggleButton,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -28,24 +30,49 @@ interface ExportCrewDialogProps {
   crewName: string;
 }
 
+const FORMAT_LABELS: Record<string, { label: string; description: string }> = {
+  [ExportFormat.DATABRICKS_NOTEBOOK]: {
+    label: 'Notebook',
+    description: 'Databricks Notebook (.ipynb) - ready for Databricks import',
+  },
+  [ExportFormat.DATABRICKS_APP]: {
+    label: 'App',
+    description:
+      'Databricks App (.zip) - FastAPI project deployable via databricks apps deploy',
+  },
+};
+
 const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
   open,
   onClose,
   crewId,
   crewName
 }) => {
-  const exportFormat = ExportFormat.DATABRICKS_NOTEBOOK; // Always export as notebook
+  const [exportFormat, setExportFormat] = useState<ExportFormat>(
+    ExportFormat.DATABRICKS_APP
+  );
   const [options, setOptions] = useState<ExportOptions>({
     include_custom_tools: true,
     include_comments: true,
     include_tracing: true,
     include_evaluation: true,
     include_deployment: true,
+    include_static_frontend: true,
+    include_obo_auth: true,
     model_override: ''
   });
   const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  const handleFormatChange = (
+    _event: React.MouseEvent<HTMLElement>,
+    newFormat: ExportFormat | null
+  ) => {
+    if (newFormat) {
+      setExportFormat(newFormat);
+    }
+  };
 
   const handleOptionChange = (option: keyof ExportOptions) => (
     event: React.ChangeEvent<HTMLInputElement>
@@ -78,13 +105,21 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
       // Then, download the file with the same options
       const blob = await CrewExportService.downloadExport(crewId, exportFormat, options);
 
-      // Determine filename
-      const filename = `${exportResponse.metadata.sanitized_name}.ipynb`;
+      // Determine filename based on format
+      const sanitizedName = exportResponse.metadata.sanitized_name;
+      const filename =
+        exportFormat === ExportFormat.DATABRICKS_APP
+          ? `${sanitizedName}_app.zip`
+          : `${sanitizedName}.ipynb`;
 
       // Trigger download
       CrewExportService.triggerDownload(blob, filename);
 
-      setSuccess('Successfully exported crew as Databricks Notebook');
+      const formatLabel =
+        exportFormat === ExportFormat.DATABRICKS_APP
+          ? 'Databricks App'
+          : 'Databricks Notebook';
+      setSuccess(`Successfully exported crew as ${formatLabel}`);
 
       // Close dialog after successful export
       setTimeout(() => {
@@ -106,6 +141,9 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
     }
   };
 
+  const isNotebook = exportFormat === ExportFormat.DATABRICKS_NOTEBOOK;
+  const isApp = exportFormat === ExportFormat.DATABRICKS_APP;
+
   return (
     <Dialog
       open={open}
@@ -114,7 +152,7 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
       fullWidth
     >
       <DialogTitle>
-        Export To Notebook: {crewName}
+        Export Crew: {crewName}
         <IconButton
           aria-label="close"
           onClick={handleClose}
@@ -131,14 +169,29 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
 
       <DialogContent dividers>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {/* Export Format Info */}
-          <Box>
-            <Typography variant="body2" color="text.secondary">
-              Exporting as Databricks Notebook (.ipynb) - ready for Databricks import
+          {/* Format Selector */}
+          <FormControl component="fieldset">
+            <FormLabel component="legend">Export Format</FormLabel>
+            <ToggleButtonGroup
+              value={exportFormat}
+              exclusive
+              onChange={handleFormatChange}
+              size="small"
+              sx={{ mt: 1 }}
+            >
+              <ToggleButton value={ExportFormat.DATABRICKS_NOTEBOOK}>
+                Databricks Notebook
+              </ToggleButton>
+              <ToggleButton value={ExportFormat.DATABRICKS_APP}>
+                Databricks App
+              </ToggleButton>
+            </ToggleButtonGroup>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+              {FORMAT_LABELS[exportFormat]?.description}
             </Typography>
-          </Box>
+          </FormControl>
 
-          {/* Export Options */}
+          {/* Common Export Options */}
           <FormControl component="fieldset">
             <FormLabel component="legend">Export Options</FormLabel>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1 }}>
@@ -163,39 +216,68 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
             </Box>
           </FormControl>
 
-          {/* Databricks Notebook Features */}
-          <FormControl component="fieldset">
-            <FormLabel component="legend">Notebook Features</FormLabel>
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1 }}>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={options.include_tracing ?? true}
-                    onChange={handleOptionChange('include_tracing')}
-                  />
-                }
-                label="Include MLflow tracing/autolog"
-              />
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={options.include_evaluation ?? true}
-                    onChange={handleOptionChange('include_evaluation')}
-                  />
-                }
-                label="Include evaluation metrics"
-              />
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={options.include_deployment ?? true}
-                    onChange={handleOptionChange('include_deployment')}
-                  />
-                }
-                label="Include deployment code"
-              />
-            </Box>
-          </FormControl>
+          {/* Notebook-specific Features */}
+          {isNotebook && (
+            <FormControl component="fieldset">
+              <FormLabel component="legend">Notebook Features</FormLabel>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1 }}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={options.include_tracing ?? true}
+                      onChange={handleOptionChange('include_tracing')}
+                    />
+                  }
+                  label="Include MLflow tracing/autolog"
+                />
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={options.include_evaluation ?? true}
+                      onChange={handleOptionChange('include_evaluation')}
+                    />
+                  }
+                  label="Include evaluation metrics"
+                />
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={options.include_deployment ?? true}
+                      onChange={handleOptionChange('include_deployment')}
+                    />
+                  }
+                  label="Include deployment code"
+                />
+              </Box>
+            </FormControl>
+          )}
+
+          {/* App-specific Features */}
+          {isApp && (
+            <FormControl component="fieldset">
+              <FormLabel component="legend">App Features</FormLabel>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1 }}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={options.include_static_frontend ?? true}
+                      onChange={handleOptionChange('include_static_frontend')}
+                    />
+                  }
+                  label="Include static frontend UI"
+                />
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={options.include_obo_auth ?? true}
+                      onChange={handleOptionChange('include_obo_auth')}
+                    />
+                  }
+                  label="Include OBO (on-behalf-of) authentication"
+                />
+              </Box>
+            </FormControl>
+          )}
 
           {/* Model Override */}
           <TextField

@@ -149,6 +149,12 @@ async def download_export(
     include_evaluation: bool = Query(True, description="Include evaluation metrics"),
     include_deployment: bool = Query(True, description="Include deployment code"),
     model_override: str = Query(None, description="Override LLM model"),
+    include_static_frontend: bool = Query(
+        True, description="Include static frontend (databricks_app only)"
+    ),
+    include_obo_auth: bool = Query(
+        True, description="Include OBO authentication (databricks_app only)"
+    ),
 ):
     """
     Download exported crew as file.
@@ -192,6 +198,8 @@ async def download_export(
             include_evaluation=include_evaluation,
             include_deployment=include_deployment,
             model_override=model_override if model_override else None,
+            include_static_frontend=include_static_frontend,
+            include_obo_auth=include_obo_auth,
         )
 
         logger.info(f"Download request with options: {export_options}")
@@ -223,6 +231,26 @@ async def download_export(
                 media_type="application/zip",
                 headers={
                     "Content-Disposition": f'attachment; filename="{sanitized_name}_project.zip"'
+                },
+            )
+
+        elif format == ExportFormat.DATABRICKS_APP:
+            # Create zip archive with _app suffix
+            zip_buffer = io.BytesIO()
+            prefix = f"{sanitized_name}_app"
+
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                for file_info in result["files"]:
+                    file_path = f"{prefix}/{file_info['path']}"
+                    zip_file.writestr(file_path, file_info["content"])
+
+            zip_buffer.seek(0)
+
+            return StreamingResponse(
+                zip_buffer,
+                media_type="application/zip",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{prefix}.zip"'
                 },
             )
 
