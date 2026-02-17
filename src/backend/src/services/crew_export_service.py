@@ -3,13 +3,15 @@ Service for exporting CrewAI crews to various formats.
 """
 
 from typing import Dict, Any, Optional, List
+from uuid import UUID
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.schemas.crew_export import ExportFormat, ExportOptions
 from src.engines.crewai.exporters import (
     PythonProjectExporter,
-    DatabricksNotebookExporter
+    DatabricksNotebookExporter,
+    DatabricksAppExporter,
 )
 from src.repositories.crew_repository import CrewRepository
 from src.repositories.agent_repository import AgentRepository
@@ -68,6 +70,8 @@ class CrewExportService:
             exporter = PythonProjectExporter()
         elif export_format == ExportFormat.DATABRICKS_NOTEBOOK:
             exporter = DatabricksNotebookExporter()
+        elif export_format == ExportFormat.DATABRICKS_APP:
+            exporter = DatabricksAppExporter()
         else:
             raise ValueError(f"Unsupported export format: {export_format}")
 
@@ -93,8 +97,9 @@ class CrewExportService:
         Returns:
             Dictionary with crew data
         """
-        # Get crew
-        crew = await self.crew_repository.get(crew_id)
+        # Get crew (convert string to UUID for the Crew model)
+        crew_uuid = UUID(crew_id) if isinstance(crew_id, str) else crew_id
+        crew = await self.crew_repository.get(crew_uuid)
         if not crew:
             raise ValueError(f"Crew {crew_id} not found")
 
