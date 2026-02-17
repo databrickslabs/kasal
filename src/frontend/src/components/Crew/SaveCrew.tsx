@@ -559,8 +559,12 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         }
         
         setError(errorMessage);
+        // Surface the error in the chat panel
+        window.dispatchEvent(new CustomEvent('saveError', { detail: { message: errorMessage } }));
       } else {
-        setError(error instanceof Error ? error.message : 'Failed to save crew');
+        const fallbackMessage = error instanceof Error ? error.message : 'Failed to save crew';
+        setError(fallbackMessage);
+        window.dispatchEvent(new CustomEvent('saveError', { detail: { message: fallbackMessage } }));
       }
     } finally {
       setIsSaving(false);

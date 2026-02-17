@@ -82,6 +82,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   onOpenLogs,
 }) => {
   const [inputValue, setInputValue] = useState('');
+  const [commandHistory, setCommandHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
   const [isLoading, setIsLoading] = useState(false);
   const [showSessionList, setShowSessionList] = useState(false);
   const [models, setModels] = useState<Record<string, ModelConfig>>({});
@@ -309,6 +311,23 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     return () => window.removeEventListener('chatCommandClick', handleCommandClick);
   }, []);
 
+  // Listen for save errors from SaveCrew/SaveFlow and surface them in chat
+  useEffect(() => {
+    const handleSaveError = (event: Event) => {
+      const { message: errorMsg } = (event as CustomEvent).detail;
+      const errorMessage: ChatMessage = {
+        id: `msg-${Date.now()}`,
+        type: 'assistant',
+        content: `❌ ${errorMsg}`,
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errorMessage]);
+      saveMessageToBackend(errorMessage);
+    };
+    window.addEventListener('saveError', handleSaveError);
+    return () => window.removeEventListener('saveError', handleSaveError);
+  }, [setMessages, saveMessageToBackend]);
+
   useEffect(() => {
     if (!isLoading) {
       const timeoutId = setTimeout(() => {
@@ -390,6 +409,10 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
+
+    // Push to command history
+    setCommandHistory(prev => [...prev, inputValue]);
+    setHistoryIndex(-1);
 
     // Check if we're collecting variables
     if (isCollectingVariables && variablesToCollect.length > 0 && currentVariableIndex < variablesToCollect.length) {
@@ -1169,6 +1192,21 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
+    } else if (e.key === 'ArrowUp' && commandHistory.length > 0) {
+      e.preventDefault();
+      const newIndex = historyIndex === -1 ? commandHistory.length - 1 : Math.max(0, historyIndex - 1);
+      setHistoryIndex(newIndex);
+      setInputValue(commandHistory[newIndex]);
+    } else if (e.key === 'ArrowDown' && historyIndex !== -1) {
+      e.preventDefault();
+      if (historyIndex >= commandHistory.length - 1) {
+        setHistoryIndex(-1);
+        setInputValue('');
+      } else {
+        const newIndex = historyIndex + 1;
+        setHistoryIndex(newIndex);
+        setInputValue(commandHistory[newIndex]);
+      }
     }
   };
   const isSendMode = inputValue.trim().length > 0;

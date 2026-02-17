@@ -330,8 +330,11 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
         }
 
         setError(errorMessage);
+        window.dispatchEvent(new CustomEvent('saveError', { detail: { message: errorMessage } }));
       } else {
-        setError(error instanceof Error ? error.message : 'Failed to save flow');
+        const fallbackMessage = error instanceof Error ? error.message : 'Failed to save flow';
+        setError(fallbackMessage);
+        window.dispatchEvent(new CustomEvent('saveError', { detail: { message: fallbackMessage } }));
       }
     } finally {
       setIsSaving(false);
