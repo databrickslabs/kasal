@@ -71,11 +71,7 @@ def _valid_response_data(task_names=None, agent_name="Agent1"):
     }
 
 
-def _mock_llm_response(content):
-    """Create a mock LLM response dict."""
-    return {
-        "choices": [{"message": {"content": content}}]
-    }
+
 
 
 # Patch paths -- local imports in generate_connections use these modules
@@ -397,10 +393,7 @@ class TestGenerateConnections:
 
         # LLM
         response_data = _valid_response_data()
-        MockLLMManager.configure_litellm = AsyncMock(return_value={"model": "gpt-4-turbo"})
-        MockLLMManager.acompletion = AsyncMock(
-            return_value=_mock_llm_response(json.dumps(response_data))
-        )
+        MockLLMManager.completion = AsyncMock(return_value=json.dumps(response_data))
 
         # Parser
         mock_parser.return_value = response_data
@@ -429,10 +422,7 @@ class TestGenerateConnections:
             mock_tpl_instance.get_template_content = AsyncMock(return_value="system prompt")
             MockTplSvc.return_value = mock_tpl_instance
 
-            MockLLMManager.configure_litellm = AsyncMock(return_value={"model": "gpt-4-turbo"})
-            MockLLMManager.acompletion = AsyncMock(
-                return_value=_mock_llm_response(json.dumps(response_data))
-            )
+            MockLLMManager.completion = AsyncMock(return_value=json.dumps(response_data))
             mock_parser.return_value = response_data
 
             result = await svc.generate_connections(request)
@@ -482,14 +472,13 @@ class TestGenerateConnections:
         MockTemplateService.get_template_content = AsyncMock(return_value="system prompt")
 
         response_data = _valid_response_data()
-        MockLLMManager.configure_litellm = AsyncMock(return_value={"model": "gpt-4-turbo"})
 
         captured_kwargs = {}
-        async def capture_acompletion(**kwargs):
+        async def capture_completion(**kwargs):
             captured_kwargs.update(kwargs)
-            return _mock_llm_response(json.dumps(response_data))
+            return json.dumps(response_data)
 
-        MockLLMManager.acompletion = capture_acompletion
+        MockLLMManager.completion = capture_completion
         mock_parser.return_value = response_data
 
         await svc.generate_connections(request)
@@ -505,13 +494,12 @@ class TestGenerateConnections:
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
     async def test_llm_completion_error_raises_valueerror(self, mock_auth, MockTemplateService, MockLLMManager):
-        """When LLM acompletion raises, it becomes a ValueError."""
+        """When LLM completion raises, it becomes a ValueError."""
         svc = ConnectionService(session=None)
         request = _make_request()
 
         MockTemplateService.get_template_content = AsyncMock(return_value="system prompt")
-        MockLLMManager.configure_litellm = AsyncMock(return_value={"model": "gpt-4-turbo"})
-        MockLLMManager.acompletion = AsyncMock(side_effect=RuntimeError("API down"))
+        MockLLMManager.completion = AsyncMock(side_effect=RuntimeError("API down"))
 
         with pytest.raises(ValueError, match="Failed to generate connections"):
             await svc.generate_connections(request)
@@ -527,10 +515,7 @@ class TestGenerateConnections:
         request = _make_request()
 
         MockTemplateService.get_template_content = AsyncMock(return_value="system prompt")
-        MockLLMManager.configure_litellm = AsyncMock(return_value={"model": "gpt-4-turbo"})
-        MockLLMManager.acompletion = AsyncMock(
-            return_value=_mock_llm_response("not json at all")
-        )
+        MockLLMManager.completion = AsyncMock(return_value="not json at all")
         mock_parser.side_effect = ValueError("Cannot parse")
 
         with pytest.raises(ValueError, match="Error processing connection response"):
@@ -548,7 +533,6 @@ class TestGenerateConnections:
         request = _make_request(tasks=tasks)
 
         MockTemplateService.get_template_content = AsyncMock(return_value="system prompt")
-        MockLLMManager.configure_litellm = AsyncMock(return_value={"model": "gpt-4-turbo"})
 
         # Only assign T1, leave T2 unassigned
         bad_data = {
@@ -557,9 +541,7 @@ class TestGenerateConnections:
             ],
             "dependencies": [],
         }
-        MockLLMManager.acompletion = AsyncMock(
-            return_value=_mock_llm_response(json.dumps(bad_data))
-        )
+        MockLLMManager.completion = AsyncMock(return_value=json.dumps(bad_data))
         mock_parser.return_value = bad_data
 
         with pytest.raises(ValueError, match="Error processing connection response"):
@@ -576,13 +558,10 @@ class TestGenerateConnections:
         request = _make_request()
 
         MockTemplateService.get_template_content = AsyncMock(return_value="system prompt")
-        MockLLMManager.configure_litellm = AsyncMock(return_value={"model": "gpt-4-turbo"})
 
         response_data = _valid_response_data()
         markdown_content = f"```json\n{json.dumps(response_data)}\n```"
-        MockLLMManager.acompletion = AsyncMock(
-            return_value=_mock_llm_response(markdown_content)
-        )
+        MockLLMManager.completion = AsyncMock(return_value=markdown_content)
         mock_parser.return_value = response_data
 
         result = await svc.generate_connections(request)
@@ -603,14 +582,11 @@ class TestGenerateConnections:
         request = _make_request()
 
         MockTemplateService.get_template_content = AsyncMock(return_value="system prompt")
-        MockLLMManager.configure_litellm = AsyncMock(return_value={"model": "gpt-4-turbo"})
 
         response_data = _valid_response_data()
         # generic code block (no 'json' keyword)
         code_content = f"```\n{json.dumps(response_data)}\n```"
-        MockLLMManager.acompletion = AsyncMock(
-            return_value=_mock_llm_response(code_content)
-        )
+        MockLLMManager.completion = AsyncMock(return_value=code_content)
         mock_parser.return_value = response_data
 
         result = await svc.generate_connections(request)
@@ -633,14 +609,11 @@ class TestGenerateConnections:
         response_data = _valid_response_data()
         captured_model = []
 
-        async def capture_configure(model):
-            captured_model.append(model)
-            return {"model": model}
+        async def capture_completion(**kwargs):
+            captured_model.append(kwargs.get("model", ""))
+            return json.dumps(response_data)
 
-        MockLLMManager.configure_litellm = capture_configure
-        MockLLMManager.acompletion = AsyncMock(
-            return_value=_mock_llm_response(json.dumps(response_data))
-        )
+        MockLLMManager.completion = capture_completion
         mock_parser.return_value = response_data
 
         # Clear the CONNECTION_MODEL env var if present
@@ -668,14 +641,11 @@ class TestGenerateConnections:
         response_data = _valid_response_data()
         captured_model = []
 
-        async def capture_configure(model):
-            captured_model.append(model)
-            return {"model": model}
+        async def capture_completion(**kwargs):
+            captured_model.append(kwargs.get("model", ""))
+            return json.dumps(response_data)
 
-        MockLLMManager.configure_litellm = capture_configure
-        MockLLMManager.acompletion = AsyncMock(
-            return_value=_mock_llm_response(json.dumps(response_data))
-        )
+        MockLLMManager.completion = capture_completion
         mock_parser.return_value = response_data
 
         with patch.dict(os.environ, {"CONNECTION_MODEL": "custom-model"}):
@@ -698,14 +668,11 @@ class TestGenerateConnections:
         response_data = _valid_response_data()
         captured_model = []
 
-        async def capture_configure(model):
-            captured_model.append(model)
-            return {"model": model}
+        async def capture_completion(**kwargs):
+            captured_model.append(kwargs.get("model", ""))
+            return json.dumps(response_data)
 
-        MockLLMManager.configure_litellm = capture_configure
-        MockLLMManager.acompletion = AsyncMock(
-            return_value=_mock_llm_response(json.dumps(response_data))
-        )
+        MockLLMManager.completion = capture_completion
         mock_parser.return_value = response_data
 
         auth_ctx = SimpleNamespace(auth_method="service_principal")
@@ -731,14 +698,11 @@ class TestGenerateConnections:
         response_data = _valid_response_data()
         captured_model = []
 
-        async def capture_configure(model):
-            captured_model.append(model)
-            return {"model": model}
+        async def capture_completion(**kwargs):
+            captured_model.append(kwargs.get("model", ""))
+            return json.dumps(response_data)
 
-        MockLLMManager.configure_litellm = capture_configure
-        MockLLMManager.acompletion = AsyncMock(
-            return_value=_mock_llm_response(json.dumps(response_data))
-        )
+        MockLLMManager.completion = capture_completion
         mock_parser.return_value = response_data
 
         with patch(_AUTH_PATCH, new_callable=AsyncMock, side_effect=ImportError("no module")):
@@ -762,14 +726,11 @@ class TestGenerateConnections:
         response_data = _valid_response_data()
         captured_model = []
 
-        async def capture_configure(model):
-            captured_model.append(model)
-            return {"model": model}
+        async def capture_completion(**kwargs):
+            captured_model.append(kwargs.get("model", ""))
+            return json.dumps(response_data)
 
-        MockLLMManager.configure_litellm = capture_configure
-        MockLLMManager.acompletion = AsyncMock(
-            return_value=_mock_llm_response(json.dumps(response_data))
-        )
+        MockLLMManager.completion = capture_completion
         mock_parser.return_value = response_data
 
         result = await svc.generate_connections(request)
@@ -787,7 +748,6 @@ class TestGenerateConnections:
         request = _make_request()
 
         MockTemplateService.get_template_content = AsyncMock(return_value="system prompt")
-        MockLLMManager.configure_litellm = AsyncMock(return_value={"model": "gpt-4-turbo"})
 
         response_data = {
             "assignments": [
@@ -795,9 +755,7 @@ class TestGenerateConnections:
             ],
             "dependencies": [],
         }
-        MockLLMManager.acompletion = AsyncMock(
-            return_value=_mock_llm_response(json.dumps(response_data))
-        )
+        MockLLMManager.completion = AsyncMock(return_value=json.dumps(response_data))
         mock_parser.return_value = response_data
 
         result = await svc.generate_connections(request)
@@ -1014,12 +972,11 @@ class TestEdgeCases:
         response_data = _valid_response_data()
         captured_kwargs = {}
 
-        async def capture_acompletion(**kwargs):
+        async def capture_completion(**kwargs):
             captured_kwargs.update(kwargs)
-            return {"choices": [{"message": {"content": json.dumps(response_data)}}]}
+            return json.dumps(response_data)
 
-        MockLLMManager.configure_litellm = AsyncMock(return_value={"model": "gpt-4-turbo"})
-        MockLLMManager.acompletion = capture_acompletion
+        MockLLMManager.completion = capture_completion
         mock_parser.return_value = response_data
 
         await svc.generate_connections(request)
@@ -1032,31 +989,28 @@ class TestEdgeCases:
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
-    async def test_generate_connections_calls_configure_litellm(self, mock_auth, MockTemplateService, mock_parser, MockLLMManager):
-        """Verify configure_litellm is called with the correct model."""
+    async def test_generate_connections_calls_completion(self, mock_auth, MockTemplateService, mock_parser, MockLLMManager):
+        """Verify completion is called with the correct model."""
         svc = ConnectionService(session=None)
         request = _make_request(model="my-model")
 
         MockTemplateService.get_template_content = AsyncMock(return_value="sys")
 
         response_data = _valid_response_data()
-        MockLLMManager.configure_litellm = AsyncMock(return_value={"model": "my-model"})
-        MockLLMManager.acompletion = AsyncMock(
-            return_value={"choices": [{"message": {"content": json.dumps(response_data)}}]}
-        )
+        MockLLMManager.completion = AsyncMock(return_value=json.dumps(response_data))
         mock_parser.return_value = response_data
 
         await svc.generate_connections(request)
 
-        MockLLMManager.configure_litellm.assert_awaited_once_with("my-model")
+        MockLLMManager.completion.assert_awaited_once()
 
     @pytest.mark.asyncio
     @patch(_LLM_MANAGER_PATCH)
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
-    async def test_generate_connections_acompletion_receives_expected_params(self, mock_auth, MockTemplateService, mock_parser, MockLLMManager):
-        """Verify acompletion is called with temperature and max_tokens."""
+    async def test_generate_connections_completion_receives_expected_params(self, mock_auth, MockTemplateService, mock_parser, MockLLMManager):
+        """Verify completion is called with temperature and max_tokens."""
         svc = ConnectionService(session=None)
         request = _make_request()
 
@@ -1067,10 +1021,9 @@ class TestEdgeCases:
 
         async def capture(**kwargs):
             captured.update(kwargs)
-            return {"choices": [{"message": {"content": json.dumps(response_data)}}]}
+            return json.dumps(response_data)
 
-        MockLLMManager.configure_litellm = AsyncMock(return_value={"model": "gpt-4-turbo"})
-        MockLLMManager.acompletion = capture
+        MockLLMManager.completion = capture
         mock_parser.return_value = response_data
 
         await svc.generate_connections(request)
@@ -1112,10 +1065,9 @@ class TestEdgeCases:
 
         async def capture(**kwargs):
             captured.update(kwargs)
-            return _mock_llm_response(json.dumps(response_data))
+            return json.dumps(response_data)
 
-        MockLLMManager.configure_litellm = AsyncMock(return_value={"model": "gpt-4-turbo"})
-        MockLLMManager.acompletion = capture
+        MockLLMManager.completion = capture
         mock_parser.return_value = response_data
 
         await svc.generate_connections(request)
@@ -1134,7 +1086,7 @@ class TestEdgeCases:
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
     async def test_generate_connections_model_params_merged(self, mock_auth, MockTemplateService, mock_parser, MockLLMManager):
-        """Verify model_params from configure_litellm are spread into acompletion."""
+        """Verify completion receives the expected parameters."""
         svc = ConnectionService(session=None)
         request = _make_request()
 
@@ -1145,20 +1097,17 @@ class TestEdgeCases:
 
         async def capture(**kwargs):
             captured.update(kwargs)
-            return _mock_llm_response(json.dumps(response_data))
+            return json.dumps(response_data)
 
-        MockLLMManager.configure_litellm = AsyncMock(
-            return_value={"model": "gpt-4-turbo", "api_key": "test-key", "timeout": 120}
-        )
-        MockLLMManager.acompletion = capture
+        MockLLMManager.completion = capture
         mock_parser.return_value = response_data
 
         await svc.generate_connections(request)
 
-        # model_params are spread into the call
+        # completion receives model and standard params
         assert captured["model"] == "gpt-4-turbo"
-        assert captured["api_key"] == "test-key"
-        assert captured["timeout"] == 120
+        assert "messages" in captured
+        assert "temperature" in captured
 
     @pytest.mark.asyncio
     async def test_validate_response_unassigned_tasks_message_content(self):

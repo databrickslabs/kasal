@@ -58,13 +58,13 @@ class EntityRelationshipRetriever:
     hard-coded patterns.
     """
     
-    def __init__(self, memory_backend_service, embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"):
+    def __init__(self, memory_backend_service, embedding_model: str = "databricks-gte-large-en"):
         """
         Initialize the relationship retriever.
-        
+
         Args:
             memory_backend_service: MemoryBackendService for all vector operations
-            embedding_model: Model for computing embeddings
+            embedding_model: Model for computing embeddings (default: databricks-gte-large-en, 1024 dims)
         """
         self.memory_backend_service = memory_backend_service
         self.embedding_model = embedding_model
@@ -492,19 +492,20 @@ class EntityRelationshipRetriever:
         return relationships
     
     async def _compute_embedding(self, text: str) -> np.ndarray:
-        """Compute embedding for text using the configured model."""
+        """Compute embedding for text using LLMManager with the configured model."""
         try:
-            # This would use your actual embedding service
-            # For now, return a placeholder - you'd implement actual embedding computation
-            # using your databricks embedding service or similar
-            
-            # Placeholder: return random embedding of appropriate dimension
-            # In real implementation, use: await self.databricks_service.compute_embedding(text)
-            return np.random.rand(384)  # Common dimension for sentence transformers
-            
+            from src.core.llm_manager import LLMManager
+
+            embedding = await LLMManager.get_embedding(text, model=self.embedding_model)
+            if embedding:
+                return np.array(embedding)
+
+            entity_logger.warning(f"LLMManager returned empty embedding for text: {text[:50]}...")
+            return np.zeros(1024)
+
         except Exception as e:
-            entity_logger.error(f"Error computing embedding: {e}")
-            return np.zeros(384)
+            entity_logger.error(f"Error computing embedding with {self.embedding_model}: {e}")
+            return np.zeros(1024)
     
     async def _build_relationship_edges(self) -> None:
         """Build relationship edges using multiple strategies."""

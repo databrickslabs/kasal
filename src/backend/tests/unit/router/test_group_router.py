@@ -746,12 +746,20 @@ class TestGroupRouter:
     
     def test_get_group_context_debug(self, client, mock_group_context):
         """Test group context debug endpoint."""
-        response = client.get("/groups/debug/context")
-        
-        assert response.status_code == 200
-        data = response.json()
-        assert data["group_id"] == "group-1"
-        assert data["group_email"] == "test@example.com"
-        assert data["user_id"] == "user-123"
-        assert data["access_token_present"] is True
-        assert "test@example.com" in data["message"]
+        # Patch settings.DEBUG_MODE since the module-level settings object
+        # is created before conftest monkeypatches the environment
+        from src.config.settings import settings as app_settings
+        original = app_settings.DEBUG_MODE
+        app_settings.DEBUG_MODE = True
+        try:
+            response = client.get("/groups/debug/context")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["group_id"] == "group-1"
+            assert data["group_email"] == "test@example.com"
+            assert data["user_id"] == "user-123"
+            assert data["access_token_present"] is True
+            assert "test@example.com" in data["message"]
+        finally:
+            app_settings.DEBUG_MODE = original

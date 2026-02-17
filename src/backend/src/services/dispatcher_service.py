@@ -12,8 +12,6 @@ import re
 from contextlib import nullcontext
 from typing import Any, Dict, List, Optional, Set
 
-import litellm
-
 from src.core.llm_manager import LLMManager
 from src.schemas.crew import CrewGenerationRequest, CrewGenerationResponse
 from src.schemas.dispatcher import DispatcherRequest, DispatcherResponse, IntentType
@@ -736,22 +734,7 @@ Please analyze this message and provide your intent classification, considering 
         ]
 
         try:
-            # Configure litellm using the LLMManager
-            model_params = await LLMManager.configure_litellm(model)
-
-            # Prepare completion parameters
-            completion_params = {
-                **model_params,
-                "messages": messages,
-                "temperature": 0.3,  # Lower temperature for more consistent intent detection
-                "max_tokens": 4000,
-            }
-
-            # With litellm 1.75.8+, GPT-5 is natively supported
-            # No need for custom handlers - litellm handles max_completion_tokens automatically
-
             # Generate completion with explicit span for tracing
-            # LiteLLM autolog will create nested spans under this
             try:
                 mlflow = __import__("mlflow")
                 if hasattr(mlflow, "start_span"):
@@ -766,25 +749,32 @@ Please analyze this message and provide your intent classification, considering 
                                     "temperature": 0.3,
                                 }
                             )
-                        response = await LLMManager.acompletion(**completion_params)
+                        content = await LLMManager.completion(
+                            messages=messages,
+                            model=model,
+                            temperature=0.3,
+                            max_tokens=4000,
+                        )
                         if hasattr(intent_span, "set_outputs"):
                             intent_span.set_outputs(
                                 {
-                                    "response": response["choices"][0]["message"][
-                                        "content"
-                                    ][
-                                        :500
-                                    ]  # Truncate for brevity
+                                    "response": content[:500]  # Truncate for brevity
                                 }
                             )
                 else:
-                    response = await LLMManager.acompletion(**completion_params)
+                    content = await LLMManager.completion(
+                        messages=messages,
+                        model=model,
+                        temperature=0.3,
+                        max_tokens=4000,
+                    )
             except ImportError:
-                response = await LLMManager.acompletion(**completion_params)
-
-            # Extract content - handle both dict and ModelResponse objects
-            # litellm 1.75.8 returns ModelResponse (Pydantic) objects
-            content = response["choices"][0]["message"]["content"]
+                content = await LLMManager.completion(
+                    messages=messages,
+                    model=model,
+                    temperature=0.3,
+                    max_tokens=4000,
+                )
 
             # Check if content is empty
             if not content or not content.strip():

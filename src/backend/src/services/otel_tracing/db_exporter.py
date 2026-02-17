@@ -64,6 +64,8 @@ SPAN_NAME_MAP: Dict[str, str] = {
     "kasal.mcp.tool_completed": "mcp_tool_completed",
     "kasal.hitl.feedback_requested": "hitl_feedback_requested",
     "kasal.hitl.feedback_received": "hitl_feedback_received",
+    # LLM retry backoff (emitted by DatabricksRetryLLM)
+    "kasal.llm.retry": "llm_retry",
 }
 
 
@@ -119,7 +121,9 @@ def _extract_event_source(span: ReadableSpan) -> str:
 
     # CrewAI instrumentor + kasal bridge + OpenInference graph node
     for key in (
-        "crewai.agent.role", "kasal.agent_name", "agent.role",
+        "crewai.agent.role",
+        "kasal.agent_name",
+        "agent.role",
         "graph.node.id",
     ):
         val = attrs.get(key)
@@ -148,7 +152,9 @@ def _extract_event_context(span: ReadableSpan) -> str:
     attrs = dict(span.attributes) if span.attributes else {}
 
     for key in (
-        "crewai.task.description", "kasal.task_name", "task.description",
+        "crewai.task.description",
+        "kasal.task_name",
+        "task.description",
         "formatted_description",
     ):
         val = attrs.get(key)
@@ -225,7 +231,7 @@ def _extract_output(span: ReadableSpan) -> Any:
     extra: Dict[str, Any] = {}
     for key, val in attrs.items():
         if key.startswith("kasal.extra."):
-            extra[key[len("kasal.extra."):]] = val
+            extra[key[len("kasal.extra.") :]] = val
     if extra:
         output["extra_data"] = extra
 
@@ -245,7 +251,7 @@ def _extract_trace_metadata(span: ReadableSpan) -> Dict[str, Any]:
     prefix = "kasal.extra."
     for key, val in attrs.items():
         if key.startswith(prefix) and val is not None:
-            metadata[key[len(prefix):]] = val
+            metadata[key[len(prefix) :]] = val
 
     # CrewAI instrumentor IDs
     for key, meta_key in (
@@ -284,7 +290,7 @@ def _extract_trace_metadata(span: ReadableSpan) -> Dict[str, Any]:
     for key in ("formatted_description", "formatted_expected_output"):
         val = attrs.get(key)
         if val:
-            metadata[key] = str(val)[:1000]
+            metadata[key] = str(val)
 
     return metadata
 
@@ -311,6 +317,30 @@ class KasalDBSpanExporter(SpanExporter):
         self._group_context = group_context
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._total_exported = 0
+
+        # Dedicated NullPool engine for thread-pool workers.
+        # NullPool closes connections immediately when sessions end,
+        # preventing MissingGreenlet errors that occur when aiosqlite
+        # connections outlive the asyncio.run() event loop in worker threads.
+        from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+        from sqlalchemy.pool import NullPool
+        from src.config.settings import settings
+
+        connect_args = {}
+        if str(settings.DATABASE_URI).startswith("sqlite"):
+            connect_args["check_same_thread"] = False
+
+        self._thread_engine = create_async_engine(
+            str(settings.DATABASE_URI),
+            poolclass=NullPool,
+            connect_args=connect_args,
+        )
+        self._thread_session_factory = async_sessionmaker(
+            self._thread_engine,
+            expire_on_commit=False,
+            autoflush=False,
+            autocommit=False,
+        )
 
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
         logger.info(
@@ -362,9 +392,7 @@ class KasalDBSpanExporter(SpanExporter):
             ),
             # OTel-native fields
             "span_name": span.name,
-            "status_code": (
-                span.status.status_code.name if span.status else "UNSET"
-            ),
+            "status_code": (span.status.status_code.name if span.status else "UNSET"),
             "duration_ms": (
                 round((span.end_time - span.start_time) / 1_000_000)
                 if span.start_time and span.end_time
@@ -374,12 +402,8 @@ class KasalDBSpanExporter(SpanExporter):
 
         # Group context
         if self._group_context:
-            record["group_id"] = getattr(
-                self._group_context, "primary_group_id", None
-            )
-            record["group_email"] = getattr(
-                self._group_context, "group_email", None
-            )
+            record["group_id"] = getattr(self._group_context, "primary_group_id", None)
+            record["group_email"] = getattr(self._group_context, "group_email", None)
 
         return record
 
@@ -388,26 +412,27 @@ class KasalDBSpanExporter(SpanExporter):
 
         Creates a new asyncio event loop in the thread (safe — ThreadPoolExecutor
         threads never have a pre-existing loop) and uses ExecutionTraceService
-        through get_smart_db_session for proper service → repository → DB flow.
+        through a dedicated NullPool session factory.  NullPool ensures every
+        connection is closed before asyncio.run() tears down the event loop,
+        preventing MissingGreenlet errors from dangling aiosqlite connections.
         """
         import asyncio
 
         async def _write_async():
-            from src.db.database_router import get_smart_db_session
             from src.services.execution_trace_service import ExecutionTraceService
 
             written = 0
-            for record in records:
-                try:
-                    # Clean output for JSON serialization
-                    output = record.get("output", {})
-                    if output:
-                        cleaned = json.loads(json.dumps(output, cls=UUIDEncoder))
-                    else:
-                        cleaned = {}
+            async with self._thread_session_factory() as session:
+                svc = ExecutionTraceService(session)
+                for record in records:
+                    try:
+                        # Clean output for JSON serialization
+                        output = record.get("output", {})
+                        if output:
+                            cleaned = json.loads(json.dumps(output, cls=UUIDEncoder))
+                        else:
+                            cleaned = {}
 
-                    async for session in get_smart_db_session():
-                        svc = ExecutionTraceService(session)
                         await svc.create_trace(
                             {
                                 "job_id": record["job_id"],
@@ -427,16 +452,20 @@ class KasalDBSpanExporter(SpanExporter):
                             }
                         )
                         written += 1
-                except ValueError as ve:
-                    logger.warning(
-                        f"[OTel-DB][{self._job_id}] ValueError writing trace "
-                        f"(job may not exist yet): {ve}"
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"[OTel-DB][{self._job_id}] Failed to write trace: {e}",
-                        exc_info=True,
-                    )
+                    except ValueError as ve:
+                        logger.warning(
+                            f"[OTel-DB][{self._job_id}] ValueError writing trace "
+                            f"(job may not exist yet): {ve}"
+                        )
+                    except Exception as e:
+                        logger.error(
+                            f"[OTel-DB][{self._job_id}] Failed to write trace: {e}",
+                            exc_info=True,
+                        )
+
+                # Explicit commit — not using get_db() DI which auto-commits
+                if written:
+                    await session.commit()
 
             if written:
                 logger.info(

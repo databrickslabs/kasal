@@ -3,9 +3,64 @@ Unit tests for EmbedderConfigBuilder
 
 Includes regression test for critical bug fix where crew_kwargs was replaced with empty dict.
 """
+import os
+import sys
+from unittest.mock import MagicMock
+
+# Set database type to sqlite for testing
+os.environ.setdefault("DATABASE_TYPE", "sqlite")
+os.environ.setdefault("SQLITE_DB_PATH", ":memory:")
+
+# Mock heavy third-party modules that are not available in the test environment.
+# Must be done BEFORE any src.engines imports due to deep import chains.
+_crewai_mock = MagicMock()
+_crewai_tools_mock = MagicMock()
+
+_MODULES_TO_MOCK = {
+    'crewai': _crewai_mock,
+    'crewai.tools': _crewai_mock.tools,
+    'crewai.events': _crewai_mock.events,
+    'crewai.flow': _crewai_mock.flow,
+    'crewai.flow.flow': _crewai_mock.flow.flow,
+    'crewai.flow.persistence': _crewai_mock.flow.persistence,
+    'crewai.llm': _crewai_mock.llm,
+    'crewai.memory': _crewai_mock.memory,
+    'crewai.memory.storage': _crewai_mock.memory.storage,
+    'crewai.memory.storage.rag_storage': _crewai_mock.memory.storage.rag_storage,
+    'crewai.project': _crewai_mock.project,
+    'crewai.tasks': _crewai_mock.tasks,
+    'crewai.tasks.llm_guardrail': _crewai_mock.tasks.llm_guardrail,
+    'crewai.tasks.task_output': _crewai_mock.tasks.task_output,
+    'crewai.utilities': _crewai_mock.utilities,
+    'crewai.utilities.converter': _crewai_mock.utilities.converter,
+    'crewai.utilities.evaluators': _crewai_mock.utilities.evaluators,
+    'crewai.utilities.evaluators.task_evaluator': _crewai_mock.utilities.evaluators.task_evaluator,
+    'crewai.utilities.exceptions': _crewai_mock.utilities.exceptions,
+    'crewai.utilities.internal_instructor': _crewai_mock.utilities.internal_instructor,
+    'crewai.utilities.paths': _crewai_mock.utilities.paths,
+    'crewai.utilities.printer': _crewai_mock.utilities.printer,
+    'crewai.knowledge': _crewai_mock.knowledge,
+    'crewai_tools': _crewai_tools_mock,
+    'asyncpg': MagicMock(),
+    'chromadb': MagicMock(),
+}
+
+_originals = {}
+for _mod_name, _mock_obj in _MODULES_TO_MOCK.items():
+    _originals[_mod_name] = sys.modules.get(_mod_name)
+    sys.modules[_mod_name] = _mock_obj
+
 import pytest
 from unittest.mock import patch, AsyncMock
 from src.engines.crewai.config.embedder_config_builder import EmbedderConfigBuilder
+
+# Immediately restore original modules after our import so that other test
+# files collected later by pytest do not see the mocked crewai modules.
+for _mod_name, _original in _originals.items():
+    if _original is None:
+        sys.modules.pop(_mod_name, None)
+    else:
+        sys.modules[_mod_name] = _original
 
 
 class TestEmbedderConfigBuilder:
@@ -206,3 +261,79 @@ class TestEmbedderConfigBuilder:
             # Embedder should be configured
             assert 'embedder' in result_kwargs
             assert result_kwargs['embedder']['provider'] == 'openai'
+
+    @pytest.mark.asyncio
+    async def test_openai_embedder_default_model_is_text_embedding_3_large(self):
+        """
+        Verify the default OpenAI embedding model is 'text-embedding-3-large'
+        (changed from 'text-embedding-3-small').
+
+        When no model is specified in the embedder config, the OpenAI embedder
+        should default to 'text-embedding-3-large' for higher quality embeddings.
+        """
+        config = {
+            'agents': [
+                {
+                    'role': 'test_agent',
+                    'embedder_config': {
+                        'provider': 'openai',
+                        'config': {}  # No model specified - should use default
+                    }
+                }
+            ]
+        }
+
+        builder = EmbedderConfigBuilder(config, user_token="test_token")
+
+        initial_crew_kwargs = {
+            'agents': ['agent1'],
+            'tasks': ['task1'],
+            'process': 'sequential',
+            'verbose': True,
+            'memory': True
+        }
+
+        with patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', new_callable=AsyncMock) as mock_api_key:
+            mock_api_key.return_value = 'test_openai_key'
+
+            result_kwargs, custom_embedder, embedder_config = await builder.configure_embedder(initial_crew_kwargs)
+
+            # Embedder should be configured with the new default model
+            assert 'embedder' in result_kwargs
+            assert result_kwargs['embedder']['provider'] == 'openai'
+            assert result_kwargs['embedder']['config']['model'] == 'text-embedding-3-large'
+
+    @pytest.mark.asyncio
+    async def test_openai_embedder_explicit_model_overrides_default(self):
+        """
+        Verify that an explicitly specified OpenAI model overrides the default.
+        """
+        config = {
+            'agents': [
+                {
+                    'role': 'test_agent',
+                    'embedder_config': {
+                        'provider': 'openai',
+                        'config': {'model': 'text-embedding-ada-002'}
+                    }
+                }
+            ]
+        }
+
+        builder = EmbedderConfigBuilder(config, user_token="test_token")
+
+        initial_crew_kwargs = {
+            'agents': ['agent1'],
+            'tasks': ['task1'],
+            'process': 'sequential',
+            'verbose': True,
+            'memory': True
+        }
+
+        with patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', new_callable=AsyncMock) as mock_api_key:
+            mock_api_key.return_value = 'test_openai_key'
+
+            result_kwargs, custom_embedder, embedder_config = await builder.configure_embedder(initial_crew_kwargs)
+
+            # Explicit model should be used, not the default
+            assert result_kwargs['embedder']['config']['model'] == 'text-embedding-ada-002'

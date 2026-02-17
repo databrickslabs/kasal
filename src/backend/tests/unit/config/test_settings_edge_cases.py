@@ -163,26 +163,22 @@ class TestSettingsEdgeCases:
         # String fields
         assert isinstance(test_settings.PROJECT_NAME, str)
         assert isinstance(test_settings.API_V1_STR, str)
-        assert isinstance(test_settings.SECRET_KEY, str)
-        assert isinstance(test_settings.ALGORITHM, str)
         assert isinstance(test_settings.LOG_LEVEL, str)
         assert isinstance(test_settings.SERVER_HOST, str)
-        
+
         # Integer fields
-        assert isinstance(test_settings.ACCESS_TOKEN_EXPIRE_MINUTES, int)
         assert isinstance(test_settings.SERVER_PORT, int)
-        
+
         # Boolean fields
         assert isinstance(test_settings.DOCS_ENABLED, bool)
         assert isinstance(test_settings.DEBUG_MODE, bool)
         assert isinstance(test_settings.AUTO_SEED_DATABASE, bool)
-        
+
         # List fields
         assert isinstance(test_settings.CORS_ORIGINS, list)
         assert isinstance(test_settings.BACKEND_CORS_ORIGINS, list)
-        
+
         # Verify critical default values
-        assert test_settings.ACCESS_TOKEN_EXPIRE_MINUTES == 60 * 24 * 8
         assert test_settings.API_V1_STR == "/api/v1"
         assert test_settings.SERVER_PORT == 8000
     

@@ -261,6 +261,8 @@ def run_flow_in_process(
         # telemetry in the parent. Subprocess needs OTel enabled for both
         # Kasal's own trace pipeline AND (optionally) MLflow tracing.
         _os_crewai_env.environ["OTEL_SDK_DISABLED"] = "false"
+        # Keep CrewAI telemetry disabled to prevent HTTP requests to docs.crewai.com
+        _os_crewai_env.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
 
         # Configure subprocess logging
         async_logger = configure_subprocess_logging(execution_id, process_type="flow")
@@ -1489,7 +1491,7 @@ class ProcessFlowExecutor:
         from sqlalchemy.pool import NullPool
 
         postgres_user = settings.POSTGRES_USER or 'postgres'
-        postgres_password = settings.POSTGRES_PASSWORD or 'postgres'
+        postgres_password = settings.POSTGRES_PASSWORD
         postgres_server = settings.POSTGRES_SERVER or 'localhost'
         postgres_port = settings.POSTGRES_PORT or '5432'
         postgres_db = settings.POSTGRES_DB or 'kasal'

@@ -17,24 +17,14 @@ import {
   SelectChangeEvent
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
+import { useModelConfigStore } from '../../store/modelConfig';
 import { ModelService } from '../../api/ModelService';
-import { Models } from '../../types/models';
-
-// Default fallback model when API is down
-const DEFAULT_FALLBACK_MODEL = {
-  'databricks-llama-4-maverick': {
-    name: 'databricks-llama-4-maverick',
-    temperature: 0.7,
-    context_window: 128000,
-    max_output_tokens: 4096,
-    enabled: true
-  }
-};
 
 export interface LLMSelectionDialogProps {
   open: boolean;
   onClose: () => void;
   onSelectLLM: (model: string) => void;
+  currentLLM?: string;
   isUpdating?: boolean;
 }
 
@@ -42,59 +32,57 @@ const LLMSelectionDialog: React.FC<LLMSelectionDialogProps> = ({
   open,
   onClose,
   onSelectLLM,
+  currentLLM = '',
   isUpdating = false
 }) => {
   const [selectedModel, setSelectedModel] = useState<string>('');
-  const [models, setModels] = useState<Models>(DEFAULT_FALLBACK_MODEL);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const selectRef = useRef<HTMLInputElement>(null);
 
-  // Fetch models when the dialog opens
+  // Read models from the Zustand store
+  const storeModels = useModelConfigStore(state => state.models);
+  const setStoreModels = useModelConfigStore(state => state.setModels);
+
+  // Ensure store has active models; refresh if empty or stale
   useEffect(() => {
     if (open) {
-      const fetchModels = async () => {
+      setSelectedModel(currentLLM);
+
+      const ensureModels = async () => {
+        // If store already has models beyond defaults, use them directly
+        if (Object.keys(storeModels).length > 1) {
+          return;
+        }
         setIsLoading(true);
         try {
           const modelService = ModelService.getInstance();
-          const fetchedModels = await modelService.getActiveModels();
-          
-          // Only update models if we got at least one model back
-          if (Object.keys(fetchedModels).length > 0) {
-            setModels(fetchedModels);
-          } else {
-            console.warn('No models returned from API, using fallback model');
+          const fetched = await modelService.getActiveModels();
+          if (Object.keys(fetched).length > 0) {
+            setStoreModels(fetched);
           }
         } catch (error) {
           console.error('Error fetching models:', error);
-          // Fallback to synchronous method if async fails
           try {
             const modelService = ModelService.getInstance();
-            const fallbackModels = modelService.getActiveModelsSync();
-            if (Object.keys(fallbackModels).length > 0) {
-              setModels(fallbackModels);
-            } else {
-              console.warn('No fallback models available, using default model');
+            const fallback = modelService.getActiveModelsSync();
+            if (Object.keys(fallback).length > 0) {
+              setStoreModels(fallback);
             }
           } catch (fallbackError) {
             console.error('Error fetching fallback models:', fallbackError);
           }
         } finally {
           setIsLoading(false);
-          // Focus on the select when loading completes
-          setTimeout(() => {
-            if (selectRef.current) {
-              selectRef.current.focus();
-            }
-          }, 100);
+          setTimeout(() => selectRef.current?.focus(), 100);
         }
       };
 
-      fetchModels();
-    } else {
-      // Reset selection when dialog closes
-      setSelectedModel('');
+      void ensureModels();
     }
-  }, [open]);
+  }, [open, currentLLM, storeModels, setStoreModels]);
+
+  const models = storeModels;
+  const modelKeys = Object.keys(models);
 
   const handleSelectModel = (event: SelectChangeEvent<string>) => {
     setSelectedModel(event.target.value);
@@ -102,35 +90,22 @@ const LLMSelectionDialog: React.FC<LLMSelectionDialogProps> = ({
 
   // Get a valid select value to avoid MUI errors
   const getValidSelectValue = (): string => {
-    // During loading or if no models available, return empty string
-    if (isLoading || Object.keys(models).length === 0) {
-      return '';
-    }
-    
-    // If selectedModel is valid, return it
-    if (selectedModel && models[selectedModel]) {
-      return selectedModel;
-    }
-    
-    // Otherwise return empty string
+    if (isLoading || modelKeys.length === 0) return '';
+    if (selectedModel && models[selectedModel]) return selectedModel;
     return '';
   };
 
   const handleClose = () => {
-    setSelectedModel('');
     onClose();
   };
 
   const handleApply = useCallback(() => {
     if (selectedModel && models[selectedModel]) {
       onSelectLLM(selectedModel);
-      // Close the dialog after applying
-      setSelectedModel('');
       onClose();
     }
   }, [selectedModel, onSelectLLM, models, onClose]);
 
-  // Handle Enter key press
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Enter' && selectedModel && !isUpdating && !isLoading) {
       event.preventDefault();
@@ -138,15 +113,12 @@ const LLMSelectionDialog: React.FC<LLMSelectionDialogProps> = ({
     }
   };
 
-  // Convert the models object to an array of model keys
-  const modelKeys = Object.keys(models);
-
   return (
-    <Dialog 
-      open={open} 
-      onClose={handleClose} 
-      maxWidth="sm" 
-      fullWidth 
+    <Dialog
+      open={open}
+      onClose={handleClose}
+      maxWidth="sm"
+      fullWidth
       onKeyDown={handleKeyDown}
     >
       <DialogTitle>
@@ -181,8 +153,7 @@ const LLMSelectionDialog: React.FC<LLMSelectionDialogProps> = ({
                 label="Select Model"
                 inputRef={selectRef}
               >
-                {Object.keys(models).length === 0 ? (
-                  // Always provide an empty option if no models are available
+                {modelKeys.length === 0 ? (
                   <MenuItem value="">No models available</MenuItem>
                 ) : (
                   modelKeys.map((key) => (
@@ -203,9 +174,9 @@ const LLMSelectionDialog: React.FC<LLMSelectionDialogProps> = ({
       </DialogContent>
       <DialogActions>
         <Button onClick={handleClose}>Cancel</Button>
-        <Button 
-          onClick={handleApply} 
-          color="primary" 
+        <Button
+          onClick={handleApply}
+          color="primary"
           disabled={!getValidSelectValue() || isUpdating || isLoading}
         >
           {isUpdating ? <CircularProgress size={24} /> : 'Select'}
@@ -215,4 +186,4 @@ const LLMSelectionDialog: React.FC<LLMSelectionDialogProps> = ({
   );
 };
 
-export default LLMSelectionDialog; 
+export default LLMSelectionDialog;

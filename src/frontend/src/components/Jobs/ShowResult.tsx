@@ -1049,68 +1049,72 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
         }
       }}
     >
-      <DialogTitle sx={{ px: 3, py: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        {/* View Mode Toggle - only show if HTML content is detected */}
-        {(() => {
-          const hasHTMLContent = Object.values(memoizedResult || {}).some(value =>
-            typeof value === 'string' && isHTML(value)
-          );
-          return hasHTMLContent ? (
-            <ToggleButtonGroup
-              value={viewMode}
-              exclusive
-              onChange={(_, newMode) => newMode && setViewMode(newMode)}
-              size="small"
-              sx={{ height: 32 }}
-            >
-              <ToggleButton value="code" aria-label="code view">
-                <CodeIcon sx={{ mr: 0.5, fontSize: 18 }} />
-                Code
-              </ToggleButton>
-              <ToggleButton value="html" aria-label="html view">
-                <WebIcon sx={{ mr: 0.5, fontSize: 18 }} />
-                HTML
-              </ToggleButton>
-            </ToggleButtonGroup>
-          ) : (
-            <Box />
-          );
-        })()}
+      <DialogTitle sx={{ px: 3, py: 1, pb: 0 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+          {/* Left side: View Mode Toggle (only when HTML content is present) */}
+          {(() => {
+            const hasHTMLContent = Object.values(memoizedResult || {}).some(value =>
+              typeof value === 'string' && isHTML(value)
+            );
+            return hasHTMLContent ? (
+              <ToggleButtonGroup
+                value={viewMode}
+                exclusive
+                onChange={(_, newMode) => newMode && setViewMode(newMode)}
+                size="small"
+                sx={{ height: 32 }}
+              >
+                <ToggleButton value="code" aria-label="code view">
+                  <CodeIcon sx={{ mr: 0.5, fontSize: 18 }} />
+                  Code
+                </ToggleButton>
+                <ToggleButton value="html" aria-label="html view">
+                  <WebIcon sx={{ mr: 0.5, fontSize: 18 }} />
+                  HTML
+                </ToggleButton>
+              </ToggleButtonGroup>
+            ) : (
+              <Box />
+            );
+          })()}
 
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <Tooltip title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}>
-            <IconButton
-              onClick={handleFullscreen}
-              size="small"
-              sx={{
-                color: 'text.secondary',
-                transition: 'all 0.2s',
-                '&:hover': {
-                  color: 'primary.main',
-                  backgroundColor: 'action.hover',
-                }
-              }}
-            >
-              {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
-            </IconButton>
-          </Tooltip>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+              <>
+                <Tooltip title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}>
+                  <IconButton
+                    onClick={handleFullscreen}
+                    size="small"
+                    sx={{
+                      color: 'text.secondary',
+                      transition: 'all 0.2s',
+                      '&:hover': {
+                        color: 'primary.main',
+                        backgroundColor: 'action.hover',
+                      }
+                    }}
+                  >
+                    {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+                  </IconButton>
+                </Tooltip>
 
-          <Tooltip title={copied ? "Copied!" : "Copy to clipboard"}>
-            <IconButton
-              onClick={handleCopyToClipboard}
-              size="small"
-              sx={{
-                color: copied ? 'success.main' : 'text.secondary',
-                transition: 'all 0.2s',
-                '&:hover': {
-                  color: 'primary.main',
-                  backgroundColor: 'action.hover',
-                }
-              }}
-            >
-              {copied ? <CheckIcon /> : <ContentCopyIcon />}
-            </IconButton>
-          </Tooltip>
+                <Tooltip title={copied ? "Copied!" : "Copy to clipboard"}>
+                  <IconButton
+                    onClick={handleCopyToClipboard}
+                    size="small"
+                    sx={{
+                      color: copied ? 'success.main' : 'text.secondary',
+                      transition: 'all 0.2s',
+                      '&:hover': {
+                        color: 'primary.main',
+                        backgroundColor: 'action.hover',
+                      }
+                    }}
+                  >
+                    {copied ? <CheckIcon /> : <ContentCopyIcon />}
+                  </IconButton>
+                </Tooltip>
+              </>
+          </Box>
         </Box>
       </DialogTitle>
       <DialogContent sx={{
@@ -1223,7 +1227,8 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
   return (
     prevProps.open === nextProps.open &&
     prevProps.onClose === nextProps.onClose &&
-    JSON.stringify(prevProps.result) === JSON.stringify(nextProps.result)
+    JSON.stringify(prevProps.result) === JSON.stringify(nextProps.result) &&
+    prevProps.run?.job_id === nextProps.run?.job_id
   );
 });
 

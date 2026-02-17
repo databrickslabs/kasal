@@ -207,7 +207,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
   // Extract variables from nodes
   const extractVariablesFromNodes = (workflowNodes: FlowNode[]): string[] => {
-    const variablePattern = /\{([^}]+)\}/g;
+    const variablePattern = /\{([a-zA-Z_][a-zA-Z0-9_-]*)\}/g;
     const foundVariables = new Set<string>();
 
     workflowNodes.forEach(node => {

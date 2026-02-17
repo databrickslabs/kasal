@@ -268,7 +268,7 @@ class EmbedderConfigBuilder:
                     'provider': 'openai',
                     'config': {
                         'api_key': openai_key,
-                        'model': config.get('model', 'text-embedding-3-small')
+                        'model': config.get('model', 'text-embedding-3-large')
                     }
                 }
                 logger.info(f"Configured CrewAI embedder for OpenAI: {crew_kwargs['embedder']}")

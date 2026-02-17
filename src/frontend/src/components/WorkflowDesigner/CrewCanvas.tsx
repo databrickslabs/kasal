@@ -136,37 +136,6 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   const reactFlowInstanceRef = useRef<ReactFlowInstance | null>(null);
   const { isDarkMode } = useThemeManager();
 
-  
-  // Add CSS for proper stacking order (edges behind nodes)
-  useEffect(() => {
-    const styleId = 'reactflow-stacking-order-fix';
-    // Remove any existing style to prevent conflicts
-    const existingStyle = document.getElementById(styleId);
-    if (existingStyle) {
-      existingStyle.remove();
-    }
-    
-    const style = document.createElement('style');
-    style.id = styleId;
-    style.textContent = `
-      /* Ensure proper edge rendering without z-index conflicts */
-      .react-flow__edge-path {
-        pointer-events: stroke;
-      }
-      .react-flow__edge {
-        pointer-events: all;
-      }
-    `;
-    document.head.appendChild(style);
-    
-    return () => {
-      const styleElement = document.getElementById(styleId);
-      if (styleElement) {
-        styleElement.remove();
-      }
-    };
-  }, []);
-  
   const errorStore = useErrorStore();
   const _runStatusStore = useRunStatusStore();
   
@@ -363,33 +332,13 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   }, [errorStore]);
 
   const nodesWithDimensions = React.useMemo(() => {
-    console.log('[CrewCanvas] Filtering nodes:', {
-      totalNodes: nodes.length,
-      nodeTypes: nodes.map(n => ({ id: n.id, type: n.type }))
-    });
-
     // Filter out any flow-related nodes first
     const crewNodes = nodes.filter(node => {
       // Exclude flow-related nodes
       if (!node || typeof node !== 'object') return false;
 
       const nodeType = node.type?.toLowerCase() || '';
-      const isIncluded = nodeType === 'agentnode' || nodeType === 'tasknode' || nodeType === 'managernode';
-
-      if (node.type === 'managerNode') {
-        console.log('[CrewCanvas] Manager node filter check:', {
-          type: node.type,
-          lowercase: nodeType,
-          isIncluded
-        });
-      }
-
-      return isIncluded;
-    });
-
-    console.log('[CrewCanvas] Filtered nodes:', {
-      count: crewNodes.length,
-      hasManager: crewNodes.some(n => n.type === 'managerNode')
+      return nodeType === 'agentnode' || nodeType === 'tasknode' || nodeType === 'managernode';
     });
 
     return crewNodes.map(node => {
@@ -442,13 +391,6 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
     try {
       const crewNodeIds = new Set(nodes.map(node => node.id));
 
-      console.log('[CrewCanvas] Building crewEdges:', {
-        totalNodes: nodes.length,
-        totalEdges: edges.length,
-        nodeIds: Array.from(crewNodeIds),
-        hasManagerNode: crewNodeIds.has('manager-node')
-      });
-
       // First, deduplicate edges by creating a Map with edge key
       const edgeMap = new Map<string, Edge>();
 
@@ -467,31 +409,10 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
 
           // Only keep the first occurrence of each edge
           if (!edgeMap.has(edgeKey)) {
-            // Ensure all edges have animated property set correctly
-            // Task-to-task edges should always be animated
-            const isTaskToTask = edge.source.startsWith('task-') && edge.target.startsWith('task-');
-            const isAgentToTask = edge.source.startsWith('agent-') && edge.target.startsWith('task-');
-
-            // Set animated to true for all agent-task and task-task edges
-            const enhancedEdge = {
-              ...edge,
-              animated: isTaskToTask || isAgentToTask ? true : (edge.animated || false)
-            };
-
-            edgeMap.set(edgeKey, enhancedEdge);
-
-            if (isManagerEdge) {
-              console.log('[CrewCanvas] Added manager edge:', edgeKey);
-            }
+            // Edge properties (animated, style) are already set by workflow.ts
+            // No need for duplicate enhancement here
+            edgeMap.set(edgeKey, edge);
           }
-        } else if (isManagerEdge) {
-          console.log('[CrewCanvas] Manager edge filtered out:', {
-            id: edge.id,
-            source: edge.source,
-            target: edge.target,
-            hasSource: crewNodeIds.has(edge.source),
-            hasTarget: crewNodeIds.has(edge.target)
-          });
         }
       });
 
@@ -506,26 +427,12 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
         // Preserve the animated property from the edge (don't override it)
       }));
 
-      console.log('[CrewCanvas] Final edges:', edgesWithType.length, 'Manager edges:', edgesWithType.filter(e => e.source === 'manager-node').length);
-      console.log('[CrewCanvas] Edge IDs:', edgesWithType.map(e => e.id));
-
       return edgesWithType;
     } catch (error) {
 
       return [];
     }
   }, [edges, nodes]); // Removed runStatusStore.hasRunningJobs dependency
-
-  // Debug: Log what's being passed to ReactFlow
-  useEffect(() => {
-    console.log('[CrewCanvas] Rendering with:', {
-      nodes: nodesWithDimensions.length,
-      edges: crewEdges.length,
-      nodeTypes: nodesWithDimensions.map(n => n.type),
-      edgeIds: crewEdges.map(e => e.id),
-      managerEdges: crewEdges.filter(e => e.source === 'manager-node').length
-    });
-  }, [nodesWithDimensions, crewEdges]);
 
   const _handleDeleteSelected = useCallback((selectedNodes: Node[], selectedEdges: Edge[]) => {
     // First, remove the selected nodes

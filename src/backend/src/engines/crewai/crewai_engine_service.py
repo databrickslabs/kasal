@@ -45,7 +45,6 @@ from src.engines.crewai.execution_runner import run_crew, run_crew_in_process, u
 from src.engines.crewai.flow.flow_execution_runner import run_flow_in_process
 from src.engines.crewai.config_adapter import normalize_config, normalize_flow_config
 from src.engines.crewai.crew_preparation import CrewPreparation
-from src.engines.crewai.flow_preparation import FlowPreparation
 from src.services.tool_service import ToolService
 from src.engines.crewai.tools.tool_factory import ToolFactory
 
@@ -238,10 +237,6 @@ class CrewAIEngineService(BaseEngineService):
                 else:
                     logger.info(f"[CrewAIEngineService] Agent {agent_id} has NO knowledge_sources")
             
-            # Setup output directory
-            output_dir = self._setup_output_directory(execution_id)
-            execution_config['output_dir'] = output_dir
-            
             # We assume the execution record is already created by the caller
             # We will only update the status
             
@@ -355,39 +350,6 @@ class CrewAIEngineService(BaseEngineService):
         except Exception as e:
             logger.error(f"Error running execution {execution_id}: {str(e)}", exc_info=True)
             raise
-    
-    def _setup_output_directory(self, execution_id: Optional[str] = None, execution_logger=None) -> str:
-        """
-        Set up output directory for workflow execution
-
-        Args:
-            execution_id: Optional execution ID for the workflow
-            execution_logger: Optional logger to use (defaults to module logger)
-
-        Returns:
-            str: Path to output directory
-        """
-        # Use provided logger or fall back to module-level logger
-        log = execution_logger or logger
-
-        try:
-            # Create base output directory
-            from pathlib import Path
-            base_dir = Path(os.getcwd()) / "tmp" / "crew_outputs"
-            base_dir.mkdir(parents=True, exist_ok=True)
-
-            # Create execution-specific directory if ID provided
-            if execution_id:
-                output_dir = base_dir / execution_id
-                output_dir.mkdir(exist_ok=True)
-                log.info(f"Created output directory: {output_dir}")
-                return str(output_dir)
-
-            return str(base_dir)
-
-        except Exception as e:
-            log.error(f"Error setting up output directory: {str(e)}")
-            return os.path.join(os.getcwd(), "tmp", "crew_outputs")
     
     async def _update_execution_status(self, 
                                  execution_id: str, 
@@ -558,10 +520,6 @@ class CrewAIEngineService(BaseEngineService):
             if group_context and group_context.primary_group_id:
                 flow_config["group_id"] = group_context.primary_group_id
                 flow_logger.info(f"[CrewAIEngineService] Added group_id to flow config: {group_context.primary_group_id}")
-
-            # Setup output directory
-            output_dir = self._setup_output_directory(execution_id, execution_logger=flow_logger)
-            flow_config['output_dir'] = output_dir
 
             # Ensure writer is started before running execution
             await TraceManager.ensure_writer_started()

@@ -593,6 +593,8 @@ def run_crew_in_process(
             import os as _otel_env
 
             _otel_env.environ["OTEL_SDK_DISABLED"] = "false"
+            # Keep CrewAI telemetry disabled to prevent HTTP requests to docs.crewai.com
+            _otel_env.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
             async_logger.info(
                 "[SUBPROCESS] Set OTEL_SDK_DISABLED=false (enabling OTel trace pipeline)"
             )

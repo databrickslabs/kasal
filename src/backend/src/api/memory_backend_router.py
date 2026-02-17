@@ -497,8 +497,8 @@ async def one_click_databricks_setup(
     catalog = request.get("catalog", "ml")
     schema = request.get("schema", "agents")
     embedding_dimension = request.get(
-        "embedding_dimension", 768
-    )  # Default to 768 if not provided
+        "embedding_dimension", 1024
+    )  # Default to 1024 for databricks-gte-large-en
 
     # Extract user token for OBO authentication
     user_token = extract_user_token_from_request(req)
@@ -891,7 +891,7 @@ async def empty_index(
     index_name = request.get("index_name")
     endpoint_name = request.get("endpoint_name")
     index_type = request.get("index_type")
-    embedding_dimension = request.get("embedding_dimension", 768)
+    embedding_dimension = request.get("embedding_dimension", 1024)
 
     # Validate required parameters
     if not all([workspace_url, index_name, endpoint_name, index_type]):

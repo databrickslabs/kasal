@@ -226,11 +226,10 @@ def create_callback_from_string(callback_name: str, task_key: str, callback_conf
 
 
 async def create_task(
-    task_key: str, 
-    task_config: dict, 
-    agent: Agent, 
+    task_key: str,
+    task_config: dict,
+    agent: Agent,
     tools: List[Any] = None,
-    output_dir: Optional[str] = None, 
     config: dict = None,
     tool_service = None,
     tool_factory = None,
@@ -238,17 +237,16 @@ async def create_task(
 ) -> Task:
     """
     Creates a Task instance from the provided configuration.
-    
+
     Args:
         task_key: The unique identifier for the task
         task_config: Dictionary containing task configuration
         agent: The agent that will perform this task
         tools: Optional list of tools to make available for this task specifically
-        output_dir: Optional directory for output files
         config: Global configuration dictionary containing API keys
         tool_service: Optional tool service for resolving tool IDs to names
         tool_factory: Optional tool factory for creating tool instances
-        
+
     Returns:
         Task: A configured CrewAI Task instance
     """
@@ -630,31 +628,6 @@ async def create_task(
             guardrail_logger.error(f"Error configuring LLM guardrail for task {task_key}: {str(e)}")
             guardrail_logger.error(f"Stack trace: {traceback.format_exc()}")
 
-    # Add output file for tasks that need it
-    if output_dir and task_config.get('output_file_enabled', False):
-        # Use task_key as filename by default, or specified filename
-        filename = task_config.get('output_filename', f"{task_key}.md")
-        file_path = str(Path(output_dir) / filename)
-        logger.info(f"Using output path: {file_path}")
-        task_args['output_file'] = file_path
-        
-        # Create directory for output file if it doesn't exist
-        os.makedirs(output_dir, exist_ok=True)
-    # Check if there's an output_file in the task configuration
-    elif 'output_file' in task_config and task_config['output_file']:
-        output_file = task_config['output_file']
-        logger.info(f"Using output file from task config: {output_file}")
-        
-        # Create directory for output file if it doesn't exist
-        output_dir = os.path.dirname(output_file)
-        if output_dir:
-            try:
-                os.makedirs(output_dir, exist_ok=True)
-                logger.info(f"Created directory for output file: {output_dir}")
-            except Exception as e:
-                logger.warning(f"Failed to create directory for output file: {e}")
-        
-        task_args['output_file'] = output_file
 
     # Special handling for output_pydantic - look up the model in the database
     if 'output_pydantic' in task_config and task_config['output_pydantic']:

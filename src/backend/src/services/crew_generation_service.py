@@ -14,8 +14,6 @@ import uuid
 from typing import Dict, Any, List, Tuple, Optional
 
 
-import litellm
-
 from src.utils.prompt_utils import robust_json_parser
 from src.services.template_service import TemplateService
 from src.services.tool_service import ToolService
@@ -128,7 +126,7 @@ class CrewGenerationService:
         # Add tools context to the system message
         return system_message + tools_context
 
-    def _process_crew_setup(self, setup: Dict[str, Any], allowed_tools: List[Dict[str, Any]], tool_name_to_id_map: Dict[str, str]) -> Dict[str, Any]:
+    def _process_crew_setup(self, setup: Dict[str, Any], allowed_tools: List[Dict[str, Any]], tool_name_to_id_map: Dict[str, str], model: str = None) -> Dict[str, Any]:
         """
         Process and validate crew setup.
 
@@ -136,6 +134,7 @@ class CrewGenerationService:
             setup: Raw crew setup from LLM
             allowed_tools: List of allowed tools with descriptions
             tool_name_to_id_map: Mapping from tool names to their IDs
+            model: Model used for generation, will be assigned to each agent's llm field
 
         Returns:
             Processed crew setup
@@ -188,6 +187,12 @@ class CrewGenerationService:
                 if field not in agent:
                     logger.error(f"Agent '{agent_name}' is missing required field: {field}")
                     raise ValueError(f"Missing required field '{field}' in agent {i}")
+
+        # Assign the generation model to each agent so they use the dispatcher's model
+        if model:
+            for agent in setup['agents']:
+                agent['llm'] = model
+                logger.info(f"MODEL: Assigned model '{model}' to agent '{agent.get('name', 'Unknown')}'")
 
         # Filter agent tools to only include allowed tools and convert tool names to IDs
         for agent in setup['agents']:
@@ -511,28 +516,21 @@ class CrewGenerationService:
             # Add the user's prompt
             messages.append({"role": "user", "content": request.prompt})
 
-            # Configure litellm using the LLMManager
-            model_params = await LLMManager.configure_litellm(model)
-            logger.info(f"CREATE CREW: Configured LiteLLM with model: {model}")
+            logger.info(f"CREATE CREW: Configured LLM with model: {model}")
 
-            # Generate completion with litellm
+            # Generate completion via unified LLMManager.completion()
             try:
                 logger.info("CREATE CREW: Calling LLM API...")
-                # Use consistent max_tokens for all models to ensure detailed task descriptions
-                _model_id = model_params.get("model", "")
                 _max_tokens = 4000
-                logger.info(f"CREATE CREW: Using max_tokens={_max_tokens} for model={_model_id}")
+                logger.info(f"CREATE CREW: Using max_tokens={_max_tokens} for model={model}")
 
-                # Use LLMManager wrapper (handles GPT-5/deep research models)
-                response = await LLMManager.acompletion(
-                    **model_params,
+                content = await LLMManager.completion(
                     messages=messages,
+                    model=model,
                     temperature=0.7,
-                    max_tokens=_max_tokens
+                    max_tokens=_max_tokens,
                 )
 
-                # Extract and parse the content
-                content = response["choices"][0]["message"]["content"]
                 logger.info(f"CREATE CREW: Extracted content from LLM response (length: {len(content)})")
 
                 # Log the LLM interaction
@@ -550,7 +548,7 @@ class CrewGenerationService:
                 logger.info(f"CREATE CREW: Successfully parsed JSON")
 
                 # Process and validate LLM response with the tool name to ID mapping
-                processed_setup = self._process_crew_setup(crew_setup, tools_with_details, tool_name_to_id_map)
+                processed_setup = self._process_crew_setup(crew_setup, tools_with_details, tool_name_to_id_map, model=model)
 
             except Exception as e:
                 error_msg = f"Error generating crew: {str(e)}"
