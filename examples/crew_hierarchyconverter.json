@@ -1,40 +1,39 @@
 {
-  "id": "68974f78-fc91-4c22-8490-0e7e66e8260e",
-  "name": "ref_conv_static",
+  "id": "7eecf5c4-9050-4dc7-a829-df958e2a977f",
+  "name": "test_hier",
   "agent_ids": [
-    "4353d891-154e-4fad-bdc8-68dddeaa7ef9"
+    "6180f60c-b590-4d53-968b-be27bc2722b8"
   ],
   "task_ids": [
-    "b6e891f1-9078-41d7-95b6-0e64ae627aab"
+    "1954f7df-a867-4bd9-b0b3-5e1a6cafacf6"
   ],
   "nodes": [
     {
-      "id": "task-b6e891f1-9078-41d7-95b6-0e64ae627aab",
+      "id": "task-1954f7df-a867-4bd9-b0b3-5e1a6cafacf6",
       "type": "taskNode",
       "position": {
-        "x": 274.6666666666667,
-        "y": 139.33333333333334
+        "x": 368,
+        "y": 68
       },
       "data": {
-        "label": "Reference Parser with Parameters",
+        "label": "Run PowerBI Hierarchies with Parameters",
         "role": null,
         "goal": null,
         "backstory": null,
         "tools": [
-          "78"
+          "76"
         ],
         "tool_configs": {
-          "Power BI Report References Tool": {
-            "workspace_id": "<YOUR_WORKSPACE_ID>",
-            "report_id": "",
-            "tenant_id": "<YOUR_TENANT_ID>",
-            "client_id": "<YOUR_CLIENT_ID>",
-            "client_secret": "<YOUR_CLIENT_SECRET>",
-            "dataset_id": "<YOUR_DATASET_ID>"
+          "Power BI Hierarchies Tool": {
+            "tenant_id": "00000000-0000-0000-0000-000000000000",
+            "workspace_id": "your-workspace-id",
+            "dataset_id": "your-dataset-id",
+            "client_id": "your-client-id",
+            "client_secret": "your-client-secret"
           }
         },
         "agentId": null,
-        "taskId": "b6e891f1-9078-41d7-95b6-0e64ae627aab",
+        "taskId": "1954f7df-a867-4bd9-b0b3-5e1a6cafacf6",
         "llm": null,
         "function_calling_llm": null,
         "max_iter": null,
@@ -54,8 +53,8 @@
         "use_system_prompt": null,
         "respect_context_window": null,
         "type": "task",
-        "description": "Use the Reference Conversion Pipeline tool to convert the measure accordingly to the FROM and TO format defined in the tool-configuration.\n\nCall the Reference Conversion Pipeline tool to perform the conversion and return the generated list in the desired output format.",
-        "expected_output": "When everything is mappable, the agent should return something output list or object‑style file. Most important are measures, its useage in the page and report and a link to the respective page.",
+        "description": "IMMEDIATELY call the \"Power BI Hierarchies Tool\" with parameters defined in the input task form. \nALL required parameters (workspace_id, dataset_id, authentication credentials) are ALREADY PRE-CONFIGURED in the tool-task-form. You do NOT need to ask for them or provide them.\n\nDO NOT ask the user for any information. DO NOT explain what you need. Just call the tool NOW.\n\nAction required:\n    1. Call power_bi_hierarchies_tool()\n    2. Return the tool's output directly to the user",
+        "expected_output": "When everything is mappable, the agent should return something like a SQL\u2011style or object\u2011style file. While for Transformations containing errors in the parsing another SQL object with the error of the conversion should be output.",
         "icon": null,
         "advanced_config": null,
         "config": {
@@ -89,27 +88,25 @@
       "style": null
     },
     {
-      "id": "agent-4353d891-154e-4fad-bdc8-68dddeaa7ef9",
+      "id": "agent-6180f60c-b590-4d53-968b-be27bc2722b8",
       "type": "agentNode",
       "position": {
         "x": 68,
         "y": 73
       },
       "data": {
-        "label": "Report Parser Converter",
-        "role": "Report Conversion Manager",
-        "goal": "Translate given report definitions efficiently into the requested output formats\n\nYou will make sure that the action run will only trigger 1 time and not more.",
-        "backstory": "Experienced PBI and SQL Engineer with 10+ years of experience in managing, translating, and optimizing report layout and translating them into reusable reference output formats for Databricks.",
-        "tools": [
-          "78"
-        ],
+        "label": "PBI Hierarchies Converter",
+        "role": "PBI Hierarchies Manager",
+        "goal": "Translate given PBI Hierarchy definitions efficiently into the requested SQL syntax.\n\nYou will make sure that the action run will only trigger 1 time and not more.",
+        "backstory": "Experienced PBI and SQL Engineer with 10+ years of experience in managing, translating, and optimizing PBI Hierarchy expressions and translating them into SQL for Databricks.",
+        "tools": [],
         "tool_configs": {},
-        "agentId": "4353d891-154e-4fad-bdc8-68dddeaa7ef9",
+        "agentId": "6180f60c-b590-4d53-968b-be27bc2722b8",
         "taskId": null,
-        "llm": "databricks-llama-4-maverick",
+        "llm": "databricks-claude-opus-4-6",
         "function_calling_llm": null,
         "max_iter": 25,
-        "max_rpm": 10,
+        "max_rpm": 1,
         "max_execution_time": 300,
         "verbose": false,
         "allow_delegation": false,
@@ -151,15 +148,15 @@
   ],
   "edges": [
     {
-      "source": "agent-4353d891-154e-4fad-bdc8-68dddeaa7ef9",
-      "target": "task-b6e891f1-9078-41d7-95b6-0e64ae627aab",
+      "source": "agent-6180f60c-b590-4d53-968b-be27bc2722b8",
+      "target": "task-1954f7df-a867-4bd9-b0b3-5e1a6cafacf6",
       "id": "reactflow__edge-agent-2d21de66-438d-4a70-8be0-f16dd0a8d4aa-task-c2c71f3e-89e8-4786-84dd-fd0e2f063ad1-right-left",
       "sourceHandle": null,
       "targetHandle": null
     }
   ],
-  "created_at": "2026-02-02T17:18:13.387105",
-  "updated_at": "2026-02-02T17:18:13.387107",
+  "created_at": "2026-02-17T11:56:34.209270",
+  "updated_at": "2026-02-17T11:56:34.209272",
   "process": "sequential",
   "planning": false,
   "planning_llm": null,

@@ -1,39 +1,40 @@
 {
-  "id": "53e4399e-c644-4980-8801-5a9d36e15b9e",
-  "name": "mquery_conv_static",
+  "id": "4bd367fa-aee0-4478-9f4a-88f42fa3b5ae",
+  "name": "test_references",
   "agent_ids": [
-    "f65dbab8-74dd-43ad-8ec1-e68bc01494c9"
+    "99fea9ed-1985-4491-9d79-5b67924ca570"
   ],
   "task_ids": [
-    "0b8b570e-32e7-4060-9bed-8c5df4739d53"
+    "66f6ac87-8fe2-4fae-8dd4-4f8592ae61fe"
   ],
   "nodes": [
     {
-      "id": "task-0b8b570e-32e7-4060-9bed-8c5df4739d53",
+      "id": "task-66f6ac87-8fe2-4fae-8dd4-4f8592ae61fe",
       "type": "taskNode",
       "position": {
-        "x": 108.06077886321171,
-        "y": 133.53749945348923
+        "x": 368,
+        "y": 68
       },
       "data": {
-        "label": "Run MQuery Conversion with Parameters",
+        "label": "Reference Parser with Parameters",
         "role": null,
         "goal": null,
         "backstory": null,
         "tools": [
-          "74"
+          "78"
         ],
         "tool_configs": {
-          "M-Query Conversion Pipeline": {
-            "workspace_id": "<YOUR_WORKSPACE_ID>",
-            "dataset_id": "<YOUR_DATASET_ID>",
-            "tenant_id": "<YOUR_TENANT_ID>",
-            "client_id": "<YOUR_CLIENT_ID>",
-            "client_secret": "<YOUR_CLIENT_SECRET>"
+          "Power BI Report References Tool": {
+            "workspace_id": "your-workspace-id",
+            "report_id": "your-report-id",
+            "tenant_id": "00000000-0000-0000-0000-000000000000",
+            "client_id": "your-client-id",
+            "client_secret": "your-client-secret",
+            "dataset_id": "your-dataset-id"
           }
         },
         "agentId": null,
-        "taskId": "0b8b570e-32e7-4060-9bed-8c5df4739d53",
+        "taskId": "66f6ac87-8fe2-4fae-8dd4-4f8592ae61fe",
         "llm": null,
         "function_calling_llm": null,
         "max_iter": null,
@@ -53,8 +54,8 @@
         "use_system_prompt": null,
         "respect_context_window": null,
         "type": "task",
-        "description": "Use the Measure Conversion Pipeline tool to convert the measure accordingly to the FROM and TO format defined in the tool-configuration.\n\nCall the MQuery Conversion Pipeline tool to perform the conversion and return the generated SQL in the desired output format.",
-        "expected_output": "When everything is mappable, the agent should return something like a SQL‑style or object‑style file. While for Transformations containing errors in the parsing another SQL object with the error of the conversion should be output.",
+        "description": "IMMEDIATELY call the \"Power BI Report References Tool\" with parameters defined in the input task form.\nALL required parameters (workspace_id, dataset_id, authentication credentials) are ALREADY PRE-CONFIGURED in the tool-task-form. You do NOT need to ask for them or provide them.\n\nDO NOT ask the user for any information. DO NOT explain what you need. Just call the tool NOW.\n\nAction required:\n  1. Call powerbi_report_references_tool()\n  2. Return the tool's output directly to the user",
+        "expected_output": "When everything is mappable, the agent should return something output list or object\u2011style file. Most important are measures, its useage in the page and report and a link to the respective page.",
         "icon": null,
         "advanced_config": null,
         "config": {
@@ -88,32 +89,32 @@
       "style": null
     },
     {
-      "id": "agent-f65dbab8-74dd-43ad-8ec1-e68bc01494c9",
+      "id": "agent-99fea9ed-1985-4491-9d79-5b67924ca570",
       "type": "agentNode",
       "position": {
-        "x": -164.37752161383287,
-        "y": 135.68011527377521
+        "x": 68,
+        "y": 73
       },
       "data": {
-        "label": "MQuery Converter",
-        "role": "Mquery Conversion Manager",
-        "goal": "Translate given mquery definitions efficiently into the requested SQL syntax.\n\nYou will make sure that the action run will only trigger 1 time and not more.",
-        "backstory": "Experienced PBI and SQL Engineer with 10+ years of experience in managing, translating, and optimizing MQuery expressions and translating them into SQL for Databricks.",
+        "label": "Report Parser Converter",
+        "role": "Report Conversion Manager",
+        "goal": "Translate given report definitions efficiently into the requested output formats\n\nYou will make sure that the action run will only trigger 1 time and not more.",
+        "backstory": "Experienced PBI and SQL Engineer with 10+ years of experience in managing, translating, and optimizing report layout and translating them into reusable reference output formats for Databricks.",
         "tools": [
-          "74"
+          "78"
         ],
         "tool_configs": {},
-        "agentId": "f65dbab8-74dd-43ad-8ec1-e68bc01494c9",
+        "agentId": "99fea9ed-1985-4491-9d79-5b67924ca570",
         "taskId": null,
-        "llm": "databricks-llama-4-maverick",
+        "llm": "databricks-claude-opus-4-6",
         "function_calling_llm": null,
         "max_iter": 25,
-        "max_rpm": 10,
+        "max_rpm": 1,
         "max_execution_time": 300,
         "verbose": false,
         "allow_delegation": false,
-        "cache": true,
-        "memory": true,
+        "cache": false,
+        "memory": false,
         "embedder_config": {
           "provider": "databricks",
           "config": {
@@ -150,15 +151,15 @@
   ],
   "edges": [
     {
-      "source": "agent-f65dbab8-74dd-43ad-8ec1-e68bc01494c9",
-      "target": "task-0b8b570e-32e7-4060-9bed-8c5df4739d53",
+      "source": "agent-99fea9ed-1985-4491-9d79-5b67924ca570",
+      "target": "task-66f6ac87-8fe2-4fae-8dd4-4f8592ae61fe",
       "id": "reactflow__edge-agent-2d21de66-438d-4a70-8be0-f16dd0a8d4aa-task-c2c71f3e-89e8-4786-84dd-fd0e2f063ad1-right-left",
       "sourceHandle": null,
       "targetHandle": null
     }
   ],
-  "created_at": "2026-01-27T06:26:57.833358",
-  "updated_at": "2026-01-27T06:26:57.833361",
+  "created_at": "2026-02-17T12:30:09.778233",
+  "updated_at": "2026-02-17T12:30:09.778237",
   "process": "sequential",
   "planning": false,
   "planning_llm": null,
