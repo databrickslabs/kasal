@@ -1,7 +1,7 @@
 """add cascade delete on flows crew_id
 
 Revision ID: c3f4d5eef044
-Revises: b2f3c4dee933
+Revises: a1f2a3cbd822
 Create Date: 2026-02-10
 
 Adds ON DELETE CASCADE to flows.crew_id foreign key so that deleting
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = "c3f4d5eef044"
-down_revision = "b2f3c4dee933"
+down_revision = "a1f2a3cbd822"
 branch_labels = None
 depends_on = None
 

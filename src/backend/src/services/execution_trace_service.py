@@ -40,21 +40,9 @@ def _mask_trace_sensitive_data(trace: ExecutionTraceItem) -> ExecutionTraceItem:
     Returns:
         ExecutionTraceItem with sensitive fields masked
     """
-    # Mask sensitive data in input_data
-    if trace.input_data:
-        trace.input_data = mask_sensitive_fields(trace.input_data)
-
-    # Mask sensitive data in output_data
-    if trace.output_data:
-        trace.output_data = mask_sensitive_fields(trace.output_data)
-
     # Mask sensitive data in trace_metadata
     if trace.trace_metadata:
         trace.trace_metadata = mask_sensitive_fields(trace.trace_metadata)
-
-    # Mask sensitive data in extra_data
-    if trace.extra_data:
-        trace.extra_data = mask_sensitive_fields(trace.extra_data)
 
     # Mask sensitive data in output if it's a dict
     if trace.output and isinstance(trace.output, dict):
