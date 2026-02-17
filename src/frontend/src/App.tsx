@@ -40,8 +40,9 @@ function App() {
   const { currentUser, fetchCurrentUser } = useUserStore();
   const { fetchMyGroups } = useGroupStore();
 
+  // Initialize user on mount
   useEffect(() => {
-    const initialize = async () => {
+    const initializeUser = async () => {
       // Initialize language
       const languageService = LanguageService.getInstance();
       await languageService.initializeLanguage();
@@ -64,20 +65,20 @@ function App() {
         }
       }
 
-      // Initialize user and groups (same logic as GroupSelector)
-      if (!currentUser) {
-        await fetchCurrentUser();
-      }
-
-      // Fetch groups to create personal workspace and set selectedGroupId
-      const updatedUser = useUserStore.getState().currentUser;
-      if (updatedUser?.email) {
-        await fetchMyGroups();
-      }
+      // Fetch current user
+      await fetchCurrentUser();
     };
 
-    initialize();
-  }, [currentUser, fetchCurrentUser, fetchMyGroups]);
+    initializeUser();
+  }, []); // Run once on mount
+
+  // Fetch groups when user is available
+  useEffect(() => {
+    if (currentUser?.email) {
+      console.log('Fetching groups for user:', currentUser.email);
+      fetchMyGroups();
+    }
+  }, [currentUser?.email, fetchMyGroups]);
 
   return (
     <ThemeProvider>
