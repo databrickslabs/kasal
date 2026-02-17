@@ -852,3 +852,71 @@ describe('setMessages stale-closure fix', () => {
     expect(source).toContain('useChatMessagesStore.getState()');
   });
 });
+
+describe('chatCommandClick event listener', () => {
+  const defaultProps = {
+    onNodesGenerated: vi.fn(),
+    onLoadingStateChange: vi.fn(),
+    selectedModel: 'test-model',
+    selectedTools: [],
+    isVisible: true,
+    setSelectedModel: vi.fn(),
+    nodes: [] as Node[],
+    edges: [] as Edge[],
+    onExecuteCrew: vi.fn(),
+    onToggleCollapse: vi.fn(),
+    chatSessionId: 'test-session-123',
+    onOpenLogs: vi.fn(),
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('populates input value when chatCommandClick event is dispatched', async () => {
+    render(<WorkflowChat {...defaultProps} />);
+
+    const input = screen.getByPlaceholderText('Describe what you want to create...');
+    expect(input).toHaveValue('');
+
+    // Dispatch the custom event as MessageRenderer would
+    window.dispatchEvent(
+      new CustomEvent('chatCommandClick', { detail: { command: '/load crew My Crew' } })
+    );
+
+    await waitFor(() => {
+      expect(input).toHaveValue('/load crew My Crew');
+    });
+  });
+
+  it('focuses the input field after chatCommandClick', async () => {
+    render(<WorkflowChat {...defaultProps} />);
+
+    const input = screen.getByPlaceholderText('Describe what you want to create...');
+
+    // Blur the input first
+    (input as HTMLElement).blur();
+
+    window.dispatchEvent(
+      new CustomEvent('chatCommandClick', { detail: { command: '/list flows' } })
+    );
+
+    await waitFor(() => {
+      expect(input).toHaveValue('/list flows');
+    });
+  });
+
+  it('cleans up event listener on unmount', () => {
+    const removeEventListenerSpy = vi.spyOn(window, 'removeEventListener');
+
+    const { unmount } = render(<WorkflowChat {...defaultProps} />);
+    unmount();
+
+    const chatCommandCalls = removeEventListenerSpy.mock.calls.filter(
+      call => call[0] === 'chatCommandClick'
+    );
+    expect(chatCommandCalls.length).toBeGreaterThan(0);
+
+    removeEventListenerSpy.mockRestore();
+  });
+});
