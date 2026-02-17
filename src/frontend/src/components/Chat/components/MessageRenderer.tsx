@@ -86,10 +86,14 @@ export const MessageContent: React.FC<MessageContentProps> = ({ content }) => {
               const isCommand = text.startsWith('/');
 
               if (isCommand) {
+                // Show short label for /load and /run commands, full text for others
+                const actionMatch = text.match(/^\/(load|run)\s+(crew|flow)\s+.+/);
+                const displayText = actionMatch ? actionMatch[1] : text;
                 return (
                   <code
                     role="button"
                     tabIndex={0}
+                    title={text}
                     onClick={() => {
                       window.dispatchEvent(
                         new CustomEvent('chatCommandClick', { detail: { command: text } })
@@ -122,7 +126,7 @@ export const MessageContent: React.FC<MessageContentProps> = ({ content }) => {
                     }}
                     {...props}
                   >
-                    {children}
+                    {displayText}
                   </code>
                 );
               }
