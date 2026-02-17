@@ -18,12 +18,13 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 @dataclass
 class CacheEntry(Generic[T]):
     """A cached value with expiration timestamp."""
+
     value: T
     expires_at: float
 
@@ -173,7 +174,9 @@ class TTLCache(Generic[T]):
                 removed += 1
 
             if removed > 0:
-                logger.info(f"[{self._name}] Invalidated {removed} entries for group {group_id}")
+                logger.info(
+                    f"[{self._name}] Invalidated {removed} entries for group {group_id}"
+                )
 
         return removed
 
@@ -225,7 +228,7 @@ class TTLCache(Generic[T]):
             "ttl": self._ttl,
             "hits": self._hits,
             "misses": self._misses,
-            "hit_rate": f"{hit_rate:.1f}%"
+            "hit_rate": f"{hit_rate:.1f}%",
         }
 
 
@@ -239,6 +242,9 @@ model_config_cache: TTLCache = TTLCache(ttl=300, maxsize=500, name="model_config
 # Database configs cache - 5 minute TTL
 db_config_cache: TTLCache = TTLCache(ttl=300, maxsize=100, name="db_config")
 
+# Intent detection cache - 2 minute TTL (short because user context evolves)
+intent_cache: TTLCache = TTLCache(ttl=120, maxsize=500, name="intent")
+
 
 def get_all_cache_stats() -> Dict[str, Dict[str, Any]]:
     """
@@ -250,4 +256,5 @@ def get_all_cache_stats() -> Dict[str, Dict[str, Any]]:
     return {
         "model_config": model_config_cache.stats(),
         "db_config": db_config_cache.stats(),
+        "intent": intent_cache.stats(),
     }
