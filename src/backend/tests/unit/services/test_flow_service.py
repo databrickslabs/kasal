@@ -10,7 +10,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 
-from src.core.exceptions import KasalError, NotFoundError, BadRequestError
+from src.core.exceptions import KasalError, NotFoundError, BadRequestError, ConflictError, ForbiddenError
 
 from src.services.flow_service import FlowService
 from src.models.flow import Flow
@@ -627,3 +627,124 @@ class TestFlowService:
             
             # The updated flow object should be returned
             assert result == mock_flow
+
+
+class TestFlowServiceNameUniqueness:
+    """Test cases for flow name uniqueness enforcement."""
+
+    @pytest.fixture
+    def mock_group_context(self):
+        """Create a mock group context."""
+        context = MagicMock()
+        context.group_ids = ["group-123"]
+        context.group_email = "test@example.com"
+        return context
+
+    @pytest.mark.asyncio
+    async def test_create_flow_with_group_duplicate_name(self, flow_service, flow_create_data, mock_group_context):
+        """Test that creating a flow with a duplicate name raises ConflictError."""
+        existing_flow = MockFlow(name="Test Flow", group_id="group-123")
+
+        with patch('src.services.flow_service.FlowRepository') as MockRepository:
+            mock_repo = AsyncMock()
+            MockRepository.return_value = mock_repo
+            mock_repo.find_by_name_and_group.return_value = existing_flow
+
+            flow_create = FlowCreate(**flow_create_data)
+
+            with pytest.raises(ConflictError) as exc_info:
+                await flow_service.create_flow_with_group(flow_create, mock_group_context)
+
+            assert exc_info.value.status_code == 409
+            assert "already exists" in str(exc_info.value.detail)
+            mock_repo.create.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_create_flow_with_group_unique_name(self, flow_service, flow_create_data, mock_flow, mock_group_context):
+        """Test that creating a flow with a unique name succeeds."""
+        with patch('src.services.flow_service.FlowRepository') as MockRepository:
+            mock_repo = AsyncMock()
+            MockRepository.return_value = mock_repo
+            mock_repo.find_by_name_and_group.return_value = None  # No duplicate
+            mock_repo.create.return_value = mock_flow
+            # Mock crew validation
+            with patch('src.repositories.crew_repository.CrewRepository') as MockCrewRepo:
+                mock_crew_repo = AsyncMock()
+                MockCrewRepo.return_value = mock_crew_repo
+                mock_crew_repo.get.return_value = None
+
+                flow_create = FlowCreate(**flow_create_data)
+                result = await flow_service.create_flow_with_group(flow_create, mock_group_context)
+
+                assert result == mock_flow
+                mock_repo.find_by_name_and_group.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_update_flow_with_group_check_duplicate_name(self, flow_service, flow_update_data, mock_group_context):
+        """Test that updating a flow to a duplicate name raises ConflictError."""
+        flow_id = uuid.uuid4()
+        existing_flow = MockFlow(id=flow_id, name="Original Flow", group_id="group-123")
+        duplicate_flow = MockFlow(name="Updated Flow", group_id="group-123")
+
+        with patch('src.services.flow_service.FlowRepository') as MockRepository:
+            mock_repo = AsyncMock()
+            MockRepository.return_value = mock_repo
+            mock_repo.get.return_value = existing_flow
+            mock_repo.find_by_name_and_group.return_value = duplicate_flow
+
+            flow_update = FlowUpdate(**flow_update_data)
+
+            with pytest.raises(ConflictError) as exc_info:
+                await flow_service.update_flow_with_group_check(flow_id, flow_update, mock_group_context)
+
+            assert exc_info.value.status_code == 409
+            assert "already exists" in str(exc_info.value.detail)
+
+    @pytest.mark.asyncio
+    async def test_update_flow_with_group_check_same_name_ok(self, flow_service, mock_flow, mock_group_context):
+        """Test that updating a flow with the same name does not trigger conflict."""
+        flow_id = mock_flow.id
+
+        with patch('src.services.flow_service.FlowRepository') as MockRepository:
+            mock_repo = AsyncMock()
+            MockRepository.return_value = mock_repo
+            mock_repo.get.return_value = mock_flow
+            mock_repo.update.return_value = mock_flow
+
+            flow_update = FlowUpdate(name=mock_flow.name, nodes=[], edges=[])
+            result = await flow_service.update_flow_with_group_check(flow_id, flow_update, mock_group_context)
+
+            assert result == mock_flow
+            # find_by_name_and_group should NOT be called since name didn't change
+            mock_repo.find_by_name_and_group.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_update_flow_with_group_check_not_found(self, flow_service, flow_update_data, mock_group_context):
+        """Test that updating a non-existent flow raises NotFoundError."""
+        flow_id = uuid.uuid4()
+
+        with patch('src.services.flow_service.FlowRepository') as MockRepository:
+            mock_repo = AsyncMock()
+            MockRepository.return_value = mock_repo
+            mock_repo.get.return_value = None
+
+            flow_update = FlowUpdate(**flow_update_data)
+
+            with pytest.raises(NotFoundError):
+                await flow_service.update_flow_with_group_check(flow_id, flow_update, mock_group_context)
+
+    @pytest.mark.asyncio
+    async def test_update_flow_with_group_check_forbidden(self, flow_service, flow_update_data, mock_group_context):
+        """Test that updating a flow from another group raises ForbiddenError."""
+        flow_id = uuid.uuid4()
+        other_group_flow = MockFlow(id=flow_id, group_id="other-group")
+
+        with patch('src.services.flow_service.FlowRepository') as MockRepository:
+            mock_repo = AsyncMock()
+            MockRepository.return_value = mock_repo
+            mock_repo.get.return_value = other_group_flow
+
+            flow_update = FlowUpdate(**flow_update_data)
+
+            with pytest.raises(ForbiddenError):
+                await flow_service.update_flow_with_group_check(flow_id, flow_update, mock_group_context)

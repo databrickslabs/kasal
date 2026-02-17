@@ -12,6 +12,7 @@ from typing import List
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.exceptions import ConflictError
 from src.services.crew_service import CrewService
 from src.models.crew import Crew
 from src.repositories.crew_repository import CrewRepository
@@ -379,7 +380,7 @@ class TestCrewServiceCreateWithGroup:
     """Test cases for create_with_group method."""
     
     @pytest.mark.asyncio
-    async def test_create_with_group_success(self, crew_service, mock_repository, 
+    async def test_create_with_group_success(self, crew_service, mock_repository,
                                             sample_crew_create, sample_group_context):
         """Test successful crew creation with group context."""
         created_crew = MockCrew(
@@ -387,8 +388,9 @@ class TestCrewServiceCreateWithGroup:
             group_id=sample_group_context.primary_group_id,
             created_by_email=sample_group_context.group_email
         )
+        mock_repository.find_by_name_and_group.return_value = None  # No duplicate
         mock_repository.create.return_value = created_crew
-        
+
         with patch('src.services.crew_service.logger') as mock_logger:
             result = await crew_service.create_with_group(sample_crew_create, sample_group_context)
             
@@ -403,15 +405,45 @@ class TestCrewServiceCreateWithGroup:
             assert mock_logger.info.call_count >= 4
     
     @pytest.mark.asyncio
-    async def test_create_with_group_exception_handling(self, crew_service, mock_repository, 
+    async def test_create_with_group_duplicate_name(self, crew_service, mock_repository,
+                                                    sample_crew_create, sample_group_context):
+        """Test that creating a crew with a duplicate name raises ConflictError."""
+        existing_crew = MockCrew(name=sample_crew_create.name, group_id="group-123")
+        mock_repository.find_by_name_and_group.return_value = existing_crew
+
+        with pytest.raises(ConflictError) as exc_info:
+            await crew_service.create_with_group(sample_crew_create, sample_group_context)
+
+        assert exc_info.value.status_code == 409
+        assert "already exists" in str(exc_info.value.detail)
+        mock_repository.create.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_create_with_group_unique_name(self, crew_service, mock_repository,
+                                                  sample_crew_create, sample_group_context):
+        """Test that creating a crew with a unique name succeeds."""
+        mock_repository.find_by_name_and_group.return_value = None
+        created_crew = MockCrew(name=sample_crew_create.name, group_id="group-123")
+        mock_repository.create.return_value = created_crew
+
+        result = await crew_service.create_with_group(sample_crew_create, sample_group_context)
+
+        assert result == created_crew
+        mock_repository.find_by_name_and_group.assert_called_once_with(
+            sample_crew_create.name, ["group-123"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_create_with_group_exception_handling(self, crew_service, mock_repository,
                                                        sample_crew_create, sample_group_context):
         """Test create with group exception handling."""
+        mock_repository.find_by_name_and_group.return_value = None
         mock_repository.create.side_effect = Exception("Group creation error")
-        
+
         with pytest.raises(Exception, match="Group creation error"):
             with patch('src.services.crew_service.logger') as mock_logger:
                 await crew_service.create_with_group(sample_crew_create, sample_group_context)
-                
+
                 mock_logger.error.assert_called_once()
 
 
@@ -504,7 +536,7 @@ class TestCrewServiceUpdateWithPartialDataByGroup:
     """Test cases for update_with_partial_data_by_group method."""
     
     @pytest.mark.asyncio
-    async def test_update_with_partial_data_by_group_success(self, crew_service, mock_repository, 
+    async def test_update_with_partial_data_by_group_success(self, crew_service, mock_repository,
                                                             sample_crew_update, sample_group_context):
         """Test successful partial update by group."""
         crew_id = uuid4()
@@ -514,12 +546,13 @@ class TestCrewServiceUpdateWithPartialDataByGroup:
             name=sample_crew_update.name,
             group_id="group-123"
         )
-        
+
         mock_repository.get_by_group.return_value = existing_crew
+        mock_repository.find_by_name_and_group.return_value = None  # No duplicate
         mock_repository.update.return_value = updated_crew
-        
+
         result = await crew_service.update_with_partial_data_by_group(crew_id, sample_crew_update, sample_group_context)
-        
+
         assert result == updated_crew
         mock_repository.get_by_group.assert_called_once_with(crew_id, ["group-123"])
         mock_repository.update.assert_called_once()
@@ -558,14 +591,51 @@ class TestCrewServiceUpdateWithPartialDataByGroup:
         crew_id = uuid4()
         existing_crew = MockCrew(id=crew_id, group_id="group-123")
         empty_update = CrewUpdate()
-        
+
         mock_repository.get_by_group.return_value = existing_crew
-        
+
         result = await crew_service.update_with_partial_data_by_group(crew_id, empty_update, sample_group_context)
-        
+
         assert result == existing_crew
         mock_repository.get_by_group.assert_called_once_with(crew_id, ["group-123"])
         mock_repository.update.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_update_with_partial_data_by_group_duplicate_name(self, crew_service, mock_repository, sample_group_context):
+        """Test that updating a crew to a name that already exists raises ConflictError."""
+        crew_id = uuid4()
+        existing_crew = MockCrew(id=crew_id, name="Original Name", group_id="group-123")
+        duplicate_crew = MockCrew(name="Taken Name", group_id="group-123")
+
+        mock_repository.get_by_group.return_value = existing_crew
+        mock_repository.find_by_name_and_group.return_value = duplicate_crew
+
+        update_data = CrewUpdate(name="Taken Name")
+
+        with pytest.raises(ConflictError) as exc_info:
+            await crew_service.update_with_partial_data_by_group(crew_id, update_data, sample_group_context)
+
+        assert exc_info.value.status_code == 409
+        assert "already exists" in str(exc_info.value.detail)
+        mock_repository.update.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_update_with_partial_data_by_group_same_name_ok(self, crew_service, mock_repository, sample_group_context):
+        """Test that updating a crew with the same name does not trigger conflict."""
+        crew_id = uuid4()
+        existing_crew = MockCrew(id=crew_id, name="Same Name", group_id="group-123")
+        updated_crew = MockCrew(id=crew_id, name="Same Name", group_id="group-123")
+
+        mock_repository.get_by_group.return_value = existing_crew
+        mock_repository.update.return_value = updated_crew
+
+        update_data = CrewUpdate(name="Same Name")
+
+        result = await crew_service.update_with_partial_data_by_group(crew_id, update_data, sample_group_context)
+
+        assert result == updated_crew
+        # find_by_name_and_group should NOT be called since name didn't change
+        mock_repository.find_by_name_and_group.assert_not_called()
 
 
 class TestCrewServiceDeleteByGroup:
