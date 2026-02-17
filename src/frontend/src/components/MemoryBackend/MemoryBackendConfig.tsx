@@ -175,7 +175,7 @@ export const MemoryBackendConfig: React.FC<MemoryBackendConfigProps> = ({
         ? { 
             endpoint_name: '',
             short_term_index: '',
-            embedding_dimension: 768,
+            embedding_dimension: 1024,
             auth_type: 'default',
           }
         : undefined,
@@ -197,7 +197,7 @@ export const MemoryBackendConfig: React.FC<MemoryBackendConfigProps> = ({
       service_principal_client_id: '',
       service_principal_client_secret: '',
       auth_type: 'default' as const,
-      embedding_dimension: 768
+      embedding_dimension: 1024
     };
 
     return (
@@ -527,9 +527,9 @@ export const MemoryBackendConfig: React.FC<MemoryBackendConfigProps> = ({
                     fullWidth
                     type="number"
                     label="Embedding Dimension"
-                    value={databricksConfig.embedding_dimension || 768}
+                    value={databricksConfig.embedding_dimension || 1024}
                     onChange={(e) => updateDatabricksConfig({ 
-                      embedding_dimension: parseInt(e.target.value) || 768 
+                      embedding_dimension: parseInt(e.target.value) || 1024 
                     })}
                     helperText="The dimension of your embedding vectors"
                   />

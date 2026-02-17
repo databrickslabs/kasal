@@ -84,7 +84,7 @@ export const InputVariablesDialog: React.FC<InputVariablesDialogProps> = ({
   useEffect(() => {
     if (!open) return;
 
-    const variablePattern = /\{([^}]+)\}/g;
+    const variablePattern = /\{([a-zA-Z_][a-zA-Z0-9_-]*)\}/g;
     const foundVariables = new Set<string>();
 
     nodes.forEach(node => {

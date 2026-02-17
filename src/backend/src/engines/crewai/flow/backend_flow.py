@@ -65,7 +65,6 @@ class BackendFlow:
                 raise ValueError(f"Invalid flow_id format: {flow_id}")
                 
         self._flow_data = None
-        self._output_dir = None
         # Don't store API keys directly, just other configuration
         self._config = {}
         # Repository container
@@ -80,18 +79,7 @@ class BackendFlow:
     def config(self, value):
         self._config = value
 
-    @property
-    def output_dir(self):
-        logger.info(f"Getting output_dir: {self._output_dir}")
-        return self._output_dir
 
-    @output_dir.setter
-    def output_dir(self, value):
-        logger.info(f"Setting output_dir to: {value}")
-        if value is not None:
-            os.makedirs(value, exist_ok=True)
-        self._output_dir = value
-        
     @property
     def repositories(self):
         return self._repositories
@@ -225,7 +213,9 @@ class BackendFlow:
                 group_context=self._config.get('group_context'),
                 restore_uuid=resume_from_flow_uuid,
                 resume_from_crew_sequence=resume_from_crew_sequence,
-                resume_from_execution_id=resume_from_execution_id
+                resume_from_execution_id=resume_from_execution_id,
+                user_token=self._config.get('user_token'),
+                group_id=self._config.get('group_id')
             )
 
             logger.info("Flow created successfully")
@@ -719,7 +709,7 @@ class BackendFlow:
             # Check if plot method is available
             if hasattr(crewai_flow, 'plot'):
                 logger.info("Using CrewAI's native plot method")
-                output_path = os.path.join(self._output_dir or ".", filename)
+                output_path = os.path.join(".", filename)
                 crewai_flow.plot(filename=output_path)
                 logger.info(f"Flow visualization saved to: {output_path}")
                 return output_path

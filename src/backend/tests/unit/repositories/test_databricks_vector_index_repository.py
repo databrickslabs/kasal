@@ -413,7 +413,7 @@ class TestDatabricksVectorIndexRepository:
         index_name = "catalog.schema.test_index"
         endpoint_name = "test_endpoint"
         filters = {"category": "test"}
-        
+
         # Mock similarity_search to return filtered results
         search_response = {
             "success": True,
@@ -423,23 +423,104 @@ class TestDatabricksVectorIndexRepository:
                 }
             }
         }
-        
+
         with patch.object(repository, 'similarity_search', new_callable=AsyncMock) as mock_search:
             mock_search.return_value = search_response
-            
+
             # Act
             count = await repository.count_documents(
                 index_name=index_name,
                 endpoint_name=endpoint_name,
                 filters=filters
             )
-            
+
             # Assert
             assert count == 3
             mock_search.assert_called_once()
             # Check that filters were passed to similarity_search
             call_args = mock_search.call_args
             assert call_args[1]["filters"] == filters
+
+    @pytest.mark.asyncio
+    async def test_count_documents_uses_1024_dim_dummy_vector(self, repository, mock_auth_token):
+        """
+        Verify that count_documents uses a 1024-dimensional dummy vector
+        (changed from 768 to match databricks-gte-large-en).
+
+        When filters are provided (or index stats unavailable), the method
+        falls back to similarity_search with a dummy vector. That vector
+        must be 1024 dimensions to match the databricks-gte-large-en model.
+        """
+        index_name = "catalog.schema.test_index"
+        endpoint_name = "test_endpoint"
+        filters = {"agent_id": "test-agent"}
+
+        search_response = {
+            "success": True,
+            "results": {
+                "result": {
+                    "data_array": [["id1"]]
+                }
+            }
+        }
+
+        with patch.object(repository, 'similarity_search', new_callable=AsyncMock) as mock_search:
+            mock_search.return_value = search_response
+
+            await repository.count_documents(
+                index_name=index_name,
+                endpoint_name=endpoint_name,
+                filters=filters
+            )
+
+            # Verify the dummy vector passed to similarity_search is 1024-dimensional
+            mock_search.assert_called_once()
+            call_kwargs = mock_search.call_args[1]
+            query_vector = call_kwargs["query_vector"]
+            assert len(query_vector) == 1024, (
+                f"Expected 1024-dim dummy vector for databricks-gte-large-en, got {len(query_vector)}"
+            )
+            assert all(v == 0.0 for v in query_vector), "Dummy vector should be all zeros"
+
+    @pytest.mark.asyncio
+    async def test_count_documents_fallback_when_describe_fails(self, repository, mock_auth_token):
+        """
+        Verify that when describe_index fails (no filters case), the method
+        falls back to similarity_search with a 1024-dim dummy vector.
+        """
+        index_name = "catalog.schema.test_index"
+        endpoint_name = "test_endpoint"
+
+        # describe_index returns failure
+        describe_response = {
+            "success": False,
+            "description": None
+        }
+
+        search_response = {
+            "success": True,
+            "results": {
+                "result": {
+                    "data_array": [["id1"], ["id2"]]
+                }
+            }
+        }
+
+        with patch.object(repository, 'describe_index', new_callable=AsyncMock) as mock_describe:
+            mock_describe.return_value = describe_response
+
+            with patch.object(repository, 'similarity_search', new_callable=AsyncMock) as mock_search:
+                mock_search.return_value = search_response
+
+                count = await repository.count_documents(
+                    index_name=index_name,
+                    endpoint_name=endpoint_name
+                )
+
+                assert count == 2
+                # Verify 1024-dim dummy vector was used
+                call_kwargs = mock_search.call_args[1]
+                assert len(call_kwargs["query_vector"]) == 1024
 
 
 class TestDatabricksVectorIndexRepositoryUtilityMethods:

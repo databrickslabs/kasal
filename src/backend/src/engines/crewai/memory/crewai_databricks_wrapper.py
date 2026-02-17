@@ -76,7 +76,7 @@ class CrewAIDatabricksWrapper:
                 
                 self.relationship_retriever = EntityRelationshipRetriever(
                     memory_backend_service=None,  # Will be created per request
-                    embedding_model="sentence-transformers/all-MiniLM-L6-v2"
+                    embedding_model="databricks-gte-large-en"
                 )
                 entity_logger.info("[__init__] Relationship-based entity retrieval enabled")
             except Exception as e:

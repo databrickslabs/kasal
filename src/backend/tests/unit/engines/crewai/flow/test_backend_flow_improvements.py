@@ -199,7 +199,6 @@ class TestPlot:
         """Test plot when CrewAI supports it."""
         flow = BackendFlow(job_id="test-job")
         flow._flow_data = mock_flow_data
-        flow._output_dir = "/tmp/test"
 
         mock_crewai_flow = Mock()
         mock_crewai_flow.plot = Mock()  # Has plot method
@@ -229,28 +228,10 @@ class TestPlot:
             assert result is None
 
     @pytest.mark.asyncio
-    async def test_plot_with_custom_output_dir(self, mock_flow_data):
-        """Test plot uses custom output directory."""
-        flow = BackendFlow(job_id="test-job")
-        flow._flow_data = mock_flow_data
-        flow._output_dir = "/custom/path"
-
-        mock_crewai_flow = Mock()
-        mock_crewai_flow.plot = Mock()
-
-        with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
-            mock_flow_method.return_value = mock_crewai_flow
-
-            result = await flow.plot(filename="custom_diagram")
-
-            assert result is not None
-
-    @pytest.mark.asyncio
     async def test_plot_default_filename(self, mock_flow_data):
         """Test plot uses default filename."""
         flow = BackendFlow(job_id="test-job")
         flow._flow_data = mock_flow_data
-        flow._output_dir = "/tmp"
 
         mock_crewai_flow = Mock()
         mock_crewai_flow.plot = Mock()
@@ -275,23 +256,6 @@ class TestPlot:
             result = await flow.plot()
 
             assert result is None
-
-    @pytest.mark.asyncio
-    async def test_plot_with_none_output_dir(self, mock_flow_data):
-        """Test plot when output_dir is None uses current directory."""
-        flow = BackendFlow(job_id="test-job")
-        flow._flow_data = mock_flow_data
-        flow._output_dir = None
-
-        mock_crewai_flow = Mock()
-        mock_crewai_flow.plot = Mock()
-
-        with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
-            mock_flow_method.return_value = mock_crewai_flow
-
-            result = await flow.plot(filename="test")
-
-            assert result is not None
 
 
 class TestTracing:

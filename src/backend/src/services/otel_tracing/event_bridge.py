@@ -135,10 +135,11 @@ def _get_tool_name(event: Any) -> str:
 
 def _get_output(event: Any) -> str:
     """Extract output/result content from an event object."""
-    for attr in ("output", "result", "response", "content", "message"):
+    for attr in ("output", "result", "results", "response", "content",
+                 "message", "value", "memory_content"):
         val = getattr(event, attr, None)
         if val is not None:
-            return _safe_str(val, 2000)
+            return str(val)
     return ""
 
 
@@ -289,7 +290,7 @@ class OTelEventBridge:
                 if tool_name:
                     span.set_attribute("kasal.tool_name", tool_name)
                 if output:
-                    span.set_attribute("kasal.output_content", output[:2000])
+                    span.set_attribute("kasal.output_content", output)
 
                 # Extra metadata
                 self._set_extra_attributes(span, event)
@@ -386,7 +387,7 @@ class OTelEventBridge:
             span.set_attribute("kasal.extra.retrieval_time_ms", float(retrieval_time))
         memory_content = getattr(event, "memory_content", None)
         if memory_content:
-            span.set_attribute("kasal.extra.memory_content", _safe_str(memory_content, 2000))
+            span.set_attribute("kasal.extra.memory_content", str(memory_content))
         limit = getattr(event, "limit", None)
         if limit is not None:
             span.set_attribute("kasal.extra.limit", int(limit))
@@ -394,13 +395,19 @@ class OTelEventBridge:
         if score_threshold is not None:
             span.set_attribute("kasal.extra.score_threshold", float(score_threshold))
 
+        # ── Memory results (query completed) ──
+        results = getattr(event, "results", None)
+        if results is not None:
+            if isinstance(results, (list, tuple)):
+                span.set_attribute("kasal.extra.results_count", len(results))
+
         # ── Tool fields ──
         tool_name = getattr(event, "tool_name", None) or getattr(event, "tool", None)
         if tool_name:
             span.set_attribute("kasal.extra.tool_name", str(tool_name))
         tool_args = getattr(event, "tool_args", None)
         if tool_args:
-            span.set_attribute("kasal.extra.tool_args", _safe_str(tool_args, 1000))
+            span.set_attribute("kasal.extra.tool_args", str(tool_args))
         tool_class = getattr(event, "tool_class", None)
         if tool_class:
             cls_name = getattr(tool_class, "__name__", str(tool_class))
@@ -421,7 +428,7 @@ class OTelEventBridge:
             span.set_attribute("kasal.extra.crew_name", str(crew_name))
         inputs = getattr(event, "inputs", None)
         if inputs:
-            span.set_attribute("kasal.extra.inputs", _safe_str(inputs, 1000))
+            span.set_attribute("kasal.extra.inputs", str(inputs))
         total_tokens = getattr(event, "total_tokens", None)
         if total_tokens is not None:
             span.set_attribute("kasal.extra.total_tokens", int(total_tokens))
@@ -429,7 +436,7 @@ class OTelEventBridge:
         # ── Agent execution fields ──
         task_prompt = getattr(event, "task_prompt", None)
         if task_prompt:
-            span.set_attribute("kasal.extra.task_prompt", _safe_str(task_prompt, 2000))
+            span.set_attribute("kasal.extra.task_prompt", str(task_prompt))
         tools = getattr(event, "tools", None)
         if tools and isinstance(tools, (list, tuple)):
             tool_names = [getattr(t, "name", str(t)) for t in tools[:20]]
@@ -438,17 +445,17 @@ class OTelEventBridge:
         # ── Task context ──
         context = getattr(event, "context", None)
         if context and isinstance(context, str):
-            span.set_attribute("kasal.extra.context", _safe_str(context, 1000))
+            span.set_attribute("kasal.extra.context", str(context))
 
         # ── Knowledge fields ──
         retrieved_knowledge = getattr(event, "retrieved_knowledge", None)
         if retrieved_knowledge:
-            span.set_attribute("kasal.extra.retrieved_knowledge", _safe_str(retrieved_knowledge, 2000))
+            span.set_attribute("kasal.extra.retrieved_knowledge", str(retrieved_knowledge))
 
         # ── Reasoning fields ──
         plan = getattr(event, "plan", None)
         if plan:
-            span.set_attribute("kasal.extra.plan", _safe_str(plan, 2000))
+            span.set_attribute("kasal.extra.plan", str(plan))
         ready = getattr(event, "ready", None)
         if ready is not None:
             span.set_attribute("kasal.extra.ready", bool(ready))
@@ -465,7 +472,7 @@ class OTelEventBridge:
             span.set_attribute("kasal.extra.success", bool(success))
         result = getattr(event, "result", None)
         if result is not None:
-            span.set_attribute("kasal.extra.result", _safe_str(result, 2000))
+            span.set_attribute("kasal.extra.result", str(result))
         retry_count = getattr(event, "retry_count", None)
         if retry_count is not None:
             span.set_attribute("kasal.extra.retry_count", int(retry_count))
@@ -498,10 +505,10 @@ class OTelEventBridge:
         # ── HITL fields ──
         message = getattr(event, "message", None)
         if message and isinstance(message, str):
-            span.set_attribute("kasal.extra.message", _safe_str(message, 1000))
+            span.set_attribute("kasal.extra.message", str(message))
         feedback = getattr(event, "feedback", None)
         if feedback:
-            span.set_attribute("kasal.extra.feedback", _safe_str(feedback, 2000))
+            span.set_attribute("kasal.extra.feedback", str(feedback))
         outcome = getattr(event, "outcome", None)
         if outcome:
             span.set_attribute("kasal.extra.outcome", str(outcome))
@@ -518,10 +525,10 @@ class OTelEventBridge:
                 user_msgs = [m for m in messages if isinstance(m, dict) and m.get("role") == "user"]
                 if user_msgs:
                     last_user = user_msgs[-1].get("content", "")
-                    span.set_attribute("kasal.extra.prompt", _safe_str(last_user, 4000))
+                    span.set_attribute("kasal.extra.prompt", str(last_user))
                 span.set_attribute("kasal.extra.message_count", len(messages))
             else:
-                span.set_attribute("kasal.extra.prompt", _safe_str(messages, 4000))
+                span.set_attribute("kasal.extra.prompt", str(messages))
         call_type = getattr(event, "call_type", None)
         if call_type is not None:
             span.set_attribute("kasal.extra.call_type", str(call_type))
@@ -533,7 +540,7 @@ class OTelEventBridge:
         # ── Error field (all failed events) ──
         error = getattr(event, "error", None)
         if error:
-            span.set_attribute("kasal.extra.error", _safe_str(error, 2000))
+            span.set_attribute("kasal.extra.error", str(error))
 
         # ── Generic operation type ──
         operation = getattr(event, "operation", None)

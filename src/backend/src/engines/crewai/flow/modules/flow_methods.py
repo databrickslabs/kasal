@@ -167,7 +167,9 @@ class FlowMethodFactory:
         callbacks: Optional[Dict[str, Any]],
         group_context: Optional[Any],
         create_execution_callbacks: Callable,
-        crew_data: Optional[Any] = None
+        crew_data: Optional[Any] = None,
+        user_token: Optional[str] = None,
+        group_id: Optional[str] = None
     ) -> Callable:
         """
         Create a starting point method that executes multiple tasks as a crew.
@@ -180,6 +182,8 @@ class FlowMethodFactory:
             group_context: Group context for multi-tenant isolation
             create_execution_callbacks: Function to create execution callbacks
             crew_data: Crew data from database for configuration inheritance
+            user_token: User access token for OBO authentication (optional)
+            group_id: Group ID for multi-tenant isolation (optional)
 
         Returns:
             Async function decorated with @start()
@@ -331,6 +335,23 @@ class FlowMethodFactory:
                         agent_role = agent.role if hasattr(agent, 'role') else 'Unknown'
                         logger.info(f"  → Propagated reasoning=True to agent '{agent_role}'")
 
+            # Configure embedder for memory (same as regular crew path)
+            if crew_memory:
+                try:
+                    from src.engines.crewai.config.embedder_config_builder import EmbedderConfigBuilder
+                    embedder_build_config = {
+                        'agents': [{'embedder_config': None}],
+                        'group_id': group_id,
+                    }
+                    embedder_builder = EmbedderConfigBuilder(embedder_build_config, user_token)
+                    crew_kwargs, _, _ = await embedder_builder.configure_embedder(crew_kwargs)
+                    if 'embedder' in crew_kwargs:
+                        logger.info(f"Configured embedder for flow crew: {crew_kwargs['embedder'].get('provider', 'custom') if isinstance(crew_kwargs.get('embedder'), dict) else 'custom'}")
+                    else:
+                        logger.warning("No embedder configured - CrewAI will use its default (requires OPENAI_API_KEY)")
+                except Exception as e:
+                    logger.warning(f"Failed to configure embedder for flow crew: {e}")
+
             # Log crew configuration for debugging
             logger.info(f"📋 Crew configuration: memory={crew_memory}, process={process_type}, planning={crew_kwargs.get('planning', False)}, reasoning={crew_kwargs.get('reasoning', False)}")
 
@@ -451,7 +472,9 @@ class FlowMethodFactory:
         group_context: Optional[Any],
         create_execution_callbacks: Callable,
         crew_name: Optional[str] = None,
-        crew_data: Optional[Any] = None
+        crew_data: Optional[Any] = None,
+        user_token: Optional[str] = None,
+        group_id: Optional[str] = None
     ) -> Callable:
         """
         Create a listener method for the flow.
@@ -466,6 +489,8 @@ class FlowMethodFactory:
             create_execution_callbacks: Function to create execution callbacks
             crew_name: Name of the crew from flow configuration (for trace tracking)
             crew_data: Crew data from database containing memory and configuration settings
+            user_token: User access token for OBO authentication (optional)
+            group_id: Group ID for multi-tenant isolation (optional)
 
         Returns:
             Async function decorated with @listen()
@@ -662,6 +687,23 @@ class FlowMethodFactory:
                         agent.reasoning = True
                         agent_role = agent.role if hasattr(agent, 'role') else 'Unknown'
                         logger.info(f"  → Propagated reasoning=True to agent '{agent_role}'")
+
+            # Configure embedder for memory (same as regular crew path)
+            if crew_memory:
+                try:
+                    from src.engines.crewai.config.embedder_config_builder import EmbedderConfigBuilder
+                    embedder_build_config = {
+                        'agents': [{'embedder_config': None}],
+                        'group_id': group_id,
+                    }
+                    embedder_builder = EmbedderConfigBuilder(embedder_build_config, user_token)
+                    crew_kwargs, _, _ = await embedder_builder.configure_embedder(crew_kwargs)
+                    if 'embedder' in crew_kwargs:
+                        logger.info(f"Configured embedder for listener crew: {crew_kwargs['embedder'].get('provider', 'custom') if isinstance(crew_kwargs.get('embedder'), dict) else 'custom'}")
+                    else:
+                        logger.warning("No embedder configured for listener - CrewAI will use its default (requires OPENAI_API_KEY)")
+                except Exception as e:
+                    logger.warning(f"Failed to configure embedder for listener crew: {e}")
 
             # Log crew configuration for debugging
             logger.info(f"Listener crew configuration: memory={crew_memory}, process={process_type}, planning={crew_kwargs.get('planning', False)}, reasoning={crew_kwargs.get('reasoning', False)}")

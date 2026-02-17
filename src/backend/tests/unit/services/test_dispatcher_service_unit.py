@@ -409,26 +409,14 @@ class TestDetectIntent:
             return_value="You are an intent detector."
         )
 
-        llm_response = {
-            "choices": [
-                {
-                    "message": {
-                        "content": '{"intent": "generate_task", "confidence": 0.9, '
-                        '"extracted_info": {"goal": "find flights"}, '
-                        '"suggested_prompt": "find the best flight"}'
-                    }
-                }
-            ]
-        }
+        llm_content = ('{"intent": "generate_task", "confidence": 0.9, '
+                       '"extracted_info": {"goal": "find flights"}, '
+                       '"suggested_prompt": "find the best flight"}')
 
         with patch(
-            "src.services.dispatcher_service.LLMManager.configure_litellm",
+            "src.services.dispatcher_service.LLMManager.completion",
             new_callable=AsyncMock,
-            return_value={"model": "test-model"},
-        ), patch(
-            "src.services.dispatcher_service.LLMManager.acompletion",
-            new_callable=AsyncMock,
-            return_value=llm_response,
+            return_value=llm_content,
         ):
             result = await svc.detect_intent("find the best flight", "test-model")
 
@@ -441,24 +429,12 @@ class TestDetectIntent:
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value=None)
 
-        llm_response = {
-            "choices": [
-                {
-                    "message": {
-                        "content": '{"intent": "generate_agent", "confidence": 0.85}'
-                    }
-                }
-            ]
-        }
+        llm_content = '{"intent": "generate_agent", "confidence": 0.85}'
 
         with patch(
-            "src.services.dispatcher_service.LLMManager.configure_litellm",
+            "src.services.dispatcher_service.LLMManager.completion",
             new_callable=AsyncMock,
-            return_value={"model": "m"},
-        ), patch(
-            "src.services.dispatcher_service.LLMManager.acompletion",
-            new_callable=AsyncMock,
-            return_value=llm_response,
+            return_value=llm_content,
         ):
             result = await svc.detect_intent("create an agent", "m")
 
@@ -469,18 +445,12 @@ class TestDetectIntent:
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
-        llm_response = {
-            "choices": [{"message": {"content": ""}}]
-        }
+        llm_content = ""
 
         with patch(
-            "src.services.dispatcher_service.LLMManager.configure_litellm",
+            "src.services.dispatcher_service.LLMManager.completion",
             new_callable=AsyncMock,
-            return_value={"model": "m"},
-        ), patch(
-            "src.services.dispatcher_service.LLMManager.acompletion",
-            new_callable=AsyncMock,
-            return_value=llm_response,
+            return_value=llm_content,
         ):
             result = await svc.detect_intent("find the best flight", "m")
 
@@ -493,18 +463,12 @@ class TestDetectIntent:
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
-        llm_response = {
-            "choices": [{"message": {"content": "   \n  "}}]
-        }
+        llm_content = "   \n  "
 
         with patch(
-            "src.services.dispatcher_service.LLMManager.configure_litellm",
+            "src.services.dispatcher_service.LLMManager.completion",
             new_callable=AsyncMock,
-            return_value={"model": "m"},
-        ), patch(
-            "src.services.dispatcher_service.LLMManager.acompletion",
-            new_callable=AsyncMock,
-            return_value=llm_response,
+            return_value=llm_content,
         ):
             result = await svc.detect_intent("find flights", "m")
 
@@ -516,18 +480,12 @@ class TestDetectIntent:
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
-        llm_response = {
-            "choices": [{"message": {"content": None}}]
-        }
+        llm_content = None
 
         with patch(
-            "src.services.dispatcher_service.LLMManager.configure_litellm",
+            "src.services.dispatcher_service.LLMManager.completion",
             new_callable=AsyncMock,
-            return_value={"model": "m"},
-        ), patch(
-            "src.services.dispatcher_service.LLMManager.acompletion",
-            new_callable=AsyncMock,
-            return_value=llm_response,
+            return_value=llm_content,
         ):
             result = await svc.detect_intent("find flights", "m")
 
@@ -542,7 +500,7 @@ class TestDetectIntent:
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
         with patch(
-            "src.services.dispatcher_service.LLMManager.configure_litellm",
+            "src.services.dispatcher_service.LLMManager.completion",
             new_callable=AsyncMock,
             side_effect=RuntimeError("API down"),
         ):
@@ -559,7 +517,7 @@ class TestDetectIntent:
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
         with patch(
-            "src.services.dispatcher_service.LLMManager.configure_litellm",
+            "src.services.dispatcher_service.LLMManager.completion",
             new_callable=AsyncMock,
             side_effect=RuntimeError("API down"),
         ):
@@ -574,18 +532,12 @@ class TestDetectIntent:
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
-        llm_response = {
-            "choices": [{"message": {"content": ""}}]
-        }
+        llm_content = ""
 
         with patch(
-            "src.services.dispatcher_service.LLMManager.configure_litellm",
+            "src.services.dispatcher_service.LLMManager.completion",
             new_callable=AsyncMock,
-            return_value={"model": "m"},
-        ), patch(
-            "src.services.dispatcher_service.LLMManager.acompletion",
-            new_callable=AsyncMock,
-            return_value=llm_response,
+            return_value=llm_content,
         ):
             result = await svc.detect_intent("xyz abc", "m")
 
@@ -597,24 +549,12 @@ class TestDetectIntent:
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
-        llm_response = {
-            "choices": [
-                {
-                    "message": {
-                        "content": '{"confidence": 0.7, "extracted_info": {}}'
-                    }
-                }
-            ]
-        }
+        llm_content = '{"confidence": 0.7, "extracted_info": {}}'
 
         with patch(
-            "src.services.dispatcher_service.LLMManager.configure_litellm",
+            "src.services.dispatcher_service.LLMManager.completion",
             new_callable=AsyncMock,
-            return_value={"model": "m"},
-        ), patch(
-            "src.services.dispatcher_service.LLMManager.acompletion",
-            new_callable=AsyncMock,
-            return_value=llm_response,
+            return_value=llm_content,
         ):
             result = await svc.detect_intent("find the best flight", "m")
 
@@ -626,24 +566,12 @@ class TestDetectIntent:
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
-        llm_response = {
-            "choices": [
-                {
-                    "message": {
-                        "content": '{"intent": "generate_task", "extracted_info": {}}'
-                    }
-                }
-            ]
-        }
+        llm_content = '{"intent": "generate_task", "extracted_info": {}}'
 
         with patch(
-            "src.services.dispatcher_service.LLMManager.configure_litellm",
+            "src.services.dispatcher_service.LLMManager.completion",
             new_callable=AsyncMock,
-            return_value={"model": "m"},
-        ), patch(
-            "src.services.dispatcher_service.LLMManager.acompletion",
-            new_callable=AsyncMock,
-            return_value=llm_response,
+            return_value=llm_content,
         ):
             result = await svc.detect_intent("analyze data", "m")
 
@@ -655,24 +583,12 @@ class TestDetectIntent:
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
-        llm_response = {
-            "choices": [
-                {
-                    "message": {
-                        "content": '{"intent": "generate_task", "confidence": 1.5}'
-                    }
-                }
-            ]
-        }
+        llm_content = '{"intent": "generate_task", "confidence": 1.5}'
 
         with patch(
-            "src.services.dispatcher_service.LLMManager.configure_litellm",
+            "src.services.dispatcher_service.LLMManager.completion",
             new_callable=AsyncMock,
-            return_value={"model": "m"},
-        ), patch(
-            "src.services.dispatcher_service.LLMManager.acompletion",
-            new_callable=AsyncMock,
-            return_value=llm_response,
+            return_value=llm_content,
         ):
             result = await svc.detect_intent("create something", "m")
 
@@ -683,24 +599,12 @@ class TestDetectIntent:
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
-        llm_response = {
-            "choices": [
-                {
-                    "message": {
-                        "content": '{"intent": "generate_task", "confidence": -0.5}'
-                    }
-                }
-            ]
-        }
+        llm_content = '{"intent": "generate_task", "confidence": -0.5}'
 
         with patch(
-            "src.services.dispatcher_service.LLMManager.configure_litellm",
+            "src.services.dispatcher_service.LLMManager.completion",
             new_callable=AsyncMock,
-            return_value={"model": "m"},
-        ), patch(
-            "src.services.dispatcher_service.LLMManager.acompletion",
-            new_callable=AsyncMock,
-            return_value=llm_response,
+            return_value=llm_content,
         ):
             result = await svc.detect_intent("create something", "m")
 
@@ -711,24 +615,12 @@ class TestDetectIntent:
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
-        llm_response = {
-            "choices": [
-                {
-                    "message": {
-                        "content": '{"intent": "generate_task", "confidence": "not_a_number"}'
-                    }
-                }
-            ]
-        }
+        llm_content = '{"intent": "generate_task", "confidence": "not_a_number"}'
 
         with patch(
-            "src.services.dispatcher_service.LLMManager.configure_litellm",
+            "src.services.dispatcher_service.LLMManager.completion",
             new_callable=AsyncMock,
-            return_value={"model": "m"},
-        ), patch(
-            "src.services.dispatcher_service.LLMManager.acompletion",
-            new_callable=AsyncMock,
-            return_value=llm_response,
+            return_value=llm_content,
         ):
             result = await svc.detect_intent("create something", "m")
 
@@ -740,24 +632,12 @@ class TestDetectIntent:
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
-        llm_response = {
-            "choices": [
-                {
-                    "message": {
-                        "content": '{"intent": "generate_task", "confidence": 0.9}'
-                    }
-                }
-            ]
-        }
+        llm_content = '{"intent": "generate_task", "confidence": 0.9}'
 
         with patch(
-            "src.services.dispatcher_service.LLMManager.configure_litellm",
+            "src.services.dispatcher_service.LLMManager.completion",
             new_callable=AsyncMock,
-            return_value={"model": "m"},
-        ), patch(
-            "src.services.dispatcher_service.LLMManager.acompletion",
-            new_callable=AsyncMock,
-            return_value=llm_response,
+            return_value=llm_content,
         ):
             result = await svc.detect_intent("find flights", "m")
 
@@ -768,24 +648,12 @@ class TestDetectIntent:
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
-        llm_response = {
-            "choices": [
-                {
-                    "message": {
-                        "content": '{"intent": "generate_task", "confidence": 0.9, "suggested_prompt": "x"}'
-                    }
-                }
-            ]
-        }
+        llm_content = '{"intent": "generate_task", "confidence": 0.9, "suggested_prompt": "x"}'
 
         with patch(
-            "src.services.dispatcher_service.LLMManager.configure_litellm",
+            "src.services.dispatcher_service.LLMManager.completion",
             new_callable=AsyncMock,
-            return_value={"model": "m"},
-        ), patch(
-            "src.services.dispatcher_service.LLMManager.acompletion",
-            new_callable=AsyncMock,
-            return_value=llm_response,
+            return_value=llm_content,
         ):
             result = await svc.detect_intent("find flights", "m")
 
@@ -798,25 +666,13 @@ class TestDetectIntent:
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
-        llm_response = {
-            "choices": [
-                {
-                    "message": {
-                        "content": '{"intent": "unknown", "confidence": 0.3, '
-                        '"extracted_info": {}, "suggested_prompt": "ec"}'
-                    }
-                }
-            ]
-        }
+        llm_content = ('{"intent": "unknown", "confidence": 0.3, '
+                       '"extracted_info": {}, "suggested_prompt": "ec"}')
 
         with patch(
-            "src.services.dispatcher_service.LLMManager.configure_litellm",
+            "src.services.dispatcher_service.LLMManager.completion",
             new_callable=AsyncMock,
-            return_value={"model": "m"},
-        ), patch(
-            "src.services.dispatcher_service.LLMManager.acompletion",
-            new_callable=AsyncMock,
-            return_value=llm_response,
+            return_value=llm_content,
         ):
             result = await svc.detect_intent("ec", "m")
 
@@ -829,25 +685,13 @@ class TestDetectIntent:
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
-        llm_response = {
-            "choices": [
-                {
-                    "message": {
-                        "content": '{"intent": "generate_agent", "confidence": 0.95, '
-                        '"extracted_info": {}, "suggested_prompt": "create agent"}'
-                    }
-                }
-            ]
-        }
+        llm_content = ('{"intent": "generate_agent", "confidence": 0.95, '
+                       '"extracted_info": {}, "suggested_prompt": "create agent"}')
 
         with patch(
-            "src.services.dispatcher_service.LLMManager.configure_litellm",
+            "src.services.dispatcher_service.LLMManager.completion",
             new_callable=AsyncMock,
-            return_value={"model": "m"},
-        ), patch(
-            "src.services.dispatcher_service.LLMManager.acompletion",
-            new_callable=AsyncMock,
-            return_value=llm_response,
+            return_value=llm_content,
         ):
             # Message has "find" (task action) but LLM says agent with high confidence
             result = await svc.detect_intent("find an agent", "m")
@@ -857,19 +701,11 @@ class TestDetectIntent:
 
     @pytest.mark.asyncio
     async def test_mlflow_import_error_handled(self):
-        """If mlflow is not importable, should fall back to plain acompletion."""
+        """If mlflow is not importable, should fall back to plain completion."""
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
-        llm_response = {
-            "choices": [
-                {
-                    "message": {
-                        "content": '{"intent": "generate_task", "confidence": 0.85}'
-                    }
-                }
-            ]
-        }
+        llm_content = '{"intent": "generate_task", "confidence": 0.85}'
 
         def fake_import(name, *args, **kwargs):
             if name == "mlflow":
@@ -880,13 +716,9 @@ class TestDetectIntent:
         original_import = builtins.__import__
 
         with patch(
-            "src.services.dispatcher_service.LLMManager.configure_litellm",
+            "src.services.dispatcher_service.LLMManager.completion",
             new_callable=AsyncMock,
-            return_value={"model": "m"},
-        ), patch(
-            "src.services.dispatcher_service.LLMManager.acompletion",
-            new_callable=AsyncMock,
-            return_value=llm_response,
+            return_value=llm_content,
         ), patch("builtins.__import__", side_effect=fake_import):
             result = await svc.detect_intent("find data", "m")
 
@@ -898,16 +730,10 @@ class TestDetectIntent:
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
-        llm_response = {
-            "choices": [
-                {
-                    "message": {
-                        "content": '{"intent": "generate_task", "confidence": 0.9, '
-                        '"extracted_info": {}, "suggested_prompt": "test"}'
-                    }
-                }
-            ]
-        }
+        llm_content = (
+            '{"intent": "generate_task", "confidence": 0.9, '
+            '"extracted_info": {}, "suggested_prompt": "test"}'
+        )
 
         mock_span = MagicMock()
         mock_span.set_inputs = MagicMock()
@@ -927,13 +753,9 @@ class TestDetectIntent:
             return original_import(name, *args, **kwargs)
 
         with patch(
-            "src.services.dispatcher_service.LLMManager.configure_litellm",
+            "src.services.dispatcher_service.LLMManager.completion",
             new_callable=AsyncMock,
-            return_value={"model": "m"},
-        ), patch(
-            "src.services.dispatcher_service.LLMManager.acompletion",
-            new_callable=AsyncMock,
-            return_value=llm_response,
+            return_value=llm_content,
         ), patch("builtins.__import__", side_effect=fake_import):
             result = await svc.detect_intent("find data", "m")
 
@@ -943,19 +765,11 @@ class TestDetectIntent:
 
     @pytest.mark.asyncio
     async def test_mlflow_no_start_span_attribute(self):
-        """When mlflow exists but has no start_span, plain acompletion is used."""
+        """When mlflow exists but has no start_span, plain completion is used."""
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
-        llm_response = {
-            "choices": [
-                {
-                    "message": {
-                        "content": '{"intent": "generate_task", "confidence": 0.9}'
-                    }
-                }
-            ]
-        }
+        llm_content = '{"intent": "generate_task", "confidence": 0.9}'
 
         mock_mlflow = MagicMock(spec=[])  # no start_span attribute
 
@@ -968,13 +782,9 @@ class TestDetectIntent:
             return original_import(name, *args, **kwargs)
 
         with patch(
-            "src.services.dispatcher_service.LLMManager.configure_litellm",
+            "src.services.dispatcher_service.LLMManager.completion",
             new_callable=AsyncMock,
-            return_value={"model": "m"},
-        ), patch(
-            "src.services.dispatcher_service.LLMManager.acompletion",
-            new_callable=AsyncMock,
-            return_value=llm_response,
+            return_value=llm_content,
         ), patch("builtins.__import__", side_effect=fake_import):
             result = await svc.detect_intent("find data", "m")
 

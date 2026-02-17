@@ -393,7 +393,7 @@ const TabBar: React.FC<TabBarProps> = ({
           minHeight: '48px',
           height: '48px',  // Fixed height to prevent shifts
           paddingLeft: 1,
-          paddingRight: 1,
+          paddingRight: '60px', // Reserve space for the fixed GroupSelector in top-right
           position: 'relative',
           zIndex: 1001, // Above the toolbar
           overflow: 'hidden'  // Prevent overflow from causing layout shifts

@@ -5,7 +5,10 @@ This adapter supports both SSE and Streamable MCP protocols using the official
 MCP client library with Databricks OAuth authentication.
 """
 
+import asyncio
 import logging
+import time
+from collections import deque
 from typing import Dict, Optional, Any, List
 
 logger = logging.getLogger(__name__)
@@ -34,6 +37,7 @@ class MCPAdapter:
         self._tools = []
         self._tool_schemas = {}  # Store schemas for parameter type conversion
         self._initialized = False
+        self._call_timestamps: deque = deque()
         
     async def initialize(self):
         """Initialize the adapter and discover tools using the working MCP client approach."""
@@ -75,7 +79,7 @@ class MCPAdapter:
             clean_headers = {"Authorization": headers["Authorization"]}
             
             # Connect using MCP streamable HTTP client (the working approach)
-            async with connect(self.server_url, headers=clean_headers) as (read_stream, write_stream, _):
+            async with connect(self.server_url, headers=clean_headers, timeout=self.timeout_seconds) as (read_stream, write_stream, _):
                 logger.info("Connected to MCP streamable endpoint for tool discovery")
                 
                 # Create a session using the client streams
@@ -235,42 +239,96 @@ class MCPAdapter:
             return parameters
 
     async def execute_tool(self, tool_name: str, parameters: Dict[str, Any]) -> Any:
-        """Execute a tool by creating a new MCP session (stateless approach)."""
-        try:
-            # Convert parameters according to schema before execution
-            converted_params = self._convert_parameters(tool_name, parameters)
+        """Execute a tool by creating a new MCP session (stateless approach).
 
-            # Get authentication headers
-            headers = await self._get_authentication_headers()
-            if not headers:
-                raise ValueError("No authentication headers available")
+        Includes rate limiting and retry with exponential backoff for transient errors.
+        """
+        # Rate limiting: enforce max calls per 60-second window
+        await self._wait_for_rate_limit()
 
-            # Import MCP client dependencies
-            from mcp.client.streamable_http import streamablehttp_client as connect
-            from mcp import ClientSession
+        # Convert parameters according to schema before execution
+        converted_params = self._convert_parameters(tool_name, parameters)
 
-            # Use only the Authorization header
-            clean_headers = {"Authorization": headers["Authorization"]}
+        # Get authentication headers
+        headers = await self._get_authentication_headers()
+        if not headers:
+            raise ValueError("No authentication headers available")
 
-            # Connect using MCP streamable HTTP client
-            async with connect(self.server_url, headers=clean_headers) as (read_stream, write_stream, _):
-                logger.debug(f"Connected to MCP for tool execution: {tool_name}")
+        # Import MCP client dependencies
+        from mcp.client.streamable_http import streamablehttp_client as connect
+        from mcp import ClientSession
 
-                # Create a session using the client streams
-                async with ClientSession(read_stream, write_stream) as session:
-                    # Initialize the connection
-                    await session.initialize()
+        # Use only the Authorization header
+        clean_headers = {"Authorization": headers["Authorization"]}
 
-                    # Execute the tool with converted parameters
-                    logger.info(f"Executing MCP tool: {tool_name} with parameters: {converted_params}")
-                    result = await session.call_tool(tool_name, converted_params)
-                    logger.info(f"Tool {tool_name} executed successfully")
-                    return result
-                    
-        except Exception as e:
-            logger.error(f"Error executing MCP tool {tool_name}: {e}")
-            raise
+        last_error: Optional[Exception] = None
+        for attempt in range(self.max_retries):
+            try:
+                # Connect using MCP streamable HTTP client
+                async with connect(self.server_url, headers=clean_headers, timeout=self.timeout_seconds) as (read_stream, write_stream, _):
+                    logger.debug(f"Connected to MCP for tool execution: {tool_name}")
+
+                    # Create a session using the client streams
+                    async with ClientSession(read_stream, write_stream) as session:
+                        # Initialize the connection
+                        await session.initialize()
+
+                        # Execute the tool with converted parameters
+                        logger.info(f"Executing MCP tool: {tool_name} with parameters: {converted_params}")
+                        result = await session.call_tool(tool_name, converted_params)
+                        logger.info(f"Tool {tool_name} executed successfully")
+                        # Record successful call for rate limiting
+                        self._call_timestamps.append(time.monotonic())
+                        return result
+
+            except (ConnectionError, OSError, asyncio.TimeoutError) as e:
+                last_error = e
+                if attempt < self.max_retries - 1:
+                    backoff = 2 ** attempt
+                    logger.warning(
+                        f"Transient error executing MCP tool {tool_name} "
+                        f"(attempt {attempt + 1}/{self.max_retries}), "
+                        f"retrying in {backoff}s: {e}"
+                    )
+                    await asyncio.sleep(backoff)
+                else:
+                    logger.error(
+                        f"MCP tool {tool_name} failed after {self.max_retries} attempts: {e}"
+                    )
+            except Exception as e:
+                # Non-transient errors (tool logic errors, auth errors) - don't retry
+                logger.error(f"Error executing MCP tool {tool_name}: {e}")
+                raise
+
+        raise last_error  # type: ignore[misc]
             
+
+    async def _wait_for_rate_limit(self) -> None:
+        """Enforce sliding-window rate limiting (max calls per 60-second window)."""
+        if self.rate_limit <= 0:
+            return
+
+        now = time.monotonic()
+        window = 60.0
+
+        # Remove timestamps outside the window
+        while self._call_timestamps and (now - self._call_timestamps[0]) > window:
+            self._call_timestamps.popleft()
+
+        if len(self._call_timestamps) >= self.rate_limit:
+            oldest = self._call_timestamps[0]
+            wait_time = window - (now - oldest)
+            if wait_time > 0:
+                logger.info(
+                    f"Rate limit reached ({self.rate_limit} calls/min), "
+                    f"waiting {wait_time:.1f}s"
+                )
+                await asyncio.sleep(wait_time)
+                # Clean up again after waiting
+                now = time.monotonic()
+                while self._call_timestamps and (now - self._call_timestamps[0]) > window:
+                    self._call_timestamps.popleft()
+
     async def _get_authentication_headers(self) -> Optional[Dict[str, str]]:
         """Get authentication headers using our fallback mechanism."""
         try:

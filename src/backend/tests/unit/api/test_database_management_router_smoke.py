@@ -89,15 +89,23 @@ async def test_list_info_and_permission_checks():
 
 @pytest.mark.asyncio
 async def test_debug_permissions_and_headers_minimal():
-    # No env set, unified auth likely missing -> returns missing configuration quickly
-    ctx = Ctx()
-    out = await debug_permissions(session=AsyncMock(), group_context=ctx)
-    assert "error" in out
+    # Patch settings.DEBUG_MODE since the module-level settings object
+    # is created before conftest monkeypatches the environment
+    from src.config.settings import settings as app_settings
+    original = app_settings.DEBUG_MODE
+    app_settings.DEBUG_MODE = True
+    try:
+        # No env set, unified auth likely missing -> returns missing configuration quickly
+        ctx = Ctx()
+        out = await debug_permissions(session=AsyncMock(), group_context=ctx)
+        assert "error" in out
 
-    # debug_headers with minimal request
-    req = SimpleNamespace(headers={})
-    out2 = await debug_headers(request=req, group_context=ctx)
-    assert "all_headers" in out2 and "environment" in out2
+        # debug_headers with minimal request
+        req = SimpleNamespace(headers={})
+        out2 = await debug_headers(request=req, group_context=ctx)
+        assert "all_headers" in out2 and "environment" in out2
+    finally:
+        app_settings.DEBUG_MODE = original
 
 
 @pytest.mark.asyncio

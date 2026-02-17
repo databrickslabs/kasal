@@ -600,6 +600,142 @@ describe('Variable Extraction', () => {
   });
 });
 
+describe('extractVariablesFromNodes regex - identifier-only matching', () => {
+  // Tests the regex pattern used inside the component's extractVariablesFromNodes function.
+  // The regex was changed from /\{([^}]+)\}/g to /\{([a-zA-Z_][a-zA-Z0-9_-]*)\}/g
+  // to prevent CSS/JS brace content from being treated as template variables.
+  const variablePattern = /\{([a-zA-Z_][a-zA-Z0-9_-]*)\}/g;
+
+  const extractVariables = (nodes: Node[]): string[] => {
+    const foundVariables = new Set<string>();
+    nodes.forEach(node => {
+      if (node.type === 'agentNode' || node.type === 'taskNode') {
+        const data = node.data as Record<string, unknown>;
+        const fieldsToCheck = [
+          data.role,
+          data.goal,
+          data.backstory,
+          data.description,
+          data.expected_output,
+          data.label
+        ];
+
+        fieldsToCheck.forEach(field => {
+          if (field && typeof field === 'string') {
+            let match;
+            variablePattern.lastIndex = 0;
+            while ((match = variablePattern.exec(field)) !== null) {
+              foundVariables.add(match[1]);
+            }
+          }
+        });
+      }
+    });
+    return Array.from(foundVariables);
+  };
+
+  const createNode = (id: string, type: string, data: Record<string, unknown>): Node => ({
+    id,
+    type,
+    position: { x: 0, y: 0 },
+    data,
+  });
+
+  it('extracts valid identifier variables from agent fields', () => {
+    const nodes = [
+      createNode('a1', 'agentNode', {
+        role: 'Expert in {field}',
+        goal: 'Analyze {target}',
+        backstory: 'Trained on {dataset}',
+      }),
+    ];
+    const vars = extractVariables(nodes);
+    expect(vars).toContain('field');
+    expect(vars).toContain('target');
+    expect(vars).toContain('dataset');
+  });
+
+  it('extracts valid identifier variables from task fields', () => {
+    const nodes = [
+      createNode('t1', 'taskNode', {
+        description: 'Research {subject}',
+        expected_output: 'Report on {output_type}',
+        label: 'Task for {client}',
+      }),
+    ];
+    const vars = extractVariables(nodes);
+    expect(vars).toContain('subject');
+    expect(vars).toContain('output_type');
+    expect(vars).toContain('client');
+  });
+
+  it('does NOT extract CSS content from task descriptions', () => {
+    const nodes = [
+      createNode('t1', 'taskNode', {
+        description: '.reveal h1 { font-size: 2.2em; margin-bottom: 0.5em; } .reveal p { font-size: 0.9em; }',
+      }),
+    ];
+    const vars = extractVariables(nodes);
+    expect(vars).toHaveLength(0);
+  });
+
+  it('does NOT extract JS config objects from task descriptions', () => {
+    const nodes = [
+      createNode('t1', 'taskNode', {
+        description: 'Reveal.initialize({ width: 960, height: 700, margin: 0.1, center: true, hash: true, slideNumber: true })',
+      }),
+    ];
+    const vars = extractVariables(nodes);
+    expect(vars).toHaveLength(0);
+  });
+
+  it('extracts only valid variables from mixed content with CSS and JS braces', () => {
+    const nodes = [
+      createNode('t1', 'taskNode', {
+        description: 'Create a {format} presentation about {topic}. CSS: .h1 { font-size: 2em; } Init: ({ width: 960 })',
+      }),
+    ];
+    const vars = extractVariables(nodes);
+    expect(vars).toEqual(expect.arrayContaining(['format', 'topic']));
+    expect(vars).toHaveLength(2);
+  });
+
+  it('ignores non-agent/non-task nodes entirely', () => {
+    const nodes = [
+      createNode('c1', 'crewNode', { label: 'Crew for {project}' }),
+    ];
+    const vars = extractVariables(nodes);
+    expect(vars).toHaveLength(0);
+  });
+
+  it('ignores non-string field values', () => {
+    const nodes = [
+      createNode('a1', 'agentNode', { role: 42, goal: null, backstory: undefined }),
+    ];
+    const vars = extractVariables(nodes);
+    expect(vars).toHaveLength(0);
+  });
+
+  it('deduplicates same variable across multiple nodes', () => {
+    const nodes = [
+      createNode('a1', 'agentNode', { goal: 'Analyze {topic}' }),
+      createNode('t1', 'taskNode', { description: 'Research {topic}' }),
+    ];
+    const vars = extractVariables(nodes);
+    expect(vars.filter(v => v === 'topic')).toHaveLength(1);
+  });
+
+  it('handles the full reveal.js edge case with zero false positives', () => {
+    const nodes = [
+      createNode('t1', 'taskNode', {
+        description: `Create a reveal.js presentation. Include CSS: .reveal .slides section { overflow: hidden; } .reveal h1 { font-size: 2.2em; margin-bottom: 0.5em; } .reveal h2 { font-size: 1.5em; margin-bottom: 0.4em; } .reveal ul, .reveal ol { font-size: 0.85em; max-height: 60vh; overflow: hidden; margin-left: 1em; } .reveal li { margin: 0.4em 0; line-height: 1.3; } .reveal img { max-height: 45vh; max-width: 85%; display: block; margin: 0 auto; } .reveal p { font-size: 0.9em; max-height: 50vh; overflow: hidden; }. Initialize with: Reveal.initialize({ width: 960, height: 700, margin: 0.1, center: true, hash: true, slideNumber: true, transition: 'slide' }).`,
+      }),
+    ];
+    const vars = extractVariables(nodes);
+    expect(vars).toHaveLength(0);
+  });
+});
+
 /**
  * Tests for the setMessages stale-closure fix.
  *

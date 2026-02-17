@@ -74,18 +74,15 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
       case 'running':
         return {
           borderColor: theme.palette.info.main,
-          background: `linear-gradient(135deg, ${theme.palette.info.light}15, ${theme.palette.info.main}10)`,
           animation: 'pulse 2s infinite',
         };
       case 'completed':
         return {
           borderColor: theme.palette.success.main,
-          background: `linear-gradient(135deg, ${theme.palette.success.light}15, ${theme.palette.success.main}10)`,
         };
       case 'failed':
         return {
           borderColor: theme.palette.error.main,
-          background: `linear-gradient(135deg, ${theme.palette.error.light}15, ${theme.palette.error.main}10)`,
         };
       case 'pending':
         return {

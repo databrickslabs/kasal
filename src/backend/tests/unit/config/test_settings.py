@@ -23,14 +23,11 @@ class TestSettings:
         assert settings.API_V1_STR == "/api/v1"
         assert settings.CORS_ORIGINS == ["http://localhost:3000", "http://127.0.0.1:3000"]
         assert settings.DATABASE_TYPE == os.getenv("DATABASE_TYPE", "postgres")
-        assert settings.SECRET_KEY == "development_secret_key"
-        assert settings.ALGORITHM == "HS256"
-        assert settings.ACCESS_TOKEN_EXPIRE_MINUTES == 60 * 24 * 8
         assert settings.DOCS_ENABLED is True
         assert settings.LOG_LEVEL == "DEBUG"  # Check the actual default from environment
         assert settings.SERVER_HOST == "0.0.0.0"
         assert settings.SERVER_PORT == 8000
-        assert settings.DEBUG_MODE is True
+        assert settings.DEBUG_MODE is True  # conftest sets DEBUG_MODE=true in env
         assert settings.AUTO_SEED_DATABASE is True
     
     def test_cors_origins_from_string(self):

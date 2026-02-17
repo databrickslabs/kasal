@@ -61,7 +61,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
   const [detectedWorkspaceUrl, setDetectedWorkspaceUrl] = useState<string | null>(null);
   const [catalog, setCatalog] = useState('ml');
   const [schema, setSchema] = useState('agents');
-  const [embeddingModel, setEmbeddingModel] = useState('databricks-bge-large-en');
+  const [embeddingModel, setEmbeddingModel] = useState('databricks-gte-large-en');
   const [isSettingUp, setIsSettingUp] = useState(false);
   const [setupResult, setSetupResult] = useState<SetupResult | null>(null);
   const [showResultDialog, setShowResultDialog] = useState(false);
@@ -109,7 +109,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
     long_term_index: '',
     entity_index: '',
     document_index: '',
-    embedding_model: 'databricks-bge-large-en', // Default to BGE Large
+    embedding_model: 'databricks-gte-large-en', // Default to GTE Large
   });
   const [documentsDialogOpen, setDocumentsDialogOpen] = useState(false);
   const [selectedIndexForDocs, setSelectedIndexForDocs] = useState<{
@@ -395,7 +395,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
         workspace_url: finalWorkspaceUrl,
         catalog: catalog,
         schema: schema,
-        embedding_dimension: EMBEDDING_MODELS.find(m => m.value === embeddingModel)?.dimension || 768
+        embedding_dimension: EMBEDDING_MODELS.find(m => m.value === embeddingModel)?.dimension || 1024
       });
 
       setSetupResult(result);
@@ -457,7 +457,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
           entity_index: updatedConfig.indexes?.entity?.name || null,
           document_index: updatedConfig.indexes?.document?.name || null,
           auth_type: 'default',
-          embedding_dimension: 768
+          embedding_dimension: 1024
         }
       };
 
@@ -870,7 +870,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
           entity_index: manualConfig.entity_index,
           document_index: manualConfig.document_index,
           auth_type: 'default',
-          embedding_dimension: EMBEDDING_MODELS.find(m => m.value === manualConfig.embedding_model)?.dimension || 768,
+          embedding_dimension: EMBEDDING_MODELS.find(m => m.value === manualConfig.embedding_model)?.dimension || 1024,
           catalog: catalogName,
           schema: schemaName,
         }
@@ -915,7 +915,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
           long_term_index: '',
           entity_index: '',
           document_index: '',
-          embedding_model: 'databricks-bge-large-en', // Reset to default
+          embedding_model: 'databricks-gte-large-en', // Reset to default
         });
       }
     } catch (error) {
@@ -941,7 +941,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
     try {
       // Get the backend configuration to find embedding dimension
       const configResponse = await apiClient.get(`/memory-backend/configs/${savedConfig.backend_id}`);
-      const embeddingDimension = configResponse.data?.databricks_config?.embedding_dimension || 768;
+      const embeddingDimension = configResponse.data?.databricks_config?.embedding_dimension || 1024;
       
       const endpointName = indexType === 'document' 
         ? savedConfig.endpoints?.document?.name 
@@ -1014,7 +1014,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
       
       // Get the backend configuration to find embedding dimension
       const configResponse = await apiClient.get(`/memory-backend/configs/${savedConfig.backend_id}`);
-      const embeddingDimension = configResponse.data?.databricks_config?.embedding_dimension || 768;
+      const embeddingDimension = configResponse.data?.databricks_config?.embedding_dimension || 1024;
       
       // Empty the index
       const emptyResponse = await apiClient.post('/memory-backend/databricks/empty-index', {

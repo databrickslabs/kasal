@@ -2,7 +2,6 @@ import pytest
 import uuid
 import asyncio
 import os
-import tempfile
 import json
 from unittest.mock import Mock, patch, AsyncMock, MagicMock, call, PropertyMock
 from datetime import datetime, UTC
@@ -65,7 +64,6 @@ class TestBackendFlow:
         assert flow._job_id == job_id
         assert flow._flow_id is None
         assert flow._flow_data is None
-        assert flow._output_dir is None
         assert flow._config == {}
         assert flow._repositories == {}
 
@@ -134,39 +132,6 @@ class TestBackendFlow:
         new_config = {"key": "value"}
         flow.config = new_config
         assert flow.config == new_config
-
-    def test_output_dir_property_getter(self):
-        """Test output_dir property getter."""
-        flow = BackendFlow()
-
-        with patch('src.engines.crewai.flow.backend_flow.logger') as mock_logger:
-            result = flow.output_dir
-            assert result is None
-            mock_logger.info.assert_called_once_with("Getting output_dir: None")
-
-    def test_output_dir_property_setter_none(self):
-        """Test output_dir property setter with None."""
-        flow = BackendFlow()
-
-        with patch('src.engines.crewai.flow.backend_flow.logger') as mock_logger:
-            flow.output_dir = None
-            assert flow._output_dir is None
-            mock_logger.info.assert_called_once_with("Setting output_dir to: None")
-
-    def test_output_dir_property_setter_with_path(self):
-        """Test output_dir property setter with actual path."""
-        flow = BackendFlow()
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            test_path = os.path.join(temp_dir, "test_output")
-
-            with patch('src.engines.crewai.flow.backend_flow.logger') as mock_logger:
-                with patch('os.makedirs') as mock_makedirs:
-                    flow.output_dir = test_path
-
-                    assert flow._output_dir == test_path
-                    mock_logger.info.assert_called_once_with(f"Setting output_dir to: {test_path}")
-                    mock_makedirs.assert_called_once_with(test_path, exist_ok=True)
 
     def test_repositories_property(self):
         """Test repositories property getter and setter."""

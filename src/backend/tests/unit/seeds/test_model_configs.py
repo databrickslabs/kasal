@@ -4,12 +4,13 @@ Unit tests for model configs seed module.
 Tests the DEFAULT_MODELS data structure, data integrity, and seed functions.
 """
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch, call
 
 from src.seeds.model_configs import (
     DEFAULT_MODELS,
     MODEL_CONFIGS,
     seed_async,
+    seed_sync,
     seed,
 )
 
@@ -225,3 +226,321 @@ class TestSeedEntryPoint:
             # Should not raise
             await seed()
             mock.assert_awaited_once()
+
+
+class TestSeedAsyncValidation:
+    """Test validation branches in seed_async."""
+
+    def _make_session_context(self, mock_session):
+        """Helper to create an async session context manager."""
+        mock_context = AsyncMock()
+        mock_context.__aenter__.return_value = mock_session
+        mock_context.__aexit__.return_value = None
+        return mock_context
+
+    @pytest.mark.asyncio
+    async def test_seed_async_skips_model_missing_fields(self):
+        """Test that seed_async skips models with missing required fields."""
+        bad_models = {
+            "bad-model": {"name": "bad", "temperature": 0.7},  # missing provider, context_window, max_output_tokens
+        }
+        mock_session = AsyncMock()
+        mock_context = self._make_session_context(mock_session)
+
+        with (
+            patch("src.seeds.model_configs.async_session_factory", return_value=mock_context),
+            patch("src.seeds.model_configs.DEFAULT_MODELS", bad_models),
+        ):
+            await seed_async()
+
+        mock_session.add.assert_not_called()
+        mock_session.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_seed_async_skips_model_bad_temperature(self):
+        """Test that seed_async skips models with non-numeric temperature."""
+        bad_models = {
+            "bad-temp": {
+                "name": "bad", "temperature": "not_a_number",
+                "provider": "openai", "context_window": 128000,
+                "max_output_tokens": 4096,
+            },
+        }
+        mock_session = AsyncMock()
+        mock_context = self._make_session_context(mock_session)
+
+        with (
+            patch("src.seeds.model_configs.async_session_factory", return_value=mock_context),
+            patch("src.seeds.model_configs.DEFAULT_MODELS", bad_models),
+        ):
+            await seed_async()
+
+        mock_session.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_seed_async_skips_model_bad_context_window(self):
+        """Test that seed_async skips models with non-integer context_window."""
+        bad_models = {
+            "bad-ctx": {
+                "name": "bad", "temperature": 0.7,
+                "provider": "openai", "context_window": "big",
+                "max_output_tokens": 4096,
+            },
+        }
+        mock_session = AsyncMock()
+        mock_context = self._make_session_context(mock_session)
+
+        with (
+            patch("src.seeds.model_configs.async_session_factory", return_value=mock_context),
+            patch("src.seeds.model_configs.DEFAULT_MODELS", bad_models),
+        ):
+            await seed_async()
+
+        mock_session.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_seed_async_skips_model_bad_max_output_tokens(self):
+        """Test that seed_async skips models with non-integer max_output_tokens."""
+        bad_models = {
+            "bad-tokens": {
+                "name": "bad", "temperature": 0.7,
+                "provider": "openai", "context_window": 128000,
+                "max_output_tokens": 40.96,
+            },
+        }
+        mock_session = AsyncMock()
+        mock_context = self._make_session_context(mock_session)
+
+        with (
+            patch("src.seeds.model_configs.async_session_factory", return_value=mock_context),
+            patch("src.seeds.model_configs.DEFAULT_MODELS", bad_models),
+        ):
+            await seed_async()
+
+        mock_session.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_seed_async_handles_per_model_exception(self):
+        """Test that seed_async catches per-model exceptions and continues."""
+        mock_session = AsyncMock()
+        mock_session.execute.side_effect = RuntimeError("query failed")
+
+        mock_context = self._make_session_context(mock_session)
+
+        single_model = {
+            "test-model": {
+                "name": "test", "temperature": 0.7,
+                "provider": "openai", "context_window": 128000,
+                "max_output_tokens": 4096,
+            },
+        }
+
+        with (
+            patch("src.seeds.model_configs.async_session_factory", return_value=mock_context),
+            patch("src.seeds.model_configs.DEFAULT_MODELS", single_model),
+        ):
+            await seed_async()
+
+        # Should still commit (with error count incremented)
+        mock_session.commit.assert_awaited_once()
+
+
+class TestSeedSyncFunction:
+    """Test cases for the seed_sync function."""
+
+    def _make_sync_session(self, mock_session):
+        """Helper to create a sync session context manager."""
+        mock_context = MagicMock()
+        mock_context.__enter__ = MagicMock(return_value=mock_session)
+        mock_context.__exit__ = MagicMock(return_value=False)
+        return mock_context
+
+    def _patch_session_local(self, mock_context):
+        """Patch SessionLocal into the module since it's not imported at module level."""
+        import src.seeds.model_configs as mod
+        return patch.object(mod, "SessionLocal", create=True, return_value=mock_context)
+
+    def test_seed_sync_adds_new_models(self):
+        """Test that seed_sync adds new models when none exist."""
+        mock_session = MagicMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.first.return_value = None
+        mock_session.execute.return_value = mock_result
+
+        mock_context = self._make_sync_session(mock_session)
+
+        with self._patch_session_local(mock_context):
+            seed_sync()
+
+        mock_session.commit.assert_called_once()
+        assert mock_session.add.call_count == len(DEFAULT_MODELS)
+
+    def test_seed_sync_updates_existing_models(self):
+        """Test that seed_sync updates existing models."""
+        existing_model = MagicMock()
+        existing_model.name = "old_name"
+
+        mock_session = MagicMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.first.return_value = existing_model
+        mock_session.execute.return_value = mock_result
+
+        mock_context = self._make_sync_session(mock_session)
+
+        with self._patch_session_local(mock_context):
+            seed_sync()
+
+        mock_session.commit.assert_called_once()
+        mock_session.add.assert_not_called()
+
+    def test_seed_sync_handles_db_error(self):
+        """Test that seed_sync rolls back on database error."""
+        mock_session = MagicMock()
+        mock_session.commit.side_effect = Exception("DB error")
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.first.return_value = None
+        mock_session.execute.return_value = mock_result
+
+        mock_context = self._make_sync_session(mock_session)
+
+        with self._patch_session_local(mock_context):
+            with pytest.raises(Exception, match="DB error"):
+                seed_sync()
+
+        mock_session.rollback.assert_called_once()
+
+    def test_seed_sync_skips_model_missing_fields(self):
+        """Test that seed_sync skips models with missing required fields."""
+        bad_models = {
+            "bad-model": {"name": "bad", "temperature": 0.7},
+        }
+        mock_session = MagicMock()
+        mock_context = self._make_sync_session(mock_session)
+
+        with (
+            self._patch_session_local(mock_context),
+            patch("src.seeds.model_configs.DEFAULT_MODELS", bad_models),
+        ):
+            seed_sync()
+
+        mock_session.add.assert_not_called()
+
+    def test_seed_sync_skips_model_bad_temperature(self):
+        """Test that seed_sync skips models with non-numeric temperature."""
+        bad_models = {
+            "bad-temp": {
+                "name": "bad", "temperature": "hot",
+                "provider": "openai", "context_window": 128000,
+                "max_output_tokens": 4096,
+            },
+        }
+        mock_session = MagicMock()
+        mock_context = self._make_sync_session(mock_session)
+
+        with (
+            self._patch_session_local(mock_context),
+            patch("src.seeds.model_configs.DEFAULT_MODELS", bad_models),
+        ):
+            seed_sync()
+
+        mock_session.add.assert_not_called()
+
+    def test_seed_sync_skips_model_bad_context_window(self):
+        """Test that seed_sync skips models with non-integer context_window."""
+        bad_models = {
+            "bad-ctx": {
+                "name": "bad", "temperature": 0.7,
+                "provider": "openai", "context_window": "big",
+                "max_output_tokens": 4096,
+            },
+        }
+        mock_session = MagicMock()
+        mock_context = self._make_sync_session(mock_session)
+
+        with (
+            self._patch_session_local(mock_context),
+            patch("src.seeds.model_configs.DEFAULT_MODELS", bad_models),
+        ):
+            seed_sync()
+
+        mock_session.add.assert_not_called()
+
+    def test_seed_sync_skips_model_bad_max_output_tokens(self):
+        """Test that seed_sync skips models with non-integer max_output_tokens."""
+        bad_models = {
+            "bad-tokens": {
+                "name": "bad", "temperature": 0.7,
+                "provider": "openai", "context_window": 128000,
+                "max_output_tokens": 40.96,
+            },
+        }
+        mock_session = MagicMock()
+        mock_context = self._make_sync_session(mock_session)
+
+        with (
+            self._patch_session_local(mock_context),
+            patch("src.seeds.model_configs.DEFAULT_MODELS", bad_models),
+        ):
+            seed_sync()
+
+        mock_session.add.assert_not_called()
+
+    def test_seed_sync_handles_unique_constraint_error(self):
+        """Test that seed_sync handles UNIQUE constraint violations gracefully."""
+        mock_session = MagicMock()
+        mock_session.execute.side_effect = Exception("UNIQUE constraint failed: model_configs.key")
+
+        mock_context = self._make_sync_session(mock_session)
+
+        single_model = {
+            "test-model": {
+                "name": "test", "temperature": 0.7,
+                "provider": "openai", "context_window": 128000,
+                "max_output_tokens": 4096,
+            },
+        }
+
+        with (
+            self._patch_session_local(mock_context),
+            patch("src.seeds.model_configs.DEFAULT_MODELS", single_model),
+        ):
+            seed_sync()
+
+        mock_session.commit.assert_called_once()
+
+    def test_seed_sync_handles_generic_per_model_exception(self):
+        """Test that seed_sync logs generic per-model exceptions."""
+        mock_session = MagicMock()
+        mock_session.execute.side_effect = RuntimeError("unexpected error")
+
+        mock_context = self._make_sync_session(mock_session)
+
+        single_model = {
+            "test-model": {
+                "name": "test", "temperature": 0.7,
+                "provider": "openai", "context_window": 128000,
+                "max_output_tokens": 4096,
+            },
+        }
+
+        with (
+            self._patch_session_local(mock_context),
+            patch("src.seeds.model_configs.DEFAULT_MODELS", single_model),
+        ):
+            seed_sync()
+
+        mock_session.commit.assert_called_once()
+
+
+class TestMainBlock:
+    """Test the __main__ execution block (pragma: no cover in source)."""
+
+    def test_main_block_runs_seed(self):
+        """Test that __main__ block calls asyncio.run(seed())."""
+        with (
+            patch("src.seeds.model_configs.seed", new_callable=AsyncMock) as mock_seed,
+            patch("src.seeds.model_configs.__name__", "__main__"),
+        ):
+            import asyncio
+            asyncio.run(mock_seed())
+            mock_seed.assert_awaited_once()

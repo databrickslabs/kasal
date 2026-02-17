@@ -71,7 +71,7 @@ class TestAgentBase:
             "allow_delegation": True,
             "cache": False,
             "memory": False,
-            "embedder_config": {"model": "sentence-transformers", "dimension": 384},
+            "embedder_config": {"model": "databricks-gte-large-en", "dimension": 1024},
             "system_template": "You are a data analyst",
             "prompt_template": "Analyze: {data}",
             "response_template": "Result: {result}",
@@ -99,7 +99,7 @@ class TestAgentBase:
         assert agent.allow_delegation is True
         assert agent.cache is False
         assert agent.memory is False
-        assert agent.embedder_config == {"model": "sentence-transformers", "dimension": 384}
+        assert agent.embedder_config == {"model": "databricks-gte-large-en", "dimension": 1024}
         assert agent.system_template == "You are a data analyst"
         assert agent.prompt_template == "Analyze: {data}"
         assert agent.response_template == "Result: {result}"

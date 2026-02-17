@@ -70,12 +70,7 @@ const TaskAdvancedConfigComponent: React.FC<TaskAdvancedConfigProps> = ({
     const callback = TASK_CALLBACKS.find(cb => cb.value === value);
     setSelectedCallback(callback || null);
     onConfigChange('callback', value || null);
-    
-    // Clear output file if new callback doesn't require it
-    if (!callback?.requiresPath) {
-      onConfigChange('output_file', null);
-    }
-    
+
     // Initialize Databricks config if DatabricksVolumeCallback is selected
     if (value === 'DatabricksVolumeCallback') {
       // Only set default config if we don't already have one
@@ -265,15 +260,6 @@ const TaskAdvancedConfigComponent: React.FC<TaskAdvancedConfigProps> = ({
         }
         label="Async Execution"
       />
-      <FormControlLabel
-        control={
-          <Switch
-            checked={advancedConfig.human_input}
-            onChange={(e) => onConfigChange('human_input', e.target.checked)}
-          />
-        }
-        label="Require Human Input"
-      />
       <TextField
         type="number"
         label="Priority"
@@ -319,12 +305,6 @@ const TaskAdvancedConfigComponent: React.FC<TaskAdvancedConfigProps> = ({
         multiline
         rows={3}
         helperText="JSON schema for task output"
-      />
-      <TextField
-        label="Output File Path"
-        value={advancedConfig.output_file || ''}
-        onChange={(e) => onConfigChange('output_file', e.target.value || null)}
-        fullWidth
       />
       <FormControlLabel
         control={
@@ -404,15 +384,6 @@ const TaskAdvancedConfigComponent: React.FC<TaskAdvancedConfigProps> = ({
         )}
       </Box>
 
-      {selectedCallback?.requiresPath && (
-        <TextField
-          label="Output File Path"
-          value={advancedConfig.output_file || ''}
-          onChange={(e) => onConfigChange('output_file', e.target.value || null)}
-          fullWidth
-          helperText="Path where the output will be saved"
-        />
-      )}
       
       {selectedCallback?.value === 'DatabricksVolumeCallback' && (
         <DatabricksVolumeConfigComponent

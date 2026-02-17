@@ -91,6 +91,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
   const { setNodes, setEdges, getNodes, getEdges } = useReactFlow();
   const [isEditing, setIsEditing] = useState(false);
   const [isToolDialogOpen, setIsToolDialogOpen] = useState(false);
+  const [toolDialogInitialTab, setToolDialogInitialTab] = useState(0);
   const [availableTools, setAvailableTools] = useState<Tool[]>([]);
   const [editTooltipOpen, setEditTooltipOpen] = useState(false);
   const [deleteTooltipOpen, setDeleteTooltipOpen] = useState(false);
@@ -264,12 +265,31 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
   const handleToolsClick = useCallback((event: React.MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
+    setToolDialogInitialTab(0);
     setIsToolDialogOpen(true);
   }, []);
 
-  // Handle tool selection from the quick tool dialog
-  const handleToolsSelect = useCallback((selectedTools: string[]) => {
-    // Update the node data with the new tools
+  // Handle click on MCP section to open quick MCP selector
+  const handleMcpClick = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setToolDialogInitialTab(1);
+    setIsToolDialogOpen(true);
+  }, []);
+
+  // Handle combined tool + MCP selection from the quick dialog (single API call)
+  const handleQuickDialogApply = useCallback((selectedTools: string[], selectedMcpServers: string[]) => {
+    // Build updated tool_configs with MCP servers
+    const existingToolConfigs = (data.tool_configs || {}) as Record<string, unknown>;
+    const updatedToolConfigs = { ...existingToolConfigs };
+
+    if (selectedMcpServers.length > 0) {
+      updatedToolConfigs.MCP_SERVERS = { servers: selectedMcpServers };
+    } else {
+      delete updatedToolConfigs.MCP_SERVERS;
+    }
+
+    // Update the node data with both tools and MCP in one state update
     setNodes(nodes => nodes.map(node => {
       if (node.id === id) {
         return {
@@ -277,16 +297,20 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
           data: {
             ...node.data,
             tools: selectedTools,
+            tool_configs: updatedToolConfigs,
           }
         };
       }
       return node;
     }));
 
-    // Persist to backend if task has a database ID
+    // Persist both tools and MCP in a single API call
     if (data.taskId) {
-      TaskService.updateTask(data.taskId, { tools: selectedTools }).catch(err => {
-        console.error('Failed to persist tool selection:', err);
+      TaskService.updateTask(data.taskId, {
+        tools: selectedTools,
+        tool_configs: Object.keys(updatedToolConfigs).length > 0 ? updatedToolConfigs : undefined,
+      }).catch(err => {
+        console.error('Failed to persist tool/MCP selection:', err);
       });
     }
 
@@ -294,7 +318,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
     markCurrentTabDirty();
 
     setIsToolDialogOpen(false);
-  }, [id, data.taskId, setNodes, markCurrentTabDirty]);
+  }, [id, data.taskId, data.tool_configs, setNodes, markCurrentTabDirty]);
 
   const iconStyles = {
     mr: 1.5,
@@ -373,23 +397,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
       position: 'relative',
       padding: 2,
       cursor: 'pointer',
-      background: (theme: Theme) => {
-        if (isPlanning || taskStatus?.status === 'planning') {
-          return `linear-gradient(135deg, ${theme.palette.warning.light}15, ${theme.palette.warning.main}10)`;
-        }
-        if (isRunning) {
-          return `linear-gradient(135deg, ${theme.palette.info.light}15, ${theme.palette.info.main}10)`;
-        }
-        if (isCompleted) {
-          return `linear-gradient(135deg, ${theme.palette.success.light}15, ${theme.palette.success.main}10)`;
-        }
-        if (isFailed) {
-          return `linear-gradient(135deg, ${theme.palette.error.light}15, ${theme.palette.error.main}10)`;
-        }
-        return isSelected
-          ? `${theme.palette.primary.light}20`
-          : theme.palette.background.paper;
-      },
+      background: (theme: Theme) => theme.palette.background.paper,
       borderRadius: '8px',
       border: '1px solid',
       borderColor: (theme: Theme) => {
@@ -484,6 +492,24 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
 
     return taskData;
   };
+
+  // Derive MCP server count from tool_configs
+  const mcpServerCount = (() => {
+    const mcpConfig = data.tool_configs?.MCP_SERVERS as { servers?: string[] } | undefined;
+    if (mcpConfig && Array.isArray(mcpConfig.servers)) {
+      return mcpConfig.servers.length;
+    }
+    return 0;
+  })();
+
+  // Extract current MCP server names for the dialog
+  const currentMcpServers = (() => {
+    const mcpConfig = data.tool_configs?.MCP_SERVERS as { servers?: string[] } | undefined;
+    if (mcpConfig && Array.isArray(mcpConfig.servers)) {
+      return mcpConfig.servers;
+    }
+    return [];
+  })();
 
   // Check if task has DatabricksKnowledgeSearchTool
   const hasKnowledgeSearchTool = data.tools?.includes('DatabricksKnowledgeSearchTool') ||
@@ -647,22 +673,42 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
             width: '100%'
           }}
         >
-          <Box
-            onClick={handleToolsClick}
-            sx={{
-              fontSize: '0.7rem',
-              color: 'text.secondary',
-              cursor: 'pointer',
-              padding: '2px 6px',
-              borderRadius: '4px',
-              transition: 'all 0.2s ease',
-              '&:hover': {
-                backgroundColor: (theme: Theme) => `${theme.palette.primary.main}15`,
-                color: (theme: Theme) => theme.palette.primary.main,
-              }
-            }}
-          >
-            Tools: {Array.isArray(data.tools) ? data.tools.length : 0}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <Box
+              onClick={handleToolsClick}
+              sx={{
+                fontSize: '0.7rem',
+                color: 'text.secondary',
+                cursor: 'pointer',
+                padding: '2px 6px',
+                borderRadius: '4px',
+                transition: 'all 0.2s ease',
+                '&:hover': {
+                  backgroundColor: (theme: Theme) => `${theme.palette.primary.main}15`,
+                  color: (theme: Theme) => theme.palette.primary.main,
+                }
+              }}
+            >
+              Tools: {Array.isArray(data.tools) ? data.tools.length : 0}
+            </Box>
+            <Box
+              onClick={handleMcpClick}
+              sx={{
+                fontSize: '0.7rem',
+                color: mcpServerCount > 0 ? 'primary.main' : 'text.secondary',
+                cursor: 'pointer',
+                padding: '2px 6px',
+                borderRadius: '4px',
+                transition: 'all 0.2s ease',
+                fontWeight: mcpServerCount > 0 ? 500 : 400,
+                '&:hover': {
+                  backgroundColor: (theme: Theme) => `${theme.palette.primary.main}15`,
+                  color: (theme: Theme) => theme.palette.primary.main,
+                }
+              }}
+            >
+              MCP: {mcpServerCount}
+            </Box>
           </Box>
           {data.config?.human_input && (
             <Typography variant="caption" sx={{ color: 'orange', fontSize: '0.7rem' }}>
@@ -686,7 +732,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
                 '0%': { backgroundPosition: '-200% 0' },
                 '100%': { backgroundPosition: '200% 0' },
               },
-              backdropFilter: 'blur(1px)',
+              // backdropFilter removed - was creating stacking context causing edges to render on top during pulsing
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -793,12 +839,14 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         </DialogContent>
       </Dialog>
 
-      {/* Quick Tool Selection Dialog */}
+      {/* Quick Tool & MCP Selection Dialog */}
       <QuickToolSelectionDialog
         open={isToolDialogOpen}
         onClose={() => setIsToolDialogOpen(false)}
-        onSelectTools={handleToolsSelect}
+        onApply={handleQuickDialogApply}
         currentTools={data.tools || []}
+        currentMcpServers={currentMcpServers}
+        initialTab={toolDialogInitialTab}
       />
     </>
   );
