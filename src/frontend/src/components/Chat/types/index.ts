@@ -44,6 +44,7 @@ export interface ChatMessage {
   eventContext?: string;
   eventType?: string;
   jobId?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ModelConfig {

@@ -21,7 +21,9 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { ChatMessage } from '../types';
 import { MessageContent } from './MessageRenderer';
-import { stripAnsiEscapes } from '../utils/textProcessing';
+import { stripAnsiEscapes, isMarkdown } from '../utils/textProcessing';
+import { GenieSpaceConfigPrompt } from '../GenieSpaceConfigPrompt';
+import type { ToolConfigNeededData } from '../../../hooks/global/useCrewGenerationSSE';
 
 interface ChatMessageItemProps {
   message: ChatMessage;
@@ -58,9 +60,14 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
   };
 
   const renderMessageContent = () => {
+    // Genie space config prompt
+    if (message.metadata?.type === 'genie_config_needed' && Array.isArray(message.metadata.configs)) {
+      return <GenieSpaceConfigPrompt configs={message.metadata.configs as ToolConfigNeededData[]} />;
+    }
+
     // Process content to remove ANSI codes
     const processedContent = stripAnsiEscapes(message.content);
-    
+
     // Special handling for result messages
     if (message.type === 'result') {
       // Try to parse as JSON
@@ -521,13 +528,13 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
               )}
               <Box
                 sx={{
-                  color: message.type === 'user' 
+                  color: message.type === 'user'
                     ? 'primary.main'
                     : message.type === 'result'
                     ? 'text.primary' // Final results in black
                     : 'text.primary',
                   wordBreak: 'break-word',
-                  whiteSpace: 'pre-wrap',
+                  whiteSpace: isMarkdown(stripAnsiEscapes(message.content)) ? 'normal' : 'pre-wrap',
                   maxWidth: '100%',
                   overflow: 'visible',
                   fontWeight: message.type === 'result' ? 500 : 'normal', // Make result text slightly bolder

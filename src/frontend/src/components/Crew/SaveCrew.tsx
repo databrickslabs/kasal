@@ -17,6 +17,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
   const [error, setError] = useState<string | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [autoSave, setAutoSave] = useState(false);
 
   const { activeTabId, updateTabCrewInfo } = useTabManagerStore();
 
@@ -32,8 +33,13 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
 
   // Listen for the custom event to open the save crew dialog
   useEffect(() => {
-    const handleOpenSaveCrewDialog = () => {
-      if (!disabled) {
+    const handleOpenSaveCrewDialog = (event: Event) => {
+      if (disabled) return;
+      const detail = (event as CustomEvent).detail;
+      if (detail?.suggestedName) {
+        setName(detail.suggestedName);
+        setAutoSave(true);
+      } else {
         setOpen(true);
       }
     };
@@ -249,6 +255,15 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
       window.removeEventListener('updateExistingCrewByName', handleUpdateExistingCrewByName);
     };
   }, [disabled]);
+
+  // Auto-save when name is set programmatically (via slash command)
+  useEffect(() => {
+    if (autoSave && name) {
+      setAutoSave(false);
+      handleSave();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSave, name]);
 
   const handleClickOpen = () => {
     if (disabled) return;
@@ -544,8 +559,12 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         }
         
         setError(errorMessage);
+        // Surface the error in the chat panel
+        window.dispatchEvent(new CustomEvent('saveError', { detail: { message: errorMessage } }));
       } else {
-        setError(error instanceof Error ? error.message : 'Failed to save crew');
+        const fallbackMessage = error instanceof Error ? error.message : 'Failed to save crew';
+        setError(fallbackMessage);
+        window.dispatchEvent(new CustomEvent('saveError', { detail: { message: fallbackMessage } }));
       }
     } finally {
       setIsSaving(false);

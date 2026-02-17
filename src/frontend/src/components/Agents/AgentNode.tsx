@@ -5,6 +5,7 @@ import PersonIcon from '@mui/icons-material/Person';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import CodeIcon from '@mui/icons-material/Code';
+import ErrorIcon from '@mui/icons-material/Error';
 import MemoryIcon from '@mui/icons-material/Memory';
 import { Agent, AgentService } from '../../api/AgentService';
 import AgentForm from './AgentForm';
@@ -47,6 +48,9 @@ interface AgentNodeData {
   respect_context_window?: boolean;
   embedder_config?: Record<string, unknown>;
   knowledge_sources?: KnowledgeSource[];
+  loading?: boolean;
+  error?: boolean;
+  errorMessage?: string;
   [key: string]: unknown; // For flexibility with other properties
 }
 
@@ -342,9 +346,17 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       boxShadow: (theme: Theme) => `0 2px 4px ${theme.palette.mode === 'light'
         ? 'rgba(0, 0, 0, 0.1)'
         : 'rgba(0, 0, 0, 0.4)'}`,
-      border: (theme: Theme) => `1px solid ${theme.palette.primary.light}`,
+      border: (theme: Theme) => data.error
+        ? `2px solid ${theme.palette.error.main}`
+        : `1px solid ${theme.palette.primary.light}`,
       transition: 'all 0.3s ease',
       padding: '16px 8px',
+      animation: data.loading ? 'agentPulse 2s ease-in-out infinite' : 'none',
+      '@keyframes agentPulse': {
+        '0%': { boxShadow: '0 0 0 0 rgba(33, 150, 243, 0.3)' },
+        '50%': { boxShadow: '0 0 0 6px rgba(33, 150, 243, 0)' },
+        '100%': { boxShadow: '0 0 0 0 rgba(33, 150, 243, 0)' },
+      },
       '&:hover': {
         boxShadow: (theme: Theme) => `0 4px 12px ${theme.palette.mode === 'light'
           ? 'rgba(0, 0, 0, 0.2)'
@@ -636,7 +648,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       </Box>
 
 
-      {Boolean((data as Record<string, unknown>)?.loading) && (
+      {data.loading && (
         <Box
           sx={{
             position: 'absolute',
@@ -645,7 +657,6 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
             background: (theme: { palette: { mode: string } }) => theme.palette.mode === 'light'
               ? 'linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.4))'
               : 'linear-gradient(180deg, rgba(0,0,0,0.3), rgba(0,0,0,0.2))',
-            // backdropFilter removed - was creating stacking context causing edges to render on top during pulsing
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -664,6 +675,32 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
             <CircularProgress size={16} sx={{ color: 'primary.main' }} />
             <Typography variant="caption" color="textSecondary">Creating…</Typography>
           </Box>
+        </Box>
+      )}
+
+      {data.error && (
+        <Box
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            borderRadius: '12px',
+            border: '2px solid',
+            borderColor: 'error.main',
+            background: (theme: Theme) => theme.palette.mode === 'light'
+              ? 'rgba(211, 47, 47, 0.05)'
+              : 'rgba(211, 47, 47, 0.1)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 0.5,
+            zIndex: 5,
+          }}
+        >
+          <ErrorIcon sx={{ color: 'error.main', fontSize: '1.2rem' }} />
+          <Typography variant="caption" sx={{ color: 'error.main', textAlign: 'center', px: 1, fontSize: '0.65rem' }}>
+            {data.errorMessage || 'Generation failed'}
+          </Typography>
         </Box>
       )}
 

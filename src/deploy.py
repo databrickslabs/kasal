@@ -386,12 +386,12 @@ starlette==0.40.0
                     'venv', '.venv', 'node_modules', '.git', 'tests', 'logs',
                     '__pycache__', '.pytest_cache', '.mypy_cache', 'htmlcov',
                     'migrations',  # Exclude migrations - run alembic upgrade manually after deployment
-                    '.claude', 'tmp'
+                    '.claude', 'tmp', 'mlruns', '.serena', '.benchmarks'
                 }
                 backend_excluded_patterns = [
                     '*.pyc', '*.pyo', '*.log', '*.db', '*.db-shm', '*.db-wal',
                     '*.backup', '.coverage', '.env', 'run_tests.py', 'run_seeders.py',
-                    'uv.lock'
+                    'uv.lock', '.gitignore', 'kasal.db'
                 ]
                 shutil.copytree(
                     backend_src,
@@ -409,8 +409,11 @@ starlette==0.40.0
             frontend_src = root_dir / "frontend"
             frontend_dst = databricks_dist / "frontend"
             if frontend_src.exists():
-                frontend_excluded_dirs = {'node_modules', 'dist', 'coverage', 'build', '.git'}
-                frontend_excluded_patterns = ['.env.local', '.env.development.local', '.env.test.local', '.env.production.local']
+                frontend_excluded_dirs = {'node_modules', 'dist', 'coverage', 'build', '.git', '.benchmarks'}
+                frontend_excluded_patterns = [
+                    '.env.local', '.env.development.local', '.env.test.local', '.env.production.local',
+                    'package-lock.json', '*.tsbuildinfo'
+                ]
                 shutil.copytree(
                     frontend_src,
                     frontend_dst,

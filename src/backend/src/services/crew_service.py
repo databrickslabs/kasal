@@ -4,6 +4,7 @@ import logging
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.exceptions import ConflictError
 from src.models.crew import Crew
 from src.repositories.crew_repository import CrewRepository
 from src.schemas.crew import CrewCreate, CrewUpdate
@@ -231,8 +232,22 @@ class CrewService:
 
         Returns:
             Created crew (with decrypted tool_configs for response)
+
+        Raises:
+            ConflictError: If a crew with the same name already exists in the group
         """
         try:
+            # Check for duplicate name within the group
+            primary_group_id = group_context.primary_group_id
+            if primary_group_id:
+                existing = await self.repository.find_by_name_and_group(
+                    obj_in.name, [primary_group_id]
+                )
+                if existing:
+                    raise ConflictError(
+                        detail=f"A crew with the name '{obj_in.name}' already exists. Please choose a different name."
+                    )
+
             # Log details for debugging
             logger.info(f"Creating crew with name: {obj_in.name} for group: {group_context.primary_group_id}")
             logger.info(f"Agent IDs: {obj_in.agent_ids}")
@@ -338,6 +353,16 @@ class CrewService:
             # No fields to update
             self._decrypt_crew_tool_configs(existing_crew)
             return existing_crew
+
+        # Check for duplicate name within the group (if name is being changed)
+        if 'name' in update_data and update_data['name'] != existing_crew.name:
+            duplicate = await self.repository.find_by_name_and_group(
+                update_data['name'], [primary_group_id], exclude_id=id
+            )
+            if duplicate:
+                raise ConflictError(
+                    detail=f"A crew with the name '{update_data['name']}' already exists. Please choose a different name."
+                )
 
         # Encrypt sensitive fields in tool_configs before storage
         if 'tool_configs' in update_data:

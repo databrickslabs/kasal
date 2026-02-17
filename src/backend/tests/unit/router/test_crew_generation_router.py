@@ -1,11 +1,11 @@
 """
 Unit tests for crew generation API router.
 
-Tests the /crew/create-crew POST endpoint with mocked
-CrewGenerationService and dependency overrides.
+Tests the /crew/create-crew POST endpoint and /crew/create-crew-streaming
+POST endpoint with mocked CrewGenerationService and dependency overrides.
 """
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch, MagicMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -203,3 +203,96 @@ class TestCreateCrew:
         data = response.json()
         assert len(data["agents"]) == 3
         assert len(data["tasks"]) == 2
+
+
+class TestCreateCrewStreaming:
+    """Tests for POST /crew/create-crew-streaming."""
+
+    def test_create_crew_streaming_success(self, client, mock_crew_service):
+        """Successful streaming request returns 200 with a generation_id."""
+        mock_crew_service.create_crew_progressive = AsyncMock()
+
+        response = client.post(
+            "/crew/create-crew-streaming",
+            json={"prompt": "Build a research crew"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "generation_id" in data
+        assert isinstance(data["generation_id"], str)
+        assert len(data["generation_id"]) > 0
+
+    def test_create_crew_streaming_empty_prompt(self, client, mock_crew_service):
+        """Empty string prompt returns 400 BadRequestError."""
+        response = client.post(
+            "/crew/create-crew-streaming",
+            json={"prompt": ""},
+        )
+
+        assert response.status_code == 400
+        assert "Prompt is required" in response.json()["detail"]
+
+    def test_create_crew_streaming_whitespace_prompt(self, client, mock_crew_service):
+        """Whitespace-only prompt returns 400 BadRequestError."""
+        response = client.post(
+            "/crew/create-crew-streaming",
+            json={"prompt": "   \t\n  "},
+        )
+
+        assert response.status_code == 400
+        assert "Prompt is required" in response.json()["detail"]
+
+    def test_create_crew_streaming_spawns_background_task(self, mock_crew_service):
+        """Verify asyncio.create_task is called to spawn background work."""
+        mock_crew_service.create_crew_progressive = AsyncMock()
+
+        app = FastAPI()
+        app.include_router(router)
+        register_exception_handlers(app)
+
+        async def override_group_context():
+            return _group_context()
+
+        async def override_session():
+            return AsyncMock()
+
+        app.dependency_overrides[get_group_context] = override_group_context
+        app.dependency_overrides[get_smart_db_session] = override_session
+
+        with patch(
+            "src.api.crew_generation_router.CrewGenerationService",
+            return_value=mock_crew_service,
+        ), patch(
+            "src.api.crew_generation_router.asyncio.create_task"
+        ) as mock_create_task:
+            test_client = TestClient(app)
+            response = test_client.post(
+                "/crew/create-crew-streaming",
+                json={"prompt": "Build a crew"},
+            )
+
+        assert response.status_code == 200
+        mock_create_task.assert_called_once()
+        # The argument to create_task should be the coroutine from create_crew_progressive
+        call_args = mock_create_task.call_args
+        assert call_args is not None
+
+    def test_create_crew_streaming_response_model(self, client, mock_crew_service):
+        """Response matches CrewStreamingResponse schema with generation_id string."""
+        mock_crew_service.create_crew_progressive = AsyncMock()
+
+        response = client.post(
+            "/crew/create-crew-streaming",
+            json={"prompt": "Create a data analysis crew"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        # CrewStreamingResponse has exactly one field: generation_id
+        assert set(data.keys()) == {"generation_id"}
+        assert isinstance(data["generation_id"], str)
+        # generation_id should be a valid UUID format (36 chars with hyphens)
+        generation_id = data["generation_id"]
+        assert len(generation_id) == 36
+        assert generation_id.count("-") == 4

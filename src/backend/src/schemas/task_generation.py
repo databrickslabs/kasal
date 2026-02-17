@@ -5,7 +5,7 @@ This module defines schemas used for validating and structuring data
 in task generation API requests and responses.
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 from pydantic import BaseModel, Field
 
 
@@ -29,6 +29,7 @@ class TaskGenerationRequest(BaseModel):
     model: Optional[str] = Field(None, description="LLM model to use for task generation")
     agent: Optional[Agent] = Field(None, description="Agent context for task generation")
     markdown: Optional[bool] = Field(False, description="Whether the task should include markdown")
+    available_tools: Optional[List[Dict[str, str]]] = Field(default=None, description="Available tools with name and description the LLM can assign")
 
 
 class AdvancedConfig(BaseModel):
@@ -57,6 +58,6 @@ class TaskGenerationResponse(BaseModel):
     name: str = Field(..., description="Name of the task")
     description: str = Field(..., description="Description of the task")
     expected_output: str = Field(..., description="Expected output of the task")
-    tools: List[Dict[str, Any]] = Field(default_factory=list, description="Tools to use for the task")
+    tools: List[Union[str, Dict[str, Any]]] = Field(default_factory=list, description="Tools to use for the task")
     advanced_config: AdvancedConfig = Field(default_factory=AdvancedConfig, description="Advanced configuration")
     llm_guardrail: Optional[LLMGuardrailConfig] = Field(None, description="LLM-based output validation configuration") 

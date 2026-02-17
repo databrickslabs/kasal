@@ -214,6 +214,32 @@ class TestCrewExportService:
 
         assert result is not None
 
+    @pytest.mark.asyncio
+    async def test_export_crew_databricks_app(self, service, sample_crew_data, mock_group_context):
+        """Test exporting crew as Databricks App."""
+        with patch.object(service, '_get_crew_with_details', return_value=sample_crew_data):
+            result = await service.export_crew(
+                crew_id=sample_crew_data['id'],
+                export_format=ExportFormat.DATABRICKS_APP,
+                options=ExportOptions(),
+                group_context=mock_group_context
+            )
+
+        assert result['crew_id'] == sample_crew_data['id']
+        assert result['crew_name'] == 'Test Crew'
+        assert result['export_format'] == 'databricks_app'
+        assert 'files' in result
+        assert len(result['files']) > 0
+
+        file_paths = [f['path'] for f in result['files']]
+        assert 'app.yaml' in file_paths
+        assert 'app.py' in file_paths
+        assert 'requirements.txt' in file_paths
+        assert 'config/agents.yaml' in file_paths
+        assert 'config/tasks.yaml' in file_paths
+        assert 'services/crew_service.py' in file_paths
+        assert 'routes/v1/crew.py' in file_paths
+
 
 class TestGetCrewData:
     """Tests for _get_crew_with_details private method."""
@@ -340,3 +366,258 @@ class TestExportFormatSelection:
                 )
 
                 mock_exporter.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_databricks_app_exporter_selected(self, service, mock_group_context):
+        """Test that Databricks App exporter is selected for DATABRICKS_APP format."""
+        sample_data = {
+            'id': 'test-id',
+            'name': 'Test',
+            'agents': [],
+            'tasks': [],
+        }
+
+        with patch.object(service, '_get_crew_with_details', return_value=sample_data):
+            with patch('src.services.crew_export_service.DatabricksAppExporter') as mock_exporter:
+                mock_instance = AsyncMock()
+                mock_exporter.return_value = mock_instance
+                mock_instance.export.return_value = {'export_format': 'databricks_app'}
+
+                await service.export_crew(
+                    crew_id='test-id',
+                    export_format=ExportFormat.DATABRICKS_APP,
+                    options=ExportOptions(),
+                    group_context=mock_group_context
+                )
+
+                mock_exporter.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_unsupported_export_format(self, service, mock_group_context):
+        """Test that unsupported format raises ValueError."""
+        sample_data = {
+            'id': 'test-id',
+            'name': 'Test',
+            'agents': [],
+            'tasks': [],
+        }
+
+        with patch.object(service, '_get_crew_with_details', return_value=sample_data):
+            with pytest.raises(ValueError, match="Unsupported export format"):
+                await service.export_crew(
+                    crew_id='test-id',
+                    export_format="invalid_format",
+                    options=ExportOptions(),
+                    group_context=mock_group_context
+                )
+
+
+class TestGetCrewWithDetails:
+    """Tests for _get_crew_with_details full execution paths."""
+
+    @pytest.fixture
+    def mock_session(self):
+        return AsyncMock()
+
+    @pytest.fixture
+    def service(self, mock_session):
+        return CrewExportService(session=mock_session)
+
+    @pytest.fixture
+    def mock_group_context(self):
+        context = MagicMock()
+        context.group_ids = ['test-group']
+        context.is_valid.return_value = True
+        return context
+
+    @pytest.mark.asyncio
+    async def test_get_crew_with_agents_and_tasks(self, service, mock_group_context):
+        """Test full path through _get_crew_with_details with agents and tasks."""
+        crew_id = str(uuid4())
+
+        mock_crew = MagicMock()
+        mock_crew.id = crew_id
+        mock_crew.name = 'Test Crew'
+        mock_crew.nodes = [{"id": "1"}]
+        mock_crew.edges = [{"source": "1"}]
+        mock_crew.group_id = 'test-group'
+        mock_crew.agent_ids = ['a1']
+        mock_crew.task_ids = ['t1']
+
+        mock_agent = MagicMock()
+        mock_agent.id = 'a1'
+        mock_agent.name = 'Agent'
+        mock_agent.role = 'Role'
+        mock_agent.goal = 'Goal'
+        mock_agent.backstory = 'Backstory'
+        mock_agent.llm = 'model'
+        mock_agent.tools = ['SerperDevTool']
+        mock_agent.max_iter = 25
+        mock_agent.max_rpm = None
+        mock_agent.max_execution_time = None
+        mock_agent.verbose = True
+        mock_agent.allow_delegation = False
+        mock_agent.cache = True
+        mock_agent.system_template = None
+        mock_agent.prompt_template = None
+        mock_agent.response_template = None
+
+        mock_task = MagicMock()
+        mock_task.id = 't1'
+        mock_task.name = 'Task'
+        mock_task.description = 'Desc'
+        mock_task.expected_output = 'Output'
+        mock_task.agent_id = 'a1'
+        mock_task.tools = [42]
+        mock_task.async_execution = False
+        mock_task.context = []
+        mock_task.output_file = None
+        mock_task.output_json = None
+        mock_task.callback = None
+        mock_task.human_input = False
+
+        service.crew_repository.get = AsyncMock(return_value=mock_crew)
+        service.agent_repository.get = AsyncMock(return_value=mock_agent)
+        service.task_repository.get = AsyncMock(return_value=mock_task)
+
+        # Mock tool lookup for integer tool IDs
+        mock_tool = MagicMock()
+        mock_tool.title = 'SerperDevTool'
+        service.tool_repository.get = AsyncMock(return_value=mock_tool)
+
+        result = await service._get_crew_with_details(crew_id, mock_group_context)
+
+        assert result['name'] == 'Test Crew'
+        assert len(result['agents']) == 1
+        assert result['agents'][0]['name'] == 'Agent'
+        assert result['agents'][0]['tools'] == ['SerperDevTool']
+        assert len(result['tasks']) == 1
+        assert result['tasks'][0]['name'] == 'Task'
+        assert result['tasks'][0]['tools'] == ['SerperDevTool']
+
+    @pytest.mark.asyncio
+    async def test_get_crew_group_authorization_denied(self, service):
+        """Test group authorization check rejects unauthorized access."""
+        crew_id = str(uuid4())
+
+        mock_crew = MagicMock()
+        mock_crew.id = crew_id
+        mock_crew.name = 'Test Crew'
+        mock_crew.group_id = 'other-group'
+        mock_crew.agent_ids = []
+        mock_crew.task_ids = []
+        mock_crew.nodes = []
+        mock_crew.edges = []
+
+        service.crew_repository.get = AsyncMock(return_value=mock_crew)
+
+        context = MagicMock()
+        context.group_ids = ['my-group']
+        context.is_valid.return_value = True
+
+        with pytest.raises(ValueError, match="not found"):
+            await service._get_crew_with_details(crew_id, context)
+
+    @pytest.mark.asyncio
+    async def test_get_crew_skips_missing_agents_and_tasks(self, service):
+        """Test that missing agents/tasks are silently skipped."""
+        crew_id = str(uuid4())
+
+        mock_crew = MagicMock()
+        mock_crew.id = crew_id
+        mock_crew.name = 'Test Crew'
+        mock_crew.group_id = 'test-group'
+        mock_crew.agent_ids = ['a1', 'a2']
+        mock_crew.task_ids = ['t1', 't2']
+        mock_crew.nodes = []
+        mock_crew.edges = []
+
+        service.crew_repository.get = AsyncMock(return_value=mock_crew)
+        # a1 found, a2 not found
+        service.agent_repository.get = AsyncMock(side_effect=[None, None])
+        service.task_repository.get = AsyncMock(side_effect=[None, None])
+
+        result = await service._get_crew_with_details(crew_id, None)
+
+        assert result['agents'] == []
+        assert result['tasks'] == []
+
+    @pytest.mark.asyncio
+    async def test_get_crew_no_group_context(self, service):
+        """Test _get_crew_with_details without group context skips auth check."""
+        crew_id = str(uuid4())
+
+        mock_crew = MagicMock()
+        mock_crew.id = crew_id
+        mock_crew.name = 'Test Crew'
+        mock_crew.group_id = 'any-group'
+        mock_crew.agent_ids = []
+        mock_crew.task_ids = []
+        mock_crew.nodes = None
+        mock_crew.edges = None
+
+        service.crew_repository.get = AsyncMock(return_value=mock_crew)
+
+        result = await service._get_crew_with_details(crew_id, None)
+
+        assert result['name'] == 'Test Crew'
+        assert result['nodes'] == []
+        assert result['edges'] == []
+
+
+class TestConvertToolIdsToNames:
+    """Tests for _convert_tool_ids_to_names method."""
+
+    @pytest.fixture
+    def mock_session(self):
+        return AsyncMock()
+
+    @pytest.fixture
+    def service(self, mock_session):
+        return CrewExportService(session=mock_session)
+
+    @pytest.mark.asyncio
+    async def test_convert_string_tool_names(self, service):
+        """String tool names are kept as-is."""
+        result = await service._convert_tool_ids_to_names(['SerperDevTool', 'DallETool'])
+        assert result == ['SerperDevTool', 'DallETool']
+
+    @pytest.mark.asyncio
+    async def test_convert_integer_tool_ids(self, service):
+        """Integer tool IDs are looked up from repository."""
+        mock_tool = MagicMock()
+        mock_tool.title = 'MyCustomTool'
+        service.tool_repository.get = AsyncMock(return_value=mock_tool)
+
+        result = await service._convert_tool_ids_to_names([42])
+        assert result == ['MyCustomTool']
+
+    @pytest.mark.asyncio
+    async def test_convert_numeric_string_tool_ids(self, service):
+        """Numeric string tool IDs are converted to int and looked up."""
+        mock_tool = MagicMock()
+        mock_tool.title = 'FoundTool'
+        service.tool_repository.get = AsyncMock(return_value=mock_tool)
+
+        result = await service._convert_tool_ids_to_names(['99'])
+        assert result == ['FoundTool']
+
+    @pytest.mark.asyncio
+    async def test_convert_integer_tool_id_not_found(self, service):
+        """Integer tool ID not in DB falls back to string ID."""
+        service.tool_repository.get = AsyncMock(return_value=None)
+
+        result = await service._convert_tool_ids_to_names([999])
+        assert result == ['999']
+
+    @pytest.mark.asyncio
+    async def test_convert_unknown_type(self, service):
+        """Unknown types are converted to string."""
+        result = await service._convert_tool_ids_to_names([3.14])
+        assert result == ['3.14']
+
+    @pytest.mark.asyncio
+    async def test_convert_empty_list(self, service):
+        """Empty list returns empty list."""
+        result = await service._convert_tool_ids_to_names([])
+        assert result == []

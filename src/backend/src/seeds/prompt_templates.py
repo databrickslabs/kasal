@@ -53,7 +53,7 @@ Keep your response concise and make sure to:
 4. Write a backstory that explains their expertise (1-2 sentences)
 5. Keep the advanced configuration with default values
 
-IMPORTANT: Do NOT include a "tools" field in your response. Tools should be configured manually after agent creation.
+IMPORTANT: Do NOT include a "tools" field in your response. Tools are assigned at the task level, not the agent level.
 
 REMINDER: Your output must be PURE, VALID JSON with no additional text. Double-check your response to ensure it is properly formatted JSON."""
 
@@ -140,12 +140,57 @@ Please follow these strict guidelines when generating your output:
 2. name must be a short, meaningful string summarizing the task.
 3. description should clearly outline what needs to be done, including background or context if necessary.
 4. expected_output must describe the output's format, data type, and content expectations.
-5. The tools field must be an empty array.
+5. TOOL SELECTION — Read the Tool Catalog below carefully before assigning tools. Only assign tools listed in "Available tools" (provided at the end of this prompt). If no available tools are listed, leave tools as an empty array. NEVER invent tool names.
 6. Do not leave placeholders like "TBD" or "N/A"; provide concrete, usable values.
 7. All boolean and null values must use correct JSON syntax.
 8. If markdown is true, ensure the description and expected_output include markdown formatting instructions.
 9. Do not include any explanation or commentary—only return the JSON object.
 10. CRITICAL: Do NOT include an "output_file" field in your response. Task outputs should be returned directly as the task result, NOT written to files. The output_file feature is reserved for explicit user requests only.
+
+TOOL CATALOG — Reference this when deciding which tools to assign:
+
+GENERAL RULES:
+- Assign at most 1-2 tools per task. Fewer is better.
+- ALWAYS prefer internal/organizational data tools over web search when the task involves the user's OWN data (campaigns, metrics, reports, KPIs, employees, products, etc.).
+- Use web search tools ONLY when the task explicitly needs external/public information (industry trends, competitor research, general knowledge).
+- Tasks that write, compose, synthesize, summarize, or review typically need NO tools — the LLM handles these natively.
+
+1. GenieTool — INTERNAL DATA QUERIES
+   USE: When the task needs to query the organization's own data — databases, tables, metrics, KPIs, campaign performance, sales figures, employee data, product catalogs, etc.
+   DO NOT USE: For general internet research or external information gathering.
+   PRIORITY: HIGH — If the task is about analyzing "our", "my", or company-specific data, this is almost always the right tool.
+
+2. SerperDevTool — WEB SEARCH
+   USE: When the task needs to search the public internet for current news, trends, general information, or external competitor data.
+   DO NOT USE: For internal data analysis, writing tasks, or when GenieTool would be more appropriate. Not needed if PerplexityTool is already assigned.
+
+3. ScrapeWebsiteTool — WEB CONTENT EXTRACTION
+   USE: When the task needs to extract full content from a specific website or URL (e.g., scraping a competitor's product page, extracting article content).
+   DO NOT USE: For general search (use SerperDevTool), internal data queries, or writing tasks.
+
+4. PerplexityTool — AI-POWERED RESEARCH
+   USE: When the task needs in-depth research with citations and references on external topics, fact-checking, or detailed explanations of complex subjects.
+   DO NOT USE: For internal data analysis (use GenieTool), simple web searches (use SerperDevTool), or writing/synthesis tasks.
+
+5. DatabricksKnowledgeSearchTool — DOCUMENT SEARCH (RAG)
+   USE: When the task needs to search through uploaded knowledge documents (PDFs, Word docs, text files) stored in the organization's knowledge base.
+   DO NOT USE: For structured database queries (use GenieTool), web search, or when no knowledge documents have been uploaded.
+
+6. DatabricksJobsTool — JOB ORCHESTRATION
+   USE: When the task needs to list, run, monitor, or create Databricks jobs and data pipelines.
+   DO NOT USE: For data analysis (use GenieTool), web search, or content generation tasks.
+
+7. AgentBricksTool — AI AGENT ENDPOINTS
+   USE: When the task needs to call a pre-built Databricks AI agent endpoint for specialized processing.
+   DO NOT USE: For standard data queries (use GenieTool), web search, or general-purpose tasks.
+
+8. PowerBIAnalysisTool — BUSINESS INTELLIGENCE
+   USE: When the task needs to run complex Power BI analytics, DAX queries, year-over-year analysis, or heavy computational BI workloads.
+   DO NOT USE: For simple data queries (use GenieTool), web search, or non-BI tasks.
+
+9. MCPTool — MCP SERVER ACCESS
+   USE: When the task needs access to specialized tools from the MCP ecosystem not covered by other tools above.
+   DO NOT USE: As a first choice — prefer specific tools above. Use only when no other tool fits.
 
 LLM GUARDRAIL GUIDELINES:
 The llm_guardrail field enables AI-powered output validation.
@@ -396,6 +441,71 @@ CRITICAL: For presentation tasks, the task "description" and "expected_output" f
 
 REMINDER: Your output must be PURE, VALID JSON with no additional text. Double-check your response to ensure it is properly formatted JSON and contains NO MORE THAN 6 TASKS."""
 
+GENERATE_CREW_PLAN_TEMPLATE = """You are an expert AI crew planner. Given a user's goal, generate a lightweight crew outline with the right number of agents and tasks.
+
+CRITICAL: Return ONLY a JSON object. Do NOT include descriptions, goals, backstories, or tools — those will be generated separately.
+
+CRITICAL OUTPUT INSTRUCTIONS:
+1. Your entire response MUST be a valid, parseable JSON object without ANY markdown or other text
+2. Do NOT include ```json, ```, or any other markdown syntax
+3. Do NOT include any explanations, comments, or text outside the JSON
+
+Return this exact structure:
+{
+    "complexity": "light|standard|complex",
+    "process_type": "sequential|parallel",
+    "agents": [
+        {"name": "descriptive agent name", "role": "specific role title"}
+    ],
+    "tasks": [
+        {"name": "descriptive task name", "assigned_agent": "exact agent name from above", "context": []}
+    ]
+}
+
+COMPLEXITY TIERS — Choose the RIGHT size for the goal:
+
+**light** (1-2 agents, 2-3 tasks): Simple, focused requests.
+  Examples: "write a blog post", "summarize this document", "analyze this data"
+  Pattern: 1 core agent does the work, optional 1 reviewer. 2-3 sequential tasks.
+
+**standard** (2-3 agents, 3-4 tasks): Multi-step workflows with distinct phases.
+  Examples: "research a topic then write a report", "analyze competitors and create strategy"
+  Pattern: Each phase gets a specialized agent. 3-4 tasks forming a clear pipeline.
+
+**complex** (3-4 agents, 4-6 tasks): Multi-domain work with parallel tracks or specialized roles.
+  Examples: "build a market analysis with competitive intel, financial data, and strategic recommendations"
+  Pattern: Multiple specialists working on different aspects, results synthesized. Some tasks may run in parallel.
+
+HARD CAPS: NEVER exceed 4 agents or 6 tasks. More agents/tasks = slower execution. Prefer fewer, well-defined entities.
+
+PROCESS TYPE RULES:
+
+**sequential** (DEFAULT — use for most crews): Tasks form a pipeline where each builds on the previous.
+  - The FIRST task has an empty context array: "context": []
+  - EVERY subsequent task MUST list the previous task name in its context array
+  - Example: Task 1 context=[], Task 2 context=["Task 1 name"], Task 3 context=["Task 2 name"]
+  - This ensures each task receives the output of the previous task
+
+**parallel**: Use ONLY when tasks are genuinely independent and can run simultaneously.
+  - Independent tasks have empty context arrays
+  - A final synthesis/merge task should list ALL parallel tasks in its context array
+  - Example: Task A context=[], Task B context=[], Task C (synthesis) context=["Task A name", "Task B name"]
+  - Use this when the goal has independent sub-problems that converge
+
+AGENT ASSIGNMENT RULES:
+1. Each agent should own 1-2 tasks (never more than 3)
+2. Avoid assigning unrelated tasks to the same agent
+3. An agent's tasks should align with their role
+
+TASK DEPENDENCY RULES:
+1. Each task's "context" array contains names of tasks whose output it needs
+2. For sequential: chain tasks linearly (each depends on the previous)
+3. For parallel: only add genuine data dependencies, use empty context for independent tasks
+4. A task CANNOT depend on itself or on tasks that come after it
+5. Keep names concise but descriptive (2-5 words)
+
+REMINDER: Your output must be PURE, VALID JSON with no additional text."""
+
 DETECT_INTENT_TEMPLATE = """You are an intelligent intent detection system for a CrewAI workflow designer.
 
 Analyze the user's message and determine their intent from these categories:
@@ -518,6 +628,12 @@ DEFAULT_TEMPLATES = [
         "name": "detect_intent",
         "description": "Template for detecting user intent in natural language messages",
         "template": DETECT_INTENT_TEMPLATE,
+        "is_active": True
+    },
+    {
+        "name": "generate_crew_plan",
+        "description": "Template for generating a lightweight crew plan outline with agent names/roles and task names/assignments",
+        "template": GENERATE_CREW_PLAN_TEMPLATE,
         "is_active": True
     }
 ]

@@ -12,8 +12,19 @@ from fastapi import APIRouter
 from src.core.dependencies import GroupContextDep, SessionDep
 from src.schemas.dispatcher import DispatcherRequest, DispatcherResponse
 from src.services.dispatcher_service import DispatcherService
+from src.services.tool_service import ToolService
 
 router = APIRouter(prefix="/dispatcher", tags=["dispatcher"])
+
+
+async def _fetch_available_tools(session, group_context) -> list:
+    """Fetch enabled tools for the workspace and return as list of dicts."""
+    tool_service = ToolService(session)
+    enabled_tools_resp = await tool_service.get_enabled_tools_for_group(group_context)
+    return [
+        {"title": t.title, "description": t.description}
+        for t in enabled_tools_resp.tools
+    ]
 
 
 @router.post("/dispatch", response_model=Dict[str, Any])
@@ -44,8 +55,13 @@ async def dispatch_request(
     # Create service instance with injected session
     dispatcher_service = DispatcherService.create(session)
 
+    # Fetch workspace-enabled tools for automatic suggestion
+    available_tools = await _fetch_available_tools(session, group_context)
+
     # Process request with tenant context
-    result = await dispatcher_service.dispatch(request, group_context)
+    result = await dispatcher_service.dispatch(
+        request, group_context, available_tools=available_tools
+    )
 
     return result
 
@@ -82,9 +98,14 @@ async def detect_intent_only(
     # Create service instance with injected session
     dispatcher_service = DispatcherService.create(session)
 
+    # Fetch workspace-enabled tools for automatic suggestion
+    available_tools = await _fetch_available_tools(session, group_context)
+
     # Only detect intent without dispatching
     intent_result = await dispatcher_service.detect_intent(
-        request.message, request.model or "databricks-llama-4-maverick"
+        request.message,
+        request.model or "databricks-llama-4-maverick",
+        available_tools=available_tools,
     )
 
     # Create response
@@ -93,6 +114,8 @@ async def detect_intent_only(
         confidence=intent_result["confidence"],
         extracted_info=intent_result["extracted_info"],
         suggested_prompt=intent_result["suggested_prompt"],
+        source=intent_result.get("source"),
+        suggested_tools=intent_result.get("suggested_tools", []),
     )
 
     return response

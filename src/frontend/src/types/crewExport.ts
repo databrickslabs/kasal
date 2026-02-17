@@ -4,7 +4,8 @@
 
 export enum ExportFormat {
   PYTHON_PROJECT = 'python_project',
-  DATABRICKS_NOTEBOOK = 'databricks_notebook'
+  DATABRICKS_NOTEBOOK = 'databricks_notebook',
+  DATABRICKS_APP = 'databricks_app'
 }
 
 export enum DeploymentTarget {
@@ -28,6 +29,9 @@ export interface ExportOptions {
   include_tracing?: boolean;
   include_evaluation?: boolean;
   include_deployment?: boolean;
+  // Databricks App options
+  include_static_frontend?: boolean;
+  include_obo_auth?: boolean;
 }
 
 export interface CrewExportRequest {

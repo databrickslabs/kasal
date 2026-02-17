@@ -1077,6 +1077,69 @@ describe('TaskNode - MCP Server Extraction', () => {
 });
 
 /**
+ * Tests for Loading and Error States
+ */
+describe('TaskNode - Loading and Error States', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('renders error overlay when error is true', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        error: true,
+        errorMessage: 'Something went wrong',
+      },
+    });
+    expect(screen.getByTestId('ErrorIcon')).toBeInTheDocument();
+    expect(screen.getByText('Something went wrong')).toBeInTheDocument();
+  });
+
+  it('error overlay shows custom message', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        error: true,
+        errorMessage: 'Custom error',
+      },
+    });
+    expect(screen.getByText('Custom error')).toBeInTheDocument();
+  });
+
+  it('error overlay shows default message when no errorMessage', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        error: true,
+      },
+    });
+    expect(screen.getByText('Generation failed')).toBeInTheDocument();
+  });
+
+  it('does not render error overlay when error is false', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        error: false,
+      },
+    });
+    expect(screen.queryByTestId('ErrorIcon')).not.toBeInTheDocument();
+    expect(screen.queryByText('Generation failed')).not.toBeInTheDocument();
+  });
+
+  it('renders without crash when loading is true', () => {
+    renderTaskNode({
+      data: {
+        ...defaultProps.data,
+        loading: true,
+      },
+    });
+    expect(screen.getByText('Creating…')).toBeInTheDocument();
+  });
+});
+
+/**
  * Tests for action button tooltip interactions
  */
 describe('TaskNode - Action Button Tooltips', () => {

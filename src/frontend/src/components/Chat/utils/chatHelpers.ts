@@ -56,7 +56,12 @@ export const handleNodesGenerated = (
 
 export const isExecuteCommand = (message: string) => {
   const trimmed = message.trim().toLowerCase();
-  return trimmed === 'execute crew' || trimmed === 'ec' || trimmed === 'run' || trimmed === 'execute' || trimmed.startsWith('ec ') || trimmed.startsWith('execute crew ');
+  return trimmed === 'execute crew' || trimmed === 'ec' || trimmed === 'run' || trimmed === 'execute' || trimmed === '/run' || trimmed === '/exec' || trimmed.startsWith('ec ') || trimmed.startsWith('execute crew ');
+};
+
+export const isExecuteFlowCommand = (message: string) => {
+  const trimmed = message.trim().toLowerCase();
+  return trimmed === '/run flow' || trimmed === '/exec flow';
 };
 
 export const extractJobIdFromCommand = (message: string): string | null => {
