@@ -4,6 +4,7 @@ import logging
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.exceptions import ConflictError
 from src.models.crew import Crew
 from src.repositories.crew_repository import CrewRepository
 from src.schemas.crew import CrewCreate, CrewUpdate
@@ -157,15 +158,29 @@ class CrewService:
     async def create_with_group(self, obj_in: CrewCreate, group_context: GroupContext) -> Crew:
         """
         Create a new crew with group context.
-        
+
         Args:
             obj_in: Crew data for creation
             group_context: Group context from headers
-            
+
         Returns:
             Created crew
+
+        Raises:
+            ConflictError: If a crew with the same name already exists in the group
         """
         try:
+            # Check for duplicate name within the group
+            primary_group_id = group_context.primary_group_id
+            if primary_group_id:
+                existing = await self.repository.find_by_name_and_group(
+                    obj_in.name, [primary_group_id]
+                )
+                if existing:
+                    raise ConflictError(
+                        detail=f"A crew with the name '{obj_in.name}' already exists. Please choose a different name."
+                    )
+
             # Log details for debugging
             logger.info(f"Creating crew with name: {obj_in.name} for group: {group_context.primary_group_id}")
             logger.info(f"Agent IDs: {obj_in.agent_ids}")
@@ -258,6 +273,16 @@ class CrewService:
         if not update_data:
             # No fields to update
             return existing_crew
+
+        # Check for duplicate name within the group (if name is being changed)
+        if 'name' in update_data and update_data['name'] != existing_crew.name:
+            duplicate = await self.repository.find_by_name_and_group(
+                update_data['name'], [primary_group_id], exclude_id=id
+            )
+            if duplicate:
+                raise ConflictError(
+                    detail=f"A crew with the name '{update_data['name']}' already exists. Please choose a different name."
+                )
 
         return await self.repository.update(id, update_data)
 
