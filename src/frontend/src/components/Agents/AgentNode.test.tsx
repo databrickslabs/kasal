@@ -1253,6 +1253,37 @@ describe('AgentNode', () => {
     });
   });
 
+  /* ---------- Loading and Error States ---------- */
+
+  describe('Loading and Error States', () => {
+    it('renders error overlay when error is true', () => {
+      renderNode({ error: true, errorMessage: 'Something went wrong' });
+      expect(screen.getByTestId('ErrorIcon')).toBeInTheDocument();
+      expect(screen.getByText('Something went wrong')).toBeInTheDocument();
+    });
+
+    it('error overlay shows custom message', () => {
+      renderNode({ error: true, errorMessage: 'Custom error' });
+      expect(screen.getByText('Custom error')).toBeInTheDocument();
+    });
+
+    it('error overlay shows default message when no errorMessage', () => {
+      renderNode({ error: true });
+      expect(screen.getByText('Generation failed')).toBeInTheDocument();
+    });
+
+    it('does not render error overlay when error is false', () => {
+      renderNode({ error: false });
+      expect(screen.queryByTestId('ErrorIcon')).not.toBeInTheDocument();
+      expect(screen.queryByText('Generation failed')).not.toBeInTheDocument();
+    });
+
+    it('renders without crash when loading is true', () => {
+      renderNode({ loading: true });
+      expect(screen.getByText('Creating…')).toBeInTheDocument();
+    });
+  });
+
   /* ---------- Data fallback: no name, no label ---------- */
 
   describe('handleEditClick data fallback edge cases', () => {

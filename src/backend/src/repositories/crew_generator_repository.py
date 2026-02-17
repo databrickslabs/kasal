@@ -19,6 +19,8 @@ from src.repositories.agent_repository import AgentRepository
 from src.repositories.task_repository import TaskRepository
 from src.schemas.agent import AgentCreate
 from src.schemas.task import TaskCreate
+from src.core.exceptions import KasalError
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
@@ -518,4 +520,146 @@ class CrewGeneratorRepository:
         else:
             logger.info("No task context updates needed.")
                 
-        logger.info("Finished processing task dependencies") 
+        logger.info("Finished processing task dependencies")
+
+    async def create_single_agent(self, agent_data: Dict[str, Any], group_context=None) -> Dict[str, Any]:
+        """
+        Create a single agent in the database and return a serializable dict.
+
+        Args:
+            agent_data: Agent configuration dictionary
+            group_context: Group context for multi-tenant isolation
+
+        Returns:
+            Serializable dict with created agent data including database ID
+        """
+        try:
+            agent = Agent(
+                id=str(uuid.uuid4()),
+                name=self._safe_get_attr(agent_data, 'name'),
+                role=self._safe_get_attr(agent_data, 'role'),
+                goal=self._safe_get_attr(agent_data, 'goal'),
+                backstory=self._safe_get_attr(agent_data, 'backstory'),
+                llm=self._safe_get_attr(agent_data, 'llm'),
+                tools=self._safe_get_attr(agent_data, 'tools', []),
+                allow_delegation=self._safe_get_attr(agent_data, 'allow_delegation', False),
+                verbose=self._safe_get_attr(agent_data, 'verbose', False),
+                max_iter=self._safe_get_attr(agent_data, 'max_iter', 25),
+                max_rpm=self._safe_get_attr(agent_data, 'max_rpm', 10),
+                cache=self._safe_get_attr(agent_data, 'cache', True),
+                allow_code_execution=False,
+                code_execution_mode=self._safe_get_attr(agent_data, 'code_execution_mode', 'safe'),
+                max_retry_limit=self._safe_get_attr(agent_data, 'max_retry_limit', 2),
+                use_system_prompt=self._safe_get_attr(agent_data, 'use_system_prompt', True),
+                respect_context_window=self._safe_get_attr(agent_data, 'respect_context_window', True),
+                function_calling_llm=self._safe_get_attr(agent_data, 'function_calling_llm'),
+                group_id=group_context.primary_group_id if group_context else None,
+                created_by_email=group_context.group_email if group_context else None,
+            )
+
+            self.session.add(agent)
+            await self.session.flush()
+            logger.info(f"Single agent created: {agent.name} (ID: {agent.id})")
+
+            return {
+                'id': agent.id,
+                'name': agent.name,
+                'role': agent.role,
+                'goal': agent.goal,
+                'backstory': agent.backstory,
+                'llm': agent.llm,
+                'tools': agent.tools,
+                'allow_delegation': agent.allow_delegation,
+                'verbose': agent.verbose,
+                'max_iter': agent.max_iter,
+                'max_rpm': agent.max_rpm,
+                'cache': agent.cache,
+                'allow_code_execution': agent.allow_code_execution,
+                'code_execution_mode': agent.code_execution_mode,
+                'max_retry_limit': agent.max_retry_limit,
+                'use_system_prompt': agent.use_system_prompt,
+                'respect_context_window': agent.respect_context_window,
+                'function_calling_llm': agent.function_calling_llm,
+                'created_at': agent.created_at.isoformat() if agent.created_at else None,
+                'updated_at': agent.updated_at.isoformat() if agent.updated_at else None,
+            }
+        except Exception as e:
+            logger.error(f"Error creating single agent: {e}")
+            logger.error(traceback.format_exc())
+            raise KasalError(f"Failed to persist agent: {e}")
+
+    async def create_single_task(self, task_data: Dict[str, Any], agent_id: Optional[str], group_context=None) -> Dict[str, Any]:
+        """
+        Create a single task in the database and return a serializable dict.
+
+        Args:
+            task_data: Task configuration dictionary
+            agent_id: ID of the assigned agent
+            group_context: Group context for multi-tenant isolation
+
+        Returns:
+            Serializable dict with created task data including database ID
+        """
+        try:
+            task = Task(
+                id=str(uuid.uuid4()),
+                name=self._safe_get_attr(task_data, 'name'),
+                description=self._safe_get_attr(task_data, 'description'),
+                expected_output=self._safe_get_attr(task_data, 'expected_output'),
+                tools=self._safe_get_attr(task_data, 'tools', []),
+                agent_id=agent_id,
+                async_execution=self._safe_get_attr(task_data, 'async_execution', False),
+                output=self._safe_get_attr(task_data, 'output'),
+                human_input=self._safe_get_attr(task_data, 'human_input', False),
+                markdown=self._safe_get_attr(task_data, 'markdown', False),
+                llm_guardrail=self._safe_get_attr(task_data, 'llm_guardrail'),
+                tool_configs=self._safe_get_attr(task_data, 'tool_configs', {}),
+                group_id=group_context.primary_group_id if group_context else None,
+                created_by_email=group_context.group_email if group_context else None,
+            )
+
+            self.session.add(task)
+            await self.session.flush()
+            logger.info(f"Single task created: {task.name} (ID: {task.id}) agent_id={agent_id}")
+
+            return {
+                'id': task.id,
+                'name': task.name,
+                'description': task.description,
+                'agent_id': task.agent_id,
+                'expected_output': task.expected_output,
+                'tools': task.tools,
+                'async_execution': task.async_execution,
+                'context': task.context or [],
+                'output': task.output,
+                'human_input': task.human_input,
+                'llm_guardrail': task.llm_guardrail,
+                'tool_configs': task.tool_configs or {},
+                'created_at': task.created_at.isoformat() if task.created_at else None,
+                'updated_at': task.updated_at.isoformat() if task.updated_at else None,
+            }
+        except Exception as e:
+            logger.error(f"Error creating single task: {e}")
+            logger.error(traceback.format_exc())
+            raise KasalError(f"Failed to persist task: {e}")
+
+    async def update_task_dependencies(self, task_id: str, context_ids: List[str]) -> None:
+        """
+        Update a task's context (dependency) list.
+
+        Args:
+            task_id: ID of the task to update
+            context_ids: List of task IDs this task depends on
+        """
+        try:
+            task_repo = TaskRepository(self.session)
+            task = await task_repo.get(task_id)
+            if task:
+                task.context = context_ids
+                await self.session.flush()
+                logger.info(f"Updated task {task_id} dependencies: {context_ids}")
+            else:
+                logger.warning(f"Task {task_id} not found for dependency update")
+        except Exception as e:
+            logger.error(f"Error updating task dependencies: {e}")
+            raise KasalError(f"Failed to update task dependencies: {e}")

@@ -869,20 +869,20 @@ class TestDispatch:
             return_value=self._make_intent_result("generate_crew")
         )
         svc._log_llm_interaction = AsyncMock()
-        svc.crew_service.create_crew_complete = AsyncMock(
-            return_value={"type": "crew", "agents": [], "tasks": []}
-        )
+        svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
 
+        mock_task = MagicMock()
         request = DispatcherRequest(
             message="build a team", model="test-model", tools=["web_search"]
         )
-        result = await svc.dispatch(request)
+        with patch("asyncio.create_task", return_value=mock_task) as mock_create_task:
+            result = await svc.dispatch(request)
 
         assert result["service_called"] == "generate_crew"
-        svc.crew_service.create_crew_complete.assert_awaited_once()
-        call_args = svc.crew_service.create_crew_complete.call_args
-        crew_req = call_args[0][0]
-        assert crew_req.tools == ["web_search"]
+        gen = result["generation_result"]
+        assert gen["type"] == "streaming"
+        assert "generation_id" in gen
+        mock_create_task.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_dispatch_execute_crew(self):
@@ -1120,19 +1120,22 @@ class TestDispatch:
 
     @pytest.mark.asyncio
     async def test_dispatch_crew_error_logs_and_reraises(self):
+        """Crew generation now uses asyncio.create_task for streaming.
+        If create_task itself raises, the error propagates."""
         svc = _build_service()
         svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
         svc.detect_intent = AsyncMock(
             return_value=self._make_intent_result("generate_crew")
         )
         svc._log_llm_interaction = AsyncMock()
-        svc.crew_service.create_crew_complete = AsyncMock(
-            side_effect=RuntimeError("crew gen error")
-        )
+        svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
 
         request = DispatcherRequest(message="build team", model="m")
-        with pytest.raises(RuntimeError, match="crew gen error"):
-            await svc.dispatch(request)
+        with patch(
+            "asyncio.create_task", side_effect=RuntimeError("crew gen error")
+        ):
+            with pytest.raises(RuntimeError, match="crew gen error"):
+                await svc.dispatch(request)
 
 
 # ===================================================================
@@ -1603,14 +1606,22 @@ class TestEdgeCases:
             }
         )
         svc._log_llm_interaction = AsyncMock()
-        svc.crew_service.create_crew_complete = AsyncMock(return_value={})
+        svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
+
+        captured_request = {}
+
+        def capture_create_task(coro):
+            # The coroutine has already been constructed with the streaming request
+            coro.close()  # Clean up the coroutine
+            return MagicMock()
 
         request = DispatcherRequest(message="build a team", model="m", tools=[])
-        result = await svc.dispatch(request)
+        with patch("asyncio.create_task", side_effect=capture_create_task):
+            result = await svc.dispatch(request)
 
-        call_args = svc.crew_service.create_crew_complete.call_args
-        crew_req = call_args[0][0]
-        assert crew_req.tools == []
+        gen = result["generation_result"]
+        assert gen["type"] == "streaming"
+        assert "generation_id" in gen
 
     @pytest.mark.asyncio
     async def test_dispatch_passes_group_context_to_agent(self):
@@ -1672,13 +1683,23 @@ class TestEdgeCases:
             }
         )
         svc._log_llm_interaction = AsyncMock()
-        svc.crew_service.create_crew_complete = AsyncMock(return_value={})
+        svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
+
+        captured_coro_args = []
+
+        def capture_create_task(coro):
+            # create_crew_progressive was called with (streaming_req, group_context, generation_id)
+            # We can verify through the mock's call_args instead
+            coro.close()
+            return MagicMock()
 
         gc = _make_group_context()
         request = DispatcherRequest(message="build team", model="m")
-        await svc.dispatch(request, group_context=gc)
+        with patch("asyncio.create_task", side_effect=capture_create_task):
+            await svc.dispatch(request, group_context=gc)
 
-        call_args = svc.crew_service.create_crew_complete.call_args
+        # Verify create_crew_progressive was called with group_context
+        call_args = svc.crew_service.create_crew_progressive.call_args
         assert call_args[0][1] is gc
 
     @pytest.mark.asyncio
@@ -1994,14 +2015,19 @@ class TestDispatchWithSuggestedTools:
             )
         )
         svc._log_llm_interaction = AsyncMock()
-        svc.crew_service.create_crew_complete = AsyncMock(return_value={})
+        svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
+
+        def capture_create_task(coro):
+            coro.close()
+            return MagicMock()
 
         request = DispatcherRequest(message="research AI trends", model="m", tools=[])
-        await svc.dispatch(request)
+        with patch("asyncio.create_task", side_effect=capture_create_task):
+            await svc.dispatch(request)
 
-        call_args = svc.crew_service.create_crew_complete.call_args
-        crew_req = call_args[0][0]
-        assert crew_req.tools == ["SerperDevTool", "ScrapeWebsiteTool"]
+        call_args = svc.crew_service.create_crew_progressive.call_args
+        streaming_req = call_args[0][0]
+        assert streaming_req.tools == ["SerperDevTool", "ScrapeWebsiteTool"]
 
     @pytest.mark.asyncio
     async def test_dispatch_uses_request_tools_over_suggested(self):
@@ -2015,16 +2041,21 @@ class TestDispatchWithSuggestedTools:
             )
         )
         svc._log_llm_interaction = AsyncMock()
-        svc.crew_service.create_crew_complete = AsyncMock(return_value={})
+        svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
+
+        def capture_create_task(coro):
+            coro.close()
+            return MagicMock()
 
         request = DispatcherRequest(
             message="research AI", model="m", tools=["UserSelectedTool"]
         )
-        await svc.dispatch(request)
+        with patch("asyncio.create_task", side_effect=capture_create_task):
+            await svc.dispatch(request)
 
-        call_args = svc.crew_service.create_crew_complete.call_args
-        crew_req = call_args[0][0]
-        assert crew_req.tools == ["UserSelectedTool"]
+        call_args = svc.crew_service.create_crew_progressive.call_args
+        streaming_req = call_args[0][0]
+        assert streaming_req.tools == ["UserSelectedTool"]
 
     @pytest.mark.asyncio
     async def test_dispatch_suggested_tools_in_agent_generation(self):
@@ -3314,3 +3345,176 @@ class TestFlowDeleteDispatch:
         assert gen["type"] == "flow_delete"
         assert "No flow found" in gen["message"]
         assert "nonexistent" in gen["message"]
+
+
+# ===================================================================
+# Tests for streaming crew generation and workspace tool resolution
+# ===================================================================
+
+
+class TestDispatchStreamingCrewAndToolResolution:
+    """Tests for GENERATE_CREW streaming dispatch and workspace tool resolution."""
+
+    def _make_intent_result(self, intent, confidence=0.9, suggested_prompt=None, suggested_tools=None):
+        return {
+            "intent": intent,
+            "confidence": confidence,
+            "extracted_info": {},
+            "suggested_prompt": suggested_prompt or "test prompt",
+            "suggested_tools": suggested_tools or [],
+        }
+
+    @pytest.mark.asyncio
+    async def test_dispatch_generate_crew_uses_streaming(self):
+        """When intent is GENERATE_CREW, create_crew_progressive is spawned via asyncio.create_task."""
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("generate_crew")
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.crew_service.create_crew_progressive = AsyncMock()
+
+        request = DispatcherRequest(
+            message="build a research team", model="test-model", tools=["web_search"]
+        )
+
+        with patch("src.services.dispatcher_service.asyncio.create_task") as mock_create_task:
+            await svc.dispatch(request)
+
+            mock_create_task.assert_called_once()
+            # The argument to create_task should be the coroutine from create_crew_progressive
+            call_args = mock_create_task.call_args[0][0]
+            # Verify create_crew_progressive was called (the coroutine was created)
+            svc.crew_service.create_crew_progressive.assert_called_once()
+            progressive_call = svc.crew_service.create_crew_progressive.call_args
+            streaming_req = progressive_call[0][0]
+            assert streaming_req.prompt == "test prompt"
+            assert streaming_req.model == "test-model"
+            assert streaming_req.tools == ["web_search"]
+
+    @pytest.mark.asyncio
+    async def test_dispatch_generate_crew_returns_generation_id(self):
+        """Result contains generation_id (string) and type='streaming'."""
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("generate_crew")
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.crew_service.create_crew_progressive = AsyncMock()
+
+        request = DispatcherRequest(
+            message="build a team", model="test-model", tools=["tool1"]
+        )
+
+        with patch("src.services.dispatcher_service.asyncio.create_task"):
+            result = await svc.dispatch(request)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "streaming"
+        assert "generation_id" in gen
+        assert isinstance(gen["generation_id"], str)
+        # generation_id should be a valid UUID-like string (36 chars with hyphens)
+        assert len(gen["generation_id"]) == 36
+
+    @pytest.mark.asyncio
+    async def test_dispatch_workspace_tools_fetched(self):
+        """When request.tools is empty, ToolService.get_enabled_tools is called."""
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("generate_crew")
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.crew_service.create_crew_progressive = AsyncMock()
+
+        # Mock tool returned by ToolService
+        mock_tool = SimpleNamespace(title="WorkspaceTool1")
+        mock_tool2 = SimpleNamespace(title="WorkspaceTool2")
+        mock_tools_response = SimpleNamespace(tools=[mock_tool, mock_tool2])
+
+        mock_tool_svc_instance = MagicMock()
+        mock_tool_svc_instance.get_enabled_tools = AsyncMock(return_value=mock_tools_response)
+
+        request = DispatcherRequest(message="build a team", model="m", tools=[])
+
+        with patch("src.services.dispatcher_service.asyncio.create_task"):
+            with patch(
+                "src.services.tool_service.ToolService",
+                return_value=mock_tool_svc_instance,
+            ) as mock_tool_cls:
+                await svc.dispatch(request)
+
+                mock_tool_cls.assert_called_once_with(svc.session)
+                mock_tool_svc_instance.get_enabled_tools.assert_awaited_once()
+
+                # Verify the streaming request got the workspace tools
+                progressive_call = svc.crew_service.create_crew_progressive.call_args
+                streaming_req = progressive_call[0][0]
+                assert streaming_req.tools == ["WorkspaceTool1", "WorkspaceTool2"]
+
+    @pytest.mark.asyncio
+    async def test_dispatch_workspace_tools_fallback(self):
+        """When ToolService fetch fails, suggested_tools from intent are used."""
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result(
+                "generate_crew",
+                suggested_tools=["FallbackTool1", "FallbackTool2"],
+            )
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.crew_service.create_crew_progressive = AsyncMock()
+
+        mock_tool_svc_instance = MagicMock()
+        mock_tool_svc_instance.get_enabled_tools = AsyncMock(
+            side_effect=Exception("DB connection failed")
+        )
+
+        request = DispatcherRequest(message="build a team", model="m", tools=[])
+
+        with patch("src.services.dispatcher_service.asyncio.create_task"):
+            with patch(
+                "src.services.tool_service.ToolService",
+                return_value=mock_tool_svc_instance,
+            ):
+                await svc.dispatch(request)
+
+                # Verify fallback to suggested_tools
+                progressive_call = svc.crew_service.create_crew_progressive.call_args
+                streaming_req = progressive_call[0][0]
+                assert streaming_req.tools == ["FallbackTool1", "FallbackTool2"]
+
+    @pytest.mark.asyncio
+    async def test_dispatch_user_tools_take_precedence(self):
+        """When request.tools is provided, ToolService is NOT called."""
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result(
+                "generate_crew",
+                suggested_tools=["SuggestedTool"],
+            )
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.crew_service.create_crew_progressive = AsyncMock()
+
+        request = DispatcherRequest(
+            message="build a team", model="m", tools=["UserTool1", "UserTool2"]
+        )
+
+        with patch("src.services.dispatcher_service.asyncio.create_task"):
+            with patch(
+                "src.services.tool_service.ToolService",
+            ) as mock_tool_cls:
+                await svc.dispatch(request)
+
+                # ToolService should NOT be instantiated when user provides tools
+                mock_tool_cls.assert_not_called()
+
+                # Verify user tools are passed through
+                progressive_call = svc.crew_service.create_crew_progressive.call_args
+                streaming_req = progressive_call[0][0]
+                assert streaming_req.tools == ["UserTool1", "UserTool2"]

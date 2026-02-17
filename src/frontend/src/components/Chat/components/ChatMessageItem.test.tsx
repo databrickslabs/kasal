@@ -29,6 +29,13 @@ vi.mock('@mui/material/Fade', () => ({
   default: ({ children }: { children: React.ReactElement }) => children,
 }));
 
+// Mock GenieSpaceConfigPrompt for genie config metadata tests
+vi.mock('../GenieSpaceConfigPrompt', () => ({
+  GenieSpaceConfigPrompt: ({ configs }: { configs: unknown[] }) => (
+    <div data-testid="genie-config-prompt">{configs.length} configs</div>
+  ),
+}));
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -740,7 +747,47 @@ describe('ChatMessageItem', () => {
   });
 
   // =========================================================================
-  // 10. Avatar colors
+  // 10. Genie config metadata rendering
+  // =========================================================================
+
+  describe('genie config metadata rendering', () => {
+    it('renders genie config prompt when metadata type is genie_config_needed', () => {
+      render(
+        <ChatMessageItem
+          message={makeMessage({
+            type: 'assistant',
+            content: 'Configure Genie spaces',
+            metadata: {
+              type: 'genie_config_needed',
+              configs: [
+                { toolName: 'GenieTool', taskNodeId: 'task-1', taskName: 'Test Task' },
+              ],
+            },
+          })}
+        />
+      );
+
+      expect(screen.getByTestId('genie-config-prompt')).toBeInTheDocument();
+      expect(screen.getByText('1 configs')).toBeInTheDocument();
+    });
+
+    it('renders normal message content when no metadata is present', () => {
+      render(
+        <ChatMessageItem
+          message={makeMessage({
+            type: 'assistant',
+            content: 'Normal response',
+          })}
+        />
+      );
+
+      expect(screen.queryByTestId('genie-config-prompt')).not.toBeInTheDocument();
+      expect(screen.getByTestId('message-content')).toHaveTextContent('Normal response');
+    });
+  });
+
+  // =========================================================================
+  // 11. Avatar colors
   // =========================================================================
 
   describe('avatar colors', () => {

@@ -24,7 +24,7 @@ except ImportError:
 
 from src.core.cache import intent_cache
 from src.core.llm_manager import LLMManager
-from src.schemas.crew import CrewGenerationRequest, CrewGenerationResponse
+from src.schemas.crew import CrewGenerationRequest, CrewGenerationResponse, CrewStreamingRequest
 from src.schemas.dispatcher import DispatcherRequest, DispatcherResponse, IntentType
 from src.schemas.task_generation import TaskGenerationRequest, TaskGenerationResponse
 from src.services.agent_generation_service import AgentGenerationService
@@ -1374,12 +1374,23 @@ Please analyze this message and provide your intent classification, considering 
                 suggested_tools=intent_result.get("suggested_tools", []),
             )
 
-            # Use LLM-suggested tools when user didn't provide any
-            effective_tools = (
-                request.tools
-                if request.tools
-                else intent_result.get("suggested_tools", [])
-            )
+            # Resolve workspace tools: use user-selected tools if provided,
+            # otherwise fetch all enabled workspace tools so the LLM can
+            # make informed tool assignments based on actual availability.
+            if request.tools:
+                effective_tools = request.tools
+            else:
+                try:
+                    from src.services.tool_service import ToolService
+                    tool_svc = ToolService(self.session)
+                    if group_context:
+                        tools_resp = await tool_svc.get_enabled_tools_for_group(group_context)
+                    else:
+                        tools_resp = await tool_svc.get_enabled_tools()
+                    effective_tools = [t.title for t in tools_resp.tools]
+                except Exception as e:
+                    logger.warning(f"Failed to fetch workspace tools, falling back to suggested: {e}")
+                    effective_tools = intent_result.get("suggested_tools", [])
 
             # Dispatch to appropriate service based on intent
             generation_result = None
@@ -1404,14 +1415,23 @@ Please analyze this message and provide your intent classification, considering 
                     )
 
                 elif dispatcher_response.intent == IntentType.GENERATE_CREW:
-                    crew_request = CrewGenerationRequest(
+                    import uuid as _uuid
+                    generation_id = str(_uuid.uuid4())
+                    streaming_request = CrewStreamingRequest(
                         prompt=dispatcher_response.suggested_prompt or request.message,
                         model=request.model,
-                        tools=effective_tools,
+                        tools=effective_tools or [],
                     )
-                    generation_result = await self.crew_service.create_crew_complete(
-                        crew_request, group_context, fast_planning=True
+                    # Spawn progressive generation in background
+                    asyncio.create_task(
+                        self.crew_service.create_crew_progressive(
+                            streaming_request, group_context, generation_id
+                        )
                     )
+                    generation_result = {
+                        "generation_id": generation_id,
+                        "type": "streaming",
+                    }
 
                 elif dispatcher_response.intent == IntentType.EXECUTE_CREW:
                     run_name = dispatcher_response.extracted_info.get(

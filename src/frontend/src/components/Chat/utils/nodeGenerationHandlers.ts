@@ -9,6 +9,13 @@ import { useWorkflowStore } from '../../../store/workflow';
 import { useUILayoutStore } from '../../../store/uiLayout';
 import { ConfigureCrewResult } from '../../../api/DispatcherService';
 import { EdgeCategory, getEdgeStyleConfig } from '../../../config/edgeConfig';
+import type {
+  PlanReadyData,
+  AgentDetailData,
+  TaskDetailData,
+  EntityErrorData,
+  DependenciesResolvedData,
+} from '../../../hooks/global/useCrewGenerationSSE';
 
 export const createAgentGenerationHandler = (
   setNodes: React.Dispatch<React.SetStateAction<Node[]>>,
@@ -602,3 +609,352 @@ export const handleConfigureCrew = (configResult: ConfigureCrewResult, inputRef?
     inputRef?.current?.focus();
   }, 500);
 };
+
+/* ------------------------------------------------------------------ */
+/*  Progressive (SSE-based) crew generation handlers                   */
+/* ------------------------------------------------------------------ */
+
+/** Map from plan index → ReactFlow node id, built during skeleton creation */
+export type IndexNodeIdMap = {
+  agents: Map<number, string>;
+  tasks: Map<number, string>;
+};
+
+/**
+ * Called on `plan_ready`. Clears canvas and creates skeleton nodes with
+ * name/role only (loading state).
+ */
+export function createCrewSkeletonHandler(
+  setNodes: React.Dispatch<React.SetStateAction<Node[]>>,
+  setEdges: React.Dispatch<React.SetStateAction<Edge[]>>,
+  setLastExecutionJobId: React.Dispatch<React.SetStateAction<string | null>>,
+  setExecutingJobId: React.Dispatch<React.SetStateAction<string | null>>,
+  layoutManagerRef?: React.MutableRefObject<CanvasLayoutManager>,
+): (plan: PlanReadyData) => IndexNodeIdMap {
+  return (plan: PlanReadyData): IndexNodeIdMap => {
+    console.log('[ProgressiveCrew] plan_ready', plan);
+
+    // Reset execution state
+    setLastExecutionJobId(null);
+    setExecutingJobId(null);
+
+    const agentCount = plan.agents.length;
+    const taskCount = plan.tasks.length;
+    const layoutResult = layoutManagerRef?.current.getCrewLayoutPositions(agentCount, taskCount, 'crew') || {
+      agentPositions: [],
+      taskPositions: [],
+      layoutBounds: null,
+      shouldAutoFit: false,
+    };
+    const { agentPositions, taskPositions } = layoutResult;
+    const { layoutOrientation } = useUILayoutStore.getState();
+
+    const nodes: Node[] = [];
+    const edges: Edge[] = [];
+    const indexMap: IndexNodeIdMap = { agents: new Map(), tasks: new Map() };
+
+    // Build name→nodeId map for edge creation
+    const agentNameToNodeId = new Map<string, string>();
+
+    // Create skeleton agent nodes
+    plan.agents.forEach((a, i) => {
+      const nodeId = `agent-skeleton-${i}-${Date.now()}`;
+      indexMap.agents.set(i, nodeId);
+      agentNameToNodeId.set(a.name, nodeId);
+
+      nodes.push({
+        id: nodeId,
+        type: 'agentNode',
+        position: agentPositions[i] || { x: 100, y: 100 + i * 150 },
+        data: {
+          label: a.name,
+          role: a.role,
+          loading: true,
+        },
+      });
+    });
+
+    // Build task name→nodeId map for dependency edge creation
+    const taskNameToNodeId = new Map<string, string>();
+
+    // Create skeleton task nodes + agent→task edges
+    plan.tasks.forEach((t, i) => {
+      const nodeId = `task-skeleton-${i}-${Date.now()}`;
+      indexMap.tasks.set(i, nodeId);
+      taskNameToNodeId.set(t.name, nodeId);
+
+      nodes.push({
+        id: nodeId,
+        type: 'taskNode',
+        position: taskPositions[i] || { x: 400, y: 100 + i * 150 },
+        data: {
+          label: t.name,
+          loading: true,
+        },
+      });
+
+      // Edge from assigned agent to this task
+      if (t.assigned_agent) {
+        const agentNodeId = agentNameToNodeId.get(t.assigned_agent);
+        if (agentNodeId) {
+          const sourceHandle = layoutOrientation === 'vertical' ? 'bottom' : 'right';
+          const targetHandle = layoutOrientation === 'vertical' ? 'top' : 'left';
+          const edgeStyle = getEdgeStyleConfig(EdgeCategory.AGENT_TO_TASK, false);
+
+          edges.push({
+            id: `edge-${agentNodeId}-${nodeId}`,
+            source: agentNodeId,
+            target: nodeId,
+            type: 'default',
+            animated: false,
+            sourceHandle,
+            targetHandle,
+            style: edgeStyle,
+          });
+        }
+      }
+    });
+
+    // Create task-to-task dependency edges from plan context arrays
+    plan.tasks.forEach((t) => {
+      if (t.context && Array.isArray(t.context) && t.context.length > 0) {
+        const targetNodeId = taskNameToNodeId.get(t.name);
+        if (!targetNodeId) return;
+
+        t.context.forEach((depName: string) => {
+          const sourceNodeId = taskNameToNodeId.get(depName);
+          if (sourceNodeId && sourceNodeId !== targetNodeId) {
+            const edgeStyle = getEdgeStyleConfig(EdgeCategory.TASK_TO_TASK, true);
+
+            edges.push({
+              id: `dep-edge-${sourceNodeId}-${targetNodeId}`,
+              source: sourceNodeId,
+              target: targetNodeId,
+              type: 'default',
+              animated: true,
+              style: { ...edgeStyle, opacity: 0.5 },
+            });
+          }
+        });
+      }
+    });
+
+    // Replace canvas contents
+    setNodes(nodes);
+    setEdges(edges);
+
+    return indexMap;
+  };
+}
+
+/**
+ * Called on `agent_detail`. Updates a skeleton agent node with full details.
+ */
+export function updateAgentNodeDetail(
+  setNodes: React.Dispatch<React.SetStateAction<Node[]>>,
+  setEdges: React.Dispatch<React.SetStateAction<Edge[]>>,
+  indexMap: IndexNodeIdMap,
+  selectedModel: string,
+) {
+  return (data: AgentDetailData) => {
+    const oldNodeId = indexMap.agents.get(data.index);
+    if (!oldNodeId) return;
+
+    const agent = data.agent;
+    const newNodeId = `agent-${agent.id}`;
+
+    // Update the index map to the real node id
+    indexMap.agents.set(data.index, newNodeId);
+
+    // Replace the skeleton node with the real one (update id, data, remove loading)
+    setNodes((prev) =>
+      prev.map((n) =>
+        n.id === oldNodeId
+          ? {
+              ...n,
+              id: newNodeId,
+              data: {
+                ...n.data,
+                label: (agent.name as string) || n.data.label,
+                agentId: agent.id,
+                role: agent.role,
+                goal: agent.goal,
+                backstory: agent.backstory,
+                llm: (agent.llm as string) || selectedModel,
+                tools: (agent.tools as string[]) || [],
+                loading: false,
+              },
+            }
+          : n
+      )
+    );
+
+    // Update edges that reference the old skeleton id
+    setEdges((prev) =>
+      prev.map((e) => {
+        let updated = e;
+        if (e.source === oldNodeId) updated = { ...updated, source: newNodeId, id: updated.id.replace(oldNodeId, newNodeId) };
+        if (e.target === oldNodeId) updated = { ...updated, target: newNodeId, id: updated.id.replace(oldNodeId, newNodeId) };
+        return updated;
+      })
+    );
+  };
+}
+
+/**
+ * Called on `task_detail`. Updates a skeleton task node with full details
+ * and adds task-to-task dependency edges.
+ */
+export function updateTaskNodeDetail(
+  setNodes: React.Dispatch<React.SetStateAction<Node[]>>,
+  setEdges: React.Dispatch<React.SetStateAction<Edge[]>>,
+  indexMap: IndexNodeIdMap,
+) {
+  return (data: TaskDetailData) => {
+    const oldNodeId = indexMap.tasks.get(data.index);
+    if (!oldNodeId) return;
+
+    const task = data.task;
+    const newNodeId = `task-${task.id}`;
+    indexMap.tasks.set(data.index, newNodeId);
+
+    setNodes((prev) =>
+      prev.map((n) =>
+        n.id === oldNodeId
+          ? {
+              ...n,
+              id: newNodeId,
+              data: {
+                ...n.data,
+                label: (task.name as string) || n.data.label,
+                taskId: task.id,
+                description: task.description,
+                expected_output: task.expected_output,
+                tools: (task.tools as string[]) || [],
+                tool_configs: (task.tool_configs as Record<string, unknown>) || n.data.tool_configs || {},
+                context: (task.context as string[]) || [],
+                loading: false,
+              },
+            }
+          : n
+      )
+    );
+
+    // Update edges that reference the old skeleton id
+    setEdges((prev) =>
+      prev.map((e) => {
+        let updated = e;
+        if (e.source === oldNodeId) updated = { ...updated, source: newNodeId, id: updated.id.replace(oldNodeId, newNodeId) };
+        if (e.target === oldNodeId) updated = { ...updated, target: newNodeId, id: updated.id.replace(oldNodeId, newNodeId) };
+        return updated;
+      })
+    );
+
+    // Add task-to-task dependency edges if context exists
+    const context = task.context as string[] | undefined;
+    if (context && Array.isArray(context) && context.length > 0) {
+      const depEdges: Edge[] = [];
+      context.forEach((depTaskId: string) => {
+        const sourceNodeId = `task-${depTaskId}`;
+        const edgeStyle = getEdgeStyleConfig(EdgeCategory.TASK_TO_TASK, true);
+        depEdges.push({
+          id: `edge-${sourceNodeId}-${newNodeId}`,
+          source: sourceNodeId,
+          target: newNodeId,
+          sourceHandle: 'right',
+          targetHandle: 'left',
+          type: 'default',
+          animated: true,
+          style: edgeStyle,
+        });
+      });
+      if (depEdges.length > 0) {
+        setEdges((prev) => [...prev, ...depEdges]);
+      }
+    }
+  };
+}
+
+/**
+ * Called on `entity_error`. Marks a skeleton node with error state.
+ */
+export function markNodeError(
+  setNodes: React.Dispatch<React.SetStateAction<Node[]>>,
+  indexMap: IndexNodeIdMap,
+) {
+  return (data: EntityErrorData) => {
+    const map = data.entity_type === 'agent' ? indexMap.agents : indexMap.tasks;
+    const nodeId = map.get(data.index);
+    if (!nodeId) return;
+
+    setNodes((prev) =>
+      prev.map((n) =>
+        n.id === nodeId
+          ? {
+              ...n,
+              data: {
+                ...n.data,
+                loading: false,
+                error: true,
+                errorMessage: data.error,
+              },
+            }
+          : n
+      )
+    );
+  };
+}
+
+/**
+ * Called on `dependencies_resolved`. Adds/updates task-to-task dependency
+ * edges using real DB task IDs (replacing any skeleton-based dep edges).
+ */
+export function addDependencyEdges(
+  setNodes: React.Dispatch<React.SetStateAction<Node[]>>,
+  setEdges: React.Dispatch<React.SetStateAction<Edge[]>>,
+) {
+  return (data: DependenciesResolvedData) => {
+    const { task_id: targetTaskId, context: depTaskIds } = data;
+    if (!depTaskIds || depTaskIds.length === 0) return;
+
+    // Find the actual node IDs for the resolved task IDs.
+    // After updateTaskNodeDetail, taskId is stored in node.data.taskId.
+    setNodes((nodes) => {
+      const targetNode = nodes.find(
+        (n) => n.type === 'taskNode' && n.data?.taskId === targetTaskId
+      );
+      if (!targetNode) return nodes;
+
+      const newEdges: Edge[] = [];
+
+      depTaskIds.forEach((depId) => {
+        const sourceNode = nodes.find(
+          (n) => n.type === 'taskNode' && n.data?.taskId === depId
+        );
+        if (!sourceNode) return;
+
+        const edgeStyle = getEdgeStyleConfig(EdgeCategory.TASK_TO_TASK, true);
+        newEdges.push({
+          id: `dep-edge-${sourceNode.id}-${targetNode.id}`,
+          source: sourceNode.id,
+          target: targetNode.id,
+          type: 'default',
+          animated: true,
+          style: edgeStyle,
+        });
+      });
+
+      if (newEdges.length > 0) {
+        // Remove any old skeleton dep-edges targeting this node, then add real ones
+        setEdges((prev) => {
+          const filtered = prev.filter(
+            (e) => !(e.id.startsWith('dep-edge-') && e.target === targetNode.id)
+          );
+          return [...filtered, ...newEdges];
+        });
+      }
+
+      return nodes;
+    });
+  };
+}

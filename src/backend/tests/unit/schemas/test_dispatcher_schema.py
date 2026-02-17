@@ -31,6 +31,9 @@ class TestIntentType:
             "flow_list",
             "flow_load",
             "flow_save",
+            "execute_flow",
+            "catalog_delete",
+            "flow_delete",
             "unknown",
         }
         actual_values = {intent.value for intent in IntentType}
@@ -63,7 +66,7 @@ class TestIntentType:
     def test_intent_type_iteration(self):
         """Test iterating over IntentType enum."""
         intent_list = list(IntentType)
-        assert len(intent_list) == 14  # There are 14 IntentType values
+        assert len(intent_list) == 17  # There are 17 IntentType values
         assert IntentType.GENERATE_AGENT in intent_list
         assert IntentType.EXECUTE_CREW in intent_list
         assert IntentType.CATALOG_LIST in intent_list
@@ -74,6 +77,9 @@ class TestIntentType:
         assert IntentType.FLOW_LIST in intent_list
         assert IntentType.FLOW_LOAD in intent_list
         assert IntentType.FLOW_SAVE in intent_list
+        assert IntentType.EXECUTE_FLOW in intent_list
+        assert IntentType.CATALOG_DELETE in intent_list
+        assert IntentType.FLOW_DELETE in intent_list
         assert IntentType.UNKNOWN in intent_list
 
 

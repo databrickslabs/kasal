@@ -50,6 +50,9 @@ export interface TaskNodeData {
   };
   description?: string;
   expected_output?: string;
+  loading?: boolean;
+  error?: boolean;
+  errorMessage?: string;
 }
 
 interface TaskNodeProps {
@@ -65,6 +68,9 @@ interface TaskNodeProps {
     async_execution?: boolean;
     context?: string[];
     callback?: string | null;
+    loading?: boolean;
+    error?: boolean;
+    errorMessage?: string;
     config?: {
       cache_response?: boolean;
       cache_ttl?: number;
@@ -401,6 +407,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
       borderRadius: '8px',
       border: '1px solid',
       borderColor: (theme: Theme) => {
+        if (data.error) return theme.palette.error.main;
         if (isPlanning || taskStatus?.status === 'planning') return theme.palette.warning.main;
         if (isRunning) return theme.palette.info.main;
         if (isCompleted) return theme.palette.success.main;
@@ -412,9 +419,11 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
       boxShadow: (theme: Theme) => isSelected
         ? `0 0 0 2px ${theme.palette.primary.main}`
         : `0 2px 4px ${theme.palette.mode === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(0, 0, 0, 0.2)'}`,
-      animation: (isPlanning || taskStatus?.status === 'planning')
-        ? 'planningGlow 2.5s ease-in-out infinite'
-        : isRunning ? 'pulse 2s infinite' : 'none',
+      animation: data.loading
+        ? 'pulse 2s infinite'
+        : (isPlanning || taskStatus?.status === 'planning')
+          ? 'planningGlow 2.5s ease-in-out infinite'
+          : isRunning ? 'pulse 2s infinite' : 'none',
       '@keyframes planningGlow': {
         '0%': { boxShadow: '0 0 0 0 rgba(255, 167, 38, 0.3)' },
         '50%': { boxShadow: '0 0 0 6px rgba(255, 167, 38, 0)' },
@@ -717,7 +726,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
           )}
         </Box>
 
-        {Boolean((data as Record<string, unknown>)?.loading) && (
+        {data.loading && (
           <Box
             sx={{
               position: 'absolute',
@@ -732,7 +741,6 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
                 '0%': { backgroundPosition: '-200% 0' },
                 '100%': { backgroundPosition: '200% 0' },
               },
-              // backdropFilter removed - was creating stacking context causing edges to render on top during pulsing
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -743,6 +751,32 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
               <CircularProgress size={16} sx={{ color: 'primary.main' }} />
               <Typography variant="caption" color="textSecondary">Creating…</Typography>
             </Box>
+          </Box>
+        )}
+
+        {data.error && (
+          <Box
+            sx={{
+              position: 'absolute',
+              inset: 0,
+              borderRadius: '8px',
+              border: '2px solid',
+              borderColor: 'error.main',
+              background: (theme: Theme) => theme.palette.mode === 'light'
+                ? 'rgba(211, 47, 47, 0.05)'
+                : 'rgba(211, 47, 47, 0.1)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 0.5,
+              zIndex: 5,
+            }}
+          >
+            <ErrorIcon sx={{ color: 'error.main', fontSize: '1.2rem' }} />
+            <Typography variant="caption" sx={{ color: 'error.main', textAlign: 'center', px: 1, fontSize: '0.65rem' }}>
+              {data.errorMessage || 'Generation failed'}
+            </Typography>
           </Box>
         )}
       </Box>
