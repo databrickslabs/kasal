@@ -979,6 +979,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             break;
           }
           case 'flow_list':
+          case 'catalog_delete':
+          case 'flow_delete':
             // Handled via response message only (no canvas action)
             break;
           case 'flow_load': {
@@ -1229,6 +1231,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         return (generation_result as { message: string }).message;
       case 'execute_crew':
       case 'execute_flow':
+      case 'catalog_delete':
+      case 'flow_delete':
         return (generation_result as { message: string }).message;
       default:
         return "Your request has been processed successfully.";
