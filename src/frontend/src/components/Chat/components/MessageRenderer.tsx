@@ -67,9 +67,66 @@ export const MessageContent: React.FC<MessageContentProps> = ({ content }) => {
               <OpenInNewIcon sx={{ fontSize: 16 }} />
             </Link>
           ),
+          p: ({ children }) => (
+            <p style={{ margin: '4px 0' }}>{children}</p>
+          ),
+          ul: ({ children }) => (
+            <ul style={{ margin: '2px 0', paddingLeft: 20 }}>{children}</ul>
+          ),
+          ol: ({ children }) => (
+            <ol style={{ margin: '2px 0', paddingLeft: 20 }}>{children}</ol>
+          ),
+          li: ({ children }) => (
+            <li style={{ margin: 0, padding: 0 }}>{children}</li>
+          ),
           code: ({ children, className, ...props }) => {
             const isInline = !className || !className.includes('language-');
             if (isInline) {
+              const text = String(children).replace(/\n$/, '');
+              const isCommand = text.startsWith('/');
+
+              if (isCommand) {
+                return (
+                  <code
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => {
+                      window.dispatchEvent(
+                        new CustomEvent('chatCommandClick', { detail: { command: text } })
+                      );
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        window.dispatchEvent(
+                          new CustomEvent('chatCommandClick', { detail: { command: text } })
+                        );
+                      }
+                    }}
+                    style={{
+                      backgroundColor: 'rgba(25, 118, 210, 0.08)',
+                      color: '#1565c0',
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      fontFamily: 'monospace',
+                      fontSize: '0.9em',
+                      border: '1px solid rgba(25, 118, 210, 0.3)',
+                      cursor: 'pointer',
+                      transition: 'background-color 0.15s',
+                    }}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(25, 118, 210, 0.16)';
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(25, 118, 210, 0.08)';
+                    }}
+                    {...props}
+                  >
+                    {children}
+                  </code>
+                );
+              }
+
               return (
                 <code
                   style={{

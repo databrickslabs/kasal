@@ -21,7 +21,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { ChatMessage } from '../types';
 import { MessageContent } from './MessageRenderer';
-import { stripAnsiEscapes } from '../utils/textProcessing';
+import { stripAnsiEscapes, isMarkdown } from '../utils/textProcessing';
 
 interface ChatMessageItemProps {
   message: ChatMessage;
@@ -521,13 +521,13 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
               )}
               <Box
                 sx={{
-                  color: message.type === 'user' 
+                  color: message.type === 'user'
                     ? 'primary.main'
                     : message.type === 'result'
                     ? 'text.primary' // Final results in black
                     : 'text.primary',
                   wordBreak: 'break-word',
-                  whiteSpace: 'pre-wrap',
+                  whiteSpace: isMarkdown(stripAnsiEscapes(message.content)) ? 'normal' : 'pre-wrap',
                   maxWidth: '100%',
                   overflow: 'visible',
                   fontWeight: message.type === 'result' ? 500 : 'normal', // Make result text slightly bolder
