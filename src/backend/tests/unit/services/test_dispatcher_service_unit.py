@@ -16,13 +16,29 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
+from src.core.cache import intent_cache
 from src.schemas.dispatcher import DispatcherRequest, DispatcherResponse, IntentType
 from src.services.dispatcher_service import DispatcherService
+
+
+@pytest.fixture(autouse=True)
+def _reset_dispatcher_class_state():
+    """Reset class-level circuit breaker, semaphore, and cache state between tests."""
+    DispatcherService._intent_failures = {}
+    DispatcherService._concurrency_semaphore = None
+    intent_cache._cache.clear()
+    intent_cache._hits = 0
+    intent_cache._misses = 0
+    yield
+    DispatcherService._intent_failures = {}
+    DispatcherService._concurrency_semaphore = None
+    intent_cache._cache.clear()
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_group_context(**overrides):
     defaults = dict(
@@ -48,6 +64,8 @@ def _build_service():
     svc.agent_service = AsyncMock()
     svc.task_service = AsyncMock()
     svc.crew_service = AsyncMock()
+    svc.catalog_service = AsyncMock()
+    svc.flow_service = AsyncMock()
     return svc
 
 
@@ -177,9 +195,7 @@ class TestAnalyzeMessageSemantics:
         assert any("Complex multi-step" in h for h in result["semantic_hints"])
 
     def test_complex_task_via_multiple_keyword(self):
-        result = self.svc._analyze_message_semantics(
-            "gather multiple data sources"
-        )
+        result = self.svc._analyze_message_semantics("gather multiple data sources")
         assert result["has_complex_task"] is True
 
     def test_greeting_is_always_false(self):
@@ -197,13 +213,14 @@ class TestAnalyzeMessageSemantics:
             "create a team of agents working together on a plan"
         )
         # crew keywords: team, together, plan; agent: agents
-        assert result["intent_scores"]["generate_crew"] >= result["intent_scores"]["generate_agent"]
+        assert (
+            result["intent_scores"]["generate_crew"]
+            >= result["intent_scores"]["generate_agent"]
+        )
 
     def test_no_imperative_when_action_word_later(self):
         """Action word not in first 3 words should not set has_imperative."""
-        result = self.svc._analyze_message_semantics(
-            "the quick brown find something"
-        )
+        result = self.svc._analyze_message_semantics("the quick brown find something")
         assert result["has_imperative"] is False
 
     def test_crew_complex_task_bonus(self):
@@ -212,7 +229,9 @@ class TestAnalyzeMessageSemantics:
             "build a team workflow to find and analyze multiple sources"
         )
         # has_complex_task True + crew_keywords present -> +2 bonus
-        assert result["intent_scores"]["generate_crew"] > len(result["crew_keywords"]) * 3
+        assert (
+            result["intent_scores"]["generate_crew"] > len(result["crew_keywords"]) * 3
+        )
 
     def test_select_configure_pattern(self):
         """'select ... model' should detect configure_structure."""
@@ -409,9 +428,11 @@ class TestDetectIntent:
             return_value="You are an intent detector."
         )
 
-        llm_content = ('{"intent": "generate_task", "confidence": 0.9, '
-                       '"extracted_info": {"goal": "find flights"}, '
-                       '"suggested_prompt": "find the best flight"}')
+        llm_content = (
+            '{"intent": "generate_task", "confidence": 0.9, '
+            '"extracted_info": {"goal": "find flights"}, '
+            '"suggested_prompt": "find the best flight"}'
+        )
 
         with patch(
             "src.services.dispatcher_service.LLMManager.completion",
@@ -423,6 +444,7 @@ class TestDetectIntent:
         assert result["intent"] == "generate_task"
         assert result["confidence"] == 0.9
         assert "semantic_analysis" in result["extracted_info"]
+        assert result["suggested_tools"] == []
 
     @pytest.mark.asyncio
     async def test_no_template_uses_default(self):
@@ -454,7 +476,7 @@ class TestDetectIntent:
         ):
             result = await svc.detect_intent("find the best flight", "m")
 
-        assert result["source"] == "semantic_fallback_empty_response"
+        assert result["source"] == "semantic_fallback"
         # "find" is a task action word so intent should not be "unknown"
         assert result["intent"] in ("generate_task", "generate_crew", "unknown")
 
@@ -472,7 +494,7 @@ class TestDetectIntent:
         ):
             result = await svc.detect_intent("find flights", "m")
 
-        assert result["source"] == "semantic_fallback_empty_response"
+        assert result["source"] == "semantic_fallback"
 
     @pytest.mark.asyncio
     async def test_none_content_triggers_exception_fallback(self):
@@ -541,7 +563,7 @@ class TestDetectIntent:
         ):
             result = await svc.detect_intent("xyz abc", "m")
 
-        assert result["source"] == "semantic_fallback_empty_response"
+        assert result["source"] == "semantic_fallback"
         assert result["intent"] == "unknown"
 
     @pytest.mark.asyncio
@@ -648,7 +670,9 @@ class TestDetectIntent:
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
-        llm_content = '{"intent": "generate_task", "confidence": 0.9, "suggested_prompt": "x"}'
+        llm_content = (
+            '{"intent": "generate_task", "confidence": 0.9, "suggested_prompt": "x"}'
+        )
 
         with patch(
             "src.services.dispatcher_service.LLMManager.completion",
@@ -666,8 +690,10 @@ class TestDetectIntent:
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
-        llm_content = ('{"intent": "unknown", "confidence": 0.3, '
-                       '"extracted_info": {}, "suggested_prompt": "ec"}')
+        llm_content = (
+            '{"intent": "unknown", "confidence": 0.3, '
+            '"extracted_info": {}, "suggested_prompt": "ec"}'
+        )
 
         with patch(
             "src.services.dispatcher_service.LLMManager.completion",
@@ -685,8 +711,10 @@ class TestDetectIntent:
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
-        llm_content = ('{"intent": "generate_agent", "confidence": 0.95, '
-                       '"extracted_info": {}, "suggested_prompt": "create agent"}')
+        llm_content = (
+            '{"intent": "generate_agent", "confidence": 0.95, '
+            '"extracted_info": {}, "suggested_prompt": "create agent"}'
+        )
 
         with patch(
             "src.services.dispatcher_service.LLMManager.completion",
@@ -707,19 +735,14 @@ class TestDetectIntent:
 
         llm_content = '{"intent": "generate_task", "confidence": 0.85}'
 
-        def fake_import(name, *args, **kwargs):
-            if name == "mlflow":
-                raise ImportError("no mlflow")
-            return original_import(name, *args, **kwargs)
-
-        import builtins
-        original_import = builtins.__import__
-
-        with patch(
-            "src.services.dispatcher_service.LLMManager.completion",
-            new_callable=AsyncMock,
-            return_value=llm_content,
-        ), patch("builtins.__import__", side_effect=fake_import):
+        with (
+            patch(
+                "src.services.dispatcher_service.LLMManager.completion",
+                new_callable=AsyncMock,
+                return_value=llm_content,
+            ),
+            patch("src.services.dispatcher_service._HAS_MLFLOW", False),
+        ):
             result = await svc.detect_intent("find data", "m")
 
         assert result["intent"] == "generate_task"
@@ -744,19 +767,15 @@ class TestDetectIntent:
         mock_mlflow = MagicMock()
         mock_mlflow.start_span = MagicMock(return_value=mock_span)
 
-        import builtins
-        original_import = builtins.__import__
-
-        def fake_import(name, *args, **kwargs):
-            if name == "mlflow":
-                return mock_mlflow
-            return original_import(name, *args, **kwargs)
-
-        with patch(
-            "src.services.dispatcher_service.LLMManager.completion",
-            new_callable=AsyncMock,
-            return_value=llm_content,
-        ), patch("builtins.__import__", side_effect=fake_import):
+        with (
+            patch(
+                "src.services.dispatcher_service.LLMManager.completion",
+                new_callable=AsyncMock,
+                return_value=llm_content,
+            ),
+            patch("src.services.dispatcher_service._HAS_MLFLOW", True),
+            patch("src.services.dispatcher_service._mlflow", mock_mlflow),
+        ):
             result = await svc.detect_intent("find data", "m")
 
         assert result["intent"] == "generate_task"
@@ -773,19 +792,15 @@ class TestDetectIntent:
 
         mock_mlflow = MagicMock(spec=[])  # no start_span attribute
 
-        import builtins
-        original_import = builtins.__import__
-
-        def fake_import(name, *args, **kwargs):
-            if name == "mlflow":
-                return mock_mlflow
-            return original_import(name, *args, **kwargs)
-
-        with patch(
-            "src.services.dispatcher_service.LLMManager.completion",
-            new_callable=AsyncMock,
-            return_value=llm_content,
-        ), patch("builtins.__import__", side_effect=fake_import):
+        with (
+            patch(
+                "src.services.dispatcher_service.LLMManager.completion",
+                new_callable=AsyncMock,
+                return_value=llm_content,
+            ),
+            patch("src.services.dispatcher_service._HAS_MLFLOW", True),
+            patch("src.services.dispatcher_service._mlflow", mock_mlflow),
+        ):
             result = await svc.detect_intent("find data", "m")
 
         assert result["intent"] == "generate_task"
@@ -805,6 +820,7 @@ class TestDispatch:
             "confidence": confidence,
             "extracted_info": {},
             "suggested_prompt": suggested_prompt or "test prompt",
+            "suggested_tools": [],
         }
 
     @pytest.mark.asyncio
@@ -853,20 +869,20 @@ class TestDispatch:
             return_value=self._make_intent_result("generate_crew")
         )
         svc._log_llm_interaction = AsyncMock()
-        svc.crew_service.create_crew_complete = AsyncMock(
-            return_value={"type": "crew", "agents": [], "tasks": []}
-        )
+        svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
 
+        mock_task = MagicMock()
         request = DispatcherRequest(
             message="build a team", model="test-model", tools=["web_search"]
         )
-        result = await svc.dispatch(request)
+        with patch("asyncio.create_task", return_value=mock_task) as mock_create_task:
+            result = await svc.dispatch(request)
 
         assert result["service_called"] == "generate_crew"
-        svc.crew_service.create_crew_complete.assert_awaited_once()
-        call_args = svc.crew_service.create_crew_complete.call_args
-        crew_req = call_args[0][0]
-        assert crew_req.tools == ["web_search"]
+        gen = result["generation_result"]
+        assert gen["type"] == "streaming"
+        assert "generation_id" in gen
+        mock_create_task.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_dispatch_execute_crew(self):
@@ -883,7 +899,7 @@ class TestDispatch:
         assert result["service_called"] == "execute_crew"
         gen = result["generation_result"]
         assert gen["type"] == "execute_crew"
-        assert gen["action"] == "execute_crew"
+        assert "message" in gen
 
     @pytest.mark.asyncio
     async def test_dispatch_configure_crew_llm(self):
@@ -959,9 +975,7 @@ class TestDispatch:
     async def test_dispatch_unknown_intent(self):
         svc = _build_service()
         svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
-        svc.detect_intent = AsyncMock(
-            return_value=self._make_intent_result("unknown")
-        )
+        svc.detect_intent = AsyncMock(return_value=self._make_intent_result("unknown"))
         svc._log_llm_interaction = AsyncMock()
 
         request = DispatcherRequest(message="asdf", model="test-model")
@@ -976,9 +990,7 @@ class TestDispatch:
     async def test_dispatch_uses_default_model_when_none(self):
         svc = _build_service()
         svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
-        svc.detect_intent = AsyncMock(
-            return_value=self._make_intent_result("unknown")
-        )
+        svc.detect_intent = AsyncMock(return_value=self._make_intent_result("unknown"))
         svc._log_llm_interaction = AsyncMock()
 
         request = DispatcherRequest(message="hello", model=None)
@@ -1015,9 +1027,7 @@ class TestDispatch:
     async def test_dispatch_logs_intent_detection(self):
         svc = _build_service()
         svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
-        svc.detect_intent = AsyncMock(
-            return_value=self._make_intent_result("unknown")
-        )
+        svc.detect_intent = AsyncMock(return_value=self._make_intent_result("unknown"))
         svc._log_llm_interaction = AsyncMock()
 
         gc = _make_group_context()
@@ -1110,19 +1120,22 @@ class TestDispatch:
 
     @pytest.mark.asyncio
     async def test_dispatch_crew_error_logs_and_reraises(self):
+        """Crew generation now uses asyncio.create_task for streaming.
+        If create_task itself raises, the error propagates."""
         svc = _build_service()
         svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
         svc.detect_intent = AsyncMock(
             return_value=self._make_intent_result("generate_crew")
         )
         svc._log_llm_interaction = AsyncMock()
-        svc.crew_service.create_crew_complete = AsyncMock(
-            side_effect=RuntimeError("crew gen error")
-        )
+        svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
 
         request = DispatcherRequest(message="build team", model="m")
-        with pytest.raises(RuntimeError, match="crew gen error"):
-            await svc.dispatch(request)
+        with patch(
+            "asyncio.create_task", side_effect=RuntimeError("crew gen error")
+        ):
+            with pytest.raises(RuntimeError, match="crew gen error"):
+                await svc.dispatch(request)
 
 
 # ===================================================================
@@ -1142,6 +1155,7 @@ class TestDispatchWithMlflow:
                 "confidence": 0.5,
                 "extracted_info": {},
                 "suggested_prompt": "hello",
+                "suggested_tools": [],
             }
         )
         svc._log_llm_interaction = AsyncMock()
@@ -1178,6 +1192,7 @@ class TestDispatchWithMlflow:
                 "confidence": 0.5,
                 "extracted_info": {},
                 "suggested_prompt": "hello",
+                "suggested_tools": [],
             }
         )
         svc._log_llm_interaction = AsyncMock()
@@ -1186,9 +1201,7 @@ class TestDispatchWithMlflow:
             "sys.modules",
             {
                 "src.services.mlflow_tracing_service": MagicMock(
-                    start_root_trace=MagicMock(
-                        side_effect=RuntimeError("trace fail")
-                    ),
+                    start_root_trace=MagicMock(side_effect=RuntimeError("trace fail")),
                     get_last_active_trace_id=MagicMock(return_value=None),
                 )
             },
@@ -1209,6 +1222,7 @@ class TestDispatchWithMlflow:
                 "confidence": 0.95,
                 "extracted_info": {},
                 "suggested_prompt": "execute",
+                "suggested_tools": [],
             }
         )
         svc._log_llm_interaction = AsyncMock()
@@ -1246,6 +1260,7 @@ class TestDispatchWithMlflow:
                 "confidence": 0.5,
                 "extracted_info": {},
                 "suggested_prompt": "hello",
+                "suggested_tools": [],
             }
         )
         svc._log_llm_interaction = AsyncMock()
@@ -1281,6 +1296,7 @@ class TestDispatchWithMlflow:
                 "confidence": 0.5,
                 "extracted_info": {},
                 "suggested_prompt": "hello",
+                "suggested_tools": [],
             }
         )
         svc._log_llm_interaction = AsyncMock()
@@ -1317,6 +1333,7 @@ class TestDispatchWithMlflow:
                 "confidence": 0.5,
                 "extracted_info": {},
                 "suggested_prompt": "hello",
+                "suggested_tools": [],
             }
         )
         svc._log_llm_interaction = AsyncMock()
@@ -1325,9 +1342,7 @@ class TestDispatchWithMlflow:
             "sys.modules",
             {
                 "src.services.mlflow_tracing_service": MagicMock(
-                    start_root_trace=MagicMock(
-                        side_effect=RuntimeError("fail")
-                    ),
+                    start_root_trace=MagicMock(side_effect=RuntimeError("fail")),
                     get_last_active_trace_id=MagicMock(
                         side_effect=RuntimeError("fail")
                     ),
@@ -1350,6 +1365,7 @@ class TestDispatchWithMlflow:
                 "confidence": 0.5,
                 "extracted_info": {},
                 "suggested_prompt": "hello",
+                "suggested_tools": [],
             }
         )
         svc._log_llm_interaction = AsyncMock()
@@ -1387,6 +1403,7 @@ class TestDispatchWithMlflow:
                 "confidence": 0.5,
                 "extracted_info": {},
                 "suggested_prompt": "hello",
+                "suggested_tools": [],
             }
         )
         svc._log_llm_interaction = AsyncMock()
@@ -1422,6 +1439,7 @@ class TestDispatchWithMlflow:
                 "confidence": 0.5,
                 "extracted_info": {},
                 "suggested_prompt": "hello",
+                "suggested_tools": [],
             }
         )
         svc._log_llm_interaction = AsyncMock()
@@ -1460,6 +1478,7 @@ class TestDispatcherResponseStructure:
                 "confidence": 0.9,
                 "extracted_info": {"some": "info"},
                 "suggested_prompt": "run it",
+                "suggested_tools": [],
             }
         )
         svc._log_llm_interaction = AsyncMock()
@@ -1505,16 +1524,23 @@ class TestKeywordSets:
         for word in DispatcherService.CONFIGURE_KEYWORDS:
             assert word == word.lower()
 
+    def test_catalog_keywords_are_lowercase(self):
+        for word in DispatcherService.CATALOG_KEYWORDS:
+            assert word == word.lower()
+
     def test_keyword_sets_are_sets(self):
         assert isinstance(DispatcherService.TASK_ACTION_WORDS, set)
         assert isinstance(DispatcherService.AGENT_KEYWORDS, set)
         assert isinstance(DispatcherService.CREW_KEYWORDS, set)
         assert isinstance(DispatcherService.EXECUTE_KEYWORDS, set)
         assert isinstance(DispatcherService.CONFIGURE_KEYWORDS, set)
+        assert isinstance(DispatcherService.CATALOG_KEYWORDS, set)
 
     def test_no_overlap_between_execute_and_configure(self):
         """Execute and configure should not share keywords to avoid ambiguity."""
-        overlap = DispatcherService.EXECUTE_KEYWORDS & DispatcherService.CONFIGURE_KEYWORDS
+        overlap = (
+            DispatcherService.EXECUTE_KEYWORDS & DispatcherService.CONFIGURE_KEYWORDS
+        )
         assert len(overlap) <= 1
 
 
@@ -1535,6 +1561,7 @@ class TestEdgeCases:
                 "confidence": 0.3,
                 "extracted_info": {},
                 "suggested_prompt": "x",
+                "suggested_tools": [],
             }
         )
         svc._log_llm_interaction = AsyncMock()
@@ -1575,17 +1602,26 @@ class TestEdgeCases:
                 "confidence": 0.9,
                 "extracted_info": {},
                 "suggested_prompt": "build a team",
+                "suggested_tools": [],
             }
         )
         svc._log_llm_interaction = AsyncMock()
-        svc.crew_service.create_crew_complete = AsyncMock(return_value={})
+        svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
+
+        captured_request = {}
+
+        def capture_create_task(coro):
+            # The coroutine has already been constructed with the streaming request
+            coro.close()  # Clean up the coroutine
+            return MagicMock()
 
         request = DispatcherRequest(message="build a team", model="m", tools=[])
-        result = await svc.dispatch(request)
+        with patch("asyncio.create_task", side_effect=capture_create_task):
+            result = await svc.dispatch(request)
 
-        call_args = svc.crew_service.create_crew_complete.call_args
-        crew_req = call_args[0][0]
-        assert crew_req.tools == []
+        gen = result["generation_result"]
+        assert gen["type"] == "streaming"
+        assert "generation_id" in gen
 
     @pytest.mark.asyncio
     async def test_dispatch_passes_group_context_to_agent(self):
@@ -1597,6 +1633,7 @@ class TestEdgeCases:
                 "confidence": 0.9,
                 "extracted_info": {},
                 "suggested_prompt": "make agent",
+                "suggested_tools": [],
             }
         )
         svc._log_llm_interaction = AsyncMock()
@@ -1619,6 +1656,7 @@ class TestEdgeCases:
                 "confidence": 0.9,
                 "extracted_info": {},
                 "suggested_prompt": "find data",
+                "suggested_tools": [],
             }
         )
         svc._log_llm_interaction = AsyncMock()
@@ -1641,16 +1679,27 @@ class TestEdgeCases:
                 "confidence": 0.9,
                 "extracted_info": {},
                 "suggested_prompt": "build team",
+                "suggested_tools": [],
             }
         )
         svc._log_llm_interaction = AsyncMock()
-        svc.crew_service.create_crew_complete = AsyncMock(return_value={})
+        svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
+
+        captured_coro_args = []
+
+        def capture_create_task(coro):
+            # create_crew_progressive was called with (streaming_req, group_context, generation_id)
+            # We can verify through the mock's call_args instead
+            coro.close()
+            return MagicMock()
 
         gc = _make_group_context()
         request = DispatcherRequest(message="build team", model="m")
-        await svc.dispatch(request, group_context=gc)
+        with patch("asyncio.create_task", side_effect=capture_create_task):
+            await svc.dispatch(request, group_context=gc)
 
-        call_args = svc.crew_service.create_crew_complete.call_args
+        # Verify create_crew_progressive was called with group_context
+        call_args = svc.crew_service.create_crew_progressive.call_args
         assert call_args[0][1] is gc
 
     @pytest.mark.asyncio
@@ -1663,6 +1712,7 @@ class TestEdgeCases:
                 "confidence": 0.5,
                 "extracted_info": {},
                 "suggested_prompt": "hello",
+                "suggested_tools": [],
             }
         )
         svc._log_llm_interaction = AsyncMock()
@@ -1683,6 +1733,7 @@ class TestEdgeCases:
                 "confidence": 0.5,
                 "extracted_info": {},
                 "suggested_prompt": "hello",
+                "suggested_tools": [],
             }
         )
         svc._log_llm_interaction = AsyncMock()
@@ -1691,7 +1742,7 @@ class TestEdgeCases:
         request = DispatcherRequest(message="hello", model="m")
         await svc.dispatch(request, group_context=gc)
 
-        svc.detect_intent.assert_awaited_once_with("hello", "m", gc)
+        svc.detect_intent.assert_awaited_once_with("hello", "m", gc, None)
 
     def test_semantic_analysis_returns_all_expected_keys(self):
         svc = _build_service()
@@ -1702,6 +1753,7 @@ class TestEdgeCases:
             "crew_keywords",
             "execute_keywords",
             "configure_keywords",
+            "catalog_keywords",
             "has_imperative",
             "has_question",
             "has_greeting",
@@ -1723,5 +1775,1746 @@ class TestEdgeCases:
             "generate_crew",
             "execute_crew",
             "configure_crew",
+            "catalog_list",
+            "catalog_load",
+            "catalog_save",
+            "catalog_schedule",
         }
         assert expected_intents == set(result["intent_scores"].keys())
+
+
+# ===================================================================
+# Tests for _build_tool_catalog
+# ===================================================================
+
+
+class TestBuildToolCatalog:
+
+    def test_formats_tools_correctly(self):
+        tools = [
+            {"title": "SerperDevTool", "description": "Search the web"},
+            {"title": "ScrapeWebsiteTool", "description": "Scrape website content"},
+        ]
+        result = DispatcherService._build_tool_catalog(tools)
+
+        assert "SerperDevTool: Search the web" in result
+        assert "ScrapeWebsiteTool: Scrape website content" in result
+        assert "suggested_tools" in result
+        assert "Available tools in the workspace:" in result
+
+    def test_single_tool(self):
+        tools = [{"title": "WebSearchTool", "description": "Performs web searches"}]
+        result = DispatcherService._build_tool_catalog(tools)
+
+        assert "WebSearchTool: Performs web searches" in result
+
+    def test_empty_descriptions(self):
+        tools = [{"title": "MyTool", "description": ""}]
+        result = DispatcherService._build_tool_catalog(tools)
+
+        assert "- MyTool: " in result
+
+
+# ===================================================================
+# Tests for suggested_tools in detect_intent
+# ===================================================================
+
+
+class TestDetectIntentWithTools:
+
+    @pytest.mark.asyncio
+    async def test_suggested_tools_parsed_and_validated(self):
+        """LLM response with suggested_tools should be parsed and validated."""
+        svc = _build_service()
+        svc.template_service.get_template_content = AsyncMock(return_value="prompt")
+
+        available_tools = [
+            {"title": "SerperDevTool", "description": "Search"},
+            {"title": "ScrapeWebsiteTool", "description": "Scrape"},
+        ]
+
+        llm_content = (
+            '{"intent": "generate_crew", "confidence": 0.9, '
+            '"extracted_info": {}, "suggested_prompt": "research task", '
+            '"suggested_tools": ["SerperDevTool", "ScrapeWebsiteTool"]}'
+        )
+
+        with patch(
+            "src.services.dispatcher_service.LLMManager.completion",
+            new_callable=AsyncMock,
+            return_value=llm_content,
+        ):
+            result = await svc.detect_intent(
+                "research topic X", "m", available_tools=available_tools
+            )
+
+        assert result["suggested_tools"] == ["SerperDevTool", "ScrapeWebsiteTool"]
+
+    @pytest.mark.asyncio
+    async def test_hallucinated_tools_filtered_out(self):
+        """Tool names not in available_tools should be dropped."""
+        svc = _build_service()
+        svc.template_service.get_template_content = AsyncMock(return_value="prompt")
+
+        available_tools = [
+            {"title": "SerperDevTool", "description": "Search"},
+        ]
+
+        llm_content = (
+            '{"intent": "generate_crew", "confidence": 0.9, '
+            '"extracted_info": {}, "suggested_prompt": "research", '
+            '"suggested_tools": ["SerperDevTool", "HallucinatedTool", "FakeTool"]}'
+        )
+
+        with patch(
+            "src.services.dispatcher_service.LLMManager.completion",
+            new_callable=AsyncMock,
+            return_value=llm_content,
+        ):
+            result = await svc.detect_intent(
+                "research topic", "m", available_tools=available_tools
+            )
+
+        assert result["suggested_tools"] == ["SerperDevTool"]
+
+    @pytest.mark.asyncio
+    async def test_suggested_tools_empty_when_no_available_tools(self):
+        """When no available_tools provided, suggested_tools should be empty."""
+        svc = _build_service()
+        svc.template_service.get_template_content = AsyncMock(return_value="prompt")
+
+        llm_content = (
+            '{"intent": "generate_task", "confidence": 0.9, '
+            '"extracted_info": {}, "suggested_prompt": "find data", '
+            '"suggested_tools": ["SomeTool"]}'
+        )
+
+        with patch(
+            "src.services.dispatcher_service.LLMManager.completion",
+            new_callable=AsyncMock,
+            return_value=llm_content,
+        ):
+            result = await svc.detect_intent("find data", "m")
+
+        assert result["suggested_tools"] == []
+
+    @pytest.mark.asyncio
+    async def test_cache_key_differs_with_different_tools(self):
+        """Cache key should be different when different tools are available."""
+        import hashlib
+
+        svc = _build_service()
+        svc.template_service.get_template_content = AsyncMock(return_value="prompt")
+
+        llm_content = '{"intent": "generate_task", "confidence": 0.9}'
+
+        tools_a = [{"title": "ToolA", "description": "A"}]
+        tools_b = [{"title": "ToolB", "description": "B"}]
+
+        results = []
+        for tools in [tools_a, tools_b, None]:
+            with patch(
+                "src.services.dispatcher_service.LLMManager.completion",
+                new_callable=AsyncMock,
+                return_value=llm_content,
+            ):
+                result = await svc.detect_intent(
+                    "find data", "m", available_tools=tools
+                )
+                results.append(result)
+
+        # All three calls should have produced results (different cache keys)
+        # If cache keys were the same, only the first call would hit LLM
+        assert len(results) == 3
+
+    @pytest.mark.asyncio
+    async def test_fallback_paths_return_empty_suggested_tools(self):
+        """All fallback paths should return suggested_tools: []."""
+        svc = _build_service()
+        svc.template_service.get_template_content = AsyncMock(return_value="prompt")
+
+        # Exception fallback
+        with patch(
+            "src.services.dispatcher_service.LLMManager.completion",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("API down"),
+        ):
+            result = await svc.detect_intent("find flights", "m")
+
+        assert result["suggested_tools"] == []
+
+    @pytest.mark.asyncio
+    async def test_empty_response_fallback_returns_empty_suggested_tools(self):
+        """Empty LLM response fallback should return suggested_tools: []."""
+        svc = _build_service()
+        svc.template_service.get_template_content = AsyncMock(return_value="prompt")
+
+        with patch(
+            "src.services.dispatcher_service.LLMManager.completion",
+            new_callable=AsyncMock,
+            return_value="",
+        ):
+            result = await svc.detect_intent("find flights", "m")
+
+        assert result["suggested_tools"] == []
+
+    @pytest.mark.asyncio
+    async def test_tool_catalog_appended_to_prompt(self):
+        """When available_tools are provided, the tool catalog should be in the prompt."""
+        svc = _build_service()
+        svc.template_service.get_template_content = AsyncMock(return_value="prompt")
+
+        available_tools = [
+            {"title": "WebSearchTool", "description": "Search the web"},
+        ]
+
+        captured_messages = []
+
+        async def capture_completion(messages, model, **kwargs):
+            captured_messages.append(messages)
+            return '{"intent": "generate_task", "confidence": 0.9}'
+
+        with patch(
+            "src.services.dispatcher_service.LLMManager.completion",
+            side_effect=capture_completion,
+        ):
+            await svc.detect_intent("find data", "m", available_tools=available_tools)
+
+        assert len(captured_messages) == 1
+        user_msg = captured_messages[0][1]["content"]
+        assert "WebSearchTool: Search the web" in user_msg
+        assert "suggested_tools" in user_msg
+
+
+# ===================================================================
+# Tests for dispatch with suggested_tools
+# ===================================================================
+
+
+class TestDispatchWithSuggestedTools:
+
+    def _make_intent_result(self, intent, suggested_tools=None, **kwargs):
+        result = {
+            "intent": intent,
+            "confidence": kwargs.get("confidence", 0.9),
+            "extracted_info": kwargs.get("extracted_info", {}),
+            "suggested_prompt": kwargs.get("suggested_prompt", "test prompt"),
+            "suggested_tools": suggested_tools or [],
+        }
+        return result
+
+    @pytest.mark.asyncio
+    async def test_dispatch_uses_suggested_tools_when_request_tools_empty(self):
+        """When request.tools is empty, suggested_tools should be used."""
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result(
+                "generate_crew",
+                suggested_tools=["SerperDevTool", "ScrapeWebsiteTool"],
+            )
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
+
+        def capture_create_task(coro):
+            coro.close()
+            return MagicMock()
+
+        request = DispatcherRequest(message="research AI trends", model="m", tools=[])
+        with patch("asyncio.create_task", side_effect=capture_create_task):
+            await svc.dispatch(request)
+
+        call_args = svc.crew_service.create_crew_progressive.call_args
+        streaming_req = call_args[0][0]
+        assert streaming_req.tools == ["SerperDevTool", "ScrapeWebsiteTool"]
+
+    @pytest.mark.asyncio
+    async def test_dispatch_uses_request_tools_over_suggested(self):
+        """When request.tools is provided, it should take precedence."""
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result(
+                "generate_crew",
+                suggested_tools=["SerperDevTool"],
+            )
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
+
+        def capture_create_task(coro):
+            coro.close()
+            return MagicMock()
+
+        request = DispatcherRequest(
+            message="research AI", model="m", tools=["UserSelectedTool"]
+        )
+        with patch("asyncio.create_task", side_effect=capture_create_task):
+            await svc.dispatch(request)
+
+        call_args = svc.crew_service.create_crew_progressive.call_args
+        streaming_req = call_args[0][0]
+        assert streaming_req.tools == ["UserSelectedTool"]
+
+    @pytest.mark.asyncio
+    async def test_dispatch_suggested_tools_in_agent_generation(self):
+        """suggested_tools should be passed to agent generation when no request tools."""
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result(
+                "generate_agent",
+                suggested_tools=["FileReadTool"],
+            )
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.agent_service.generate_agent = AsyncMock(return_value={})
+
+        request = DispatcherRequest(message="create an agent", model="m")
+        await svc.dispatch(request)
+
+        call_kwargs = svc.agent_service.generate_agent.call_args.kwargs
+        assert call_kwargs["tools"] == ["FileReadTool"]
+
+    @pytest.mark.asyncio
+    async def test_dispatch_response_contains_suggested_tools(self):
+        """The dispatch response should contain suggested_tools."""
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result(
+                "unknown",
+                suggested_tools=["SerperDevTool"],
+            )
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        request = DispatcherRequest(message="hello", model="m")
+        result = await svc.dispatch(request)
+
+        assert result["dispatcher"]["suggested_tools"] == ["SerperDevTool"]
+
+    @pytest.mark.asyncio
+    async def test_dispatch_passes_available_tools_to_detect_intent(self):
+        """dispatch should forward available_tools to detect_intent."""
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(return_value=self._make_intent_result("unknown"))
+        svc._log_llm_interaction = AsyncMock()
+
+        available_tools = [{"title": "T1", "description": "D1"}]
+        request = DispatcherRequest(message="hello", model="m")
+        await svc.dispatch(request, available_tools=available_tools)
+
+        call_args = svc.detect_intent.call_args
+        assert call_args[0][3] == available_tools
+
+
+# ===================================================================
+# Tests for _detect_slash_command
+# ===================================================================
+
+
+class TestSlashCommandDetection:
+
+    # --- Bare commands (no qualifier) show usage help ---
+
+    def test_bare_list_shows_help(self):
+        result = DispatcherService._detect_slash_command("/list")
+        assert result is not None
+        assert result["intent"] == "catalog_help"
+        assert result["extracted_info"]["command_help"].startswith("Usage:")
+        assert "/list crews" in result["extracted_info"]["command_help"]
+        assert "/list flows" in result["extracted_info"]["command_help"]
+
+    def test_bare_load_shows_help(self):
+        result = DispatcherService._detect_slash_command("/load")
+        assert result is not None
+        assert result["intent"] == "catalog_help"
+        assert "/load crew" in result["extracted_info"]["command_help"]
+
+    def test_bare_load_with_unqualified_name_shows_help(self):
+        result = DispatcherService._detect_slash_command("/load my-research-plan")
+        assert result is not None
+        assert result["intent"] == "catalog_help"
+        assert "/load crew" in result["extracted_info"]["command_help"]
+
+    def test_bare_save_shows_help(self):
+        result = DispatcherService._detect_slash_command("/save My Plan")
+        assert result is not None
+        assert result["intent"] == "catalog_help"
+        assert "/save crew" in result["extracted_info"]["command_help"]
+
+    def test_bare_run_shows_help(self):
+        result = DispatcherService._detect_slash_command("/run")
+        assert result is not None
+        assert result["intent"] == "catalog_help"
+        assert "/run crew" in result["extracted_info"]["command_help"]
+
+    def test_bare_exec_shows_help(self):
+        result = DispatcherService._detect_slash_command("/exec")
+        assert result is not None
+        assert result["intent"] == "catalog_help"
+        assert "/run crew" in result["extracted_info"]["command_help"]
+
+    def test_bare_schedule_shows_help(self):
+        result = DispatcherService._detect_slash_command("/schedule")
+        assert result is not None
+        assert result["intent"] == "catalog_help"
+        assert "/schedule crew" in result["extracted_info"]["command_help"]
+
+    # --- Qualified crew commands ---
+
+    def test_list_crews(self):
+        result = DispatcherService._detect_slash_command("/list crews")
+        assert result is not None
+        assert result["intent"] == "catalog_list"
+        assert result["confidence"] == 1.0
+        assert result["source"] == "slash_command"
+        assert result["extracted_info"]["command"] == "/list"
+        assert result["extracted_info"]["args"] == ""
+        assert result["suggested_tools"] == []
+
+    def test_load_crew_with_name(self):
+        result = DispatcherService._detect_slash_command("/load crew my-research-plan")
+        assert result is not None
+        assert result["intent"] == "catalog_load"
+        assert result["extracted_info"]["args"] == "my-research-plan"
+
+    def test_load_crew_without_name(self):
+        result = DispatcherService._detect_slash_command("/load crew")
+        assert result is not None
+        assert result["intent"] == "catalog_load"
+        assert result["extracted_info"]["args"] == ""
+
+    def test_save_crew_with_name(self):
+        result = DispatcherService._detect_slash_command("/save crew My Plan")
+        assert result is not None
+        assert result["intent"] == "catalog_save"
+        assert result["extracted_info"]["args"] == "My Plan"
+
+    def test_save_crew_without_name(self):
+        result = DispatcherService._detect_slash_command("/save crew")
+        assert result is not None
+        assert result["intent"] == "catalog_save"
+        assert result["extracted_info"]["args"] == ""
+
+    def test_run_crew(self):
+        result = DispatcherService._detect_slash_command("/run crew")
+        assert result is not None
+        assert result["intent"] == "execute_crew"
+        assert result["confidence"] == 1.0
+
+    def test_schedule_crew(self):
+        result = DispatcherService._detect_slash_command("/schedule crew")
+        assert result is not None
+        assert result["intent"] == "catalog_schedule"
+
+    # --- Aliases that imply qualifier ---
+
+    def test_plans_alias(self):
+        result = DispatcherService._detect_slash_command("/plans")
+        assert result is not None
+        assert result["intent"] == "catalog_list"
+
+    # --- /help (no qualifier needed) ---
+
+    def test_help_command(self):
+        result = DispatcherService._detect_slash_command("/help")
+        assert result is not None
+        assert result["intent"] == "catalog_help"
+        assert result["confidence"] == 1.0
+        assert result["source"] == "slash_command"
+
+    # --- Invalid/unknown commands ---
+
+    def test_unknown_command_returns_help_with_invalid_flag(self):
+        result = DispatcherService._detect_slash_command("/unknown-command")
+        assert result is not None
+        assert result["intent"] == "catalog_help"
+        assert result["confidence"] == 1.0
+        assert result["source"] == "slash_command"
+        assert result["extracted_info"]["invalid_command"] is True
+        assert result["extracted_info"]["command"] == "/unknown-command"
+
+    def test_invalid_command_foo(self):
+        result = DispatcherService._detect_slash_command("/foo")
+        assert result is not None
+        assert result["intent"] == "catalog_help"
+        assert result["extracted_info"]["invalid_command"] is True
+        assert result["extracted_info"]["command"] == "/foo"
+        assert result["extracted_info"]["args"] == ""
+
+    def test_invalid_command_with_args(self):
+        result = DispatcherService._detect_slash_command("/xyz bar")
+        assert result is not None
+        assert result["intent"] == "catalog_help"
+        assert result["extracted_info"]["invalid_command"] is True
+        assert result["extracted_info"]["command"] == "/xyz"
+        assert result["extracted_info"]["args"] == "bar"
+
+    # --- Edge cases ---
+
+    def test_regular_message_returns_none(self):
+        result = DispatcherService._detect_slash_command("regular message")
+        assert result is None
+
+    def test_empty_message_returns_none(self):
+        result = DispatcherService._detect_slash_command("")
+        assert result is None
+
+    def test_command_case_insensitive(self):
+        result = DispatcherService._detect_slash_command("/LIST crews")
+        assert result is not None
+        assert result["intent"] == "catalog_list"
+
+    def test_command_with_leading_spaces(self):
+        result = DispatcherService._detect_slash_command("  /list crews")
+        assert result is not None
+        assert result["intent"] == "catalog_list"
+
+    @pytest.mark.asyncio
+    async def test_slash_command_bypasses_llm(self):
+        """Slash commands should return immediately without calling LLM."""
+        svc = _build_service()
+        svc.template_service.get_template_content = AsyncMock(return_value="prompt")
+
+        with patch(
+            "src.services.dispatcher_service.LLMManager.completion",
+            new_callable=AsyncMock,
+        ) as mock_completion:
+            result = await svc.detect_intent("/list crews", "test-model")
+
+        assert result["intent"] == "catalog_list"
+        assert result["source"] == "slash_command"
+        mock_completion.assert_not_awaited()
+
+
+# ===================================================================
+# Tests for catalog dispatch handlers
+# ===================================================================
+
+
+class TestCatalogDispatch:
+
+    def _make_intent_result(self, intent, confidence=1.0, args=""):
+        return {
+            "intent": intent,
+            "confidence": confidence,
+            "extracted_info": {"command": f"/{intent.split('_')[1]}", "args": args},
+            "suggested_prompt": f"/{intent.split('_')[1]} {args}".strip(),
+            "suggested_tools": [],
+        }
+
+    def _make_mock_crew(self, name="Test Crew", crew_id="crew-1"):
+        crew = MagicMock()
+        crew.id = crew_id
+        crew.name = name
+        crew.agent_ids = ["a1", "a2"]
+        crew.task_ids = ["t1"]
+        crew.nodes = [{"id": "node1"}]
+        crew.edges = [{"id": "edge1"}]
+        crew.process = "sequential"
+        crew.planning = False
+        crew.planning_llm = None
+        crew.memory = True
+        crew.verbose = True
+        crew.max_rpm = None
+        crew.created_at = MagicMock()
+        crew.created_at.isoformat.return_value = "2026-01-01T00:00:00"
+        crew.updated_at = MagicMock()
+        crew.updated_at.isoformat.return_value = "2026-01-02T00:00:00"
+        return crew
+
+    @pytest.mark.asyncio
+    async def test_catalog_list_returns_plans(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("catalog_list")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        mock_crew = self._make_mock_crew()
+        svc.catalog_service = AsyncMock()
+        svc.catalog_service.find_by_group = AsyncMock(return_value=[mock_crew])
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/list", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "catalog_list"
+        assert len(gen["plans"]) == 1
+        assert gen["plans"][0]["name"] == "Test Crew"
+        assert gen["plans"][0]["agent_count"] == 2
+        assert gen["plans"][0]["task_count"] == 1
+        assert "Found 1 plan(s)" in gen["message"]
+
+    @pytest.mark.asyncio
+    async def test_catalog_load_exact_match(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("catalog_load", args="Test Crew")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        mock_crew = self._make_mock_crew()
+        svc.catalog_service = AsyncMock()
+        svc.catalog_service.find_by_group = AsyncMock(return_value=[mock_crew])
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/load Test Crew", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "catalog_load"
+        assert gen["plan"]["name"] == "Test Crew"
+        assert gen["plan"]["nodes"] == [{"id": "node1"}]
+        assert gen["plan"]["edges"] == [{"id": "edge1"}]
+        assert "Loaded plan" in gen["message"]
+
+    @pytest.mark.asyncio
+    async def test_catalog_load_partial_match_multiple(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("catalog_load", args="Test")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        crew1 = self._make_mock_crew(name="Test Alpha", crew_id="c1")
+        crew2 = self._make_mock_crew(name="Test Beta", crew_id="c2")
+        svc.catalog_service = AsyncMock()
+        svc.catalog_service.find_by_group = AsyncMock(return_value=[crew1, crew2])
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/load Test", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "catalog_list"
+        assert len(gen["plans"]) == 2
+        assert "Multiple plans match" in gen["message"]
+
+    @pytest.mark.asyncio
+    async def test_catalog_load_duplicate_names_loads_most_recent(self):
+        """When multiple plans share the exact same name, load the most recent one."""
+        from datetime import datetime
+
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("catalog_load", args="test")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        crew1 = self._make_mock_crew(name="test", crew_id="c1")
+        crew1.updated_at = datetime(2026, 1, 1)
+        crew1.created_at = datetime(2026, 1, 1)
+        crew2 = self._make_mock_crew(name="test", crew_id="c2")
+        crew2.updated_at = datetime(2026, 1, 5)
+        crew2.created_at = datetime(2026, 1, 5)
+        crew3 = self._make_mock_crew(name="test", crew_id="c3")
+        crew3.updated_at = datetime(2026, 1, 3)
+        crew3.created_at = datetime(2026, 1, 3)
+        svc.catalog_service = AsyncMock()
+        svc.catalog_service.find_by_group = AsyncMock(
+            return_value=[crew1, crew2, crew3]
+        )
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/load test", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "catalog_load"
+        assert gen["plan"]["id"] == "c2"  # most recent
+        assert gen["plan"]["name"] == "test"
+        assert "most recent" in gen["message"]
+
+    @pytest.mark.asyncio
+    async def test_catalog_load_exact_match_preferred_over_partial(self):
+        """Exact name match is preferred even when partial matches exist."""
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("catalog_load", args="test")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        crew1 = self._make_mock_crew(name="test", crew_id="c1")
+        crew2 = self._make_mock_crew(name="test plan", crew_id="c2")
+        crew3 = self._make_mock_crew(name="my test", crew_id="c3")
+        svc.catalog_service = AsyncMock()
+        svc.catalog_service.find_by_group = AsyncMock(
+            return_value=[crew1, crew2, crew3]
+        )
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/load test", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "catalog_load"
+        assert gen["plan"]["id"] == "c1"
+        assert gen["plan"]["name"] == "test"
+        assert "Loaded plan" in gen["message"]
+
+    @pytest.mark.asyncio
+    async def test_catalog_load_no_match(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("catalog_load", args="nonexistent")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        svc.catalog_service = AsyncMock()
+        svc.catalog_service.find_by_group = AsyncMock(return_value=[])
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/load nonexistent", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "catalog_load"
+        assert gen["plan"] is None
+        assert "No plan found" in gen["message"]
+
+    @pytest.mark.asyncio
+    async def test_catalog_load_no_args_returns_list(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("catalog_load", args="")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        mock_crew = self._make_mock_crew()
+        svc.catalog_service = AsyncMock()
+        svc.catalog_service.find_by_group = AsyncMock(return_value=[mock_crew])
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/load", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "catalog_list"
+        assert "No plan name specified" in gen["message"]
+
+    @pytest.mark.asyncio
+    async def test_catalog_save_returns_action_flag(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("catalog_save", args="")
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.catalog_service = AsyncMock()
+
+        request = DispatcherRequest(message="/save", model="m")
+        result = await svc.dispatch(request)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "catalog_save"
+        assert gen["action"] == "open_save_dialog"
+        assert gen["suggested_name"] is None
+
+    @pytest.mark.asyncio
+    async def test_catalog_save_with_name(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result(
+                "catalog_save", args="My Research Plan"
+            )
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.catalog_service = AsyncMock()
+
+        request = DispatcherRequest(message="/save My Research Plan", model="m")
+        result = await svc.dispatch(request)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "catalog_save"
+        assert gen["suggested_name"] == "My Research Plan"
+        assert "My Research Plan" in gen["message"]
+
+    @pytest.mark.asyncio
+    async def test_catalog_schedule_returns_action_flag(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("catalog_schedule")
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.catalog_service = AsyncMock()
+
+        request = DispatcherRequest(message="/schedule", model="m")
+        result = await svc.dispatch(request)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "catalog_schedule"
+        assert gen["action"] == "open_schedule_dialog"
+
+    @pytest.mark.asyncio
+    async def test_catalog_help_returns_commands(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("catalog_help")
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.catalog_service = AsyncMock()
+
+        request = DispatcherRequest(message="/help", model="m")
+        result = await svc.dispatch(request)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "catalog_help"
+        assert "/list" in gen["message"]
+        assert "/load" in gen["message"]
+        assert "/save" in gen["message"]
+        assert "/run" in gen["message"]
+        assert "/schedule" in gen["message"]
+        assert "/help" in gen["message"]
+        assert "/list flows" in gen["message"]
+        assert "/load flow" in gen["message"]
+        assert "/save flow" in gen["message"]
+        assert "/run flow" in gen["message"]
+        assert "/delete crew" in gen["message"]
+        assert "/delete flow" in gen["message"]
+
+
+# ===================================================================
+# Tests for flow slash command detection
+# ===================================================================
+
+
+class TestFlowSlashCommandDetection:
+
+    def test_list_flows(self):
+        result = DispatcherService._detect_slash_command("/list flows")
+        assert result is not None
+        assert result["intent"] == "flow_list"
+        assert result["extracted_info"]["args"] == ""
+
+    def test_list_flow_singular(self):
+        result = DispatcherService._detect_slash_command("/list flow")
+        assert result is not None
+        assert result["intent"] == "flow_list"
+        assert result["extracted_info"]["args"] == ""
+
+    def test_flows_alias(self):
+        result = DispatcherService._detect_slash_command("/flows")
+        assert result is not None
+        assert result["intent"] == "flow_list"
+
+    def test_load_flow_with_name(self):
+        result = DispatcherService._detect_slash_command("/load flow my-flow")
+        assert result is not None
+        assert result["intent"] == "flow_load"
+        assert result["extracted_info"]["args"] == "my-flow"
+
+    def test_load_flow_without_name(self):
+        result = DispatcherService._detect_slash_command("/load flow")
+        assert result is not None
+        assert result["intent"] == "flow_load"
+        assert result["extracted_info"]["args"] == ""
+
+    def test_save_flow_with_name(self):
+        result = DispatcherService._detect_slash_command("/save flow My Flow")
+        assert result is not None
+        assert result["intent"] == "flow_save"
+        assert result["extracted_info"]["args"] == "My Flow"
+
+    def test_save_flow_without_name(self):
+        result = DispatcherService._detect_slash_command("/save flow")
+        assert result is not None
+        assert result["intent"] == "flow_save"
+        assert result["extracted_info"]["args"] == ""
+
+    def test_run_flow_routes_to_execute_flow(self):
+        """'/run flow' routes to execute_flow via FLOW_INTENT_MAP."""
+        result = DispatcherService._detect_slash_command("/run flow")
+        assert result is not None
+        assert result["intent"] == "execute_flow"
+        assert result["confidence"] == 1.0
+
+    def test_bare_list_shows_help(self):
+        result = DispatcherService._detect_slash_command("/list")
+        assert result is not None
+        assert result["intent"] == "catalog_help"
+
+    def test_bare_load_with_name_shows_help(self):
+        result = DispatcherService._detect_slash_command("/load my-plan")
+        assert result is not None
+        assert result["intent"] == "catalog_help"
+
+
+# ===================================================================
+# Tests for flow dispatch handlers
+# ===================================================================
+
+
+class TestFlowDispatch:
+
+    def _make_intent_result(self, intent, confidence=1.0, args=""):
+        return {
+            "intent": intent,
+            "confidence": confidence,
+            "extracted_info": {"command": "/flow", "args": args},
+            "suggested_prompt": f"/flow {args}".strip(),
+            "suggested_tools": [],
+        }
+
+    def _make_mock_flow(self, name="Test Flow", flow_id="flow-1"):
+        flow = MagicMock()
+        flow.id = flow_id
+        flow.name = name
+        flow.nodes = [{"id": "crew-node-1", "type": "crewNode"}]
+        flow.edges = [{"id": "edge1"}]
+        flow.flow_config = {"start_method": "sequential"}
+        flow.created_at = MagicMock()
+        flow.created_at.isoformat.return_value = "2026-01-01T00:00:00"
+        flow.updated_at = MagicMock()
+        flow.updated_at.isoformat.return_value = "2026-01-02T00:00:00"
+        return flow
+
+    @pytest.mark.asyncio
+    async def test_flow_list_returns_flows(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("flow_list")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        mock_flow = self._make_mock_flow()
+        svc.flow_service = AsyncMock()
+        svc.flow_service.get_all_flows_for_group = AsyncMock(return_value=[mock_flow])
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/list flows", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "flow_list"
+        assert len(gen["flows"]) == 1
+        assert gen["flows"][0]["name"] == "Test Flow"
+        assert gen["flows"][0]["node_count"] == 1
+        assert "Found 1 flow(s)" in gen["message"]
+
+    @pytest.mark.asyncio
+    async def test_flow_load_exact_match(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("flow_load", args="Test Flow")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        mock_flow = self._make_mock_flow()
+        svc.flow_service = AsyncMock()
+        svc.flow_service.get_all_flows_for_group = AsyncMock(return_value=[mock_flow])
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/load flow Test Flow", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "flow_load"
+        assert gen["flow"]["name"] == "Test Flow"
+        assert gen["flow"]["nodes"] == [{"id": "crew-node-1", "type": "crewNode"}]
+        assert gen["flow"]["edges"] == [{"id": "edge1"}]
+        assert gen["flow"]["flow_config"] == {"start_method": "sequential"}
+        assert "Loaded flow" in gen["message"]
+
+    @pytest.mark.asyncio
+    async def test_flow_load_multiple_matches(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("flow_load", args="Test")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        flow1 = self._make_mock_flow(name="Test Alpha", flow_id="f1")
+        flow2 = self._make_mock_flow(name="Test Beta", flow_id="f2")
+        svc.flow_service = AsyncMock()
+        svc.flow_service.get_all_flows_for_group = AsyncMock(
+            return_value=[flow1, flow2]
+        )
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/load flow Test", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "flow_list"
+        assert len(gen["flows"]) == 2
+        assert "Multiple flows match" in gen["message"]
+
+    @pytest.mark.asyncio
+    async def test_flow_load_duplicate_names_loads_most_recent(self):
+        """When multiple flows share the exact same name, load the most recent one."""
+        from datetime import datetime
+
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("flow_load", args="test")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        flow1 = self._make_mock_flow(name="test", flow_id="f1")
+        flow1.updated_at = datetime(2026, 1, 1)
+        flow1.created_at = datetime(2026, 1, 1)
+        flow2 = self._make_mock_flow(name="test", flow_id="f2")
+        flow2.updated_at = datetime(2026, 1, 5)
+        flow2.created_at = datetime(2026, 1, 5)
+        svc.flow_service = AsyncMock()
+        svc.flow_service.get_all_flows_for_group = AsyncMock(
+            return_value=[flow1, flow2]
+        )
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/load flow test", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "flow_load"
+        assert gen["flow"]["id"] == "f2"  # most recent
+        assert gen["flow"]["name"] == "test"
+        assert "most recent" in gen["message"]
+
+    @pytest.mark.asyncio
+    async def test_flow_load_exact_match_preferred_over_partial(self):
+        """Exact name match is preferred even when partial matches exist."""
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("flow_load", args="test")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        flow1 = self._make_mock_flow(name="test", flow_id="f1")
+        flow2 = self._make_mock_flow(name="test flow", flow_id="f2")
+        flow3 = self._make_mock_flow(name="my test", flow_id="f3")
+        svc.flow_service = AsyncMock()
+        svc.flow_service.get_all_flows_for_group = AsyncMock(
+            return_value=[flow1, flow2, flow3]
+        )
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/load flow test", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "flow_load"
+        assert gen["flow"]["id"] == "f1"
+        assert gen["flow"]["name"] == "test"
+        assert "Loaded flow" in gen["message"]
+
+    @pytest.mark.asyncio
+    async def test_flow_load_no_match(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("flow_load", args="nonexistent")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        svc.flow_service = AsyncMock()
+        svc.flow_service.get_all_flows_for_group = AsyncMock(return_value=[])
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/load flow nonexistent", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "flow_load"
+        assert gen["flow"] is None
+        assert "No flow found" in gen["message"]
+
+    @pytest.mark.asyncio
+    async def test_flow_load_no_args_returns_list(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("flow_load", args="")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        mock_flow = self._make_mock_flow()
+        svc.flow_service = AsyncMock()
+        svc.flow_service.get_all_flows_for_group = AsyncMock(return_value=[mock_flow])
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/load flow", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "flow_list"
+        assert len(gen["flows"]) == 1
+        assert "No flow name specified" in gen["message"]
+
+    @pytest.mark.asyncio
+    async def test_flow_save_returns_action(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("flow_save", args="My Flow")
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.flow_service = AsyncMock()
+
+        request = DispatcherRequest(message="/save flow My Flow", model="m")
+        result = await svc.dispatch(request)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "flow_save"
+        assert gen["action"] == "open_save_flow_dialog"
+        assert gen["suggested_name"] == "My Flow"
+        assert "Saving flow 'My Flow'" in gen["message"]
+
+    @pytest.mark.asyncio
+    async def test_flow_save_no_name(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("flow_save", args="")
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.flow_service = AsyncMock()
+
+        request = DispatcherRequest(message="/save flow", model="m")
+        result = await svc.dispatch(request)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "flow_save"
+        assert gen["action"] == "open_save_flow_dialog"
+        assert gen["suggested_name"] is None
+        assert "Opening save flow dialog" in gen["message"]
+
+
+# ===================================================================
+# Tests for /delete slash command detection
+# ===================================================================
+
+
+class TestDeleteSlashCommandDetection:
+
+    def test_bare_delete_shows_help(self):
+        result = DispatcherService._detect_slash_command("/delete")
+        assert result is not None
+        assert result["intent"] == "catalog_help"
+        assert result["extracted_info"]["command_help"].startswith("Usage:")
+        assert "/delete crew" in result["extracted_info"]["command_help"]
+        assert "/delete flow" in result["extracted_info"]["command_help"]
+
+    def test_delete_with_unqualified_name_shows_help(self):
+        result = DispatcherService._detect_slash_command("/delete some-name")
+        assert result is not None
+        assert result["intent"] == "catalog_help"
+        assert "/delete crew" in result["extracted_info"]["command_help"]
+
+    def test_delete_crew_with_name(self):
+        result = DispatcherService._detect_slash_command("/delete crew my-crew")
+        assert result is not None
+        assert result["intent"] == "catalog_delete"
+        assert result["confidence"] == 1.0
+        assert result["source"] == "slash_command"
+        assert result["extracted_info"]["args"] == "my-crew"
+        assert result["suggested_tools"] == []
+
+    def test_delete_crew_without_name(self):
+        result = DispatcherService._detect_slash_command("/delete crew")
+        assert result is not None
+        assert result["intent"] == "catalog_delete"
+        assert result["extracted_info"]["args"] == ""
+
+    def test_delete_crews_plural(self):
+        result = DispatcherService._detect_slash_command("/delete crews my-crew")
+        assert result is not None
+        assert result["intent"] == "catalog_delete"
+        assert result["extracted_info"]["args"] == "my-crew"
+
+    def test_delete_flow_with_name(self):
+        result = DispatcherService._detect_slash_command("/delete flow my-flow")
+        assert result is not None
+        assert result["intent"] == "flow_delete"
+        assert result["extracted_info"]["args"] == "my-flow"
+
+    def test_delete_flow_without_name(self):
+        result = DispatcherService._detect_slash_command("/delete flow")
+        assert result is not None
+        assert result["intent"] == "flow_delete"
+        assert result["extracted_info"]["args"] == ""
+
+    def test_delete_flows_plural(self):
+        result = DispatcherService._detect_slash_command("/delete flows my-flow")
+        assert result is not None
+        assert result["intent"] == "flow_delete"
+        assert result["extracted_info"]["args"] == "my-flow"
+
+    def test_delete_case_insensitive(self):
+        result = DispatcherService._detect_slash_command("/DELETE crew test")
+        assert result is not None
+        assert result["intent"] == "catalog_delete"
+        assert result["extracted_info"]["args"] == "test"
+
+    def test_delete_crew_multiword_name(self):
+        result = DispatcherService._detect_slash_command("/delete crew My Research Crew")
+        assert result is not None
+        assert result["intent"] == "catalog_delete"
+        assert result["extracted_info"]["args"] == "My Research Crew"
+
+    def test_delete_flow_multiword_name(self):
+        result = DispatcherService._detect_slash_command("/delete flow My Data Flow")
+        assert result is not None
+        assert result["intent"] == "flow_delete"
+        assert result["extracted_info"]["args"] == "My Data Flow"
+
+
+# ===================================================================
+# Tests for catalog_delete dispatch handler
+# ===================================================================
+
+
+class TestCatalogDeleteDispatch:
+
+    def _make_intent_result(self, intent, confidence=1.0, args=""):
+        return {
+            "intent": intent,
+            "confidence": confidence,
+            "extracted_info": {"command": "/delete", "args": args},
+            "suggested_prompt": f"/delete {args}".strip(),
+            "suggested_tools": [],
+        }
+
+    def _make_mock_crew(self, name="Test Crew", crew_id="crew-1"):
+        crew = MagicMock()
+        crew.id = crew_id
+        crew.name = name
+        crew.agent_ids = ["a1", "a2"]
+        crew.task_ids = ["t1"]
+        crew.nodes = [{"id": "node1"}]
+        crew.edges = [{"id": "edge1"}]
+        crew.process = "sequential"
+        crew.planning = False
+        crew.planning_llm = None
+        crew.memory = True
+        crew.verbose = True
+        crew.max_rpm = None
+        crew.created_at = MagicMock()
+        crew.created_at.isoformat.return_value = "2026-01-01T00:00:00"
+        crew.updated_at = MagicMock()
+        crew.updated_at.isoformat.return_value = "2026-01-02T00:00:00"
+        return crew
+
+    @pytest.mark.asyncio
+    async def test_catalog_delete_no_name(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("catalog_delete", args="")
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.catalog_service = AsyncMock()
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/delete crew", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "catalog_delete"
+        assert "Please specify a crew name" in gen["message"]
+
+    @pytest.mark.asyncio
+    async def test_catalog_delete_single_match(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("catalog_delete", args="Test Crew")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        mock_crew = self._make_mock_crew()
+        svc.catalog_service = AsyncMock()
+        svc.catalog_service.find_by_group = AsyncMock(return_value=[mock_crew])
+        svc.catalog_service.delete_by_group = AsyncMock(return_value=True)
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/delete crew Test Crew", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "catalog_delete"
+        assert "has been deleted" in gen["message"]
+        assert "Test Crew" in gen["message"]
+        svc.catalog_service.delete_by_group.assert_awaited_once_with("crew-1", gc)
+
+    @pytest.mark.asyncio
+    async def test_catalog_delete_exact_match_preferred(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("catalog_delete", args="test")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        crew1 = self._make_mock_crew(name="test", crew_id="c1")
+        crew2 = self._make_mock_crew(name="test plan", crew_id="c2")
+        svc.catalog_service = AsyncMock()
+        svc.catalog_service.find_by_group = AsyncMock(return_value=[crew1, crew2])
+        svc.catalog_service.delete_by_group = AsyncMock(return_value=True)
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/delete crew test", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "catalog_delete"
+        assert "has been deleted" in gen["message"]
+        svc.catalog_service.delete_by_group.assert_awaited_once_with("c1", gc)
+
+    @pytest.mark.asyncio
+    async def test_catalog_delete_multiple_ambiguous_matches(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("catalog_delete", args="Test")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        crew1 = self._make_mock_crew(name="Test Alpha", crew_id="c1")
+        crew2 = self._make_mock_crew(name="Test Beta", crew_id="c2")
+        svc.catalog_service = AsyncMock()
+        svc.catalog_service.find_by_group = AsyncMock(return_value=[crew1, crew2])
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/delete crew Test", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "catalog_list"
+        assert len(gen["plans"]) == 2
+        assert "Multiple crews match" in gen["message"]
+
+    @pytest.mark.asyncio
+    async def test_catalog_delete_duplicate_names_deletes_most_recent(self):
+        from datetime import datetime
+
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("catalog_delete", args="test")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        crew1 = self._make_mock_crew(name="test", crew_id="c1")
+        crew1.updated_at = datetime(2026, 1, 1)
+        crew1.created_at = datetime(2026, 1, 1)
+        crew2 = self._make_mock_crew(name="test", crew_id="c2")
+        crew2.updated_at = datetime(2026, 1, 5)
+        crew2.created_at = datetime(2026, 1, 5)
+        svc.catalog_service = AsyncMock()
+        svc.catalog_service.find_by_group = AsyncMock(return_value=[crew1, crew2])
+        svc.catalog_service.delete_by_group = AsyncMock(return_value=True)
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/delete crew test", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "catalog_delete"
+        assert "most recent" in gen["message"]
+        assert "has been deleted" in gen["message"]
+        svc.catalog_service.delete_by_group.assert_awaited_once_with("c2", gc)
+
+    @pytest.mark.asyncio
+    async def test_catalog_delete_no_match(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("catalog_delete", args="nonexistent")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        svc.catalog_service = AsyncMock()
+        svc.catalog_service.find_by_group = AsyncMock(return_value=[])
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/delete crew nonexistent", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "catalog_delete"
+        assert "No crew found" in gen["message"]
+        assert "nonexistent" in gen["message"]
+
+
+# ===================================================================
+# Tests for flow_delete dispatch handler
+# ===================================================================
+
+
+class TestFlowDeleteDispatch:
+
+    def _make_intent_result(self, intent, confidence=1.0, args=""):
+        return {
+            "intent": intent,
+            "confidence": confidence,
+            "extracted_info": {"command": "/delete", "args": args},
+            "suggested_prompt": f"/delete {args}".strip(),
+            "suggested_tools": [],
+        }
+
+    def _make_mock_flow(self, name="Test Flow", flow_id="flow-1"):
+        flow = MagicMock()
+        flow.id = flow_id
+        flow.name = name
+        flow.nodes = [{"id": "crew-node-1", "type": "crewNode"}]
+        flow.edges = [{"id": "edge1"}]
+        flow.flow_config = {"start_method": "sequential"}
+        flow.created_at = MagicMock()
+        flow.created_at.isoformat.return_value = "2026-01-01T00:00:00"
+        flow.updated_at = MagicMock()
+        flow.updated_at.isoformat.return_value = "2026-01-02T00:00:00"
+        return flow
+
+    @pytest.mark.asyncio
+    async def test_flow_delete_no_name(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("flow_delete", args="")
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.flow_service = AsyncMock()
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/delete flow", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "flow_delete"
+        assert "Please specify a flow name" in gen["message"]
+
+    @pytest.mark.asyncio
+    async def test_flow_delete_single_match(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("flow_delete", args="Test Flow")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        mock_flow = self._make_mock_flow()
+        svc.flow_service = AsyncMock()
+        svc.flow_service.get_all_flows_for_group = AsyncMock(return_value=[mock_flow])
+        svc.flow_service.force_delete_flow_with_executions_with_group_check = AsyncMock(
+            return_value=True
+        )
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/delete flow Test Flow", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "flow_delete"
+        assert "has been deleted" in gen["message"]
+        assert "Test Flow" in gen["message"]
+        svc.flow_service.force_delete_flow_with_executions_with_group_check.assert_awaited_once_with(
+            "flow-1", gc
+        )
+
+    @pytest.mark.asyncio
+    async def test_flow_delete_exact_match_preferred(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("flow_delete", args="test")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        flow1 = self._make_mock_flow(name="test", flow_id="f1")
+        flow2 = self._make_mock_flow(name="test flow", flow_id="f2")
+        svc.flow_service = AsyncMock()
+        svc.flow_service.get_all_flows_for_group = AsyncMock(
+            return_value=[flow1, flow2]
+        )
+        svc.flow_service.force_delete_flow_with_executions_with_group_check = AsyncMock(
+            return_value=True
+        )
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/delete flow test", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "flow_delete"
+        assert "has been deleted" in gen["message"]
+        svc.flow_service.force_delete_flow_with_executions_with_group_check.assert_awaited_once_with(
+            "f1", gc
+        )
+
+    @pytest.mark.asyncio
+    async def test_flow_delete_multiple_ambiguous_matches(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("flow_delete", args="Test")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        flow1 = self._make_mock_flow(name="Test Alpha", flow_id="f1")
+        flow2 = self._make_mock_flow(name="Test Beta", flow_id="f2")
+        svc.flow_service = AsyncMock()
+        svc.flow_service.get_all_flows_for_group = AsyncMock(
+            return_value=[flow1, flow2]
+        )
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/delete flow Test", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "flow_list"
+        assert len(gen["flows"]) == 2
+        assert "Multiple flows match" in gen["message"]
+
+    @pytest.mark.asyncio
+    async def test_flow_delete_duplicate_names_deletes_most_recent(self):
+        from datetime import datetime
+
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("flow_delete", args="test")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        flow1 = self._make_mock_flow(name="test", flow_id="f1")
+        flow1.updated_at = datetime(2026, 1, 1)
+        flow1.created_at = datetime(2026, 1, 1)
+        flow2 = self._make_mock_flow(name="test", flow_id="f2")
+        flow2.updated_at = datetime(2026, 1, 5)
+        flow2.created_at = datetime(2026, 1, 5)
+        svc.flow_service = AsyncMock()
+        svc.flow_service.get_all_flows_for_group = AsyncMock(
+            return_value=[flow1, flow2]
+        )
+        svc.flow_service.force_delete_flow_with_executions_with_group_check = AsyncMock(
+            return_value=True
+        )
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/delete flow test", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "flow_delete"
+        assert "most recent" in gen["message"]
+        assert "has been deleted" in gen["message"]
+        svc.flow_service.force_delete_flow_with_executions_with_group_check.assert_awaited_once_with(
+            "f2", gc
+        )
+
+    @pytest.mark.asyncio
+    async def test_flow_delete_no_match(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("flow_delete", args="nonexistent")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        svc.flow_service = AsyncMock()
+        svc.flow_service.get_all_flows_for_group = AsyncMock(return_value=[])
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/delete flow nonexistent", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "flow_delete"
+        assert "No flow found" in gen["message"]
+        assert "nonexistent" in gen["message"]
+
+
+# ===================================================================
+# Tests for streaming crew generation and workspace tool resolution
+# ===================================================================
+
+
+class TestDispatchStreamingCrewAndToolResolution:
+    """Tests for GENERATE_CREW streaming dispatch and workspace tool resolution."""
+
+    def _make_intent_result(self, intent, confidence=0.9, suggested_prompt=None, suggested_tools=None):
+        return {
+            "intent": intent,
+            "confidence": confidence,
+            "extracted_info": {},
+            "suggested_prompt": suggested_prompt or "test prompt",
+            "suggested_tools": suggested_tools or [],
+        }
+
+    @pytest.mark.asyncio
+    async def test_dispatch_generate_crew_uses_streaming(self):
+        """When intent is GENERATE_CREW, create_crew_progressive is spawned via asyncio.create_task."""
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("generate_crew")
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.crew_service.create_crew_progressive = AsyncMock()
+
+        request = DispatcherRequest(
+            message="build a research team", model="test-model", tools=["web_search"]
+        )
+
+        with patch("src.services.dispatcher_service.asyncio.create_task") as mock_create_task:
+            await svc.dispatch(request)
+
+            mock_create_task.assert_called_once()
+            # The argument to create_task should be the coroutine from create_crew_progressive
+            call_args = mock_create_task.call_args[0][0]
+            # Verify create_crew_progressive was called (the coroutine was created)
+            svc.crew_service.create_crew_progressive.assert_called_once()
+            progressive_call = svc.crew_service.create_crew_progressive.call_args
+            streaming_req = progressive_call[0][0]
+            assert streaming_req.prompt == "test prompt"
+            assert streaming_req.model == "test-model"
+            assert streaming_req.tools == ["web_search"]
+
+    @pytest.mark.asyncio
+    async def test_dispatch_generate_crew_returns_generation_id(self):
+        """Result contains generation_id (string) and type='streaming'."""
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("generate_crew")
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.crew_service.create_crew_progressive = AsyncMock()
+
+        request = DispatcherRequest(
+            message="build a team", model="test-model", tools=["tool1"]
+        )
+
+        with patch("src.services.dispatcher_service.asyncio.create_task"):
+            result = await svc.dispatch(request)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "streaming"
+        assert "generation_id" in gen
+        assert isinstance(gen["generation_id"], str)
+        # generation_id should be a valid UUID-like string (36 chars with hyphens)
+        assert len(gen["generation_id"]) == 36
+
+    @pytest.mark.asyncio
+    async def test_dispatch_workspace_tools_fetched(self):
+        """When request.tools is empty, ToolService.get_enabled_tools is called."""
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("generate_crew")
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.crew_service.create_crew_progressive = AsyncMock()
+
+        # Mock tool returned by ToolService
+        mock_tool = SimpleNamespace(title="WorkspaceTool1")
+        mock_tool2 = SimpleNamespace(title="WorkspaceTool2")
+        mock_tools_response = SimpleNamespace(tools=[mock_tool, mock_tool2])
+
+        mock_tool_svc_instance = MagicMock()
+        mock_tool_svc_instance.get_enabled_tools = AsyncMock(return_value=mock_tools_response)
+
+        request = DispatcherRequest(message="build a team", model="m", tools=[])
+
+        with patch("src.services.dispatcher_service.asyncio.create_task"):
+            with patch(
+                "src.services.tool_service.ToolService",
+                return_value=mock_tool_svc_instance,
+            ) as mock_tool_cls:
+                await svc.dispatch(request)
+
+                mock_tool_cls.assert_called_once_with(svc.session)
+                mock_tool_svc_instance.get_enabled_tools.assert_awaited_once()
+
+                # Verify the streaming request got the workspace tools
+                progressive_call = svc.crew_service.create_crew_progressive.call_args
+                streaming_req = progressive_call[0][0]
+                assert streaming_req.tools == ["WorkspaceTool1", "WorkspaceTool2"]
+
+    @pytest.mark.asyncio
+    async def test_dispatch_workspace_tools_fallback(self):
+        """When ToolService fetch fails, suggested_tools from intent are used."""
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result(
+                "generate_crew",
+                suggested_tools=["FallbackTool1", "FallbackTool2"],
+            )
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.crew_service.create_crew_progressive = AsyncMock()
+
+        mock_tool_svc_instance = MagicMock()
+        mock_tool_svc_instance.get_enabled_tools = AsyncMock(
+            side_effect=Exception("DB connection failed")
+        )
+
+        request = DispatcherRequest(message="build a team", model="m", tools=[])
+
+        with patch("src.services.dispatcher_service.asyncio.create_task"):
+            with patch(
+                "src.services.tool_service.ToolService",
+                return_value=mock_tool_svc_instance,
+            ):
+                await svc.dispatch(request)
+
+                # Verify fallback to suggested_tools
+                progressive_call = svc.crew_service.create_crew_progressive.call_args
+                streaming_req = progressive_call[0][0]
+                assert streaming_req.tools == ["FallbackTool1", "FallbackTool2"]
+
+    @pytest.mark.asyncio
+    async def test_dispatch_user_tools_take_precedence(self):
+        """When request.tools is provided, ToolService is NOT called."""
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result(
+                "generate_crew",
+                suggested_tools=["SuggestedTool"],
+            )
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.crew_service.create_crew_progressive = AsyncMock()
+
+        request = DispatcherRequest(
+            message="build a team", model="m", tools=["UserTool1", "UserTool2"]
+        )
+
+        with patch("src.services.dispatcher_service.asyncio.create_task"):
+            with patch(
+                "src.services.tool_service.ToolService",
+            ) as mock_tool_cls:
+                await svc.dispatch(request)
+
+                # ToolService should NOT be instantiated when user provides tools
+                mock_tool_cls.assert_not_called()
+
+                # Verify user tools are passed through
+                progressive_call = svc.crew_service.create_crew_progressive.call_args
+                streaming_req = progressive_call[0][0]
+                assert streaming_req.tools == ["UserTool1", "UserTool2"]

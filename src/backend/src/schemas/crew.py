@@ -287,5 +287,17 @@ class CrewCreationResponse(BaseModel):
     """Response schema for crew creation with database entities."""
     agents: List[Any] = Field(..., description="List of created agent entities with database IDs")
     tasks: List[Any] = Field(..., description="List of created task entities with database IDs")
-    
-    model_config = ConfigDict(from_attributes=True) 
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CrewStreamingRequest(BaseModel):
+    """Request schema for progressive/streaming crew generation."""
+    prompt: str = Field(..., description="Natural language description of the crew setup")
+    model: Optional[str] = Field(None, description="LLM model to use for generation")
+    tools: Optional[List[str]] = Field(default_factory=list, description="List of available tools for the crew")
+
+
+class CrewStreamingResponse(BaseModel):
+    """Response schema for streaming crew generation initiation."""
+    generation_id: str = Field(..., description="Unique ID for tracking the progressive generation via SSE")

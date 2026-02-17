@@ -195,6 +195,20 @@ export class TaskService {
     }
   }
 
+  static async patchTaskToolConfigs(
+    id: string,
+    toolConfigs: Record<string, Record<string, unknown>>,
+  ): Promise<Task> {
+    try {
+      const response = await apiClient.put<Task>(`/tasks/${id}`, { tool_configs: toolConfigs });
+      return response.data;
+    } catch (error) {
+      console.error('Error patching task tool_configs:', error);
+      const axiosError = error as AxiosError<ErrorResponse>;
+      throw new Error(axiosError.response?.data?.detail || 'Error patching task tool_configs');
+    }
+  }
+
   static async updateTaskFull(id: string, task: Partial<Task>): Promise<Task> {
     try {
       // Format the task data to match the server's expected structure

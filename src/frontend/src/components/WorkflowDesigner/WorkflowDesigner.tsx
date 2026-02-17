@@ -628,6 +628,15 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     };
   }, []);
 
+  // Listen for openScheduleDialog events from chat slash commands
+  useEffect(() => {
+    const handleOpenScheduleDialog = () => {
+      dialogManager.setScheduleDialogOpen(true);
+    };
+    window.addEventListener('openScheduleDialog', handleOpenScheduleDialog);
+    return () => window.removeEventListener('openScheduleDialog', handleOpenScheduleDialog);
+  }, [dialogManager]);
+
   // Track the currently executing job ID
   const [executingJobId, setExecutingJobId] = React.useState<string | null>(null);
   const runningTabTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
@@ -963,6 +972,30 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     setNodes,
     setEdges
   );
+
+  // Listen for catalogLoadCrew events from chat /load command
+  useEffect(() => {
+    const handleCatalogLoad = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail?.nodes && detail?.edges) {
+        _handleCrewSelectWrapper(detail.nodes, detail.edges, detail.name, detail.id);
+      }
+    };
+    window.addEventListener('catalogLoadCrew', handleCatalogLoad);
+    return () => window.removeEventListener('catalogLoadCrew', handleCatalogLoad);
+  }, [_handleCrewSelectWrapper]);
+
+  // Listen for catalogLoadFlow events from chat /load flow command
+  useEffect(() => {
+    const handleCatalogFlowLoad = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail?.nodes && detail?.edges) {
+        handleFlowSelect(detail.nodes, detail.edges, detail.flowConfig);
+      }
+    };
+    window.addEventListener('catalogLoadFlow', handleCatalogFlowLoad);
+    return () => window.removeEventListener('catalogLoadFlow', handleCatalogFlowLoad);
+  }, [handleFlowSelect]);
 
   // Add refs for the Save dialogs
   const saveCrewRef = useRef<HTMLButtonElement>(null);

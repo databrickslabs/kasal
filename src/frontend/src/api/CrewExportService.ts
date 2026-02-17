@@ -45,6 +45,8 @@ export class CrewExportService {
       include_evaluation?: boolean;
       include_deployment?: boolean;
       model_override?: string;
+      include_static_frontend?: boolean;
+      include_obo_auth?: boolean;
     }
   ): Promise<Blob> {
     try {

@@ -48,6 +48,29 @@ class CrewRepository(BaseRepository[Crew]):
         result = await self.session.execute(query)
         return list(result.scalars().all())
     
+    async def find_by_name_and_group(self, name: str, group_ids: List[str], exclude_id: Optional[UUID] = None) -> Optional[Crew]:
+        """
+        Find a crew by name within the given groups.
+
+        Args:
+            name: Name to search for
+            group_ids: List of group IDs to filter by
+            exclude_id: Optional crew ID to exclude (for updates)
+
+        Returns:
+            Crew if found, else None
+        """
+        if not group_ids:
+            return None
+
+        conditions = [self.model.name == name, self.model.group_id.in_(group_ids)]
+        if exclude_id is not None:
+            conditions.append(self.model.id != exclude_id)
+
+        query = select(self.model).where(*conditions)
+        result = await self.session.execute(query)
+        return result.scalars().first()
+
     async def find_by_group(self, group_ids: List[str]) -> List[Crew]:
         """
         Find all crews for the given group IDs.

@@ -4,7 +4,7 @@ import uuid
 from typing import List, Dict, Any, Optional, Union
 from datetime import datetime
 
-from src.core.exceptions import KasalError, NotFoundError, BadRequestError, ForbiddenError
+from src.core.exceptions import KasalError, NotFoundError, BadRequestError, ForbiddenError, ConflictError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
@@ -41,6 +41,17 @@ class FlowService:
             Created flow with group_id set
         """
         try:
+            # Check for duplicate name within the group
+            if group_context and group_context.group_ids:
+                repository = FlowRepository(self.session)
+                existing = await repository.find_by_name_and_group(
+                    flow_in.name, group_context.group_ids
+                )
+                if existing:
+                    raise ConflictError(
+                        detail=f"A flow with the name '{flow_in.name}' already exists. Please choose a different name."
+                    )
+
             # Log details for debugging
             logger.info(f"Creating flow with group isolation: {flow_in.name}")
             logger.info(f"Group context: {group_context.group_ids if group_context else 'None'}")
@@ -105,6 +116,8 @@ class FlowService:
         except ValueError as ve:
             logger.error(f"Validation error while creating flow: {str(ve)}")
             raise BadRequestError(detail=str(ve))
+        except KasalError:
+            raise
         except Exception as e:
             logger.error(f"Error creating flow: {str(e)}")
             raise KasalError(detail=f"Error creating flow: {str(e)}")
@@ -178,6 +191,67 @@ class FlowService:
         result = await self.session.execute(query)
         return list(result.scalars().all())
     
+    async def update_flow_with_group_check(self, flow_id: uuid.UUID, flow_in: FlowUpdate, group_context) -> Flow:
+        """
+        Update a flow with group authorization check and name uniqueness validation.
+
+        Args:
+            flow_id: UUID of the flow to update
+            flow_in: Flow data for update
+            group_context: Group context with group_ids list
+
+        Returns:
+            Updated flow
+
+        Raises:
+            NotFoundError: If flow not found
+            ForbiddenError: If user doesn't have access
+            ConflictError: If a flow with the same name already exists in the group
+        """
+        repository = FlowRepository(self.session)
+        flow = await repository.get(flow_id)
+
+        if not flow:
+            raise NotFoundError(detail="Flow not found")
+
+        # Check if user has access to this flow's group
+        if flow.group_id and group_context and group_context.group_ids:
+            if flow.group_id not in group_context.group_ids:
+                raise ForbiddenError(detail="Access denied to this flow")
+
+        # Check for duplicate name within the group (if name is being changed)
+        if flow_in.name and flow_in.name != flow.name and group_context and group_context.group_ids:
+            duplicate = await repository.find_by_name_and_group(
+                flow_in.name, group_context.group_ids, exclude_id=flow_id
+            )
+            if duplicate:
+                raise ConflictError(
+                    detail=f"A flow with the name '{flow_in.name}' already exists. Please choose a different name."
+                )
+
+        # Delegate to the existing update_flow method
+        return await self.update_flow(flow_id, flow_in)
+
+    async def delete_all_flows_for_group(self, group_context) -> None:
+        """
+        Delete all flows for the user's groups.
+
+        Args:
+            group_context: Group context with group_ids list
+        """
+        if not group_context or not group_context.group_ids:
+            return
+
+        from sqlalchemy import select, or_, delete as sql_delete
+
+        # First delete execution history for these flows
+        flows = await self.get_all_flows_for_group(group_context)
+        for flow in flows:
+            try:
+                await self.force_delete_flow_with_executions(flow.id)
+            except Exception as e:
+                logger.error(f"Error deleting flow {flow.id}: {e}")
+
     async def get_flows_by_crew(self, crew_id: Union[uuid.UUID, str]) -> List[Flow]:
         """
         Get all flows for a specific crew.

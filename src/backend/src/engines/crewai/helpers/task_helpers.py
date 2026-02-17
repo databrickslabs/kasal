@@ -284,6 +284,59 @@ async def create_task(
     # Continue with normal tool resolution
     # Check for tools in task_config or in a backup field (for when MCP clears the tools array)
     tools_to_resolve = task_config.get('tools', []) or task_config.get('_original_tools', [])
+
+    # Auto-resolve tools from tool_configs keys when tools array is empty.
+    # The frontend may set tool_configs (e.g. {'GenieTool': {'spaceId': '...'}})
+    # without adding the tool name to the tools array. In that case, use the
+    # tool_configs keys as the tools to resolve so they actually get instantiated.
+    task_tool_configs_map = task_config.get('tool_configs', {})
+    if not tools_to_resolve and task_tool_configs_map and tool_factory:
+        auto_tool_names = list(task_tool_configs_map.keys())
+        logger.info(
+            f"Task {task_key}: tools array is empty but tool_configs has keys "
+            f"{auto_tool_names} - auto-resolving tools from tool_configs"
+        )
+        for tool_name in auto_tool_names:
+            if not tool_name:
+                continue
+            try:
+                tool_config = {}
+                if tool_service and hasattr(tool_service, 'get_tool_config_by_name'):
+                    tool_config = await tool_service.get_tool_config_by_name(tool_name) or {}
+
+                tool_override = task_tool_configs_map.get(tool_name, {})
+                logger.info(
+                    f"Task {task_key} - Auto-creating {tool_name} with "
+                    f"override: {tool_override}"
+                )
+
+                tool_instance = tool_factory.create_tool(
+                    tool_name,
+                    result_as_answer=tool_config.get('result_as_answer', False),
+                    tool_config_override=tool_override
+                )
+                if tool_instance:
+                    if isinstance(tool_instance, tuple) and len(tool_instance) == 2 and tool_instance[0] is True:
+                        mcp_tools = tool_instance[1]
+                        if isinstance(mcp_tools, list):
+                            task_tools.extend(mcp_tools)
+                            logger.info(f"Auto-added {len(mcp_tools)} MCP tools from {tool_name} to task {task_key}")
+                    else:
+                        task_tools.append(tool_instance)
+                        tool_info = {
+                            "name": getattr(tool_instance, "name", "unknown"),
+                            "type": type(tool_instance).__name__,
+                            "has_run": hasattr(tool_instance, "_run"),
+                            "result_as_answer": tool_config.get('result_as_answer', False)
+                        }
+                        logger.info(
+                            f"Auto-created tool {tool_name} for task {task_key}: {tool_info}"
+                        )
+                else:
+                    logger.error(f"Tool factory returned None for auto-resolved tool {tool_name}")
+            except Exception as e:
+                logger.error(f"Error auto-creating tool {tool_name} for task {task_key}: {e}")
+
     if tool_service and tools_to_resolve:
         logger.info(f"Resolving tool IDs for task {task_key}: {tools_to_resolve}")
         try:

@@ -2,11 +2,12 @@
 Unit tests for SSE Router API endpoints.
 
 Tests the functionality of SSE streaming endpoints including
-execution streams, global streams, statistics, and health check.
+execution streams, global streams, generation streams, statistics, and health check.
 """
 import pytest
 from pathlib import Path
-from fastapi import FastAPI, APIRouter
+from unittest.mock import patch, AsyncMock, MagicMock
+from fastapi import FastAPI, APIRouter, Query
 from fastapi.testclient import TestClient
 from fastapi.responses import StreamingResponse
 
@@ -26,6 +27,24 @@ async def stream_execution_updates(job_id: str):
 async def stream_all_executions():
     """Stream all execution updates."""
     return StreamingResponse(content=iter([]), media_type="text/event-stream")
+
+
+@router.get("/generations/{generation_id}/stream")
+async def stream_generation_updates(
+    generation_id: str,
+    timeout: int = Query(300, ge=30, le=600),
+    heartbeat: int = Query(10, ge=5, le=60),
+):
+    """Stream generation updates for progressive crew creation."""
+    return StreamingResponse(
+        content=iter([]),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/stats")
@@ -168,3 +187,100 @@ class TestStreamingResponseHeaders:
         source = router_file.read_text()
 
         assert "text/event-stream" in source
+
+
+class TestStreamGenerationUpdates:
+    """Test cases for /sse/generations/{generation_id}/stream endpoint."""
+
+    def test_stream_generation_updates_returns_sse(self, client):
+        """Response uses text/event-stream media type."""
+        response = client.get("/sse/generations/gen-123/stream")
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+
+    def test_stream_generation_updates_headers(self, client):
+        """Response includes Cache-Control, Connection, and X-Accel-Buffering headers."""
+        response = client.get("/sse/generations/gen-456/stream")
+
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "no-cache"
+        assert response.headers["connection"] == "keep-alive"
+        assert response.headers["x-accel-buffering"] == "no"
+
+    def test_stream_generation_updates_timeout_validation(self, client):
+        """Timeout defaults to 300 and accepts range 30-600."""
+        # Default timeout (300) works
+        response = client.get("/sse/generations/gen-789/stream")
+        assert response.status_code == 200
+
+        # Explicit valid timeout within range
+        response = client.get("/sse/generations/gen-789/stream?timeout=60")
+        assert response.status_code == 200
+
+        # Minimum boundary
+        response = client.get("/sse/generations/gen-789/stream?timeout=30")
+        assert response.status_code == 200
+
+        # Maximum boundary
+        response = client.get("/sse/generations/gen-789/stream?timeout=600")
+        assert response.status_code == 200
+
+        # Below minimum returns 422
+        response = client.get("/sse/generations/gen-789/stream?timeout=29")
+        assert response.status_code == 422
+
+        # Above maximum returns 422
+        response = client.get("/sse/generations/gen-789/stream?timeout=601")
+        assert response.status_code == 422
+
+    def test_stream_generation_updates_heartbeat_validation(self, client):
+        """Heartbeat defaults to 10 and accepts range 5-60."""
+        # Default heartbeat (10) works
+        response = client.get("/sse/generations/gen-abc/stream")
+        assert response.status_code == 200
+
+        # Explicit valid heartbeat within range
+        response = client.get("/sse/generations/gen-abc/stream?heartbeat=30")
+        assert response.status_code == 200
+
+        # Minimum boundary
+        response = client.get("/sse/generations/gen-abc/stream?heartbeat=5")
+        assert response.status_code == 200
+
+        # Maximum boundary
+        response = client.get("/sse/generations/gen-abc/stream?heartbeat=60")
+        assert response.status_code == 200
+
+        # Below minimum returns 422
+        response = client.get("/sse/generations/gen-abc/stream?heartbeat=4")
+        assert response.status_code == 422
+
+        # Above maximum returns 422
+        response = client.get("/sse/generations/gen-abc/stream?heartbeat=61")
+        assert response.status_code == 422
+
+    def test_stream_generation_updates_calls_event_stream_generator(self):
+        """Verify the real router passes correct params to event_stream_generator."""
+        router_file = Path(__file__).parent.parent.parent.parent / "src" / "api" / "sse_router.py"
+        source = router_file.read_text()
+
+        # Verify the endpoint definition exists with correct path
+        assert 'generations/{generation_id}/stream' in source
+
+        # Verify event_stream_generator is called with generation_id and keyword args
+        assert "event_stream_generator(" in source
+        assert "generation_id" in source
+        assert "timeout=timeout" in source
+        assert "heartbeat_interval=heartbeat" in source
+
+    def test_stream_generation_updates_endpoint_exists(self, client):
+        """Test that the generation stream endpoint is registered."""
+        routes = [route.path for route in app.routes]
+        assert "/sse/generations/{generation_id}/stream" in routes
+
+    def test_stream_generation_updates_uses_get_method(self, client):
+        """Test that the generation stream endpoint uses GET method."""
+        for route in app.routes:
+            if hasattr(route, 'path') and route.path == "/sse/generations/{generation_id}/stream":
+                assert 'GET' in route.methods

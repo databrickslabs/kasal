@@ -26,7 +26,7 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 
-import DispatcherService, { DispatchResult, ConfigureCrewResult } from '../../api/DispatcherService';
+import DispatcherService, { DispatchResult, ConfigureCrewResult, CatalogListResult, CatalogLoadResult, FlowListResult, FlowLoadResult, StreamingGenerationResult } from '../../api/DispatcherService';
 import { useWorkflowStore } from '../../store/workflow';
 import { useCrewExecutionStore } from '../../store/crewExecution';
 import { useChatMessagesStore, deduplicateMessages } from '../../store/chatMessagesStore';
@@ -50,13 +50,20 @@ import {
 } from './types';
 
 // Import utilities
-import { hasCrewContent, isExecuteCommand, extractJobIdFromCommand } from './utils/chatHelpers';
+import { hasCrewContent, isExecuteCommand, isExecuteFlowCommand, extractJobIdFromCommand } from './utils/chatHelpers';
 import {
   createAgentGenerationHandler,
   createTaskGenerationHandler,
   createCrewGenerationHandler,
-  handleConfigureCrew
+  handleConfigureCrew,
+  createCrewSkeletonHandler,
+  updateAgentNodeDetail,
+  updateTaskNodeDetail,
+  markNodeError,
+  addDependencyEdges,
+  IndexNodeIdMap,
 } from './utils/nodeGenerationHandlers';
+import { useCrewGenerationSSE, CrewGenerationSSEHandlers, ToolConfigNeededData } from '../../hooks/global/useCrewGenerationSSE';
 
 // Import hooks
 import { useChatSession } from './hooks/useChatSession';
@@ -82,6 +89,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   onOpenLogs,
 }) => {
   const [inputValue, setInputValue] = useState('');
+  const [commandHistory, setCommandHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
   const [isLoading, setIsLoading] = useState(false);
   const [showSessionList, setShowSessionList] = useState(false);
   const [models, setModels] = useState<Record<string, ModelConfig>>({});
@@ -298,6 +307,34 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     };
   }, []);
 
+  // Listen for chatCommandClick events from clickable slash commands in messages
+  useEffect(() => {
+    const handleCommandClick = (event: Event) => {
+      const { command } = (event as CustomEvent).detail;
+      setInputValue(command);
+      setTimeout(() => inputRef.current?.focus(), 50);
+    };
+    window.addEventListener('chatCommandClick', handleCommandClick);
+    return () => window.removeEventListener('chatCommandClick', handleCommandClick);
+  }, []);
+
+  // Listen for save errors from SaveCrew/SaveFlow and surface them in chat
+  useEffect(() => {
+    const handleSaveError = (event: Event) => {
+      const { message: errorMsg } = (event as CustomEvent).detail;
+      const errorMessage: ChatMessage = {
+        id: `msg-${Date.now()}`,
+        type: 'assistant',
+        content: `❌ ${errorMsg}`,
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errorMessage]);
+      saveMessageToBackend(errorMessage);
+    };
+    window.addEventListener('saveError', handleSaveError);
+    return () => window.removeEventListener('saveError', handleSaveError);
+  }, [setMessages, saveMessageToBackend]);
+
   useEffect(() => {
     if (!isLoading) {
       const timeoutId = setTimeout(() => {
@@ -377,8 +414,137 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     inputRef
   );
 
+  // ── Progressive crew generation via SSE ──────────────────────────
+  const [generationId, setGenerationId] = useState<string | null>(null);
+  const indexMapRef = useRef<IndexNodeIdMap | null>(null);
+  const progressMsgIdRef = useRef<string | null>(null);
+  const pendingGenieConfigsRef = useRef<ToolConfigNeededData[]>([]);
+
+  /** Append a line to the single progress message instead of creating new ones. */
+  const appendProgressLine = useCallback((line: string) => {
+    const msgId = progressMsgIdRef.current;
+    if (!msgId) return;
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === msgId ? { ...m, content: m.content + '\n' + line } : m
+      )
+    );
+  }, [setMessages]);
+
+  const sseHandlers = useMemo<CrewGenerationSSEHandlers>(() => ({
+    onPlanReady: (plan) => {
+      const buildSkeleton = createCrewSkeletonHandler(
+        setNodes, setEdges, setLastExecutionJobId, setExecutingJobId, layoutManagerRef
+      );
+      indexMapRef.current = buildSkeleton(plan);
+      pendingGenieConfigsRef.current = [];
+
+      const processLabel = plan.process_type === 'parallel' ? 'parallel' : 'sequential';
+      const complexityLabel = plan.complexity || 'standard';
+      const msgId = `msg-progress-${Date.now()}`;
+      progressMsgIdRef.current = msgId;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: msgId,
+          type: 'assistant' as const,
+          content: `**Crew Plan** — ${complexityLabel} ${processLabel} · ${plan.agents.length} agents · ${plan.tasks.length} tasks`,
+          timestamp: new Date(),
+        },
+      ]);
+    },
+    onAgentDetail: (data) => {
+      if (indexMapRef.current) {
+        updateAgentNodeDetail(setNodes, setEdges, indexMapRef.current, selectedModel)(data);
+      }
+      const name = (data.agent.name as string) || `Agent ${data.index + 1}`;
+      const role = (data.agent.role as string) || '';
+      const goal = (data.agent.goal as string) || '';
+      const toolCount = Array.isArray(data.agent.tools) ? data.agent.tools.length : 0;
+      const toolsLabel = toolCount > 0 ? ` · ${toolCount} tool${toolCount > 1 ? 's' : ''}` : '';
+      appendProgressLine(`\n  **${name}** — ${role}${toolsLabel}\n     _${goal}_`);
+    },
+    onTaskDetail: (data) => {
+      if (indexMapRef.current) {
+        updateTaskNodeDetail(setNodes, setEdges, indexMapRef.current)(data);
+      }
+      const name = (data.task.name as string) || `Task ${data.index + 1}`;
+      const desc = (data.task.description as string) || '';
+      const shortDesc = desc.length > 120 ? desc.substring(0, 120) + '...' : desc;
+      appendProgressLine(`  ${data.index + 1}. **${name}**\n     ${shortDesc}`);
+    },
+    onEntityError: (data) => {
+      if (indexMapRef.current) {
+        markNodeError(setNodes, indexMapRef.current)(data);
+      }
+      appendProgressLine(`  ⚠ Failed to generate ${data.entity_type} "${data.name}"`);
+    },
+    onDependenciesResolved: (data) => {
+      addDependencyEdges(setNodes, setEdges)(data);
+    },
+    onToolConfigNeeded: (data) => {
+      pendingGenieConfigsRef.current = [...pendingGenieConfigsRef.current, data];
+    },
+    onComplete: () => {
+      setGenerationId(null);
+      setIsLoading(false);
+      indexMapRef.current = null;
+
+      // Append success line BEFORE clearing the ref so it still finds the message
+      appendProgressLine('\n✓ Crew generated successfully');
+      progressMsgIdRef.current = null;
+
+      // Show GenieTool config prompt if any tasks need it
+      const hasPendingConfigs = pendingGenieConfigsRef.current.length > 0;
+      if (hasPendingConfigs) {
+        const configMsgId = `msg-genie-config-${Date.now()}`;
+        const configsSnapshot = [...pendingGenieConfigsRef.current];
+        pendingGenieConfigsRef.current = [];
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: configMsgId,
+            type: 'assistant' as const,
+            content: '',
+            timestamp: new Date(),
+            metadata: { type: 'genie_config_needed', configs: configsSnapshot },
+          },
+        ]);
+      }
+
+      // Fit view to show all generated nodes.
+      // Use a longer delay when genie config prompts are shown so the
+      // user isn't disoriented by a viewport jump while reading the prompt.
+      setTimeout(() => {
+        window.dispatchEvent(new Event('fitViewToNodesInternal'));
+      }, hasPendingConfigs ? 100 : 300);
+    },
+    onFailed: (data) => {
+      setGenerationId(null);
+      setIsLoading(false);
+      indexMapRef.current = null;
+      progressMsgIdRef.current = null;
+      pendingGenieConfigsRef.current = [];
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `msg-fail-${Date.now()}`,
+          type: 'assistant' as const,
+          content: `Crew generation failed: ${data.error}`,
+          timestamp: new Date(),
+        },
+      ]);
+    },
+  }), [setNodes, setEdges, setLastExecutionJobId, setExecutingJobId, setMessages, selectedModel, layoutManagerRef, appendProgressLine]);
+
+  useCrewGenerationSSE(generationId, sseHandlers);
+
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
+
+    // Push to command history
+    setCommandHistory(prev => [...prev, inputValue]);
+    setHistoryIndex(-1);
 
     // Check if we're collecting variables
     if (isCollectingVariables && variablesToCollect.length > 0 && currentVariableIndex < variablesToCollect.length) {
@@ -572,6 +738,30 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       return;
     }
 
+    // Check if user wants to execute a flow
+    if (isExecuteFlowCommand(inputValue)) {
+      const userMessage: ChatMessage = {
+        id: `msg-${Date.now()}`,
+        type: 'user',
+        content: inputValue,
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, userMessage]);
+      setInputValue('');
+      saveMessageToBackend(userMessage);
+
+      window.dispatchEvent(new CustomEvent('executeFlowEvent'));
+
+      const pendingMessage: ChatMessage = {
+        id: `exec-pending-${Date.now()}`,
+        type: 'execution',
+        content: '⏳ Preparing to execute flow...',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, pendingMessage]);
+      return;
+    }
+
     // Check if user wants to see execution traces
     if (isExecuteCommand(inputValue)) {
       const userMessage: ChatMessage = {
@@ -715,6 +905,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     setMessages(prev => [...prev, userMessage]);
     setInputValue('');
     setIsLoading(true);
+    // Force scroll to bottom when user sends a message so they always see the response
+    isUserNearBottomRef.current = true;
 
     // Await the save so the backend has the user message before the (potentially long)
     // dispatch call.  This protects against Databricks Apps proxy resets / page reloads
@@ -858,6 +1050,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
       setMessages(prev => [...prev, assistantMessage]);
       saveMessageToBackend(assistantMessage);
+      // Force scroll after dispatch response so slash command results are visible
+      setTimeout(() => scrollToBottom(), 50);
 
       // Remove any temporary placeholders before rendering final nodes
       if (cleanupPlaceholders) {
@@ -874,15 +1068,131 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             await handleTaskGenerated(result.generation_result as GeneratedTask);
             break;
           case 'generate_crew':
-            handleCrewGenerated(result.generation_result as GeneratedCrew);
+          case 'generate_plan': {
+            const genResult = result.generation_result as StreamingGenerationResult | GeneratedCrew;
+            if (genResult && typeof genResult === 'object' && 'type' in genResult && genResult.type === 'streaming') {
+              // Progressive SSE path
+              const streamResult = genResult as StreamingGenerationResult;
+              setGenerationId(streamResult.generation_id);
+              // Keep isLoading true — it will be cleared by onComplete/onFailed
+            } else {
+              // Legacy synchronous path (fallback)
+              handleCrewGenerated(genResult as GeneratedCrew);
+            }
             break;
-          case 'generate_plan':
-            // Plans work exactly like crews - use the same handler
-            handleCrewGenerated(result.generation_result as GeneratedCrew);
-            break;
+          }
           case 'configure_crew':
             handleConfigureCrew(result.generation_result as ConfigureCrewResult, inputRef);
             break;
+          case 'catalog_list':
+          case 'catalog_help':
+            // Handled via response message only (no canvas action)
+            break;
+          case 'catalog_load': {
+            const loadResult = result.generation_result as CatalogLoadResult;
+            if (loadResult.plan?.nodes) {
+              // Dispatch custom event for WorkflowDesigner to handle via handleCrewSelectWrapper
+              const loadEvent = new CustomEvent('catalogLoadCrew', {
+                detail: {
+                  nodes: loadResult.plan.nodes,
+                  edges: loadResult.plan.edges,
+                  name: loadResult.plan.name,
+                  id: loadResult.plan.id,
+                },
+              });
+              window.dispatchEvent(loadEvent);
+            }
+            break;
+          }
+          case 'catalog_save': {
+            const saveResult = result.generation_result as { suggested_name?: string; message: string };
+            const saveEvent = new CustomEvent('openSaveCrewDialog', {
+              detail: { suggestedName: saveResult.suggested_name },
+            });
+            window.dispatchEvent(saveEvent);
+            break;
+          }
+          case 'catalog_schedule': {
+            const scheduleEvent = new CustomEvent('openScheduleDialog');
+            window.dispatchEvent(scheduleEvent);
+            break;
+          }
+          case 'flow_list':
+          case 'catalog_delete':
+          case 'flow_delete':
+            // Handled via response message only (no canvas action)
+            break;
+          case 'flow_load': {
+            const flowLoadResult = result.generation_result as FlowLoadResult;
+            if (flowLoadResult.flow?.nodes) {
+              window.dispatchEvent(new CustomEvent('catalogLoadFlow', {
+                detail: {
+                  nodes: flowLoadResult.flow.nodes,
+                  edges: flowLoadResult.flow.edges,
+                  flowConfig: flowLoadResult.flow.flow_config,
+                  name: flowLoadResult.flow.name,
+                  id: flowLoadResult.flow.id,
+                },
+              }));
+            }
+            break;
+          }
+          case 'flow_save': {
+            const flowSaveResult = result.generation_result as { suggested_name?: string; message: string };
+            window.dispatchEvent(new CustomEvent('openSaveFlowDialog', {
+              detail: { suggestedName: flowSaveResult.suggested_name },
+            }));
+            break;
+          }
+          case 'execute_crew': {
+            const execResult = result.generation_result as { plan?: CatalogLoadResult['plan']; message: string };
+            if (execResult.plan?.nodes) {
+              // Load crew on canvas first
+              window.dispatchEvent(new CustomEvent('catalogLoadCrew', {
+                detail: {
+                  nodes: execResult.plan.nodes,
+                  edges: execResult.plan.edges,
+                  name: execResult.plan.name,
+                  id: execResult.plan.id,
+                },
+              }));
+              // Give canvas time to render, then trigger execution
+              setTimeout(() => {
+                if (onExecuteCrew) {
+                  onExecuteCrew();
+                }
+              }, 500);
+            } else if (!execResult.plan) {
+              // No name provided — execute whatever is on canvas
+              if (onExecuteCrew && hasCrewContent(nodes)) {
+                onExecuteCrew();
+              }
+            }
+            break;
+          }
+          case 'execute_flow': {
+            const execFlowResult = result.generation_result as { flow?: FlowLoadResult['flow']; message: string };
+            if (execFlowResult.flow?.nodes) {
+              // Load flow on canvas first
+              window.dispatchEvent(new CustomEvent('catalogLoadFlow', {
+                detail: {
+                  nodes: execFlowResult.flow.nodes,
+                  edges: execFlowResult.flow.edges,
+                  flowConfig: execFlowResult.flow.flow_config,
+                  name: execFlowResult.flow.name,
+                  id: execFlowResult.flow.id,
+                },
+              }));
+              // Give canvas time to render, then trigger flow execution
+              setTimeout(() => {
+                window.dispatchEvent(new CustomEvent('executeFlowEvent'));
+              }, 500);
+            } else if (!execFlowResult.flow) {
+              // No name provided — execute whatever is on canvas
+              window.dispatchEvent(new CustomEvent('executeFlowEvent'));
+            }
+            break;
+          }
         }
       }
     } catch (error) {
@@ -1001,6 +1311,68 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         response += "\nTo execute plan type either **execute crew** or **ec**";
         return response;
       }
+      case 'catalog_list': {
+        const listResult = generation_result as CatalogListResult;
+        let msg = listResult.message + '\n';
+        if (listResult.plans?.length > 0) {
+          listResult.plans.forEach((p, i) => {
+            msg += `${i + 1}. **${p.name}** — ${p.agent_count || 0} agents, ${p.task_count || 0} tasks — \`/load crew ${p.name}\` \`/run crew ${p.name}\`\n`;
+          });
+        }
+        return msg;
+      }
+      case 'catalog_load': {
+        // When multiple matches or no name given, backend returns type "catalog_list" with plans array
+        const genResult = generation_result as Record<string, unknown>;
+        if (genResult.type === 'catalog_list' && Array.isArray(genResult.plans)) {
+          const plans = genResult.plans as Array<{ id: string; name: string; agent_count?: number; task_count?: number }>;
+          let msg = (genResult.message as string) + '\n';
+          plans.forEach((p, i) => {
+            msg += `${i + 1}. **${p.name}**`;
+            if (p.agent_count !== undefined || p.task_count !== undefined) {
+              msg += ` — ${p.agent_count || 0} agents, ${p.task_count || 0} tasks`;
+            }
+            msg += ` — \`/load crew ${p.name}\` \`/run crew ${p.name}\`\n`;
+          });
+          return msg;
+        }
+        return (genResult.message as string) || 'Plan loaded.';
+      }
+      case 'catalog_save':
+      case 'catalog_schedule':
+      case 'catalog_help':
+        return (generation_result as { message: string }).message;
+      case 'flow_list': {
+        const flowListResult = generation_result as FlowListResult;
+        let flowListMsg = flowListResult.message + '\n';
+        if (flowListResult.flows?.length > 0) {
+          flowListResult.flows.forEach((f, i) => {
+            flowListMsg += `${i + 1}. **${f.name}** — ${f.node_count || 0} crew nodes — \`/load flow ${f.name}\` \`/run flow ${f.name}\`\n`;
+          });
+        }
+        return flowListMsg;
+      }
+      case 'flow_load': {
+        const flowGenResult = generation_result as Record<string, unknown>;
+        if (flowGenResult.type === 'flow_list' && Array.isArray(flowGenResult.flows)) {
+          const flows = flowGenResult.flows as Array<{ id: string; name: string; node_count?: number }>;
+          let flowMsg = (flowGenResult.message as string) + '\n';
+          flows.forEach((f, i) => {
+            flowMsg += `${i + 1}. **${f.name}**`;
+            if (f.node_count !== undefined) flowMsg += ` — ${f.node_count} crew nodes`;
+            flowMsg += ` — \`/load flow ${f.name}\` \`/run flow ${f.name}\`\n`;
+          });
+          return flowMsg;
+        }
+        return (flowGenResult.message as string) || 'Flow loaded.';
+      }
+      case 'flow_save':
+        return (generation_result as { message: string }).message;
+      case 'execute_crew':
+      case 'execute_flow':
+      case 'catalog_delete':
+      case 'flow_delete':
+        return (generation_result as { message: string }).message;
       default:
         return "Your request has been processed successfully.";
     }
@@ -1012,6 +1384,21 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
+    } else if (e.key === 'ArrowUp' && commandHistory.length > 0) {
+      e.preventDefault();
+      const newIndex = historyIndex === -1 ? commandHistory.length - 1 : Math.max(0, historyIndex - 1);
+      setHistoryIndex(newIndex);
+      setInputValue(commandHistory[newIndex]);
+    } else if (e.key === 'ArrowDown' && historyIndex !== -1) {
+      e.preventDefault();
+      if (historyIndex >= commandHistory.length - 1) {
+        setHistoryIndex(-1);
+        setInputValue('');
+      } else {
+        const newIndex = historyIndex + 1;
+        setHistoryIndex(newIndex);
+        setInputValue(commandHistory[newIndex]);
+      }
     }
   };
   const isSendMode = inputValue.trim().length > 0;
@@ -1263,7 +1650,48 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               <ListItem>
                 <ListItemText
                   primary="Build a research team with a researcher and writer"
-                  secondary="Complete a plan"
+                  secondary="Creates a complete plan"
+                />
+              </ListItem>
+            </List>
+            <Typography variant="body2" color="text.secondary" paragraph sx={{ mt: 2 }}>
+              Or use slash commands:
+            </Typography>
+            <List dense>
+              <ListItem>
+                <ListItemText
+                  primary="/list crews"
+                  secondary="Browse your saved crews"
+                />
+              </ListItem>
+              <ListItem>
+                <ListItemText
+                  primary="/load crew <name>"
+                  secondary="Load a saved crew onto the canvas"
+                />
+              </ListItem>
+              <ListItem>
+                <ListItemText
+                  primary="/run crew"
+                  secondary="Execute the current crew"
+                />
+              </ListItem>
+              <ListItem>
+                <ListItemText
+                  primary="/list flows"
+                  secondary="Browse your saved flows"
+                />
+              </ListItem>
+              <ListItem>
+                <ListItemText
+                  primary="/run flow"
+                  secondary="Execute the current flow"
+                />
+              </ListItem>
+              <ListItem>
+                <ListItemText
+                  primary="/help"
+                  secondary="See all available commands"
                 />
               </ListItem>
             </List>
@@ -1345,7 +1773,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       >
         <Box sx={{ position: 'relative' }}>
           <TextField
-            ref={inputRef}
+            inputRef={inputRef}
             fullWidth
             variant="outlined"
             placeholder={executingJobId ? "Execution in progress..." : "Describe what you want to create..."}
@@ -1361,11 +1789,10 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             size="small"
             sx={{
               '& .MuiOutlinedInput-root': {
-                paddingRight: '120px',
+                paddingRight: '210px',
                 borderRadius: 1,
               },
               '& .MuiInputBase-inputMultiline': {
-                paddingRight: '20px',
                 overflowY: 'auto',
                 // Hide scrollbar but keep scroll functionality
                 scrollbarWidth: 'none', // Firefox

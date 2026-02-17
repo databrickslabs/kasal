@@ -236,7 +236,9 @@ class TestDownloadExport:
                 include_tracing=True,
                 include_evaluation=True,
                 include_deployment=True,
-                model_override=None
+                model_override=None,
+                include_static_frontend=True,
+                include_obo_auth=True,
             )
 
         # Check that it returns a streaming response
@@ -268,11 +270,168 @@ class TestDownloadExport:
                 include_tracing=True,
                 include_evaluation=True,
                 include_deployment=True,
-                model_override=None
+                model_override=None,
+                include_static_frontend=True,
+                include_obo_auth=True,
             )
 
         # Check that it returns an ipynb response
         assert result.media_type == 'application/x-ipynb+json'
+
+    @pytest.mark.asyncio
+    async def test_download_databricks_app(self, mock_service, valid_group_context):
+        """Test downloading a Databricks App export as zip."""
+        crew_id = "test-crew-123"
+
+        mock_service.export_crew.return_value = {
+            'crew_id': crew_id,
+            'crew_name': 'Test Crew',
+            'export_format': 'databricks_app',
+            'files': [
+                {'path': 'app.py', 'content': '# app'},
+                {'path': 'app.yaml', 'content': 'command: uvicorn'},
+            ],
+            'metadata': {},
+            'generated_at': '2025-01-01 00:00:00 UTC',
+        }
+
+        with patch('src.api.crews_export_router.check_role_in_context', return_value=True):
+            result = await download_export(
+                crew_id=crew_id,
+                service=mock_service,
+                group_context=valid_group_context,
+                format=ExportFormat.DATABRICKS_APP,
+                include_custom_tools=True,
+                include_comments=True,
+                include_tracing=True,
+                include_evaluation=True,
+                include_deployment=True,
+                model_override=None,
+                include_static_frontend=True,
+                include_obo_auth=True,
+            )
+
+        assert result.media_type == 'application/zip'
+
+    @pytest.mark.asyncio
+    async def test_download_with_model_override(self, mock_service, valid_group_context):
+        """Test download passes model override."""
+        crew_id = "test-crew-123"
+
+        mock_service.export_crew.return_value = {
+            'crew_id': crew_id,
+            'crew_name': 'Test Crew',
+            'export_format': 'python_project',
+            'files': [{'path': 'README.md', 'content': '# Test'}],
+            'metadata': {},
+            'generated_at': '2025-01-01 00:00:00 UTC',
+        }
+
+        with patch('src.api.crews_export_router.check_role_in_context', return_value=True):
+            result = await download_export(
+                crew_id=crew_id,
+                service=mock_service,
+                group_context=valid_group_context,
+                format=ExportFormat.PYTHON_PROJECT,
+                include_custom_tools=True,
+                include_comments=True,
+                include_tracing=True,
+                include_evaluation=True,
+                include_deployment=True,
+                model_override="gpt-4o",
+                include_static_frontend=True,
+                include_obo_auth=True,
+            )
+
+        assert result.media_type == 'application/zip'
+        # Verify model override was passed
+        call_args = mock_service.export_crew.call_args
+        assert call_args.kwargs['options'].model_override == "gpt-4o"
+
+    @pytest.mark.asyncio
+    async def test_download_forbidden(self, mock_service, valid_group_context):
+        """Test download is forbidden for non-editors."""
+        with patch('src.api.crews_export_router.check_role_in_context', return_value=False):
+            with pytest.raises(ForbiddenError):
+                await download_export(
+                    crew_id="crew-1",
+                    service=mock_service,
+                    group_context=valid_group_context,
+                    format=ExportFormat.PYTHON_PROJECT,
+                    include_custom_tools=True,
+                    include_comments=True,
+                    include_tracing=True,
+                    include_evaluation=True,
+                    include_deployment=True,
+                    model_override=None,
+                    include_static_frontend=True,
+                    include_obo_auth=True,
+                )
+
+    @pytest.mark.asyncio
+    async def test_download_invalid_group_context(self, mock_service):
+        """Test download with invalid group context."""
+        invalid_context = MagicMock()
+        invalid_context.is_valid.return_value = False
+
+        with patch('src.api.crews_export_router.check_role_in_context', return_value=True):
+            with pytest.raises(BadRequestError):
+                await download_export(
+                    crew_id="crew-1",
+                    service=mock_service,
+                    group_context=invalid_context,
+                    format=ExportFormat.PYTHON_PROJECT,
+                    include_custom_tools=True,
+                    include_comments=True,
+                    include_tracing=True,
+                    include_evaluation=True,
+                    include_deployment=True,
+                    model_override=None,
+                    include_static_frontend=True,
+                    include_obo_auth=True,
+                )
+
+    @pytest.mark.asyncio
+    async def test_download_none_group_context(self, mock_service):
+        """Test download with None group context."""
+        with patch('src.api.crews_export_router.check_role_in_context', return_value=True):
+            with pytest.raises(BadRequestError):
+                await download_export(
+                    crew_id="crew-1",
+                    service=mock_service,
+                    group_context=None,
+                    format=ExportFormat.PYTHON_PROJECT,
+                    include_custom_tools=True,
+                    include_comments=True,
+                    include_tracing=True,
+                    include_evaluation=True,
+                    include_deployment=True,
+                    model_override=None,
+                    include_static_frontend=True,
+                    include_obo_auth=True,
+                )
+
+    @pytest.mark.asyncio
+    async def test_download_crew_not_found(self, mock_service, valid_group_context):
+        """Test download when crew is not found."""
+        mock_service.export_crew.side_effect = ValueError("Crew not found")
+
+        with patch('src.api.crews_export_router.check_role_in_context', return_value=True):
+            with pytest.raises(NotFoundError):
+                await download_export(
+                    crew_id="missing",
+                    service=mock_service,
+                    group_context=valid_group_context,
+                    format=ExportFormat.PYTHON_PROJECT,
+                    include_custom_tools=True,
+                    include_comments=True,
+                    include_tracing=True,
+                    include_evaluation=True,
+                    include_deployment=True,
+                    model_override=None,
+                    include_static_frontend=True,
+                    include_obo_auth=True,
+                )
 
 
 class TestDeployCrew:
@@ -340,6 +499,45 @@ class TestDeployCrew:
         assert exc_info.value.status_code == 403
         assert "admins" in exc_info.value.detail
 
+    @pytest.mark.asyncio
+    async def test_deploy_crew_invalid_group_context(self, mock_service):
+        """Test deploy with invalid group context."""
+        request = DeploymentRequest(
+            deployment_target=DeploymentTarget.DATABRICKS_MODEL_SERVING,
+            config=ModelServingConfig(model_name="test-model")
+        )
+
+        invalid_context = MagicMock()
+        invalid_context.is_valid.return_value = False
+
+        with patch('src.api.crews_export_router.check_role_in_context', return_value=True):
+            with pytest.raises(BadRequestError):
+                await deploy_crew(
+                    crew_id="crew-1",
+                    request=request,
+                    service=mock_service,
+                    group_context=invalid_context
+                )
+
+    @pytest.mark.asyncio
+    async def test_deploy_crew_not_found(self, mock_service, valid_group_context):
+        """Test deploy when crew is not found."""
+        request = DeploymentRequest(
+            deployment_target=DeploymentTarget.DATABRICKS_MODEL_SERVING,
+            config=ModelServingConfig(model_name="test-model")
+        )
+
+        mock_service.deploy_to_model_serving.side_effect = ValueError("Crew not found")
+
+        with patch('src.api.crews_export_router.check_role_in_context', return_value=True):
+            with pytest.raises(NotFoundError):
+                await deploy_crew(
+                    crew_id="missing",
+                    request=request,
+                    service=mock_service,
+                    group_context=valid_group_context
+                )
+
 
 class TestGetDeploymentStatus:
     """Tests for get_deployment_status endpoint."""
@@ -368,7 +566,6 @@ class TestGetDeploymentStatus:
         mock_endpoint.config = MagicMock()
 
         with patch('src.api.crews_export_router.check_role_in_context', return_value=True):
-            # Patch the import inside the function
             with patch('databricks.sdk.WorkspaceClient') as mock_ws:
                 mock_ws_instance = MagicMock()
                 mock_ws.return_value = mock_ws_instance
@@ -382,6 +579,58 @@ class TestGetDeploymentStatus:
 
         assert result["endpoint_name"] == endpoint_name
         assert result["state"] == "READY"
+
+    @pytest.mark.asyncio
+    async def test_get_deployment_status_forbidden(self, valid_group_context):
+        """Test status check is forbidden for non-editors."""
+        with patch('src.api.crews_export_router.check_role_in_context', return_value=False):
+            with pytest.raises(ForbiddenError):
+                await get_deployment_status(
+                    crew_id="crew-1",
+                    group_context=valid_group_context,
+                    endpoint_name="ep-1"
+                )
+
+    @pytest.mark.asyncio
+    async def test_get_deployment_status_invalid_context(self):
+        """Test status check with invalid group context."""
+        invalid_context = MagicMock()
+        invalid_context.is_valid.return_value = False
+
+        with patch('src.api.crews_export_router.check_role_in_context', return_value=True):
+            with pytest.raises(BadRequestError):
+                await get_deployment_status(
+                    crew_id="crew-1",
+                    group_context=invalid_context,
+                    endpoint_name="ep-1"
+                )
+
+    @pytest.mark.asyncio
+    async def test_get_deployment_status_null_state(self, valid_group_context):
+        """Test status with null state returns UNKNOWN."""
+        mock_endpoint = MagicMock()
+        mock_endpoint.state = None
+        mock_endpoint.pending_config = None
+        mock_endpoint.creator = "user"
+        mock_endpoint.creation_timestamp = 0
+        mock_endpoint.last_updated_timestamp = 0
+        mock_endpoint.config = None
+
+        with patch('src.api.crews_export_router.check_role_in_context', return_value=True):
+            with patch('databricks.sdk.WorkspaceClient') as mock_ws:
+                mock_ws_instance = MagicMock()
+                mock_ws.return_value = mock_ws_instance
+                mock_ws_instance.serving_endpoints.get.return_value = mock_endpoint
+
+                result = await get_deployment_status(
+                    crew_id="crew-1",
+                    group_context=valid_group_context,
+                    endpoint_name="ep-1"
+                )
+
+        assert result["state"] == "UNKNOWN"
+        assert result["ready_replicas"] == 0
+        assert result["target_replicas"] == 0
 
 
 class TestDeleteDeployment:
@@ -434,3 +683,17 @@ class TestDeleteDeployment:
 
         assert exc_info.value.status_code == 403
         assert "admins" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_delete_deployment_invalid_context(self):
+        """Test delete with invalid group context."""
+        invalid_context = MagicMock()
+        invalid_context.is_valid.return_value = False
+
+        with patch('src.api.crews_export_router.check_role_in_context', return_value=True):
+            with pytest.raises(BadRequestError):
+                await delete_deployment(
+                    crew_id="crew-1",
+                    endpoint_name="ep-1",
+                    group_context=invalid_context
+                )

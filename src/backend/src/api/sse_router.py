@@ -135,6 +135,42 @@ async def stream_all_executions(
     )
 
 
+@router.get("/generations/{generation_id}/stream")
+async def stream_generation_updates(
+    generation_id: str,
+    group_context: GroupContextDep,
+    timeout: int = Query(300, ge=30, le=600, description="Stream timeout in seconds"),
+    heartbeat: int = Query(10, ge=5, le=60, description="Heartbeat interval in seconds"),
+):
+    """
+    Stream real-time updates for a progressive crew generation via SSE.
+
+    Events:
+    - `plan_ready`: Crew outline with agent/task names
+    - `agent_detail`: Full agent details after generation + DB persist
+    - `task_detail`: Full task details after generation + DB persist
+    - `entity_error`: Error generating a specific entity
+    - `generation_complete`: All entities created
+    - `generation_failed`: Fatal error during generation
+    """
+    logger.info(
+        f"SSE generation stream requested for {generation_id}, "
+        f"timeout={timeout}s, heartbeat={heartbeat}s"
+    )
+
+    return StreamingResponse(
+        event_stream_generator(
+            generation_id, timeout=timeout, heartbeat_interval=heartbeat
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.get("/stats")
 async def get_sse_stats():
     """
