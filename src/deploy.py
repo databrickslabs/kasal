@@ -368,7 +368,9 @@ starlette==0.40.0
                 shutil.copytree(backend_src, backend_dst, ignore=shutil.ignore_patterns(
                     '__pycache__', '*.pyc', '*.pyo', 'logs', '*.log',
                     '.mypy_cache', '.pytest_cache', 'htmlcov', 'tests',
-                    '*.db', '*.db-shm', '*.db-wal', '.coverage', '.venv'
+                    '*.db', '*.db-shm', '*.db-wal', '.coverage', '.venv',
+                    'mlruns', '.serena', '.claude', '.benchmarks', '.gitignore',
+                    'run_tests.py', 'run_seeders.py', 'uv.lock', 'kasal.db'
                 ))
                 logger.info(f"Copied backend folder")
             else:
@@ -382,7 +384,8 @@ starlette==0.40.0
             if frontend_src.exists():
                 shutil.copytree(frontend_src, frontend_dst, ignore=shutil.ignore_patterns(
                     'node_modules', 'dist', 'coverage', '.env.local',
-                    '.env.development.local', '.env.test.local', '.env.production.local'
+                    '.env.development.local', '.env.test.local', '.env.production.local',
+                    'package-lock.json', '*.tsbuildinfo', '.benchmarks'
                 ))
                 logger.info("Copied frontend source folder")
             else:
