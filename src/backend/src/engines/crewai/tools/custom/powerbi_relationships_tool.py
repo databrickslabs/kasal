@@ -288,7 +288,7 @@ class PowerBIRelationshipsTool(BaseTool):
             # - CREDENTIALS: Use pre-configured values (prevent agent placeholder overrides)
             # - AUTH_METHOD: Use UI selection (deterministic, not auto-detected)
             # - OTHER: Agent can override
-            credential_fields = ['tenant_id', 'client_id', 'client_secret', 'username', 'password', 'access_token']
+            credential_fields = ['workspace_id', 'dataset_id', 'tenant_id', 'client_id', 'client_secret', 'username', 'password', 'access_token']
             selection_fields = ['auth_method']  # User selection - must be deterministic
 
             merged_kwargs = {}
