@@ -26,6 +26,7 @@ class IntentType(str, Enum):
     FLOW_LIST = "flow_list"
     FLOW_LOAD = "flow_load"
     FLOW_SAVE = "flow_save"
+    EXECUTE_FLOW = "execute_flow"
     UNKNOWN = "unknown"
 
 
