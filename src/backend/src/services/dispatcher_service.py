@@ -697,6 +697,7 @@ class DispatcherService:
             "/help": "catalog_help",
             "/run": "execute_crew",
             "/exec": "execute_crew",
+            "/delete": "catalog_delete",
         }
 
         intent = COMMAND_MAP.get(command)
@@ -720,6 +721,7 @@ class DispatcherService:
             "catalog_load": "flow_load",
             "catalog_save": "flow_save",
             "execute_crew": "execute_flow",
+            "catalog_delete": "flow_delete",
         }
         if args.lower().startswith(("flow", "flows")) and intent in FLOW_INTENT_MAP:
             intent = FLOW_INTENT_MAP[intent]
@@ -729,7 +731,7 @@ class DispatcherService:
             args = remaining[1].strip() if len(remaining) > 1 else ""
 
         # Check for crew/crews qualifier (e.g. "/list crews", "/save crew My Crew")
-        CREW_QUALIFIABLE = {"catalog_list", "catalog_load", "catalog_save", "catalog_schedule", "execute_crew"}
+        CREW_QUALIFIABLE = {"catalog_list", "catalog_load", "catalog_save", "catalog_schedule", "execute_crew", "catalog_delete"}
         if not qualifier_found and args.lower().startswith(("crew", "crews")) and intent in CREW_QUALIFIABLE:
             qualifier_found = True
             remaining = args.split(None, 1)
@@ -737,7 +739,7 @@ class DispatcherService:
 
         # Commands that require a crew/flow qualifier (bare /list, /load etc. show usage help)
         # /plans and /flows are aliases that already imply the qualifier, so they're excluded.
-        QUALIFIER_REQUIRED = {"/list", "/load", "/save", "/run", "/exec", "/schedule"}
+        QUALIFIER_REQUIRED = {"/list", "/load", "/save", "/run", "/exec", "/schedule", "/delete"}
         if not qualifier_found and command in QUALIFIER_REQUIRED:
             COMMAND_USAGE = {
                 "/list": "Usage: `/list crews` or `/list flows`",
@@ -746,6 +748,7 @@ class DispatcherService:
                 "/run": "Usage: `/run crew` or `/run flow`",
                 "/exec": "Usage: `/run crew` or `/run flow`",
                 "/schedule": "Usage: `/schedule crew`",
+                "/delete": "Usage: `/delete crew <name>` or `/delete flow <name>`",
             }
             return {
                 "intent": "catalog_help",
@@ -1733,6 +1736,7 @@ Please analyze this message and provide your intent classification, considering 
                         "- `/load crew <name>` — Load a saved crew onto the canvas\n"
                         "- `/save crew [name]` — Save the current canvas as a crew\n"
                         "- `/run crew` — Execute the current crew on the canvas\n"
+                        "- `/delete crew <name>` — Delete a saved crew\n"
                         "- `/schedule crew` — Schedule the current crew for automatic execution\n"
                         "\n"
                         "**Flow Commands:**\n"
@@ -1740,6 +1744,7 @@ Please analyze this message and provide your intent classification, considering 
                         "- `/load flow <name>` — Load a saved flow onto the canvas\n"
                         "- `/save flow [name]` — Save the current flow\n"
                         "- `/run flow` — Execute the current flow\n"
+                        "- `/delete flow <name>` — Delete a saved flow\n"
                         "\n"
                         "**Other:**\n"
                         "- `/help` — Show this help message\n"
@@ -1883,6 +1888,126 @@ Please analyze this message and provide your intent classification, considering 
                             else "Opening save flow dialog..."
                         ),
                     }
+
+                elif dispatcher_response.intent == IntentType.CATALOG_DELETE:
+                    delete_name = dispatcher_response.extracted_info.get(
+                        "args", ""
+                    ).strip()
+                    crews = await self.catalog_service.find_by_group(group_context)
+
+                    if not delete_name:
+                        generation_result = {
+                            "type": "catalog_delete",
+                            "message": "Please specify a crew name to delete. Usage: `/delete crew <name>`",
+                        }
+                    else:
+                        matches = [
+                            c for c in crews if delete_name.lower() in c.name.lower()
+                        ]
+                        exact_matches = [
+                            c for c in matches if c.name.lower() == delete_name.lower()
+                        ]
+                        if exact_matches:
+                            matches = exact_matches
+                        if len(matches) == 1:
+                            crew = matches[0]
+                            await self.catalog_service.delete_by_group(
+                                crew.id, group_context
+                            )
+                            generation_result = {
+                                "type": "catalog_delete",
+                                "message": f"Crew '{crew.name}' has been deleted.",
+                            }
+                        elif len(matches) > 1:
+                            unique_names = {c.name.lower() for c in matches}
+                            if len(unique_names) == 1:
+                                crew = sorted(
+                                    matches,
+                                    key=lambda c: c.updated_at or c.created_at,
+                                    reverse=True,
+                                )[0]
+                                await self.catalog_service.delete_by_group(
+                                    crew.id, group_context
+                                )
+                                generation_result = {
+                                    "type": "catalog_delete",
+                                    "message": f"Crew '{crew.name}' (most recent) has been deleted.",
+                                }
+                            else:
+                                generation_result = {
+                                    "type": "catalog_list",
+                                    "plans": [
+                                        {"id": str(c.id), "name": c.name}
+                                        for c in matches
+                                    ],
+                                    "message": f"Multiple crews match '{delete_name}'. Please be more specific:",
+                                }
+                        else:
+                            generation_result = {
+                                "type": "catalog_delete",
+                                "message": f"No crew found matching '{delete_name}'.",
+                            }
+
+                elif dispatcher_response.intent == IntentType.FLOW_DELETE:
+                    delete_name = dispatcher_response.extracted_info.get(
+                        "args", ""
+                    ).strip()
+                    flows = await self.flow_service.get_all_flows_for_group(
+                        group_context
+                    )
+
+                    if not delete_name:
+                        generation_result = {
+                            "type": "flow_delete",
+                            "message": "Please specify a flow name to delete. Usage: `/delete flow <name>`",
+                        }
+                    else:
+                        matches = [
+                            f for f in flows if delete_name.lower() in f.name.lower()
+                        ]
+                        exact_matches = [
+                            f for f in matches if f.name.lower() == delete_name.lower()
+                        ]
+                        if exact_matches:
+                            matches = exact_matches
+                        if len(matches) == 1:
+                            flow = matches[0]
+                            await self.flow_service.force_delete_flow_with_executions_with_group_check(
+                                flow.id, group_context
+                            )
+                            generation_result = {
+                                "type": "flow_delete",
+                                "message": f"Flow '{flow.name}' has been deleted.",
+                            }
+                        elif len(matches) > 1:
+                            unique_names = {f.name.lower() for f in matches}
+                            if len(unique_names) == 1:
+                                flow = sorted(
+                                    matches,
+                                    key=lambda f: f.updated_at or f.created_at,
+                                    reverse=True,
+                                )[0]
+                                await self.flow_service.force_delete_flow_with_executions_with_group_check(
+                                    flow.id, group_context
+                                )
+                                generation_result = {
+                                    "type": "flow_delete",
+                                    "message": f"Flow '{flow.name}' (most recent) has been deleted.",
+                                }
+                            else:
+                                generation_result = {
+                                    "type": "flow_list",
+                                    "flows": [
+                                        {"id": str(f.id), "name": f.name}
+                                        for f in matches
+                                    ],
+                                    "message": f"Multiple flows match '{delete_name}'. Please be more specific:",
+                                }
+                        else:
+                            generation_result = {
+                                "type": "flow_delete",
+                                "message": f"No flow found matching '{delete_name}'.",
+                            }
 
                 else:
                     logger.warning(

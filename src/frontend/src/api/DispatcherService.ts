@@ -12,6 +12,7 @@ export interface DispatcherResponse {
     | 'catalog_list' | 'catalog_load' | 'catalog_save' | 'catalog_schedule' | 'catalog_help'
     | 'flow_list' | 'flow_load' | 'flow_save'
     | 'execute_flow'
+    | 'catalog_delete' | 'flow_delete'
     | 'unknown';
   confidence: number;
   extracted_info: Record<string, unknown>;

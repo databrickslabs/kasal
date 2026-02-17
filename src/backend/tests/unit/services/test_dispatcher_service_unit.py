@@ -64,6 +64,8 @@ def _build_service():
     svc.agent_service = AsyncMock()
     svc.task_service = AsyncMock()
     svc.crew_service = AsyncMock()
+    svc.catalog_service = AsyncMock()
+    svc.flow_service = AsyncMock()
     return svc
 
 
@@ -897,7 +899,7 @@ class TestDispatch:
         assert result["service_called"] == "execute_crew"
         gen = result["generation_result"]
         assert gen["type"] == "execute_crew"
-        assert gen["action"] == "execute_crew"
+        assert "message" in gen
 
     @pytest.mark.asyncio
     async def test_dispatch_configure_crew_llm(self):
@@ -2552,6 +2554,8 @@ class TestCatalogDispatch:
         assert "/load flow" in gen["message"]
         assert "/save flow" in gen["message"]
         assert "/run flow" in gen["message"]
+        assert "/delete crew" in gen["message"]
+        assert "/delete flow" in gen["message"]
 
 
 # ===================================================================
@@ -2602,13 +2606,12 @@ class TestFlowSlashCommandDetection:
         assert result["intent"] == "flow_save"
         assert result["extracted_info"]["args"] == ""
 
-    def test_run_flow_shows_help_backend(self):
-        """'/run flow' shows help in backend; frontend handles it client-side."""
+    def test_run_flow_routes_to_execute_flow(self):
+        """'/run flow' routes to execute_flow via FLOW_INTENT_MAP."""
         result = DispatcherService._detect_slash_command("/run flow")
         assert result is not None
-        # No execute_flow intent exists — frontend intercepts /run flow client-side
-        assert result["intent"] == "catalog_help"
-        assert "command_help" in result["extracted_info"]
+        assert result["intent"] == "execute_flow"
+        assert result["confidence"] == 1.0
 
     def test_bare_list_shows_help(self):
         result = DispatcherService._detect_slash_command("/list")
@@ -2865,3 +2868,449 @@ class TestFlowDispatch:
         assert gen["action"] == "open_save_flow_dialog"
         assert gen["suggested_name"] is None
         assert "Opening save flow dialog" in gen["message"]
+
+
+# ===================================================================
+# Tests for /delete slash command detection
+# ===================================================================
+
+
+class TestDeleteSlashCommandDetection:
+
+    def test_bare_delete_shows_help(self):
+        result = DispatcherService._detect_slash_command("/delete")
+        assert result is not None
+        assert result["intent"] == "catalog_help"
+        assert result["extracted_info"]["command_help"].startswith("Usage:")
+        assert "/delete crew" in result["extracted_info"]["command_help"]
+        assert "/delete flow" in result["extracted_info"]["command_help"]
+
+    def test_delete_with_unqualified_name_shows_help(self):
+        result = DispatcherService._detect_slash_command("/delete some-name")
+        assert result is not None
+        assert result["intent"] == "catalog_help"
+        assert "/delete crew" in result["extracted_info"]["command_help"]
+
+    def test_delete_crew_with_name(self):
+        result = DispatcherService._detect_slash_command("/delete crew my-crew")
+        assert result is not None
+        assert result["intent"] == "catalog_delete"
+        assert result["confidence"] == 1.0
+        assert result["source"] == "slash_command"
+        assert result["extracted_info"]["args"] == "my-crew"
+        assert result["suggested_tools"] == []
+
+    def test_delete_crew_without_name(self):
+        result = DispatcherService._detect_slash_command("/delete crew")
+        assert result is not None
+        assert result["intent"] == "catalog_delete"
+        assert result["extracted_info"]["args"] == ""
+
+    def test_delete_crews_plural(self):
+        result = DispatcherService._detect_slash_command("/delete crews my-crew")
+        assert result is not None
+        assert result["intent"] == "catalog_delete"
+        assert result["extracted_info"]["args"] == "my-crew"
+
+    def test_delete_flow_with_name(self):
+        result = DispatcherService._detect_slash_command("/delete flow my-flow")
+        assert result is not None
+        assert result["intent"] == "flow_delete"
+        assert result["extracted_info"]["args"] == "my-flow"
+
+    def test_delete_flow_without_name(self):
+        result = DispatcherService._detect_slash_command("/delete flow")
+        assert result is not None
+        assert result["intent"] == "flow_delete"
+        assert result["extracted_info"]["args"] == ""
+
+    def test_delete_flows_plural(self):
+        result = DispatcherService._detect_slash_command("/delete flows my-flow")
+        assert result is not None
+        assert result["intent"] == "flow_delete"
+        assert result["extracted_info"]["args"] == "my-flow"
+
+    def test_delete_case_insensitive(self):
+        result = DispatcherService._detect_slash_command("/DELETE crew test")
+        assert result is not None
+        assert result["intent"] == "catalog_delete"
+        assert result["extracted_info"]["args"] == "test"
+
+    def test_delete_crew_multiword_name(self):
+        result = DispatcherService._detect_slash_command("/delete crew My Research Crew")
+        assert result is not None
+        assert result["intent"] == "catalog_delete"
+        assert result["extracted_info"]["args"] == "My Research Crew"
+
+    def test_delete_flow_multiword_name(self):
+        result = DispatcherService._detect_slash_command("/delete flow My Data Flow")
+        assert result is not None
+        assert result["intent"] == "flow_delete"
+        assert result["extracted_info"]["args"] == "My Data Flow"
+
+
+# ===================================================================
+# Tests for catalog_delete dispatch handler
+# ===================================================================
+
+
+class TestCatalogDeleteDispatch:
+
+    def _make_intent_result(self, intent, confidence=1.0, args=""):
+        return {
+            "intent": intent,
+            "confidence": confidence,
+            "extracted_info": {"command": "/delete", "args": args},
+            "suggested_prompt": f"/delete {args}".strip(),
+            "suggested_tools": [],
+        }
+
+    def _make_mock_crew(self, name="Test Crew", crew_id="crew-1"):
+        crew = MagicMock()
+        crew.id = crew_id
+        crew.name = name
+        crew.agent_ids = ["a1", "a2"]
+        crew.task_ids = ["t1"]
+        crew.nodes = [{"id": "node1"}]
+        crew.edges = [{"id": "edge1"}]
+        crew.process = "sequential"
+        crew.planning = False
+        crew.planning_llm = None
+        crew.memory = True
+        crew.verbose = True
+        crew.max_rpm = None
+        crew.created_at = MagicMock()
+        crew.created_at.isoformat.return_value = "2026-01-01T00:00:00"
+        crew.updated_at = MagicMock()
+        crew.updated_at.isoformat.return_value = "2026-01-02T00:00:00"
+        return crew
+
+    @pytest.mark.asyncio
+    async def test_catalog_delete_no_name(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("catalog_delete", args="")
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.catalog_service = AsyncMock()
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/delete crew", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "catalog_delete"
+        assert "Please specify a crew name" in gen["message"]
+
+    @pytest.mark.asyncio
+    async def test_catalog_delete_single_match(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("catalog_delete", args="Test Crew")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        mock_crew = self._make_mock_crew()
+        svc.catalog_service = AsyncMock()
+        svc.catalog_service.find_by_group = AsyncMock(return_value=[mock_crew])
+        svc.catalog_service.delete_by_group = AsyncMock(return_value=True)
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/delete crew Test Crew", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "catalog_delete"
+        assert "has been deleted" in gen["message"]
+        assert "Test Crew" in gen["message"]
+        svc.catalog_service.delete_by_group.assert_awaited_once_with("crew-1", gc)
+
+    @pytest.mark.asyncio
+    async def test_catalog_delete_exact_match_preferred(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("catalog_delete", args="test")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        crew1 = self._make_mock_crew(name="test", crew_id="c1")
+        crew2 = self._make_mock_crew(name="test plan", crew_id="c2")
+        svc.catalog_service = AsyncMock()
+        svc.catalog_service.find_by_group = AsyncMock(return_value=[crew1, crew2])
+        svc.catalog_service.delete_by_group = AsyncMock(return_value=True)
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/delete crew test", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "catalog_delete"
+        assert "has been deleted" in gen["message"]
+        svc.catalog_service.delete_by_group.assert_awaited_once_with("c1", gc)
+
+    @pytest.mark.asyncio
+    async def test_catalog_delete_multiple_ambiguous_matches(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("catalog_delete", args="Test")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        crew1 = self._make_mock_crew(name="Test Alpha", crew_id="c1")
+        crew2 = self._make_mock_crew(name="Test Beta", crew_id="c2")
+        svc.catalog_service = AsyncMock()
+        svc.catalog_service.find_by_group = AsyncMock(return_value=[crew1, crew2])
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/delete crew Test", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "catalog_list"
+        assert len(gen["plans"]) == 2
+        assert "Multiple crews match" in gen["message"]
+
+    @pytest.mark.asyncio
+    async def test_catalog_delete_duplicate_names_deletes_most_recent(self):
+        from datetime import datetime
+
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("catalog_delete", args="test")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        crew1 = self._make_mock_crew(name="test", crew_id="c1")
+        crew1.updated_at = datetime(2026, 1, 1)
+        crew1.created_at = datetime(2026, 1, 1)
+        crew2 = self._make_mock_crew(name="test", crew_id="c2")
+        crew2.updated_at = datetime(2026, 1, 5)
+        crew2.created_at = datetime(2026, 1, 5)
+        svc.catalog_service = AsyncMock()
+        svc.catalog_service.find_by_group = AsyncMock(return_value=[crew1, crew2])
+        svc.catalog_service.delete_by_group = AsyncMock(return_value=True)
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/delete crew test", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "catalog_delete"
+        assert "most recent" in gen["message"]
+        assert "has been deleted" in gen["message"]
+        svc.catalog_service.delete_by_group.assert_awaited_once_with("c2", gc)
+
+    @pytest.mark.asyncio
+    async def test_catalog_delete_no_match(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("catalog_delete", args="nonexistent")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        svc.catalog_service = AsyncMock()
+        svc.catalog_service.find_by_group = AsyncMock(return_value=[])
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/delete crew nonexistent", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "catalog_delete"
+        assert "No crew found" in gen["message"]
+        assert "nonexistent" in gen["message"]
+
+
+# ===================================================================
+# Tests for flow_delete dispatch handler
+# ===================================================================
+
+
+class TestFlowDeleteDispatch:
+
+    def _make_intent_result(self, intent, confidence=1.0, args=""):
+        return {
+            "intent": intent,
+            "confidence": confidence,
+            "extracted_info": {"command": "/delete", "args": args},
+            "suggested_prompt": f"/delete {args}".strip(),
+            "suggested_tools": [],
+        }
+
+    def _make_mock_flow(self, name="Test Flow", flow_id="flow-1"):
+        flow = MagicMock()
+        flow.id = flow_id
+        flow.name = name
+        flow.nodes = [{"id": "crew-node-1", "type": "crewNode"}]
+        flow.edges = [{"id": "edge1"}]
+        flow.flow_config = {"start_method": "sequential"}
+        flow.created_at = MagicMock()
+        flow.created_at.isoformat.return_value = "2026-01-01T00:00:00"
+        flow.updated_at = MagicMock()
+        flow.updated_at.isoformat.return_value = "2026-01-02T00:00:00"
+        return flow
+
+    @pytest.mark.asyncio
+    async def test_flow_delete_no_name(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("flow_delete", args="")
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.flow_service = AsyncMock()
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/delete flow", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "flow_delete"
+        assert "Please specify a flow name" in gen["message"]
+
+    @pytest.mark.asyncio
+    async def test_flow_delete_single_match(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("flow_delete", args="Test Flow")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        mock_flow = self._make_mock_flow()
+        svc.flow_service = AsyncMock()
+        svc.flow_service.get_all_flows_for_group = AsyncMock(return_value=[mock_flow])
+        svc.flow_service.force_delete_flow_with_executions_with_group_check = AsyncMock(
+            return_value=True
+        )
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/delete flow Test Flow", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "flow_delete"
+        assert "has been deleted" in gen["message"]
+        assert "Test Flow" in gen["message"]
+        svc.flow_service.force_delete_flow_with_executions_with_group_check.assert_awaited_once_with(
+            "flow-1", gc
+        )
+
+    @pytest.mark.asyncio
+    async def test_flow_delete_exact_match_preferred(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("flow_delete", args="test")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        flow1 = self._make_mock_flow(name="test", flow_id="f1")
+        flow2 = self._make_mock_flow(name="test flow", flow_id="f2")
+        svc.flow_service = AsyncMock()
+        svc.flow_service.get_all_flows_for_group = AsyncMock(
+            return_value=[flow1, flow2]
+        )
+        svc.flow_service.force_delete_flow_with_executions_with_group_check = AsyncMock(
+            return_value=True
+        )
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/delete flow test", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "flow_delete"
+        assert "has been deleted" in gen["message"]
+        svc.flow_service.force_delete_flow_with_executions_with_group_check.assert_awaited_once_with(
+            "f1", gc
+        )
+
+    @pytest.mark.asyncio
+    async def test_flow_delete_multiple_ambiguous_matches(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("flow_delete", args="Test")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        flow1 = self._make_mock_flow(name="Test Alpha", flow_id="f1")
+        flow2 = self._make_mock_flow(name="Test Beta", flow_id="f2")
+        svc.flow_service = AsyncMock()
+        svc.flow_service.get_all_flows_for_group = AsyncMock(
+            return_value=[flow1, flow2]
+        )
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/delete flow Test", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "flow_list"
+        assert len(gen["flows"]) == 2
+        assert "Multiple flows match" in gen["message"]
+
+    @pytest.mark.asyncio
+    async def test_flow_delete_duplicate_names_deletes_most_recent(self):
+        from datetime import datetime
+
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("flow_delete", args="test")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        flow1 = self._make_mock_flow(name="test", flow_id="f1")
+        flow1.updated_at = datetime(2026, 1, 1)
+        flow1.created_at = datetime(2026, 1, 1)
+        flow2 = self._make_mock_flow(name="test", flow_id="f2")
+        flow2.updated_at = datetime(2026, 1, 5)
+        flow2.created_at = datetime(2026, 1, 5)
+        svc.flow_service = AsyncMock()
+        svc.flow_service.get_all_flows_for_group = AsyncMock(
+            return_value=[flow1, flow2]
+        )
+        svc.flow_service.force_delete_flow_with_executions_with_group_check = AsyncMock(
+            return_value=True
+        )
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/delete flow test", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "flow_delete"
+        assert "most recent" in gen["message"]
+        assert "has been deleted" in gen["message"]
+        svc.flow_service.force_delete_flow_with_executions_with_group_check.assert_awaited_once_with(
+            "f2", gc
+        )
+
+    @pytest.mark.asyncio
+    async def test_flow_delete_no_match(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("flow_delete", args="nonexistent")
+        )
+        svc._log_llm_interaction = AsyncMock()
+
+        svc.flow_service = AsyncMock()
+        svc.flow_service.get_all_flows_for_group = AsyncMock(return_value=[])
+
+        gc = _make_group_context()
+        request = DispatcherRequest(message="/delete flow nonexistent", model="m")
+        result = await svc.dispatch(request, group_context=gc)
+
+        gen = result["generation_result"]
+        assert gen["type"] == "flow_delete"
+        assert "No flow found" in gen["message"]
+        assert "nonexistent" in gen["message"]
