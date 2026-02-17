@@ -19,13 +19,19 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
   const [error, setError] = useState<string | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [autoSave, setAutoSave] = useState(false);
 
   const { activeTabId, updateTabFlowInfo } = useTabManagerStore();
 
   // Listen for the custom event to open the save flow dialog
   useEffect(() => {
-    const handleOpenSaveFlowDialog = () => {
-      if (!disabled) {
+    const handleOpenSaveFlowDialog = (event: Event) => {
+      if (disabled) return;
+      const detail = (event as CustomEvent).detail;
+      if (detail?.suggestedName) {
+        setName(detail.suggestedName);
+        setAutoSave(true);
+      } else {
         setOpen(true);
       }
     };
@@ -142,6 +148,15 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
       window.removeEventListener('updateExistingFlow', handleUpdateExistingFlow);
     };
   }, [disabled]);
+
+  // Auto-save when name is set programmatically (via slash command)
+  useEffect(() => {
+    if (autoSave && name) {
+      setAutoSave(false);
+      handleSave();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSave, name]);
 
   const handleClickOpen = () => {
     if (disabled) return;
