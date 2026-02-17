@@ -1126,8 +1126,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         let msg = listResult.message + '\n';
         if (listResult.plans?.length > 0) {
           listResult.plans.forEach((p, i) => {
-            msg += `${i + 1}. **${p.name}** — ${p.agent_count || 0} agents, ${p.task_count || 0} tasks\n`;
-            msg += `   Load with: \`/load crew ${p.name}\`\n`;
+            msg += `${i + 1}. **${p.name}** — ${p.agent_count || 0} agents, ${p.task_count || 0} tasks — \`/load crew ${p.name}\` \`/run crew ${p.name}\`\n`;
           });
         }
         return msg;
@@ -1143,8 +1142,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             if (p.agent_count !== undefined || p.task_count !== undefined) {
               msg += ` — ${p.agent_count || 0} agents, ${p.task_count || 0} tasks`;
             }
-            msg += '\n';
-            msg += `   Load with: \`/load crew ${p.name}\`\n`;
+            msg += ` — \`/load crew ${p.name}\` \`/run crew ${p.name}\`\n`;
           });
           return msg;
         }
@@ -1159,8 +1157,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         let flowListMsg = flowListResult.message + '\n';
         if (flowListResult.flows?.length > 0) {
           flowListResult.flows.forEach((f, i) => {
-            flowListMsg += `${i + 1}. **${f.name}** — ${f.node_count || 0} crew nodes\n`;
-            flowListMsg += `   Load with: \`/load flow ${f.name}\`\n`;
+            flowListMsg += `${i + 1}. **${f.name}** — ${f.node_count || 0} crew nodes — \`/load flow ${f.name}\` \`/run flow ${f.name}\`\n`;
           });
         }
         return flowListMsg;
@@ -1173,7 +1170,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           flows.forEach((f, i) => {
             flowMsg += `${i + 1}. **${f.name}**`;
             if (f.node_count !== undefined) flowMsg += ` — ${f.node_count} crew nodes`;
-            flowMsg += `\n   Load with: \`/load flow ${f.name}\`\n`;
+            flowMsg += ` — \`/load flow ${f.name}\` \`/run flow ${f.name}\`\n`;
           });
           return flowMsg;
         }
