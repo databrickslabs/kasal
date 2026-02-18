@@ -2427,3 +2427,4 @@ class TestOtelLoggerHandlerRouting:
             for p_ctx in reversed(ctx_stack):
                 p_ctx.__exit__(None, None, None)
         assert r["status"] == "COMPLETED"
+

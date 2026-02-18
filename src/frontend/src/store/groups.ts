@@ -78,7 +78,10 @@ export const useGroupStore = create<GroupState>()(
 
         // Persist to localStorage if not set yet
         if (!selectedFromStorage) {
+          console.log('[GroupStore] Setting selectedGroupId in localStorage:', effectiveGroupId);
           localStorage.setItem('selectedGroupId', effectiveGroupId);
+        } else {
+          console.log('[GroupStore] selectedGroupId already in localStorage:', selectedFromStorage);
         }
       } catch (error) {
         console.error('Failed to fetch user groups:', error);

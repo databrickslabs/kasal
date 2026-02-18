@@ -56,6 +56,19 @@ const docSections: DocSection[] = [
     label: 'Integrations',
     items: [
       { label: 'Power BI Integration', file: 'powerbi_integration' },
+      { label: 'Power BI Tools Guide', file: 'powerbi-tools-guide' },
+    ],
+  },
+  {
+    label: 'Power BI Tools',
+    items: [
+      { label: 'Comprehensive Analysis Tool', file: 'tool-comprehensive-analysis' },
+      { label: 'Measure Conversion Tool', file: 'tool-measure-conversion' },
+      { label: 'M-Query Conversion Tool', file: 'tool-mquery-conversion' },
+      { label: 'Relationships Tool', file: 'tool-relationships-conversion' },
+      { label: 'Hierarchies Tool', file: 'tool-hierarchies-conversion' },
+      { label: 'Field Parameters & Calc Groups', file: 'tool-field-parameters' },
+      { label: 'Report References Tool', file: 'tool-report-references' },
     ],
   },
 

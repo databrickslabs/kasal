@@ -5,14 +5,15 @@ This module provides functions for retrieving and managing execution history
 from the database.
 """
 
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import logging
+import copy
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.repositories.execution_history_repository import ExecutionHistoryRepository
 from src.repositories.execution_logs_repository import ExecutionLogsRepository
 from src.schemas.execution_history import (
-    ExecutionHistoryItem, 
+    ExecutionHistoryItem,
     ExecutionHistoryList,
     ExecutionOutput,
     ExecutionOutputList,
@@ -20,6 +21,7 @@ from src.schemas.execution_history import (
     ExecutionOutputDebugList,
     DeleteResponse
 )
+from src.utils.sensitive_data_utils import mask_sensitive_fields
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +45,41 @@ class ExecutionHistoryService:
         self.session = session
         self.history_repo = execution_history_repository or ExecutionHistoryRepository(session)
         self.logs_repo = execution_logs_repository or ExecutionLogsRepository(session)
-    
+
+    def _mask_inputs_sensitive_data(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Mask sensitive fields in execution inputs before returning to API.
+
+        This method processes the inputs dictionary which may contain:
+        - agents_yaml: Dict of agent configs with tool_configs containing secrets
+        - tasks_yaml: Dict of task configs with tool_configs containing secrets
+
+        Args:
+            inputs: The raw inputs dictionary from execution history
+
+        Returns:
+            A copy of inputs with sensitive fields masked
+        """
+        if not inputs:
+            return inputs
+
+        # Create a deep copy to avoid modifying the original
+        masked_inputs = copy.deepcopy(inputs)
+
+        # Mask tool_configs in agents_yaml
+        if 'agents_yaml' in masked_inputs and isinstance(masked_inputs['agents_yaml'], dict):
+            for agent_key, agent_config in masked_inputs['agents_yaml'].items():
+                if isinstance(agent_config, dict) and 'tool_configs' in agent_config:
+                    agent_config['tool_configs'] = mask_sensitive_fields(agent_config['tool_configs'])
+
+        # Mask tool_configs in tasks_yaml
+        if 'tasks_yaml' in masked_inputs and isinstance(masked_inputs['tasks_yaml'], dict):
+            for task_key, task_config in masked_inputs['tasks_yaml'].items():
+                if isinstance(task_config, dict) and 'tool_configs' in task_config:
+                    task_config['tool_configs'] = mask_sensitive_fields(task_config['tool_configs'])
+
+        return masked_inputs
+
     async def get_execution_history(self, limit: int = 50, offset: int = 0, group_ids: List[str] = None) -> ExecutionHistoryList:
         """
         Get paginated execution history with group-based filtering.
@@ -76,15 +112,18 @@ class ExecutionHistoryService:
                 
                 # Extract agents_yaml and tasks_yaml from inputs if available
                 if hasattr(run, 'inputs') and run.inputs:
+                    # Mask sensitive data in inputs before returning
+                    masked_inputs = self._mask_inputs_sensitive_data(run.inputs)
+
                     # Convert agents_yaml and tasks_yaml to JSON strings for the schema
-                    if 'agents_yaml' in run.inputs:
-                        run_dict['agents_yaml'] = json.dumps(run.inputs['agents_yaml']) if isinstance(run.inputs['agents_yaml'], dict) else run.inputs.get('agents_yaml', '')
-                    if 'tasks_yaml' in run.inputs:
-                        run_dict['tasks_yaml'] = json.dumps(run.inputs['tasks_yaml']) if isinstance(run.inputs['tasks_yaml'], dict) else run.inputs.get('tasks_yaml', '')
-                    
-                    # Keep the full inputs for the input field
-                    run_dict['input'] = run.inputs
-                
+                    if 'agents_yaml' in masked_inputs:
+                        run_dict['agents_yaml'] = json.dumps(masked_inputs['agents_yaml']) if isinstance(masked_inputs['agents_yaml'], dict) else masked_inputs.get('agents_yaml', '')
+                    if 'tasks_yaml' in masked_inputs:
+                        run_dict['tasks_yaml'] = json.dumps(masked_inputs['tasks_yaml']) if isinstance(masked_inputs['tasks_yaml'], dict) else masked_inputs.get('tasks_yaml', '')
+
+                    # Keep the full masked inputs for the input field
+                    run_dict['input'] = masked_inputs
+
                 # Create a model-compatible dictionary for validation
                 execution_items.append(ExecutionHistoryItem.model_validate(run_dict))
             
@@ -130,18 +169,21 @@ class ExecutionHistoryService:
             
             # Extract agents_yaml and tasks_yaml from inputs if available
             if hasattr(run, 'inputs') and run.inputs:
+                # Mask sensitive data in inputs before returning
+                masked_inputs = self._mask_inputs_sensitive_data(run.inputs)
+
                 # Convert agents_yaml and tasks_yaml to JSON strings for the schema
-                if 'agents_yaml' in run.inputs:
-                    run_dict['agents_yaml'] = json.dumps(run.inputs['agents_yaml']) if isinstance(run.inputs['agents_yaml'], dict) else run.inputs.get('agents_yaml', '')
-                if 'tasks_yaml' in run.inputs:
-                    run_dict['tasks_yaml'] = json.dumps(run.inputs['tasks_yaml']) if isinstance(run.inputs['tasks_yaml'], dict) else run.inputs.get('tasks_yaml', '')
-                
-                # Keep the full inputs for the input field
-                run_dict['input'] = run.inputs
-            
+                if 'agents_yaml' in masked_inputs:
+                    run_dict['agents_yaml'] = json.dumps(masked_inputs['agents_yaml']) if isinstance(masked_inputs['agents_yaml'], dict) else masked_inputs.get('agents_yaml', '')
+                if 'tasks_yaml' in masked_inputs:
+                    run_dict['tasks_yaml'] = json.dumps(masked_inputs['tasks_yaml']) if isinstance(masked_inputs['tasks_yaml'], dict) else masked_inputs.get('tasks_yaml', '')
+
+                # Keep the full masked inputs for the input field
+                run_dict['input'] = masked_inputs
+
             # Create a model-compatible dictionary for validation
             return ExecutionHistoryItem.model_validate(run_dict)
-            
+
         except SQLAlchemyError as e:
             logger.error(f"Database error retrieving execution {execution_id}: {str(e)}")
             raise
@@ -554,18 +596,21 @@ class ExecutionHistoryService:
             
             # Extract agents_yaml and tasks_yaml from inputs if available
             if hasattr(run, 'inputs') and run.inputs:
+                # Mask sensitive data in inputs before returning
+                masked_inputs = self._mask_inputs_sensitive_data(run.inputs)
+
                 # Convert agents_yaml and tasks_yaml to JSON strings for the schema
-                if 'agents_yaml' in run.inputs:
-                    run_dict['agents_yaml'] = json.dumps(run.inputs['agents_yaml']) if isinstance(run.inputs['agents_yaml'], dict) else run.inputs.get('agents_yaml', '')
-                if 'tasks_yaml' in run.inputs:
-                    run_dict['tasks_yaml'] = json.dumps(run.inputs['tasks_yaml']) if isinstance(run.inputs['tasks_yaml'], dict) else run.inputs.get('tasks_yaml', '')
-                
-                # Keep the full inputs for the input field
-                run_dict['input'] = run.inputs
-            
+                if 'agents_yaml' in masked_inputs:
+                    run_dict['agents_yaml'] = json.dumps(masked_inputs['agents_yaml']) if isinstance(masked_inputs['agents_yaml'], dict) else masked_inputs.get('agents_yaml', '')
+                if 'tasks_yaml' in masked_inputs:
+                    run_dict['tasks_yaml'] = json.dumps(masked_inputs['tasks_yaml']) if isinstance(masked_inputs['tasks_yaml'], dict) else masked_inputs.get('tasks_yaml', '')
+
+                # Keep the full masked inputs for the input field
+                run_dict['input'] = masked_inputs
+
             # Create a model-compatible dictionary for validation
             return ExecutionHistoryItem.model_validate(run_dict)
-            
+
         except SQLAlchemyError as e:
             logger.error(f"Database error retrieving execution with job_id {job_id}: {str(e)}")
             raise

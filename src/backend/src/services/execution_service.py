@@ -44,6 +44,8 @@ from src.services.crewai_execution_service import CrewAIExecutionService
 from src.services.execution_status_service import ExecutionStatusService
 from src.services.execution_name_service import ExecutionNameService
 from src.utils.user_context import GroupContext
+from src.utils.sensitive_data_utils import mask_sensitive_fields
+import copy
 
 
 # Configure logging
@@ -97,7 +99,47 @@ class ExecutionService:
         self.execution_name_service = ExecutionNameService.create(session)
         # Create a CrewAIExecutionService instance for all execution operations
         self.crewai_execution_service = CrewAIExecutionService()
-    
+
+    def _mask_inputs_sensitive_data(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Mask sensitive fields in execution inputs before returning to API or storing to database.
+
+        This method processes the inputs dictionary which may contain:
+        - agents_yaml: Dict of agent configs with tool_configs containing secrets
+        - tasks_yaml: Dict of task configs with tool_configs containing secrets
+        - inputs: Dict of user-provided inputs that may contain secrets (client_secret, etc.)
+
+        Args:
+            inputs: The raw inputs dictionary from execution
+
+        Returns:
+            A copy of inputs with sensitive fields masked
+        """
+        if not inputs:
+            return inputs
+
+        # Create a deep copy to avoid modifying the original
+        masked_inputs = copy.deepcopy(inputs)
+
+        # Mask tool_configs in agents_yaml
+        if 'agents_yaml' in masked_inputs and isinstance(masked_inputs['agents_yaml'], dict):
+            for agent_key, agent_config in masked_inputs['agents_yaml'].items():
+                if isinstance(agent_config, dict) and 'tool_configs' in agent_config:
+                    agent_config['tool_configs'] = mask_sensitive_fields(agent_config['tool_configs'])
+
+        # Mask tool_configs in tasks_yaml
+        if 'tasks_yaml' in masked_inputs and isinstance(masked_inputs['tasks_yaml'], dict):
+            for task_key, task_config in masked_inputs['tasks_yaml'].items():
+                if isinstance(task_config, dict) and 'tool_configs' in task_config:
+                    task_config['tool_configs'] = mask_sensitive_fields(task_config['tool_configs'])
+
+        # Mask sensitive fields in the nested 'inputs' dictionary (user-provided values)
+        # This catches fields like client_secret, password, token, api_key, etc.
+        if 'inputs' in masked_inputs and isinstance(masked_inputs['inputs'], dict):
+            masked_inputs['inputs'] = mask_sensitive_fields(masked_inputs['inputs'])
+
+        return masked_inputs
+
     async def execute_flow(self, flow_id: Optional[uuid.UUID] = None, 
                            nodes: Optional[List[Dict[str, Any]]] = None, 
                            edges: Optional[List[Dict[str, Any]]] = None,
@@ -477,6 +519,9 @@ class ExecutionService:
                 import json
                 db_executions = []
                 for e in db_executions_list:
+                    # Mask sensitive data in inputs before returning to API
+                    masked_inputs = self._mask_inputs_sensitive_data(e.inputs) if e.inputs else None
+
                     exec_dict = {
                         "execution_id": e.job_id,
                         "status": e.status,
@@ -486,18 +531,18 @@ class ExecutionService:
                         "error": e.error,
                         "group_email": e.group_email,
                         "group_id": e.group_id,  # CRITICAL: Include group_id for frontend security filtering
-                        "inputs": e.inputs,  # Include the inputs field
+                        "inputs": masked_inputs,  # Include the masked inputs field (sensitive data redacted)
                         # Flow scheduling support - include execution_type and flow_id
-                        "execution_type": getattr(e, 'execution_type', None) or (e.inputs.get('execution_type') if e.inputs else None) or 'crew',
-                        "flow_id": str(e.flow_id) if getattr(e, 'flow_id', None) else (e.inputs.get('flow_id') if e.inputs else None)
+                        "execution_type": getattr(e, 'execution_type', None) or (masked_inputs.get('execution_type') if masked_inputs else None) or 'crew',
+                        "flow_id": str(e.flow_id) if getattr(e, 'flow_id', None) else (masked_inputs.get('flow_id') if masked_inputs else None)
                     }
 
-                    # Also extract agents_yaml and tasks_yaml from inputs for direct access
-                    if e.inputs and isinstance(e.inputs, dict):
-                        if 'agents_yaml' in e.inputs:
-                            exec_dict['agents_yaml'] = json.dumps(e.inputs['agents_yaml']) if isinstance(e.inputs['agents_yaml'], dict) else e.inputs.get('agents_yaml', '')
-                        if 'tasks_yaml' in e.inputs:
-                            exec_dict['tasks_yaml'] = json.dumps(e.inputs['tasks_yaml']) if isinstance(e.inputs['tasks_yaml'], dict) else e.inputs.get('tasks_yaml', '')
+                    # Also extract agents_yaml and tasks_yaml from masked inputs for direct access
+                    if masked_inputs and isinstance(masked_inputs, dict):
+                        if 'agents_yaml' in masked_inputs:
+                            exec_dict['agents_yaml'] = json.dumps(masked_inputs['agents_yaml']) if isinstance(masked_inputs['agents_yaml'], dict) else masked_inputs.get('agents_yaml', '')
+                        if 'tasks_yaml' in masked_inputs:
+                            exec_dict['tasks_yaml'] = json.dumps(masked_inputs['tasks_yaml']) if isinstance(masked_inputs['tasks_yaml'], dict) else masked_inputs.get('tasks_yaml', '')
 
                     db_executions.append(exec_dict)
             else:
@@ -943,8 +988,13 @@ class ExecutionService:
                 config.inputs["flow_id"] = str(flow_id)
                 logger.info(f"[ExecutionService.create_execution] Added flow_id {flow_id} to config.inputs")
 
+            # SECURITY: Mask sensitive fields (client_secret, password, token, etc.) BEFORE storing to database
+            # This ensures secrets are never persisted in plaintext
+            masked_inputs = self._mask_inputs_sensitive_data(inputs)
+            logger.info(f"[ExecutionService.create_execution] Masked sensitive fields in inputs before database storage")
+
             # Sanitize inputs to ensure all values are JSON serializable
-            sanitized_inputs = ExecutionService.sanitize_for_database(inputs)
+            sanitized_inputs = ExecutionService.sanitize_for_database(masked_inputs)
 
             # Create execution data with RUNNING status for immediate visibility
             execution_data = {

@@ -53,6 +53,24 @@ def extract_crew_yaml_data(agents_yaml: Dict[str, Any], tasks_yaml: Dict[str, An
         # Create a copy of the config and add the ID
         task_data = dict(task_config)
         task_data["id"] = task_id
+
+        # Log task details including tool_configs
+        logger.info(f"[extract_crew_yaml_data] Processing task {task_id}")
+        logger.info(f"[extract_crew_yaml_data] Task {task_id} keys: {list(task_config.keys())}")
+
+        # Check for tool_configs
+        if "tool_configs" in task_config:
+            tool_configs = task_config["tool_configs"]
+            logger.info(f"[extract_crew_yaml_data] Task {task_id} has tool_configs with keys: {list(tool_configs.keys())}")
+            # Log preview of each tool config (mask secrets)
+            for tool_name, tool_cfg in tool_configs.items():
+                safe_cfg = {k: (v[:30] + '...' if isinstance(v, str) and len(v) > 30 else v)
+                           for k, v in (tool_cfg if isinstance(tool_cfg, dict) else {}).items()
+                           if 'secret' not in k.lower() and v}
+                logger.info(f"[extract_crew_yaml_data] Task {task_id} tool_config[{tool_name}]: {safe_cfg}")
+        else:
+            logger.info(f"[extract_crew_yaml_data] Task {task_id} has NO tool_configs field")
+
         tasks_data.append(task_data)
     
     logger.info(f"[extract_crew_yaml_data] Extraction complete: {len(agents_data)} agents, {len(tasks_data)} tasks")

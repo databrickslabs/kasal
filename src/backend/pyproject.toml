@@ -35,13 +35,15 @@ dependencies = [
     "bcrypt==4.0.1",
     "cryptography",
     "python-multipart>=0.0.9",
-    "azure-identity>=1.15.0",
 
     # Databricks
     "databricks",
     "databricks-sdk>=0.65.0",
     "databricks-vectorsearch",
     "databricks-agents>=1.4.0",
+
+    # Azure
+    "azure-identity>=1.15.0",
 
     # AI/ML
     "litellm==1.74.9",

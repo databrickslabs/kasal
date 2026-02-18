@@ -65,7 +65,12 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
   const effectiveStatus: string | undefined = executionState?.status;
 
   // Get status-based styling
-  const getStatusStyles = (): { borderColor?: string; animation?: string; opacity?: number; background?: string } => {
+  const getStatusStyles = (): {
+    borderColor?: string;
+    animation?: string;
+    opacity?: number;
+    background?: string;
+  } => {
     if (!effectiveStatus) {
       return {}; // No per-crew status resolved — stay idle
     }

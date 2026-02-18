@@ -1,0 +1,172 @@
+{
+  "id": "5d8e1bca-b5ca-4968-81cd-cd03c009b922",
+  "name": "test_mquery",
+  "agent_ids": [
+    "6b07ad5e-974d-46b1-abff-34d62f84f863"
+  ],
+  "task_ids": [
+    "209bbc98-b9df-448a-9f06-7507eff995eb"
+  ],
+  "nodes": [
+    {
+      "id": "task-209bbc98-b9df-448a-9f06-7507eff995eb",
+      "type": "taskNode",
+      "position": {
+        "x": 368,
+        "y": 68
+      },
+      "data": {
+        "label": "Run MQuery Conversion with Parameters",
+        "role": null,
+        "goal": null,
+        "backstory": null,
+        "tools": [
+          "74"
+        ],
+        "tool_configs": {
+          "M-Query Conversion Pipeline": {
+            "workspace_id": "your-workspace-id",
+            "dataset_id": "your-dataset-id",
+            "tenant_id": "00000000-0000-0000-0000-000000000000",
+            "client_id": "your-client-id",
+            "client_secret": "your-client-secret"
+          }
+        },
+        "agentId": null,
+        "taskId": "209bbc98-b9df-448a-9f06-7507eff995eb",
+        "llm": null,
+        "function_calling_llm": null,
+        "max_iter": null,
+        "max_rpm": null,
+        "max_execution_time": null,
+        "verbose": null,
+        "allow_delegation": null,
+        "cache": null,
+        "memory": true,
+        "embedder_config": null,
+        "system_template": null,
+        "prompt_template": null,
+        "response_template": null,
+        "allow_code_execution": null,
+        "code_execution_mode": null,
+        "max_retry_limit": null,
+        "use_system_prompt": null,
+        "respect_context_window": null,
+        "type": "task",
+        "description": "IMMEDIATELY call the \"M-Query Conversion Pipeline\" with parameters defined in the input task form.\nALL required parameters (workspace_id, dataset_id, authentication credentials) are ALREADY PRE-CONFIGURED in the tool-task-form. You do NOT need to ask for them or provide them.\n\nDO NOT ask the user for any information. DO NOT explain what you need. Just call the tool NOW.\n\nAction required:\n  1. Call mquery_conversion_pipeline_tool()\n  2. Return the tool's output directly to the user",
+        "expected_output": "A comprehensive conversion report showing:\n1. Original M-Query expressions from Power BI\n2. Expression types (native_query, table_from_rows, etc.)\n3. Converted Databricks SQL statements\n4. Conversion notes and warnings\n5. Summary statistics",
+        "icon": null,
+        "advanced_config": null,
+        "config": {
+          "cache_response": false,
+          "cache_ttl": 3600,
+          "retry_on_fail": true,
+          "max_retries": 3,
+          "timeout": null,
+          "priority": 1,
+          "error_handling": "default",
+          "output_file": null,
+          "output_json": null,
+          "output_pydantic": null,
+          "validation_function": null,
+          "callback_function": null,
+          "human_input": false,
+          "markdown": false,
+          "llm_guardrail": null
+        },
+        "context": [],
+        "async_execution": false,
+        "knowledge_sources": null,
+        "markdown": false,
+        "llm_guardrail": null
+      },
+      "width": null,
+      "height": null,
+      "selected": null,
+      "positionAbsolute": null,
+      "dragging": null,
+      "style": null
+    },
+    {
+      "id": "agent-6b07ad5e-974d-46b1-abff-34d62f84f863",
+      "type": "agentNode",
+      "position": {
+        "x": 68,
+        "y": 73
+      },
+      "data": {
+        "label": "MQuery Converter",
+        "role": "Mquery Conversion Manager",
+        "goal": "Translate given mquery definitions efficiently into the requested SQL syntax.\n\nYou will make sure that the action run will only trigger 1 time and not more.",
+        "backstory": "Experienced PBI and SQL Engineer with 10+ years of experience in managing, translating, and optimizing MQuery expressions and translating them into SQL for Databricks.",
+        "tools": [
+          "74"
+        ],
+        "tool_configs": {},
+        "agentId": "6b07ad5e-974d-46b1-abff-34d62f84f863",
+        "taskId": null,
+        "llm": "databricks-claude-sonnet-4",
+        "function_calling_llm": null,
+        "max_iter": 25,
+        "max_rpm": 1,
+        "max_execution_time": 300,
+        "verbose": false,
+        "allow_delegation": false,
+        "cache": false,
+        "memory": false,
+        "embedder_config": {
+          "provider": "databricks",
+          "config": {
+            "model": "databricks-gte-large-en"
+          }
+        },
+        "system_template": null,
+        "prompt_template": null,
+        "response_template": null,
+        "allow_code_execution": false,
+        "code_execution_mode": "safe",
+        "max_retry_limit": 3,
+        "use_system_prompt": true,
+        "respect_context_window": true,
+        "type": "agent",
+        "description": null,
+        "expected_output": null,
+        "icon": null,
+        "advanced_config": null,
+        "config": null,
+        "context": [],
+        "async_execution": false,
+        "knowledge_sources": [],
+        "markdown": false,
+        "llm_guardrail": null
+      },
+      "width": null,
+      "height": null,
+      "selected": null,
+      "positionAbsolute": null,
+      "dragging": null,
+      "style": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "agent-6b07ad5e-974d-46b1-abff-34d62f84f863",
+      "target": "task-209bbc98-b9df-448a-9f06-7507eff995eb",
+      "id": "reactflow__edge-agent-2d21de66-438d-4a70-8be0-f16dd0a8d4aa-task-c2c71f3e-89e8-4786-84dd-fd0e2f063ad1-right-left",
+      "sourceHandle": null,
+      "targetHandle": null
+    }
+  ],
+  "created_at": "2026-02-17T13:28:17.646804",
+  "updated_at": "2026-02-17T13:28:17.646807",
+  "process": "sequential",
+  "planning": false,
+  "planning_llm": null,
+  "reasoning": false,
+  "reasoning_llm": null,
+  "manager_llm": null,
+  "tool_configs": null,
+  "memory": true,
+  "verbose": true,
+  "max_rpm": null
+}

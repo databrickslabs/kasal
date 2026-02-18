@@ -847,6 +847,9 @@ class CrewPreparation:
             memory_service.set_crew_reference_on_memory(self.crew)
             memory_service.attach_memory_trace_context(self.crew, memory_backend_config, crew_kwargs)
 
+            # 16.5. Attach trace context to all tools (enables custom trace emission)
+            memory_service.attach_tools_trace_context(self.crew, crew_kwargs)
+
             # 17. Initialize knowledge for agents
             await self._initialize_agent_knowledge(crew_kwargs)
 

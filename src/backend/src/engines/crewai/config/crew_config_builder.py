@@ -113,7 +113,8 @@ class CrewConfigBuilder:
             'tasks': tasks,
             'process': process_type,
             'verbose': True,
-            'memory': default_crew_memory
+            'memory': default_crew_memory,
+            'prompt_to_print_output': False  # CRITICAL: Disable interactive trace prompt to prevent subprocess hang
             # Note: 'tracing' parameter removed - not supported in all CrewAI versions
             # CrewAI cloud tracing is disabled by default anyway
         }

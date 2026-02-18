@@ -25,6 +25,8 @@ import {
   ExpandMore as ExpandMoreIcon,
   Search as SearchIcon,
   Clear as ClearIcon,
+  Visibility as VisibilityIcon,
+  VisibilityOff as VisibilityOffIcon,
 } from '@mui/icons-material';
 import { Node } from 'reactflow';
 
@@ -44,6 +46,24 @@ interface InputVariablesDialogProps {
 
 const ITEMS_PER_SECTION = 20;
 
+// Patterns for detecting sensitive variable names that should be masked
+const SENSITIVE_PATTERNS = [
+  /secret/i,
+  /password/i,
+  /passwd/i,
+  /token/i,
+  /api[_-]?key/i,
+  /apikey/i,
+  /credential/i,
+  /auth/i,
+  /private[_-]?key/i,
+  /access[_-]?key/i,
+];
+
+const isSensitiveVariable = (name: string): boolean => {
+  return SENSITIVE_PATTERNS.some(pattern => pattern.test(name));
+};
+
 export const InputVariablesDialog: React.FC<InputVariablesDialogProps> = ({
   open,
   onClose,
@@ -58,6 +78,7 @@ export const InputVariablesDialog: React.FC<InputVariablesDialogProps> = ({
   const [optionalExpanded, setOptionalExpanded] = useState(true);
   const [showAllRequired, setShowAllRequired] = useState(false);
   const [showAllOptional, setShowAllOptional] = useState(false);
+  const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
 
   // Extract variables from agent and task nodes
   useEffect(() => {
@@ -182,6 +203,13 @@ export const InputVariablesDialog: React.FC<InputVariablesDialogProps> = ({
     setErrors({});
   };
 
+  const togglePasswordVisibility = (variableName: string) => {
+    setVisiblePasswords(prev => ({
+      ...prev,
+      [variableName]: !prev[variableName]
+    }));
+  };
+
   const handleConfirm = () => {
     // Validate that all required variables have values
     const newErrors: Record<string, string> = {};
@@ -213,6 +241,8 @@ export const InputVariablesDialog: React.FC<InputVariablesDialogProps> = ({
 
   const renderVariableRow = (variable: InputVariable, isDetected: boolean) => {
     const index = variables.findIndex(v => v.name === variable.name);
+    const isSensitive = isSensitiveVariable(variable.name);
+    const isPasswordVisible = visiblePasswords[variable.name] || false;
 
     return (
       <Box
@@ -246,6 +276,21 @@ export const InputVariablesDialog: React.FC<InputVariablesDialogProps> = ({
           error={!!errors[variable.name]}
           helperText={errors[variable.name]}
           placeholder={variable.required ? "Required" : "Optional"}
+          type={isSensitive && !isPasswordVisible ? 'password' : 'text'}
+          InputProps={isSensitive ? {
+            endAdornment: (
+              <InputAdornment position="end">
+                <IconButton
+                  onClick={() => togglePasswordVisibility(variable.name)}
+                  edge="end"
+                  size="small"
+                  title={isPasswordVisible ? "Hide value" : "Show value"}
+                >
+                  {isPasswordVisible ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+                </IconButton>
+              </InputAdornment>
+            ),
+          } : undefined}
         />
         <Tooltip title={variable.required ? "Mark as optional" : "Mark as required"}>
           <FormControlLabel

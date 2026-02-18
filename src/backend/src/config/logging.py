@@ -313,8 +313,20 @@ class CentralizedLoggingConfig:
                         logger.handlers = []
                         logger.propagate = False
 
-        # Optionally suppress console output
-        if os.getenv('KASAL_LOG_CONSOLE', 'true').lower() == 'false':
+        # In Databricks Apps, ALWAYS enable console logging (for /logz)
+        in_databricks_apps = os.getenv('DATABRICKS_RUNTIME_VERSION') or os.getenv('DATABRICKS_APP_NAME')
+
+        if in_databricks_apps:
+            # Force console logging for Databricks Apps /logz endpoint
+            root = logging.getLogger()
+            has_console = any(isinstance(h, logging.StreamHandler) for h in root.handlers)
+            if not has_console:
+                console_handler = logging.StreamHandler(sys.stdout)
+                console_handler.setLevel(logging.INFO)
+                console_handler.setFormatter(logging.Formatter(SIMPLE_FORMAT))
+                root.addHandler(console_handler)
+        elif os.getenv('KASAL_LOG_CONSOLE', 'true').lower() == 'false':
+            # Only suppress console in non-Databricks environments
             root = logging.getLogger()
             root.handlers = [h for h in root.handlers if not isinstance(h, logging.StreamHandler)]
 

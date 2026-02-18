@@ -120,7 +120,7 @@ export const PowerBIConfigSelector: React.FC<PowerBIConfigSelectorProps> = ({
               ⚠️ Required API Keys Missing
             </Typography>
             <Typography variant="body2">
-              To use PowerBIAnalysisTool, you MUST configure the following API Keys in Settings → API Keys:
+              To use Power BI Comprehensive Analysis Tool, you MUST configure the following API Keys in Settings → API Keys:
             </Typography>
             <Box component="ul" sx={{ margin: 0, paddingLeft: 2 }}>
               {missingApiKeys.map(key => (
