@@ -1228,7 +1228,7 @@ class CrewGenerationService:
             messages=messages,
             model=model,
             temperature=0.3,
-            max_tokens=800,
+            max_tokens=2000,
         )
 
         await self._log_llm_interaction(
