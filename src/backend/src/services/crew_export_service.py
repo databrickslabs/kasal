@@ -5,6 +5,7 @@ Service for exporting CrewAI crews to various formats.
 from typing import Dict, Any, Optional, List
 from uuid import UUID
 import logging
+import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.schemas.crew_export import ExportFormat, ExportOptions
@@ -91,7 +92,7 @@ class CrewExportService:
         Get crew with all related agents and tasks
 
         Args:
-            crew_id: Crew ID
+            crew_id: Crew ID (string)
             group_context: Group context for authorization
 
         Returns:
@@ -125,7 +126,7 @@ class CrewExportService:
                 tasks.append(task_dict)
 
         return {
-            'id': crew.id,
+            'id': str(crew.id),
             'name': crew.name,
             'agents': agents,
             'tasks': tasks,

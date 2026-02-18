@@ -413,6 +413,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# Add local development authentication middleware
+async def local_dev_auth_middleware(request: Request, call_next):
+    """
+    Middleware to inject authentication headers for local development.
+
+    When running locally (not in Databricks Apps), this adds default headers
+    so developers can use the app without OAuth/OBO authentication.
+    """
+    # Check if we're in local development (no X-Forwarded-Email header present)
+    if not request.headers.get("X-Forwarded-Email") and not request.headers.get("X-Auth-Request-Email"):
+        # Inject default local dev user headers
+        request.scope["headers"].append((b"x-forwarded-email", b"david.schwarzenbacher@databricks.com"))
+        logger.debug("[LOCAL_DEV_AUTH] Injected default authentication headers for local development")
+
+    response = await call_next(request)
+    return response
+
+
+app.add_middleware(BaseHTTPMiddleware, dispatch=local_dev_auth_middleware)
+
 # Add user context middleware to extract user tokens from Databricks Apps headers
 from src.utils.user_context import user_context_middleware
 

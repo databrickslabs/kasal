@@ -44,6 +44,19 @@ from src.models.documentation_embedding import DocumentationEmbedding
 # Database configuration models
 from src.models.database_config import LakebaseConfig
 
+# Conversion models
+from src.models.conversion import ConversionHistory, ConversionJob, SavedConverterConfiguration
+
+# HITL (Human-in-the-Loop) models
+from src.models.hitl_approval import HITLApproval, HITLWebhook
+
+# PowerBI models
+from src.models.powerbi_context_config import PowerBIBusinessMapping, PowerBIFieldSynonym
+from src.models.powerbi_semantic_model_cache import PowerBISemanticModelCache
+
+# Memory backend models
+from src.models.memory_backend import MemoryBackend
+
 # Add additional models here as your application grows
 # from src.models.order import Order
 
@@ -88,5 +101,18 @@ __all__ = [
     # Documentation models
     "DocumentationEmbedding",
     # Database configuration models
-    "LakebaseConfig"
+    "LakebaseConfig",
+    # Conversion models
+    "ConversionHistory",
+    "ConversionJob",
+    "SavedConverterConfiguration",
+    # HITL models
+    "HITLApproval",
+    "HITLWebhook",
+    # PowerBI models
+    "PowerBIBusinessMapping",
+    "PowerBIFieldSynonym",
+    "PowerBISemanticModelCache",
+    # Memory backend models
+    "MemoryBackend"
 ]

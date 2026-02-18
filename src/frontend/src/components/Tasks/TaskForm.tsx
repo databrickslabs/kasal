@@ -45,7 +45,13 @@ import { AgentBricksEndpointSelector } from '../Common/AgentBricksEndpointSelect
 import { PerplexityConfigSelector } from '../Common/PerplexityConfigSelector';
 import { SerperConfigSelector } from '../Common/SerperConfigSelector';
 import { MCPServerSelector } from '../Common/MCPServerSelector';
-import { PowerBIConfigSelector, PowerBIConfig } from '../Common/PowerBIConfigSelector';
+import { PowerBIAnalysisConfigSelector, PowerBIAnalysisConfig } from '../Common/PowerBIAnalysisConfigSelector';
+import { MeasureConverterConfigSelector, MeasureConverterConfig } from '../Common/MeasureConverterConfigSelector';
+import { MQueryConverterConfigSelector, MQueryConverterConfig } from '../Common/MQueryConverterConfigSelector';
+import { PowerBIRelationshipsConfigSelector, PowerBIRelationshipsConfig } from '../Common/PowerBIRelationshipsConfigSelector';
+import { PowerBIHierarchiesConfigSelector, PowerBIHierarchiesConfig } from '../Common/PowerBIHierarchiesConfigSelector';
+import { PowerBIFieldParametersConfigSelector, PowerBIFieldParametersConfig } from '../Common/PowerBIFieldParametersConfigSelector';
+import { PowerBIReportReferencesConfigSelector, PowerBIReportReferencesConfig } from '../Common/PowerBIReportReferencesConfigSelector';
 import { PerplexityConfig, SerperConfig } from '../../types/config';
 import { type LLMGuardrailConfig } from '../../types/task';
 import { ModelService } from '../../api/ModelService';
@@ -130,7 +136,13 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const [selectedAgentBricksEndpoint, setSelectedAgentBricksEndpoint] = useState<{ id: string; name: string } | null>(null);
   const [perplexityConfig, setPerplexityConfig] = useState<PerplexityConfig>({});
   const [serperConfig, setSerperConfig] = useState<SerperConfig>({});
-  const [powerBIConfig, setPowerBIConfig] = useState<PowerBIConfig>({});
+  const [powerBIConfig, setPowerBIConfig] = useState<PowerBIAnalysisConfig>({});
+  const [measureConverterConfig, setMeasureConverterConfig] = useState<MeasureConverterConfig>({});
+  const [mQueryConverterConfig, setMQueryConverterConfig] = useState<MQueryConverterConfig>({});
+  const [powerBIRelationshipsConfig, setPowerBIRelationshipsConfig] = useState<PowerBIRelationshipsConfig>({});
+  const [powerBIHierarchiesConfig, setPowerBIHierarchiesConfig] = useState<PowerBIHierarchiesConfig>({});
+  const [powerBIFieldParametersConfig, setPowerBIFieldParametersConfig] = useState<PowerBIFieldParametersConfig>({});
+  const [powerBIReportReferencesConfig, setPowerBIReportReferencesConfig] = useState<PowerBIReportReferencesConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
   const [showBestPractices, setShowBestPractices] = useState(false);
@@ -193,9 +205,39 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
         setSerperConfig(initialData.tool_configs.SerperDevTool as SerperConfig);
       }
 
-      // Check for PowerBIAnalysisTool config
-      if (initialData.tool_configs.PowerBIAnalysisTool) {
-        setPowerBIConfig(initialData.tool_configs.PowerBIAnalysisTool as PowerBIConfig);
+      // Check for Power BI Comprehensive Analysis Tool config
+      if (initialData.tool_configs['Power BI Comprehensive Analysis Tool']) {
+        setPowerBIConfig(initialData.tool_configs['Power BI Comprehensive Analysis Tool'] as PowerBIAnalysisConfig);
+      }
+
+      // Check for Measure Conversion Pipeline config
+      if (initialData.tool_configs['Measure Conversion Pipeline']) {
+        setMeasureConverterConfig(initialData.tool_configs['Measure Conversion Pipeline'] as MeasureConverterConfig);
+      }
+
+      // Check for M-Query Conversion Pipeline config
+      if (initialData.tool_configs['M-Query Conversion Pipeline']) {
+        setMQueryConverterConfig(initialData.tool_configs['M-Query Conversion Pipeline'] as MQueryConverterConfig);
+      }
+
+      // Check for Power BI Relationships Tool config
+      if (initialData.tool_configs['Power BI Relationships Tool']) {
+        setPowerBIRelationshipsConfig(initialData.tool_configs['Power BI Relationships Tool'] as PowerBIRelationshipsConfig);
+      }
+
+      // Check for Power BI Hierarchies Tool config
+      if (initialData.tool_configs['Power BI Hierarchies Tool']) {
+        setPowerBIHierarchiesConfig(initialData.tool_configs['Power BI Hierarchies Tool'] as PowerBIHierarchiesConfig);
+      }
+
+      // Check for Power BI Field Parameters & Calculation Groups Tool config
+      if (initialData.tool_configs['Power BI Field Parameters & Calculation Groups Tool']) {
+        setPowerBIFieldParametersConfig(initialData.tool_configs['Power BI Field Parameters & Calculation Groups Tool'] as PowerBIFieldParametersConfig);
+      }
+
+      // Check for Power BI Report References Tool config
+      if (initialData.tool_configs['Power BI Report References Tool']) {
+        setPowerBIReportReferencesConfig(initialData.tool_configs['Power BI Report References Tool'] as PowerBIReportReferencesConfig);
       }
 
       // Check for MCP_SERVERS config
@@ -491,6 +533,181 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
         })) {
           // Remove SerperDevTool config if tool not selected
           delete updatedToolConfigs.SerperDevTool;
+        }
+
+        // Handle Measure Conversion Pipeline config
+        if (measureConverterConfig && Object.keys(measureConverterConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Measure Conversion Pipeline';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            'Measure Conversion Pipeline': measureConverterConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Measure Conversion Pipeline';
+        })) {
+          // Remove Measure Conversion Pipeline config if tool not selected
+          delete updatedToolConfigs['Measure Conversion Pipeline'];
+        }
+
+        // Handle M-Query Conversion Pipeline config
+        if (mQueryConverterConfig && Object.keys(mQueryConverterConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'M-Query Conversion Pipeline';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            'M-Query Conversion Pipeline': mQueryConverterConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'M-Query Conversion Pipeline';
+        })) {
+          // Remove M-Query Conversion Pipeline config if tool not selected
+          delete updatedToolConfigs['M-Query Conversion Pipeline'];
+        }
+
+        // Handle Power BI Relationships Tool config
+        if (powerBIRelationshipsConfig && Object.keys(powerBIRelationshipsConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Relationships Tool';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            'Power BI Relationships Tool': powerBIRelationshipsConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Relationships Tool';
+        })) {
+          // Remove Power BI Relationships Tool config if tool not selected
+          delete updatedToolConfigs['Power BI Relationships Tool'];
+        }
+
+        // Handle Power BI Hierarchies Tool config
+        if (powerBIHierarchiesConfig && Object.keys(powerBIHierarchiesConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Hierarchies Tool';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            'Power BI Hierarchies Tool': powerBIHierarchiesConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Hierarchies Tool';
+        })) {
+          // Remove Power BI Hierarchies Tool config if tool not selected
+          delete updatedToolConfigs['Power BI Hierarchies Tool'];
+        }
+
+        // Handle Power BI Field Parameters & Calculation Groups Tool config
+        if (powerBIFieldParametersConfig && Object.keys(powerBIFieldParametersConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Field Parameters & Calculation Groups Tool';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            'Power BI Field Parameters & Calculation Groups Tool': powerBIFieldParametersConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Field Parameters & Calculation Groups Tool';
+        })) {
+          // Remove Power BI Field Parameters & Calculation Groups Tool config if tool not selected
+          delete updatedToolConfigs['Power BI Field Parameters & Calculation Groups Tool'];
+        }
+
+        // Handle Power BI Report References Tool config
+        if (powerBIReportReferencesConfig && Object.keys(powerBIReportReferencesConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Report References Tool';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            'Power BI Report References Tool': powerBIReportReferencesConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Report References Tool';
+        })) {
+          // Remove Power BI Report References Tool config if tool not selected
+          delete updatedToolConfigs['Power BI Report References Tool'];
+        }
+
+        // Handle Power BI Comprehensive Analysis Tool config
+        if (powerBIConfig && Object.keys(powerBIConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Comprehensive Analysis Tool';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            'Power BI Comprehensive Analysis Tool': powerBIConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Comprehensive Analysis Tool';
+        })) {
+          // Remove Power BI Comprehensive Analysis Tool config if tool not selected
+          delete updatedToolConfigs['Power BI Comprehensive Analysis Tool'];
         }
 
         // Handle MCP_SERVERS config - use dict format to match schema
@@ -1128,30 +1345,241 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
               </Box>
             )}
 
-            {/* Power BI Configuration - Show only when PowerBIAnalysisTool is selected */}
+            {/* Power BI Comprehensive Analysis Configuration - Show only when Power BI Comprehensive Analysis Tool is selected */}
             {formData.tools.some(toolId => {
               const tool = tools.find(t =>
                 String(t.id) === String(toolId) ||
                 t.id === Number(toolId) ||
                 t.title === toolId
               );
-              return tool?.title === 'PowerBIAnalysisTool';
+              return tool?.title === 'Power BI Comprehensive Analysis Tool';
             }) && (
               <Box sx={{ mt: 2 }}>
-                <PowerBIConfigSelector
-                  value={powerBIConfig}
-                  onChange={(config) => {
-                    setPowerBIConfig(config);
-                    // Update tool configs when configuration changes
-                    setToolConfigs(prev => ({
-                      ...prev,
-                      PowerBIAnalysisTool: config
-                    }));
-                  }}
-                  label="Power BI Configuration"
-                  helperText="Configure Power BI authentication and semantic model for this task"
-                  fullWidth
-                />
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  Power BI Comprehensive Analysis Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(25, 118, 210, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(25, 118, 210, 0.2)'
+                }}>
+                  <PowerBIAnalysisConfigSelector
+                    value={powerBIConfig}
+                    onChange={(config) => {
+                      setPowerBIConfig(config);
+                      // Update tool configs when configuration changes
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'Power BI Comprehensive Analysis Tool': config
+                      }));
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+
+            {/* Measure Conversion Pipeline Configuration - Show only when tool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'Measure Conversion Pipeline';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  Measure Conversion Pipeline Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(156, 39, 176, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(156, 39, 176, 0.2)'
+                }}>
+                  <MeasureConverterConfigSelector
+                    value={measureConverterConfig}
+                    onChange={(config) => {
+                      setMeasureConverterConfig(config);
+                      // Update tool configs when configuration changes
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'Measure Conversion Pipeline': config
+                      }));
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+
+            {/* M-Query Conversion Pipeline Configuration - Show only when tool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'M-Query Conversion Pipeline';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  M-Query Conversion Pipeline Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(25, 118, 210, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(25, 118, 210, 0.2)'
+                }}>
+                  <MQueryConverterConfigSelector
+                    value={mQueryConverterConfig}
+                    onChange={(config) => {
+                      setMQueryConverterConfig(config);
+                      // Update tool configs when configuration changes
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'M-Query Conversion Pipeline': config
+                      }));
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+
+            {/* Power BI Relationships Tool Configuration - Show only when tool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'Power BI Relationships Tool';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  Power BI Relationships Tool Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(76, 175, 80, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(76, 175, 80, 0.2)'
+                }}>
+                  <PowerBIRelationshipsConfigSelector
+                    value={powerBIRelationshipsConfig}
+                    onChange={(config) => {
+                      setPowerBIRelationshipsConfig(config);
+                      // Update tool configs when configuration changes
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'Power BI Relationships Tool': config
+                      }));
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+
+            {/* Power BI Hierarchies Tool Configuration - Show only when tool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'Power BI Hierarchies Tool';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  Power BI Hierarchies Tool Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(156, 39, 176, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(156, 39, 176, 0.2)'
+                }}>
+                  <PowerBIHierarchiesConfigSelector
+                    value={powerBIHierarchiesConfig}
+                    onChange={(config) => {
+                      setPowerBIHierarchiesConfig(config);
+                      // Update tool configs when configuration changes
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'Power BI Hierarchies Tool': config
+                      }));
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+
+            {/* Power BI Field Parameters & Calculation Groups Tool Configuration - Show only when tool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'Power BI Field Parameters & Calculation Groups Tool';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  Power BI Field Parameters & Calculation Groups Tool Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(0, 150, 136, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(0, 150, 136, 0.2)'
+                }}>
+                  <PowerBIFieldParametersConfigSelector
+                    value={powerBIFieldParametersConfig}
+                    onChange={(config) => {
+                      setPowerBIFieldParametersConfig(config);
+                      // Update tool configs when configuration changes
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'Power BI Field Parameters & Calculation Groups Tool': config
+                      }));
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+
+            {/* Power BI Report References Tool Configuration - Show only when tool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'Power BI Report References Tool';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  Power BI Report References Tool Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(156, 39, 176, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(156, 39, 176, 0.2)'
+                }}>
+                  <PowerBIReportReferencesConfigSelector
+                    value={powerBIReportReferencesConfig}
+                    onChange={(config) => {
+                      setPowerBIReportReferencesConfig(config);
+                      // Update tool configs when configuration changes
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'Power BI Report References Tool': config
+                      }));
+                    }}
+                  />
+                </Box>
               </Box>
             )}
 

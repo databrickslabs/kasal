@@ -53,6 +53,8 @@ from src.api.template_generation_router import router as template_generation_rou
 from src.api.templates_router import router as templates_router
 from src.api.tools_router import router as tools_router
 from src.api.users_router import router as users_router
+from src.api.kpi_conversion_router import router as kpi_conversion_router
+from src.api.converter_router import router as converter_router
 
 # Create the main API router
 api_router = APIRouter()
@@ -101,6 +103,8 @@ api_router.include_router(memory_backend_router)
 api_router.include_router(documentation_embeddings_router)
 api_router.include_router(database_management_router)
 api_router.include_router(genie_router)
+api_router.include_router(kpi_conversion_router)
+api_router.include_router(converter_router)
 api_router.include_router(agentbricks_router)
 api_router.include_router(hitl_router)
 api_router.include_router(sse_router)
@@ -145,6 +149,8 @@ __all__ = [
     "documentation_embeddings_router",
     "database_management_router",
     "genie_router",
+    "kpi_conversion_router",
+    "converter_router",
     "agentbricks_router",
     "mlflow_router",
     "hitl_router",

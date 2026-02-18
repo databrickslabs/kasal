@@ -211,7 +211,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Default to PostgreSQL if no DB type specified
+# Default to SQLite if no DB type specified (change to "postgres" if you prefer PostgreSQL)
 if [ -z "$DB_TYPE" ]; then
     DB_TYPE="postgres"
 fi
@@ -262,11 +262,18 @@ if [ "$SHOW_CONFIG" = true ]; then
     print_config
 fi
 
-# Check if port 8000 is already in use
-if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1; then
-    echo -e "${YELLOW}Port 8000 is already in use. Killing existing process...${NC}"
-    lsof -ti:8000 | xargs kill -9 2>/dev/null
-    sleep 1
+# Check if port 8000 is already in use and kill any process using it
+PORT_PID=$(lsof -ti:8000 2>/dev/null)
+if [ -n "$PORT_PID" ]; then
+    echo -e "${YELLOW}Port 8000 is already in use (PID: $PORT_PID). Killing existing process...${NC}"
+    echo "$PORT_PID" | xargs kill -9 2>/dev/null
+    sleep 2
+    # Double-check it's really dead
+    if lsof -ti:8000 >/dev/null 2>&1; then
+        echo -e "${RED}Failed to kill process on port 8000. Please kill it manually.${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}Port 8000 is now free.${NC}"
 fi
 
 # Create logs directory if it doesn't exist

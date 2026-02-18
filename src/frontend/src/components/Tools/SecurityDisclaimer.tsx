@@ -609,35 +609,35 @@ export const TOOL_SECURITY_INFO: Record<string, {
     ],
     deploymentContext: 'Single-tenant with API key service'
   },
-  'PowerBIAnalysisTool': {
+  'Power BI Comprehensive Analysis Tool': {
     riskLevel: 'MEDIUM',
-    description: 'Executes complex Power BI analysis via Databricks jobs',
+    description: 'Answer business questions via intelligent DAX generation with self-correction',
     risks: [
-      'Heavy computational workloads on Databricks',
-      'Extended execution time for large datasets',
-      'Combined Power BI and Databricks resource usage',
-      'Potential for expensive compute operations'
+      'Automatic DAX query execution against Power BI semantic models',
+      'Up to 5 retry attempts with LLM-based self-correction',
+      'Measure hallucination detection may flag legitimate queries',
+      'Extended execution time for complex queries with retries'
     ],
     mitigations: [
-      'Implement job resource limits and quotas',
-      'Add job approval workflows for large analyses',
-      'Monitor execution time and resource usage',
-      'Validate analysis parameters before execution'
+      'Measure validation prevents incorrect data from being returned',
+      'Configurable retry limit (max_dax_retries: 1-10)',
+      'Enhanced logging for debugging and monitoring',
+      'Service Principal or OAuth authentication required'
     ],
     singleTenantRiskLevel: 'LOW',
     singleTenantRisks: [
-      'Databricks job execution within workspace limits',
-      'Power BI data access limited by user permissions',
-      'Compute resources consumed per analysis job'
+      'DAX query execution with up to 5 automatic retries',
+      'Power BI data access limited by authentication method',
+      'LLM-generated queries may require validation'
     ],
     singleTenantMitigations: [
-      'Databricks OBO ensures jobs run with user\'s permissions',
-      'Power BI access controlled by service principal configuration',
-      'Job execution monitored and logged',
-      'Workspace-level compute resource limits apply',
-      'Analysis results stored securely in user\'s workspace'
+      'Service Principal or OAuth authentication required',
+      'Measure hallucination detection validates queries',
+      'Enhanced logging tracks all retry attempts',
+      'Configurable retry limits for performance control',
+      'Read-only access to Power BI semantic models'
     ],
-    deploymentContext: 'Single-tenant with Databricks OBO and Power BI integration'
+    deploymentContext: 'Single-tenant with Power BI Execute Queries API and optional LLM integration'
   }
 };
 

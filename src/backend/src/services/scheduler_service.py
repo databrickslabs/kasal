@@ -24,6 +24,7 @@ from src.core.logger import LoggerManager
 from src.services.execution_service import ExecutionService
 from src.schemas.execution import ExecutionNameGenerationRequest
 from src.utils.user_context import GroupContext
+from src.utils.sensitive_data_utils import mask_sensitive_fields
 
 logger = logging.getLogger(__name__)
 logger_manager = LoggerManager.get_instance()
@@ -486,10 +487,11 @@ class SchedulerService:
                     logger_manager.scheduler.info(f"Running scheduled crew job {job_id} for schedule {schedule_id}")
 
                 # Prepare job configuration based on execution type
+                # SECURITY: Mask sensitive fields (client_secret, password, token, etc.) before storage
                 config_dict = {
-                    "agents_yaml": config.agents_yaml or {},
-                    "tasks_yaml": config.tasks_yaml or {},
-                    "inputs": config.inputs,
+                    "agents_yaml": mask_sensitive_fields(config.agents_yaml) if config.agents_yaml else {},
+                    "tasks_yaml": mask_sensitive_fields(config.tasks_yaml) if config.tasks_yaml else {},
+                    "inputs": mask_sensitive_fields(config.inputs) if config.inputs else {},
                     "model": config.model,
                     "execution_type": execution_type
                 }

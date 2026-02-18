@@ -62,7 +62,7 @@ export const customTools = [
   'DatabricksCustomTool',
   'DatabricksJobsTool',
   'PythonPPTXTool',
-  'PowerBIAnalysisTool'
+  'Power BI Comprehensive Analysis Tool'
 ];
 
 const convertServiceToolToTool = (serviceTool: ServiceTool): Tool => {

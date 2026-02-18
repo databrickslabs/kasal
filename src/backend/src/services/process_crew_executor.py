@@ -469,7 +469,6 @@ def run_crew_in_process(
         # We need to run the async crew preparation in the subprocess
         async def prepare_and_run():
             # Import within async context
-            import logging  # Import logging for use in async function
             import os  # Import os first
 
             # Suppress any stdout/stderr from CrewAI
@@ -656,6 +655,23 @@ def run_crew_in_process(
                     async_logger.warning(
                         f"[SUBPROCESS] Could not inject group_id into crew_config: {e}"
                     )
+
+                # CRITICAL: Inject execution inputs into crew_config BEFORE ToolFactory creation
+                # This enables placeholder resolution for dynamic tool configs like {tenant_id}, {workspace_id}, etc.
+                # The ToolFactory looks for inputs in config['inputs']['inputs'] for placeholder resolution
+                try:
+                    if isinstance(crew_config, dict) and inputs:
+                        # Ensure inputs structure exists for ToolFactory placeholder resolution
+                        if 'inputs' not in crew_config:
+                            crew_config['inputs'] = {}
+                        if isinstance(crew_config['inputs'], dict):
+                            # Store inputs in nested structure that ToolFactory expects
+                            crew_config['inputs']['inputs'] = inputs
+                            async_logger.info(f"[SUBPROCESS] Injected execution inputs into crew_config for tool placeholder resolution: {list(inputs.keys())}")
+                        else:
+                            async_logger.warning(f"[SUBPROCESS] crew_config['inputs'] is not a dict, cannot inject execution inputs")
+                except Exception as e:
+                    async_logger.warning(f"[SUBPROCESS] Could not inject execution inputs into crew_config: {e}")
 
                 # Extract user_token from crew_config for OBO authentication
                 # The user_token is passed from the parent process via crew_config
@@ -1243,6 +1259,7 @@ def run_crew_in_process(
                     execute_with_mlflow_trace,
                     post_execution_mlflow_cleanup,
                 )
+
 
                 kickoff_fn = (
                     (lambda: crew.kickoff(inputs=inputs))
@@ -2196,6 +2213,7 @@ class ProcessCrewExecutor:
                                 ),
                             }
                         )
+
 
             if len(logs_to_write) <= 1:  # Only has JobConfiguration
                 logger.info(f"No logs found for execution {exec_id_short} in crew.log")

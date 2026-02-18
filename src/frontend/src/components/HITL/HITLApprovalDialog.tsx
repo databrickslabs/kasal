@@ -37,7 +37,6 @@ import {
 import {
   HITLService,
   HITLApprovalResponse,
-  HITLApprovalStatus,
   HITLRejectionAction,
 } from '../../api/HITLService';
 
