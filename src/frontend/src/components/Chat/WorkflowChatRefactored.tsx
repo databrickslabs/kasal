@@ -50,7 +50,7 @@ import {
 } from './types';
 
 // Import utilities
-import { hasCrewContent, isExecuteCommand, isExecuteFlowCommand, extractJobIdFromCommand } from './utils/chatHelpers';
+import { hasCrewContent, isExecuteCommand, isExecuteFlowCommand, extractJobIdFromCommand, filterSlashCommands, SlashCommand } from './utils/chatHelpers';
 import {
   createAgentGenerationHandler,
   createTaskGenerationHandler,
@@ -73,6 +73,7 @@ import { useExecutionMonitoring } from './hooks/useExecutionMonitoring';
 import { ChatMessageItem } from './components/ChatMessageItem';
 import { GroupedTraceMessages } from './components/GroupedTraceMessages';
 import { KnowledgeFileUpload } from './KnowledgeFileUpload';
+import SlashCommandMenu from './components/SlashCommandMenu';
 
 const WorkflowChat: React.FC<WorkflowChatProps> = ({
   onNodesGenerated,
@@ -96,6 +97,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   const [models, setModels] = useState<Record<string, ModelConfig>>({});
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [modelMenuAnchor, setModelMenuAnchor] = useState<null | HTMLElement>(null);
+  const [showSlashMenu, setShowSlashMenu] = useState(false);
+  const [slashMenuIndex, setSlashMenuIndex] = useState(0);
+  const [slashFilteredCommands, setSlashFilteredCommands] = useState<SlashCommand[]>([]);
 
   // Variable collection state
   const [isCollectingVariables, setIsCollectingVariables] = useState(false);
@@ -1378,8 +1382,50 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     }
   };
 
+  const handleSlashSelect = useCallback((cmd: SlashCommand) => {
+    setInputValue(cmd.command + ' ');
+    setShowSlashMenu(false);
+    setSlashMenuIndex(0);
+    inputRef.current?.focus();
+  }, []);
+
+  const handleInputChange = useCallback((value: string) => {
+    setInputValue(value);
+    if (value.startsWith('/')) {
+      const filtered = filterSlashCommands(value);
+      setSlashFilteredCommands(filtered);
+      setShowSlashMenu(filtered.length > 0);
+      setSlashMenuIndex(0);
+    } else {
+      setShowSlashMenu(false);
+    }
+  }, []);
+
   const handleKeyPress = (e: React.KeyboardEvent) => {
     e.stopPropagation();
+
+    if (showSlashMenu && slashFilteredCommands.length > 0) {
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSlashMenuIndex(prev => (prev <= 0 ? slashFilteredCommands.length - 1 : prev - 1));
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSlashMenuIndex(prev => (prev >= slashFilteredCommands.length - 1 ? 0 : prev + 1));
+        return;
+      }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        handleSlashSelect(slashFilteredCommands[slashMenuIndex]);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowSlashMenu(false);
+        return;
+      }
+    }
 
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -1772,13 +1818,20 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         sx={{ p: 2, borderTop: 1, borderColor: 'divider', borderRadius: 0, flexShrink: 0 }}
       >
         <Box sx={{ position: 'relative' }}>
+          {showSlashMenu && (
+            <SlashCommandMenu
+              commands={slashFilteredCommands}
+              selectedIndex={slashMenuIndex}
+              onSelect={handleSlashSelect}
+            />
+          )}
           <TextField
             inputRef={inputRef}
             fullWidth
             variant="outlined"
             placeholder={executingJobId ? "Execution in progress..." : "Describe what you want to create..."}
             value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
+            onChange={(e) => handleInputChange(e.target.value)}
             onKeyDown={(e) => {
               handleKeyPress(e);
               e.stopPropagation();

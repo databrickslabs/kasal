@@ -74,7 +74,7 @@ export const MessageContent: React.FC<MessageContentProps> = ({ content }) => {
             <ul style={{ margin: '2px 0', paddingLeft: 20 }}>{children}</ul>
           ),
           ol: ({ children }) => (
-            <ol style={{ margin: '2px 0', paddingLeft: 20 }}>{children}</ol>
+            <ol style={{ margin: '2px 0', paddingLeft: 32 }}>{children}</ol>
           ),
           li: ({ children }) => (
             <li style={{ margin: 0, padding: 0 }}>{children}</li>

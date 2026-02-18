@@ -17,6 +17,8 @@ import {
   handleNodesGenerated,
   isExecuteCommand,
   extractJobIdFromCommand,
+  SLASH_COMMANDS,
+  filterSlashCommands,
 } from './chatHelpers';
 
 describe('chatHelpers', () => {
@@ -367,6 +369,98 @@ describe('chatHelpers', () => {
 
     it('handles "Execute Crew " with case variations', () => {
       expect(extractJobIdFromCommand('Execute Crew my-job-id')).toBe('my-job-id');
+    });
+  });
+
+  describe('SLASH_COMMANDS', () => {
+    it('contains 12 commands', () => {
+      expect(SLASH_COMMANDS).toHaveLength(12);
+    });
+
+    it('every command starts with /', () => {
+      SLASH_COMMANDS.forEach(cmd => {
+        expect(cmd.command).toMatch(/^\//);
+      });
+    });
+
+    it('every command has a non-empty description', () => {
+      SLASH_COMMANDS.forEach(cmd => {
+        expect(cmd.description.length).toBeGreaterThan(0);
+      });
+    });
+
+    it('every command has a valid category', () => {
+      const validCategories = ['crew', 'flow', 'general'];
+      SLASH_COMMANDS.forEach(cmd => {
+        expect(validCategories).toContain(cmd.category);
+      });
+    });
+
+    it('includes /help command', () => {
+      expect(SLASH_COMMANDS.find(c => c.command === '/help')).toBeDefined();
+    });
+
+    it('includes crew commands (list, load, save, run, delete, schedule)', () => {
+      const crewCommands = SLASH_COMMANDS.filter(c => c.category === 'crew');
+      expect(crewCommands.length).toBe(6);
+    });
+
+    it('includes flow commands (list, load, save, run, delete)', () => {
+      const flowCommands = SLASH_COMMANDS.filter(c => c.category === 'flow');
+      expect(flowCommands.length).toBe(5);
+    });
+  });
+
+  describe('filterSlashCommands', () => {
+    it('returns all commands for "/"', () => {
+      const results = filterSlashCommands('/');
+      expect(results).toHaveLength(SLASH_COMMANDS.length);
+    });
+
+    it('filters to list commands for "/list"', () => {
+      const results = filterSlashCommands('/list');
+      expect(results).toHaveLength(2);
+      expect(results.every(c => c.command.startsWith('/list'))).toBe(true);
+    });
+
+    it('filters to "/list crews" for "/list c"', () => {
+      const results = filterSlashCommands('/list c');
+      expect(results).toHaveLength(1);
+      expect(results[0].command).toBe('/list crews');
+    });
+
+    it('filters to run commands for "/run"', () => {
+      const results = filterSlashCommands('/run');
+      expect(results).toHaveLength(2);
+      expect(results.every(c => c.command.startsWith('/run'))).toBe(true);
+    });
+
+    it('returns only /help for "/help"', () => {
+      const results = filterSlashCommands('/help');
+      expect(results).toHaveLength(1);
+      expect(results[0].command).toBe('/help');
+    });
+
+    it('returns empty array for non-matching input "/xyz"', () => {
+      const results = filterSlashCommands('/xyz');
+      expect(results).toHaveLength(0);
+    });
+
+    it('is case-insensitive', () => {
+      const results = filterSlashCommands('/LIST');
+      expect(results).toHaveLength(2);
+    });
+
+    it('filters to crew-specific commands for "/load crew"', () => {
+      const results = filterSlashCommands('/load crew');
+      expect(results).toHaveLength(1);
+      expect(results[0].command).toBe('/load crew');
+    });
+
+    it('filters to delete commands for "/delete"', () => {
+      const results = filterSlashCommands('/delete');
+      expect(results).toHaveLength(2);
+      expect(results.every(c => c.command.startsWith('/delete'))).toBe(true);
     });
   });
 });

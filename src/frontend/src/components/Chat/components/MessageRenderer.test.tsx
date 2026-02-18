@@ -187,7 +187,7 @@ describe('MessageRenderer', () => {
         const ol = container.querySelector('ol');
         expect(ol).not.toBeNull();
         expect(ol!.style.margin).toBe('2px 0px');
-        expect(ol!.style.paddingLeft).toBe('20px');
+        expect(ol!.style.paddingLeft).toBe('32px');
       });
 
       it('renders paragraphs with compact spacing', () => {

@@ -963,3 +963,159 @@ describe('chatCommandClick event listener', () => {
     removeEventListenerSpy.mockRestore();
   });
 });
+
+describe('Slash Command Autocomplete Menu', () => {
+  const slashProps = {
+    onNodesGenerated: vi.fn(),
+    onLoadingStateChange: vi.fn(),
+    selectedModel: 'test-model',
+    selectedTools: [],
+    isVisible: true,
+    setSelectedModel: vi.fn(),
+    nodes: [] as Node[],
+    edges: [] as Edge[],
+    onExecuteCrew: vi.fn(),
+    onToggleCollapse: vi.fn(),
+    chatSessionId: 'test-session-slash',
+    onOpenLogs: vi.fn(),
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    // Pre-populate messages so the empty state (which contains command text like "/help")
+    // does not render and conflict with slash menu assertions.
+    // The useChatSession mock always returns sessionId 'test-session-123'.
+    const { __storeState } = await import('../../store/chatMessagesStore') as {
+      __storeState: { messagesBySession: Record<string, unknown[]> };
+    };
+    __storeState.messagesBySession['test-session-123'] = [
+      { id: 'msg-seed', type: 'assistant', content: 'Hello', timestamp: new Date().toISOString() },
+    ];
+  });
+
+  afterEach(async () => {
+    const { __storeState } = await import('../../store/chatMessagesStore') as {
+      __storeState: { messagesBySession: Record<string, unknown[]> };
+    };
+    delete __storeState.messagesBySession['test-session-123'];
+  });
+
+  it('does not show slash menu initially', () => {
+    render(<WorkflowChat {...slashProps} />);
+    // The slash menu renders command text like "List all saved crews" as secondary text.
+    // When the menu is hidden, these descriptions should not be in the document.
+    expect(screen.queryByText('List all saved crews')).not.toBeInTheDocument();
+  });
+
+  it('shows slash menu when typing "/"', async () => {
+    render(<WorkflowChat {...slashProps} />);
+
+    const input = screen.getByPlaceholderText('Describe what you want to create...');
+    await userEvent.type(input, '/');
+
+    expect(screen.getByText('List all saved crews')).toBeInTheDocument();
+    expect(screen.getByText('Show all available commands')).toBeInTheDocument();
+  });
+
+  it('filters commands when typing "/list"', async () => {
+    render(<WorkflowChat {...slashProps} />);
+
+    const input = screen.getByPlaceholderText('Describe what you want to create...');
+    await userEvent.type(input, '/list');
+
+    expect(screen.getByText('List all saved crews')).toBeInTheDocument();
+    expect(screen.getByText('List all saved flows')).toBeInTheDocument();
+    // /help and /run should not be visible
+    expect(screen.queryByText('Show all available commands')).not.toBeInTheDocument();
+    expect(screen.queryByText('Execute the current crew')).not.toBeInTheDocument();
+  });
+
+  it('hides slash menu when input does not start with "/"', async () => {
+    render(<WorkflowChat {...slashProps} />);
+
+    const input = screen.getByPlaceholderText('Describe what you want to create...');
+    await userEvent.type(input, '/');
+    expect(screen.getByText('Show all available commands')).toBeInTheDocument();
+
+    await userEvent.clear(input);
+    await userEvent.type(input, 'hello');
+    expect(screen.queryByText('Show all available commands')).not.toBeInTheDocument();
+  });
+
+  it('hides slash menu when no commands match', async () => {
+    render(<WorkflowChat {...slashProps} />);
+
+    const input = screen.getByPlaceholderText('Describe what you want to create...');
+    await userEvent.type(input, '/zzz');
+    expect(screen.queryByText('Show all available commands')).not.toBeInTheDocument();
+  });
+
+  it('selects command on Enter and fills input', async () => {
+    render(<WorkflowChat {...slashProps} />);
+
+    const input = screen.getByPlaceholderText('Describe what you want to create...');
+    await userEvent.type(input, '/help');
+
+    // Press Enter to select the first (only) match
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    // Input should be filled with the command + trailing space
+    expect(input).toHaveValue('/help ');
+    // Menu should be closed
+    expect(screen.queryByText('Show all available commands')).not.toBeInTheDocument();
+  });
+
+  it('closes slash menu on Escape', async () => {
+    render(<WorkflowChat {...slashProps} />);
+
+    const input = screen.getByPlaceholderText('Describe what you want to create...');
+    await userEvent.type(input, '/');
+    expect(screen.getByText('Show all available commands')).toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: 'Escape', code: 'Escape' });
+    expect(screen.queryByText('Show all available commands')).not.toBeInTheDocument();
+  });
+
+  it('navigates with ArrowDown and ArrowUp', async () => {
+    render(<WorkflowChat {...slashProps} />);
+
+    const input = screen.getByPlaceholderText('Describe what you want to create...');
+    await userEvent.type(input, '/list');
+
+    // Two items: /list crews (index 0, selected by default), /list flows (index 1)
+    const items = screen.getAllByRole('button').filter(btn =>
+      btn.textContent?.includes('/list')
+    );
+
+    expect(items[0]).toHaveClass('Mui-selected');
+
+    // ArrowDown to select second item
+    fireEvent.keyDown(input, { key: 'ArrowDown', code: 'ArrowDown' });
+
+    const updatedItems = screen.getAllByRole('button').filter(btn =>
+      btn.textContent?.includes('/list')
+    );
+    expect(updatedItems[1]).toHaveClass('Mui-selected');
+
+    // ArrowUp to go back to first item
+    fireEvent.keyDown(input, { key: 'ArrowUp', code: 'ArrowUp' });
+
+    const finalItems = screen.getAllByRole('button').filter(btn =>
+      btn.textContent?.includes('/list')
+    );
+    expect(finalItems[0]).toHaveClass('Mui-selected');
+  });
+
+  it('fills input when clicking a command in the menu', async () => {
+    render(<WorkflowChat {...slashProps} />);
+
+    const input = screen.getByPlaceholderText('Describe what you want to create...');
+    await userEvent.type(input, '/help');
+
+    // Use description text to find the menu item precisely
+    const helpItem = screen.getByText('Show all available commands').closest('[role="button"]')!;
+    fireEvent.mouseDown(helpItem);
+
+    expect(input).toHaveValue('/help ');
+  });
+});

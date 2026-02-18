@@ -1,5 +1,31 @@
 import { Node, Edge } from 'reactflow';
 
+export interface SlashCommand {
+  command: string;
+  description: string;
+  category: 'crew' | 'flow' | 'general';
+}
+
+export const SLASH_COMMANDS: SlashCommand[] = [
+  { command: '/list crews', description: 'List all saved crews', category: 'crew' },
+  { command: '/list flows', description: 'List all saved flows', category: 'flow' },
+  { command: '/load crew', description: 'Load a saved crew onto the canvas', category: 'crew' },
+  { command: '/load flow', description: 'Load a saved flow onto the canvas', category: 'flow' },
+  { command: '/save crew', description: 'Save the current crew', category: 'crew' },
+  { command: '/save flow', description: 'Save the current flow', category: 'flow' },
+  { command: '/run crew', description: 'Execute the current crew', category: 'crew' },
+  { command: '/run flow', description: 'Execute the current flow', category: 'flow' },
+  { command: '/delete crew', description: 'Delete a saved crew', category: 'crew' },
+  { command: '/delete flow', description: 'Delete a saved flow', category: 'flow' },
+  { command: '/schedule crew', description: 'Schedule crew for automatic execution', category: 'crew' },
+  { command: '/help', description: 'Show all available commands', category: 'general' },
+];
+
+export const filterSlashCommands = (input: string): SlashCommand[] => {
+  const lower = input.toLowerCase();
+  return SLASH_COMMANDS.filter(cmd => cmd.command.startsWith(lower));
+};
+
 export const hasCrewContent = (nodes: Node[]) => {
   const hasAgents = nodes.some(node => node.type === 'agentNode');
   const hasTask = nodes.some(node => node.type === 'taskNode');
