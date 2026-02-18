@@ -73,7 +73,7 @@ def get_tool_configs():
             "result_as_answer": False
         },  # PerplexityTool
         "35": {
-            "result_as_answer": True
+            "result_as_answer": False
         },  # GenieTool
         "71": {
             "result_as_answer": True,
