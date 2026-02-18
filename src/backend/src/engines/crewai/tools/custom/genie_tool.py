@@ -62,6 +62,9 @@ class GenieTool(BaseTool):
     _tool_id: int = PrivateAttr(default=35)  # Default tool ID
     _user_token: str = PrivateAttr(default=None)  # For OBO authentication
     _group_id: str = PrivateAttr(default=None)  # For PAT authentication fallback
+    _call_count: int = PrivateAttr(default=0)  # Tracks how many times _run has been invoked
+    _max_calls: int = PrivateAttr(default=5)  # Configurable call limit per tool instance
+    _max_result_rows: int = PrivateAttr(default=50)  # Max rows returned per query
 
     def __init__(self, tool_config: Optional[dict] = None, tool_id: Optional[int] = None, token_required: bool = True, user_token: str = None, group_id: str = None, result_as_answer: bool = False):
         super().__init__(result_as_answer=result_as_answer)
@@ -80,6 +83,11 @@ class GenieTool(BaseTool):
             # Calculate max retries based on timeout and base delay
             self._max_retries = (self._polling_timeout_minutes * 60) // self._base_polling_delay
             logger.info(f"Polling config: delay={self._base_polling_delay}s, timeout={self._polling_timeout_minutes}min, max_retries={self._max_retries}")
+
+            # Configure call limiter
+            self._max_calls = tool_config.get("max_calls", 5)
+            self._max_result_rows = tool_config.get("max_result_rows", 50)
+            logger.info(f"Call limiter config: max_calls={self._max_calls}, max_result_rows={self._max_result_rows}")
 
         # Set tool ID if provided
         if tool_id is not None:
@@ -471,10 +479,17 @@ class GenieTool(BaseTool):
             result = result_data["statement_response"].get("result", {})
             if "data_typed_array" in result and result["data_typed_array"]:
                 data_array = result["data_typed_array"]
-                
+                total_rows = len(data_array)
+
+                # Cap result rows to prevent excessive context growth
+                truncated = False
+                if total_rows > self._max_result_rows:
+                    data_array = data_array[:self._max_result_rows]
+                    truncated = True
+
                 # If no meaningful text response but we have data, add a summary
                 if not response_parts:
-                    response_parts.append(f"Query returned {len(data_array)} rows.")
+                    response_parts.append(f"Query returned {total_rows} rows.")
                 
                 response_parts.append("\nQuery Results:")
                 response_parts.append("-" * 20)
@@ -497,13 +512,26 @@ class GenieTool(BaseTool):
                         response_parts.append("".join(row_values))
                 
                 response_parts.append("-" * 20)
-        
+
+                if truncated:
+                    response_parts.append(f"Showing first {self._max_result_rows} of {total_rows} rows.")
+
         return "\n".join(response_parts) if response_parts else "No response content found"
 
     async def _run_async(self, question: str) -> str:
         """
         Async implementation of the Genie API query execution.
         """
+        # Enforce call limit to prevent unbounded loops
+        self._call_count += 1
+        if self._call_count > self._max_calls:
+            logger.warning(f"GenieTool call limit reached ({self._max_calls}). Rejecting call #{self._call_count}.")
+            return (
+                f"You have reached the maximum number of Genie queries ({self._max_calls}) for this task. "
+                "You must now synthesize and analyze the data you have already collected to produce your final answer. "
+                "Do NOT attempt to call GenieTool again."
+            )
+
         # Check if space_id is properly configured
         if not self._space_id:
             return """ERROR: Genie space ID is not configured!
@@ -601,6 +629,12 @@ This tool can extract information from databases and provide structured data in 
                             # Optionally append SQL for debugging
                             if generated_sql:
                                 response += f"\n\n[Generated SQL: {generated_sql}]"
+                            # Warn the agent on the final allowed call
+                            if self._call_count == self._max_calls:
+                                response += (
+                                    f"\n\n[NOTICE: This was your last allowed Genie query ({self._call_count}/{self._max_calls}). "
+                                    "You must now synthesize all collected data into your final answer.]"
+                                )
                             return response
 
                     # Calculate delay with exponential backoff after threshold

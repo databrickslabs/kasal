@@ -552,38 +552,71 @@ async def create_task(
     if 'guardrail' in task_config and task_config['guardrail']:
         guardrail_config = task_config['guardrail']
         guardrail_logger.info(f"Task {task_key} has guardrail configuration: {guardrail_config}")
-        
-        try:
-            # Import guardrail factory only when needed
-            from src.engines.crewai.guardrails.guardrail_factory import GuardrailFactory
-            
-            # Convert guardrail config to JSON string if it's a dictionary
-            if isinstance(guardrail_config, dict):
-                guardrail_config = json.dumps(guardrail_config)
-            
-            # Create the guardrail instance
-            guardrail = GuardrailFactory.create_guardrail(guardrail_config)
-            if guardrail:
-                # Create a callable wrapper for this guardrail
-                # Using GuardrailWrapper class instead of a closure because:
-                # CrewAI's LLMGuardrailStartedEvent.__init__ calls inspect.getsource()
-                # on the guardrail function, which fails for closures with
-                # "OSError: could not get source code". The wrapper class is defined
-                # in a source file, so getsource() can inspect it properly.
-                guardrail_wrapper = GuardrailWrapper(guardrail, task_key)
 
-                # Instead of setting as callback, set as guardrail function
-                # This integrates with CrewAI's native retry mechanism
-                task_args['guardrail'] = guardrail_wrapper
-                
-                # Make sure retry_on_fail is set to True
-                if 'retry_on_fail' not in task_config:
-                    task_args['retry_on_fail'] = True
-                
-                guardrail_logger.info(f"Added guardrail validation to task {task_key}")
-            else:
-                guardrail_logger.warning(f"Failed to create guardrail for task {task_key}, guardrail will not be applied")
-                # If guardrail creation failed but we have an existing callback, use it
+        # Detect if this is an LLM guardrail config (has 'description'/'llm_model' but no 'type')
+        # stored under the 'guardrail' key instead of the 'llm_guardrail' key.
+        # Parse the config to inspect its fields.
+        _parsed_config = guardrail_config
+        if isinstance(_parsed_config, str):
+            try:
+                _parsed_config = json.loads(_parsed_config)
+            except (json.JSONDecodeError, TypeError):
+                _parsed_config = {}
+
+        _is_llm_guardrail = (
+            isinstance(_parsed_config, dict)
+            and ('description' in _parsed_config or 'llm_model' in _parsed_config)
+            and 'type' not in _parsed_config
+        )
+
+        if _is_llm_guardrail:
+            # Route to LLM guardrail handler — the config was stored under 'guardrail'
+            # but is actually an LLM guardrail (description + llm_model, no code-based type).
+            guardrail_logger.info(f"Task {task_key} guardrail config detected as LLM guardrail (has description/llm_model, no type) — routing to LLM guardrail handler")
+            task_config['llm_guardrail'] = _parsed_config
+        else:
+            try:
+                # Import guardrail factory only when needed
+                from src.engines.crewai.guardrails.guardrail_factory import GuardrailFactory
+
+                # Convert guardrail config to JSON string if it's a dictionary
+                if isinstance(guardrail_config, dict):
+                    guardrail_config = json.dumps(guardrail_config)
+
+                # Create the guardrail instance
+                guardrail = GuardrailFactory.create_guardrail(guardrail_config)
+                if guardrail:
+                    # Create a callable wrapper for this guardrail
+                    # Using GuardrailWrapper class instead of a closure because:
+                    # CrewAI's LLMGuardrailStartedEvent.__init__ calls inspect.getsource()
+                    # on the guardrail function, which fails for closures with
+                    # "OSError: could not get source code". The wrapper class is defined
+                    # in a source file, so getsource() can inspect it properly.
+                    guardrail_wrapper = GuardrailWrapper(guardrail, task_key)
+
+                    # Instead of setting as callback, set as guardrail function
+                    # This integrates with CrewAI's native retry mechanism
+                    task_args['guardrail'] = guardrail_wrapper
+
+                    # Make sure retry_on_fail is set to True
+                    if 'retry_on_fail' not in task_config:
+                        task_args['retry_on_fail'] = True
+
+                    guardrail_logger.info(f"Added guardrail validation to task {task_key}")
+                else:
+                    guardrail_logger.warning(f"Failed to create guardrail for task {task_key}, guardrail will not be applied")
+                    # If guardrail creation failed but we have an existing callback, use it
+                    if existing_callback:
+                        if isinstance(existing_callback, str):
+                            callback_func = create_callback_from_string(existing_callback, task_key, callback_config, execution_name)
+                            if callback_func:
+                                task_args['callback'] = callback_func
+                        else:
+                            task_args['callback'] = existing_callback
+            except Exception as e:
+                guardrail_logger.error(f"Error setting up guardrail for task {task_key}: {str(e)}")
+                guardrail_logger.error(f"Stack trace: {traceback.format_exc()}")
+                # If guardrail setup failed but we have an existing callback, use it
                 if existing_callback:
                     if isinstance(existing_callback, str):
                         callback_func = create_callback_from_string(existing_callback, task_key, callback_config, execution_name)
@@ -591,17 +624,6 @@ async def create_task(
                             task_args['callback'] = callback_func
                     else:
                         task_args['callback'] = existing_callback
-        except Exception as e:
-            guardrail_logger.error(f"Error setting up guardrail for task {task_key}: {str(e)}")
-            guardrail_logger.error(f"Stack trace: {traceback.format_exc()}")
-            # If guardrail setup failed but we have an existing callback, use it
-            if existing_callback:
-                if isinstance(existing_callback, str):
-                    callback_func = create_callback_from_string(existing_callback, task_key, callback_config, execution_name)
-                    if callback_func:
-                        task_args['callback'] = callback_func
-                else:
-                    task_args['callback'] = existing_callback
     elif existing_callback:
         # No guardrail, but we have an existing callback
         if isinstance(existing_callback, str):
