@@ -485,12 +485,28 @@ class KasalDBSpanExporter(SpanExporter):
             )
 
     def shutdown(self) -> None:
-        """Shutdown thread pool and log final count."""
+        """Shutdown thread pool and log final count.
+
+        Uses wait=False with a bounded join to avoid deadlocking the
+        subprocess when a thread-pool task is stuck (e.g. on a Databricks
+        embedding call).  A 10-second grace period is given for pending
+        futures to drain before we move on.
+        """
         logger.info(
             f"[OTel-DB][{self._job_id}] shutdown() called, "
             f"total_exported={self._total_exported}, waiting for thread pool..."
         )
-        self._executor.shutdown(wait=True)
+        # Use wait=False so shutdown() returns immediately, then give
+        # pending futures a bounded grace period to finish.
+        self._executor.shutdown(wait=False, cancel_futures=True)
+        # Wait up to 10 seconds for any in-flight futures to complete
+        import time
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            # _executor._threads is empty once all workers have drained
+            if not getattr(self._executor, "_threads", None):
+                break
+            time.sleep(0.2)
         logger.info(
             f"[OTel-DB][{self._job_id}] shutdown() complete, "
             f"exported {self._total_exported} spans total"
