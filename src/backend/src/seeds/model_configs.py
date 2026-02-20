@@ -271,7 +271,7 @@ DEFAULT_MODELS = {
         "temperature": 0.7,
         "provider": "databricks",
         "context_window": 200000,
-        "max_output_tokens": 8192
+        "max_output_tokens": 64000
     },
     "databricks-claude-opus-4-1": {
         "name": "databricks-claude-opus-4-1",
@@ -303,6 +303,13 @@ DEFAULT_MODELS = {
     },
     "databricks-claude-sonnet-4-5": {
         "name": "databricks-claude-sonnet-4-5",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 200000,
+        "max_output_tokens": 64000
+    },
+    "databricks-claude-sonnet-4-6": {
+        "name": "databricks-claude-sonnet-4-6",
         "temperature": 0.7,
         "provider": "databricks",
         "context_window": 200000,
