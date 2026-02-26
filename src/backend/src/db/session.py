@@ -2,6 +2,7 @@ from typing import AsyncGenerator, Generator, Optional
 import os
 import logging
 import re
+import threading
 from pathlib import Path
 from datetime import datetime, timezone
 import sys
@@ -288,6 +289,115 @@ else:
         logger.info("USE_NULLPOOL=false - Full pooling mode enabled for maximum performance")
         engine = pooled_engine
 
+# ---------------------------------------------------------------------------
+# Lakebase OAuth token auto-refresh
+# ---------------------------------------------------------------------------
+# Lakebase (Databricks managed PostgreSQL) issues short-lived OAuth JWT tokens
+# that expire after ~1 hour.  When a new DB connection is needed, the
+# do_connect event fires synchronously (inside a SQLAlchemy greenlet, so
+# blocking I/O is safe) and we check whether the cached token is about to
+# expire; if it is, we request a fresh one via the Databricks REST API.
+# ---------------------------------------------------------------------------
+
+_lakebase_lock = threading.Lock()
+_lakebase_cache: dict = {"token": None, "expires_at": 0.0}
+
+
+def _refresh_lakebase_token_sync() -> Optional[str]:
+    """Refresh the Lakebase OAuth token synchronously. Thread-safe."""
+    import urllib.request as _ur
+    import urllib.error as _ue
+    import json as _json
+
+    pat = os.environ.get("LAKEBASE_PAT", "")
+    host = os.environ.get("LAKEBASE_HOST") or os.environ.get("DATABRICKS_HOST", "").rstrip("/")
+    instance = os.environ.get("LAKEBASE_INSTANCE_NAME", "")
+
+    if not (pat and host and instance):
+        logger.warning("Lakebase token refresh: LAKEBASE_PAT / LAKEBASE_HOST / LAKEBASE_INSTANCE_NAME not set")
+        return None
+
+    if not host.startswith("http"):
+        host = f"https://{host}"
+
+    try:
+        payload = _json.dumps({
+            "request_id": f"kasal-{int(time.time())}",
+            "instance_names": [instance],
+        }).encode("utf-8")
+        req = _ur.Request(
+            f"{host}/api/2.0/database/credentials",
+            data=payload,
+            headers={"Authorization": f"Bearer {pat}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        with _ur.urlopen(req, timeout=20) as resp:
+            cred = _json.loads(resp.read())
+
+        token = cred["token"]
+        expiry_str = cred.get("expiration_time", "")
+        if expiry_str:
+            expiry = datetime.fromisoformat(expiry_str.replace("Z", "+00:00"))
+            expires_at = expiry.timestamp()
+        else:
+            expires_at = time.time() + 3600
+
+        _lakebase_cache["token"] = token
+        _lakebase_cache["expires_at"] = expires_at
+        os.environ["POSTGRES_PASSWORD"] = token
+        logger.info(f"Lakebase OAuth token refreshed, expires: {expiry_str}")
+        return token
+    except _ue.HTTPError as e:
+        logger.error(f"Lakebase token refresh HTTP error {e.code}: {e.read()}")
+    except Exception as e:
+        logger.error(f"Lakebase token refresh failed: {e}")
+    return _lakebase_cache.get("token")  # return stale token as fallback
+
+
+def _get_lakebase_token() -> Optional[str]:
+    """Return a valid Lakebase token, refreshing if needed. Thread-safe."""
+    now = time.time()
+    with _lakebase_lock:
+        if _lakebase_cache["token"] and now < _lakebase_cache["expires_at"] - 300:
+            return _lakebase_cache["token"]
+        return _refresh_lakebase_token_sync()
+
+
+def _setup_lakebase_token_refresh(engines: list) -> None:
+    """Register do_connect listeners on the given engines for Lakebase token refresh."""
+    pat = os.environ.get("LAKEBASE_PAT", "")
+    instance = os.environ.get("LAKEBASE_INSTANCE_NAME", "")
+    if not (pat and instance):
+        return
+
+    # Seed the cache from the token generated at startup
+    current_token = os.environ.get("POSTGRES_PASSWORD", "")
+    expiry_str = os.environ.get("LAKEBASE_TOKEN_EXPIRES", "")
+    if current_token.startswith("eyJ") and expiry_str:
+        try:
+            expiry = datetime.fromisoformat(expiry_str.replace("Z", "+00:00"))
+            _lakebase_cache["token"] = current_token
+            _lakebase_cache["expires_at"] = expiry.timestamp()
+            logger.info(f"Lakebase token cache seeded from startup token, expires: {expiry_str}")
+        except Exception as e:
+            logger.warning(f"Could not parse LAKEBASE_TOKEN_EXPIRES: {e}")
+
+    def _do_connect_handler(dialect, conn_rec, cargs, cparams):
+        """Inject a fresh Lakebase OAuth token into every new DB connection."""
+        token = _get_lakebase_token()
+        if token:
+            cparams["password"] = token
+
+    for eng in engines:
+        event.listen(eng.sync_engine, "do_connect", _do_connect_handler)
+        logger.info(f"Lakebase token auto-refresh registered on {eng}")
+
+
+# Register Lakebase token refresh for PostgreSQL engines
+if not str(settings.DATABASE_URI).startswith("sqlite"):
+    _setup_lakebase_token_refresh([pooled_engine, nullpool_engine])
+
+
 # Configure SQLite for better concurrent access
 def configure_sqlite(dbapi_connection, connection_record):
     """Configure SQLite connection for better performance and concurrency."""
@@ -442,6 +552,8 @@ async def init_db() -> None:
             # environment settings, to prevent SQL injection via CREATE DATABASE.
             _validate_identifier(db_name, "database name")
 
+            ssl_arg = True if settings.POSTGRES_SSL else None
+
             try:
                 # First, try to connect to the specified database
                 test_conn = await asyncpg.connect(
@@ -449,7 +561,8 @@ async def init_db() -> None:
                     port=port,
                     user=user,
                     password=password,
-                    database=db_name
+                    database=db_name,
+                    ssl=ssl_arg
                 )
                 await test_conn.close()
                 logger.info(f"Database '{db_name}' exists and is accessible")
@@ -463,7 +576,8 @@ async def init_db() -> None:
                     port=port,
                     user=user,
                     password=password,
-                    database='postgres'  # Connect to default postgres database
+                    database='postgres',  # Connect to default postgres database
+                    ssl=ssl_arg
                 )
 
                 try:

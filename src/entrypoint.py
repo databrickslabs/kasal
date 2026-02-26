@@ -40,7 +40,7 @@ def create_parser():
     parser.add_argument(
         "--db-type",
         choices=["sqlite", "postgres"],
-        default="sqlite",
+        default=os.environ.get("DATABASE_TYPE", "sqlite"),
         help="Database type to use (sqlite or postgres)"
     )
     parser.add_argument(
@@ -227,6 +227,24 @@ async def initialize_database():
 
 def run_app():
     """Run the Kasal application."""
+    # Diagnostic: log all database-related env vars at startup so we can confirm
+    # what Databricks Apps actually injects into the process environment.
+    _db_env_keys = [
+        "DATABASE_TYPE", "DATABASE_URI", "DATABASE_URL",
+        "POSTGRES_SERVER", "POSTGRES_USER", "POSTGRES_DB",
+        "POSTGRES_PORT", "POSTGRES_SSL",
+        "SQLITE_DB_PATH",
+        "LAKEBASE_INSTANCE_NAME",
+        "DATABRICKS_HOST", "DATABRICKS_TOKEN",
+    ]
+    logger.info("=== DATABASE ENVIRONMENT AT STARTUP ===")
+    for _k in _db_env_keys:
+        _v = os.environ.get(_k)
+        if _k == "POSTGRES_PASSWORD":
+            _v = "<redacted>" if _v else "<not set>"
+        logger.info(f"  {_k}={repr(_v) if _v is not None else '<not set>'}")
+    logger.info("=======================================")
+
     # Parse command line arguments
     parser = create_parser()
     args = parser.parse_args()
@@ -264,13 +282,68 @@ def run_app():
     if args.db_type == "postgres":
         # Use PostgreSQL
         if args.db_url:
-            db_url = args.db_url
+            # Explicit URL passed — use it directly
+            os.environ["DATABASE_URL"] = args.db_url
+            os.environ["DATABASE_URI"] = args.db_url
         else:
-            logger.warning("No database URL provided for PostgreSQL. Using default.")
-            db_url = "postgresql://postgres:postgres@localhost:5432/kasal"
+            # No explicit URL — let settings.py build the URI from POSTGRES_* env vars
+            # (POSTGRES_SERVER, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_PORT, POSTGRES_SSL)
+            logger.info("Using PostgreSQL with connection settings from environment variables.")
 
-        os.environ["DATABASE_URL"] = db_url
-        os.environ["DATABASE_URI"] = db_url  # Set both variables
+        # Lakebase (Databricks managed PostgreSQL) requires an OAuth JWT token as the
+        # PostgreSQL password — static PAT tokens are rejected.  If LAKEBASE_INSTANCE_NAME
+        # is set, exchange the PAT in POSTGRES_PASSWORD for a fresh short-lived OAuth token
+        # BEFORE importing src.main (which triggers settings = Settings() and engine creation).
+        _lakebase_instance = os.environ.get("LAKEBASE_INSTANCE_NAME")
+        if _lakebase_instance:
+            logger.info(f"Generating fresh Lakebase OAuth token for instance: {_lakebase_instance}")
+            try:
+                import time as _time
+                import urllib.request as _urllib_req
+                import urllib.error as _urllib_err
+                import json as _json
+
+                _host = os.environ.get("DATABRICKS_HOST", "").rstrip("/")
+                if _host and not _host.startswith("http"):
+                    _host = f"https://{_host}"
+                _pat = os.environ.get("POSTGRES_PASSWORD", "")
+                logger.info(f"DATABRICKS_HOST={repr(_host)}, PAT present={bool(_pat)}")
+
+                if _host and _pat:
+                    _payload = _json.dumps({
+                        "request_id": f"kasal-{int(_time.time())}",
+                        "instance_names": [_lakebase_instance],
+                    }).encode("utf-8")
+                    _req = _urllib_req.Request(
+                        f"{_host}/api/2.0/database/credentials",
+                        data=_payload,
+                        headers={
+                            "Authorization": f"Bearer {_pat}",
+                            "Content-Type": "application/json",
+                        },
+                        method="POST",
+                    )
+                    try:
+                        with _urllib_req.urlopen(_req, timeout=20) as _resp:
+                            _cred = _json.loads(_resp.read())
+                        # Save PAT and host so session.py can refresh tokens on expiry
+                        os.environ["LAKEBASE_PAT"] = _pat
+                        os.environ["LAKEBASE_HOST"] = _host
+                        os.environ["LAKEBASE_TOKEN_EXPIRES"] = _cred.get("expiration_time", "")
+                        os.environ["POSTGRES_PASSWORD"] = _cred["token"]
+                        logger.info(
+                            f"Lakebase OAuth token generated, expires: {_cred.get('expiration_time', 'unknown')}"
+                        )
+                    except _urllib_err.HTTPError as _he:
+                        logger.warning(f"HTTP {_he.code} generating Lakebase credential: {_he.read()}")
+                    except Exception as _e:
+                        logger.warning(f"Error calling generate-database-credential: {_e}")
+                else:
+                    logger.warning(
+                        "DATABRICKS_HOST or POSTGRES_PASSWORD not set; cannot generate Lakebase OAuth token"
+                    )
+            except Exception as _outer:
+                logger.warning(f"Lakebase credential generation failed: {_outer}")
     else:
         # Use SQLite (default)
         db_path = os.environ.get("SQLITE_DB_PATH", str(project_root / "kasal.db"))
@@ -375,23 +448,39 @@ def run_app():
         # Add middleware to serve frontend for all non-API routes
         app.add_middleware(SPAMiddleware, frontend_dir=frontend_static_dir)
 
-        # Initialize the database
-        try:
-            # Create a new event loop
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            logger.info("Running database initialization...")
-            db_initialized = loop.run_until_complete(initialize_database())
-            logger.info(f"Database initialization complete (success: {db_initialized})")
-        except Exception as e:
-            logger.error(f"Error during database initialization: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
+        # Initialize the database in a background thread so uvicorn starts immediately.
+        # This ensures the process binds to the port quickly (critical for Databricks Apps
+        # 10-minute startup timeout), while DB init (table creation + seeding) runs in the
+        # background concurrently with the server serving static assets and health checks.
+        import threading
+
+        def _run_db_init():
+            bg_loop = None
+            try:
+                bg_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(bg_loop)
+                logger.info("Running database initialization (background thread)...")
+                db_initialized = bg_loop.run_until_complete(initialize_database())
+                logger.info(f"Database initialization complete (success: {db_initialized})")
+            except Exception as e:
+                logger.error(f"Error during background database initialization: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+            finally:
+                if bg_loop is not None:
+                    try:
+                        bg_loop.close()
+                    except Exception:
+                        pass
+
+        db_init_thread = threading.Thread(target=_run_db_init, daemon=True, name="db-init")
+        db_init_thread.start()
+        logger.info("Database initialization started in background thread")
 
         # Import uvicorn to run the app
         import uvicorn
 
-        # Run the app with uvicorn
+        # Run the app with uvicorn — starts immediately without waiting for DB init
         logger.info(f"Starting server on port {args.port}")
         uvicorn.run(
             app,
