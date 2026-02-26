@@ -422,11 +422,21 @@ async def local_dev_auth_middleware(request: Request, call_next):
     When running locally (not in Databricks Apps), this adds default headers
     so developers can use the app without OAuth/OBO authentication.
     """
-    # Check if we're in local development (no X-Forwarded-Email header present)
-    if not request.headers.get("X-Forwarded-Email") and not request.headers.get("X-Auth-Request-Email"):
-        # Inject default local dev user headers
-        request.scope["headers"].append((b"x-forwarded-email", b"david.schwarzenbacher@databricks.com"))
-        logger.debug("[LOCAL_DEV_AUTH] Injected default authentication headers for local development")
+    # Inject a fallback email when no platform header is present.
+    # In production (Databricks Apps) X-Forwarded-Email is always set by the platform,
+    # so this block is never reached there.
+    # Locally, use LOCAL_DEV_USER_EMAIL if configured, otherwise default to dev@localhost.
+    if (
+        not request.headers.get("X-Forwarded-Email")
+        and not request.headers.get("X-Auth-Request-Email")
+    ):
+        fallback_email = settings.LOCAL_DEV_USER_EMAIL or "dev@localhost"
+        request.scope["headers"].append(
+            (b"x-forwarded-email", fallback_email.encode())
+        )
+        logger.debug(
+            f"[LOCAL_DEV_AUTH] Injected fallback email header: {fallback_email}"
+        )
 
     response = await call_next(request)
     return response
