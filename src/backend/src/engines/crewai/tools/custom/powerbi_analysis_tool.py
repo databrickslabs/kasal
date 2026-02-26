@@ -819,12 +819,31 @@ class PowerBIAnalysisTool(BaseTool):
         except Exception as e:
             logger.warning(f"Could not get Fabric token, using Power BI token: {e}")
 
-        # Fetch TMDL for measures and tables
-        tmdl_parts = await self._fetch_tmdl_definition(workspace_id, dataset_id, fabric_token)
-        if tmdl_parts:
+        # Fetch measures and tables — three-tier fallback:
+        #   1. Fabric TMDL          (full context, Fabric workspaces)
+        #   2. Admin Scanner API    (full context, any workspace where SP has admin read)
+        #   3. DAX fallback         (partial — tables from relationships only, no measures)
+        tmdl_parts = await self._fetch_tmdl_via_fabric(workspace_id, dataset_id, fabric_token)
+        if tmdl_parts is not None:
             measures, tables = self._parse_tmdl_for_measures_and_tables(tmdl_parts, config)
-            model_context["measures"] = measures
-            model_context["tables"] = tables
+            logger.info(
+                f"[Model Context] Fabric TMDL: {len(measures)} measure(s), {len(tables)} table(s)"
+            )
+        else:
+            logger.info("[Model Context] Fabric API unavailable — trying Admin Scanner API")
+            measures, tables = await self._fetch_model_via_admin_scanner(
+                workspace_id, dataset_id, access_token, config
+            )
+            if not measures and not tables:
+                logger.info(
+                    "[Model Context] Admin Scanner unavailable — "
+                    "falling back to relationship-derived table names (no measures)"
+                )
+                measures, tables = await self._fetch_model_via_powerbi_dax(
+                    workspace_id, dataset_id, access_token, config
+                )
+        model_context["measures"] = measures
+        model_context["tables"] = tables
 
         # Fetch relationships via DAX
         relationships = await self._fetch_relationships(workspace_id, dataset_id, access_token, config)
@@ -842,14 +861,25 @@ class PowerBIAnalysisTool(BaseTool):
         from src.engines.crewai.tools.custom.powerbi_auth_utils import get_fabric_access_token_from_config
         return await get_fabric_access_token_from_config(config)
 
-    async def _fetch_tmdl_definition(
+    async def _fetch_tmdl_via_fabric(
         self,
         workspace_id: str,
         dataset_id: str,
         access_token: str
-    ) -> List[Dict[str, Any]]:
-        """Fetch TMDL definition from Fabric API."""
-        url = f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}/semanticModels/{dataset_id}/getDefinition?format=TMDL"
+    ) -> Optional[List[Dict[str, Any]]]:
+        """
+        Fetch TMDL definition from the Fabric REST API.
+
+        Returns:
+            List of TMDL parts when Fabric API responds successfully (may be empty for
+            models with no tables yet).  Returns None when the workspace is not
+            Fabric-enabled or the API is otherwise unavailable, signalling the caller
+            to fall back to the Power BI DAX INFO function approach.
+        """
+        url = (
+            f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}"
+            f"/semanticModels/{dataset_id}/getDefinition?format=TMDL"
+        )
         headers = {
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json"
@@ -860,10 +890,11 @@ class PowerBIAnalysisTool(BaseTool):
                 response = await client.post(url, headers=headers)
 
                 if response.status_code == 202:
-                    # Long-running operation - poll for completion
+                    # Long-running operation — poll for completion
                     location = response.headers.get("Location")
                     if not location:
-                        return []
+                        logger.warning("[TMDL] Fabric returned 202 but no Location header")
+                        return None
 
                     for _ in range(60):
                         await asyncio.sleep(2)
@@ -876,20 +907,272 @@ class PowerBIAnalysisTool(BaseTool):
                             result_response.raise_for_status()
                             return result_response.json().get("definition", {}).get("parts", [])
                         elif poll_data.get("status") == "Failed":
-                            logger.error(f"TMDL fetch failed: {poll_data}")
-                            return []
+                            logger.error(f"[TMDL] Fabric long-running operation failed: {poll_data}")
+                            return None
 
-                    return []
+                    logger.warning("[TMDL] Fabric polling timed out after 120 s")
+                    return None
 
                 elif response.status_code == 200:
                     return response.json().get("definition", {}).get("parts", [])
+
                 else:
-                    logger.error(f"TMDL fetch error: {response.status_code}")
-                    return []
+                    # 400/403/404 typically means the workspace is not Fabric-enabled
+                    logger.warning(
+                        f"[TMDL] Fabric API returned HTTP {response.status_code} — "
+                        "workspace is likely not Fabric-enabled, will try Power BI fallback"
+                    )
+                    return None
 
             except Exception as e:
-                logger.error(f"TMDL fetch exception: {e}")
-                return []
+                logger.error(f"[TMDL] Fabric API exception: {e}")
+                return None
+
+    async def _fetch_model_via_admin_scanner(
+        self,
+        workspace_id: str,
+        dataset_id: str,
+        access_token: str,
+        config: Dict[str, Any]
+    ) -> tuple:
+        """
+        Fetch full model schema via the Power BI Admin Metadata Scanner API.
+
+        Returns the same (measures, tables) tuple as the Fabric TMDL path, including
+        measure DAX expressions and column names.  Works for any workspace type
+        (non-Fabric Premium, PPU, Fabric) as long as the Service Principal has the
+        Power BI Service admin role or the Tenant.Read.All / Tenant.ReadWrite.All
+        permission granted in Azure AD.
+
+        Flow:
+            POST  /admin/workspaces/getInfo   → scan_id  (may return 202 + Location)
+            GET   /admin/workspaces/scanStatus/{scan_id}   (poll until Succeeded)
+            GET   /admin/workspaces/scanResult/{scan_id}   → full schema JSON
+
+        Returns ([], []) when the SP lacks admin permissions (401/403) so the caller
+        can transparently fall through to the DAX-only fallback.
+
+        Required SP permissions (one of):
+          • Power BI Service Administrator tenant role, OR
+          • Tenant.Read.All / Tenant.ReadWrite.All app permission in Azure AD
+            (granted by a Global Administrator via admin consent)
+        """
+        base = "https://api.powerbi.com/v1.0/myorg/admin/workspaces"
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+        skip_system = config.get("skip_system_tables", True)
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+
+            # ── Step 1: kick off the scan ──────────────────────────────────────
+            try:
+                response = await client.post(
+                    f"{base}/getInfo"
+                    "?lineage=false"
+                    "&datasourceDetails=false"
+                    "&datasetSchema=true"
+                    "&datasetExpressions=true",
+                    headers=headers,
+                    json={"workspaces": [workspace_id]}
+                )
+
+                if response.status_code in (401, 403):
+                    logger.info(
+                        f"[Admin Scanner] SP lacks admin permissions (HTTP {response.status_code}) — "
+                        "skipping. To enable: assign the 'Power BI Service Administrator' tenant role "
+                        "or grant Tenant.Read.All app permission to the SP."
+                    )
+                    return [], []
+
+                response.raise_for_status()
+                scan_id = response.json().get("id")
+                if not scan_id:
+                    logger.warning("[Admin Scanner] No scan ID in response")
+                    return [], []
+
+            except httpx.HTTPStatusError as e:
+                logger.warning(f"[Admin Scanner] getInfo failed HTTP {e.response.status_code}")
+                return [], []
+            except Exception as e:
+                logger.warning(f"[Admin Scanner] getInfo exception: {e}")
+                return [], []
+
+            # ── Step 2: poll until the scan is ready ───────────────────────────
+            try:
+                for _ in range(30):
+                    await asyncio.sleep(2)
+                    poll = await client.get(
+                        f"{base}/scanStatus/{scan_id}", headers=headers
+                    )
+                    poll.raise_for_status()
+                    status = poll.json().get("status", "")
+                    if status == "Succeeded":
+                        break
+                    if status == "Failed":
+                        logger.error(f"[Admin Scanner] Scan failed: {poll.json()}")
+                        return [], []
+                else:
+                    logger.warning("[Admin Scanner] Scan polling timed out after 60 s")
+                    return [], []
+            except Exception as e:
+                logger.warning(f"[Admin Scanner] Polling exception: {e}")
+                return [], []
+
+            # ── Step 3: fetch the result ───────────────────────────────────────
+            try:
+                result_resp = await client.get(
+                    f"{base}/scanResult/{scan_id}", headers=headers
+                )
+                result_resp.raise_for_status()
+                workspaces = result_resp.json().get("workspaces", [])
+            except Exception as e:
+                logger.warning(f"[Admin Scanner] scanResult exception: {e}")
+                return [], []
+
+        # ── Step 4: parse the result for the requested dataset ─────────────────
+        measures: List[Dict[str, Any]] = []
+        tables: List[Dict[str, Any]] = []
+
+        target_ws = next(
+            (ws for ws in workspaces if ws.get("id", "").lower() == workspace_id.lower()),
+            None
+        )
+        if not target_ws:
+            logger.warning("[Admin Scanner] Workspace not found in scan result")
+            return [], []
+
+        target_ds = next(
+            (
+                ds for ds in target_ws.get("datasets", [])
+                if ds.get("id", "").lower() == dataset_id.lower()
+            ),
+            None
+        )
+        if not target_ds:
+            logger.warning("[Admin Scanner] Dataset not found in scan result")
+            return [], []
+
+        for table in target_ds.get("tables", []):
+            table_name = table.get("name", "")
+
+            if skip_system:
+                if "LocalDateTable" in table_name or "DateTableTemplate" in table_name:
+                    continue
+
+            columns = [
+                col.get("name", "")
+                for col in table.get("columns", [])
+                if col.get("name") and not col.get("isHidden", False)
+            ]
+            tables.append({"name": table_name, "columns": columns})
+
+            for measure in table.get("measures", []):
+                measure_name = measure.get("name", "")
+                expression = measure.get("expression", "")
+                if not measure_name or not expression.strip():
+                    continue
+                measures.append({
+                    "name": measure_name,
+                    "table": table_name,
+                    "expression": expression.strip()
+                })
+
+        logger.info(
+            f"[Admin Scanner] {len(measures)} measure(s), {len(tables)} table(s) "
+            f"retrieved for dataset {dataset_id}"
+        )
+        return measures, tables
+
+    async def _fetch_model_via_powerbi_dax(
+        self,
+        workspace_id: str,
+        dataset_id: str,
+        access_token: str,
+        config: Dict[str, Any]
+    ) -> tuple:
+        """
+        Fallback model extraction for non-Fabric Power BI workspaces.
+
+        Power BI's executeQueries REST API blocks raw Analysis Services DMV functions
+        (INFO.TABLES, INFO.MEASURES, INFO.COLUMNS) — they return HTTP 400 with AS error
+        code 3239575574 (DMV_NOT_AUTHORIZED) regardless of token or SP permissions.
+
+        Only INFO.VIEW.* safe views are allowed via REST.  We use
+        INFO.VIEW.RELATIONSHIPS() — which is already called by _fetch_relationships —
+        to derive the set of table names present in the model.
+
+        Measure expressions are not retrievable via the REST API without XMLA access
+        (Premium/PPU with XMLA endpoint enabled).  We return an empty measures list
+        so the LLM works with table/relationship context only.
+
+        Customers who need full measure extraction on a non-Fabric workspace must
+        either:
+          a) Migrate to a Fabric workspace (recommended), or
+          b) Enable the XMLA endpoint and provide XMLA credentials.
+        """
+        query_url = (
+            f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}"
+            f"/datasets/{dataset_id}/executeQueries"
+        )
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        tables: List[Dict[str, Any]] = []
+
+        # ── Extract unique table names from relationship data ───────────────────
+        # INFO.VIEW.RELATIONSHIPS() is the only INFO.VIEW.* function permitted via
+        # the REST executeQueries API on non-Fabric workspaces.
+        try:
+            response = await httpx.AsyncClient(timeout=60.0).post(
+                query_url,
+                headers=headers,
+                json={
+                    "queries": [{"query": "EVALUATE INFO.VIEW.RELATIONSHIPS()"}],
+                    "serializerSettings": {"includeNulls": True}
+                }
+            )
+            response.raise_for_status()
+            rows = (
+                response.json()
+                .get("results", [{}])[0]
+                .get("tables", [{}])[0]
+                .get("rows", [])
+            )
+
+            seen: set = set()
+            for row in rows:
+                for key in ("[FromTable]", "[ToTable]"):
+                    name = row.get(key, "")
+                    if not name or name in seen:
+                        continue
+                    if config.get("skip_system_tables", True):
+                        if "LocalDateTable" in name or "DateTableTemplate" in name:
+                            continue
+                    seen.add(name)
+                    tables.append({"name": name})
+
+            logger.info(
+                f"[PowerBI Fallback] {len(tables)} table(s) derived from "
+                "INFO.VIEW.RELATIONSHIPS() — measures not available via REST API"
+            )
+
+        except Exception as e:
+            logger.warning(f"[PowerBI Fallback] INFO.VIEW.RELATIONSHIPS() failed: {e}")
+
+        # Measures cannot be retrieved without XMLA on non-Fabric workspaces.
+        measures: List[Dict[str, Any]] = []
+        if not measures:
+            logger.warning(
+                "[PowerBI Fallback] Measure expressions unavailable on non-Fabric workspace. "
+                "LLM will work with table/relationship context only. "
+                "To enable full measure extraction, use a Fabric workspace."
+            )
+
+        return measures, tables
 
     def _parse_tmdl_for_measures_and_tables(
         self,
