@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional, Union
 import os
 from pathlib import Path
+from urllib.parse import quote_plus
 
 from pydantic import AnyHttpUrl, PostgresDsn, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -32,6 +33,7 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str = "postgres"
     POSTGRES_DB: str = "kasal"
     POSTGRES_PORT: str = "5432"
+    POSTGRES_SSL: bool = os.getenv("POSTGRES_SSL", "false").lower() == "true"
     DATABASE_URI: Optional[str] = None
     SYNC_DATABASE_URI: Optional[str] = None
     
@@ -51,23 +53,29 @@ class Settings(BaseSettings):
             sqlite_path = info.data.get("SQLITE_DB_PATH", "./app.db")
             return f"sqlite+aiosqlite:///{sqlite_path}"
         else:
-            # Default to PostgreSQL - return string instead of PostgresDsn to avoid validation issues
-            return f"postgresql+asyncpg://{info.data.get('POSTGRES_USER')}:{info.data.get('POSTGRES_PASSWORD')}@{info.data.get('POSTGRES_SERVER')}:{info.data.get('POSTGRES_PORT', 5432)}/{info.data.get('POSTGRES_DB') or ''}"
+            # Default to PostgreSQL - URL-encode user/password so special chars (e.g. @ in emails) are safe
+            ssl_suffix = "?ssl=require" if info.data.get("POSTGRES_SSL") else ""
+            user = quote_plus(info.data.get('POSTGRES_USER') or '')
+            password = quote_plus(info.data.get('POSTGRES_PASSWORD') or '')
+            return f"postgresql+asyncpg://{user}:{password}@{info.data.get('POSTGRES_SERVER')}:{info.data.get('POSTGRES_PORT', 5432)}/{info.data.get('POSTGRES_DB') or ''}{ssl_suffix}"
 
     @field_validator("SYNC_DATABASE_URI", mode="before")
     def assemble_sync_db_connection(cls, v: Optional[str], info) -> Any:
         if isinstance(v, str):
             return v
-        
+
         # Check database type to determine URI format
         db_type = info.data.get("DATABASE_TYPE", "postgres")
-        
+
         if db_type.lower() == "sqlite":
             sqlite_path = info.data.get("SQLITE_DB_PATH", "./app.db")
             return f"sqlite:///{sqlite_path}"
         else:
-            # Use asyncpg for sync operations too - avoid psycopg2 dependency
-            return f"postgresql+asyncpg://{info.data.get('POSTGRES_USER')}:{info.data.get('POSTGRES_PASSWORD')}@{info.data.get('POSTGRES_SERVER')}:{info.data.get('POSTGRES_PORT', 5432)}/{info.data.get('POSTGRES_DB') or ''}"
+            # Use asyncpg for sync operations too - URL-encode user/password for special chars
+            ssl_suffix = "?ssl=require" if info.data.get("POSTGRES_SSL") else ""
+            user = quote_plus(info.data.get('POSTGRES_USER') or '')
+            password = quote_plus(info.data.get('POSTGRES_PASSWORD') or '')
+            return f"postgresql+asyncpg://{user}:{password}@{info.data.get('POSTGRES_SERVER')}:{info.data.get('POSTGRES_PORT', 5432)}/{info.data.get('POSTGRES_DB') or ''}{ssl_suffix}"
 
     # API Documentation
     DOCS_ENABLED: bool = True
@@ -80,6 +88,11 @@ class Settings(BaseSettings):
     SERVER_HOST: str = "0.0.0.0"
     SERVER_PORT: int = 8000
     DEBUG_MODE: bool = False
+
+    # Local development fallback user.
+    # Set this in your .env file when running outside Databricks Apps.
+    # Leave empty (the default) in production — the platform provides X-Forwarded-Email.
+    LOCAL_DEV_USER_EMAIL: str = os.getenv("LOCAL_DEV_USER_EMAIL", "")
 
     # Add the following setting to control database seeding
     AUTO_SEED_DATABASE: bool = True
