@@ -1365,9 +1365,11 @@ Please analyze this message and provide your intent classification, considering 
             )
 
             # Create dispatcher response
+            # Clamp confidence to [0.0, 1.0] range (LLM sometimes returns >1.0)
+            confidence = min(max(float(intent_result["confidence"]), 0.0), 1.0)
             dispatcher_response = DispatcherResponse(
                 intent=IntentType(intent_result["intent"]),
-                confidence=intent_result["confidence"],
+                confidence=confidence,
                 extracted_info=intent_result["extracted_info"],
                 suggested_prompt=intent_result["suggested_prompt"],
                 source=intent_result.get("source"),
