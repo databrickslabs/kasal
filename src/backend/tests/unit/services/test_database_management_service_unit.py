@@ -1268,7 +1268,7 @@ class TestGetDatabaseInfo:
 
     @pytest.mark.asyncio
     async def test_get_info_lakebase_enabled_but_session_is_sqlite(self, service, mock_session, mock_repository):
-        """Lakebase config is enabled but session is actually SQLite -- falls through to sqlite path."""
+        """Lakebase config is enabled but session is actually SQLite -- reports lakebase with connection_error."""
         mock_bind = MagicMock()
         mock_bind.url = "sqlite+aiosqlite:///app.db"
         mock_session.bind = mock_bind
@@ -1303,9 +1303,11 @@ class TestGetDatabaseInfo:
             result = await service.get_database_info()
 
         assert result["success"] is True
-        # Even though lakebase is enabled, actual session is sqlite so lakebase path
-        # is skipped (actual_session_db_type != 'postgres')
-        assert result["database_type"] == "sqlite"
+        # Lakebase is reported as active backend even though session fell back to sqlite
+        assert result["database_type"] == "lakebase"
+        assert result["lakebase_enabled"] is True
+        assert result["lakebase_instance"] == "my-lakebase"
+        assert "connection_error" in result
 
     @pytest.mark.asyncio
     async def test_get_info_lakebase_repo_failure(self, service, mock_session, mock_repository):
@@ -1491,6 +1493,130 @@ class TestGetDatabaseInfo:
 
         assert result["success"] is True
 
+    # ---- Lakebase info reporting (new behavior) ----
+
+    @pytest.mark.asyncio
+    async def test_get_database_info_lakebase_enabled_connected(self, service, mock_session, mock_repository):
+        """When lakebase is enabled and session is postgres, report database_type='lakebase' with tables."""
+        mock_bind = MagicMock()
+        mock_bind.url = "postgresql+asyncpg://user:pass@host/db"
+        mock_session.bind = mock_bind
+
+        lakebase_cfg = {
+            "enabled": True,
+            "endpoint": "https://example.com/lakebase",
+            "migration_completed": True,
+            "instance_name": "test-lakebase-instance",
+        }
+
+        mock_repository.get_database_info.return_value = {
+            "success": True,
+            "tables": {"agents": 20, "tasks": 15, "crews": 5},
+            "total_tables": 3,
+            "memory_backends": [{"id": "mb1", "name": "default"}],
+        }
+
+        with patch(
+            "src.services.database_management_service.DatabaseBackupRepository.get_database_type",
+            return_value="postgres",
+        ), patch(
+            "src.db.database_router.get_lakebase_config_from_db",
+            new_callable=AsyncMock,
+            return_value=lakebase_cfg,
+        ):
+            result = await service.get_database_info()
+
+        assert result["success"] is True
+        assert result["database_type"] == "lakebase"
+        assert result["lakebase_enabled"] is True
+        assert result["lakebase_instance"] == "test-lakebase-instance"
+        assert result["lakebase_endpoint"] == "https://example.com/lakebase"
+        assert result["tables"] == {"agents": 20, "tasks": 15, "crews": 5}
+        assert result["total_tables"] == 3
+        assert result["memory_backends"] == [{"id": "mb1", "name": "default"}]
+        assert "connection_error" not in result
+
+    @pytest.mark.asyncio
+    async def test_get_database_info_lakebase_enabled_connection_failed(self, service, mock_session, mock_repository):
+        """When lakebase is enabled but session fell back to sqlite, report 'lakebase' with connection_error."""
+        mock_bind = MagicMock()
+        mock_bind.url = "sqlite+aiosqlite:///app.db"
+        mock_session.bind = mock_bind
+
+        lakebase_cfg = {
+            "enabled": True,
+            "endpoint": "https://example.com/lakebase",
+            "migration_completed": True,
+            "instance_name": "my-lakebase",
+        }
+
+        with patch(
+            "src.services.database_management_service.DatabaseBackupRepository.get_database_type",
+            return_value="sqlite",
+        ), patch(
+            "src.services.database_management_service.settings"
+        ) as mock_settings, patch(
+            "src.services.database_management_service.os.path.isabs", return_value=True
+        ), patch(
+            "src.db.database_router.get_lakebase_config_from_db",
+            new_callable=AsyncMock,
+            return_value=lakebase_cfg,
+        ):
+            mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
+            result = await service.get_database_info()
+
+        assert result["success"] is True
+        assert result["database_type"] == "lakebase"
+        assert result["lakebase_enabled"] is True
+        assert result["lakebase_instance"] == "my-lakebase"
+        assert result["lakebase_endpoint"] == "https://example.com/lakebase"
+        assert "connection_error" in result
+        assert "connection failed" in result["connection_error"].lower()
+        assert "fallback" in result["connection_error"].lower()
+        assert result["tables"] == {}
+        assert result["total_tables"] == 0
+        assert result["memory_backends"] == []
+
+    @pytest.mark.asyncio
+    async def test_get_database_info_sqlite_normal(self, service, mock_session, mock_repository):
+        """Normal sqlite path when lakebase is not enabled -- no lakebase fields in result."""
+        mock_session.bind = None
+
+        with patch(
+            "src.services.database_management_service.DatabaseBackupRepository.get_database_type",
+            return_value="sqlite",
+        ), patch(
+            "src.services.database_management_service.settings"
+        ) as mock_settings, patch(
+            "src.services.database_management_service.os.path.isabs", return_value=True
+        ), patch(
+            "src.db.database_router.get_lakebase_config_from_db",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
+            mock_repository.get_database_info.return_value = {
+                "success": True,
+                "tables": {"users": 10},
+                "total_tables": 1,
+                "memory_backends": [],
+                "size": 2097152,
+                "path": "/tmp/test.db",
+            }
+
+            result = await service.get_database_info()
+
+        assert result["success"] is True
+        assert result["database_type"] == "sqlite"
+        assert result["tables"] == {"users": 10}
+        assert result["total_tables"] == 1
+        assert result["size_mb"] == 2.0
+        # Lakebase fields should NOT be present in normal sqlite mode
+        assert "lakebase_enabled" not in result
+        assert "lakebase_instance" not in result
+        assert "lakebase_endpoint" not in result
+        assert "connection_error" not in result
+
     # ---- General exception ----
 
     @pytest.mark.asyncio
@@ -1605,3 +1731,139 @@ class TestServiceWithUserToken:
             result = await service_with_token.export_to_volume(catalog="c", schema="s")
 
         assert result["success"] is True
+
+
+# ===================================================================
+# Housekeeping Tests
+# ===================================================================
+
+class TestRunHousekeeping:
+    """Tests for DatabaseManagementService.run_housekeeping."""
+
+    @pytest.fixture
+    def mock_session(self):
+        session = AsyncMock()
+        session.bind = None
+        session.execute = AsyncMock()
+        session.flush = AsyncMock()
+        session.commit = AsyncMock()
+        return session
+
+    @pytest.fixture
+    def service(self, mock_session):
+        from src.services.database_management_service import DatabaseManagementService
+        return DatabaseManagementService(
+            session=mock_session,
+            repository=AsyncMock(),
+            user_token=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_run_housekeeping_success(self, service, mock_session):
+        """Test successful housekeeping run deletes records from all tables."""
+        from unittest.mock import patch as _patch
+
+        # The service uses deferred imports, so we patch the class methods directly
+        mock_history_result = {
+            'executionhistory': 10, 'taskstatus': 5, 'errortrace': 2,
+        }
+
+        # Mock trace delete by ref (run_id subquery) + trace by date + llm delete + vacuum
+        mock_trace_ref = MagicMock(rowcount=30)
+        mock_trace_date = MagicMock(rowcount=5)
+        mock_llm = MagicMock(rowcount=8)
+
+        mock_session.execute = AsyncMock(
+            side_effect=[mock_trace_ref, mock_trace_date, mock_llm, None]
+        )
+
+        with _patch(
+            "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
+            new_callable=AsyncMock,
+            return_value=mock_history_result,
+        ), _patch(
+            "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
+            new_callable=AsyncMock,
+            return_value=20,
+        ), _patch(
+            "src.services.database_management_service.DatabaseBackupRepository"
+        ) as MockBackupRepo:
+            MockBackupRepo.get_database_type.return_value = "sqlite"
+
+            result = await service.run_housekeeping("2025-01-01")
+
+        assert result["success"] is True
+        assert result["cutoff_date"] == "2025-01-01"
+        assert result["deleted"]["executionhistory"] == 10
+        assert result["deleted"]["taskstatus"] == 5
+        assert result["deleted"]["errortrace"] == 2
+        assert result["deleted"]["execution_trace"] == 35  # 30 + 5
+        assert result["deleted"]["execution_logs"] == 20
+        assert result["deleted"]["llmlog"] == 8
+        assert result["total_deleted"] == 80
+
+        mock_session.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_run_housekeeping_invalid_date(self, service):
+        """Test housekeeping with invalid date format returns error."""
+        result = await service.run_housekeeping("not-a-date")
+
+        assert result["success"] is False
+        assert "Invalid date format" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_run_housekeeping_empty_date(self, service):
+        """Test housekeeping with empty date string returns error."""
+        result = await service.run_housekeeping("")
+
+        assert result["success"] is False
+
+    @pytest.mark.asyncio
+    async def test_run_housekeeping_database_error(self, service, mock_session):
+        """Test housekeeping handles database errors gracefully."""
+        mock_session.execute = AsyncMock(side_effect=Exception("Connection lost"))
+
+        with patch(
+            "src.services.database_management_service.DatabaseBackupRepository"
+        ):
+            result = await service.run_housekeeping("2025-01-01")
+
+        assert result["success"] is False
+        assert "Connection lost" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_run_housekeeping_zero_deletions(self, service, mock_session):
+        """Test housekeeping when no records match the cutoff."""
+        mock_history_repo = AsyncMock()
+        mock_history_repo.delete_older_than = AsyncMock(return_value={
+            'executionhistory': 0,
+            'taskstatus': 0,
+            'errortrace': 0,
+        })
+
+        mock_logs_repo = AsyncMock()
+        mock_logs_repo.delete_older_than = AsyncMock(return_value=0)
+
+        mock_zero_result = MagicMock()
+        mock_zero_result.rowcount = 0
+
+        mock_session.execute = AsyncMock(return_value=mock_zero_result)
+
+        with patch(
+            "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
+            new_callable=AsyncMock,
+            return_value=mock_history_repo.delete_older_than.return_value,
+        ), patch(
+            "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
+            new_callable=AsyncMock,
+            return_value=0,
+        ), patch(
+            "src.services.database_management_service.DatabaseBackupRepository"
+        ) as MockBackupRepo:
+            MockBackupRepo.get_database_type.return_value = "postgres"
+
+            result = await service.run_housekeeping("2020-01-01")
+
+        assert result["success"] is True
+        assert result["total_deleted"] == 0

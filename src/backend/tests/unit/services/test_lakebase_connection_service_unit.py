@@ -2,13 +2,11 @@
 Unit tests for LakebaseConnectionService.
 
 Tests all connection management, credential generation, engine creation,
-and user identity resolution for Databricks Lakebase (PostgreSQL) instances.
+and SPN-based username resolution for Databricks Lakebase (PostgreSQL) instances.
 """
 import pytest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
-from typing import Optional
-
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.services.lakebase_connection_service import LakebaseConnectionService
 
@@ -121,7 +119,6 @@ class TestGetWorkspaceClient:
         first = await service.get_workspace_client()
         second = await service.get_workspace_client()
 
-        # Only called once despite two invocations
         mock_get_ws.assert_awaited_once()
         assert first is second
 
@@ -144,6 +141,73 @@ class TestGetWorkspaceClient:
             await service.get_workspace_client()
 
         assert service._workspace_client is None
+
+
+# ---------------------------------------------------------------------------
+# Test class: get_spn_username
+# ---------------------------------------------------------------------------
+
+class TestGetSpnUsername:
+    """Tests for the get_spn_username method."""
+
+    def test_returns_client_id_from_env(self, service):
+        """get_spn_username should return DATABRICKS_CLIENT_ID from environment."""
+        with patch.dict("os.environ", {"DATABRICKS_CLIENT_ID": "84698c5c-6144-44a2-b6d4-4a69c77fc442"}):
+            result = service.get_spn_username()
+            assert result == "84698c5c-6144-44a2-b6d4-4a69c77fc442"
+
+    def test_returns_none_when_env_not_set(self, service):
+        """get_spn_username should return None when DATABRICKS_CLIENT_ID is not set."""
+        with patch.dict("os.environ", {}, clear=True):
+            result = service.get_spn_username()
+            assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Test class: get_username
+# ---------------------------------------------------------------------------
+
+class TestGetUsername:
+    """Tests for the get_username method."""
+
+    @pytest.mark.asyncio
+    async def test_returns_spn_client_id_when_available(self, service):
+        """get_username should prefer SPN client_id from environment."""
+        with patch.dict("os.environ", {"DATABRICKS_CLIENT_ID": "test-spn-id"}):
+            result = await service.get_username()
+            assert result == "test-spn-id"
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_user_email(self, service):
+        """get_username should fall back to user_email when no SPN client_id."""
+        with patch.dict("os.environ", {}, clear=True):
+            result = await service.get_username()
+            assert result == "testuser@example.com"
+
+    @pytest.mark.asyncio
+    @patch("src.services.lakebase_connection_service.get_workspace_client")
+    async def test_falls_back_to_workspace_user(self, mock_get_ws, service_no_email):
+        """get_username should fall back to workspace current user when no email."""
+        with patch.dict("os.environ", {}, clear=True):
+            mock_ws = MagicMock()
+            mock_user = MagicMock()
+            mock_user.user_name = "workspace-user@example.com"
+            mock_ws.current_user.me.return_value = mock_user
+            mock_get_ws.return_value = mock_ws
+
+            result = await service_no_email.get_username()
+            assert result == "workspace-user@example.com"
+
+    @pytest.mark.asyncio
+    @patch("src.services.lakebase_connection_service.get_workspace_client")
+    async def test_raises_when_no_username_available(self, mock_get_ws):
+        """get_username should raise ValueError when no username can be determined."""
+        svc = LakebaseConnectionService(user_token=None, user_email=None)
+        with patch.dict("os.environ", {}, clear=True):
+            mock_get_ws.return_value = None
+
+            with pytest.raises(ValueError, match="Cannot determine PostgreSQL username"):
+                await svc.get_username()
 
 
 # ---------------------------------------------------------------------------
@@ -182,281 +246,6 @@ class TestGenerateCredentials:
 
         with pytest.raises(RuntimeError, match="API error"):
             await service.generate_credentials(instance_name)
-
-
-# ---------------------------------------------------------------------------
-# Test class: test_connections_async
-# ---------------------------------------------------------------------------
-
-class TestTestConnectionsAsync:
-    """Tests for the test_connections_async method."""
-
-    def _make_async_engine_mock(self, succeed: bool, current_user: str = "admin"):
-        """
-        Build a mock async engine whose connect() context manager either
-        succeeds (returning current_user, version) or raises an exception.
-        """
-        engine = MagicMock()
-        conn = AsyncMock()
-        if succeed:
-            row = (current_user, "PostgreSQL 15.0 (Databricks)")
-            result = MagicMock()
-            result.fetchone.return_value = row
-            conn.execute = AsyncMock(return_value=result)
-        else:
-            conn.execute = AsyncMock(side_effect=Exception("connection refused"))
-
-        # async context manager: __aenter__ returns conn, __aexit__ does nothing
-        ctx = AsyncMock()
-        ctx.__aenter__ = AsyncMock(return_value=conn)
-        ctx.__aexit__ = AsyncMock(return_value=False)
-        engine.connect.return_value = ctx
-        engine.dispose = AsyncMock()
-        return engine
-
-    @pytest.mark.asyncio
-    @patch("src.services.lakebase_connection_service.create_async_engine")
-    async def test_succeeds_on_first_approach(
-        self, mock_create_engine, service, endpoint, mock_credential
-    ):
-        """test_connections_async should return engine+user when first attempt succeeds."""
-        good_engine = self._make_async_engine_mock(succeed=True, current_user="token_user")
-        mock_create_engine.return_value = good_engine
-
-        engine, user = await service.test_connections_async(endpoint, mock_credential)
-
-        assert engine is good_engine
-        assert user == "token_user"
-        # Should have been called once (first attempt succeeded, no further attempts)
-        assert mock_create_engine.call_count == 1
-
-    @pytest.mark.asyncio
-    @patch("src.services.lakebase_connection_service.create_async_engine")
-    async def test_falls_back_to_second_approach(
-        self, mock_create_engine, service, endpoint, mock_credential
-    ):
-        """test_connections_async should try the second approach when the first fails."""
-        bad_engine = self._make_async_engine_mock(succeed=False)
-        good_engine = self._make_async_engine_mock(succeed=True, current_user="admin")
-
-        mock_create_engine.side_effect = [bad_engine, good_engine]
-
-        engine, user = await service.test_connections_async(endpoint, mock_credential)
-
-        assert engine is good_engine
-        assert user == "admin"
-        assert mock_create_engine.call_count == 2
-        # Verify the first failed engine was disposed
-        bad_engine.dispose.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    @patch("src.services.lakebase_connection_service.create_async_engine")
-    async def test_falls_back_to_third_approach(
-        self, mock_create_engine, service, endpoint, mock_credential
-    ):
-        """test_connections_async should try the third approach when first two fail."""
-        bad1 = self._make_async_engine_mock(succeed=False)
-        bad2 = self._make_async_engine_mock(succeed=False)
-        good = self._make_async_engine_mock(succeed=True, current_user="postgres")
-
-        mock_create_engine.side_effect = [bad1, bad2, good]
-
-        engine, user = await service.test_connections_async(endpoint, mock_credential)
-
-        assert engine is good
-        assert user == "postgres"
-        assert mock_create_engine.call_count == 3
-
-    @pytest.mark.asyncio
-    @patch("src.services.lakebase_connection_service.create_async_engine")
-    async def test_returns_none_none_when_all_fail(
-        self, mock_create_engine, service, endpoint, mock_credential
-    ):
-        """test_connections_async should return (None, None) when all approaches fail."""
-        bad1 = self._make_async_engine_mock(succeed=False)
-        bad2 = self._make_async_engine_mock(succeed=False)
-        bad3 = self._make_async_engine_mock(succeed=False)
-
-        mock_create_engine.side_effect = [bad1, bad2, bad3]
-
-        engine, user = await service.test_connections_async(endpoint, mock_credential)
-
-        assert engine is None
-        assert user is None
-        # All three failed engines should have been disposed
-        bad1.dispose.assert_awaited_once()
-        bad2.dispose.assert_awaited_once()
-        bad3.dispose.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    @patch("src.services.lakebase_connection_service.create_async_engine")
-    async def test_connection_url_contains_endpoint_and_token(
-        self, mock_create_engine, service, endpoint, mock_credential
-    ):
-        """test_connections_async should build URLs containing the endpoint and token."""
-        good_engine = self._make_async_engine_mock(succeed=True, current_user="user1")
-        mock_create_engine.return_value = good_engine
-
-        await service.test_connections_async(endpoint, mock_credential)
-
-        call_args = mock_create_engine.call_args
-        url = call_args[0][0]
-        assert endpoint in url
-        assert mock_credential.token in url
-        assert "asyncpg" in url
-
-
-# ---------------------------------------------------------------------------
-# Test class: test_connections_sync
-# ---------------------------------------------------------------------------
-
-class TestTestConnectionsSync:
-    """Tests for the test_connections_sync method."""
-
-    def _make_sync_engine_mock(self, succeed: bool, current_user: str = "admin"):
-        """
-        Build a mock sync engine whose connect() context manager either
-        succeeds (returning current_user) or raises an exception.
-        """
-        engine = MagicMock()
-        conn = MagicMock()
-        if succeed:
-            result = MagicMock()
-            result.scalar.return_value = current_user
-            conn.execute.return_value = result
-        else:
-            conn.execute.side_effect = Exception("connection refused")
-
-        # sync context manager
-        conn.__enter__ = MagicMock(return_value=conn)
-        conn.__exit__ = MagicMock(return_value=False)
-        engine.connect.return_value = conn
-        engine.dispose = MagicMock()
-        return engine
-
-    @pytest.mark.asyncio
-    @patch("src.services.lakebase_connection_service.create_engine")
-    @patch("src.services.lakebase_connection_service.get_workspace_client")
-    async def test_succeeds_with_workspace_identity(
-        self, mock_get_ws_util, mock_create_engine, service, endpoint, mock_credential
-    ):
-        """test_connections_sync should succeed when workspace identity connects."""
-        # Mock the workspace identity resolution inside the method
-        mock_ws_inner = MagicMock()
-        mock_current_user_obj = MagicMock()
-        mock_current_user_obj.user_name = "spn-user@example.com"
-        mock_current_user_obj.application_id = None
-        mock_current_user_obj.display_name = None
-        mock_ws_inner.current_user.me.return_value = mock_current_user_obj
-        mock_get_ws_util.return_value = mock_ws_inner
-
-        good_engine = self._make_sync_engine_mock(succeed=True, current_user="spn-user@example.com")
-        mock_create_engine.return_value = good_engine
-
-        engine, user = service.test_connections_sync(endpoint, mock_credential)
-
-        assert engine is good_engine
-        assert user == "spn-user@example.com"
-
-    @pytest.mark.asyncio
-    @patch("src.services.lakebase_connection_service.create_engine")
-    @patch("src.services.lakebase_connection_service.get_workspace_client")
-    async def test_falls_back_to_user_email(
-        self, mock_get_ws_util, mock_create_engine, service, endpoint, mock_credential
-    ):
-        """test_connections_sync should fall back to user_email when workspace identity fails."""
-        # Workspace identity resolution fails
-        mock_get_ws_util.return_value = None
-
-        # First fallback attempts fail, user_email attempt succeeds
-        bad_engine = self._make_sync_engine_mock(succeed=False)
-        good_engine = self._make_sync_engine_mock(succeed=True, current_user="testuser@example.com")
-
-        # The order: user_email_obo attempt succeeds
-        # When workspace identity returns None, the first attempt is user_email_obo
-        mock_create_engine.side_effect = [good_engine]
-
-        engine, user = service.test_connections_sync(endpoint, mock_credential)
-
-        assert engine is good_engine
-        assert user == "testuser@example.com"
-
-    @pytest.mark.asyncio
-    @patch("src.services.lakebase_connection_service.create_engine")
-    @patch("src.services.lakebase_connection_service.get_workspace_client")
-    async def test_returns_none_none_when_all_fail(
-        self, mock_get_ws_util, mock_create_engine, service, endpoint, mock_credential
-    ):
-        """test_connections_sync should return (None, None) when all approaches fail."""
-        # Workspace identity resolution fails
-        mock_get_ws_util.return_value = None
-
-        # user_email_obo + 3 fallbacks = 4 attempts all fail
-        bad_engines = [self._make_sync_engine_mock(succeed=False) for _ in range(4)]
-        mock_create_engine.side_effect = bad_engines
-
-        engine, user = service.test_connections_sync(endpoint, mock_credential)
-
-        assert engine is None
-        assert user is None
-
-    @pytest.mark.asyncio
-    @patch("src.services.lakebase_connection_service.create_engine")
-    @patch("src.services.lakebase_connection_service.get_workspace_client")
-    async def test_no_user_email_skips_obo_attempt(
-        self, mock_get_ws_util, mock_create_engine, service_no_email, endpoint, mock_credential
-    ):
-        """test_connections_sync should skip the user_email_obo attempt when email is None."""
-        mock_get_ws_util.return_value = None
-
-        good_engine = self._make_sync_engine_mock(succeed=True, current_user="databricks_superuser")
-        mock_create_engine.return_value = good_engine
-
-        engine, user = service_no_email.test_connections_sync(endpoint, mock_credential)
-
-        assert engine is good_engine
-        assert user == "databricks_superuser"
-        # Verify that the first call was for databricks_superuser (not user_email_obo)
-        first_call_url = mock_create_engine.call_args_list[0][0][0]
-        assert "databricks_superuser" in first_call_url
-
-    @pytest.mark.asyncio
-    @patch("src.services.lakebase_connection_service.create_engine")
-    @patch("src.services.lakebase_connection_service.get_workspace_client")
-    async def test_connection_url_uses_pg8000_driver(
-        self, mock_get_ws_util, mock_create_engine, service, endpoint, mock_credential
-    ):
-        """test_connections_sync should build URLs using the pg8000 driver."""
-        mock_get_ws_util.return_value = None
-
-        good_engine = self._make_sync_engine_mock(succeed=True, current_user="test")
-        mock_create_engine.return_value = good_engine
-
-        service.test_connections_sync(endpoint, mock_credential)
-
-        first_call_url = mock_create_engine.call_args_list[0][0][0]
-        assert "pg8000" in first_call_url
-
-    @pytest.mark.asyncio
-    @patch("src.services.lakebase_connection_service.create_engine")
-    @patch("src.services.lakebase_connection_service.get_workspace_client")
-    async def test_disposes_failed_engines(
-        self, mock_get_ws_util, mock_create_engine, service_no_email, endpoint, mock_credential
-    ):
-        """test_connections_sync should dispose engines that fail connection."""
-        mock_get_ws_util.return_value = None
-
-        bad1 = self._make_sync_engine_mock(succeed=False)
-        bad2 = self._make_sync_engine_mock(succeed=False)
-        good = self._make_sync_engine_mock(succeed=True, current_user="admin")
-
-        mock_create_engine.side_effect = [bad1, bad2, good]
-
-        engine, user = service_no_email.test_connections_sync(endpoint, mock_credential)
-
-        assert engine is good
-        bad1.dispose.assert_called_once()
-        bad2.dispose.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -503,10 +292,10 @@ class TestCreateLakebaseEngineAsync:
 
     @pytest.mark.asyncio
     @patch("src.services.lakebase_connection_service.create_async_engine")
-    async def test_creates_engine_with_jit_off(
+    async def test_creates_engine_with_pool_pre_ping_false(
         self, mock_create_engine, service, endpoint
     ):
-        """create_lakebase_engine_async should disable JIT in server_settings."""
+        """create_lakebase_engine_async should set pool_pre_ping=False for do_connect compatibility."""
         mock_create_engine.return_value = MagicMock()
 
         await service.create_lakebase_engine_async(
@@ -514,7 +303,7 @@ class TestCreateLakebaseEngineAsync:
         )
 
         call_kwargs = mock_create_engine.call_args[1]
-        assert call_kwargs["connect_args"]["server_settings"]["jit"] == "off"
+        assert call_kwargs["pool_pre_ping"] is False
 
     @pytest.mark.asyncio
     @patch("src.services.lakebase_connection_service.create_async_engine")
@@ -600,105 +389,3 @@ class TestCreateLakebaseEngineSync:
 
         call_kwargs = mock_create_engine.call_args[1]
         assert call_kwargs["echo"] is False
-
-
-# ---------------------------------------------------------------------------
-# Test class: get_connected_user_identity
-# ---------------------------------------------------------------------------
-
-class TestGetConnectedUserIdentity:
-    """Tests for the get_connected_user_identity method."""
-
-    @pytest.mark.asyncio
-    async def test_success_path(self, service, instance_name, endpoint, mock_credential):
-        """get_connected_user_identity should return (user, engine) on success."""
-        mock_engine = MagicMock()
-        service.generate_credentials = AsyncMock(return_value=mock_credential)
-        service.test_connections_async = AsyncMock(
-            return_value=(mock_engine, "connected_admin")
-        )
-
-        user, engine = await service.get_connected_user_identity(instance_name, endpoint)
-
-        assert user == "connected_admin"
-        assert engine is mock_engine
-        service.generate_credentials.assert_awaited_once_with(instance_name)
-        service.test_connections_async.assert_awaited_once_with(endpoint, mock_credential)
-
-    @pytest.mark.asyncio
-    async def test_raises_when_engine_is_none(self, service, instance_name, endpoint, mock_credential):
-        """get_connected_user_identity should raise when engine is None."""
-        service.generate_credentials = AsyncMock(return_value=mock_credential)
-        service.test_connections_async = AsyncMock(return_value=(None, None))
-
-        with pytest.raises(Exception, match="Failed to connect to Lakebase"):
-            await service.get_connected_user_identity(instance_name, endpoint)
-
-    @pytest.mark.asyncio
-    async def test_raises_when_connected_user_is_none(
-        self, service, instance_name, endpoint, mock_credential
-    ):
-        """get_connected_user_identity should raise when connected_user is None but engine exists."""
-        mock_engine = MagicMock()
-        service.generate_credentials = AsyncMock(return_value=mock_credential)
-        service.test_connections_async = AsyncMock(return_value=(mock_engine, None))
-
-        with pytest.raises(Exception, match="Failed to connect to Lakebase"):
-            await service.get_connected_user_identity(instance_name, endpoint)
-
-    @pytest.mark.asyncio
-    async def test_propagates_credential_generation_error(
-        self, service, instance_name, endpoint
-    ):
-        """get_connected_user_identity should propagate errors from generate_credentials."""
-        service.generate_credentials = AsyncMock(
-            side_effect=RuntimeError("credential API error")
-        )
-
-        with pytest.raises(RuntimeError, match="credential API error"):
-            await service.get_connected_user_identity(instance_name, endpoint)
-
-
-# ---------------------------------------------------------------------------
-# Test class: resolve_postgresql_user
-# ---------------------------------------------------------------------------
-
-class TestResolvePostgresqlUser:
-    """Tests for the resolve_postgresql_user method."""
-
-    def test_prefers_connected_user(self, service):
-        """resolve_postgresql_user should return connected_user when provided."""
-        result = service.resolve_postgresql_user(
-            cred_user="cred_admin",
-            connected_user="actual_connected_user"
-        )
-        assert result == "actual_connected_user"
-
-    def test_falls_back_to_cred_user_when_connected_user_is_none(self, service):
-        """resolve_postgresql_user should return cred_user when connected_user is None."""
-        result = service.resolve_postgresql_user(
-            cred_user="cred_admin",
-            connected_user=None
-        )
-        assert result == "cred_admin"
-
-    def test_falls_back_to_cred_user_when_connected_user_is_empty(self, service):
-        """resolve_postgresql_user should return cred_user when connected_user is empty string."""
-        result = service.resolve_postgresql_user(
-            cred_user="cred_admin",
-            connected_user=""
-        )
-        assert result == "cred_admin"
-
-    def test_default_connected_user_is_none(self, service):
-        """resolve_postgresql_user should default connected_user to None."""
-        result = service.resolve_postgresql_user(cred_user="cred_admin")
-        assert result == "cred_admin"
-
-    def test_both_users_equal(self, service):
-        """resolve_postgresql_user should work when both users are the same."""
-        result = service.resolve_postgresql_user(
-            cred_user="same_user",
-            connected_user="same_user"
-        )
-        assert result == "same_user"

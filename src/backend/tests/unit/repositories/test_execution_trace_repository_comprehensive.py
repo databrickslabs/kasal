@@ -701,3 +701,54 @@ class TestDatabaseErrorHandling:
 
         with pytest.raises(SQLAlchemyError):
             await repository.get_all_traces()
+
+
+class TestDeleteOlderThan:
+    """Tests for delete_older_than method."""
+
+    @pytest.fixture
+    def mock_session(self):
+        """Create a mock async session."""
+        session = AsyncMock()
+        session.flush = AsyncMock()
+        session.rollback = AsyncMock()
+        return session
+
+    @pytest.fixture
+    def repository(self, mock_session):
+        """Create a repository instance with mock session."""
+        return ExecutionTraceRepository(mock_session)
+
+    @pytest.mark.asyncio
+    async def test_delete_older_than_returns_rowcount(self, repository, mock_session):
+        """Test deleting traces older than cutoff date."""
+        mock_result = MagicMock()
+        mock_result.rowcount = 15
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        result = await repository.delete_older_than(datetime(2025, 1, 1))
+
+        assert result == 15
+        mock_session.execute.assert_awaited_once()
+        mock_session.flush.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_delete_older_than_no_matches(self, repository, mock_session):
+        """Test when no traces match the cutoff."""
+        mock_result = MagicMock()
+        mock_result.rowcount = 0
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        result = await repository.delete_older_than(datetime(2020, 1, 1))
+
+        assert result == 0
+
+    @pytest.mark.asyncio
+    async def test_delete_older_than_database_error(self, repository, mock_session):
+        """Test that SQLAlchemy errors propagate and trigger rollback."""
+        mock_session.execute = AsyncMock(side_effect=SQLAlchemyError("DB error"))
+
+        with pytest.raises(SQLAlchemyError):
+            await repository.delete_older_than(datetime(2025, 1, 1))
+
+        mock_session.rollback.assert_awaited_once()
