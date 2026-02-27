@@ -2021,7 +2021,7 @@ class TestProgressiveGeneration:
         agent_saved_2 = {"id": "agent-id-2", "name": "Agent2", "role": "R2"}
         task_saved = {"id": "task-id-1", "name": "Task2", "description": "desc"}
 
-        request = self._make_progressive_request()
+        request = self._make_progressive_request(prompt="build a crew with 2 agents and 1 task")
         gen_id = "gen-agent-err"
 
         with self._progressive_patches(plan=plan, agent_saved=agent_saved_2, task_saved=task_saved) as m:
@@ -2118,7 +2118,7 @@ class TestProgressiveGeneration:
             ],
         )
 
-        request = self._make_progressive_request()
+        request = self._make_progressive_request(prompt="build a crew with 2 agents and 2 tasks")
         gen_id = "gen-interleaved"
 
         agent_saves = [
@@ -2202,7 +2202,7 @@ class TestProgressiveGeneration:
         )
         # Tasks have no "context" key -- the method should auto-chain them
 
-        request = self._make_progressive_request()
+        request = self._make_progressive_request(prompt="build a crew with 1 agent and 3 tasks")
         gen_id = "gen-seq-chain"
 
         task_saves = [
@@ -2398,7 +2398,7 @@ class TestProgressiveGeneration:
             tr.llm_guardrail = None
             task_responses.append(tr)
 
-        request = self._make_progressive_request()
+        request = self._make_progressive_request(prompt="build a crew with 1 agent and 2 tasks")
         gen_id = "gen-unassigned"
 
         with self._progressive_patches(plan=plan, agent_saved=agent_saved) as m:

@@ -24,6 +24,7 @@ from src.utils.user_context import GroupContext
 class MockCrew:
     def __init__(self, id=None, name="Test Crew",
                  agent_ids=None, task_ids=None, nodes=None, edges=None,
+                 tool_configs=None,
                  group_id="group-123", created_by_email="test@example.com",
                  created_at=None, updated_at=None):
         self.id = id or uuid4()
@@ -32,6 +33,7 @@ class MockCrew:
         self.task_ids = task_ids or []
         self.nodes = nodes or []
         self.edges = edges or []
+        self.tool_configs = tool_configs
         self.group_id = group_id
         self.created_by_email = created_by_email
         self.created_at = created_at or datetime.utcnow()

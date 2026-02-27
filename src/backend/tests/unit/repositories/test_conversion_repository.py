@@ -235,7 +235,10 @@ class TestConversionHistoryRepository:
         mock_avg_time_result = MagicMock()
         mock_avg_time_result.scalar.return_value = 1500.0
 
-        mock_popular_result = MockResult([mock_row1, mock_row2])
+        # Popular conversions query returns rows that are iterated directly
+        # (not via .scalars()), so we need an iterable result object
+        mock_popular_result = MagicMock()
+        mock_popular_result.__iter__ = MagicMock(return_value=iter([mock_row1, mock_row2]))
 
         # Set up session.execute to return different results based on call order
         mock_async_session.execute.side_effect = [
@@ -314,22 +317,23 @@ class TestConversionJobRepository:
     @pytest.mark.asyncio
     async def test_update_status_success(self, job_repository, mock_async_session):
         """Test successful status update."""
-        job = MockConversionJob(id="job-123", status="pending")
         updated_job = MockConversionJob(id="job-123", status="running", progress=0.3)
 
-        # Mock the update result with rowcount
+        # update_status calls:
+        # 1. session.scalar() to check started_at (returns None => set started_at)
+        # 2. session.execute() for the UPDATE query
+        # 3. self.get(job_id) => session.execute() + .scalars().first()
+        mock_async_session.scalar.return_value = None  # started_at not set
+
         mock_update_result = MagicMock()
         mock_update_result.rowcount = 1
 
-        mock_result_get = MockResult([job])
         mock_result_updated = MockResult([updated_job])
 
         mock_async_session.execute.side_effect = [
-            mock_result_get,      # First call to get the job
-            mock_update_result,   # Update query execution with rowcount
-            mock_result_updated   # Get updated job
+            mock_update_result,   # UPDATE query
+            mock_result_updated   # SELECT for get()
         ]
-        mock_async_session.flush = AsyncMock()
 
         result = await job_repository.update_status("job-123", status="running", progress=0.3)
 
@@ -339,8 +343,16 @@ class TestConversionJobRepository:
     @pytest.mark.asyncio
     async def test_update_status_not_found(self, job_repository, mock_async_session):
         """Test status update when job not found."""
-        mock_result = MockResult([])
-        mock_async_session.execute.return_value = mock_result
+        # session.scalar() for started_at check
+        mock_async_session.scalar.return_value = None
+
+        mock_update_result = MagicMock()
+        mock_get_result = MockResult([])  # get() returns None
+
+        mock_async_session.execute.side_effect = [
+            mock_update_result,  # UPDATE query
+            mock_get_result      # SELECT for get()
+        ]
 
         result = await job_repository.update_status("nonexistent", status="running")
 
@@ -349,22 +361,20 @@ class TestConversionJobRepository:
     @pytest.mark.asyncio
     async def test_cancel_job_success(self, job_repository, mock_async_session):
         """Test successful job cancellation."""
-        job = MockConversionJob(id="job-123", status="pending")
         cancelled_job = MockConversionJob(id="job-123", status="cancelled")
 
-        # Mock the update result with rowcount
+        # cancel_job calls:
+        # 1. session.execute(update_query) => needs .rowcount
+        # 2. self.get(job_id) => session.execute(select_query) + .scalars().first()
         mock_update_result = MagicMock()
         mock_update_result.rowcount = 1
 
-        mock_result_get = MockResult([job])
         mock_result_updated = MockResult([cancelled_job])
 
         mock_async_session.execute.side_effect = [
-            mock_result_get,      # Get job
-            mock_update_result,   # Update query with rowcount
-            mock_result_updated   # Get updated job
+            mock_update_result,   # UPDATE query with rowcount
+            mock_result_updated   # SELECT for get()
         ]
-        mock_async_session.flush = AsyncMock()
 
         result = await job_repository.cancel_job("job-123")
 
@@ -374,17 +384,13 @@ class TestConversionJobRepository:
     @pytest.mark.asyncio
     async def test_cancel_job_not_cancellable(self, job_repository, mock_async_session):
         """Test cancellation of completed job fails."""
-        completed_job = MockConversionJob(id="job-123", status="completed")
-
-        # Mock the update result with rowcount = 0 (no rows updated)
+        # cancel_job calls:
+        # 1. session.execute(update_query) => rowcount = 0 means no match
         mock_update_result = MagicMock()
         mock_update_result.rowcount = 0
 
-        mock_result_get = MockResult([completed_job])
-
         mock_async_session.execute.side_effect = [
-            mock_result_get,      # Get job
-            mock_update_result    # Update query returns 0 rows
+            mock_update_result    # UPDATE query returns 0 rows
         ]
 
         result = await job_repository.cancel_job("job-123")
@@ -499,23 +505,20 @@ class TestSavedConverterConfigurationRepository:
     @pytest.mark.asyncio
     async def test_increment_use_count_success(self, config_repository, mock_async_session):
         """Test successful use count increment."""
-        config = MockSavedConfiguration(id=1, use_count=5)
         updated_config = MockSavedConfiguration(id=1, use_count=6)
         updated_config.last_used_at = datetime.utcnow()
 
-        # Mock the update result with rowcount
+        # increment_use_count calls:
+        # 1. session.execute(update_query)
+        # 2. self.get(config_id) => session.execute(select_query) + .scalars().first()
         mock_update_result = MagicMock()
-        mock_update_result.rowcount = 1
 
-        mock_result_get = MockResult([config])
         mock_result_updated = MockResult([updated_config])
 
         mock_async_session.execute.side_effect = [
-            mock_result_get,      # Get config
-            mock_update_result,   # Update query with rowcount
-            mock_result_updated   # Get updated config
+            mock_update_result,   # UPDATE query
+            mock_result_updated   # SELECT for get()
         ]
-        mock_async_session.flush = AsyncMock()
 
         result = await config_repository.increment_use_count(1)
 
@@ -525,8 +528,16 @@ class TestSavedConverterConfigurationRepository:
     @pytest.mark.asyncio
     async def test_increment_use_count_not_found(self, config_repository, mock_async_session):
         """Test use count increment when config not found."""
-        mock_result = MockResult([])
-        mock_async_session.execute.return_value = mock_result
+        # increment_use_count calls:
+        # 1. session.execute(update_query)
+        # 2. self.get(config_id) => session.execute(select_query) + .scalars().first() => None
+        mock_update_result = MagicMock()
+        mock_get_result = MockResult([])
+
+        mock_async_session.execute.side_effect = [
+            mock_update_result,  # UPDATE query
+            mock_get_result      # SELECT for get()
+        ]
 
         result = await config_repository.increment_use_count(999)
 

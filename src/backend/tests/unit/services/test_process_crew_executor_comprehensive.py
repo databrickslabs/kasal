@@ -613,13 +613,18 @@ class TestProcessCrewExecutorTerminateExecution:
         # Other tracking dictionaries are cleaned up elsewhere, not in terminate_execution
 
     @pytest.mark.asyncio
-    async def test_terminate_execution_with_exception(self):
+    @patch("src.services.process_crew_executor.psutil", create=True)
+    async def test_terminate_execution_with_exception(self, mock_psutil):
         """Test terminate_execution handles exceptions gracefully"""
         execution_id = "test-execution-id"
         mock_process = Mock()
         mock_process.is_alive.return_value = True
         mock_process.pid = 12345
         mock_process.terminate.side_effect = Exception("Termination failed")
+
+        # Make psutil fallback also fail so terminated stays False
+        mock_psutil.Process.side_effect = Exception("No such process")
+        mock_psutil.process_iter.return_value = []
 
         self.executor._running_processes[execution_id] = mock_process
 

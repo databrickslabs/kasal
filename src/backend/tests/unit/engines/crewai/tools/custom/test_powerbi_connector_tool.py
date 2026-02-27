@@ -112,7 +112,7 @@ class TestPowerBIConnectorTool:
         )
 
         assert "Error" in result
-        assert "required" in result.lower()
+        assert "authentication" in result.lower()
 
     def test_run_invalid_outbound_format(self, tool):
         """Test _run fails with invalid outbound_format"""
