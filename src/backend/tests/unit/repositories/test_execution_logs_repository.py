@@ -504,3 +504,41 @@ class TestSqlInjectionPrevention:
         await repo.create_log(execution_id="safe-id", content=malicious_content)
         added_obj = mock_session.add.call_args[0][0]
         assert added_obj.content == malicious_content
+
+
+# ===========================================================================
+# TestDeleteOlderThan
+# ===========================================================================
+
+class TestDeleteOlderThan:
+    """Tests for delete_older_than method."""
+
+    @pytest.mark.asyncio
+    async def test_delete_older_than_returns_rowcount(self, repo, mock_session):
+        """delete_older_than deletes logs older than cutoff and returns count."""
+        mock_session.execute.return_value = MockResult(rowcount=42)
+
+        cutoff = datetime(2025, 1, 1)
+        result = await repo.delete_older_than(cutoff)
+
+        assert result == 42
+        mock_session.execute.assert_awaited_once()
+        mock_session.flush.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_delete_older_than_no_matches(self, repo, mock_session):
+        """delete_older_than returns 0 when no logs match the cutoff."""
+        mock_session.execute.return_value = MockResult(rowcount=0)
+
+        result = await repo.delete_older_than(datetime(2020, 1, 1))
+
+        assert result == 0
+
+    @pytest.mark.asyncio
+    async def test_delete_older_than_flushes_session(self, repo, mock_session):
+        """delete_older_than flushes the session after executing delete."""
+        mock_session.execute.return_value = MockResult(rowcount=5)
+
+        await repo.delete_older_than(datetime(2025, 6, 1))
+
+        mock_session.flush.assert_awaited_once()
