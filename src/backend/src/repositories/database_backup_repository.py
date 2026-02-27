@@ -1155,9 +1155,18 @@ class DatabaseBackupRepository:
                 }
                 
             elif db_type == 'postgres' and db_session:
-                # Get all tables
+                # Detect whether this is a Lakebase session (kasal schema)
+                # by checking if the kasal schema exists
+                schema_check = await db_session.execute(
+                    text("SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'kasal'")
+                )
+                has_kasal_schema = schema_check.scalar() is not None
+                target_schema = 'kasal' if has_kasal_schema else 'public'
+
+                # Get all tables from the target schema
                 result = await db_session.execute(
-                    text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
+                    text("SELECT tablename FROM pg_tables WHERE schemaname = :schema"),
+                    {"schema": target_schema}
                 )
                 tables = [row[0] for row in result.fetchall()]
 
@@ -1165,7 +1174,9 @@ class DatabaseBackupRepository:
                 table_info = {}
                 for table in tables:
                     self._validate_identifier(table, "table name")
-                    result = await db_session.execute(text(f"SELECT COUNT(*) FROM {table}"))
+                    result = await db_session.execute(
+                        text(f"SELECT COUNT(*) FROM {target_schema}.{table}")
+                    )
                     count = result.scalar()
                     table_info[table] = count
 
@@ -1179,9 +1190,9 @@ class DatabaseBackupRepository:
                 memory_backends = []
                 if 'memory_backends' in table_info:
                     result = await db_session.execute(
-                        text("""
+                        text(f"""
                             SELECT id, name, backend_type, is_default, created_at, group_id
-                            FROM memory_backends
+                            FROM {target_schema}.memory_backends
                             ORDER BY created_at DESC
                             LIMIT 5
                         """)

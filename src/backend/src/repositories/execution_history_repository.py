@@ -5,6 +5,7 @@ This module provides database operations for execution history models.
 """
 
 import logging
+from datetime import datetime
 from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -689,6 +690,64 @@ class ExecutionHistoryRepository:
         except Exception as e:
             logger.error(f"Error getting crew checkpoints for job {job_id}: {str(e)}", exc_info=True)
             return []
+
+    async def delete_older_than(self, cutoff: datetime) -> Dict[str, int]:
+        """
+        Delete execution history records older than a cutoff date, including
+        associated taskstatus and errortrace rows.
+
+        Args:
+            cutoff: Delete records with created_at before this datetime
+
+        Returns:
+            Dictionary with deletion counts for each table
+        """
+        if not self.session:
+            raise RuntimeError("ExecutionHistoryRepository requires a session")
+
+        try:
+            # Get execution ids and job_ids for records older than cutoff
+            stmt = select(ExecutionHistory.id, ExecutionHistory.job_id).where(
+                ExecutionHistory.created_at < cutoff
+            )
+            exec_result = await self.session.execute(stmt)
+            executions = exec_result.fetchall()
+
+            execution_ids = [row[0] for row in executions]
+            job_ids = [row[1] for row in executions]
+
+            if not execution_ids:
+                return {
+                    'executionhistory': 0,
+                    'taskstatus': 0,
+                    'errortrace': 0
+                }
+
+            # Delete associated task statuses
+            task_status_stmt = delete(TaskStatus).where(TaskStatus.job_id.in_(job_ids))
+            task_status_result = await self.session.execute(task_status_stmt)
+            task_status_count = task_status_result.rowcount
+
+            # Delete associated error traces
+            error_trace_stmt = delete(ErrorTrace).where(ErrorTrace.run_id.in_(execution_ids))
+            error_trace_result = await self.session.execute(error_trace_stmt)
+            error_trace_count = error_trace_result.rowcount
+
+            # Delete the execution history records
+            run_stmt = delete(ExecutionHistory).where(ExecutionHistory.created_at < cutoff)
+            run_result = await self.session.execute(run_stmt)
+            run_count = run_result.rowcount
+
+            await self.session.flush()
+
+            return {
+                'executionhistory': run_count,
+                'taskstatus': task_status_count,
+                'errortrace': error_trace_count
+            }
+        except Exception as e:
+            logger.error(f"Error deleting execution history older than {cutoff}: {str(e)}", exc_info=True)
+            raise
 
 
 # Don't create a singleton instance - repositories should be created with sessions

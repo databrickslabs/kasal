@@ -9,6 +9,7 @@ structured CrewAI configurations.
 import json
 import logging
 import os
+import re
 import traceback
 import uuid
 from collections import defaultdict
@@ -784,10 +785,75 @@ class CrewGenerationService:
         try:
             model = request.model or os.getenv("CREW_MODEL", "databricks-llama-4-maverick")
 
+            # ── Compute caps BEFORE planning so the LLM knows the limits ──
+            # CrewAI best practice: default to 1 agent, 1 task.
+            # Only allow more when (a) user explicitly requests it, or
+            # (b) user describes multiple distinct specialist roles.
+            ABSOLUTE_MAX_AGENTS = 10
+            ABSOLUTE_MAX_TASKS = 10
+
+            # Check BOTH the (possibly LLM-rewritten) prompt AND the original
+            # user message for cap signals.  The LLM rewrite can lose explicit
+            # agent counts (e.g. "3 agents" → "3 specialized agents") or add
+            # false-positive triggers (e.g. "Create a crew…with key insights").
+            user_prompt = (request.prompt or "").lower()
+            original_prompt = (
+                getattr(request, "original_prompt", None) or ""
+            ).lower()
+            # Combine both for signal detection
+            combined = user_prompt + " " + original_prompt
+
+            # Detect explicit user-requested counts in the prompt.
+            # Allow optional adjective(s) between the number and "agents/tasks"
+            # because the LLM rewrite may expand "3 agents" to "3 specialized agents".
+            agent_count_match = re.search(r'(\d+)\s+(?:\w+\s+)*agents?', combined)
+            task_count_match = re.search(r'(\d+)\s+(?:\w+\s+)*tasks?', combined)
+
+            # Detect if user explicitly asks for multiple roles/specialists.
+            # NOTE: "crew" is excluded from the team pattern because the LLM
+            # rewrite adds "Create a crew that will..." prefix, which would
+            # false-positive on "crew ... with key insights".
+            multi_role_patterns = [
+                r'\b(team|group|squad)\b\s+\b(of|with)\b\s+(\w+\s+)?(agents?|roles?|specialists?|members?)\b',
+                r'\b(multiple|several|different)\b.*\b(agents?|roles?|specialists?)\b',
+                # Match "researcher and writer" style — limit gap to ~40 chars to avoid
+                # false positives across sentences (e.g., "analyst ... anomalies and ...")
+                r'\b(researcher|writer|analyst|designer|developer|validator|reviewer)\b.{1,40}\band\b.{1,20}\b(researcher|writer|analyst|designer|developer|validator|reviewer)\b',
+            ]
+            # Only check multi-role patterns on the ORIGINAL prompt to avoid
+            # false positives from the LLM rewrite which may enumerate roles.
+            multi_check_text = original_prompt if original_prompt.strip() else combined
+            user_wants_multi = any(
+                re.search(p, multi_check_text) for p in multi_role_patterns
+            )
+
+            if agent_count_match:
+                max_agents = min(int(agent_count_match.group(1)), ABSOLUTE_MAX_AGENTS)
+                logger.info(f"PROGRESSIVE [{generation_id}]: User requested {max_agents} agents")
+            elif user_wants_multi:
+                max_agents = 3
+                logger.info(f"PROGRESSIVE [{generation_id}]: Multi-role detected, max {max_agents} agents")
+            else:
+                max_agents = 1
+                logger.info(f"PROGRESSIVE [{generation_id}]: Default 1 agent")
+
+            if task_count_match:
+                max_tasks = min(int(task_count_match.group(1)), ABSOLUTE_MAX_TASKS)
+                logger.info(f"PROGRESSIVE [{generation_id}]: User requested {max_tasks} tasks")
+            else:
+                max_tasks = max_agents
+                logger.info(f"PROGRESSIVE [{generation_id}]: 1:1 ratio, max_tasks={max_tasks}")
+
             # ── Phase 1: Planning (LLM only, no DB writes) ───────────
-            logger.info(f"PROGRESSIVE [{generation_id}]: Phase 1 — Planning")
+            # Inject the computed cap into the request so the LLM generates
+            # the correct number from the start (instead of generating many
+            # and truncating, which loses the user's actual goal).
+            logger.info(f"PROGRESSIVE [{generation_id}]: Phase 1 — Planning (max {max_agents} agents, {max_tasks} tasks)")
             try:
-                plan = await self._generate_crew_plan(request, group_context, model)
+                plan = await self._generate_crew_plan(
+                    request, group_context, model,
+                    max_agents=max_agents, max_tasks=max_tasks,
+                )
             except Exception as e:
                 logger.error(f"PROGRESSIVE [{generation_id}]: Planning failed: {e}")
                 await sse_manager.broadcast_to_job(generation_id, SSEEvent(
@@ -801,12 +867,46 @@ class CrewGenerationService:
             process_type = plan.get("process_type", "sequential")
             complexity = plan.get("complexity", "standard")
 
+            # Safety net: if LLM still exceeded caps, truncate as last resort.
+            # For single-agent (max=1), keep the LAST agent/task since in a
+            # sequential pipeline the final step produces the user's deliverable
+            # (e.g., dashboard builder > scraper). For multi-agent, keep the first N.
+            if len(plan_agents) > max_agents:
+                logger.warning(
+                    f"PROGRESSIVE [{generation_id}]: Truncating agents from "
+                    f"{len(plan_agents)} to {max_agents}"
+                )
+                if max_agents == 1 and process_type == "sequential":
+                    plan_agents = plan_agents[-1:]
+                else:
+                    plan_agents = plan_agents[:max_agents]
+            if len(plan_tasks) > max_tasks:
+                logger.warning(
+                    f"PROGRESSIVE [{generation_id}]: Truncating tasks from "
+                    f"{len(plan_tasks)} to {max_tasks}"
+                )
+                if max_tasks == 1 and process_type == "sequential":
+                    plan_tasks = plan_tasks[-1:]
+                else:
+                    plan_tasks = plan_tasks[:max_tasks]
             if not plan_agents:
                 await sse_manager.broadcast_to_job(generation_id, SSEEvent(
                     data={"type": "generation_failed", "error": "Plan returned no agents"},
                     event="generation_failed",
                 ))
                 return
+
+            # Re-assign orphaned tasks to valid agents and clean stale context refs
+            valid_agent_names = {a.get("name") for a in plan_agents}
+            valid_task_names = {t.get("name") for t in plan_tasks}
+            for task in plan_tasks:
+                if task.get("assigned_agent") not in valid_agent_names:
+                    task["assigned_agent"] = plan_agents[0].get("name", "")
+                # Remove context references to tasks that were truncated
+                if task.get("context"):
+                    task["context"] = [
+                        c for c in task["context"] if c in valid_task_names
+                    ]
 
             # ── Enforce sequential dependency chain ────────────────
             if process_type == "sequential":
@@ -1211,18 +1311,91 @@ class CrewGenerationService:
         request: CrewStreamingRequest,
         group_context: Optional[GroupContext],
         model: str,
+        max_agents: int = 1,
+        max_tasks: int = 1,
     ) -> Dict[str, Any]:
-        """Fast LLM call to get crew outline (names/roles only)."""
+        """Fast LLM call to get crew outline (names/roles only).
+
+        NOTE: This method is called from create_crew_progressive which runs as
+        a background task after the request-scoped session is closed. It uses
+        an independent session to log the LLM interaction.
+
+        Args:
+            max_agents: Maximum number of agents to generate. Injected into
+                the user message so the LLM plans within the limit rather
+                than generating excess agents that get truncated (which would
+                lose the user's actual goal).
+            max_tasks: Maximum number of tasks to generate.
+        """
         system_message = await TemplateService.get_effective_template_content(
             "generate_crew_plan", group_context
         )
         if not system_message:
             raise KasalError("Required prompt template 'generate_crew_plan' not found")
 
+        # Inject cap constraints. Strategy differs by agent count:
+        # - Single-agent: Aggressive PREFIX to override model tendency to decompose
+        # - Multi-agent: Softer constraint that cooperates with the user's intent
+        if max_agents == 1:
+            system_cap = (
+                f"MANDATORY OUTPUT CONSTRAINT — RESPOND WITH EXACTLY 1 AGENT AND 1 TASK:\n"
+                f"Your JSON response MUST contain EXACTLY 1 agent and EXACTLY 1 task. "
+                f"Any response with more than 1 is INVALID.\n"
+                f"Even if the goal involves multiple steps (scrape, analyze, build, format), "
+                f"combine them into ONE comprehensive task handled by ONE generalist agent.\n"
+                f"WRONG: 3 agents (Scraper, Analyst, Builder) with 3 tasks\n"
+                f"RIGHT: 1 agent (Full-Stack Specialist) with 1 task that covers the entire workflow\n\n"
+            )
+            cap_instruction = (
+                f"\n\nHARD CONSTRAINT: Generate EXACTLY 1 agent and 1 task. "
+                f"The single agent must be capable of handling the entire goal. "
+                f"The single task must describe the COMPLETE end-to-end objective "
+                f"(not just the first step). The task name and description should "
+                f"reflect the user's ultimate goal, not an intermediate step."
+            )
+        else:
+            system_cap = (
+                f"OUTPUT CONSTRAINT: Your JSON response must contain EXACTLY "
+                f"{max_agents} agent(s) and EXACTLY {max_tasks} task(s). "
+                f"Each agent should be a distinct specialist with a unique role.\n\n"
+            )
+            cap_instruction = (
+                f"\n\nCONSTRAINT: Generate EXACTLY {max_agents} distinct agent(s) and "
+                f"EXACTLY {max_tasks} task(s). Each agent should have a specialized role."
+            )
+
+        user_message = request.prompt + cap_instruction
+
         messages = [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": request.prompt},
+            {"role": "system", "content": system_cap + system_message},
         ]
+
+        # For single-agent plans, add a few-shot example showing the correct
+        # behavior for a multi-step pipeline prompt. Claude models in particular
+        # tend to decompose pipeline tasks into multiple agents; a concrete
+        # example in the conversation history reliably overrides this tendency.
+        if max_agents == 1:
+            messages.extend([
+                {
+                    "role": "user",
+                    "content": (
+                        "scrape the latest AI news and build an interactive visualization dashboard\n\n"
+                        "HARD CONSTRAINT: Generate EXACTLY 1 agent and 1 task. "
+                        "The single agent must be capable of handling the entire goal. "
+                        "The single task must describe the COMPLETE end-to-end objective "
+                        "(not just the first step). The task name and description should "
+                        "reflect the user's ultimate goal, not an intermediate step."
+                    ),
+                },
+                {
+                    "role": "assistant",
+                    "content": '{"complexity":"light","process_type":"sequential","agents":[{"name":"AI News Dashboard Specialist","role":"Full-Stack Data Journalist and Visualization Developer"}],"tasks":[{"name":"Scrape AI News and Build Interactive Dashboard","assigned_agent":"AI News Dashboard Specialist","context":[]}]}',
+                },
+            ])
+
+        messages.append(
+            {"role": "user", "content": user_message},
+        )
 
         content = await LLMManager.completion(
             messages=messages,
@@ -1231,13 +1404,24 @@ class CrewGenerationService:
             max_tokens=2000,
         )
 
-        await self._log_llm_interaction(
-            endpoint="generate-crew-plan",
-            prompt=f"System: {system_message}\nUser: {request.prompt}",
-            response=content,
-            model=model,
-            group_context=group_context,
-        )
+        # Log via an independent session (the request-scoped session is closed
+        # by the time this background task runs).
+        from src.db.session import async_session_factory as _plan_session_factory
+        try:
+            async with _plan_session_factory() as log_session:
+                log_service = LLMLogService(LLMLogRepository(log_session))
+                await log_service.create_log(
+                    endpoint="generate-crew-plan",
+                    prompt=f"System: {system_message}\nUser: {user_message}",
+                    response=content,
+                    model=model,
+                    status="success",
+                    group_context=group_context,
+                )
+                await log_session.commit()
+                logger.info("Logged generate-crew-plan interaction to database")
+        except Exception as e:
+            logger.error(f"Failed to log crew plan LLM interaction: {e}")
 
         plan = robust_json_parser(content)
 

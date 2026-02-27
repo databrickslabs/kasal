@@ -257,9 +257,10 @@ class LLMManager:
 
             # Ensure the model string explicitly includes the provider for CrewAI compatibility
             # GPT-5 reasoning models need longer timeout (300s) — they can take 2-4 min on complex prompts
+            # Standard Databricks models: 240s (server-side limit is 297s)
             llm_params = {
                 "model": prefixed_model,
-                "timeout": 300 if is_gpt5 else 120,
+                "timeout": 300 if is_gpt5 else 297,
             }
 
             # GPT-5 reasoning models on Databricks reject stop, temperature, and other params.

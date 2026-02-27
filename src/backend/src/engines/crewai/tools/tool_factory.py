@@ -934,11 +934,75 @@ class ToolFactory:
                         from src.utils.user_context import UserContext
                         user_token = UserContext.get_user_token()
                         if user_token:
-                            logger.info(f"Extracted user token from context for DatabricksJobsTool OBO authentication: {user_token[:10]}...")
+                            logger.info(f"Extracted user token from context for DatabricksJobsTool: {user_token[:10]}...")
                         else:
                             logger.warning("No user token found in context for DatabricksJobsTool")
                     except Exception as e:
                         logger.error(f"Could not extract user token from context: {e}")
+
+                # CRITICAL: Extract group_id from config for PAT authentication
+                # This is essential for tools running in CrewAI threads where UserContext is unavailable
+                group_id = None
+                if isinstance(self.config, dict):
+                    group_id = self.config.get('group_id')
+                    if group_id:
+                        logger.info(f"Extracted group_id from factory config for DatabricksJobsTool: {group_id}")
+                    else:
+                        logger.warning("No group_id in factory config - PAT authentication may fail for DatabricksJobsTool")
+
+                # NOTE: Databricks Jobs API does NOT support OBO (on-behalf-of) authentication scopes.
+                # Even when a user_token is available, PAT must be used for Jobs API calls.
+                # Reference: https://docs.databricks.com/en/dev-tools/databricks-apps/auth.html
+                api_key = databricks_jobs_config.get('DATABRICKS_API_KEY', '')
+                databricks_api_key = None
+
+                # Try to get API key from unified auth
+                try:
+                    from src.utils.databricks_auth import get_auth_context
+                    try:
+                        asyncio.get_running_loop()
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor() as pool:
+                            auth = pool.submit(self._run_in_new_loop, get_auth_context).result()
+                    except RuntimeError:
+                        auth = asyncio.run(get_auth_context())
+                    databricks_api_key = auth.token if auth else None
+                except Exception as e:
+                    logger.debug(f"Unified auth not available for DatabricksJobsTool: {e}")
+
+                # If not found via unified auth, fetch from ApiKeysService
+                if not databricks_api_key and not api_key:
+                    if self.api_keys_service is not None:
+                        logger.info("Using ApiKeysService to get DATABRICKS_API_KEY for DatabricksJobsTool")
+                        db_api_key = None
+                        try:
+                            asyncio.get_running_loop()
+                            import concurrent.futures
+                            with concurrent.futures.ThreadPoolExecutor() as pool:
+                                db_api_key = pool.submit(
+                                    self._run_in_new_loop,
+                                    self._get_api_key_async,
+                                    "DATABRICKS_API_KEY"
+                                ).result()
+                        except RuntimeError:
+                            loop = asyncio.new_event_loop()
+                            try:
+                                asyncio.set_event_loop(loop)
+                                db_api_key = loop.run_until_complete(
+                                    self._get_api_key_async("DATABRICKS_API_KEY")
+                                )
+                            finally:
+                                loop.close()
+                        if db_api_key:
+                            databricks_api_key = db_api_key
+                            logger.info("Retrieved DATABRICKS_API_KEY for DatabricksJobsTool from ApiKeysService")
+                    else:
+                        logger.warning("No ApiKeysService available - DatabricksJobsTool PAT lookup may fail")
+
+                final_api_key = api_key or databricks_api_key
+                if final_api_key:
+                    databricks_jobs_config['DATABRICKS_API_KEY'] = final_api_key
+                    logger.info("Injected DATABRICKS_API_KEY into DatabricksJobsTool config")
 
                 # Get DATABRICKS_HOST from tool_config or environment
                 databricks_host = tool_config.get('DATABRICKS_HOST')
@@ -1017,6 +1081,7 @@ class ToolFactory:
                     databricks_host=databricks_host,
                     tool_config=databricks_jobs_config,
                     user_token=user_token,
+                    group_id=group_id,
                     result_as_answer=result_as_answer
                 )
 
