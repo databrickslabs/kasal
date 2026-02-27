@@ -8,6 +8,7 @@ reusable component following the repository pattern and service architecture.
 import json
 import logging
 import re
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -16,6 +17,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_service import BaseService
+from src.db.base import Base
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +217,26 @@ class LakebaseMigrationService(BaseService):
             "refresh_tokens",
         ]
 
+        # FK filters: tables whose rows may reference deleted parents.
+        # SQLite doesn't enforce FK constraints by default, so orphaned child
+        # rows accumulate.  PostgreSQL (Lakebase) *does* enforce them, causing
+        # migration failures.  For each table we list the WHERE clause that
+        # filters out orphans.
+        self.fk_existence_filters: Dict[str, str] = {
+            "execution_trace": (
+                'job_id IN (SELECT job_id FROM "executionhistory")'
+            ),
+            "taskstatus": (
+                'job_id IN (SELECT job_id FROM "executionhistory")'
+            ),
+            "llm_usage_billing": (
+                'execution_id IN (SELECT job_id FROM "executionhistory")'
+            ),
+            "hitl_approvals": (
+                'execution_id IN (SELECT job_id FROM "executionhistory")'
+            ),
+        }
+
     async def get_table_list_async(
         self, session: AsyncSession, is_sqlite: bool
     ) -> List[str]:
@@ -320,6 +342,48 @@ class LakebaseMigrationService(BaseService):
 
         logger.debug(f"Sorted {len(tables)} tables by dependency order")
         return sorted_tables
+
+    def get_migration_waves(self, tables: List[str]) -> List[List[str]]:
+        """Group tables into parallel migration waves based on FK dependencies.
+
+        Tables in the same wave have no FK dependencies on each other,
+        so their data can be migrated concurrently without FK violations.
+
+        Args:
+            tables: List of table names to migrate (already sorted)
+
+        Returns:
+            List of waves, where each wave is a list of table names
+        """
+        metadata_tables = {t.name: t for t in Base.metadata.sorted_tables}
+
+        # Build dependency map using FK constraints from metadata
+        deps: Dict[str, set] = {}
+        for name in tables:
+            fk_deps: set = set()
+            if name in metadata_tables:
+                for fk in metadata_tables[name].foreign_keys:
+                    ref_table = fk.column.table.name
+                    if ref_table != name and ref_table in tables:
+                        fk_deps.add(ref_table)
+            deps[name] = fk_deps
+
+        waves: List[List[str]] = []
+        assigned: set = set()
+
+        while len(assigned) < len(deps):
+            wave = [
+                n for n, d in deps.items()
+                if n not in assigned and d.issubset(assigned)
+            ]
+            if not wave:
+                # Circular deps — force remaining into final wave
+                wave = [n for n in deps if n not in assigned]
+            waves.append(wave)
+            assigned.update(wave)
+
+        logger.info(f"Grouped {len(tables)} tables into {len(waves)} migration waves")
+        return waves
 
     def convert_row_types(
         self, row_dict: Dict[str, Any], table_name: str, columns: List[str]
@@ -514,77 +578,135 @@ class LakebaseMigrationService(BaseService):
             Tuple of (row_count, error_message)
             error_message is None if successful
         """
+        t0 = time.monotonic()
+        logger.info(f"[migrate] START {table_name}")
         try:
-            # Get data from source
-            safe_table = _validate_identifier(table_name, "table name")
-            if is_sqlite:
-                with source_engine.connect() as conn:
-                    result = conn.execute(text(f'SELECT * FROM "{safe_table}"'))
-                    rows = result.fetchall()
-                    columns = result.keys()
+            # Special handling for documentation_embeddings table
+            # Skip the embedding column which doesn't exist in the Lakebase target
+            if table_name == "documentation_embeddings":
+                safe_table = _validate_identifier(table_name, "table name")
+                _doc_embed_sql = (
+                    "SELECT id, source, title, content, doc_metadata, "
+                    "created_at, updated_at FROM documentation_embeddings"
+                )
+                if is_sqlite:
+                    with source_engine.connect() as conn:
+                        result = conn.execute(text(_doc_embed_sql))
+                        rows = result.fetchall()
+                        columns = [
+                            "id", "source", "title", "content",
+                            "doc_metadata", "created_at", "updated_at",
+                        ]
+                else:
+                    with source_engine.begin() as conn:
+                        result = conn.execute(text(_doc_embed_sql))
+                        rows = result.fetchall()
+                        columns = [
+                            "id", "source", "title", "content",
+                            "doc_metadata", "created_at", "updated_at",
+                        ]
             else:
-                with source_engine.begin() as conn:
-                    result = conn.execute(text(f'SELECT * FROM "{safe_table}"'))
-                    rows = result.fetchall()
-                    columns = result.keys()
+                # Get data from source
+                safe_table = _validate_identifier(table_name, "table name")
+                # Add FK existence filter to skip orphaned child rows.
+                # SQLite doesn't enforce FKs, so orphans accumulate; PostgreSQL
+                # rejects them on INSERT.
+                fk_filter = self.fk_existence_filters.get(table_name)
+                where_clause = f" WHERE {fk_filter}" if fk_filter else ""
+                if fk_filter:
+                    logger.info(f"  ↳ Applying FK filter for {table_name}: {fk_filter}")
+                select_sql = f'SELECT * FROM "{safe_table}"{where_clause}'
+                if is_sqlite:
+                    with source_engine.connect() as conn:
+                        result = conn.execute(text(select_sql))
+                        rows = result.fetchall()
+                        columns = result.keys()
+                else:
+                    with source_engine.begin() as conn:
+                        result = conn.execute(text(select_sql))
+                        rows = result.fetchall()
+                        columns = result.keys()
 
             if not rows:
-                logger.info(f"  ↳ Table {table_name} is empty (0 rows)")
+                elapsed = time.monotonic() - t0
+                logger.info(f"  ↳ Table {table_name} is empty (0 rows) [{elapsed:.2f}s]")
                 return 0, None
 
-            # Migrate rows
-            with lakebase_engine.begin() as lakebase_conn:
-                lakebase_conn.execute(text("SET search_path TO kasal"))
+            logger.info(f"  ↳ Table {table_name}: {len(rows)} rows to migrate")
 
-                # Build insert statement
-                column_list = ", ".join([f'"{col}"' for col in columns])
-                placeholders = ", ".join([f":{col}" for col in columns])
-                insert_sql = f'INSERT INTO "{safe_table}" ({column_list}) VALUES ({placeholders})'
+            json_columns = self.json_columns_by_table.get(table_name, [])
+            datetime_columns = self.datetime_columns_by_table.get(table_name, [])
+            boolean_columns = self.boolean_columns_by_table.get(table_name, [])
 
-                json_columns = self.json_columns_by_table.get(table_name, [])
-                datetime_columns = self.datetime_columns_by_table.get(table_name, [])
-                boolean_columns = self.boolean_columns_by_table.get(table_name, [])
-
-                for row in rows:
-                    row_dict = dict(zip(columns, row))
-
-                    # Convert types
-                    for col in columns:
-                        value = row_dict[col]
-                        if value is None:
-                            continue
-
-                        if col in json_columns:
-                            # For JSON columns, ensure proper serialization
-                            if isinstance(value, str):
-                                # Already a string, might be JSON from SQLite
-                                try:
-                                    # Validate it's valid JSON
-                                    json.loads(value)
-                                    # Keep as string for PostgreSQL
-                                except:
-                                    # Not valid JSON, wrap as JSON string
-                                    row_dict[col] = json.dumps(value)
-                            elif isinstance(value, (dict, list)):
-                                # Python object, serialize to JSON string
-                                row_dict[col] = json.dumps(value)
-                        elif col in datetime_columns and isinstance(value, str):
+            # Convert all rows up-front
+            converted_rows = []
+            for row in rows:
+                row_dict = dict(zip(columns, row))
+                for col in columns:
+                    value = row_dict[col]
+                    if value is None:
+                        continue
+                    if col in json_columns:
+                        if isinstance(value, str):
                             try:
-                                row_dict[col] = datetime.fromisoformat(
-                                    value.replace("Z", "+00:00")
-                                )
-                            except:
-                                pass
-                        elif col in boolean_columns and isinstance(value, int):
-                            row_dict[col] = bool(value)
+                                json.loads(value)
+                            except Exception:
+                                row_dict[col] = json.dumps(value)
+                        elif isinstance(value, (dict, list)):
+                            row_dict[col] = json.dumps(value)
+                    elif col in datetime_columns and isinstance(value, str):
+                        try:
+                            row_dict[col] = datetime.fromisoformat(
+                                value.replace("Z", "+00:00")
+                            )
+                        except Exception:
+                            pass
+                    elif col in boolean_columns and isinstance(value, int):
+                        row_dict[col] = bool(value)
+                converted_rows.append(row_dict)
 
-                    # Use dictionary with named parameters for SQLAlchemy text()
-                    lakebase_conn.execute(text(insert_sql), row_dict)
+            # Insert using multi-row VALUES to minimise round-trips.
+            # pg8000's executemany sends one INSERT per row which is very slow
+            # over SSL.  Building a single INSERT … VALUES (…),(…),… per batch
+            # sends one statement for the whole batch — much faster.
+            column_list = ", ".join([f'"{col}"' for col in columns])
+            batch_size = 200
+            total_inserted = 0
+            with lakebase_engine.connect() as lakebase_conn:
+                lakebase_conn.execute(text("SET search_path TO kasal"))
+                lakebase_conn.commit()
+                for batch_start in range(0, len(converted_rows), batch_size):
+                    batch = converted_rows[batch_start : batch_start + batch_size]
 
-            logger.info(f"  ✓ Migrated {len(rows)} rows from {table_name}")
+                    # Build multi-row VALUES clause with unique param names
+                    value_clauses = []
+                    params: Dict[str, Any] = {}
+                    for row_idx, row_dict in enumerate(batch):
+                        row_placeholders = []
+                        for col in columns:
+                            param_name = f"{col}_{row_idx}"
+                            row_placeholders.append(f":{param_name}")
+                            params[param_name] = row_dict.get(col)
+                        value_clauses.append(f"({', '.join(row_placeholders)})")
+
+                    multi_insert_sql = (
+                        f'INSERT INTO "{safe_table}" ({column_list}) VALUES '
+                        + ", ".join(value_clauses)
+                    )
+                    lakebase_conn.execute(text(multi_insert_sql), params)
+                    lakebase_conn.commit()
+                    total_inserted += len(batch)
+                    if len(converted_rows) > batch_size:
+                        logger.info(
+                            f"  ↳ {table_name}: {total_inserted}/{len(converted_rows)} rows inserted"
+                        )
+
+            elapsed = time.monotonic() - t0
+            logger.info(f"  ✓ Migrated {len(rows)} rows from {table_name} [{elapsed:.2f}s]")
             return len(rows), None
 
         except Exception as e:
+            elapsed = time.monotonic() - t0
             error_msg = f"{type(e).__name__}: {str(e)}"
-            logger.error(f"❌ Error migrating table {table_name}: {error_msg}")
+            logger.error(f"❌ Error migrating table {table_name} [{elapsed:.2f}s]: {error_msg}")
             return 0, error_msg

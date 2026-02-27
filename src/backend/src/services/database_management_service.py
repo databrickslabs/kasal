@@ -471,31 +471,53 @@ class DatabaseManagementService:
 
             logger.debug(f"[SERVICE] lakebase_enabled={lakebase_enabled}, db_type={db_type}, actual_session_db_type={actual_session_db_type}")
 
-            # Check Lakebase FIRST - if enabled AND session is actually PostgreSQL
-            if lakebase_enabled and actual_session_db_type == 'postgres':
-                logger.debug(f"[SERVICE] Taking Lakebase path - passing session to repository")
-                # Use provided session or injected session for Lakebase
-                db_session = session if session else self.session
-
-                # Use repository to get database info from Lakebase
-                info_result = await self.repository.get_database_info(session=db_session)
-
-                if not info_result["success"]:
-                    return info_result
-
-                # Format result for Lakebase
-                result = {
-                    "success": True,
-                    "database_type": "lakebase",
-                    "tables": info_result.get("tables", {}),
-                    "total_tables": info_result.get("total_tables", 0),
-                    "memory_backends": info_result.get("memory_backends", []),
-                    "lakebase_enabled": True,
-                    "lakebase_instance": lakebase_instance
-                }
-
-                # Lakebase-specific information (no file path/size like SQLite)
+            # Check Lakebase FIRST - if config says enabled, ALWAYS report
+            # Lakebase as the backend.  The session may have silently fallen
+            # back to SQLite when the Lakebase connection fails, but the
+            # Database Management page must reflect the configured state.
+            if lakebase_enabled:
                 lakebase_endpoint = lakebase_config.get("endpoint", "")
+
+                if actual_session_db_type == 'postgres':
+                    logger.debug(f"[SERVICE] Taking Lakebase path - passing session to repository")
+                    db_session = session if session else self.session
+                    info_result = await self.repository.get_database_info(session=db_session)
+
+                    if not info_result["success"]:
+                        return info_result
+
+                    result = {
+                        "success": True,
+                        "database_type": "lakebase",
+                        "tables": info_result.get("tables", {}),
+                        "total_tables": info_result.get("total_tables", 0),
+                        "memory_backends": info_result.get("memory_backends", []),
+                        "lakebase_enabled": True,
+                        "lakebase_instance": lakebase_instance,
+                    }
+                else:
+                    # Lakebase is configured but connection failed (session
+                    # fell back to SQLite/Postgres).  Report Lakebase as the
+                    # active backend with a connection error so the UI shows
+                    # the real state instead of misleading the user.
+                    logger.warning(
+                        f"[SERVICE] Lakebase enabled but session is {actual_session_db_type} — connection failed"
+                    )
+                    result = {
+                        "success": True,
+                        "database_type": "lakebase",
+                        "tables": {},
+                        "total_tables": 0,
+                        "memory_backends": [],
+                        "lakebase_enabled": True,
+                        "lakebase_instance": lakebase_instance,
+                        "connection_error": (
+                            "Lakebase is configured but the connection failed. "
+                            "The app is temporarily using the fallback database. "
+                            "Check your Databricks credentials."
+                        ),
+                    }
+
                 if lakebase_endpoint:
                     result["lakebase_endpoint"] = lakebase_endpoint
 
@@ -567,6 +589,115 @@ class DatabaseManagementService:
                 "error": str(e)
             }
     
+    async def run_housekeeping(self, cutoff_date: str) -> Dict[str, Any]:
+        """
+        Delete old execution data (history, traces, logs, LLM logs) older than cutoff_date.
+
+        Order matters: execution_trace has FK references to executionhistory,
+        so traces must be deleted before the parent execution history rows.
+
+        Args:
+            cutoff_date: ISO format date string (e.g. "2025-01-01")
+
+        Returns:
+            Summary of deleted records per table
+        """
+        try:
+            from datetime import datetime as dt
+            from sqlalchemy import delete
+            from sqlalchemy.future import select
+            from src.repositories.execution_history_repository import ExecutionHistoryRepository
+            from src.repositories.execution_logs_repository import ExecutionLogsRepository
+            from src.repositories.execution_trace_repository import ExecutionTraceRepository
+            from src.models.execution_trace import ExecutionTrace
+            from src.models.execution_history import ExecutionHistory
+            from src.models.log import LLMLog
+
+            cutoff = dt.fromisoformat(cutoff_date)
+
+            # Instantiate repositories with the current session
+            history_repo = ExecutionHistoryRepository(session=self.session)
+            logs_repo = ExecutionLogsRepository(session=self.session)
+
+            # 1. Delete execution_trace rows that reference executions older than cutoff
+            #    (FK: execution_trace.run_id -> executionhistory.id)
+            #    Also delete any traces older than cutoff by their own created_at
+            old_exec_ids_stmt = select(ExecutionHistory.id).where(
+                ExecutionHistory.created_at < cutoff
+            )
+            trace_by_ref_stmt = delete(ExecutionTrace).where(
+                ExecutionTrace.run_id.in_(old_exec_ids_stmt)
+            )
+            trace_ref_result = await self.session.execute(trace_by_ref_stmt)
+            trace_count = trace_ref_result.rowcount
+
+            # Also delete any orphaned traces older than cutoff by date
+            trace_by_date_stmt = delete(ExecutionTrace).where(
+                ExecutionTrace.created_at < cutoff
+            )
+            trace_date_result = await self.session.execute(trace_by_date_stmt)
+            trace_count += trace_date_result.rowcount
+
+            await self.session.flush()
+
+            # 2. Delete execution logs older than cutoff
+            logs_count = await logs_repo.delete_older_than(cutoff)
+
+            # 3. Delete LLM logs inline (no dedicated repo needed)
+            llm_stmt = delete(LLMLog).where(LLMLog.created_at < cutoff)
+            llm_result = await self.session.execute(llm_stmt)
+            llm_count = llm_result.rowcount
+            await self.session.flush()
+
+            # 4. Delete execution history last (cascades to taskstatus + errortrace)
+            #    Now safe because execution_trace FK references are already gone
+            history_result = await history_repo.delete_older_than(cutoff)
+
+            await self.session.commit()
+
+            # 5. VACUUM SQLite to reclaim disk space after bulk deletes
+            from sqlalchemy import text
+            db_type = DatabaseBackupRepository.get_database_type()
+            space_reclaimed = False
+            if db_type == 'sqlite':
+                try:
+                    await self.session.execute(text("VACUUM"))
+                    space_reclaimed = True
+                    logger.info("SQLite VACUUM completed — disk space reclaimed")
+                except Exception as vacuum_err:
+                    logger.warning(f"SQLite VACUUM failed (non-fatal): {vacuum_err}")
+
+            deleted = {
+                'executionhistory': history_result.get('executionhistory', 0),
+                'taskstatus': history_result.get('taskstatus', 0),
+                'errortrace': history_result.get('errortrace', 0),
+                'execution_trace': trace_count,
+                'execution_logs': logs_count,
+                'llmlog': llm_count,
+            }
+            total = sum(deleted.values())
+
+            logger.info(f"Housekeeping completed: {total} total records deleted (cutoff: {cutoff_date})")
+
+            return {
+                'success': True,
+                'cutoff_date': cutoff_date,
+                'deleted': deleted,
+                'total_deleted': total,
+            }
+        except ValueError as e:
+            logger.error(f"Invalid cutoff date format: {e}")
+            return {
+                'success': False,
+                'error': f"Invalid date format: {cutoff_date}. Use ISO format (YYYY-MM-DD)."
+            }
+        except Exception as e:
+            logger.error(f"Error during housekeeping: {e}", exc_info=True)
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
     async def check_user_permission(
         self,
         user_email: str,
