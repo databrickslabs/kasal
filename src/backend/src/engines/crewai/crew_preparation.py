@@ -357,7 +357,15 @@ class CrewPreparation:
                     logger.info(f"[CrewPreparation] Agent {agent_name} has NO knowledge_sources")
 
                 # Add MCP requirements from assigned tasks to agent config
-                agent_mcp_servers = agent_mcp_requirements.get(agent_id, [])
+                # Try multiple keys: collect_agent_mcp_requirements() uses
+                # _resolve_agent_reference() which returns the config-level ID
+                # (e.g. "agent_agent-xxx"), but agent_id here may be the Kasal
+                # UUID resolved via _lookup_kasal_agent_uuid_via_service().
+                agent_mcp_servers = (
+                    agent_mcp_requirements.get(agent_id, [])
+                    or agent_mcp_requirements.get(config_agent_id, [])
+                    or agent_mcp_requirements.get(agent_name, [])
+                )
                 if agent_mcp_servers:
                     logger.info(f"Agent {agent_name} will have MCP servers from tasks: {agent_mcp_servers}")
                     if 'tool_configs' not in agent_config:
