@@ -196,6 +196,21 @@ class ExecutionLogsRepository:
         await self.session.flush()
         return result.rowcount
     
+    async def delete_older_than(self, cutoff: datetime) -> int:
+        """
+        Delete all execution logs older than a cutoff date.
+
+        Args:
+            cutoff: Delete records with timestamp before this datetime
+
+        Returns:
+            Number of deleted records
+        """
+        stmt = delete(ExecutionLog).where(ExecutionLog.timestamp < cutoff)
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.rowcount
+
     async def count_by_execution_id(self, execution_id: str, group_ids: list = None) -> int:
         """
         Count logs for a specific execution using injected session.

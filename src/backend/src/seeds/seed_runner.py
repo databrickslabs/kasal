@@ -7,7 +7,7 @@ import traceback
 import os
 import sys
 import inspect
-from typing import List, Callable, Awaitable
+from typing import List, Callable, Awaitable, Optional, Set
 
 # Use centralized logger - no need for basicConfig
 from src.core.logger import get_logger
@@ -169,11 +169,114 @@ async def run_all_seeders() -> None:
             logger.info(f"✓ {seeder_name} seeder started in background, continuing...")
     
     logger.info("✅ All fast seeders completed, slow seeders running in background.")
-    
+
     # Optionally, you can store the tasks if you need to track them later
     # But we don't await them here to keep it non-blocking
     if background_tasks:
         logger.info(f"Running {len(background_tasks)} seeder(s) in background (non-blocking)")
+
+    # Resync PostgreSQL sequences after seeding.
+    # Seeds (and backup restores) insert rows with explicit IDs which leaves
+    # PostgreSQL auto-increment sequences behind, causing duplicate-key errors.
+    await resync_postgres_sequences()
+
+
+async def resync_postgres_sequences() -> None:
+    """Reset all PostgreSQL sequences to max(id)+1 so inserts don't collide.
+
+    Only runs when the backend is PostgreSQL — silently skips for SQLite.
+    """
+    try:
+        from src.config.settings import settings
+
+        db_uri = str(settings.DATABASE_URI)
+        if "sqlite" in db_uri:
+            return  # SQLite uses ROWID, no sequences
+
+        import re
+        from sqlalchemy import text as sa_text
+        from src.db.session import async_session_factory
+
+        safe_id_re = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+        async with async_session_factory() as session:
+            # Get all tables that have a serial/identity 'id' column
+            result = await session.execute(sa_text(
+                "SELECT table_name FROM information_schema.columns "
+                "WHERE column_name = 'id' AND table_schema = 'public' "
+                "AND (is_identity = 'YES' OR column_default LIKE 'nextval%')"
+            ))
+            tables = [row[0] for row in result.fetchall()]
+
+            for table_name in tables:
+                try:
+                    if not safe_id_re.match(table_name):
+                        continue
+                    seq_name = f"{table_name}_id_seq"
+                    await session.execute(sa_text(
+                        f"SELECT setval('{seq_name}', COALESCE((SELECT MAX(id) FROM \"{table_name}\"), 0) + 1, false)"
+                    ))
+                except Exception:
+                    pass
+
+            await session.commit()
+            logger.info(f"Resynced PostgreSQL sequences for {len(tables)} table(s)")
+    except Exception as e:
+        logger.debug(f"Sequence resync skipped: {e}")
+
+
+async def run_seeders_with_factory(factory, exclude: Optional[Set[str]] = None) -> None:
+    """Run seeders using a custom session factory instead of the default.
+
+    This temporarily patches async_session_factory in all seeder modules
+    so they connect to a different database (e.g., Lakebase after schema creation).
+
+    Args:
+        factory: async_sessionmaker to use for database connections
+        exclude: set of seeder names to skip (e.g., {'documentation'})
+    """
+    exclude = exclude or set()
+
+    if not SEEDERS:
+        logger.warning("No seeders registered — skipping run_seeders_with_factory")
+        return
+
+    # Collect seeder modules that reference async_session_factory.
+    # Use sys.modules to avoid NameError if a module failed to import.
+    seeder_modules = []
+    seed_module_names = [
+        'src.seeds.tools', 'src.seeds.schemas', 'src.seeds.prompt_templates',
+        'src.seeds.model_configs', 'src.seeds.documentation', 'src.seeds.groups',
+        'src.seeds.api_keys', 'src.seeds.dspy_examples', 'src.seeds.example_crews',
+    ]
+    for mod_name in seed_module_names:
+        mod = sys.modules.get(mod_name)
+        if mod and hasattr(mod, 'async_session_factory'):
+            seeder_modules.append(mod)
+
+    # Save originals and patch each module's reference
+    originals = {}
+    for mod in seeder_modules:
+        originals[mod] = mod.async_session_factory
+        mod.async_session_factory = factory
+
+    try:
+        for seeder_name, seeder_func in SEEDERS.items():
+            if seeder_name in exclude:
+                logger.info(f"Skipping {seeder_name} seeder (excluded)")
+                continue
+            logger.info(f"Running {seeder_name} seeder with custom factory...")
+            try:
+                await seeder_func()
+                logger.info(f"Completed {seeder_name} seeder.")
+            except Exception as e:
+                logger.error(f"Error running {seeder_name} seeder: {e}")
+                logger.error(traceback.format_exc())
+    finally:
+        # Restore original factories
+        for mod, original in originals.items():
+            mod.async_session_factory = original
+        logger.debug("Restored original session factory in all seeder modules")
+
 
 # Command-line entry point
 async def main() -> None:
