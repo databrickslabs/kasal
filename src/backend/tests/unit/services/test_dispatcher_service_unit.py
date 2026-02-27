@@ -121,10 +121,13 @@ class TestAnalyzeMessageSemantics:
     def setup_method(self):
         self.svc = _build_service()
 
-    def test_empty_message_returns_unknown(self):
+    def test_empty_message_returns_crew_default(self):
         result = self.svc._analyze_message_semantics("")
-        assert result["suggested_intent"] == "unknown"
-        assert result["intent_scores"]["generate_task"] == 0
+        # Crew-first: generate_crew has base score, so it wins by default
+        assert result["suggested_intent"] == "generate_crew"
+        # Empty message has no task actions, but is_single_atomic is True
+        # so generate_task gets 5 (single atomic action score)
+        assert result["intent_scores"]["generate_task"] == 5
 
     def test_task_action_word_detected(self):
         result = self.svc._analyze_message_semantics("find the best flight to Paris")
@@ -134,7 +137,8 @@ class TestAnalyzeMessageSemantics:
     def test_imperative_form_detected(self):
         result = self.svc._analyze_message_semantics("search for news about AI")
         assert result["has_imperative"] is True
-        assert any("Imperative form" in h for h in result["semantic_hints"])
+        # Semantic hints now report "Action words detected" instead of "Imperative form"
+        assert any("Action words detected" in h for h in result["semantic_hints"])
 
     def test_agent_keywords_detected(self):
         result = self.svc._analyze_message_semantics(
@@ -182,17 +186,22 @@ class TestAnalyzeMessageSemantics:
         result = self.svc._analyze_message_semantics("what is the best approach")
         assert result["has_question"] is True
 
-    def test_command_structure_detected(self):
+    def test_command_structure_removed(self):
         result = self.svc._analyze_message_semantics("i need to find flight options")
-        assert result["has_command_structure"] is True
-        assert any("Command-like structure" in h for h in result["semantic_hints"])
+        # has_command_structure is now always False (removed in crew-first refactor)
+        assert result["has_command_structure"] is False
 
     def test_complex_task_multiple_actions(self):
         result = self.svc._analyze_message_semantics(
             "find and analyze all the news articles"
         )
         assert result["has_complex_task"] is True
-        assert any("Complex multi-step" in h for h in result["semantic_hints"])
+        # Semantic hints now report "Multiple action words detected" and/or
+        # "Multi-step workflow detected" instead of "Complex multi-step"
+        assert any(
+            "Multiple action words detected" in h or "Multi-step workflow detected" in h
+            for h in result["semantic_hints"]
+        )
 
     def test_complex_task_via_multiple_keyword(self):
         result = self.svc._analyze_message_semantics("gather multiple data sources")
@@ -204,9 +213,10 @@ class TestAnalyzeMessageSemantics:
         assert result["has_greeting"] is False
 
     def test_suggested_intent_picks_highest_score(self):
-        # "execute" alone should yield execute_crew as top score
+        # "execute" alone: execute_crew=6, generate_crew=6 (base).
+        # Tied scores break in priority order: crew > execute, so crew wins.
         result = self.svc._analyze_message_semantics("execute")
-        assert result["suggested_intent"] == "execute_crew"
+        assert result["suggested_intent"] == "generate_crew"
 
     def test_mixed_keywords_highest_wins(self):
         result = self.svc._analyze_message_semantics(
@@ -239,14 +249,20 @@ class TestAnalyzeMessageSemantics:
         assert result["has_configure_structure"] is True
 
     def test_action_starts_with_pattern(self):
-        """Messages starting with 'get' should match command pattern."""
+        """Messages starting with 'get' no longer set has_command_structure (removed)."""
         result = self.svc._analyze_message_semantics("get the latest data")
-        assert result["has_command_structure"] is True
+        # has_command_structure is now always False (removed in crew-first refactor)
+        assert result["has_command_structure"] is False
+        # 'get' is still detected as a task action word
+        assert "get" in result["task_actions"]
 
     def test_can_you_request_pattern(self):
-        """'can you' pattern should match command structure."""
+        """'can you' pattern no longer sets has_command_structure (removed)."""
         result = self.svc._analyze_message_semantics("can you find the best hotel")
-        assert result["has_command_structure"] is True
+        # has_command_structure is now always False (removed in crew-first refactor)
+        assert result["has_command_structure"] is False
+        # 'find' is still detected as a task action word
+        assert "find" in result["task_actions"]
 
     def test_all_various_keywords_detected(self):
         """Several keyword in words triggers 'several' in message."""
@@ -528,13 +544,14 @@ class TestDetectIntent:
         ):
             result = await svc.detect_intent("execute the crew", "m")
 
-        # "execute" yields execute_crew via semantic fallback
-        assert result["intent"] == "execute_crew"
+        # In crew-first mode, "crew" is a crew keyword so crew_score > execute_score.
+        # Semantic fallback returns generate_crew as the default.
+        assert result["intent"] == "generate_crew"
         assert result["suggested_prompt"] == "execute the crew"
 
     @pytest.mark.asyncio
     async def test_exception_fallback_low_semantic_confidence(self):
-        """When exception and semantic confidence is low, intent should be unknown."""
+        """When exception, crew-first still returns generate_crew as default."""
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
@@ -545,12 +562,13 @@ class TestDetectIntent:
         ):
             result = await svc.detect_intent("xyz", "m")
 
-        assert result["intent"] == "unknown"
-        assert result["confidence"] == 0.3  # max(0.3, 0/5.0)
+        # Crew-first: generate_crew has base score of 6 -> confidence 0.6 > 0.3 threshold
+        assert result["intent"] == "generate_crew"
+        assert result["confidence"] == 0.6  # max(0.5, 6/10.0)
 
     @pytest.mark.asyncio
-    async def test_empty_response_low_semantic_falls_back_unknown(self):
-        """Empty LLM response + low semantic confidence -> unknown intent."""
+    async def test_empty_response_falls_back_to_crew(self):
+        """Empty LLM response -> falls back to generate_crew (crew-first default)."""
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
@@ -564,7 +582,8 @@ class TestDetectIntent:
             result = await svc.detect_intent("xyz abc", "m")
 
         assert result["source"] == "semantic_fallback"
-        assert result["intent"] == "unknown"
+        # Crew-first: empty response falls back to generate_crew
+        assert result["intent"] == "generate_crew"
 
     @pytest.mark.asyncio
     async def test_missing_intent_filled_from_semantic(self):
@@ -686,7 +705,9 @@ class TestDetectIntent:
 
     @pytest.mark.asyncio
     async def test_semantic_override_when_confident(self):
-        """When semantic analysis has high confidence and LLM has low, semantic wins."""
+        """When semantic analysis has high confidence and LLM has low, semantic wins.
+        But in crew-first mode, the semantic override only applies to non-generation
+        intents and crew. 'ec' ties crew (6) with execute (6) -> crew wins priority."""
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
@@ -702,8 +723,11 @@ class TestDetectIntent:
         ):
             result = await svc.detect_intent("ec", "m")
 
-        # "ec" is an execute keyword with high semantic score
-        assert result["intent"] == "execute_crew"
+        # "ec" yields crew=6, execute=6. Crew wins in priority tiebreak.
+        # But semantic_confidence=0.6 < 0.7 override threshold so LLM stays.
+        # LLM said "unknown" with confidence 0.3.
+        # Since override threshold (0.7) is not met, result keeps LLM intent.
+        assert result["intent"] == "unknown"
 
     @pytest.mark.asyncio
     async def test_semantic_does_not_override_when_llm_confident(self):
@@ -1590,7 +1614,8 @@ class TestEdgeCases:
     def test_semantic_analysis_no_words(self):
         svc = _build_service()
         result = svc._analyze_message_semantics("!!! ???")
-        assert result["suggested_intent"] == "unknown"
+        # Crew-first: generate_crew has base score of 6 even with no words
+        assert result["suggested_intent"] == "generate_crew"
 
     @pytest.mark.asyncio
     async def test_dispatch_request_with_empty_tools(self):

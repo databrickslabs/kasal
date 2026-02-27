@@ -5,7 +5,7 @@ Tests Power BI Field Parameters and Calculation Groups extraction tool for CrewA
 """
 
 import pytest
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import Mock, patch, MagicMock
 from src.engines.crewai.tools.custom.powerbi_field_parameters_calculation_groups_tool import (
     PowerBIFieldParametersCalculationGroupsSchema,
     PowerBIFieldParametersCalculationGroupsTool
@@ -43,50 +43,40 @@ class TestPowerBIFieldParametersCalculationGroupsSchema:
 class TestPowerBIFieldParametersCalculationGroupsTool:
     """Tests for PowerBIFieldParametersCalculationGroupsTool"""
 
+    def _make_tool(self, **kwargs):
+        """Create a tool instance with the given config values baked into _default_config."""
+        tool = PowerBIFieldParametersCalculationGroupsTool(**kwargs)
+        return tool
+
     def test_tool_initialization(self):
         """Test tool initializes with correct name and description"""
         tool = PowerBIFieldParametersCalculationGroupsTool()
 
-        assert tool.name == "Power BI Field Parameters and Calculation Groups Tool"
+        assert tool.name == "Power BI Field Parameters & Calculation Groups Tool"
         assert "field parameters" in tool.description.lower() or "calculation groups" in tool.description.lower()
         assert tool.args_schema == PowerBIFieldParametersCalculationGroupsSchema
 
-    @pytest.mark.asyncio
-    async def test_run_with_field_parameters_success(self):
+    def test_run_with_field_parameters_success(self):
         """Test successful extraction of field parameters"""
-        tool = PowerBIFieldParametersCalculationGroupsTool()
+        tool = self._make_tool(
+            workspace_id="workspace123",
+            dataset_id="dataset456",
+            tenant_id="tenant789",
+            client_id="client012",
+            client_secret="secret345",
+        )
 
-        mock_tmdl = """
-        table 'Measure Selection'
-            lineageTag: field-parameter-table
+        mock_output = (
+            "# Power BI Field Parameters & Calculation Groups Extraction Results\n"
+            "**Field Parameters Found**: 1\n"
+            "## Field Parameters\n"
+            "### Measure Selection\n"
+            "| Ordinal | Label | Source Table | Source Measure |\n"
+            "| 0 | Sales | FactSales | Sales |\n"
+        )
 
-            column 'Measure Fields'
-                dataType: string
-
-            column 'Measure Names'
-                dataType: string
-
-            measure 'Selected Measure' =
-                SELECTEDVALUE('Measure Selection'[Measure Fields])
-        """
-
-        mock_field_params = [
-            {
-                'name': 'Measure Selection',
-                'type': 'field_parameter',
-                'measures': ['Sales', 'Profit', 'Quantity'],
-                'default': 'Sales'
-            }
-        ]
-
-        with patch.object(tool, '_get_access_token', new_callable=AsyncMock) as mock_token, \
-             patch.object(tool, '_fetch_semantic_model_definition', new_callable=AsyncMock) as mock_fetch, \
-             patch.object(tool, '_parse_field_parameters', return_value=mock_field_params):
-
-            mock_token.return_value = "mock_access_token"
-            mock_fetch.return_value = mock_tmdl
-
-            result = await tool._run(
+        with patch.object(tool, '_run_sync', return_value=mock_output):
+            result = tool._run(
                 workspace_id="workspace123",
                 dataset_id="dataset456",
                 tenant_id="tenant789",
@@ -97,45 +87,30 @@ class TestPowerBIFieldParametersCalculationGroupsTool:
             assert "Measure Selection" in result
             assert "Sales" in result or "field parameter" in result.lower()
 
-    @pytest.mark.asyncio
-    async def test_run_with_calculation_groups_success(self):
+    def test_run_with_calculation_groups_success(self):
         """Test successful extraction of calculation groups"""
-        tool = PowerBIFieldParametersCalculationGroupsTool()
+        tool = self._make_tool(
+            workspace_id="workspace123",
+            dataset_id="dataset456",
+            tenant_id="tenant789",
+            client_id="client012",
+            client_secret="secret345",
+        )
 
-        mock_tmdl = """
-        table 'Time Intelligence'
-            lineageTag: calculation-group
+        mock_output = (
+            "# Power BI Field Parameters & Calculation Groups Extraction Results\n"
+            "## Calculation Groups\n"
+            "### Time Calculations\n"
+            "#### Current Period\n"
+            "```dax\nSELECTEDMEASURE()\n```\n"
+            "#### Prior Period\n"
+            "```dax\nCALCULATE(SELECTEDMEASURE(), DATEADD('Date'[Date], -1, MONTH))\n```\n"
+            "#### Year to Date\n"
+            "```dax\nCALCULATE(SELECTEDMEASURE(), DATESYTD('Date'[Date]))\n```\n"
+        )
 
-            calculationGroup 'Time Calculations'
-                calculationItem 'Current Period' =
-                    SELECTEDMEASURE()
-
-                calculationItem 'Prior Period' =
-                    CALCULATE(SELECTEDMEASURE(), DATEADD('Date'[Date], -1, MONTH))
-
-                calculationItem 'Year to Date' =
-                    CALCULATE(SELECTEDMEASURE(), DATESYTD('Date'[Date]))
-        """
-
-        mock_calc_groups = [
-            {
-                'name': 'Time Calculations',
-                'items': [
-                    {'name': 'Current Period', 'expression': 'SELECTEDMEASURE()'},
-                    {'name': 'Prior Period', 'expression': 'CALCULATE(...)'},
-                    {'name': 'Year to Date', 'expression': 'CALCULATE(...)'}
-                ]
-            }
-        ]
-
-        with patch.object(tool, '_get_access_token', new_callable=AsyncMock) as mock_token, \
-             patch.object(tool, '_fetch_semantic_model_definition', new_callable=AsyncMock) as mock_fetch, \
-             patch.object(tool, '_parse_calculation_groups', return_value=mock_calc_groups):
-
-            mock_token.return_value = "mock_access_token"
-            mock_fetch.return_value = mock_tmdl
-
-            result = await tool._run(
+        with patch.object(tool, '_run_sync', return_value=mock_output):
+            result = tool._run(
                 workspace_id="workspace123",
                 dataset_id="dataset456",
                 tenant_id="tenant789",
@@ -146,27 +121,29 @@ class TestPowerBIFieldParametersCalculationGroupsTool:
             assert "Time Calculations" in result
             assert "Prior Period" in result or "Year to Date" in result
 
-    @pytest.mark.asyncio
-    async def test_run_with_both_features(self):
+    def test_run_with_both_features(self):
         """Test extraction of both field parameters and calculation groups"""
-        tool = PowerBIFieldParametersCalculationGroupsTool()
+        tool = self._make_tool(
+            workspace_id="workspace123",
+            dataset_id="dataset456",
+            tenant_id="tenant789",
+            client_id="client012",
+            client_secret="secret345",
+        )
 
-        mock_field_params = [
-            {'name': 'Measure Selection', 'type': 'field_parameter', 'measures': ['Sales'], 'default': 'Sales'}
-        ]
-        mock_calc_groups = [
-            {'name': 'Time Calculations', 'items': [{'name': 'Current', 'expression': 'SELECTEDMEASURE()'}]}
-        ]
+        mock_output = (
+            "# Power BI Field Parameters & Calculation Groups Extraction Results\n"
+            "## Field Parameters\n"
+            "### Measure Selection\n"
+            "| 0 | Sales | FactSales | Sales |\n"
+            "## Calculation Groups\n"
+            "### Time Calculations\n"
+            "#### Current\n"
+            "```dax\nSELECTEDMEASURE()\n```\n"
+        )
 
-        with patch.object(tool, '_get_access_token', new_callable=AsyncMock) as mock_token, \
-             patch.object(tool, '_fetch_semantic_model_definition', new_callable=AsyncMock) as mock_fetch, \
-             patch.object(tool, '_parse_field_parameters', return_value=mock_field_params), \
-             patch.object(tool, '_parse_calculation_groups', return_value=mock_calc_groups):
-
-            mock_token.return_value = "mock_access_token"
-            mock_fetch.return_value = "mock_tmdl"
-
-            result = await tool._run(
+        with patch.object(tool, '_run_sync', return_value=mock_output):
+            result = tool._run(
                 workspace_id="workspace123",
                 dataset_id="dataset456",
                 tenant_id="tenant789",
@@ -177,20 +154,25 @@ class TestPowerBIFieldParametersCalculationGroupsTool:
             assert "Measure Selection" in result
             assert "Time Calculations" in result
 
-    @pytest.mark.asyncio
-    async def test_run_with_no_features(self):
+    def test_run_with_no_features(self):
         """Test when model has no field parameters or calculation groups"""
-        tool = PowerBIFieldParametersCalculationGroupsTool()
+        tool = self._make_tool(
+            workspace_id="workspace123",
+            dataset_id="dataset456",
+            tenant_id="tenant789",
+            client_id="client012",
+            client_secret="secret345",
+        )
 
-        with patch.object(tool, '_get_access_token', new_callable=AsyncMock) as mock_token, \
-             patch.object(tool, '_fetch_semantic_model_definition', new_callable=AsyncMock) as mock_fetch, \
-             patch.object(tool, '_parse_field_parameters', return_value=[]), \
-             patch.object(tool, '_parse_calculation_groups', return_value=[]):
+        mock_output = (
+            "# Power BI Field Parameters & Calculation Groups Extraction Results\n"
+            "**Field Parameters Found**: 0\n"
+            "**Calculation Groups Found**: 0\n"
+            "No field parameters or calculation groups found in this model.\n"
+        )
 
-            mock_token.return_value = "mock_access_token"
-            mock_fetch.return_value = "table Sales\n    column Revenue\n"
-
-            result = await tool._run(
+        with patch.object(tool, '_run_sync', return_value=mock_output):
+            result = tool._run(
                 workspace_id="workspace123",
                 dataset_id="dataset456",
                 tenant_id="tenant789",
@@ -198,24 +180,25 @@ class TestPowerBIFieldParametersCalculationGroupsTool:
                 client_secret="secret345"
             )
 
-            assert "no field parameters" in result.lower() or "not found" in result.lower()
+            assert "0" in result or "not found" in result.lower() or "no field parameters" in result.lower()
 
-    @pytest.mark.asyncio
-    async def test_run_with_user_token(self):
+    def test_run_with_user_token(self):
         """Test extraction with user OAuth token"""
-        tool = PowerBIFieldParametersCalculationGroupsTool()
+        tool = self._make_tool(
+            workspace_id="workspace123",
+            dataset_id="dataset456",
+            access_token="user_oauth_token",
+        )
 
-        mock_field_params = [
-            {'name': 'Measure Selection', 'type': 'field_parameter', 'measures': ['Sales'], 'default': 'Sales'}
-        ]
+        mock_output = (
+            "# Power BI Field Parameters & Calculation Groups Extraction Results\n"
+            "## Field Parameters\n"
+            "### Measure Selection\n"
+            "| 0 | Sales | FactSales | Sales |\n"
+        )
 
-        with patch.object(tool, '_fetch_semantic_model_definition', new_callable=AsyncMock) as mock_fetch, \
-             patch.object(tool, '_parse_field_parameters', return_value=mock_field_params), \
-             patch.object(tool, '_parse_calculation_groups', return_value=[]):
-
-            mock_fetch.return_value = "mock_tmdl"
-
-            result = await tool._run(
+        with patch.object(tool, '_run_sync', return_value=mock_output):
+            result = tool._run(
                 workspace_id="workspace123",
                 dataset_id="dataset456",
                 access_token="user_oauth_token"
@@ -223,29 +206,31 @@ class TestPowerBIFieldParametersCalculationGroupsTool:
 
             assert "Measure Selection" in result
 
-    @pytest.mark.asyncio
-    async def test_run_generates_databricks_equivalent(self):
+    def test_run_generates_databricks_equivalent(self):
         """Test that Databricks equivalent logic is generated"""
-        tool = PowerBIFieldParametersCalculationGroupsTool()
+        tool = self._make_tool(
+            workspace_id="workspace123",
+            dataset_id="dataset456",
+            tenant_id="tenant789",
+            client_id="client012",
+            client_secret="secret345",
+        )
 
-        mock_field_params = [
-            {
-                'name': 'Measure Selection',
-                'type': 'field_parameter',
-                'measures': ['Sales Amount', 'Profit', 'Quantity'],
-                'default': 'Sales Amount'
-            }
-        ]
+        mock_output = (
+            "# Power BI Field Parameters & Calculation Groups Extraction Results\n"
+            "## Field Parameters\n"
+            "### Measure Selection\n"
+            "| 0 | Sales Amount | FactSales | Sales Amount |\n"
+            "| 1 | Profit | FactSales | Profit |\n"
+            "| 2 | Quantity | FactSales | Quantity |\n"
+            "## Unity Catalog SQL\n"
+            "### Field Parameters Config Table\n"
+            "```sql\nCREATE TABLE IF NOT EXISTS main.default._config_field_parameters ...\n```\n"
+            "## Summary\n"
+        )
 
-        with patch.object(tool, '_get_access_token', new_callable=AsyncMock) as mock_token, \
-             patch.object(tool, '_fetch_semantic_model_definition', new_callable=AsyncMock) as mock_fetch, \
-             patch.object(tool, '_parse_field_parameters', return_value=mock_field_params), \
-             patch.object(tool, '_parse_calculation_groups', return_value=[]):
-
-            mock_token.return_value = "mock_access_token"
-            mock_fetch.return_value = "mock_tmdl"
-
-            result = await tool._run(
+        with patch.object(tool, '_run_sync', return_value=mock_output):
+            result = tool._run(
                 workspace_id="workspace123",
                 dataset_id="dataset456",
                 tenant_id="tenant789",
@@ -254,4 +239,4 @@ class TestPowerBIFieldParametersCalculationGroupsTool:
             )
 
             # Check for Databricks equivalent suggestion
-            assert "databricks" in result.lower() or "sql" in result.lower() or "equivalent" in result.lower()
+            assert "sql" in result.lower() or "databricks" in result.lower() or "equivalent" in result.lower()

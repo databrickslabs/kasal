@@ -21,6 +21,7 @@ from src.utils.user_context import GroupContext
 class MockAgent:
     def __init__(self, id="agent-123", name="Test Agent", role="Test Role",
                  goal="Test Goal", backstory="Test Backstory", tools=None,
+                 tool_configs=None,
                  group_id="group-123", created_by_email="test@example.com"):
         self.id = id
         self.name = name
@@ -28,6 +29,7 @@ class MockAgent:
         self.goal = goal
         self.backstory = backstory
         self.tools = tools or ["tool1", "tool2"]
+        self.tool_configs = tool_configs
         self.group_id = group_id
         self.created_by_email = created_by_email
         self.created_at = datetime.utcnow()
