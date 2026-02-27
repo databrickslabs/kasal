@@ -74,6 +74,53 @@ async def execute_db_operation_with_fresh_engine(operation: Callable[[AsyncSessi
         raise
     # No engine disposal - engine lifecycle managed by session.py
 
+async def execute_db_operation_smart(operation: Callable[[AsyncSession], Coroutine[Any, Any, T]]) -> T:
+    """
+    Execute a database operation using the smart session (Lakebase-aware).
+
+    Unlike ``execute_db_operation_with_fresh_engine`` (which always uses the
+    local DB engine), this function honours the database router:
+    - When Lakebase is active → uses a Lakebase session.
+    - Otherwise             → falls back to the local NullPool engine.
+
+    Use this for operations on tables that may live in Lakebase
+    (e.g. execution_history).
+    """
+    from src.db.database_router import is_lakebase_enabled
+
+    if await is_lakebase_enabled():
+        import os
+        from src.db.database_router import get_lakebase_config_from_db
+        from src.db.lakebase_session import get_lakebase_session
+        from src.utils.databricks_auth import get_auth_context
+
+        config = await get_lakebase_config_from_db()
+        instance_name = (config.get("instance_name") if config else None) or os.environ.get(
+            "LAKEBASE_INSTANCE_NAME", "kasal-lakebase"
+        )
+
+        user_token = None
+        user_email = None
+        try:
+            auth = await get_auth_context()
+            if auth:
+                user_token = auth.token
+                user_email = auth.user_identity
+        except Exception:
+            pass  # Will rely on other auth methods inside lakebase session
+
+        try:
+            async with get_lakebase_session(instance_name, user_token, user_email) as session:
+                result = await operation(session)
+                return result
+        except Exception as e:
+            logger.warning(f"Lakebase session failed, falling back to local DB: {e}")
+            # Fall through to local DB below
+
+    # Local DB fallback (or Lakebase not enabled)
+    return await execute_db_operation_with_fresh_engine(operation)
+
+
 def create_and_run_loop(coroutine: Any) -> Any:
     """Create a new event loop, run the coroutine, and clean up properly."""
     new_loop = asyncio.new_event_loop()

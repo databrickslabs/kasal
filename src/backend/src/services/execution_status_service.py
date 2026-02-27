@@ -11,7 +11,7 @@ from typing import Dict, Any, Optional
 
 from src.models.execution_status import ExecutionStatus
 from src.repositories.execution_repository import ExecutionRepository
-from src.utils.asyncio_utils import execute_db_operation_with_fresh_engine
+from src.utils.asyncio_utils import execute_db_operation_with_fresh_engine, execute_db_operation_smart
 from src.core.sse_manager import sse_manager, SSEEvent
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -154,10 +154,12 @@ class ExecutionStatusService:
                     await session.rollback()
                     return False
 
-            # Execute the operation with a provided session if available; otherwise fall back
+            # Execute the operation with a provided session if available; otherwise fall back.
+            # Use execute_db_operation_smart so that when Lakebase is active the
+            # execution_history record (which lives in Lakebase) can be found.
             if session is not None:
                 return await _update_operation(session)
-            return await execute_db_operation_with_fresh_engine(_update_operation)
+            return await execute_db_operation_smart(_update_operation)
 
         except Exception as e:
             logger.error(f"[ExecutionStatusService] Error during update/flush/commit for job_id {job_id}: {str(e)}", exc_info=True)
@@ -237,7 +239,7 @@ class ExecutionStatusService:
             # Execute the operation with a provided session if available; otherwise fall back
             if session is not None:
                 return await _update_trace_operation(session)
-            return await execute_db_operation_with_fresh_engine(_update_trace_operation)
+            return await execute_db_operation_smart(_update_trace_operation)
 
         except Exception as e:
             logger.error(f"[ExecutionStatusService] Error updating MLflow trace ID for job_id {job_id}: {str(e)}", exc_info=True)
@@ -312,7 +314,7 @@ class ExecutionStatusService:
             # Execute the operation with a provided session if available; otherwise fall back
             if session is not None:
                 return await _get_operation(session)
-            return await execute_db_operation_with_fresh_engine(_get_operation)
+            return await execute_db_operation_smart(_get_operation)
 
         except Exception as e:
             logger.error(f"Error getting execution status: {str(e)}")

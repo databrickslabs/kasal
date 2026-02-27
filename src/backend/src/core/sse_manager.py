@@ -295,6 +295,8 @@ async def event_stream_generator(
                 logger.info(f"SSE stream cancelled for job {job_id}")
                 break
 
+    except (asyncio.CancelledError, GeneratorExit):
+        logger.info(f"SSE stream cancelled/disconnected for job {job_id}")
     except Exception as e:
         logger.error(f"Error in SSE stream for job {job_id}: {e}")
     finally:
