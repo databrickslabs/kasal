@@ -54,7 +54,7 @@ class ExecutionNameService:
     async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str) -> None:
         """
         Log LLM interaction using the log service.
-        
+
         Args:
             endpoint: API endpoint that was called
             prompt: Input prompt text
@@ -72,7 +72,13 @@ class ExecutionNameService:
             logger.info(f"Logged {endpoint} interaction to database")
         except Exception as e:
             logger.error(f"Failed to log LLM interaction: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            # CRITICAL: Rollback the session so subsequent operations (e.g.
+            # create_execution) are not blocked by PendingRollbackError.
+            try:
+                session = self.log_service.repository.session
+                await session.rollback()
+            except Exception:
+                pass
     
     async def generate_execution_name(self, request: ExecutionNameGenerationRequest) -> ExecutionNameGenerationResponse:
         """

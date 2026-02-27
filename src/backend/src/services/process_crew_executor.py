@@ -694,6 +694,94 @@ def run_crew_in_process(
                     crew_config, api_keys_service, user_token
                 )
 
+                # Initialize OTel tracing BEFORE crew preparation so traces
+                # are captured even when MCP tool creation or other prep is slow.
+                otel_provider = None
+                try:
+                    from src.services.otel_tracing import (
+                        create_kasal_tracer_provider,
+                    )
+                    from opentelemetry import trace as _otel_trace
+                    from opentelemetry.sdk.trace.export import (
+                        SimpleSpanProcessor,
+                    )
+
+                    otel_provider = create_kasal_tracer_provider(
+                        job_id=execution_id
+                    )
+
+                    # DB exporter + SSE processor
+                    from src.services.otel_tracing.db_exporter import (
+                        KasalDBSpanExporter,
+                    )
+                    from src.services.otel_tracing.sse_processor import (
+                        KasalSSESpanProcessor,
+                    )
+                    otel_provider.add_span_processor(
+                        SimpleSpanProcessor(
+                            KasalDBSpanExporter(
+                                execution_id, group_context
+                            )
+                        )
+                    )
+                    otel_provider.add_span_processor(
+                        KasalSSESpanProcessor(execution_id)
+                    )
+
+                    # MLflow exporter (conditional on mlflow being ready)
+                    if mlflow_result and mlflow_result.tracing_ready:
+                        from src.services.otel_tracing.mlflow_exporter import (
+                            KasalMLflowSpanExporter,
+                        )
+                        otel_provider.add_span_processor(
+                            SimpleSpanProcessor(
+                                KasalMLflowSpanExporter(
+                                    execution_id, mlflow_result, group_context
+                                )
+                            )
+                        )
+                        mlflow_result.otel_exporter_active = True
+                        async_logger.info(
+                            f"[SUBPROCESS] MLflow span exporter added to OTel pipeline for {execution_id}"
+                        )
+
+                    _otel_trace.set_tracer_provider(otel_provider)
+
+                    # Instrument CrewAI if instrumentor available
+                    try:
+                        from openinference.instrumentation.crewai import (
+                            CrewAIInstrumentor,
+                        )
+                        CrewAIInstrumentor().instrument(
+                            tracer_provider=otel_provider
+                        )
+                        async_logger.info(
+                            f"[SUBPROCESS] OTel tracing enabled with CrewAI instrumentation for {execution_id}"
+                        )
+                    except ImportError:
+                        async_logger.info(
+                            f"[SUBPROCESS] OTel tracing enabled (no CrewAI instrumentor) for {execution_id}"
+                        )
+
+                    # Diagnostic: confirm span processors are attached
+                    try:
+                        proc_count = len(
+                            otel_provider._active_span_processor._span_processors
+                        ) if hasattr(otel_provider, '_active_span_processor') else 'unknown'
+                    except Exception:
+                        proc_count = 'unknown'
+                    async_logger.info(
+                        f"[SUBPROCESS] OTel pipeline: provider has {proc_count} span processor(s) for {execution_id}"
+                    )
+                except ImportError:
+                    async_logger.debug(
+                        "[SUBPROCESS] OTel packages not available, skipping"
+                    )
+                except Exception as otel_err:
+                    async_logger.warning(
+                        f"[SUBPROCESS] OTel initialization error (non-fatal): {otel_err}"
+                    )
+
                 # Log the JobConfiguration BEFORE crew preparation to ensure it's captured
                 import json
 
@@ -891,75 +979,9 @@ def run_crew_in_process(
                     # DetailedOutputLogger functionality now integrated into AgentTraceEventListener
                     # No separate detailed logger needed
 
-                    # Initialize OTel tracing (always-on, sole trace source)
-                    otel_provider = None
-                    try:
-                        from src.services.otel_tracing import (
-                            create_kasal_tracer_provider,
-                        )
-                        from opentelemetry import trace as _otel_trace
-                        from opentelemetry.sdk.trace.export import (
-                            SimpleSpanProcessor,
-                        )
-
-                        otel_provider = create_kasal_tracer_provider(
-                            job_id=execution_id
-                        )
-
-                        # DB exporter + SSE processor
-                        from src.services.otel_tracing.db_exporter import (
-                            KasalDBSpanExporter,
-                        )
-                        from src.services.otel_tracing.sse_processor import (
-                            KasalSSESpanProcessor,
-                        )
-                        otel_provider.add_span_processor(
-                            SimpleSpanProcessor(
-                                KasalDBSpanExporter(
-                                    execution_id, group_context
-                                )
-                            )
-                        )
-                        otel_provider.add_span_processor(
-                            KasalSSESpanProcessor(execution_id)
-                        )
-
-                        # MLflow exporter (conditional on mlflow being ready)
-                        if mlflow_result and mlflow_result.tracing_ready:
-                            from src.services.otel_tracing.mlflow_exporter import (
-                                KasalMLflowSpanExporter,
-                            )
-                            otel_provider.add_span_processor(
-                                SimpleSpanProcessor(
-                                    KasalMLflowSpanExporter(
-                                        execution_id, mlflow_result, group_context
-                                    )
-                                )
-                            )
-                            mlflow_result.otel_exporter_active = True
-                            async_logger.info(
-                                f"[SUBPROCESS] MLflow span exporter added to OTel pipeline for {execution_id}"
-                            )
-
-                        _otel_trace.set_tracer_provider(otel_provider)
-
-                        # Instrument CrewAI if instrumentor available
-                        try:
-                            from openinference.instrumentation.crewai import (
-                                CrewAIInstrumentor,
-                            )
-                            CrewAIInstrumentor().instrument(
-                                tracer_provider=otel_provider
-                            )
-                            async_logger.info(
-                                f"[SUBPROCESS] OTel tracing enabled with CrewAI instrumentation for {execution_id}"
-                            )
-                        except ImportError:
-                            async_logger.info(
-                                f"[SUBPROCESS] OTel tracing enabled (no CrewAI instrumentor) for {execution_id}"
-                            )
-
-                        # Register OTel Event Bridge on the CrewAI event bus
+                    # Register OTel Event Bridge on the CrewAI event bus
+                    # (OTel provider was initialized earlier, before crew preparation)
+                    if otel_provider is not None:
                         try:
                             from src.services.otel_tracing.event_bridge import (
                                 OTelEventBridge,
@@ -979,25 +1001,6 @@ def run_crew_in_process(
                             async_logger.warning(
                                 f"[SUBPROCESS] OTel Event Bridge registration failed (non-fatal): {bridge_err}"
                             )
-
-                        # Diagnostic: confirm span processors are attached
-                        try:
-                            proc_count = len(
-                                otel_provider._active_span_processor._span_processors
-                            ) if hasattr(otel_provider, '_active_span_processor') else 'unknown'
-                        except Exception:
-                            proc_count = 'unknown'
-                        async_logger.info(
-                            f"[SUBPROCESS] OTel pipeline: provider has {proc_count} span processor(s) for {execution_id}"
-                        )
-                    except ImportError:
-                        async_logger.debug(
-                            "[SUBPROCESS] OTel packages not available, skipping"
-                        )
-                    except Exception as otel_err:
-                        async_logger.warning(
-                            f"[SUBPROCESS] OTel initialization error (non-fatal): {otel_err}"
-                        )
 
                     # Debug: Print that we're about to configure logging
                     import sys  # Import sys for stderr debugging
@@ -1320,6 +1323,15 @@ def run_crew_in_process(
                         f"[SUBPROCESS] OTel shutdown: {otel_shutdown_err}"
                     )
 
+                # Stop MCP adapters to close streaming HTTP connections
+                try:
+                    from src.engines.crewai.tools.mcp_handler import stop_all_adapters
+                    await stop_all_adapters()
+                except Exception as mcp_err:
+                    async_logger.debug(
+                        f"[SUBPROCESS] MCP adapter cleanup: {mcp_err}"
+                    )
+
                 return result
 
         # Run the async preparation and execution with proper cleanup
@@ -1430,6 +1442,14 @@ def run_crew_in_process(
             from crewai.events import crewai_event_bus as _event_bus
 
             _event_bus.flush(timeout=10.0)
+        except Exception:
+            pass
+
+        # CRITICAL: Shutdown OTel on error path too, so the db_exporter's
+        # thread pool drains and pending trace writes complete.
+        try:
+            from src.services.otel_tracing import shutdown_provider
+            shutdown_provider()
         except Exception:
             pass
 
@@ -1768,6 +1788,30 @@ class ProcessCrewExecutor:
             f"[ProcessCrewExecutor] Set KASAL_EXECUTION_ID={execution_id} for subprocess inheritance"
         )
 
+        # Propagate Lakebase config to subprocess so the OTel trace exporter
+        # writes traces to Lakebase instead of the local DB when Lakebase is active.
+        old_lakebase_active = os.environ.get("LAKEBASE_ACTIVE")
+        old_lakebase_instance = os.environ.get("LAKEBASE_INSTANCE_NAME")
+        try:
+            from src.db.database_router import is_lakebase_enabled, get_lakebase_config_from_db
+            import asyncio
+            loop = asyncio.get_running_loop()
+            lakebase_enabled = await is_lakebase_enabled()
+            if lakebase_enabled:
+                os.environ["LAKEBASE_ACTIVE"] = "true"
+                lakebase_config = await get_lakebase_config_from_db()
+                if lakebase_config:
+                    instance_name = lakebase_config.get("instance_name") or os.environ.get("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
+                    os.environ["LAKEBASE_INSTANCE_NAME"] = instance_name
+                logger.info(
+                    f"[ProcessCrewExecutor] Lakebase active — set LAKEBASE_ACTIVE=true, "
+                    f"LAKEBASE_INSTANCE_NAME={os.environ.get('LAKEBASE_INSTANCE_NAME')}"
+                )
+            else:
+                os.environ.pop("LAKEBASE_ACTIVE", None)
+        except Exception as e:
+            logger.debug(f"[ProcessCrewExecutor] Could not check Lakebase status: {e}")
+
         try:
             # Create a direct Process instead of using ProcessPoolExecutor
             # This gives us full control over the process lifecycle
@@ -1795,6 +1839,13 @@ class ProcessCrewExecutor:
                 os.environ["KASAL_EXECUTION_ID"] = old_kasal_exec_id
             else:
                 os.environ.pop("KASAL_EXECUTION_ID", None)
+            # Restore Lakebase env vars
+            if old_lakebase_active is not None:
+                os.environ["LAKEBASE_ACTIVE"] = old_lakebase_active
+            else:
+                os.environ.pop("LAKEBASE_ACTIVE", None)
+            if old_lakebase_instance is not None:
+                os.environ["LAKEBASE_INSTANCE_NAME"] = old_lakebase_instance
 
         try:
             # Start a background task to relay task lifecycle events from subprocess
