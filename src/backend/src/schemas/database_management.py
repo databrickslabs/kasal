@@ -156,6 +156,11 @@ class DatabaseInfoResponse(BaseModel):
     total_tables: Optional[int] = None
     memory_backends: Optional[List[MemoryBackendInfo]] = None
     error: Optional[str] = None
+    # Lakebase-specific fields
+    lakebase_enabled: Optional[bool] = None
+    lakebase_instance: Optional[str] = None
+    lakebase_endpoint: Optional[str] = None
+    connection_error: Optional[str] = None
 
 
 class DeleteBackupRequest(BaseModel):

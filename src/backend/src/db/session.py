@@ -746,6 +746,9 @@ async def dispose_engines() -> None:
     Dispose all async engines/pools while the FastAPI event loop is still alive.
     This prevents asyncpg from attempting to close connections on a different
     loop during interpreter shutdown ("Future attached to a different loop").
+
+    Also disposes the global Lakebase session factory to ensure a clean
+    switch between database backends (SQLite/PG <-> Lakebase).
     """
     try:
         engines = []
@@ -778,5 +781,13 @@ async def dispose_engines() -> None:
                 await eng.dispose()
             except Exception as e:
                 logger.warning(f"Error disposing engine {eng}: {e}")
+
+        # Also dispose the Lakebase factory to force fresh connections
+        # on the next request after a backend switch
+        try:
+            from src.db.lakebase_session import dispose_lakebase_factory
+            await dispose_lakebase_factory()
+        except Exception as e:
+            logger.warning(f"Error disposing Lakebase factory: {e}")
     except Exception as outer_e:
         logger.warning(f"dispose_engines encountered an error: {outer_e}")

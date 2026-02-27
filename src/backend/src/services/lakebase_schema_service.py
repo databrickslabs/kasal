@@ -8,9 +8,11 @@ This service handles:
 - Search path configuration (SET search_path TO kasal)
 - Special handling for tables with vector columns (documentation_embeddings)
 """
+import asyncio
 import logging
 import re
-from typing import Optional, AsyncGenerator, Dict, Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Optional, List, Tuple, Generator, AsyncGenerator, Dict, Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.engine import Engine
@@ -257,8 +259,7 @@ class LakebaseSchemaService(BaseService):
         """
         Create all tables from SQLAlchemy metadata in kasal schema (sync version).
 
-        Handles special case for documentation_embeddings table which contains
-        vector columns not supported by Lakebase.
+        Uses parallel dependency waves for faster creation on remote Lakebase.
 
         Args:
             engine: Sync Engine for Lakebase connection
@@ -267,40 +268,50 @@ class LakebaseSchemaService(BaseService):
             Exception: If table creation fails
         """
         try:
-            with engine.begin() as conn:
-                # Set kasal as the default schema for this connection
-                conn.execute(text("SET search_path TO kasal"))
-                logger.info("Set kasal schema as default search path")
+            tables_to_skip = {'documentation_embeddings'}
+            all_tables = Base.metadata.sorted_tables
+            waves, table_map = self._get_dependency_waves(all_tables)
+            max_parallel = 10
 
-                # Tables with vector columns that need special handling
-                tables_to_skip = ['documentation_embeddings']
+            logger.info(f"Creating {len(all_tables)} tables in {len(waves)} waves")
 
-                # Get all table objects from metadata
-                for table in Base.metadata.sorted_tables:
-                    if table.name in tables_to_skip:
-                        logger.info(f"Skipping table {table.name} (contains vector column)")
-                        # Create a modified version without vector column
-                        if table.name == 'documentation_embeddings':
-                            # Create table without the embedding column
-                            create_sql = """
-                            CREATE TABLE IF NOT EXISTS documentation_embeddings (
-                                id SERIAL PRIMARY KEY,
-                                source VARCHAR NOT NULL,
-                                title VARCHAR NOT NULL,
-                                content TEXT NOT NULL,
-                                doc_metadata JSON,
-                                created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-                                updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
-                            )
-                            """
-                            conn.execute(text(create_sql))
-                            logger.info("Created documentation_embeddings table without vector column")
+            for wave_table_names in waves:
+                normal = [n for n in wave_table_names if n not in tables_to_skip]
+                special = [n for n in wave_table_names if n in tables_to_skip]
+
+                if normal:
+                    if len(normal) <= 2:
+                        self._create_tables_batch_sync(engine, normal, table_map)
+                        for name in normal:
+                            logger.info(f"Created table {name}")
                     else:
-                        # Create table normally using SQLAlchemy metadata
-                        table.create(conn, checkfirst=True)
-                        logger.info(f"Created table {table.name}")
+                        n_workers = min(len(normal), max_parallel)
+                        chunks: List[List[str]] = [[] for _ in range(n_workers)]
+                        for i, name in enumerate(normal):
+                            chunks[i % n_workers].append(name)
 
-                logger.info("Created table structure in Lakebase")
+                        with ThreadPoolExecutor(max_workers=n_workers) as executor:
+                            futures = [
+                                executor.submit(
+                                    self._create_tables_batch_sync, engine, chunk, table_map
+                                )
+                                for chunk in chunks if chunk
+                            ]
+                            for future in as_completed(futures):
+                                results = future.result()
+                                for name, success, error in results:
+                                    if success:
+                                        logger.info(f"Created table {name}")
+                                    else:
+                                        logger.error(f"Error creating table {name}: {error}")
+
+                for name in special:
+                    if name == 'documentation_embeddings':
+                        logger.info(f"Skipping table {name} (contains vector column)")
+                        self._create_doc_embeddings_sync(engine)
+                        logger.info("Created documentation_embeddings without vector column")
+
+            logger.info("Created table structure in Lakebase")
 
         except Exception as e:
             logger.error(f"Error creating tables: {e}")
@@ -362,16 +373,103 @@ class LakebaseSchemaService(BaseService):
 
                 yield {"type": "success", "message": "Created table structure in Lakebase"}
 
+        except (asyncio.CancelledError, GeneratorExit):
+            logger.warning("Async table creation stream cancelled (client disconnected)")
+            return
         except Exception as e:
             logger.error(f"Error creating tables: {e}")
-            yield {"type": "error", "message": f"Error creating tables: {e}"}
+            try:
+                yield {"type": "error", "message": f"Error creating tables: {e}"}
+            except (GeneratorExit, asyncio.CancelledError):
+                return
             raise
 
-    def create_tables_sync_stream(self, engine: Engine) -> AsyncGenerator[Dict[str, Any], None]:
-        """
-        Create all tables from SQLAlchemy metadata with streaming progress (sync version).
+    @staticmethod
+    def _get_dependency_waves(tables) -> Tuple[List[List[str]], Dict[str, Any]]:
+        """Group tables into parallel waves based on FK dependencies.
 
-        Yields progress events as tables are created.
+        Tables in the same wave have no FK dependencies on each other,
+        so they can be created or populated concurrently.
+
+        Returns:
+            Tuple of (waves, table_map) where waves is a list of lists
+            of table names, and table_map maps names to Table objects.
+        """
+        table_map = {t.name: t for t in tables}
+
+        # Build dependency map: table_name -> set of referenced table names
+        deps: Dict[str, set] = {}
+        for table in tables:
+            fk_deps = set()
+            for fk in table.foreign_keys:
+                ref_table = fk.column.table.name
+                if ref_table != table.name:  # skip self-references
+                    fk_deps.add(ref_table)
+            deps[table.name] = fk_deps
+
+        waves: List[List[str]] = []
+        assigned: set = set()
+
+        while len(assigned) < len(deps):
+            # Tables whose dependencies are all in already-assigned waves
+            wave = [
+                name for name, d in deps.items()
+                if name not in assigned and d.issubset(assigned)
+            ]
+            if not wave:
+                # Circular deps or unresolvable — force remaining into final wave
+                wave = [n for n in deps if n not in assigned]
+            waves.append(wave)
+            assigned.update(wave)
+
+        return waves, table_map
+
+    def _create_tables_batch_sync(
+        self, engine: Engine, table_names: List[str], table_map: Dict[str, Any]
+    ) -> List[Tuple[str, bool, Optional[str]]]:
+        """Create multiple tables on a single connection. Thread-safe.
+
+        Each call opens its own connection (NullPool creates a fresh one),
+        sets search_path, then creates all tables in the batch sequentially.
+
+        Returns:
+            List of (table_name, success, error_message) tuples.
+        """
+        results = []
+        with engine.begin() as conn:
+            conn.execute(text("SET search_path TO kasal"))
+            for name in table_names:
+                try:
+                    table_map[name].create(conn, checkfirst=True)
+                    results.append((name, True, None))
+                except Exception as e:
+                    results.append((name, False, str(e)))
+        return results
+
+    def _create_doc_embeddings_sync(self, engine: Engine) -> None:
+        """Create documentation_embeddings table without vector column."""
+        create_sql = """
+        CREATE TABLE IF NOT EXISTS documentation_embeddings (
+            id SERIAL PRIMARY KEY,
+            source VARCHAR NOT NULL,
+            title VARCHAR NOT NULL,
+            content TEXT NOT NULL,
+            doc_metadata JSON,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+        )
+        """
+        with engine.begin() as conn:
+            conn.execute(text("SET search_path TO kasal"))
+            conn.execute(text(create_sql))
+
+    def create_tables_sync_stream(self, engine: Engine) -> Generator[Dict[str, Any], None, None]:
+        """Create all tables with streaming progress using parallel dependency waves.
+
+        Groups tables by FK dependency depth and creates each wave in parallel
+        using ThreadPoolExecutor. Tables within the same wave have no FK deps
+        on each other, so they can be safely created concurrently on separate
+        connections.
 
         Args:
             engine: Sync Engine for Lakebase connection
@@ -380,45 +478,69 @@ class LakebaseSchemaService(BaseService):
             Dict with event type and progress information
         """
         try:
-            with engine.begin() as conn:
-                # Set kasal as the default schema for this connection
-                conn.execute(text("SET search_path TO kasal"))
-                yield {"type": "success", "message": "Set kasal schema as default search path"}
+            tables_to_skip = {'documentation_embeddings'}
+            all_tables = Base.metadata.sorted_tables
+            waves, table_map = self._get_dependency_waves(all_tables)
 
-                # Tables with vector columns that need special handling
-                tables_to_skip = ['documentation_embeddings']
+            total_tables = len(all_tables)
+            created_count = 0
+            max_parallel = 10  # max concurrent connections to Lakebase
 
-                # Get all table objects from metadata
-                for table in Base.metadata.sorted_tables:
-                    if table.name in tables_to_skip:
-                        yield {
-                            "type": "info",
-                            "message": f"Skipping table {table.name} (contains vector column)"
-                        }
-                        # Create a modified version without vector column
-                        if table.name == 'documentation_embeddings':
-                            create_sql = """
-                            CREATE TABLE IF NOT EXISTS documentation_embeddings (
-                                id SERIAL PRIMARY KEY,
-                                source VARCHAR NOT NULL,
-                                title VARCHAR NOT NULL,
-                                content TEXT NOT NULL,
-                                doc_metadata JSON,
-                                created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-                                updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
-                            )
-                            """
-                            conn.execute(text(create_sql))
-                            yield {
-                                "type": "success",
-                                "message": f"Created {table.name} without vector column"
-                            }
+            logger.info(
+                f"Creating {total_tables} tables in {len(waves)} dependency waves"
+            )
+
+            for wave_idx, wave_table_names in enumerate(waves):
+                normal = [n for n in wave_table_names if n not in tables_to_skip]
+                special = [n for n in wave_table_names if n in tables_to_skip]
+
+                if normal:
+                    if len(normal) <= 2:
+                        # Small wave — single connection, no threading overhead
+                        results = self._create_tables_batch_sync(engine, normal, table_map)
+                        for name, success, error in results:
+                            if success:
+                                created_count += 1
+                                yield {"type": "success", "message": f"Created table {name}"}
+                            else:
+                                yield {"type": "error", "message": f"Error creating table {name}: {error}"}
                     else:
-                        # Create table normally
-                        table.create(conn, checkfirst=True)
-                        yield {"type": "success", "message": f"Created table {table.name}"}
+                        # Split across parallel connections
+                        n_workers = min(len(normal), max_parallel)
+                        chunks: List[List[str]] = [[] for _ in range(n_workers)]
+                        for i, name in enumerate(normal):
+                            chunks[i % n_workers].append(name)
 
-                yield {"type": "success", "message": "Created table structure in Lakebase"}
+                        with ThreadPoolExecutor(max_workers=n_workers) as executor:
+                            futures = {
+                                executor.submit(
+                                    self._create_tables_batch_sync, engine, chunk, table_map
+                                ): chunk
+                                for chunk in chunks if chunk
+                            }
+                            for future in as_completed(futures):
+                                try:
+                                    results = future.result()
+                                    for name, success, error in results:
+                                        if success:
+                                            created_count += 1
+                                            yield {"type": "success", "message": f"Created table {name}"}
+                                        else:
+                                            yield {"type": "error", "message": f"Error creating table {name}: {error}"}
+                                except Exception as e:
+                                    chunk = futures[future]
+                                    for name in chunk:
+                                        yield {"type": "error", "message": f"Error creating table {name}: {e}"}
+
+                # Handle special tables (need custom DDL)
+                for name in special:
+                    yield {"type": "info", "message": f"Skipping table {name} (contains vector column)"}
+                    if name == 'documentation_embeddings':
+                        self._create_doc_embeddings_sync(engine)
+                        created_count += 1
+                        yield {"type": "success", "message": f"Created {name} without vector column"}
+
+            yield {"type": "success", "message": f"Created {created_count} tables in Lakebase ({len(waves)} waves, parallel)"}
 
         except Exception as e:
             logger.error(f"Error creating tables: {e}")

@@ -98,26 +98,30 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
     the database session to either Lakebase (when enabled and configured)
     or the regular database (PostgreSQL/SQLite).
 
+    IMPORTANT: This is an async generator used as a FastAPI dependency.
+    It must yield EXACTLY ONCE to avoid 'generator didn't stop after athrow()'.
+    The Lakebase vs regular DB decision must be made BEFORE the single yield.
+
     Yields:
         AsyncSession from either regular database or Lakebase
     """
-    # Check if Lakebase should be used
+    # Decide which session provider to use BEFORE yielding
+    use_lakebase = False
+    instance_name = None
+    user_token = None
+    user_email = None
+    config = None
+
     if await is_lakebase_enabled():
         logger.debug("🔄 DATABASE ROUTER: Connecting to LAKEBASE")
 
-        # Get configuration to extract instance name
         config = await get_lakebase_config_from_db()
-        instance_name = None
-
         if config:
             instance_name = config.get("instance_name")
-
         if not instance_name:
             instance_name = os.environ.get("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
 
         # Get user token and email from unified auth
-        user_token = None
-        user_email = None
         try:
             from src.utils.databricks_auth import get_auth_context
             auth = await get_auth_context()
@@ -128,14 +132,17 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
         except Exception as e:
             logger.warning(f"Failed to get unified auth for Lakebase: {e}")
 
+        use_lakebase = True
+
+    if use_lakebase:
+        session_yielded = False
         try:
-            # Simply delegate to lakebase session provider
-            # It will handle its own session lifecycle
             logger.debug(f"  • Instance: {instance_name}")
             logger.debug(f"  • Endpoint: {config.get('endpoint') if config else 'N/A'}")
             async with get_lakebase_session(instance_name, user_token, user_email) as session:
                 token = _request_session.set(session)
                 try:
+                    session_yielded = True
                     yield session
                 finally:
                     try:
@@ -143,22 +150,27 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
                     except ValueError:
                         pass
             return
+        except GeneratorExit:
+            # Client disconnected — don't fall through, just exit
+            return
         except Exception as e:
-            logger.error(f"⚠️ Failed to get Lakebase session, falling back to regular DB: {e}")
-            # Fall through to regular database
+            if session_yielded:
+                # Error occurred DURING request processing (after yield).
+                # Cannot fall through — generator already yielded once.
+                raise
+            # Error occurred during session CREATION (before yield).
+            # Safe to fall through to regular DB — no yield has happened yet.
+            logger.error(f"Failed to create Lakebase session, falling back to regular DB: {e}")
+            use_lakebase = False
 
     # Use regular database session with proper lifecycle management
     logger.debug("🔄 DATABASE ROUTER: Using PostgreSQL/SQLite")
-    # Use async context manager for proper session lifecycle
     async with async_session_factory() as session:
         token = _request_session.set(session)
         try:
-            # logger.debug(f"[DB ROUTER] Created session {id(session)}")
             yield session
-            # Commit the transaction if no exception occurred
             await session.commit()
         except Exception as e:
-            # Rollback on any exception
             logger.error(f"[DB ROUTER] Rolling back session {id(session)} due to exception: {e}")
             await session.rollback()
             raise
@@ -166,9 +178,5 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
             try:
                 _request_session.reset(token)
             except ValueError:
-                # Token was created in a different async context (e.g. generator
-                # garbage-collected or cancelled in another Task). Safe to ignore
-                # because the ContextVar will fall out of scope with the task.
                 pass
-            # Ensure session is closed even if not explicitly committed/rolled back
             await session.close()

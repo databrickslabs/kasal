@@ -3,13 +3,17 @@ Lakebase Service for managing Databricks Lakebase instances and configuration.
 """
 import os
 import re
+import time
 import uuid
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from datetime import datetime
 import asyncio
 from contextlib import asynccontextmanager
-from urllib.parse import quote
+
+# Migration timeout constants
+TABLE_MIGRATION_TIMEOUT_SECONDS = 1800
+STATEMENT_TIMEOUT_MS = 1_800_000
 
 from databricks.sdk import WorkspaceClient
 from sqlalchemy import create_engine, text
@@ -25,7 +29,6 @@ try:
     )
     LAKEBASE_AVAILABLE = True
 except ImportError:
-    # Don't use logger here as it's not initialized yet
     print("Warning: DatabaseInstance not available in databricks-sdk. Lakebase features will be disabled.")
     DatabaseInstance = None
     DatabaseInstanceRole = None
@@ -33,8 +36,7 @@ except ImportError:
     DatabaseInstanceRoleMembershipRole = None
     DatabaseInstanceRoleIdentityType = None
     LAKEBASE_AVAILABLE = False
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-import asyncpg
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logger import LoggerManager
 from src.config.settings import settings
@@ -42,7 +44,7 @@ from src.core.base_service import BaseService
 from src.models.database_config import LakebaseConfig
 from src.db.base import Base
 from src.repositories.database_config_repository import DatabaseConfigRepository
-from src.utils.databricks_auth import get_current_databricks_user, get_workspace_client, _databricks_auth
+from src.utils.databricks_auth import get_workspace_client
 from src.services.lakebase_permission_service import LakebasePermissionService
 from src.services.lakebase_connection_service import LakebaseConnectionService
 from src.services.lakebase_schema_service import LakebaseSchemaService
@@ -108,6 +110,35 @@ class LakebaseService(BaseService):
             WorkspaceClient configured with appropriate credentials
         """
         return await self.connection_service.get_workspace_client()
+
+    async def list_instances(self) -> List[Dict[str, Any]]:
+        """
+        List all available Lakebase database instances.
+
+        Returns:
+            List of instance dicts with name, state, capacity, read_write_dns, node_count
+        """
+        if not LAKEBASE_AVAILABLE:
+            logger.warning("Lakebase features not available, cannot list instances")
+            return []
+
+        try:
+            w = await self.get_workspace_client()
+            instances = w.database.list_database_instances()
+
+            result = []
+            for inst in instances:
+                result.append({
+                    "name": inst.name,
+                    "state": inst.state if hasattr(inst, 'state') else None,
+                    "capacity": inst.capacity if hasattr(inst, 'capacity') else None,
+                    "read_write_dns": inst.read_write_dns if hasattr(inst, 'read_write_dns') else None,
+                    "node_count": inst.node_count if hasattr(inst, 'node_count') else None,
+                })
+            return result
+        except Exception as e:
+            logger.error(f"Error listing Lakebase instances: {e}")
+            raise
 
     async def get_config(self) -> Dict[str, Any]:
         """
@@ -268,8 +299,9 @@ class LakebaseService(BaseService):
             })
             await self.save_config(config)
 
-            # After instance is ready, migrate data if needed
-            await self.migrate_existing_data(instance_name, final_instance.read_write_dns)
+            # Don't auto-migrate here — the migration dialog (streaming endpoint)
+            # handles this separately, giving the user control over the strategy
+            # and showing real-time progress.
 
             return result
 
@@ -296,12 +328,6 @@ class LakebaseService(BaseService):
             if not LAKEBASE_AVAILABLE:
                 logger.info("Lakebase features not available, returning NOT_FOUND state")
                 return {"state": "NOT_FOUND", "name": instance_name, "message": "Lakebase not available"}
-
-            # Check if Lakebase is configured before trying to authenticate
-            config = await self.get_config()
-            if not config or not config.get("enabled", False):
-                logger.info(f"Lakebase not configured or disabled, returning NOT_FOUND state for instance {instance_name}")
-                return {"state": "NOT_FOUND", "name": instance_name, "message": "Lakebase not configured"}
 
             w = await self.get_workspace_client()
             instance = w.database.get_database_instance(name=instance_name)
@@ -404,8 +430,9 @@ class LakebaseService(BaseService):
             # Generate credentials using connection service
             cred = await self.connection_service.generate_credentials(instance_name)
 
-            # Note: DatabaseCredential has no 'user' attribute - we'll determine user by testing connections
-            logger.info(f"🔐 Generated database credential (will test connections to determine user)")
+            # Use SPN client_id as PG username (deterministic, no guessing)
+            user_email = await self.connection_service.get_username()
+            logger.info(f"🔐 Using PG username: {user_email}")
 
             # Determine source database type from URI
             source_uri = str(settings.DATABASE_URI)
@@ -447,14 +474,16 @@ class LakebaseService(BaseService):
                 logger.info(f"📊 Found {len(tables)} tables to migrate from {source_db_type}")
                 logger.info(f"📋 Tables: {', '.join(tables[:10])}{'...' if len(tables) > 10 else ''}")
 
-            # Test connections and get working engine + user
-            connected_engine, connected_user = await self.connection_service.test_connections_async(endpoint, cred)
-            if not connected_engine:
-                raise Exception("Failed to connect to Lakebase with any credentials")
+            # Create async engine with deterministic SPN auth
+            lakebase_engine = await self.connection_service.create_lakebase_engine_async(
+                endpoint, user_email, cred.token
+            )
 
-            lakebase_engine = connected_engine
-            user_email = connected_user
-            logger.info(f"Using connected engine for all operations (connected as: {user_email})")
+            # Verify connection
+            async with lakebase_engine.connect() as verify_conn:
+                result = await verify_conn.execute(text("SELECT current_user"))
+                connected_user = result.scalar()
+                logger.info(f"Connected to Lakebase as: {connected_user}")
 
             # Create schema using schema service
             await self.schema_service.create_schema_async(lakebase_engine, user_email, recreate_schema)
@@ -605,25 +634,26 @@ class LakebaseService(BaseService):
             cred = await self.connection_service.generate_credentials(instance_name)
             yield {"type": "success", "message": f"✅ Generated database credential"}
 
-            yield {"type": "info", "message": f"[STREAM] Testing connection methods to determine user..."}
+            # Use SPN client_id as PG username (deterministic, no guessing)
+            user_email = await self.connection_service.get_username()
+            yield {"type": "info", "message": f"🔐 Using PG username: {user_email}"}
 
-            # Test connections using connection service (sync version for streaming)
-            test_engine, connected_user = self.connection_service.test_connections_sync(endpoint, cred)
-
-            if not test_engine or not connected_user:
-                yield {"type": "error", "message": "All connection attempts failed - could not connect to Lakebase"}
-                return
-
-            # Use the engine and user that worked
-            lakebase_engine_initial = test_engine
-            user_email = connected_user
-            yield {"type": "info", "message": f"🔐 Using PostgreSQL role: {user_email}"}
-
-            # Build the URL for any additional engines (but we'll primarily use the one that worked)
-            lakebase_url = (
-                f"postgresql+pg8000://{quote(user_email)}:{cred.token}@"
-                f"{endpoint}:5432/databricks_postgres"
+            # Create sync engine with deterministic auth and statement timeout
+            lakebase_engine_initial = self.connection_service.create_lakebase_engine_sync(
+                endpoint, user_email, cred.token,
+                statement_timeout_ms=STATEMENT_TIMEOUT_MS
             )
+
+            # Verify connection
+            try:
+                with lakebase_engine_initial.connect() as verify_conn:
+                    result = verify_conn.execute(text("SELECT current_user"))
+                    connected_user = result.scalar()
+                    yield {"type": "success", "message": f"Connected to Lakebase as: {connected_user}"}
+            except Exception as conn_err:
+                yield {"type": "error", "message": f"Failed to connect to Lakebase as '{user_email}': {conn_err}"}
+                lakebase_engine_initial.dispose()
+                return
 
             # Determine source database type
             source_uri = str(settings.DATABASE_URI)
@@ -693,8 +723,50 @@ class LakebaseService(BaseService):
 
             # Check if we should migrate data
             if not migrate_data:
-                # Schema-only mode - skip data migration
+                # Schema-only mode - skip data migration, but run seeders
                 yield {"type": "success", "message": "✅ Schema created successfully (data migration skipped)"}
+
+                # Run seeders on the new Lakebase instance so it has default data
+                yield {"type": "progress", "message": "🌱 Running database seeders on new instance...", "step": "seed"}
+                try:
+                    from sqlalchemy.ext.asyncio import create_async_engine as _create_async_engine
+                    from sqlalchemy.ext.asyncio import async_sessionmaker as _async_sessionmaker
+                    from src.seeds.seed_runner import run_seeders_with_factory
+
+                    # Create async engine for Lakebase with kasal search_path
+                    lakebase_async_engine = _create_async_engine(
+                        f"postgresql+asyncpg://{user_email}:{cred.token}@"
+                        f"{endpoint}:5432/databricks_postgres",
+                        echo=False,
+                        connect_args={
+                            "ssl": "require",
+                            "server_settings": {
+                                "jit": "off",
+                                "search_path": "kasal",
+                            },
+                        },
+                    )
+
+                    lakebase_seed_factory = _async_sessionmaker(
+                        lakebase_async_engine,
+                        expire_on_commit=False,
+                        autoflush=False,
+                        autocommit=False,
+                    )
+
+                    # Run all seeders except documentation (slow, uses embeddings)
+                    await run_seeders_with_factory(
+                        lakebase_seed_factory, exclude={"documentation"}
+                    )
+
+                    await lakebase_async_engine.dispose()
+                    yield {"type": "success", "message": "✅ Database seeders completed successfully"}
+                except Exception as seed_error:
+                    logger.error(f"Error running seeders on Lakebase: {seed_error}")
+                    import traceback as tb
+                    logger.error(tb.format_exc())
+                    yield {"type": "warning", "message": f"⚠️ Seeders encountered errors (non-critical): {seed_error}"}
+
                 start_time = datetime.utcnow()
                 yield {
                     "type": "result",
@@ -717,45 +789,191 @@ class LakebaseService(BaseService):
             failed_tables_list = []
             total_rows = 0
             start_time = datetime.utcnow()
+            migrated_count = 0
+            table_durations: Dict[str, float] = {}  # table_name -> seconds
 
-            # Migrate each table
-            for idx, table_name in enumerate(sorted_tables, 1):
-                yield {
-                    "type": "table_start",
-                    "message": f"Migrating table {table_name}...",
-                    "table": table_name,
-                    "progress": idx,
-                    "total": len(tables)
-                }
+            # Group tables into parallel waves based on FK dependencies
+            from concurrent.futures import ThreadPoolExecutor
+            migration_waves = self.migration_service.get_migration_waves(sorted_tables)
+            logger.info(f"Data migration: {len(sorted_tables)} tables in {len(migration_waves)} waves")
+            max_parallel = 8  # max concurrent table migrations
 
-                row_count, error = self.migration_service.migrate_table_data_sync(
-                    table_name, source_engine, lakebase_engine, is_sqlite
-                )
+            for wave_idx, wave_tables in enumerate(migration_waves):
+                if len(wave_tables) <= 1:
+                    # Single table - no parallelism needed
+                    for table_name in wave_tables:
+                        migrated_count += 1
+                        yield {
+                            "type": "table_start",
+                            "message": f"Migrating table {table_name}...",
+                            "table": table_name,
+                            "progress": migrated_count,
+                            "total": len(sorted_tables)
+                        }
 
-                if error:
-                    failed_tables_list.append({
-                        "table": table_name,
-                        "error": error,
-                        "error_type": error.split(':')[0] if ':' in error else "Unknown"
-                    })
-                    yield {
-                        "type": "table_error",
-                        "message": f"❌ Error migrating table {table_name}: {error}",
-                        "table": table_name,
-                        "error": error,
-                        "error_type": error.split(':')[0] if ':' in error else "Unknown"
-                    }
+                        t0 = time.monotonic()
+                        loop = asyncio.get_event_loop()
+                        row_count, error = await loop.run_in_executor(
+                            None,
+                            self.migration_service.migrate_table_data_sync,
+                            table_name, source_engine, lakebase_engine, is_sqlite
+                        )
+                        elapsed = time.monotonic() - t0
+                        table_durations[table_name] = elapsed
+
+                        if error:
+                            failed_tables_list.append({
+                                "table": table_name,
+                                "error": error,
+                                "error_type": error.split(':')[0] if ':' in error else "Unknown"
+                            })
+                            yield {
+                                "type": "table_error",
+                                "message": f"❌ Error migrating table {table_name} ({elapsed:.1f}s): {error}",
+                                "table": table_name,
+                                "error": error,
+                                "error_type": error.split(':')[0] if ':' in error else "Unknown",
+                                "duration": round(elapsed, 2)
+                            }
+                        else:
+                            migrated_tables.append({"table": table_name, "rows": row_count})
+                            total_rows += row_count
+                            yield {
+                                "type": "table_complete",
+                                "message": f"✓ Migrated {row_count} rows from {table_name} ({elapsed:.1f}s)",
+                                "table": table_name,
+                                "rows": row_count,
+                                "progress": migrated_count,
+                                "total": len(sorted_tables),
+                                "duration": round(elapsed, 2)
+                            }
                 else:
-                    migrated_tables.append({"table": table_name, "rows": row_count})
-                    total_rows += row_count
+                    # Parallel migration for this wave
+                    from concurrent.futures import wait, FIRST_COMPLETED
+                    n_workers = min(len(wave_tables), max_parallel)
                     yield {
-                        "type": "table_complete",
-                        "message": f"✓ Migrated {row_count} rows from {table_name}",
-                        "table": table_name,
-                        "rows": row_count,
-                        "progress": idx,
-                        "total": len(tables)
+                        "type": "info",
+                        "message": f"⚡ Wave {wave_idx + 1}: migrating {len(wave_tables)} tables in parallel (timeout={TABLE_MIGRATION_TIMEOUT_SECONDS}s)"
                     }
+
+                    with ThreadPoolExecutor(max_workers=n_workers) as executor:
+                        table_start_times: Dict[str, float] = {}
+                        futures = {}
+                        for tname in wave_tables:
+                            table_start_times[tname] = time.monotonic()
+                            fut = executor.submit(
+                                self.migration_service.migrate_table_data_sync,
+                                tname, source_engine, lakebase_engine, is_sqlite
+                            )
+                            futures[fut] = tname
+
+                        pending = set(futures.keys())
+                        deadline = time.monotonic() + TABLE_MIGRATION_TIMEOUT_SECONDS
+                        heartbeat_interval = 15.0  # seconds between heartbeat messages
+
+                        last_heartbeat = time.monotonic()
+
+                        while pending:
+                            remaining_time = deadline - time.monotonic()
+                            if remaining_time <= 0:
+                                # Deadline exceeded — report all pending as timed out
+                                in_flight_names = sorted(futures[f] for f in pending)
+                                logger.error(
+                                    f"Wave {wave_idx + 1} TIMEOUT after {TABLE_MIGRATION_TIMEOUT_SECONDS}s. "
+                                    f"Timed-out tables: {in_flight_names}"
+                                )
+                                for fut in list(pending):
+                                    tname = futures[fut]
+                                    elapsed = time.monotonic() - table_start_times[tname]
+                                    table_durations[tname] = elapsed
+                                    fut.cancel()
+                                    migrated_count += 1
+                                    timeout_error = f"TIMEOUT migrating table {tname} after {elapsed:.1f}s"
+                                    failed_tables_list.append({
+                                        "table": tname,
+                                        "error": timeout_error,
+                                        "error_type": "TimeoutError"
+                                    })
+                                    yield {
+                                        "type": "table_error",
+                                        "message": f"⏰ {timeout_error}",
+                                        "table": tname,
+                                        "error": timeout_error,
+                                        "error_type": "TimeoutError",
+                                        "duration": round(elapsed, 2)
+                                    }
+                                break
+
+                            # Non-blocking poll: use a short timeout so we don't starve the event loop.
+                            # This keeps the rest of the API responsive during long table migrations.
+                            done, pending = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
+                            await asyncio.sleep(0)  # yield to event loop
+
+                            if not done:
+                                # Periodically emit heartbeat
+                                if time.monotonic() - last_heartbeat >= heartbeat_interval:
+                                    last_heartbeat = time.monotonic()
+                                    in_flight_names = sorted(futures[f] for f in pending)
+                                    wave_elapsed = time.monotonic() - table_start_times[in_flight_names[0]]
+                                    yield {
+                                        "type": "info",
+                                        "message": f"⏳ Waiting for {len(pending)} tables ({wave_elapsed:.0f}s elapsed): {', '.join(in_flight_names)}"
+                                    }
+                                continue
+
+                            # Process completed futures
+                            for future in done:
+                                table_name = futures[future]
+                                elapsed = time.monotonic() - table_start_times[table_name]
+                                table_durations[table_name] = elapsed
+                                migrated_count += 1
+
+                                try:
+                                    row_count, error = future.result()
+                                    if error:
+                                        failed_tables_list.append({
+                                            "table": table_name,
+                                            "error": error,
+                                            "error_type": error.split(':')[0] if ':' in error else "Unknown"
+                                        })
+                                        yield {
+                                            "type": "table_error",
+                                            "message": f"❌ Error migrating table {table_name} ({elapsed:.1f}s): {error}",
+                                            "table": table_name,
+                                            "error": error,
+                                            "error_type": error.split(':')[0] if ':' in error else "Unknown",
+                                            "duration": round(elapsed, 2)
+                                        }
+                                    else:
+                                        migrated_tables.append({"table": table_name, "rows": row_count})
+                                        total_rows += row_count
+                                        yield {
+                                            "type": "table_complete",
+                                            "message": f"✓ Migrated {row_count} rows from {table_name} ({elapsed:.1f}s)",
+                                            "table": table_name,
+                                            "rows": row_count,
+                                            "progress": migrated_count,
+                                            "total": len(sorted_tables),
+                                            "duration": round(elapsed, 2)
+                                        }
+                                except Exception as e:
+                                    failed_tables_list.append({
+                                        "table": table_name,
+                                        "error": str(e),
+                                        "error_type": type(e).__name__
+                                    })
+                                    yield {
+                                        "type": "table_error",
+                                        "message": f"❌ Error migrating table {table_name} ({elapsed:.1f}s): {e}",
+                                        "table": table_name,
+                                        "error": str(e),
+                                        "error_type": type(e).__name__,
+                                        "duration": round(elapsed, 2)
+                                    }
+
+                            if pending:
+                                in_flight_names = sorted(futures[f] for f in pending)
+                                logger.info(f"Wave {wave_idx + 1}: {len(pending)} tables still in-flight: {in_flight_names}")
 
             # Dispose engines
             source_engine.dispose()
@@ -786,8 +1004,17 @@ class LakebaseService(BaseService):
             yield {"type": "info", "message": f"  • Tables migrated: {len(migrated_tables)}/{len(tables)}"}
             yield {"type": "info", "message": f"  • Total rows: {total_rows:,}"}
             yield {"type": "info", "message": f"  • Duration: {duration:.2f} seconds"}
+            yield {"type": "info", "message": f"  • Timeout per table: {TABLE_MIGRATION_TIMEOUT_SECONDS}s"}
             yield {"type": "info", "message": f"  • Instance: {instance_name}"}
             yield {"type": "info", "message": f"  • Status: READY"}
+
+            # Show 5 slowest tables for observability
+            if table_durations:
+                slowest = sorted(table_durations.items(), key=lambda x: x[1], reverse=True)[:5]
+                yield {"type": "info", "message": "  ⏱️ Slowest tables:"}
+                for tbl, dur in slowest:
+                    yield {"type": "info", "message": f"    • {tbl}: {dur:.2f}s"}
+
             yield {"type": "info", "message": "=" * 80}
 
             # Final result
@@ -800,13 +1027,22 @@ class LakebaseService(BaseService):
                 "failed_tables": failed_tables,
                 "failed_tables_details": failed_tables_list,
                 "duration": duration,
+                "timeout_seconds": TABLE_MIGRATION_TIMEOUT_SECONDS,
                 "timestamp": datetime.utcnow().isoformat()
             }
 
+        except (asyncio.CancelledError, GeneratorExit):
+            logger.warning("Migration stream cancelled (client disconnected)")
+            return
         except Exception as e:
-            yield {"type": "error", "message": f"Error migrating data to Lakebase: {e}"}
+            logger.error(f"Error migrating data to Lakebase: {e}")
             import traceback
-            yield {"type": "error", "message": f"Traceback: {traceback.format_exc()}"}
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            try:
+                yield {"type": "error", "message": f"Error migrating data to Lakebase: {e}"}
+                yield {"type": "error", "message": f"Traceback: {traceback.format_exc()}"}
+            except (GeneratorExit, asyncio.CancelledError):
+                return
 
     @asynccontextmanager
     async def get_lakebase_session(self, instance_name: str):
@@ -826,8 +1062,11 @@ class LakebaseService(BaseService):
 
             # Get instance details
             instance = await self.get_instance(instance_name)
-            if not instance or instance.get("state") != "READY":
-                raise ValueError(f"Lakebase instance {instance_name} is not ready")
+            ready_states = {"READY", "AVAILABLE", "RUNNING"}
+            raw_state = instance.get("state") if instance else None
+            instance_state = str(raw_state).upper() if raw_state else ""
+            if not instance or instance_state not in ready_states:
+                raise ValueError(f"Lakebase instance {instance_name} is not ready (state: {raw_state})")
 
             # Generate temporary token
             w = await self.get_workspace_client()
@@ -836,41 +1075,14 @@ class LakebaseService(BaseService):
                 instance_names=[instance_name]
             )
 
-            # Build connection string
+            # Use SPN client_id as PG username (deterministic)
             endpoint = instance["read_write_dns"]
-            # For asyncpg, don't use sslmode in URL
-            # Determine username:
-            # - If user email provided (e.g., from request context), use it
-            # - Otherwise: Get the actual authenticated user's identity
-            if self.user_email:
-                username = quote(self.user_email)
-                logger.info(f"Using provided email for Lakebase: {self.user_email}")
-            else:
-                # Get the actual authenticated user's identity using centralized method
-                # Pass the user token if we have it (for OBO), otherwise it will use PAT
-                current_user_identity, error = await get_current_databricks_user(self.user_token)
-                if error or not current_user_identity:
-                    logger.error(f"Failed to get current user identity: {error}")
-                    raise Exception(f"Cannot determine Databricks user identity: {error}")
+            username = await self.connection_service.get_username()
+            logger.info(f"Using PG username for Lakebase session: {username}")
 
-                username = quote(current_user_identity)
-                logger.info(f"Using authenticated user identity for Lakebase: {current_user_identity}")
-
-            connection_url = (
-                f"postgresql+asyncpg://{username}:{cred.token}@"
-                f"{endpoint}:5432/databricks_postgres"
-            )
-
-            # Create engine and session with SSL configuration for asyncpg
-            engine = create_async_engine(
-                connection_url,
-                echo=False,
-                connect_args={
-                    "ssl": "require",  # Enable SSL for asyncpg
-                    "server_settings": {
-                        "jit": "off"  # Disable JIT for compatibility
-                    }
-                }
+            # Create engine using connection service
+            engine = await self.connection_service.create_lakebase_engine_async(
+                endpoint, username, cred.token
             )
             async with AsyncSession(engine) as session:
                 yield session
@@ -886,9 +1098,6 @@ class LakebaseService(BaseService):
         """
         Check what tables exist in Lakebase database.
 
-        Args:
-            instance_name: Lakebase instance name
-
         Returns:
             List of tables and their row counts
         """
@@ -901,6 +1110,9 @@ class LakebaseService(BaseService):
                     "error": "Lakebase features not available in current environment"
                 }
 
+            # Get instance name from config
+            config = await self.get_config()
+            instance_name = config.get("instance_name", "kasal-lakebase")
             logger.info(f"Checking tables in Lakebase instance {instance_name}")
 
             # Get instance details
@@ -918,39 +1130,13 @@ class LakebaseService(BaseService):
                     "error": "Instance has no endpoint"
                 }
 
-            # Generate temporary token for connection
-            w = await self.get_workspace_client()
-            cred = w.database.generate_database_credential(
-                request_id=str(uuid.uuid4()),
-                instance_names=[instance_name]
-            )
+            # Use SPN client_id as PG username (deterministic)
+            username = await self.connection_service.get_username()
+            cred = await self.connection_service.generate_credentials(instance_name)
 
-            # Get user identity
-            if self.user_email:
-                username = quote(self.user_email)
-            else:
-                current_user_identity, error = await get_current_databricks_user(self.user_token)
-                if error or not current_user_identity:
-                    return {
-                        "success": False,
-                        "error": f"Cannot determine user identity: {error}"
-                    }
-                username = quote(current_user_identity)
-
-            # Build connection URL
-            lakebase_url = (
-                f"postgresql+asyncpg://{username}:{cred.token}@"
-                f"{endpoint}:5432/databricks_postgres"
-            )
-
-            # Create engine with SSL
-            engine = create_async_engine(
-                lakebase_url,
-                echo=False,
-                connect_args={
-                    "ssl": "require",
-                    "server_settings": {"jit": "off"}
-                }
+            # Create engine using connection service
+            engine = await self.connection_service.create_lakebase_engine_async(
+                endpoint, username, cred.token
             )
 
             tables_info = []
@@ -1052,6 +1238,9 @@ class LakebaseService(BaseService):
         """
         Test connection to Lakebase instance and check migration status.
 
+        This method connects directly without requiring Lakebase to be
+        already enabled in config, so it works during initial setup.
+
         Args:
             instance_name: Name of the instance
 
@@ -1059,7 +1248,37 @@ class LakebaseService(BaseService):
             Connection test result with migration status
         """
         try:
-            async with self.get_lakebase_session(instance_name) as session:
+            if not LAKEBASE_AVAILABLE:
+                raise NotImplementedError("Lakebase features are not available in the current environment")
+
+            # Get instance details directly (bypass enabled check)
+            w = await self.get_workspace_client()
+            instance = w.database.get_database_instance(name=instance_name)
+            raw_state = instance.state if hasattr(instance, 'state') else None
+            state = str(raw_state.value if hasattr(raw_state, 'value') else raw_state or '').upper()
+            ready_states = {"READY", "AVAILABLE", "RUNNING"}
+            if not state or state not in ready_states:
+                raise ValueError(
+                    f"Lakebase instance {instance_name} is in state '{state}'. "
+                    f"Expected one of: {', '.join(sorted(ready_states))}"
+                )
+
+            endpoint = instance.read_write_dns
+            if not endpoint:
+                raise ValueError(f"Lakebase instance {instance_name} has no endpoint")
+
+            # Generate temporary token
+            cred = w.database.generate_database_credential(
+                request_id=str(uuid.uuid4()),
+                instance_names=[instance_name]
+            )
+
+            username = await self.connection_service.get_username()
+            engine = await self.connection_service.create_lakebase_engine_async(
+                endpoint, username, cred.token
+            )
+
+            async with AsyncSession(engine) as session:
                 # Test query
                 result = await session.execute(text("SELECT version()"))
                 version = result.scalar()
@@ -1165,13 +1384,14 @@ class LakebaseService(BaseService):
         # Save updated config
         await self.save_config(config)
 
-        # Dispose existing database connections to force reconnection to Lakebase
-        from src.db.session import dispose_engines
-        await dispose_engines()
-        logger.info("Disposed existing database connections to switch to Lakebase")
+        # No dispose_engines() here — the database router checks
+        # is_lakebase_enabled() on every request, so the next request
+        # will route to Lakebase automatically after this config is committed.
+        # Calling dispose inside a request handler kills the StaticPool
+        # connection before the DI layer commits, losing the config change.
 
         return {
             "success": True,
-            "message": "Lakebase enabled successfully. All connections switched to Lakebase.",
+            "message": "Lakebase enabled successfully. Next request will use Lakebase.",
             "config": config
         }
