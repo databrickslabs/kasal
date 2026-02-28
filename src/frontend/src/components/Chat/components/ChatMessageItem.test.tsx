@@ -18,10 +18,12 @@ vi.mock('./MessageRenderer', () => ({
 // Mock textProcessing utilities so we can control markdown detection
 const mockStripAnsiEscapes = vi.fn((text: string) => text);
 const mockIsMarkdown = vi.fn((_text: string) => false);
+const mockIsHtmlDocument = vi.fn((_text: string) => false);
 
 vi.mock('../utils/textProcessing', () => ({
   stripAnsiEscapes: (text: string) => mockStripAnsiEscapes(text),
   isMarkdown: (text: string) => mockIsMarkdown(text),
+  isHtmlDocument: (text: string) => mockIsHtmlDocument(text),
 }));
 
 // MUI Fade can interfere with rendering in tests -- simplify it
@@ -59,6 +61,7 @@ describe('ChatMessageItem', () => {
     vi.clearAllMocks();
     mockStripAnsiEscapes.mockImplementation((t: string) => t);
     mockIsMarkdown.mockReturnValue(false);
+    mockIsHtmlDocument.mockReturnValue(false);
   });
 
   // =========================================================================
@@ -825,6 +828,47 @@ describe('ChatMessageItem', () => {
 
       const avatar = container.querySelector('.MuiAvatar-root');
       expect(avatar).toBeInTheDocument();
+    });
+  });
+
+  // =========================================================================
+  // 12. Raw HTML document wrapping
+  // =========================================================================
+
+  describe('raw HTML document wrapping', () => {
+    it('wraps raw HTML documents in a code fence for syntax highlighting', () => {
+      mockIsHtmlDocument.mockReturnValue(true);
+
+      render(
+        <ChatMessageItem
+          message={makeMessage({
+            type: 'assistant',
+            content: '<!doctype html><html><body>Hello</body></html>',
+          })}
+        />
+      );
+
+      // The content should be wrapped in ```html ... ``` before passing to MessageContent
+      const messageContent = screen.getByTestId('message-content');
+      expect(messageContent.textContent).toContain('```html');
+      expect(messageContent.textContent).toContain('<!doctype html>');
+    });
+
+    it('does not wrap non-HTML content in a code fence', () => {
+      mockIsHtmlDocument.mockReturnValue(false);
+
+      render(
+        <ChatMessageItem
+          message={makeMessage({
+            type: 'assistant',
+            content: 'Just a regular message',
+          })}
+        />
+      );
+
+      const messageContent = screen.getByTestId('message-content');
+      expect(messageContent.textContent).not.toContain('```');
+      expect(messageContent.textContent).toBe('Just a regular message');
     });
   });
 });
