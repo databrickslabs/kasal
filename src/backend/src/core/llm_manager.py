@@ -295,8 +295,24 @@ class LLMManager:
                     logger.info(f"Setting max_tokens to {model_config_dict['max_output_tokens']} for model {prefixed_model}")
 
             logger.info(f"Creating CrewAI LLM with model: {prefixed_model}, has_api_key: {bool(api_key)}, api_base: {api_base}")
-            
-            # Use DatabricksRetryLLM for all Databricks models (GPT-OSS, Llama, Claude, etc.)
+
+            # gpt-5-3-codex ONLY supports the Responses API on Databricks.
+            # DatabricksCodexCompletion extends OpenAICompletion with:
+            #  - phase preservation (prevents early stopping / skipped tool calls)
+            #  - stop-word suppression (GPT-5 reasoning rejects 'stop')
+            #  - diagnostic logging for tool-calling debugging
+            if "gpt-5-3-codex" in model_name_value.lower():
+                from src.core.llm_handlers.databricks_codex_handler import DatabricksCodexCompletion
+                logger.info(f"Using DatabricksCodexCompletion for Responses API model: {model_name_value}")
+                return DatabricksCodexCompletion(
+                    model=model_name_value,
+                    api_key=api_key,
+                    base_url=api_base,
+                    timeout=300,
+                    max_tokens=llm_params.get("max_completion_tokens") or llm_params.get("max_tokens"),
+                )
+
+            # Use DatabricksRetryLLM for all other Databricks models (GPT-OSS, Llama, Claude, etc.)
             # Provides retry logic for empty responses, rate limits, and message sanitization.
             # GPT-OSS Harmony response format is handled by the monkey patch in DatabricksGPTOSSHandler.
             logger.info(f"Using DatabricksRetryLLM wrapper for Databricks model: {model_name_value}")

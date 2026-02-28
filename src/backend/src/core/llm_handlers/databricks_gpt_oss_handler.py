@@ -661,6 +661,7 @@ class DatabricksRetryLLM(LLM):
         Note: kwargs accepts additional parameters like response_model (CrewAI 1.9.x structured outputs)
         """
         crew_log = self._get_crew_logger()
+
         last_error = None
         is_rate_limit = False
         attempt = 0
