@@ -112,17 +112,22 @@ const GroupManagement: React.FC = () => {
     group.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const loadGroups = useCallback(async () => {
-    setLoading(true);
+  const loadGroups = useCallback(async (showSpinner = true) => {
+    if (showSpinner) setLoading(true);
     try {
       const groupService = GroupService.getInstance();
       const groupsData = await groupService.getGroups();
       setGroups(groupsData);
+      // Keep selectedGroup in sync with refreshed data
+      setSelectedGroup(prev => {
+        if (!prev) return prev;
+        return groupsData.find(g => g.id === prev.id) || prev;
+      });
     } catch (error) {
       console.error('Error loading workspaces:', error);
       showNotification('Failed to load workspaces', 'error');
     } finally {
-      setLoading(false);
+      if (showSpinner) setLoading(false);
     }
   }, []);
 
@@ -240,7 +245,8 @@ const GroupManagement: React.FC = () => {
       }
 
       loadGroupUsers(selectedGroup.id);
-
+      // Refresh workspace list to update user_count (no spinner)
+      await loadGroups(false);
       // Refresh GroupSelector to show updated workspace list
       await refreshGroupStore();
     } catch (error) {
@@ -322,6 +328,8 @@ const GroupManagement: React.FC = () => {
       setUserToRemove(null);
       showNotification('Member removed successfully', 'success');
       loadGroupUsers(selectedGroup.id);
+      // Refresh workspace list to update user_count (no spinner)
+      await loadGroups(false);
     } catch (error) {
       console.error('Error removing member from workspace:', error);
       showNotification('Failed to remove member', 'error');
