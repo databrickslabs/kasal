@@ -69,18 +69,19 @@ class TestMemoryBackendTypeEnum:
 
     def test_memory_backend_type_enum_all_values(self):
         """Test MemoryBackendTypeEnum contains all expected values."""
-        expected_values = {"default", "databricks"}
+        expected_values = {"default", "databricks", "lakebase"}
         actual_values = {item.value for item in MemoryBackendTypeEnum}
-        
+
         assert actual_values == expected_values
 
     def test_memory_backend_type_enum_iteration(self):
         """Test MemoryBackendTypeEnum can be iterated."""
         enum_values = list(MemoryBackendTypeEnum)
-        
-        assert len(enum_values) == 2
+
+        assert len(enum_values) == 3
         assert MemoryBackendTypeEnum.DEFAULT in enum_values
         assert MemoryBackendTypeEnum.DATABRICKS in enum_values
+        assert MemoryBackendTypeEnum.LAKEBASE in enum_values
 
 
 class TestMemoryBackend:
@@ -98,9 +99,9 @@ class TestMemoryBackend:
         """Test MemoryBackend has expected columns."""
         expected_columns = [
             'id', 'group_id', 'name', 'description', 'backend_type',
-            'databricks_config', 'enable_short_term', 'enable_long_term',
-            'enable_entity', 'enable_relationship_retrieval', 'custom_config',
-            'is_active', 'is_default', 'created_at', 'updated_at'
+            'databricks_config', 'lakebase_config', 'enable_short_term',
+            'enable_long_term', 'enable_entity', 'enable_relationship_retrieval',
+            'custom_config', 'is_active', 'is_default', 'created_at', 'updated_at'
         ]
         
         actual_columns = list(MemoryBackend.__table__.columns.keys())
@@ -179,6 +180,7 @@ class TestMemoryBackend:
         backend.description = None
         backend.backend_type = MemoryBackendTypeEnum.DEFAULT
         backend.databricks_config = None
+        backend.lakebase_config = None
         backend.enable_short_term = True
         backend.enable_long_term = True
         backend.enable_entity = True
@@ -188,9 +190,9 @@ class TestMemoryBackend:
         backend.is_default = False
         backend.created_at = None
         backend.updated_at = None
-        
+
         result = backend.to_dict()
-        
+
         expected = {
             "id": "test-id",
             "group_id": "test-group",
@@ -198,6 +200,7 @@ class TestMemoryBackend:
             "description": None,
             "backend_type": "default",
             "databricks_config": None,
+            "lakebase_config": None,
             "enable_short_term": True,
             "enable_long_term": True,
             "enable_entity": True,
@@ -208,7 +211,7 @@ class TestMemoryBackend:
             "created_at": None,
             "updated_at": None,
         }
-        
+
         assert result == expected
 
     def test_memory_backend_to_dict_full(self):
@@ -221,6 +224,7 @@ class TestMemoryBackend:
         backend.description = "Test description"
         backend.backend_type = MemoryBackendTypeEnum.DATABRICKS
         backend.databricks_config = {"endpoint": "test"}
+        backend.lakebase_config = {"catalog": "test_catalog"}
         backend.enable_short_term = False
         backend.enable_long_term = False
         backend.enable_entity = False
@@ -230,9 +234,9 @@ class TestMemoryBackend:
         backend.is_default = True
         backend.created_at = now
         backend.updated_at = now
-        
+
         result = backend.to_dict()
-        
+
         expected = {
             "id": "test-id",
             "group_id": "test-group",
@@ -240,6 +244,7 @@ class TestMemoryBackend:
             "description": "Test description",
             "backend_type": "databricks",
             "databricks_config": {"endpoint": "test"},
+            "lakebase_config": {"catalog": "test_catalog"},
             "enable_short_term": False,
             "enable_long_term": False,
             "enable_entity": False,
@@ -250,7 +255,7 @@ class TestMemoryBackend:
             "created_at": "2023-01-01T12:00:00",
             "updated_at": "2023-01-01T12:00:00",
         }
-        
+
         assert result == expected
 
     def test_memory_backend_to_dict_none_backend_type(self):
