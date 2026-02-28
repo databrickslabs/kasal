@@ -61,7 +61,7 @@ def mock_tool_factory():
     mock_tool2 = MagicMock()
     mock_tool2.name = "Tool 2"
 
-    def create_tool_side_effect(tool_id):
+    def create_tool_side_effect(tool_id, tool_config_override=None):
         if tool_id == "tool-1":
             return mock_tool1
         elif tool_id == "tool-2":
@@ -193,7 +193,7 @@ class TestAgentConfig:
         """Test creating tools when some tools fail to create."""
         tool_ids = ["tool-1", "invalid-tool"]
 
-        def create_tool_side_effect(tool_id):
+        def create_tool_side_effect(tool_id, tool_config_override=None):
             if tool_id == "tool-1":
                 return MagicMock()
             return None

@@ -1816,6 +1816,7 @@ class TestProgressiveGeneration:
         req.prompt = prompt
         req.model = model
         req.tools = tools or []
+        req.original_prompt = None
         return req
 
     def _make_plan(self, agents=None, tasks=None, process_type="sequential", complexity="standard"):
@@ -2202,7 +2203,7 @@ class TestProgressiveGeneration:
         )
         # Tasks have no "context" key -- the method should auto-chain them
 
-        request = self._make_progressive_request(prompt="build a crew with 1 agent and 3 tasks")
+        request = self._make_progressive_request(prompt="build a crew, use 3 tasks")
         gen_id = "gen-seq-chain"
 
         task_saves = [
@@ -2398,7 +2399,7 @@ class TestProgressiveGeneration:
             tr.llm_guardrail = None
             task_responses.append(tr)
 
-        request = self._make_progressive_request(prompt="build a crew with 1 agent and 2 tasks")
+        request = self._make_progressive_request(prompt="build a crew, use 2 tasks")
         gen_id = "gen-unassigned"
 
         with self._progressive_patches(plan=plan, agent_saved=agent_saved) as m:

@@ -103,19 +103,31 @@ import sys
 import importlib
 import importlib.util
 
-# Pre-populate sys.modules with mocks so the handler can import from them.
-# Use setdefault so we don't clobber real modules if they're already loaded.
-# NOTE: We do NOT mock "openai.types.responses" because it conflicts with the
-# real openai package used by other test modules (litellm import chain).
-# The handler only imports from it inside _handle_responses at call time.
-sys.modules.setdefault(
-    "crewai.llms.providers.openai.completion",
-    MagicMock(OpenAICompletion=_FakeOpenAICompletion),
-)
-sys.modules.setdefault(
-    "crewai.events.types.llm_events",
-    MagicMock(LLMCallType=MagicMock(LLM_CALL="LLM_CALL", TOOL_CALL="TOOL_CALL")),
-)
+# ---------------------------------------------------------------------------
+# Isolated module loading: force-install our mocks so the handler file sees
+# _FakeOpenAICompletion as its base class (even if the real crewai module is
+# already imported by other tests), then RESTORE sys.modules so we don't
+# pollute other test files.
+# ---------------------------------------------------------------------------
+_MOCK_MODULES = {
+    "crewai.llms.providers.openai.completion": MagicMock(
+        OpenAICompletion=_FakeOpenAICompletion,
+    ),
+    "crewai.events.types.llm_events": MagicMock(
+        LLMCallType=MagicMock(LLM_CALL="LLM_CALL", TOOL_CALL="TOOL_CALL"),
+    ),
+}
+_HANDLER_MODULE_KEY = "src.core.llm_handlers.databricks_codex_handler"
+
+# Save originals so we can restore them after loading
+_saved_modules = {}
+for _key in list(_MOCK_MODULES) + [_HANDLER_MODULE_KEY]:
+    if _key in sys.modules:
+        _saved_modules[_key] = sys.modules[_key]
+
+# Force-install mocks (override real modules temporarily)
+for _key, _mock_mod in _MOCK_MODULES.items():
+    sys.modules[_key] = _mock_mod
 
 # Load the module directly from its file path to bypass __init__.py
 _handler_path = str(
@@ -125,14 +137,20 @@ _handler_path = str(
     / "llm_handlers"
     / "databricks_codex_handler.py"
 )
-_spec = importlib.util.spec_from_file_location(
-    "src.core.llm_handlers.databricks_codex_handler", _handler_path
-)
+_spec = importlib.util.spec_from_file_location(_HANDLER_MODULE_KEY, _handler_path)
 _mod = importlib.util.module_from_spec(_spec)
-sys.modules["src.core.llm_handlers.databricks_codex_handler"] = _mod
+sys.modules[_HANDLER_MODULE_KEY] = _mod
 _spec.loader.exec_module(_mod)
 
+# Extract the class we need (survives module cleanup because held by reference)
 DatabricksCodexCompletion = _mod.DatabricksCodexCompletion
+
+# Restore sys.modules — put back originals or remove entries we added
+for _key in list(_MOCK_MODULES) + [_HANDLER_MODULE_KEY]:
+    if _key in _saved_modules:
+        sys.modules[_key] = _saved_modules[_key]
+    else:
+        sys.modules.pop(_key, None)
 
 
 # ---------------------------------------------------------------------------
