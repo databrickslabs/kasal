@@ -6,7 +6,7 @@
  * (sqlite, lakebase, lakebase with connection errors).
  */
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import '@testing-library/jest-dom';
@@ -29,25 +29,21 @@ const {
       node_count: 1,
       instance_status: 'NOT_CREATED',
     },
-    lakebaseMode: 'connect' as const,
     schemaExists: false,
     showMigrationDialog: false,
     migrationOption: 'recreate' as const,
     loading: false,
     checkingInstance: false,
-    creatingInstance: false,
     expandedSections: { lakebaseConfig: false },
     error: null as string | null,
     success: null as string | null,
     setDatabaseInfo: vi.fn(),
     setLakebaseConfig: vi.fn(),
-    setLakebaseMode: vi.fn(),
     setSchemaExists: vi.fn(),
     setShowMigrationDialog: vi.fn(),
     setMigrationOption: vi.fn(),
     setLoading: vi.fn(),
     setCheckingInstance: vi.fn(),
-    setCreatingInstance: vi.fn(),
     setError: vi.fn(),
     setSuccess: vi.fn(),
     setCurrentBackend: vi.fn(),
@@ -453,6 +449,138 @@ describe('DatabaseManagement', () => {
         const alert = screen.getByRole('alert');
         expect(alert).toHaveClass('MuiAlert-standardWarning');
       });
+    });
+  });
+
+  describe('Lakebase tab - connect form visibility', () => {
+    const navigateToLakebaseTab = async () => {
+      await waitFor(() => {
+        expect(screen.getByText('Lakebase')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText('Lakebase'));
+    };
+
+    it('shows connect form when lakebase is selected but not connected', async () => {
+      renderWithProviders(<DatabaseManagement />);
+      await navigateToLakebaseTab();
+
+      // Select "Databricks Lakebase" radio
+      fireEvent.click(screen.getByText('Databricks Lakebase'));
+
+      await waitFor(() => {
+        expect(screen.getByText('Connect to Existing Lakebase Instance')).toBeInTheDocument();
+      });
+    });
+
+    it('shows prerequisites alert when not connected', async () => {
+      renderWithProviders(<DatabaseManagement />);
+      await navigateToLakebaseTab();
+
+      fireEvent.click(screen.getByText('Databricks Lakebase'));
+
+      await waitFor(() => {
+        expect(screen.getByText('Databricks App Setup')).toBeInTheDocument();
+      });
+    });
+
+    it('hides connect form when instance is enabled and READY', async () => {
+      mockDatabaseStoreState.lakebaseConfig = {
+        enabled: true,
+        instance_name: 'kasal-lakebase1',
+        capacity: 'CU_1',
+        retention_days: 14,
+        node_count: 1,
+        instance_status: 'READY',
+        endpoint: 'instance-123.database.cloud.databricks.com',
+      };
+
+      renderWithProviders(<DatabaseManagement />);
+      await navigateToLakebaseTab();
+
+      fireEvent.click(screen.getByText('Databricks Lakebase'));
+
+      await waitFor(() => {
+        expect(screen.queryByText('Connect to Existing Lakebase Instance')).not.toBeInTheDocument();
+      });
+    });
+
+    it('hides prerequisites alert when instance is enabled and READY', async () => {
+      mockDatabaseStoreState.lakebaseConfig = {
+        enabled: true,
+        instance_name: 'kasal-lakebase1',
+        capacity: 'CU_1',
+        retention_days: 14,
+        node_count: 1,
+        instance_status: 'READY',
+        endpoint: 'instance-123.database.cloud.databricks.com',
+      };
+
+      renderWithProviders(<DatabaseManagement />);
+      await navigateToLakebaseTab();
+
+      fireEvent.click(screen.getByText('Databricks Lakebase'));
+
+      await waitFor(() => {
+        expect(screen.queryByText('Databricks App Setup')).not.toBeInTheDocument();
+      });
+    });
+
+    it('shows connect form when instance is READY but not enabled (re-enabling flow)', async () => {
+      mockDatabaseStoreState.lakebaseConfig = {
+        enabled: false,
+        instance_name: 'kasal-lakebase1',
+        capacity: 'CU_1',
+        retention_days: 14,
+        node_count: 1,
+        instance_status: 'READY',
+        endpoint: 'instance-123.database.cloud.databricks.com',
+      };
+
+      renderWithProviders(<DatabaseManagement />);
+      await navigateToLakebaseTab();
+
+      fireEvent.click(screen.getByText('Databricks Lakebase'));
+
+      await waitFor(() => {
+        expect(screen.getByText('Connect to Existing Lakebase Instance')).toBeInTheDocument();
+      });
+    });
+
+    it('shows status section with action buttons when enabled and READY', async () => {
+      mockDatabaseStoreState.lakebaseConfig = {
+        enabled: true,
+        instance_name: 'kasal-lakebase1',
+        capacity: 'CU_1',
+        retention_days: 14,
+        node_count: 1,
+        instance_status: 'READY',
+        endpoint: 'instance-123.database.cloud.databricks.com',
+      };
+
+      renderWithProviders(<DatabaseManagement />);
+      await navigateToLakebaseTab();
+
+      fireEvent.click(screen.getByText('Databricks Lakebase'));
+
+      await waitFor(() => {
+        expect(screen.getByText('Current Status')).toBeInTheDocument();
+        expect(screen.getByText('View in Databricks')).toBeInTheDocument();
+        expect(screen.getByText('Refresh Status')).toBeInTheDocument();
+      });
+    });
+
+    it('does not render Create New Instance option', async () => {
+      renderWithProviders(<DatabaseManagement />);
+      await navigateToLakebaseTab();
+
+      fireEvent.click(screen.getByText('Databricks Lakebase'));
+
+      await waitFor(() => {
+        expect(screen.getByText('Connect to Existing Lakebase Instance')).toBeInTheDocument();
+      });
+
+      expect(screen.queryByText('Create New Instance')).not.toBeInTheDocument();
+      expect(screen.queryByText('How would you like to set up Lakebase?')).not.toBeInTheDocument();
     });
   });
 

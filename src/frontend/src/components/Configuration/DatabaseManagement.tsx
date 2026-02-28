@@ -200,8 +200,6 @@ const DatabaseManagement: React.FC = () => {
     setDatabaseInfo,
     lakebaseConfig,
     setLakebaseConfig,
-    lakebaseMode,
-    setLakebaseMode,
     schemaExists,
     setSchemaExists,
     showMigrationDialog,
@@ -212,8 +210,6 @@ const DatabaseManagement: React.FC = () => {
     setLoading,
     checkingInstance,
     setCheckingInstance,
-    creatingInstance,
-    setCreatingInstance,
     error,
     setError,
     success,
@@ -382,41 +378,6 @@ const DatabaseManagement: React.FC = () => {
       setCheckingInstance(false);
     }
   }, [setLakebaseConfig, setCheckingInstance, checkLakebaseInstance]);
-
-  const createLakebaseInstance = async () => {
-    try {
-      setCreatingInstance(true);
-      setError(null);
-
-      const response = await apiClient.post<LakebaseInstance>('/database-management/lakebase/create', {
-        instance_name: lakebaseConfig.instance_name,
-        capacity: lakebaseConfig.capacity,
-        retention_days: lakebaseConfig.retention_days,
-        node_count: lakebaseConfig.node_count
-      });
-
-      setLakebaseConfig({
-        enabled: true,
-        instance_status: 'READY',
-        endpoint: response.data.read_write_dns,
-        created_at: response.data.created_at
-      });
-
-      setSuccess(`Lakebase instance "${response.data.name}" created successfully!`);
-
-      // New instance has no kasal schema — show migration dialog
-      setSchemaExists(false);
-      setMigrationOption('recreate');
-      setShowMigrationDialog(true);
-    } catch (err: unknown) {
-      const errorMessage = isErrorWithResponse(err)
-        ? err.response?.data?.detail || 'Failed to create Lakebase instance'
-        : 'Failed to create Lakebase instance';
-      setError(errorMessage);
-    } finally {
-      setCreatingInstance(false);
-    }
-  };
 
   const saveLakebaseConfig = async () => {
     try {
@@ -1168,6 +1129,28 @@ const DatabaseManagement: React.FC = () => {
             <>
               <Divider sx={{ mb: 3 }} />
 
+              {/* Databricks App Setup Prerequisites - only show when not connected */}
+              {!(lakebaseConfig.enabled && lakebaseConfig.instance_status === 'READY') && (
+                <Alert severity="info" icon={<InfoIcon />} sx={{ mb: 3 }}>
+                  <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Databricks App Setup</Typography>
+                  <Typography variant="body2" component="div">
+                    Before connecting, ensure your App&apos;s service principal has Lakebase access:
+                    <ol style={{ margin: '4px 0 0 0', paddingLeft: '20px' }}>
+                      <li>Add a <strong>Database</strong> resource to your App in the Databricks UI</li>
+                      <li>Create a PostgreSQL role for the service principal on the Lakebase instance</li>
+                    </ol>
+                    <a
+                      href="https://docs.databricks.com/aws/en/dev-tools/databricks-apps/lakebase"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ fontSize: '0.85em' }}
+                    >
+                      Databricks Lakebase App docs <OpenInNewIcon sx={{ fontSize: 14, verticalAlign: 'middle', ml: 0.5 }} />
+                    </a>
+                  </Typography>
+                </Alert>
+              )}
+
               {/* Current Status Section */}
               <Box sx={{ mb: 3 }}>
                 <Typography variant="subtitle1" sx={{ mb: 2, display: 'flex', alignItems: 'center' }}>
@@ -1238,62 +1221,12 @@ const DatabaseManagement: React.FC = () => {
                 )}
               </Box>
 
+              {!(lakebaseConfig.enabled && lakebaseConfig.instance_status === 'READY') && (
+              <>
               <Divider sx={{ mb: 3 }} />
 
-              {/* Connection Mode Selection - Clear toggle between Create and Connect */}
-              <Box sx={{ mb: 3 }}>
-                <Typography variant="subtitle1" sx={{ mb: 2 }}>
-                  How would you like to set up Lakebase?
-                </Typography>
-                <Grid container spacing={2}>
-                  <Grid item xs={12} md={6}>
-                    <Card
-                      variant={lakebaseMode === 'connect' ? 'outlined' : 'elevation'}
-                      sx={{
-                        border: lakebaseMode === 'connect' ? '2px solid' : 'none',
-                        borderColor: lakebaseMode === 'connect' ? 'primary.main' : 'transparent',
-                        cursor: 'pointer',
-                        height: '100%'
-                      }}
-                      onClick={() => setLakebaseMode('connect')}
-                    >
-                      <CardContent>
-                        <Typography variant="h6" gutterBottom color={lakebaseMode === 'connect' ? 'primary' : 'inherit'}>
-                          Connect to Existing Kasal
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          Connect to an existing Lakebase instance
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                  <Grid item xs={12} md={6}>
-                    <Card
-                      variant={lakebaseMode === 'create' ? 'outlined' : 'elevation'}
-                      sx={{
-                        border: lakebaseMode === 'create' ? '2px solid' : 'none',
-                        borderColor: lakebaseMode === 'create' ? 'primary.main' : 'transparent',
-                        cursor: 'pointer',
-                        height: '100%'
-                      }}
-                      onClick={() => setLakebaseMode('create')}
-                    >
-                      <CardContent>
-                        <Typography variant="h6" gutterBottom color={lakebaseMode === 'create' ? 'primary' : 'inherit'}>
-                          Create New Instance
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          Create a new Lakebase instance in my Databricks workspace
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                </Grid>
-              </Box>
-
               {/* Connect to Existing Instance Form */}
-              {lakebaseMode === 'connect' && (
-                <Box sx={{ mb: 3 }}>
+              <Box sx={{ mb: 3 }}>
                   <Paper sx={{ p: 2, backgroundColor: 'background.default' }}>
                     <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 'bold' }}>
                       Connect to Existing Lakebase Instance
@@ -1464,7 +1397,19 @@ const DatabaseManagement: React.FC = () => {
 
                               // Check if the connection test itself failed
                               if (!testResponse.data.success) {
-                                setError(`Connection test failed: ${testResponse.data.error || 'Unknown error'}. Verify the instance is running and accessible.`);
+                                if (testResponse.data.error_code === 'MISSING_DATABASE_RESOURCE') {
+                                  const clientId = testResponse.data.client_id || '<your-service-principal-client-id>';
+                                  setError(
+                                    `The service principal's OAuth token is missing the "postgres" scope.\n\n` +
+                                    `Step 1: In your Databricks App settings, add a Database resource pointing to your Lakebase instance.\n\n` +
+                                    `Step 2: Create a PostgreSQL role for the service principal:\n` +
+                                    `  CREATE ROLE \`${clientId}\` LOGIN;\n` +
+                                    `  GRANT ALL ON SCHEMA public TO \`${clientId}\`;\n\n` +
+                                    `After completing these steps, click Connect again.`
+                                  );
+                                } else {
+                                  setError(`Connection test failed: ${testResponse.data.error || 'Unknown error'}. Verify the instance is running and accessible.`);
+                                }
                                 return;
                               }
 
@@ -1514,95 +1459,7 @@ const DatabaseManagement: React.FC = () => {
                     </Grid>
                   </Paper>
                 </Box>
-              )}
-
-              {/* Create New Instance Form */}
-              {lakebaseMode === 'create' && (
-                <Box sx={{ mb: 3 }}>
-                  <Paper sx={{ p: 2, backgroundColor: 'background.default' }}>
-                    <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 'bold' }}>
-                      Create New Lakebase Instance
-                    </Typography>
-                    <Grid container spacing={2}>
-                      <Grid item xs={12} md={6}>
-                        <TextField
-                          fullWidth
-                          label="Instance Name"
-                          value={lakebaseConfig.instance_name}
-                          onChange={(e) => setLakebaseConfig({ ...lakebaseConfig, instance_name: e.target.value })}
-                          helperText="1-63 characters, letters and hyphens only"
-                          placeholder="kasal-lakebase"
-                          required
-                        />
-                      </Grid>
-                      <Grid item xs={12} md={6}>
-                        <FormControl fullWidth>
-                          <InputLabel>Capacity</InputLabel>
-                          <Select
-                            value={lakebaseConfig.capacity}
-                            onChange={(e) => setLakebaseConfig({ ...lakebaseConfig, capacity: e.target.value })}
-                            label="Capacity"
-                          >
-                            <MenuItem value="CU_1">CU_1 (Small - 1 compute unit)</MenuItem>
-                            <MenuItem value="CU_2">CU_2 (Medium - 2 compute units)</MenuItem>
-                            <MenuItem value="CU_4">CU_4 (Large - 4 compute units)</MenuItem>
-                          </Select>
-                          <FormHelperText>Select compute capacity based on your workload</FormHelperText>
-                        </FormControl>
-                      </Grid>
-                      <Grid item xs={12} md={6}>
-                        <TextField
-                          fullWidth
-                          type="number"
-                          label="Backup Retention (Days)"
-                          value={lakebaseConfig.retention_days}
-                          onChange={(e) => setLakebaseConfig({ ...lakebaseConfig, retention_days: parseInt(e.target.value) })}
-                          inputProps={{ min: 2, max: 35 }}
-                          helperText="How long to keep backups (2-35 days)"
-                        />
-                      </Grid>
-                      <Grid item xs={12} md={6}>
-                        <TextField
-                          fullWidth
-                          type="number"
-                          label="High Availability Nodes"
-                          value={lakebaseConfig.node_count}
-                          onChange={(e) => setLakebaseConfig({ ...lakebaseConfig, node_count: parseInt(e.target.value) })}
-                          inputProps={{ min: 1, max: 3 }}
-                          helperText="1 = Basic, 2+ = High Availability"
-                        />
-                      </Grid>
-                      <Grid item xs={12}>
-                        <Alert severity="info" sx={{ mb: 2 }}>
-                          Creating a new instance will provision resources in your Databricks workspace.
-                          This may take 3-5 minutes.
-                        </Alert>
-                        <Button
-                          variant="contained"
-                          onClick={createLakebaseInstance}
-                          disabled={!lakebaseConfig.instance_name || creatingInstance || lakebaseConfig.instance_status === 'READY'}
-                        >
-                          {creatingInstance ? 'Creating Instance...' : 'Create Instance'}
-                        </Button>
-                      </Grid>
-                    </Grid>
-                  </Paper>
-                </Box>
-              )}
-
-              {/* Info Alert - Only show when creating a new instance */}
-              {lakebaseMode === 'create' && (
-                <Alert severity="info" sx={{ mt: 3 }}>
-                  <Typography variant="body2">
-                    <strong>Lakebase</strong> is a fully-managed PostgreSQL OLTP engine within Databricks that provides:
-                  </Typography>
-                  <ul style={{ margin: '8px 0 0 0', paddingLeft: '20px' }}>
-                    <li>High availability with automatic failover</li>
-                    <li>Point-in-time restore and automated backups</li>
-                    <li>Built-in monitoring and alerting</li>
-                    <li>Seamless integration with Databricks ecosystem</li>
-                  </ul>
-                </Alert>
+              </>
               )}
             </>
           )}
@@ -1727,7 +1584,7 @@ const DatabaseManagement: React.FC = () => {
       )}
       {error && (
         <Alert severity="error" onClose={() => setError(null)} sx={{ mt: 2 }}>
-          {error}
+          <Typography sx={{ whiteSpace: 'pre-line' }}>{error}</Typography>
         </Alert>
       )}
 
@@ -1901,6 +1758,8 @@ const DatabaseManagement: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+
 
       {/* Migration Logs Dialog */}
       <Dialog
