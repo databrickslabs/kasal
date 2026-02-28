@@ -748,7 +748,7 @@ class CrewPreparation:
             if memory_enabled and memory_backend_config:
                 # Determine which embedder to use
                 backend_type = memory_backend_config.get('backend_type')
-                embedder_for_backends = custom_embedder if backend_type == 'databricks' else crew_kwargs.get('embedder')
+                embedder_for_backends = custom_embedder if backend_type in ('databricks', 'lakebase') else crew_kwargs.get('embedder')
                 logger.info(f"Creating memory backends with backend_type={backend_type}, using_custom_embedder={embedder_for_backends is not None}")
 
                 # Create memory backends

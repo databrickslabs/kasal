@@ -1,129 +1,162 @@
 """
-Unit tests for engines/crewai/memory/memory_backend_factory.py
-
-Auto-generated test template. TODO: Add comprehensive test coverage.
+Unit tests for MemoryBackendFactory.
 """
-
 import pytest
-from unittest.mock import Mock, patch, MagicMock
-from src.engines.crewai.memory.memory_backend_factory import (
-    MemoryBackendFactory,
-    EmbedderStorageWrapper,
-    create_embedder_wrapper,
-    embed_and_store,
-    search,
-    reset
+from unittest.mock import MagicMock, AsyncMock, patch
+
+from src.engines.crewai.memory.memory_backend_factory import MemoryBackendFactory
+from src.schemas.memory_backend import (
+    MemoryBackendConfig,
+    MemoryBackendType,
+    DatabricksMemoryConfig,
+    LakebaseMemoryConfig,
 )
 
 
+class TestCreateMemoryBackendsDefault:
+    """Tests for default backend creation."""
 
-class TestMemoryBackendFactory:
-    """Tests for MemoryBackendFactory"""
-
-    @pytest.fixture
-    def memorybackendfactory(self):
-        """Create MemoryBackendFactory instance for testing"""
-        # TODO: Implement fixture
-        pass
-
-    def test_memorybackendfactory_initialization(self, memorybackendfactory):
-        """Test MemoryBackendFactory initializes correctly"""
-        # TODO: Implement test
-        pass
-
-    def test_memorybackendfactory_basic_functionality(self, memorybackendfactory):
-        """Test MemoryBackendFactory basic functionality"""
-        # TODO: Implement test
-        pass
-
-    def test_memorybackendfactory_error_handling(self, memorybackendfactory):
-        """Test MemoryBackendFactory handles errors correctly"""
-        # TODO: Implement test
-        pass
+    @pytest.mark.asyncio
+    async def test_default_backend_returns_empty_dict(self):
+        """Test that default backend returns empty dict for CrewAI to handle."""
+        config = MemoryBackendConfig(
+            backend_type=MemoryBackendType.DEFAULT,
+            enable_short_term=True,
+            enable_long_term=True,
+            enable_entity=True,
+        )
+        result = await MemoryBackendFactory.create_memory_backends(
+            config=config,
+            crew_id="test_crew_123",
+        )
+        assert result == {}
 
 
-class TestEmbedderStorageWrapper:
-    """Tests for EmbedderStorageWrapper"""
+class TestCreateMemoryBackendsLakebase:
+    """Tests for Lakebase backend creation."""
 
-    @pytest.fixture
-    def embedderstoragewrapper(self):
-        """Create EmbedderStorageWrapper instance for testing"""
-        # TODO: Implement fixture
-        pass
+    @pytest.mark.asyncio
+    async def test_lakebase_missing_config_raises(self):
+        """Test that missing lakebase_config raises ValueError."""
+        config = MemoryBackendConfig(
+            backend_type=MemoryBackendType.LAKEBASE,
+            lakebase_config=None,
+            enable_short_term=True,
+        )
+        with pytest.raises(ValueError, match="Lakebase configuration is required"):
+            await MemoryBackendFactory.create_memory_backends(
+                config=config,
+                crew_id="test_crew_123",
+            )
 
-    def test_embedderstoragewrapper_initialization(self, embedderstoragewrapper):
-        """Test EmbedderStorageWrapper initializes correctly"""
-        # TODO: Implement test
-        pass
+    @pytest.mark.asyncio
+    async def test_lakebase_creates_all_memory_types(self):
+        """Test that Lakebase backend creates all three memory types."""
+        config = MemoryBackendConfig(
+            backend_type=MemoryBackendType.LAKEBASE,
+            lakebase_config=LakebaseMemoryConfig(
+                embedding_dimension=1024,
+                short_term_table="crew_short_term_memory",
+                long_term_table="crew_long_term_memory",
+                entity_table="crew_entity_memory",
+            ),
+            enable_short_term=True,
+            enable_long_term=True,
+            enable_entity=True,
+        )
+        mock_embedder = MagicMock()
+        result = await MemoryBackendFactory.create_memory_backends(
+            config=config,
+            crew_id="test_group_crew_abc123",
+            embedder=mock_embedder,
+            job_id="job_001",
+        )
+        assert "short_term" in result
+        assert "long_term" in result
+        assert "entity" in result
 
-    def test_embedderstoragewrapper_basic_functionality(self, embedderstoragewrapper):
-        """Test EmbedderStorageWrapper basic functionality"""
-        # TODO: Implement test
-        pass
+    @pytest.mark.asyncio
+    async def test_lakebase_respects_disabled_memory_types(self):
+        """Test that disabled memory types are not created."""
+        config = MemoryBackendConfig(
+            backend_type=MemoryBackendType.LAKEBASE,
+            lakebase_config=LakebaseMemoryConfig(),
+            enable_short_term=True,
+            enable_long_term=False,
+            enable_entity=False,
+        )
+        result = await MemoryBackendFactory.create_memory_backends(
+            config=config,
+            crew_id="test_crew",
+            embedder=MagicMock(),
+        )
+        assert "short_term" in result
+        assert "long_term" not in result
+        assert "entity" not in result
 
-    def test_embedderstoragewrapper_error_handling(self, embedderstoragewrapper):
-        """Test EmbedderStorageWrapper handles errors correctly"""
-        # TODO: Implement test
-        pass
+    @pytest.mark.asyncio
+    async def test_lakebase_passes_job_id_to_short_term(self):
+        """Test that job_id is passed to short-term storage for session scoping."""
+        config = MemoryBackendConfig(
+            backend_type=MemoryBackendType.LAKEBASE,
+            lakebase_config=LakebaseMemoryConfig(),
+            enable_short_term=True,
+            enable_long_term=False,
+            enable_entity=False,
+        )
+        result = await MemoryBackendFactory.create_memory_backends(
+            config=config,
+            crew_id="grp_crew_123",
+            embedder=MagicMock(),
+            job_id="job_42",
+        )
+        wrapper = result["short_term"]
+        assert wrapper.storage.job_id == "job_42"
+
+    @pytest.mark.asyncio
+    async def test_lakebase_extracts_group_id_from_crew_id(self):
+        """Test that group_id is extracted from crew_id format."""
+        config = MemoryBackendConfig(
+            backend_type=MemoryBackendType.LAKEBASE,
+            lakebase_config=LakebaseMemoryConfig(),
+            enable_short_term=True,
+            enable_long_term=False,
+            enable_entity=False,
+        )
+        result = await MemoryBackendFactory.create_memory_backends(
+            config=config,
+            crew_id="my_group_crew_abc123",
+            embedder=MagicMock(),
+        )
+        wrapper = result["short_term"]
+        assert wrapper.storage.group_id == "my_group"
+
+
+class TestCreateMemoryBackendsDatabricks:
+    """Tests for Databricks backend creation."""
+
+    @pytest.mark.asyncio
+    async def test_databricks_missing_config_raises(self):
+        """Test that missing databricks_config raises ValueError."""
+        config = MemoryBackendConfig(
+            backend_type=MemoryBackendType.DATABRICKS,
+            databricks_config=None,
+        )
+        with pytest.raises(ValueError, match="Databricks configuration is required"):
+            await MemoryBackendFactory.create_memory_backends(
+                config=config,
+                crew_id="test_crew",
+            )
 
 
 class TestCreateEmbedderWrapper:
-    """Tests for create_embedder_wrapper function"""
+    """Tests for create_embedder_wrapper static method."""
 
-    def test_create_embedder_wrapper_success(self):
-        """Test create_embedder_wrapper succeeds with valid input"""
-        # TODO: Implement test
-        pass
-
-    def test_create_embedder_wrapper_invalid_input(self):
-        """Test create_embedder_wrapper handles invalid input"""
-        # TODO: Implement test
-        pass
-
-
-class TestEmbedAndStore:
-    """Tests for embed_and_store function"""
-
-    def test_embed_and_store_success(self):
-        """Test embed_and_store succeeds with valid input"""
-        # TODO: Implement test
-        pass
-
-    def test_embed_and_store_invalid_input(self):
-        """Test embed_and_store handles invalid input"""
-        # TODO: Implement test
-        pass
-
-
-class TestSearch:
-    """Tests for search function"""
-
-    def test_search_success(self):
-        """Test search succeeds with valid input"""
-        # TODO: Implement test
-        pass
-
-    def test_search_invalid_input(self):
-        """Test search handles invalid input"""
-        # TODO: Implement test
-        pass
-
-
-class TestReset:
-    """Tests for reset function"""
-
-    def test_reset_success(self):
-        """Test reset succeeds with valid input"""
-        # TODO: Implement test
-        pass
-
-    def test_reset_invalid_input(self):
-        """Test reset handles invalid input"""
-        # TODO: Implement test
-        pass
-
-
-
-# TODO: Add more comprehensive tests
-# TODO: Test edge cases and error handling
-# TODO: Achieve 80%+ code coverage
+    def test_creates_wrapper_with_embed_and_store(self):
+        """Test that wrapper has embed_and_store method."""
+        embedder = MagicMock()
+        storage = MagicMock()
+        wrapper = MemoryBackendFactory.create_embedder_wrapper(embedder, storage)
+        assert hasattr(wrapper, "embed_and_store")
+        assert hasattr(wrapper, "search")
+        assert hasattr(wrapper, "reset")
