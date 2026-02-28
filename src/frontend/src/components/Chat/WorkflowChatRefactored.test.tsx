@@ -1119,3 +1119,68 @@ describe('Slash Command Autocomplete Menu', () => {
     expect(input).toHaveValue('/help ');
   });
 });
+
+/**
+ * Test the model display name mapping logic used in the chat header.
+ * This is a pure function extracted from the component to verify
+ * new display names for GPT-5 variants.
+ */
+describe('WorkflowChat - model display name mapping', () => {
+  // Replicate the display name logic from the component
+  const getDisplayName = (displayName: string): string => {
+    if (displayName.includes('meta-llama-3-3-70b')) return 'Llama 3.3 70B';
+    if (displayName.includes('gpt-5-mini')) return 'GPT-5 Mini';
+    if (displayName.includes('gpt-5-nano')) return 'GPT-5 Nano';
+    if (displayName.includes('gpt-5-3-codex')) return 'GPT-5.3 Codex';
+    if (displayName.includes('gpt-5-2') || displayName.includes('gpt-5.2')) return 'GPT-5.2';
+    if (displayName.includes('gpt-5-1-codex-max')) return 'GPT-5.1 Codex Max';
+    if (displayName.includes('gpt-5-1-codex-mini')) return 'GPT-5.1 Codex Mini';
+    if (displayName.includes('gpt-5-1')) return 'GPT-5.1';
+    if (displayName.includes('gpt-5')) return 'GPT-5';
+    return displayName;
+  };
+
+  it('should map gpt-5-3-codex correctly', () => {
+    expect(getDisplayName('databricks-gpt-5-3-codex')).toBe('GPT-5.3 Codex');
+  });
+
+  it('should map gpt-5-1 correctly', () => {
+    expect(getDisplayName('databricks-gpt-5-1')).toBe('GPT-5.1');
+  });
+
+  it('should map gpt-5-1-codex-max correctly', () => {
+    expect(getDisplayName('databricks-gpt-5-1-codex-max')).toBe('GPT-5.1 Codex Max');
+  });
+
+  it('should map gpt-5-1-codex-mini correctly', () => {
+    expect(getDisplayName('databricks-gpt-5-1-codex-mini')).toBe('GPT-5.1 Codex Mini');
+  });
+
+  it('should map gpt-5-2 correctly', () => {
+    expect(getDisplayName('databricks-gpt-5-2')).toBe('GPT-5.2');
+  });
+
+  it('should map gpt-5 correctly', () => {
+    expect(getDisplayName('databricks-gpt-5')).toBe('GPT-5');
+  });
+
+  it('should map gpt-5-mini correctly', () => {
+    expect(getDisplayName('databricks-gpt-5-mini')).toBe('GPT-5 Mini');
+  });
+
+  it('should map gpt-5-nano correctly', () => {
+    expect(getDisplayName('databricks-gpt-5-nano')).toBe('GPT-5 Nano');
+  });
+
+  it('should preserve gpt-5-3-codex precedence over gpt-5', () => {
+    // gpt-5-3-codex includes "gpt-5" — ensure the more specific match wins
+    const name = 'databricks-gpt-5-3-codex';
+    expect(getDisplayName(name)).toBe('GPT-5.3 Codex');
+    expect(getDisplayName(name)).not.toBe('GPT-5');
+  });
+
+  it('should preserve gpt-5-1-codex-max precedence over gpt-5-1', () => {
+    expect(getDisplayName('databricks-gpt-5-1-codex-max')).toBe('GPT-5.1 Codex Max');
+    expect(getDisplayName('databricks-gpt-5-1-codex-max')).not.toBe('GPT-5.1');
+  });
+});

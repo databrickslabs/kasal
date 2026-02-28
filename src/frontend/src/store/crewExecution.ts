@@ -119,7 +119,7 @@ interface CrewExecutionState {
 export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   // Initial state
   isExecuting: false,
-  selectedModel: 'databricks-llama-4-maverick',
+  selectedModel: 'databricks-gpt-5-3-codex',
   planningEnabled: false,
   planningLLM: '',
   reasoningEnabled: false,
