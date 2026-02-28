@@ -1,9 +1,57 @@
+import sys
+import types as _types_mod
+from unittest.mock import Mock, MagicMock
+from importlib.abc import MetaPathFinder
+from importlib.machinery import ModuleSpec
+from pydantic import BaseModel, ConfigDict
+
+
+# Provide a real BaseTool stand-in so GenieTool can inherit from a proper class.
+class _FakeBaseTool(BaseModel):
+    """Minimal stand-in for crewai.tools.BaseTool."""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def __init__(self, **kwargs):
+        # Accept and discard any unknown kwargs (e.g. result_as_answer)
+        known = {k: v for k, v in kwargs.items() if k in type(self).model_fields}
+        super().__init__(**known)
+
+
+# Pre-create the crewai.tools module with a real BaseTool
+_crewai_tools_mod = _types_mod.ModuleType("crewai.tools")
+_crewai_tools_mod.BaseTool = _FakeBaseTool
+sys.modules["crewai.tools"] = _crewai_tools_mod
+
+
+# Install a meta-path finder that intercepts ALL other crewai / crewai_tools imports.
+class _CrewAIMockFinder(MetaPathFinder):
+    """Intercept any import of crewai.* or crewai_tools.* and return a MagicMock."""
+
+    _PREFIXES = ("crewai", "crewai_tools")
+
+    def find_module(self, fullname, path=None):
+        # Skip crewai.tools — already handled above
+        if fullname == "crewai.tools":
+            return None
+        if any(fullname == p or fullname.startswith(p + ".") for p in self._PREFIXES):
+            return self
+        return None
+
+    def load_module(self, fullname):
+        if fullname in sys.modules:
+            return sys.modules[fullname]
+        mod = MagicMock()
+        mod.__path__ = []
+        mod.__name__ = fullname
+        mod.__spec__ = ModuleSpec(fullname, None)
+        sys.modules[fullname] = mod
+        return mod
+
+
+sys.meta_path.insert(0, _CrewAIMockFinder())
+
 import pytest
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
-import asyncio
-import json
-import base64
-import aiohttp
+from unittest.mock import patch, AsyncMock
 from src.engines.crewai.tools.custom.genie_tool import GenieTool, GenieInput
 import logging
 
@@ -118,6 +166,29 @@ class TestGenieTool:
         tool = GenieTool()
         tool.set_user_token("new-user-token")
         assert tool._user_token == "new-user-token"
+
+    def test_init_default_max_result_rows(self):
+        """Test that default max_result_rows is 200."""
+        tool = GenieTool(tool_config={"spaceId": "test-space"})
+        assert tool._max_result_rows == 200
+
+    def test_init_max_result_rows_from_config(self):
+        """Test max_result_rows is configurable via tool_config."""
+        tool = GenieTool(tool_config={"spaceId": "test-space", "max_result_rows": 500})
+        assert tool._max_result_rows == 500
+
+    def test_init_max_result_rows_default_without_config_key(self):
+        """Test max_result_rows defaults to 200 when not specified in config."""
+        tool = GenieTool(tool_config={"spaceId": "test-space"})
+        assert tool._max_result_rows == 200
+
+    def test_description_contains_aggregation_guidance(self):
+        """Test that tool description includes aggregation query guidelines."""
+        tool = GenieTool(tool_config={"spaceId": "test-space"})
+        assert "aggregated queries" in tool.description
+        assert "SUM, COUNT, AVG, GROUP BY, TOP N" in tool.description
+        assert "Bad:" in tool.description
+        assert "Good:" in tool.description
 
     @pytest.mark.asyncio
     async def test_get_workspace_url_success(self):
@@ -266,18 +337,20 @@ class TestGenieTool:
         assert "ERROR: Genie space ID is not configured" in result
 
     def test_run_with_empty_question(self):
-        """Test run method with empty question."""
+        """Test run method with empty question returns aggregation guidance."""
         tool = GenieTool(tool_config={"spaceId": "test-space"})
 
         result = tool._run("")
-        assert "To use the GenieTool, please provide a specific business question" in result
+        assert "provide a specific, focused business question" in result
+        assert "aggregated queries" in result
 
     def test_run_with_none_question(self):
-        """Test run method with 'none' as question."""
+        """Test run method with 'none' as question returns aggregation guidance."""
         tool = GenieTool(tool_config={"spaceId": "test-space"})
 
         result = tool._run("none")
-        assert "To use the GenieTool, please provide a specific business question" in result
+        assert "provide a specific, focused business question" in result
+        assert "aggregations" in result
 
     def test_extract_response_with_text_attachment(self):
         """Test extracting response from message status with text attachment."""
@@ -321,3 +394,49 @@ class TestGenieTool:
 
         response = tool._extract_response(message_status)
         assert response == "No response content found"
+
+    def test_extract_response_truncated_rows_shows_aggregation_hint(self):
+        """Test that truncated results include aggregation suggestion."""
+        tool = GenieTool(tool_config={"spaceId": "test-space", "max_result_rows": 3})
+
+        message_status = {"attachments": []}
+        # Create 5 rows — exceeds max_result_rows of 3
+        result_data = {
+            "statement_response": {
+                "result": {
+                    "data_typed_array": [
+                        {"values": [{"str": f"Row{i}"}]} for i in range(5)
+                    ]
+                }
+            }
+        }
+
+        response = tool._extract_response(message_status, result_data)
+        assert "Showing first 3 of 5 rows" in response
+        assert "Consider rephrasing your question to use aggregations" in response
+        assert "GROUP BY, SUM, COUNT, AVG, TOP N" in response
+        # Verify only 3 rows are included, not all 5
+        assert "Row0" in response
+        assert "Row2" in response
+        assert "Row4" not in response
+
+    def test_extract_response_not_truncated_no_hint(self):
+        """Test that non-truncated results do NOT include aggregation suggestion."""
+        tool = GenieTool(tool_config={"spaceId": "test-space", "max_result_rows": 200})
+
+        message_status = {"attachments": []}
+        result_data = {
+            "statement_response": {
+                "result": {
+                    "data_typed_array": [
+                        {"values": [{"str": "Row1"}]},
+                        {"values": [{"str": "Row2"}]}
+                    ]
+                }
+            }
+        }
+
+        response = tool._extract_response(message_status, result_data)
+        assert "Consider rephrasing" not in response
+        assert "Row1" in response
+        assert "Row2" in response
