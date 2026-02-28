@@ -29,8 +29,10 @@ interface DatabaseInfo {
   tables?: Record<string, number>;
   total_tables?: number;
   error?: string;
+  lakebase_enabled?: boolean;
   lakebase_instance?: string;
   lakebase_endpoint?: string;
+  connection_error?: string;
 }
 
 interface DatabaseStore {
