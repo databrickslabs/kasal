@@ -24,28 +24,40 @@ async def get_lakebase_config_from_db() -> Optional[Dict[str, Any]]:
     """
     Get Lakebase configuration from the database.
 
+    IMPORTANT: Always reads from the local SQLite fallback database, not the
+    main session factory.  The lakebase config is written to SQLite during
+    setup; once migration succeeds the main session factory points at the
+    Lakebase PostgreSQL instance which doesn't contain the config row.
+    Reading from SQLite avoids the chicken-and-egg problem.
+
     Returns:
         Lakebase configuration dictionary or None if not found
     """
     try:
-        # Use direct session factory to avoid circular dependency
-        from src.db.session import async_session_factory
-        from src.models.database_config import LakebaseConfig
+        import json
+        import sqlite3
+        from src.db.session import settings
 
-        # Use async context manager properly to ensure session cleanup
-        async with async_session_factory() as session:
-            # Query for Lakebase configuration
-            stmt = select(LakebaseConfig).where(
-                LakebaseConfig.key == "lakebase"
-            )
-            result = await session.execute(stmt)
-            config_entry = result.scalar_one_or_none()
+        db_path = settings.SQLITE_DB_PATH or "./app.db"
+        if not os.path.isabs(db_path):
+            db_path = os.path.abspath(db_path)
 
-            if config_entry and config_entry.value:
-                return config_entry.value
-
-            # No configuration found means Lakebase is disabled
+        if not os.path.exists(db_path):
             return None
+
+        conn = sqlite3.connect(db_path)
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT value FROM database_configs WHERE key = ?",
+                ("lakebase",),
+            )
+            row = cursor.fetchone()
+            if row and row[0]:
+                return json.loads(row[0]) if isinstance(row[0], str) else row[0]
+            return None
+        finally:
+            conn.close()
     except Exception as e:
         logger.debug(f"Could not read Lakebase config from database: {e}")
         return None
@@ -69,7 +81,11 @@ async def is_lakebase_enabled() -> bool:
         is_enabled = (
             config.get("enabled", False) and
             config.get("endpoint") and
-            config.get("migration_completed", False)
+            (
+                config.get("migration_completed", False) or
+                config.get("database_type") == "lakebase" or
+                config.get("instance_status") == "READY"
+            )
         )
 
         if is_enabled:

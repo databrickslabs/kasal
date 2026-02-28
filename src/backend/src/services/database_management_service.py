@@ -451,7 +451,11 @@ class DatabaseManagementService:
                     lakebase_enabled = (
                         lakebase_config.get("enabled", False) and
                         lakebase_config.get("endpoint") and
-                        lakebase_config.get("migration_completed", False)
+                        (
+                            lakebase_config.get("migration_completed", False) or
+                            lakebase_config.get("database_type") == "lakebase" or
+                            lakebase_config.get("instance_status") == "READY"
+                        )
                     )
                     lakebase_instance = lakebase_config.get("instance_name")
             except Exception as e:

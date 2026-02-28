@@ -142,6 +142,63 @@ class TestGetWorkspaceClient:
 
         assert service._workspace_client is None
 
+    @pytest.mark.asyncio
+    async def test_uses_spn_oauth_when_env_vars_set(self):
+        """get_workspace_client should use SPN OAuth when all env vars are present."""
+        svc = LakebaseConnectionService()
+        env = {
+            "DATABRICKS_CLIENT_ID": "spn-id",
+            "DATABRICKS_CLIENT_SECRET": "spn-secret",
+            "DATABRICKS_HOST": "https://example.com",
+        }
+        mock_ws = MagicMock()
+
+        with patch.dict("os.environ", env, clear=False), \
+             patch("src.services.lakebase_connection_service.WorkspaceClient", return_value=mock_ws) as mock_cls:
+            result = await svc.get_workspace_client()
+
+            assert result is mock_ws
+            assert svc._workspace_client is mock_ws
+            mock_cls.assert_called_once_with(
+                host="https://example.com",
+                client_id="spn-id",
+                client_secret="spn-secret",
+            )
+
+    @pytest.mark.asyncio
+    async def test_spn_oauth_is_cached(self):
+        """SPN workspace client should be cached on subsequent calls."""
+        svc = LakebaseConnectionService()
+        env = {
+            "DATABRICKS_CLIENT_ID": "spn-id",
+            "DATABRICKS_CLIENT_SECRET": "spn-secret",
+            "DATABRICKS_HOST": "https://example.com",
+        }
+        mock_ws = MagicMock()
+
+        with patch.dict("os.environ", env, clear=False), \
+             patch("src.services.lakebase_connection_service.WorkspaceClient", return_value=mock_ws) as mock_cls:
+            first = await svc.get_workspace_client()
+            second = await svc.get_workspace_client()
+
+            assert first is second
+            mock_cls.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("src.services.lakebase_connection_service.get_workspace_client")
+    async def test_falls_back_to_pat_when_spn_env_incomplete(self, mock_get_ws):
+        """Should fall back to PAT/OBO when SPN env vars are incomplete."""
+        mock_ws = MagicMock()
+        mock_get_ws.return_value = mock_ws
+        svc = LakebaseConnectionService(user_token="tok-abc")
+
+        # Only CLIENT_ID set, no SECRET — should fall back
+        with patch.dict("os.environ", {"DATABRICKS_CLIENT_ID": "id"}, clear=True):
+            result = await svc.get_workspace_client()
+
+            assert result is mock_ws
+            mock_get_ws.assert_awaited_once_with("tok-abc")
+
 
 # ---------------------------------------------------------------------------
 # Test class: get_spn_username

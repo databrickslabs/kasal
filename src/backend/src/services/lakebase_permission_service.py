@@ -19,22 +19,23 @@ logger = logging.getLogger(__name__)
 _SAFE_IDENTIFIER_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 
 
-def _quote_pg_role(email: str) -> str:
-    """Safely quote a PostgreSQL role name derived from an email address.
+def _quote_pg_role(identifier: str) -> str:
+    """Safely quote a PostgreSQL role name.
 
-    Validates the email against a strict pattern and escapes embedded
-    double-quotes so the result is safe for use as a quoted identifier
-    in GRANT / ALTER DEFAULT PRIVILEGES statements.
+    Accepts either an email address (local dev) or a UUID client_id
+    (SPN in deployed Databricks Apps). Escapes embedded double-quotes
+    so the result is safe for use as a quoted identifier in GRANT /
+    ALTER DEFAULT PRIVILEGES statements.
 
     Raises:
-        ValueError: If the email does not match the expected format.
+        ValueError: If the identifier does not match expected formats.
     """
-    if not email or not re.match(
-        r'^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$', email
-    ):
-        raise ValueError(f"Invalid email for PostgreSQL role: {email!r}")
-    # Escape any embedded double-quotes and wrap in double-quotes
-    return '"' + email.replace('"', '""') + '"'
+    _EMAIL_RE = re.compile(r'^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$')
+    _UUID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE)
+
+    if not identifier or not (_EMAIL_RE.match(identifier) or _UUID_RE.match(identifier)):
+        raise ValueError(f"Invalid PostgreSQL role identifier: {identifier!r}")
+    return '"' + identifier.replace('"', '""') + '"'
 
 
 class LakebasePermissionService(BaseService):
