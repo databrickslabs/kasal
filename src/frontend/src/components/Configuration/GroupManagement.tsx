@@ -422,7 +422,7 @@ const GroupManagement: React.FC = () => {
     );
   }
 
-  if (loading) {
+  if (loading && groups.length === 0) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 200 }}>
         <CircularProgress />
