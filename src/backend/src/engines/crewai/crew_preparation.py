@@ -583,8 +583,17 @@ class CrewPreparation:
                     context_tasks = []
 
                     for ref in context_refs:
-                        if ref in task_dict:
-                            context_tasks.append(task_dict[ref])
+                        # Try direct lookup first
+                        resolved_task = task_dict.get(ref)
+                        if not resolved_task:
+                            # Frontend sends refs with "task_" prefix (e.g. "task_<uuid>")
+                            # but task_dict keys are raw IDs from task_config['id'].
+                            # Strip the prefix and retry.
+                            stripped = ref.replace("task_", "", 1) if ref.startswith("task_") else None
+                            if stripped:
+                                resolved_task = task_dict.get(stripped)
+                        if resolved_task:
+                            context_tasks.append(resolved_task)
                         else:
                             logger.warning(f"Could not resolve context reference '{ref}' for task {task_id}")
 

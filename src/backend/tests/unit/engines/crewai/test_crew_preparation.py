@@ -441,6 +441,141 @@ class TestCrewPreparation:
             assert mock_task2.context == [mock_task1]
     
     @pytest.mark.asyncio
+    async def test_create_tasks_context_refs_with_task_prefix(self, crew_preparation):
+        """Test that context refs with 'task_' prefix resolve to raw-ID keys."""
+        crew_preparation.agents = {"researcher": MagicMock(), "writer": MagicMock()}
+
+        # Frontend sends context as ["task_<uuid>"] but task_dict keys are raw UUIDs
+        crew_preparation.config["tasks"] = [
+            {
+                "id": "abc-123",
+                "name": "research_task",
+                "description": "Research AI trends",
+                "agent": "researcher",
+                "expected_output": "Research report"
+            },
+            {
+                "id": "def-456",
+                "name": "write_task",
+                "description": "Write blog post",
+                "agent": "writer",
+                "expected_output": "Blog post",
+                "context": ["task_abc-123"]  # Frontend-style prefixed reference
+            }
+        ]
+
+        mock_task1 = MagicMock()
+        mock_task1.async_execution = False
+        mock_task2 = MagicMock()
+        mock_task2.async_execution = False
+        mock_task2.context = None
+
+        with patch('src.engines.crewai.helpers.task_helpers.create_task', side_effect=[mock_task1, mock_task2]):
+            result = await crew_preparation._create_tasks()
+
+            assert result is True
+            assert mock_task2.context == [mock_task1]
+
+    @pytest.mark.asyncio
+    async def test_create_tasks_context_refs_task_prefix_unresolvable(self, crew_preparation):
+        """Test that context refs with 'task_' prefix still warn when stripped ID is missing."""
+        crew_preparation.agents = {"researcher": MagicMock(), "writer": MagicMock()}
+
+        crew_preparation.config["tasks"] = [
+            {
+                "id": "abc-123",
+                "name": "research_task",
+                "description": "Research AI trends",
+                "agent": "researcher",
+                "expected_output": "Research report"
+            },
+            {
+                "id": "def-456",
+                "name": "write_task",
+                "description": "Write blog post",
+                "agent": "writer",
+                "expected_output": "Blog post",
+                "context": ["task_nonexistent-id"]  # task_ prefix but ID doesn't exist
+            }
+        ]
+
+        mock_task1 = MagicMock()
+        mock_task1.async_execution = False
+        mock_task2 = MagicMock()
+        mock_task2.async_execution = False
+
+        with patch('src.engines.crewai.helpers.task_helpers.create_task', side_effect=[mock_task1, mock_task2]), \
+             patch('src.engines.crewai.crew_preparation.logger') as mock_logger:
+
+            result = await crew_preparation._create_tasks()
+
+            assert result is True
+            # Per-ref warning for the unresolvable prefixed reference
+            mock_logger.warning.assert_any_call(
+                "Could not resolve context reference 'task_nonexistent-id' for task def-456"
+            )
+            # Overall warning since no context tasks could be resolved
+            mock_logger.warning.assert_any_call(
+                "No context tasks could be resolved for task def-456"
+            )
+
+    @pytest.mark.asyncio
+    async def test_create_tasks_context_refs_mixed_resolution(self, crew_preparation):
+        """Test mixed context refs: one resolves via prefix stripping, one fails."""
+        crew_preparation.agents = {
+            "researcher": MagicMock(),
+            "analyst": MagicMock(),
+            "writer": MagicMock(),
+        }
+
+        crew_preparation.config["tasks"] = [
+            {
+                "id": "aaa-111",
+                "name": "research_task",
+                "description": "Research",
+                "agent": "researcher",
+                "expected_output": "Report"
+            },
+            {
+                "id": "bbb-222",
+                "name": "analysis_task",
+                "description": "Analyze",
+                "agent": "analyst",
+                "expected_output": "Analysis"
+            },
+            {
+                "id": "ccc-333",
+                "name": "write_task",
+                "description": "Write",
+                "agent": "writer",
+                "expected_output": "Document",
+                # One valid prefixed ref, one invalid prefixed ref
+                "context": ["task_aaa-111", "task_does-not-exist"]
+            }
+        ]
+
+        mock_task1 = MagicMock()
+        mock_task1.async_execution = False
+        mock_task2 = MagicMock()
+        mock_task2.async_execution = False
+        mock_task3 = MagicMock()
+        mock_task3.async_execution = False
+        mock_task3.context = None
+
+        with patch('src.engines.crewai.helpers.task_helpers.create_task', side_effect=[mock_task1, mock_task2, mock_task3]), \
+             patch('src.engines.crewai.crew_preparation.logger') as mock_logger:
+
+            result = await crew_preparation._create_tasks()
+
+            assert result is True
+            # The valid ref resolves; context should contain only mock_task1
+            assert mock_task3.context == [mock_task1]
+            # Warning logged for the unresolvable ref
+            mock_logger.warning.assert_any_call(
+                "Could not resolve context reference 'task_does-not-exist' for task ccc-333"
+            )
+
+    @pytest.mark.asyncio
     async def test_create_tasks_unresolvable_context_references(self, crew_preparation):
         """Test task creation when context references can't be resolved."""
         crew_preparation.agents = {"researcher": MagicMock(), "writer": MagicMock()}
