@@ -17,6 +17,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # Load our target modules directly from file, bypassing the __init__.py chain.
+#
+# IMPORTANT: We install temporary stubs in sys.modules so the source files
+# can resolve their imports, then IMMEDIATELY clean up all stubs so we don't
+# pollute the import cache for other test modules.  The extracted Python
+# objects (_resolve_tool_override, TaskConfig, AgentConfig) survive because
+# they're held by reference — they don't need the stubs to stay in sys.modules.
 # ---------------------------------------------------------------------------
 _BACKEND_SRC = os.path.join(
     os.path.dirname(__file__), os.pardir, os.pardir, os.pardir,
@@ -25,71 +31,120 @@ _BACKEND_SRC = os.path.join(
 _BACKEND_SRC = os.path.normpath(_BACKEND_SRC)
 
 
-def _stub_module(name):
-    """Create a stub in sys.modules so imports from within the loaded module work."""
-    if name not in sys.modules:
-        mod = types.ModuleType(name)
-        mod.__path__ = []
-        sys.modules[name] = mod
-    return sys.modules[name]
+def _load_modules_isolated():
+    """Load task_config and agent_config in an isolated sys.modules context.
+
+    Returns (_resolve_tool_override, TaskConfig, AgentConfig).
+    """
+    stubs_needed = [
+        "src", "src.core", "src.core.logger",
+        "src.utils", "src.utils.user_context",
+        "src.engines", "src.engines.crewai",
+        "src.engines.crewai.tools", "src.engines.crewai.tools.tool_factory",
+        "src.engines.crewai.flow", "src.engines.crewai.flow.modules",
+        "src.engines.crewai.guardrails",
+        "src.engines.crewai.guardrails.guardrail_factory",
+        "src.engines.crewai.guardrails.guardrail_wrapper",
+        "src.db", "src.db.session",
+        "src.services", "src.services.api_keys_service",
+        "src.services.mcp_service",
+        "src.models", "src.models.agent",
+        "src.core.llm_manager",
+        "src.engines.crewai.tools.mcp_integration",
+        "crewai", "crewai.flow", "crewai.flow.flow",
+        "crewai.tasks", "crewai.tasks.llm_guardrail",
+    ]
+    loaded_modules = [
+        "src.engines.crewai.flow.modules.task_config",
+        "src.engines.crewai.flow.modules.agent_config",
+    ]
+
+    # 1. Snapshot existing entries
+    saved = {k: sys.modules[k] for k in stubs_needed + loaded_modules if k in sys.modules}
+
+    # 2. Install stubs (only for modules not already loaded)
+    added = []
+    for name in stubs_needed:
+        if name not in sys.modules:
+            mod = types.ModuleType(name)
+            mod.__path__ = []
+            sys.modules[name] = mod
+            added.append(name)
+
+    # 3. Wire up expected attributes on stubs.
+    #    IMPORTANT: For modules that already existed in sys.modules (i.e. the
+    #    real module was already imported by another test file), we save the
+    #    original attribute value so we can restore it later — otherwise we'd
+    #    permanently mutate the real module object.
+    _attr_backups = []  # list of (module_obj, attr_name, old_value_or_sentinel)
+    _SENTINEL = object()
+
+    def _set_attr(module_key, attr_name, value):
+        mod = sys.modules[module_key]
+        old = getattr(mod, attr_name, _SENTINEL)
+        _attr_backups.append((mod, attr_name, old))
+        setattr(mod, attr_name, value)
+
+    logger_mgr = MagicMock()
+    logger_mgr.get_instance.return_value = MagicMock(flow=MagicMock())
+    _set_attr("src.core.logger", "LoggerManager", logger_mgr)
+    _set_attr("src.utils.user_context", "GroupContext", type("GroupContext", (), {}))
+    _set_attr("crewai", "Task", MagicMock)
+    _set_attr("crewai", "Agent", MagicMock)
+    _set_attr("crewai", "LLM", MagicMock)
+    _set_attr("src.engines.crewai.tools.tool_factory", "ToolFactory", MagicMock)
+    _set_attr("src.db.session", "request_scoped_session", MagicMock)
+    _set_attr("src.services.api_keys_service", "ApiKeysService", MagicMock)
+
+    # 4. Load actual source files
+    def _load(module_name, filepath):
+        spec = importlib.util.spec_from_file_location(module_name, filepath)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = mod
+        spec.loader.exec_module(mod)
+        return mod
+
+    task_mod = _load(
+        "src.engines.crewai.flow.modules.task_config",
+        os.path.join(_BACKEND_SRC, "engines", "crewai", "flow", "modules", "task_config.py"),
+    )
+    agent_mod = _load(
+        "src.engines.crewai.flow.modules.agent_config",
+        os.path.join(_BACKEND_SRC, "engines", "crewai", "flow", "modules", "agent_config.py"),
+    )
+
+    # 5. Extract the symbols we need
+    resolve_fn = task_mod._resolve_tool_override
+    task_cls = task_mod.TaskConfig
+    agent_cls = agent_mod.AgentConfig
+
+    # 6. Restore mutated attributes on pre-existing (real) modules FIRST,
+    #    before touching sys.modules entries.
+    for mod_obj, attr_name, old_val in reversed(_attr_backups):
+        if old_val is _SENTINEL:
+            # Attribute didn't exist before — remove it
+            try:
+                delattr(mod_obj, attr_name)
+            except AttributeError:
+                pass
+        else:
+            setattr(mod_obj, attr_name, old_val)
+
+    # 7. Restore sys.modules — remove every stub we added
+    for name in added + loaded_modules:
+        if name in saved:
+            sys.modules[name] = saved[name]
+        else:
+            sys.modules.pop(name, None)
+
+    # Also restore any pre-existing modules we may have overwritten
+    for name, orig in saved.items():
+        sys.modules[name] = orig
+
+    return resolve_fn, task_cls, agent_cls
 
 
-def _load_from_file(module_name, filepath):
-    """Load a Python file as module_name and register it in sys.modules."""
-    spec = importlib.util.spec_from_file_location(module_name, filepath)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-# Ensure stubs for all imports that task_config.py and agent_config.py need
-_stubs_needed = [
-    "src", "src.core", "src.core.logger",
-    "src.utils", "src.utils.user_context",
-    "src.engines", "src.engines.crewai",
-    "src.engines.crewai.tools", "src.engines.crewai.tools.tool_factory",
-    "src.engines.crewai.flow", "src.engines.crewai.flow.modules",
-    "src.engines.crewai.guardrails",
-    "src.engines.crewai.guardrails.guardrail_factory",
-    "src.engines.crewai.guardrails.guardrail_wrapper",
-    "src.db", "src.db.session",
-    "src.services", "src.services.api_keys_service",
-    "src.services.mcp_service",
-    "src.models", "src.models.agent",
-    "src.core.llm_manager",
-    "src.engines.crewai.tools.mcp_integration",
-    "crewai", "crewai.flow", "crewai.flow.flow",
-    "crewai.tasks", "crewai.tasks.llm_guardrail",
-]
-for _s in _stubs_needed:
-    _stub_module(_s)
-
-# Wire up expected attributes
-_logger_mgr = MagicMock()
-_logger_mgr.get_instance.return_value = MagicMock(flow=MagicMock())
-sys.modules["src.core.logger"].LoggerManager = _logger_mgr
-sys.modules["src.utils.user_context"].GroupContext = type("GroupContext", (), {})
-sys.modules["crewai"].Task = MagicMock
-sys.modules["crewai"].Agent = MagicMock
-sys.modules["crewai"].LLM = MagicMock
-sys.modules["src.engines.crewai.tools.tool_factory"].ToolFactory = MagicMock
-sys.modules["src.db.session"].request_scoped_session = MagicMock
-sys.modules["src.services.api_keys_service"].ApiKeysService = MagicMock
-
-# Load the actual source files
-_task_config_mod = _load_from_file(
-    "src.engines.crewai.flow.modules.task_config",
-    os.path.join(_BACKEND_SRC, "engines", "crewai", "flow", "modules", "task_config.py"),
-)
-_agent_config_mod = _load_from_file(
-    "src.engines.crewai.flow.modules.agent_config",
-    os.path.join(_BACKEND_SRC, "engines", "crewai", "flow", "modules", "agent_config.py"),
-)
-
-_resolve_tool_override = _task_config_mod._resolve_tool_override
-TaskConfig = _task_config_mod.TaskConfig
-AgentConfig = _agent_config_mod.AgentConfig
+_resolve_tool_override, TaskConfig, AgentConfig = _load_modules_isolated()
 
 
 # ---------------------------------------------------------------------------
