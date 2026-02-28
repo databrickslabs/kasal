@@ -61,18 +61,6 @@ class GenieRepository:
         transport = httpx.AsyncHTTPTransport(retries=3)
         self._client = httpx.AsyncClient(transport=transport, timeout=30.0)
     
-    @property
-    def base_url(self) -> str:
-        """Get the base URL for Genie API."""
-        if not self.auth_config or not self.auth_config.host:
-            return ""
-        host = self.auth_config.host
-        if host.startswith('https://'):
-            host = host[8:]
-        if host.endswith('/'):
-            host = host[:-1]
-        return f"https://{host}/api/2.0/genie"
-    
     def _build_headers(self) -> Dict[str, str]:
         """Build authentication headers."""
         headers = {"Content-Type": "application/json"}
@@ -95,7 +83,12 @@ class GenieRepository:
         
         # Check from config
         if self.auth_config.host:
-            self._host = self.auth_config.host
+            host = self.auth_config.host
+            if host.startswith('https://'):
+                host = host[8:]
+            if host.endswith('/'):
+                host = host[:-1]
+            self._host = host
             logger.info(f"Using host from config: {self._host}")
             return self._host
         
@@ -207,16 +200,15 @@ class GenieRepository:
             current_token = page_token
             has_more = True
             total_fetched = 0
-            max_pages_for_search = 5  # Limit pages fetched for search
             pages_fetched = 0
-            
-            # Only fetch all if explicitly requested, not for search
-            should_fetch_all = fetch_all
-            # For search, fetch limited pages to avoid timeout
-            should_fetch_limited = search_query or space_ids
-            
+
+            # Determine fetching strategy:
+            # - fetch_all: fetch every page (used when search/filter needs full dataset)
+            # - default: fetch one page and return next_page_token for client-side pagination
+            should_fetch_all = fetch_all or bool(search_query) or bool(space_ids)
+
             if search_query:
-                logger.info(f"Searching for spaces with query: '{search_query}' (will fetch up to {max_pages_for_search} pages)")
+                logger.info(f"Searching for spaces with query: '{search_query}' (fetching all pages for client-side filtering)")
             
             while has_more:
                 # Build URL with pagination parameters
@@ -274,13 +266,10 @@ class GenieRepository:
                 
                 # Check if we should continue fetching
                 if should_fetch_all:
-                    # Fetch all pages if explicitly requested
+                    # Fetch all pages for search/filter (client-side filtering needs full dataset)
                     has_more = bool(next_token)
-                elif should_fetch_limited:
-                    # For search, limit pages to avoid timeout
-                    has_more = bool(next_token) and pages_fetched < max_pages_for_search
                 else:
-                    # Normal pagination - just return first page
+                    # Normal pagination - return one page, let client paginate via next_page_token
                     has_more = False
                 
                 current_token = next_token
@@ -321,13 +310,10 @@ class GenieRepository:
             
             # Determine what token to return
             if should_fetch_all:
-                # If we fetched all, no more pages
+                # If we fetched all pages, no more to paginate
                 return_token = None
-            elif should_fetch_limited and pages_fetched >= max_pages_for_search:
-                # If we hit the limit for search, indicate there might be more
-                return_token = current_token
             else:
-                # Normal pagination
+                # Normal pagination - pass through the next_page_token
                 return_token = current_token if current_token else None
             
             logger.info(f"Found {len(filtered_spaces)} Genie spaces{' (filtered)' if filtered else ''}, total fetched: {total_fetched}")
