@@ -24,6 +24,25 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { renderWithLinks, MessageContent } from './MessageRenderer';
 
+// Mock CodeBlock so fenced code block tests can inspect rendered output
+vi.mock('./CodeBlock', () => ({
+  CodeBlock: ({ language, code }: { language: string; code: string }) => (
+    <pre
+      data-testid="code-block"
+      data-language={language}
+      style={{
+        padding: '12px',
+        maxHeight: '400px',
+        overflow: 'auto',
+        fontFamily: 'monospace',
+        fontSize: '0.875em',
+      }}
+    >
+      <code className={language ? `language-${language}` : ''}>{code}</code>
+    </pre>
+  ),
+}));
+
 // Helper: wraps inline code content with a bold marker so isMarkdown() returns true
 // and the content flows through ReactMarkdown with custom renderers.
 const md = (text: string) => `**Note:** ${text}`;
@@ -429,38 +448,46 @@ describe('MessageRenderer', () => {
         const event = chatCommandHandler.mock.calls[0][0] as CustomEvent;
         expect(event.detail.command).toBe('/execute job-123');
       });
+
+      it('shows short label for /load crew commands', () => {
+        const { container } = render(
+          <MessageContent content={md('Try `/load crew My Research Crew`')} />
+        );
+        const commandCode = container.querySelector('code[role="button"]');
+        expect(commandCode).not.toBeNull();
+        // Display text should be just "load", not the full command
+        expect(commandCode!.textContent).toBe('load');
+        // Title should have the full command
+        expect(commandCode!.getAttribute('title')).toBe('/load crew My Research Crew');
+      });
+
+      it('shows short label for /run flow commands', () => {
+        const { container } = render(
+          <MessageContent content={md('Try `/run flow Data Pipeline`')} />
+        );
+        const commandCode = container.querySelector('code[role="button"]');
+        expect(commandCode).not.toBeNull();
+        expect(commandCode!.textContent).toBe('run');
+        expect(commandCode!.getAttribute('title')).toBe('/run flow Data Pipeline');
+      });
     });
 
     // ── fenced code blocks ────────────────────────────────────────
 
     describe('fenced code block rendering', () => {
-      it('renders fenced code blocks inside <pre> with correct styling', () => {
+      it('renders fenced code blocks via CodeBlock component', () => {
         const content = '```javascript\nconst x = 1;\n```';
         const { container } = render(<MessageContent content={content} />);
 
-        // The custom code renderer returns a <pre> that wraps the <code>.
-        // ReactMarkdown may also wrap it in its own <pre>.
-        // Find the styled <pre> by looking for the one with our custom styles.
-        const allPre = container.querySelectorAll('pre');
-        expect(allPre.length).toBeGreaterThanOrEqual(1);
+        // CodeBlock is now used for fenced code blocks (mocked above).
+        const codeBlock = container.querySelector('[data-testid="code-block"]');
+        expect(codeBlock).not.toBeNull();
+        expect(codeBlock!.getAttribute('data-language')).toBe('javascript');
 
-        // Find the <pre> that has our custom background color
-        const styledPre = Array.from(allPre).find(
-          (el) => el.style.padding === '12px'
-        );
-        expect(styledPre).not.toBeNull();
-        expect(styledPre!.style.backgroundColor).toBe('rgba(0, 0, 0, 0.05)');
-        expect(styledPre!.style.borderRadius).toBe('8px');
-        expect(styledPre!.style.overflow).toBe('auto');
-        expect(styledPre!.style.fontFamily).toBe('monospace');
-        expect(styledPre!.style.fontSize).toBe('0.875em');
-        expect(styledPre!.style.maxHeight).toBe('400px');
-        expect(styledPre!.style.maxWidth).toBe('100%');
-        expect(styledPre!.style.margin).toBe('8px 0px');
-
-        const code = styledPre!.querySelector('code');
+        const code = codeBlock!.querySelector('code');
         expect(code).not.toBeNull();
         expect(code!.className).toContain('language-javascript');
+        expect(code!.textContent).toContain('const x = 1;');
       });
 
       it('renders code blocks without a language specifier', () => {

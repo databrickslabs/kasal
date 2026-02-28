@@ -21,7 +21,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { ChatMessage } from '../types';
 import { MessageContent } from './MessageRenderer';
-import { stripAnsiEscapes, isMarkdown } from '../utils/textProcessing';
+import { stripAnsiEscapes, isMarkdown, isHtmlDocument } from '../utils/textProcessing';
 import { GenieSpaceConfigPrompt } from '../GenieSpaceConfigPrompt';
 import type { ToolConfigNeededData } from '../../../hooks/global/useCrewGenerationSSE';
 
@@ -420,6 +420,11 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
       }
     }
     
+    // Wrap raw HTML documents in a code fence so they get syntax highlighting + Preview button
+    if (isHtmlDocument(processedContent)) {
+      return <MessageContent content={'```html\n' + processedContent + '\n```'} />;
+    }
+
     // Default content rendering
     return <MessageContent content={processedContent} />;
   };
@@ -427,7 +432,7 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
 
   return (
     <Fade in={true} timeout={300}>
-      <ListItem 
+      <ListItem
         alignItems="flex-start"
         sx={{
           flexDirection: 'row', // Always left-aligned
