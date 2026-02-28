@@ -210,4 +210,76 @@ describe('MCPConfiguration', () => {
       expect(screen.queryByText(/enable model mapping/i)).not.toBeInTheDocument();
     });
   });
+
+  // =========================================================================
+  // Loading / error / empty states
+  // =========================================================================
+
+  describe('loading and error states', () => {
+    it('shows loading spinner while fetching servers', async () => {
+      // Make getMcpServers hang so we can observe the loading state
+      let resolveFetch!: (value: unknown) => void;
+      mockMCPService.getMcpServers.mockReturnValue(
+        new Promise(resolve => { resolveFetch = resolve; })
+      );
+
+      await act(async () => {
+        render(<MCPConfiguration />);
+      });
+
+      // Both the header spinner (20px) and the list area spinner (28px) should be present
+      const spinners = screen.getAllByRole('progressbar');
+      expect(spinners.length).toBeGreaterThanOrEqual(1);
+      // The "No MCP servers" message should NOT appear during loading
+      expect(screen.queryByText('No MCP servers configured yet.')).not.toBeInTheDocument();
+
+      // Resolve the fetch to clean up
+      await act(async () => {
+        resolveFetch({ servers: [] });
+      });
+    });
+
+    it('shows error alert when server fetch fails', async () => {
+      mockMCPService.getMcpServers.mockRejectedValue(new Error('Network error'));
+
+      await act(async () => {
+        render(<MCPConfiguration />);
+      });
+
+      await waitFor(() => {
+        // Error appears in both the inline alert and the snackbar notification
+        const errorMessages = screen.getAllByText('Network error');
+        expect(errorMessages.length).toBeGreaterThanOrEqual(1);
+      });
+
+      // The "No MCP servers" message should NOT appear on error
+      expect(screen.queryByText('No MCP servers configured yet.')).not.toBeInTheDocument();
+    });
+
+    it('shows error alert with fallback message for non-Error throws', async () => {
+      mockMCPService.getMcpServers.mockRejectedValue('something broke');
+
+      await act(async () => {
+        render(<MCPConfiguration />);
+      });
+
+      await waitFor(() => {
+        const errorMessages = screen.getAllByText('Failed to load MCP servers');
+        expect(errorMessages.length).toBeGreaterThanOrEqual(1);
+      });
+    });
+
+    it('shows empty message only after successful load returns no servers', async () => {
+      mockMCPService.getGlobalSettings.mockResolvedValue({ global_enabled: false });
+      mockMCPService.getMcpServers.mockResolvedValue({ servers: [] });
+
+      await act(async () => {
+        render(<MCPConfiguration />);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText('No MCP servers configured yet.')).toBeInTheDocument();
+      });
+    });
+  });
 });
