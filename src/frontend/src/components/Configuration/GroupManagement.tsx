@@ -32,6 +32,7 @@ import {
   Fab,
   Zoom,
   LinearProgress,
+  CircularProgress,
   Menu,
   MenuList,
   DialogContentText,
@@ -72,7 +73,7 @@ const GroupManagement: React.FC = () => {
   const [assignUserDialogOpen, setAssignUserDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [groupToDelete, setGroupToDelete] = useState<Group | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [_viewMode, _setViewMode] = useState<'groups' | 'users'>('groups');
   const [menuAnchorEl, setMenuAnchorEl] = useState<null | HTMLElement>(null);
@@ -409,6 +410,17 @@ const GroupManagement: React.FC = () => {
       <Box sx={{ p: 3, textAlign: 'center' }}>
         <LinearProgress sx={{ mb: 2 }} />
         <Typography color="text.secondary">Checking permissions...</Typography>
+      </Box>
+    );
+  }
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 200 }}>
+        <CircularProgress />
+        <Typography variant="body2" sx={{ ml: 2 }}>
+          Loading workspace management...
+        </Typography>
       </Box>
     );
   }

@@ -289,7 +289,14 @@ function ObjectManagement(): JSX.Element {
   };
 
   if (loading && schemas.length === 0) {
-    return <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}><CircularProgress /></Box>;
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 200 }}>
+        <CircularProgress />
+        <Typography variant="body2" sx={{ ml: 2 }}>
+          Loading schemas...
+        </Typography>
+      </Box>
+    );
   }
 
   return (

@@ -109,7 +109,7 @@ export const useDatabaseStore = create<DatabaseStore>((set) => ({
   schemaExists: false,
   showMigrationDialog: false,
   migrationOption: 'recreate',
-  loading: false,
+  loading: true,
   checkingInstance: false,
   creatingInstance: false,
   expandedSections: {

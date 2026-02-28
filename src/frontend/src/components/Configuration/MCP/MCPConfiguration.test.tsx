@@ -77,7 +77,7 @@ describe('MCPConfiguration', () => {
     // Check basic elements
     expect(screen.getByText('MCP Server Configuration')).toBeInTheDocument();
     expect(screen.getByText('Enable MCP Servers')).toBeInTheDocument();
-    
+
     // Wait for data to load
     await waitFor(() => {
       expect(screen.getByRole('checkbox', { name: /enable mcp servers/i })).toBeChecked();
@@ -112,7 +112,7 @@ describe('MCPConfiguration', () => {
 
     // Wait for the Add button to appear
     const addButton = await screen.findByText('Add Server');
-    
+
     await act(async () => {
       fireEvent.click(addButton);
     });
@@ -216,7 +216,7 @@ describe('MCPConfiguration', () => {
   // =========================================================================
 
   describe('loading and error states', () => {
-    it('shows loading spinner while fetching servers', async () => {
+    it('shows full-page loading message while fetching servers', async () => {
       // Make getMcpServers hang so we can observe the loading state
       let resolveFetch!: (value: unknown) => void;
       mockMCPService.getMcpServers.mockReturnValue(
@@ -227,10 +227,13 @@ describe('MCPConfiguration', () => {
         render(<MCPConfiguration />);
       });
 
-      // Both the header spinner (20px) and the list area spinner (28px) should be present
-      const spinners = screen.getAllByRole('progressbar');
-      expect(spinners.length).toBeGreaterThanOrEqual(1);
-      // The "No MCP servers" message should NOT appear during loading
+      // Full-page loading message should be visible
+      expect(screen.getByText('Loading MCP configuration...')).toBeInTheDocument();
+      expect(screen.getByRole('progressbar')).toBeInTheDocument();
+
+      // The page content should NOT appear during loading
+      expect(screen.queryByText('MCP Server Configuration')).not.toBeInTheDocument();
+      expect(screen.queryByText('Enable MCP Servers')).not.toBeInTheDocument();
       expect(screen.queryByText('No MCP servers configured yet.')).not.toBeInTheDocument();
 
       // Resolve the fetch to clean up
@@ -239,7 +242,7 @@ describe('MCPConfiguration', () => {
       });
     });
 
-    it('shows error alert when server fetch fails', async () => {
+    it('shows full-page error with retry button when server fetch fails', async () => {
       mockMCPService.getMcpServers.mockRejectedValue(new Error('Network error'));
 
       await act(async () => {
@@ -247,16 +250,18 @@ describe('MCPConfiguration', () => {
       });
 
       await waitFor(() => {
-        // Error appears in both the inline alert and the snackbar notification
-        const errorMessages = screen.getAllByText('Network error');
-        expect(errorMessages.length).toBeGreaterThanOrEqual(1);
+        expect(screen.getByText('Network error')).toBeInTheDocument();
       });
 
-      // The "No MCP servers" message should NOT appear on error
+      // Should show a Retry button
+      expect(screen.getByText('Retry')).toBeInTheDocument();
+
+      // The page content should NOT appear on error
+      expect(screen.queryByText('MCP Server Configuration')).not.toBeInTheDocument();
       expect(screen.queryByText('No MCP servers configured yet.')).not.toBeInTheDocument();
     });
 
-    it('shows error alert with fallback message for non-Error throws', async () => {
+    it('shows error with fallback message for non-Error throws', async () => {
       mockMCPService.getMcpServers.mockRejectedValue('something broke');
 
       await act(async () => {
@@ -264,8 +269,34 @@ describe('MCPConfiguration', () => {
       });
 
       await waitFor(() => {
-        const errorMessages = screen.getAllByText('Failed to load MCP servers');
-        expect(errorMessages.length).toBeGreaterThanOrEqual(1);
+        expect(screen.getByText('Failed to load MCP servers')).toBeInTheDocument();
+      });
+    });
+
+    it('retries loading when Retry button is clicked', async () => {
+      // First call fails
+      mockMCPService.getMcpServers.mockRejectedValueOnce(new Error('Network error'));
+
+      await act(async () => {
+        render(<MCPConfiguration />);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText('Network error')).toBeInTheDocument();
+      });
+
+      // Set up success for retry
+      mockMCPService.getMcpServers.mockResolvedValue({ servers: mockServers });
+
+      // Click Retry
+      await act(async () => {
+        fireEvent.click(screen.getByText('Retry'));
+      });
+
+      // Should now show the config page
+      await waitFor(() => {
+        expect(screen.getByText('MCP Server Configuration')).toBeInTheDocument();
+        expect(screen.getByText('Test Server 1')).toBeInTheDocument();
       });
     });
 

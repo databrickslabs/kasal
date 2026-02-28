@@ -764,6 +764,17 @@ const DatabaseManagement: React.FC = () => {
     }
   };
 
+  if (loading && !databaseInfo) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 200 }}>
+        <CircularProgress />
+        <Typography variant="body2" sx={{ ml: 2 }}>
+          Loading database management...
+        </Typography>
+      </Box>
+    );
+  }
+
   return (
     <Box>
       <Typography variant="h6" sx={{ mb: 3 }}>
