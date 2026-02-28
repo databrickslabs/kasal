@@ -559,6 +559,192 @@ class TestConvertRowTypesExtended:
         assert result["name"] is None
 
 
-# TODO: Add more comprehensive tests
-# TODO: Test edge cases and error handling
-# TODO: Achieve 80%+ code coverage
+class TestResetSequencesSync:
+    """Tests for reset_sequences_sync - resetting PG sequences after data migration."""
+
+    @pytest.fixture
+    def service(self):
+        return LakebaseMigrationService()
+
+    def _make_engine(self, sequences, max_ids=None):
+        """Build a mock engine that returns given sequences and max IDs.
+
+        Args:
+            sequences: List of sequence name tuples, e.g. [("executionhistory_id_seq",)]
+            max_ids: Dict mapping table_name -> max_id. Defaults to 10 for all.
+        """
+        if max_ids is None:
+            max_ids = {}
+
+        mock_conn = MagicMock()
+
+        def execute_side_effect(stmt):
+            sql = stmt.text if hasattr(stmt, 'text') else str(stmt)
+            if "pg_sequences" in sql:
+                result = MagicMock()
+                result.fetchall.return_value = sequences
+                return result
+            elif "COALESCE(MAX(id)" in sql:
+                result = MagicMock()
+                # Extract table name from SQL to return correct max_id
+                for table_name, max_id in max_ids.items():
+                    if table_name in sql:
+                        result.scalar.return_value = max_id
+                        return result
+                result.scalar.return_value = 10
+                return result
+            elif "setval" in sql:
+                return MagicMock()
+            return MagicMock()
+
+        mock_conn.execute = MagicMock(side_effect=execute_side_effect)
+        mock_conn.commit = MagicMock()
+        mock_conn.rollback = MagicMock()
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+
+        engine = MagicMock()
+        engine.connect.return_value = mock_conn
+        return engine, mock_conn
+
+    def test_resets_sequence_to_max_id(self, service):
+        """Sequences should be reset to MAX(id) of their table."""
+        engine, mock_conn = self._make_engine(
+            sequences=[("executionhistory_id_seq",)],
+            max_ids={"executionhistory": 42}
+        )
+
+        results = service.reset_sequences_sync(engine, ["executionhistory"])
+
+        assert len(results) == 1
+        assert results[0][0] == "executionhistory_id_seq"
+        assert results[0][1] is True
+        assert results[0][2] is None
+
+    def test_empty_table_resets_to_one(self, service):
+        """Empty tables should have sequence reset to 1 with is_called=false."""
+        engine, mock_conn = self._make_engine(
+            sequences=[("users_id_seq",)],
+            max_ids={"users": 0}
+        )
+
+        results = service.reset_sequences_sync(engine, ["users"])
+
+        assert len(results) == 1
+        assert results[0][1] is True
+
+    def test_no_sequences_returns_empty(self, service):
+        """If no sequences exist, return empty list."""
+        engine, _ = self._make_engine(sequences=[])
+
+        results = service.reset_sequences_sync(engine, ["some_table"])
+
+        assert results == []
+
+    def test_multiple_sequences_all_reset(self, service):
+        """Multiple sequences should all be reset."""
+        engine, _ = self._make_engine(
+            sequences=[
+                ("executionhistory_id_seq",),
+                ("agents_id_seq",),
+                ("tasks_id_seq",),
+            ],
+            max_ids={"executionhistory": 100, "agents": 50, "tasks": 25}
+        )
+
+        results = service.reset_sequences_sync(engine, ["executionhistory", "agents", "tasks"])
+
+        assert len(results) == 3
+        assert all(ok for _, ok, _ in results)
+
+    def test_sequence_error_does_not_stop_others(self, service):
+        """If one sequence reset fails, others should still proceed."""
+        mock_conn = MagicMock()
+        call_count = [0]
+
+        def execute_side_effect(stmt):
+            sql = stmt.text if hasattr(stmt, 'text') else str(stmt)
+            if "pg_sequences" in sql:
+                result = MagicMock()
+                result.fetchall.return_value = [
+                    ("good_table_id_seq",),
+                    ("bad_table_id_seq",),
+                ]
+                return result
+            elif "COALESCE(MAX(id)" in sql:
+                call_count[0] += 1
+                if call_count[0] == 2:
+                    raise Exception("table does not exist")
+                result = MagicMock()
+                result.scalar.return_value = 5
+                return result
+            elif "setval" in sql:
+                return MagicMock()
+            return MagicMock()
+
+        mock_conn.execute = MagicMock(side_effect=execute_side_effect)
+        mock_conn.commit = MagicMock()
+        mock_conn.rollback = MagicMock()
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+
+        engine = MagicMock()
+        engine.connect.return_value = mock_conn
+
+        results = service.reset_sequences_sync(engine, [])
+
+        assert len(results) == 2
+        # First succeeds, second fails
+        assert results[0][1] is True
+        assert results[1][1] is False
+
+    def test_short_sequence_name_uses_first_part(self, service):
+        """Sequence names with fewer than 3 underscore parts use parts[0] as table."""
+        engine, mock_conn = self._make_engine(
+            sequences=[("id_seq",)],
+            max_ids={"id": 5}
+        )
+
+        results = service.reset_sequences_sync(engine, [])
+
+        assert len(results) == 1
+        assert results[0][1] is True
+
+    def test_rollback_failure_is_swallowed(self, service):
+        """If rollback itself fails after a sequence error, it should be swallowed."""
+        mock_conn = MagicMock()
+        call_count = [0]
+
+        def execute_side_effect(stmt):
+            sql = stmt.text if hasattr(stmt, 'text') else str(stmt)
+            if "pg_sequences" in sql:
+                result = MagicMock()
+                result.fetchall.return_value = [("bad_table_id_seq",)]
+                return result
+            elif "COALESCE(MAX(id)" in sql:
+                raise Exception("table does not exist")
+            return MagicMock()
+
+        mock_conn.execute = MagicMock(side_effect=execute_side_effect)
+        mock_conn.commit = MagicMock()
+        mock_conn.rollback = MagicMock(side_effect=Exception("rollback failed too"))
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+
+        engine = MagicMock()
+        engine.connect.return_value = mock_conn
+
+        results = service.reset_sequences_sync(engine, [])
+
+        assert len(results) == 1
+        assert results[0][1] is False
+        assert "table does not exist" in results[0][2]
+
+    def test_engine_connection_error_returns_empty(self, service):
+        """If engine.connect() fails, return empty results gracefully."""
+        engine = MagicMock()
+        engine.connect.side_effect = Exception("connection refused")
+
+        results = service.reset_sequences_sync(engine, [])
+
+        assert results == []

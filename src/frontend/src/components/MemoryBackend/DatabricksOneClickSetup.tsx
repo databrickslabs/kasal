@@ -42,6 +42,7 @@ import {
   Refresh as RefreshIcon,
   Visibility as VisibilityIcon,
   AccountTree as AccountTreeIcon,
+  Save as SaveIcon,
 } from '@mui/icons-material';
 import { AxiosError } from 'axios';
 import { apiClient } from '../../config/api/ApiConfig';
@@ -440,6 +441,28 @@ export const DatabricksOneClickSetup: React.FC = () => {
       setLakebaseConfig(prev => ({ ...prev, tables_initialized: allExist }));
     } catch {
       setLakebaseTableStats(null);
+    }
+  };
+
+  const handleSaveLakebaseConfig = async () => {
+    try {
+      const saveResult = await apiClient.post('/memory-backend/lakebase/save-config', {
+        lakebase_config: lakebaseConfig,
+      });
+      setSavedConfig({ backend_id: saveResult.data.backend_id });
+      updateConfig({
+        backend_type: MemoryBackendType.LAKEBASE,
+        lakebase_config: lakebaseConfig,
+        enable_short_term: true,
+        enable_long_term: true,
+        enable_entity: true,
+      });
+      setLakebaseStatus({ success: true, message: 'Configuration saved successfully' });
+    } catch (error) {
+      setLakebaseStatus({
+        success: false,
+        message: `Failed to save configuration: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      });
     }
   };
 
@@ -1778,6 +1801,15 @@ export const DatabricksOneClickSetup: React.FC = () => {
                 sx={{ py: 1 }}
               >
                 {lakebaseConfig.tables_initialized ? 'Re-initialize Tables' : 'Initialize Tables'}
+              </Button>
+              <Button
+                variant="outlined"
+                startIcon={<SaveIcon />}
+                disabled={!lakebaseConfig.instance_name}
+                onClick={handleSaveLakebaseConfig}
+                sx={{ py: 1 }}
+              >
+                Save Configuration
               </Button>
               <Button
                 variant="text"

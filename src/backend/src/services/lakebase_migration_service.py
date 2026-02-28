@@ -710,3 +710,78 @@ class LakebaseMigrationService(BaseService):
             error_msg = f"{type(e).__name__}: {str(e)}"
             logger.error(f"❌ Error migrating table {table_name} [{elapsed:.2f}s]: {error_msg}")
             return 0, error_msg
+
+    def reset_sequences_sync(
+        self, lakebase_engine: Engine, migrated_tables: List[str]
+    ) -> List[Tuple[str, bool, Optional[str]]]:
+        """Reset PostgreSQL sequences after data migration.
+
+        After bulk-inserting rows with explicit IDs from SQLite, PostgreSQL
+        sequences are out of sync (they still start at 1). This resets each
+        sequence to MAX(id) so new inserts get the correct next value.
+
+        Args:
+            lakebase_engine: Sync engine connected to Lakebase.
+            migrated_tables: List of table names that were migrated.
+
+        Returns:
+            List of (table_name, success, error_or_None) tuples.
+        """
+        results: List[Tuple[str, bool, Optional[str]]] = []
+        try:
+            with lakebase_engine.connect() as conn:
+                conn.execute(text("SET search_path TO kasal"))
+                conn.commit()
+
+                # Find all sequences owned by columns in the kasal schema
+                seq_rows = conn.execute(text(
+                    "SELECT sequencename FROM pg_sequences "
+                    "WHERE schemaname = 'kasal'"
+                )).fetchall()
+
+                if not seq_rows:
+                    logger.info("No sequences found in kasal schema — nothing to reset")
+                    return results
+
+                for (seq_name,) in seq_rows:
+                    try:
+                        # Extract table name from sequence name (e.g. executionhistory_id_seq -> executionhistory)
+                        # PostgreSQL naming convention: {table}_{column}_seq
+                        parts = seq_name.rsplit("_", 2)
+                        if len(parts) >= 3:
+                            table_name = "_".join(parts[:-2])
+                        else:
+                            table_name = parts[0]
+
+                        safe_seq = _validate_identifier(seq_name, "sequence")
+                        safe_table = _validate_identifier(table_name, "table")
+
+                        # Get max id; if table is empty setval to 1 with is_called=false
+                        row = conn.execute(
+                            text(f'SELECT COALESCE(MAX(id), 0) FROM "{safe_table}"')
+                        ).scalar()
+
+                        if row and row > 0:
+                            conn.execute(
+                                text(f"SELECT setval('\"kasal\".\"{safe_seq}\"', {int(row)})")
+                            )
+                            logger.info(f"  ✓ Reset sequence {seq_name} to {row}")
+                        else:
+                            conn.execute(
+                                text(f"SELECT setval('\"kasal\".\"{safe_seq}\"', 1, false)")
+                            )
+                            logger.info(f"  ✓ Reset sequence {seq_name} to 1 (empty table)")
+                        conn.commit()
+                        results.append((seq_name, True, None))
+                    except Exception as e:
+                        logger.warning(f"  ⚠ Could not reset sequence {seq_name}: {e}")
+                        results.append((seq_name, False, str(e)))
+                        try:
+                            conn.rollback()
+                        except Exception:
+                            pass
+
+        except Exception as e:
+            logger.error(f"Error resetting sequences: {e}")
+
+        return results

@@ -175,6 +175,9 @@ describe('DatabricksOneClickSetup', () => {
       if (url === '/memory-backend/configs') {
         return Promise.resolve({ data: [] });
       }
+      if (url === '/database-management/lakebase/instances') {
+        return Promise.resolve({ data: [] });
+      }
       return Promise.resolve({ data: {} });
     });
   });
@@ -710,6 +713,174 @@ describe('DatabricksOneClickSetup', () => {
         expect(manualForm).toHaveAttribute('data-embedding-model', 'databricks-gte-large-en');
         expect(manualForm).not.toHaveAttribute('data-embedding-model', 'databricks-bge-large-en');
       });
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Lakebase Save Configuration button
+  // -----------------------------------------------------------------------
+  describe('Lakebase Save Configuration', () => {
+    const switchToLakebaseMode = async () => {
+      await act(async () => {
+        renderComponent();
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByText('Loading memory configuration...')).not.toBeInTheDocument();
+      });
+
+      const lakebaseRadio = screen.getByLabelText(/Lakebase/i);
+      await act(async () => {
+        fireEvent.click(lakebaseRadio);
+      });
+    };
+
+    it('renders Save Configuration button when Lakebase mode is active', async () => {
+      await switchToLakebaseMode();
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /Save Configuration/i })).toBeInTheDocument();
+      });
+    });
+
+    it('Save Configuration button is disabled when no instance is selected', async () => {
+      await switchToLakebaseMode();
+
+      await waitFor(() => {
+        const saveBtn = screen.getByRole('button', { name: /Save Configuration/i });
+        expect(saveBtn).toBeDisabled();
+      });
+    });
+
+    it('calls /memory-backend/lakebase/save-config when Save Configuration is clicked', async () => {
+      // Return a saved Lakebase config so the component loads in lakebase mode
+      // with an instance already selected
+      mockApiClient.get.mockImplementation((url: string) => {
+        if (url === '/memory-backend/configs/default') {
+          return Promise.resolve({
+            data: {
+              id: 'lb-existing',
+              backend_type: MemoryBackendType.LAKEBASE,
+              lakebase_config: {
+                instance_name: 'my-instance',
+                embedding_dimension: 1024,
+                tables_initialized: false,
+              },
+            },
+          });
+        }
+        if (url === '/databricks/environment') {
+          return Promise.resolve({ data: { databricks_host: 'https://test.databricks.com' } });
+        }
+        if (url === '/database-management/lakebase/instances') {
+          return Promise.resolve({
+            data: [{ name: 'my-instance', state: 'ACTIVE' }],
+          });
+        }
+        return Promise.resolve({ data: {} });
+      });
+
+      mockApiClient.post.mockResolvedValue({ data: { backend_id: 'lb-123' } });
+
+      await act(async () => {
+        renderComponent();
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByText('Loading memory configuration...')).not.toBeInTheDocument();
+      });
+
+      // The Save Configuration button should be enabled since instance is selected
+      const saveBtn = await waitFor(() => {
+        const btn = screen.getByRole('button', { name: /Save Configuration/i });
+        expect(btn).not.toBeDisabled();
+        return btn;
+      });
+
+      // Click Save Configuration
+      await act(async () => {
+        fireEvent.click(saveBtn);
+      });
+
+      await waitFor(() => {
+        expect(mockApiClient.post).toHaveBeenCalledWith(
+          '/memory-backend/lakebase/save-config',
+          expect.objectContaining({
+            lakebase_config: expect.objectContaining({
+              instance_name: 'my-instance',
+            }),
+          }),
+        );
+      });
+
+      // Verify updateConfig was called with Lakebase type
+      await waitFor(() => {
+        expect(mockUpdateConfig).toHaveBeenCalledWith(
+          expect.objectContaining({
+            backend_type: MemoryBackendType.LAKEBASE,
+            enable_short_term: true,
+            enable_long_term: true,
+            enable_entity: true,
+          }),
+        );
+      });
+    });
+
+    it('shows error status when save-config call fails', async () => {
+      // Return a saved Lakebase config with instance already selected
+      mockApiClient.get.mockImplementation((url: string) => {
+        if (url === '/memory-backend/configs/default') {
+          return Promise.resolve({
+            data: {
+              id: 'lb-existing',
+              backend_type: MemoryBackendType.LAKEBASE,
+              lakebase_config: {
+                instance_name: 'my-instance',
+                embedding_dimension: 1024,
+                tables_initialized: false,
+              },
+            },
+          });
+        }
+        if (url === '/databricks/environment') {
+          return Promise.resolve({ data: { databricks_host: 'https://test.databricks.com' } });
+        }
+        if (url === '/database-management/lakebase/instances') {
+          return Promise.resolve({
+            data: [{ name: 'my-instance', state: 'ACTIVE' }],
+          });
+        }
+        return Promise.resolve({ data: {} });
+      });
+
+      mockApiClient.post.mockRejectedValue(new Error('Network error'));
+
+      await act(async () => {
+        renderComponent();
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByText('Loading memory configuration...')).not.toBeInTheDocument();
+      });
+
+      const saveBtn = await waitFor(() => {
+        const btn = screen.getByRole('button', { name: /Save Configuration/i });
+        expect(btn).not.toBeDisabled();
+        return btn;
+      });
+
+      await act(async () => {
+        fireEvent.click(saveBtn);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/Failed to save configuration: Network error/)).toBeInTheDocument();
+      });
+
+      // updateConfig should NOT have been called
+      expect(mockUpdateConfig).not.toHaveBeenCalledWith(
+        expect.objectContaining({ backend_type: MemoryBackendType.LAKEBASE }),
+      );
     });
   });
 });
