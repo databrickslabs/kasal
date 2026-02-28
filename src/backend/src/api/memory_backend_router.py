@@ -463,34 +463,6 @@ async def get_memory_configs(
     return [MemoryBackendResponse.model_validate(backend) for backend in backends]
 
 
-@router.get("/configs/{backend_id}", response_model=MemoryBackendResponse)
-async def get_memory_config_by_id(
-    backend_id: str,
-    group_context: GroupContextDep,
-    service: Annotated[MemoryBackendService, Depends(get_memory_backend_service)],
-) -> MemoryBackendResponse:
-    """
-    Get a specific memory backend configuration.
-
-    Args:
-        backend_id: Backend ID
-        group_context: Current group context
-        service: Memory backend service
-
-    Returns:
-        Memory backend configuration
-    """
-    # Service is injected via dependency
-    backend = await service.get_memory_backend(
-        group_context.primary_group_id, backend_id
-    )
-
-    if not backend:
-        raise NotFoundError("Memory backend configuration not found")
-
-    return MemoryBackendResponse.model_validate(backend)
-
-
 @router.get("/configs/default", response_model=Optional[MemoryBackendResponse])
 async def get_default_memory_config(
     group_context: GroupContextDep,
@@ -520,6 +492,34 @@ async def get_default_memory_config(
             f"No default backend found for group: {group_context.primary_group_id}"
         )
         return None
+
+
+@router.get("/configs/{backend_id}", response_model=MemoryBackendResponse)
+async def get_memory_config_by_id(
+    backend_id: str,
+    group_context: GroupContextDep,
+    service: Annotated[MemoryBackendService, Depends(get_memory_backend_service)],
+) -> MemoryBackendResponse:
+    """
+    Get a specific memory backend configuration.
+
+    Args:
+        backend_id: Backend ID
+        group_context: Current group context
+        service: Memory backend service
+
+    Returns:
+        Memory backend configuration
+    """
+    # Service is injected via dependency
+    backend = await service.get_memory_backend(
+        group_context.primary_group_id, backend_id
+    )
+
+    if not backend:
+        raise NotFoundError("Memory backend configuration not found")
+
+    return MemoryBackendResponse.model_validate(backend)
 
 
 @router.put("/configs/{backend_id}", response_model=MemoryBackendResponse)
