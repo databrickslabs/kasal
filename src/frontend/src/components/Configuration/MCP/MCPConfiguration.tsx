@@ -490,12 +490,14 @@ const MCPConfiguration: React.FC = () => {
     open: false,
     severity: 'success' as 'success' | 'error',
   });
-  const [_loading, set_Loading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const _userRole = usePermissionStore(state => state.userRole);
 
 
   const loadMcpServers = async () => {
-    set_Loading(true);
+    setLoading(true);
+    setLoadError(null);
     try {
       const mcpService = MCPService.getInstance();
       const response = await mcpService.getMcpServers();
@@ -519,13 +521,15 @@ const MCPConfiguration: React.FC = () => {
 
     } catch (error) {
       console.error('Error loading MCP servers:', error);
+      const message = error instanceof Error ? error.message : 'Failed to load MCP servers';
+      setLoadError(message);
       setNotification({
         open: true,
-        message: error instanceof Error ? error.message : 'Failed to load MCP servers',
+        message,
         severity: 'error',
       });
     } finally {
-      set_Loading(false);
+      setLoading(false);
     }
   };
 
@@ -727,7 +731,7 @@ const MCPConfiguration: React.FC = () => {
           <Typography variant="h6">
             {t('configuration.mcp.title', { defaultValue: 'MCP Server Configuration' })}
           </Typography>
-          {_loading && <CircularProgress size={20} sx={{ ml: 2 }} />}
+          {loading && <CircularProgress size={20} sx={{ ml: 2 }} />}
         </Box>
         <FormControlLabel
           control={
@@ -781,7 +785,15 @@ const MCPConfiguration: React.FC = () => {
         </Box>
 
         <Box sx={{ mt: 2 }}>
-          {mcpConfig.servers.length === 0 ? (
+          {loading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress size={28} />
+            </Box>
+          ) : loadError ? (
+            <Alert severity="error" sx={{ my: 2 }}>
+              {loadError}
+            </Alert>
+          ) : mcpConfig.servers.length === 0 ? (
             <Typography variant="body2" color="text.secondary" align="center" sx={{ py: 3 }}>
               {t('configuration.mcp.noServers', { defaultValue: 'No MCP servers configured yet.' })}
             </Typography>
