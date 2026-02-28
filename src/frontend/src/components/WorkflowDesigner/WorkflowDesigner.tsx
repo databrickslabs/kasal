@@ -12,7 +12,11 @@ import {
   applyEdgeChanges,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { Box, Snackbar, Alert, Dialog, DialogContent, Menu, Button, DialogTitle, IconButton, Typography } from '@mui/material';
+import { Box, Snackbar, Alert, Dialog, DialogContent, Menu, Button, DialogTitle, IconButton, Typography, Drawer, SpeedDial, SpeedDialAction, SpeedDialIcon } from '@mui/material';
+import ChatIcon from '@mui/icons-material/Chat';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import HistoryIcon from '@mui/icons-material/History';
+import SettingsIcon from '@mui/icons-material/Settings';
 import { useWorkflowStore } from '../../store/workflow';
 import { useThemeManager } from '../../hooks/workflow/useThemeManager';
 import { useErrorManager } from '../../hooks/workflow/useErrorManager';
@@ -24,6 +28,7 @@ import { useTabExecutionSync } from '../../hooks/workflow/useTabExecutionSync';
 import { useRunStatusStore } from '../../store/runStatus';
 import { useChatPanelResize } from '../../hooks/workflow/useChatPanelResize';
 import { useExecutionHistoryResize } from '../../hooks/workflow/useExecutionHistoryResize';
+import { useResponsiveLayout } from '../../hooks/workflow/useResponsiveLayout';
 
 import { v4 as _uuidv4 } from 'uuid';
 import { FlowService as _FlowService } from '../../api/FlowService';
@@ -327,6 +332,13 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     areFlowsVisible,
   } = useUILayoutStore();
 
+  // Responsive layout — computed overrides, never mutates the store
+  const { isCompact, isMobile } = useResponsiveLayout();
+  const effectiveChatVisible = showChatPanel; // Always respect user toggle
+  const effectiveChatCollapsed = (isCompact || isMobile) ? true : isChatCollapsed; // Force-collapse on compact & mobile
+  const effectiveChatWidth = effectiveChatCollapsed ? chatPanelCollapsedWidth : chatPanelWidth;
+  const effectiveLeftMargin = leftSidebarBaseWidth; // Always reserve sidebar space
+
   // Use the panel manager
   const {
     isDraggingPanel,
@@ -420,6 +432,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
 
   const [isChatProcessing, setIsChatProcessing] = React.useState(false);
+  const [mobileChatDrawerOpen, setMobileChatDrawerOpen] = React.useState(false);
   const [hasManuallyResized, setHasManuallyResized] = React.useState(false);
   const [executionCount, setExecutionCount] = React.useState(0);
 
@@ -432,8 +445,9 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   const [lastViewedJobId, setLastViewedJobId] = React.useState<string | null>(null);
   const [runningTabId, setRunningTabId] = React.useState<string | null>(null);
 
-  // Chat panel resize handlers
-  const { handleResizeStart } = useChatPanelResize(setChatPanelWidth);
+  // Chat panel resize handlers (cap max width on compact screens)
+  const chatMaxWidthOverride = isCompact ? Math.min(400, window.innerWidth * 0.4) : undefined;
+  const { handleResizeStart } = useChatPanelResize(setChatPanelWidth, chatMaxWidthOverride);
 
   // Update screen dimensions in store on window resize
   React.useEffect(() => {
@@ -448,10 +462,12 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     return () => window.removeEventListener('resize', handleResize);
   }, [updateScreenDimensions]);
 
-  // Execution history resize handlers
+  // Execution history resize handlers (cap max height on compact screens)
+  const historyMaxHeightOverride = isCompact ? Math.min(300, window.innerHeight * 0.4) : undefined;
   const { handleHistoryResizeStart } = useExecutionHistoryResize(
     setExecutionHistoryHeight,
-    setHasManuallyResized
+    setHasManuallyResized,
+    historyMaxHeightOverride
   );
 
   // Auto-adjust execution history height based on execution count
@@ -1126,18 +1142,10 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             setCrewFlowDialogShowOnlyTab(0); // Only show Plans tab
             setIsCrewFlowDialogOpen(true);
           }}
-          onLoadAgents={() => {
-            setCrewFlowDialogInitialTab(1);
-            setCrewFlowDialogShowOnlyTab(1); // Only show Agents tab
-            setIsCrewFlowDialogOpen(true);
-          }}
-          onLoadTasks={() => {
-            setCrewFlowDialogInitialTab(2);
-            setCrewFlowDialogShowOnlyTab(2); // Only show Tasks tab
-            setIsCrewFlowDialogOpen(true);
-          }}
+
           disabled={isChatProcessing || !!runningTabId}
           hideTabsAndButtons={false}
+          isMobile={isMobile}
         />
 
         <Box sx={{
@@ -1146,10 +1154,10 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           flexDirection: 'row',
           overflow: 'hidden',
           position: 'relative',
-          marginLeft: `${leftSidebarBaseWidth}px` // Push entire content area to the right of LeftSidebar
+          marginLeft: `${effectiveLeftMargin}px` // Push entire content area to the right of LeftSidebar
         }}>
           {/* Chat Panel on Left (when positioned left) - Hidden when flow panel is visible */}
-          {showChatPanel && chatPanelSide === 'left' && !areFlowsVisible && (
+          {effectiveChatVisible && chatPanelSide === 'left' && !areFlowsVisible && (
             <Box
               onMouseEnter={() => {
                 window.postMessage({ type: 'chat-hover-state', isHovering: true }, '*');
@@ -1158,7 +1166,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                 window.postMessage({ type: 'chat-hover-state', isHovering: false }, '*');
               }}
               sx={{
-                width: isChatCollapsed ? `${chatPanelCollapsedWidth}px` : `${chatPanelWidth}px`,
+                width: effectiveChatCollapsed ? `${chatPanelCollapsedWidth}px` : `${effectiveChatWidth}px`,
                 height: showRunHistory ? `calc(100% - ${executionHistoryHeight}px)` : '100%',
                 display: 'flex',
                 flexDirection: 'row',
@@ -1167,7 +1175,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                 borderRight: 1,
                 borderColor: 'divider',
                 zIndex: 15, // Higher than LeftSidebar (10) to ensure collapsed chat is visible
-                transition: isChatCollapsed ? 'width 0.3s ease-in-out' : 'none',
+                transition: effectiveChatCollapsed ? 'width 0.3s ease-in-out' : 'none',
               }}>
               {/* Chat Content */}
               <Box sx={{ flex: 1, overflow: 'hidden' }}>
@@ -1212,23 +1220,28 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                       handleRunClick('crew');
                     }, 100);
                   }}
-                  isCollapsed={isChatCollapsed}
+                  isCollapsed={effectiveChatCollapsed}
                   onToggleCollapse={() => {
-                    setChatPanelCollapsed(!isChatCollapsed);
-                    // Trigger node repositioning when toggling collapse
-                    setTimeout(() => {
-                      const event = new CustomEvent('recalculateNodePositions', {
-                        detail: { reason: 'chat-panel-toggle' }
-                      });
-                      window.dispatchEvent(event);
-                    }, 350); // Wait for animation to complete
+                    if (isMobile || isCompact) {
+                      // On small screens, open full-screen drawer instead of expanding inline
+                      setMobileChatDrawerOpen(true);
+                    } else {
+                      setChatPanelCollapsed(!isChatCollapsed);
+                      // Trigger node repositioning when toggling collapse
+                      setTimeout(() => {
+                        const event = new CustomEvent('recalculateNodePositions', {
+                          detail: { reason: 'chat-panel-toggle' }
+                        });
+                        window.dispatchEvent(event);
+                      }, 350); // Wait for animation to complete
+                    }
                   }}
                   chatSessionId={getActiveTab()?.chatSessionId}
                   onOpenLogs={handleShowExecutionLogs}
                 />
               </Box>
               {/* Resize Handle - on the right side when chat is on left */}
-              {!isChatCollapsed && (
+              {!effectiveChatCollapsed && (
                 <Box
                   onMouseDown={handleResizeStart}
                   sx={{
@@ -1364,7 +1377,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             />
 
             {/* Chat Panel on Right (when positioned right) - Hidden when flow panel is visible */}
-            {showChatPanel && chatPanelSide === 'right' && !areFlowsVisible && (
+            {effectiveChatVisible && chatPanelSide === 'right' && !areFlowsVisible && (
               <Box
                 onMouseEnter={() => {
                   window.postMessage({ type: 'chat-hover-state', isHovering: true }, '*');
@@ -1377,16 +1390,16 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                   top: 0,
                   right: rightSidebarWidth,
                   bottom: showRunHistory ? `${executionHistoryHeight}px` : 0,
-                  width: isChatCollapsed ? `${chatPanelCollapsedWidth}px` : `${chatPanelWidth}px`,
+                  width: effectiveChatCollapsed ? `${chatPanelCollapsedWidth}px` : `${effectiveChatWidth}px`,
                   display: 'flex',
                   flexDirection: 'row',
                   overflow: 'hidden',
                   backgroundColor: 'background.paper',
                   zIndex: 10,
-                  transition: isChatCollapsed ? 'width 0.3s ease-in-out' : 'none',
+                  transition: effectiveChatCollapsed ? 'width 0.3s ease-in-out' : 'none',
                 }}>
                 {/* Resize Handle */}
-                {!isChatCollapsed && (
+                {!effectiveChatCollapsed && (
                   <Box
                     onMouseDown={handleResizeStart}
                     sx={{
@@ -1445,16 +1458,21 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                         handleRunClick('crew');
                       }, 100);
                     }}
-                    isCollapsed={isChatCollapsed}
+                    isCollapsed={effectiveChatCollapsed}
                     onToggleCollapse={() => {
-                      setChatPanelCollapsed(!isChatCollapsed);
-                      // Trigger node repositioning when toggling collapse
-                      setTimeout(() => {
-                        const event = new CustomEvent('recalculateNodePositions', {
-                          detail: { reason: 'chat-panel-toggle' }
-                        });
-                        window.dispatchEvent(event);
-                      }, 350); // Wait for animation to complete
+                      if (isMobile || isCompact) {
+                        // On small screens, open full-screen drawer instead of expanding inline
+                        setMobileChatDrawerOpen(true);
+                      } else {
+                        setChatPanelCollapsed(!isChatCollapsed);
+                        // Trigger node repositioning when toggling collapse
+                        setTimeout(() => {
+                          const event = new CustomEvent('recalculateNodePositions', {
+                            detail: { reason: 'chat-panel-toggle' }
+                          });
+                          window.dispatchEvent(event);
+                        }, 350); // Wait for animation to complete
+                      }
                     }}
                     chatSessionId={getActiveTab()?.chatSessionId}
                     onOpenLogs={handleShowExecutionLogs}
@@ -1749,115 +1767,115 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
         {/* Right Sidebar */}
         <RightSidebar
-          onOpenLogsDialog={() => dialogManager.setIsLogsDialogOpen(true)}
-          onToggleChat={() => setChatPanelVisible(!showChatPanel)}
-          isChatOpen={showChatPanel}
-          setIsAgentDialogOpen={() => openAgentDialog(true)}
-          setIsTaskDialogOpen={() => openTaskDialog(true)}
-          setIsCrewDialogOpen={() => {
-            // Context-aware catalog: Show only Flows tab when on Flow Canvas
-            if (areFlowsVisible) {
-              setCrewFlowDialogInitialTab(3); // Flows tab
-              setCrewFlowDialogShowOnlyTab(3); // Show only Flows tab
-            } else {
-              setCrewFlowDialogInitialTab(0); // Crews tab
-              setCrewFlowDialogShowOnlyTab(undefined); // Show all tabs
-            }
-            setIsCrewFlowDialogOpen(true);
-          }}
-          onSaveCrewClick={() => {
-            const event = new CustomEvent('openSaveCrewDialog');
-            window.dispatchEvent(event);
-          }}
-          onSaveFlowClick={() => {
-            const event = new CustomEvent('openSaveFlowDialog');
-            window.dispatchEvent(event);
-          }}
-          showRunHistory={showRunHistory}
-          executionHistoryHeight={executionHistoryHeight}
-          onOpenSchedulesDialog={() => {
-            // Open schedule dialog
-            dialogManager.setScheduleDialogOpen(true);
-          }}
-          onToggleExecutionHistory={toggleExecutionHistory}
-          areFlowsVisible={areFlowsVisible}
-          toggleFlowsVisibility={toggleFlowsVisibility}
-          hasCrewNodes={nodes.some(node => node.type === 'agentNode' || node.type === 'taskNode' || node.type === 'managerNode')}
-          hasFlowNodes={flowNodes.some(node => node.type === 'crewNode')}
-          edges={flowEdges}
-          onPlayPlan={() => {
-            console.log('[WorkflowDesigner] RightSidebar onPlayPlan called, calling handleRunClick("crew")');
-            handleRunClick('crew');
-          }}
-          onPlayFlow={() => {
-            console.log('[WorkflowDesigner] RightSidebar onPlayFlow called');
-            console.log('[WorkflowDesigner] flowNodes count:', flowNodes.length, 'flowEdges count:', flowEdges.length);
-            // Nodes/edges are auto-synced via useEffect, but ensure sync is current
-            setCrewExecutionNodes(flowNodes);
-            setCrewExecutionEdges(flowEdges);
-            // Execute immediately - auto-sync should have already updated the store
-            handleRunClick('flow');
-          }}
-        />
+            onOpenLogsDialog={() => dialogManager.setIsLogsDialogOpen(true)}
+            onToggleChat={() => setChatPanelVisible(!showChatPanel)}
+            isChatOpen={showChatPanel}
+            setIsAgentDialogOpen={() => openAgentDialog(true)}
+            setIsTaskDialogOpen={() => openTaskDialog(true)}
+            setIsCrewDialogOpen={() => {
+              // Context-aware catalog: Show only Flows tab when on Flow Canvas
+              if (areFlowsVisible) {
+                setCrewFlowDialogInitialTab(3); // Flows tab
+                setCrewFlowDialogShowOnlyTab(3); // Show only Flows tab
+              } else {
+                setCrewFlowDialogInitialTab(0); // Crews tab
+                setCrewFlowDialogShowOnlyTab(undefined); // Show all tabs
+              }
+              setIsCrewFlowDialogOpen(true);
+            }}
+            onSaveCrewClick={() => {
+              const event = new CustomEvent('openSaveCrewDialog');
+              window.dispatchEvent(event);
+            }}
+            onSaveFlowClick={() => {
+              const event = new CustomEvent('openSaveFlowDialog');
+              window.dispatchEvent(event);
+            }}
+            showRunHistory={showRunHistory}
+            executionHistoryHeight={executionHistoryHeight}
+            onOpenSchedulesDialog={() => {
+              // Open schedule dialog
+              dialogManager.setScheduleDialogOpen(true);
+            }}
+            onToggleExecutionHistory={toggleExecutionHistory}
+            areFlowsVisible={areFlowsVisible}
+            toggleFlowsVisibility={toggleFlowsVisibility}
+            hasCrewNodes={nodes.some(node => node.type === 'agentNode' || node.type === 'taskNode' || node.type === 'managerNode')}
+            hasFlowNodes={flowNodes.some(node => node.type === 'crewNode')}
+            edges={flowEdges}
+            onPlayPlan={() => {
+              console.log('[WorkflowDesigner] RightSidebar onPlayPlan called, calling handleRunClick("crew")');
+              handleRunClick('crew');
+            }}
+            onPlayFlow={() => {
+              console.log('[WorkflowDesigner] RightSidebar onPlayFlow called');
+              console.log('[WorkflowDesigner] flowNodes count:', flowNodes.length, 'flowEdges count:', flowEdges.length);
+              // Nodes/edges are auto-synced via useEffect, but ensure sync is current
+              setCrewExecutionNodes(flowNodes);
+              setCrewExecutionEdges(flowEdges);
+              // Execute immediately - auto-sync should have already updated the store
+              handleRunClick('flow');
+            }}
+          />
 
         {/* Left Sidebar */}
         <LeftSidebar
-          onClearCanvas={() => {
-            // Context-aware: clear flow canvas or crew canvas based on which is visible
-            if (areFlowsVisible) {
-              setFlowNodes([]);
-              setFlowEdges([]);
-            } else {
-              setNodes([]);
-              setEdges([]);
-            }
-          }}
-          onZoomIn={() => {
-            // Context-aware: zoom the visible canvas
-            const reactFlowInstance = areFlowsVisible ? flowFlowInstanceRef.current : crewFlowInstanceRef.current;
-            if (reactFlowInstance) {
-              reactFlowInstance.zoomIn({ duration: 200 });
-            }
-          }}
-          onZoomOut={() => {
-            // Context-aware: zoom the visible canvas
-            const reactFlowInstance = areFlowsVisible ? flowFlowInstanceRef.current : crewFlowInstanceRef.current;
-            if (reactFlowInstance) {
-              reactFlowInstance.zoomOut({ duration: 200 });
-            }
-          }}
-          onFitView={() => {
-            // Use the UI-aware fit view that respects canvas boundaries
-            handleUIAwareFitView();
-          }}
-          onToggleInteractivity={() => {
-            // Toggle interactivity if needed
-            console.log('Toggle interactivity');
-          }}
-          planningEnabled={planningEnabled}
-          setPlanningEnabled={setPlanningEnabled}
-          reasoningEnabled={reasoningEnabled}
-          setReasoningEnabled={setReasoningEnabled}
-          schemaDetectionEnabled={schemaDetectionEnabled}
-          setSchemaDetectionEnabled={setSchemaDetectionEnabled}
+            onClearCanvas={() => {
+              // Context-aware: clear flow canvas or crew canvas based on which is visible
+              if (areFlowsVisible) {
+                setFlowNodes([]);
+                setFlowEdges([]);
+              } else {
+                setNodes([]);
+                setEdges([]);
+              }
+            }}
+            onZoomIn={() => {
+              // Context-aware: zoom the visible canvas
+              const reactFlowInstance = areFlowsVisible ? flowFlowInstanceRef.current : crewFlowInstanceRef.current;
+              if (reactFlowInstance) {
+                reactFlowInstance.zoomIn({ duration: 200 });
+              }
+            }}
+            onZoomOut={() => {
+              // Context-aware: zoom the visible canvas
+              const reactFlowInstance = areFlowsVisible ? flowFlowInstanceRef.current : crewFlowInstanceRef.current;
+              if (reactFlowInstance) {
+                reactFlowInstance.zoomOut({ duration: 200 });
+              }
+            }}
+            onFitView={() => {
+              // Use the UI-aware fit view that respects canvas boundaries
+              handleUIAwareFitView();
+            }}
+            onToggleInteractivity={() => {
+              // Toggle interactivity if needed
+              console.log('Toggle interactivity');
+            }}
+            planningEnabled={planningEnabled}
+            setPlanningEnabled={setPlanningEnabled}
+            reasoningEnabled={reasoningEnabled}
+            setReasoningEnabled={setReasoningEnabled}
+            schemaDetectionEnabled={schemaDetectionEnabled}
+            setSchemaDetectionEnabled={setSchemaDetectionEnabled}
 
-          setIsConfigurationDialogOpen={dialogManager.setIsConfigurationDialogOpen}
-          onOpenLogsDialog={() => dialogManager.setIsLogsDialogOpen(true)}
-          showRunHistory={showRunHistory}
-          executionHistoryHeight={executionHistoryHeight}
-          onOpenTutorial={() => {
-            console.log('[WorkflowDesigner] Opening tutorial from LeftSidebar');
-            dialogManager.setIsTutorialOpen(true);
-          }}
-          hideRuntimeFilters={areFlowsVisible}
-        />
+            setIsConfigurationDialogOpen={dialogManager.setIsConfigurationDialogOpen}
+            onOpenLogsDialog={() => dialogManager.setIsLogsDialogOpen(true)}
+            showRunHistory={showRunHistory}
+            executionHistoryHeight={executionHistoryHeight}
+            onOpenTutorial={() => {
+              console.log('[WorkflowDesigner] Opening tutorial from LeftSidebar');
+              dialogManager.setIsTutorialOpen(true);
+            }}
+            hideRuntimeFilters={areFlowsVisible}
+          />
 
         {/* Workspace Selector - Upper Right Corner */}
         <Box
           sx={{
             position: 'fixed',
             top: '12px',
-            right: '20px', // Positioned closer to the right edge
+            right: isMobile ? '8px' : '20px',
             zIndex: 1002, // Above everything else
             display: 'flex',
             alignItems: 'center'
@@ -1865,6 +1883,68 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         >
           <GroupSelector />
         </Box>
+
+        {/* Full-screen chat drawer (opens on mobile/compact when tapping collapsed chat) */}
+        {(isMobile || isCompact) && (
+          <Drawer
+            anchor="right"
+            open={mobileChatDrawerOpen}
+            onClose={() => setMobileChatDrawerOpen(false)}
+            sx={{ '& .MuiDrawer-paper': { width: isMobile ? '100vw' : '80vw', maxWidth: 600 } }}
+          >
+            <ChatPanel
+              chatSide="right"
+              onNodesGenerated={(newNodes, newEdges) => {
+                handleNodesGenerated(newNodes, newEdges, setNodes, setEdges);
+              }}
+              onLoadingStateChange={setIsChatProcessing}
+              isVisible={true}
+              nodes={nodes}
+              edges={edges}
+              onExecuteCrew={() => {
+                const activeTab = getActiveTab();
+                if (activeTab) {
+                  setRunningTabId(activeTab.id);
+                  updateTabExecutionStatus(activeTab.id, 'running');
+                  if (runningTabTimeoutRef.current) {
+                    clearTimeout(runningTabTimeoutRef.current);
+                  }
+                  const tabIdToTimeout = activeTab.id;
+                  runningTabTimeoutRef.current = setTimeout(() => {
+                    setRunningTabId((currentRunningTabId) => {
+                      if (currentRunningTabId === tabIdToTimeout) return null;
+                      return currentRunningTabId;
+                    });
+                    updateTabExecutionStatus(tabIdToTimeout, 'completed');
+                  }, 5 * 60 * 1000);
+                }
+                setCrewExecutionNodes(nodes);
+                setCrewExecutionEdges(edges);
+                setTimeout(() => {
+                  handleRunClick('crew');
+                }, 100);
+              }}
+              isCollapsed={false}
+              onToggleCollapse={() => setMobileChatDrawerOpen(false)}
+              chatSessionId={getActiveTab()?.chatSessionId}
+              onOpenLogs={handleShowExecutionLogs}
+            />
+          </Drawer>
+        )}
+
+        {/* Mobile: SpeedDial for quick actions */}
+        {isMobile && (
+          <SpeedDial
+            ariaLabel="Actions"
+            sx={{ position: 'fixed', bottom: 16, right: 16, zIndex: 1100 }}
+            icon={<SpeedDialIcon />}
+          >
+            <SpeedDialAction icon={<ChatIcon />} tooltipTitle="Chat" onClick={() => setMobileChatDrawerOpen(true)} />
+            <SpeedDialAction icon={<PlayArrowIcon />} tooltipTitle="Run" onClick={() => handleRunClick('crew')} />
+            <SpeedDialAction icon={<HistoryIcon />} tooltipTitle="History" onClick={toggleExecutionHistory} />
+            <SpeedDialAction icon={<SettingsIcon />} tooltipTitle="Settings" onClick={() => dialogManager.setIsConfigurationDialogOpen(true)} />
+          </SpeedDial>
+        )}
 
       </Box>
     </div>
