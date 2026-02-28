@@ -168,6 +168,17 @@ class TestToggleEnabledInGroup:
 
         assert result is False
 
+    @pytest.mark.asyncio
+    async def test_toggle_in_group_raises_on_db_error(self, repo, mock_session):
+        config = MagicMock(spec=ModelConfig, enabled=False)
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.first.return_value = config
+        mock_session.execute.return_value = mock_result
+        mock_session.flush.side_effect = Exception("DB error")
+
+        with pytest.raises(Exception, match="DB error"):
+            await repo.toggle_enabled_in_group("gpt-4", "group-1", True)
+
 
 class TestEnableAllModels:
 
@@ -260,6 +271,23 @@ class TestDeleteByKey:
         result = await repo.delete_by_key("missing")
 
         assert result is False
+
+    @pytest.mark.asyncio
+    async def test_delete_raises_on_db_error(self, repo, mock_session):
+        config = MagicMock(spec=ModelConfig, id="cfg-1", key="gpt-4")
+        find_result = MagicMock()
+        find_result.scalars.return_value.first.return_value = config
+        mock_session.execute.side_effect = [find_result, Exception("DB error")]
+
+        with pytest.raises(Exception, match="DB error"):
+            await repo.delete_by_key("gpt-4")
+
+    @pytest.mark.asyncio
+    async def test_upsert_raises_on_db_error(self, repo, mock_session):
+        mock_session.execute.side_effect = Exception("DB error")
+
+        with pytest.raises(Exception, match="DB error"):
+            await repo.upsert_model("bad-key", {"name": "bad"})
 
 
 class TestFindAllGlobal:
