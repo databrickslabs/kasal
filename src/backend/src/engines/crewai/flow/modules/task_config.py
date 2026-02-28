@@ -16,6 +16,35 @@ from src.engines.crewai.tools.tool_factory import ToolFactory
 # Initialize logger
 logger = LoggerManager.get_instance().flow
 
+
+def _resolve_tool_override(tool_factory, tool_id, tool_configs):
+    """Resolve tool_config_override for a tool by looking up its name in tool_configs.
+
+    Tries a direct lookup by tool_id first, then resolves the numeric ID to a
+    tool title and looks that up.
+
+    Args:
+        tool_factory: ToolFactory instance used to resolve tool IDs to titles.
+        tool_id: The tool identifier (may be a numeric string like '35').
+        tool_configs: Dict mapping tool names/IDs to their config overrides.
+
+    Returns:
+        The matching override dict, or None.
+    """
+    if not tool_configs:
+        return None
+    # Direct lookup by tool_id (string form)
+    override = tool_configs.get(str(tool_id))
+    if override:
+        return override
+    # Resolve numeric ID to title and look up by name
+    tool_info = tool_factory.get_tool_info(tool_id)
+    if tool_info:
+        title = getattr(tool_info, 'title', None)
+        if title:
+            return tool_configs.get(title)
+    return None
+
 class TaskConfig:
     """
     Helper class for configuring tasks in CrewAI flows.
@@ -342,13 +371,18 @@ class TaskConfig:
             
             if task_tools:
                 logger.info(f"Task {task_data.name} has specific tools: {task_tools}")
-                
+
+                # Extract tool_configs for per-tool overrides
+                task_tool_configs = getattr(task_data, 'tool_configs', {}) or {}
+
                 # We only replace agent tools if task has tools specifically defined
                 tools = []
                 for tool_id in task_tools:
                     try:
+                        # Resolve per-tool config override (e.g. GenieTool spaceId)
+                        tool_override = _resolve_tool_override(tool_factory, tool_id, task_tool_configs)
                         # Try to create the tool using the factory
-                        tool = tool_factory.create_tool(tool_id)
+                        tool = tool_factory.create_tool(tool_id, tool_config_override=tool_override)
                         if tool:
                             tools.append(tool)
                             logger.info(f"Added tool {tool_id} for task: {task_data.name}")
@@ -389,11 +423,16 @@ class TaskConfig:
                             if node_tools:
                                 logger.info(f"Found tools in node data for task {task_id}: {node_tools}")
                                 tools = []
-                                
+
+                                # Extract tool_configs for per-tool overrides
+                                task_tool_configs = getattr(task_data, 'tool_configs', {}) or {}
+
                                 for tool_id in node_tools:
                                     try:
+                                        # Resolve per-tool config override (e.g. GenieTool spaceId)
+                                        tool_override = _resolve_tool_override(tool_factory, tool_id, task_tool_configs)
                                         # Try to create the tool using the factory
-                                        tool = tool_factory.create_tool(tool_id)
+                                        tool = tool_factory.create_tool(tool_id, tool_config_override=tool_override)
                                         if tool:
                                             tools.append(tool)
                                             logger.info(f"Added tool {tool_id} from node data for task: {task_data.name}")
