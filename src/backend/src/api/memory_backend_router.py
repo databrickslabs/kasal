@@ -4,6 +4,7 @@ Memory backend configuration API endpoints.
 This module provides API endpoints for managing memory backend configurations,
 including validation, testing connections, and retrieving available indexes.
 """
+
 import os
 from datetime import datetime
 from typing import Annotated, Any, Dict, List, Optional
@@ -11,9 +12,13 @@ from typing import Annotated, Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.exceptions import BadRequestError, ForbiddenError, KasalError, NotFoundError
-
 from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.exceptions import (
+    BadRequestError,
+    ForbiddenError,
+    KasalError,
+    NotFoundError,
+)
 from src.core.logger import LoggerManager
 from src.core.permissions import check_role_in_context, is_workspace_admin
 from src.models.memory_backend import MemoryBackend
@@ -52,6 +57,197 @@ async def get_workspace_url(
     """
     result = await service.get_workspace_url()
     return result
+
+
+@router.post("/lakebase/test-connection")
+async def test_lakebase_connection(
+    group_context: GroupContextDep,
+    service: Annotated[MemoryBackendService, Depends(get_memory_backend_service)],
+    request: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Test connection to Lakebase and verify pgvector extension availability.
+
+    Args:
+        request: Optional dict with instance_name
+
+    Returns:
+        Connection test result
+    """
+    try:
+        instance_name = request.get("instance_name") if request else None
+        result = await service.test_lakebase_connection(instance_name=instance_name)
+        return result
+    except Exception as e:
+        logger.error(f"Error testing Lakebase connection: {e}")
+        return {
+            "success": False,
+            "message": f"Connection test failed: {str(e)}",
+            "details": {"error": str(e)},
+        }
+
+
+@router.post("/lakebase/initialize-tables")
+async def initialize_lakebase_tables(
+    request: Dict[str, Any],
+    group_context: GroupContextDep,
+    service: Annotated[MemoryBackendService, Depends(get_memory_backend_service)],
+) -> Dict[str, Any]:
+    """
+    Create pgvector extension and memory tables on Lakebase.
+    Only workspace admins can initialize tables.
+
+    Args:
+        request: Table configuration overrides including optional instance_name
+        group_context: Current group context
+        service: Memory backend service
+
+    Returns:
+        Table initialization result
+    """
+    if not is_workspace_admin(group_context):
+        raise ForbiddenError(
+            "Only workspace admins can initialize Lakebase memory tables"
+        )
+
+    instance_name = request.get("instance_name")
+    embedding_dimension = request.get("embedding_dimension", 1024)
+    short_term_table = request.get("short_term_table", "crew_short_term_memory")
+    long_term_table = request.get("long_term_table", "crew_long_term_memory")
+    entity_table = request.get("entity_table", "crew_entity_memory")
+
+    result = await service.initialize_lakebase_tables(
+        embedding_dimension=embedding_dimension,
+        short_term_table=short_term_table,
+        long_term_table=long_term_table,
+        entity_table=entity_table,
+        instance_name=instance_name,
+    )
+    return result
+
+
+@router.get("/lakebase/table-stats")
+async def get_lakebase_table_stats(
+    group_context: GroupContextDep,
+    service: Annotated[MemoryBackendService, Depends(get_memory_backend_service)],
+    instance_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Get row counts per memory table on Lakebase.
+
+    Args:
+        instance_name: Optional Lakebase instance name
+
+    Returns:
+        Table statistics
+    """
+    result = await service.get_lakebase_table_stats(instance_name=instance_name)
+    return result
+
+
+@router.get("/lakebase/table-data")
+async def get_lakebase_table_data(
+    group_context: GroupContextDep,
+    service: Annotated[MemoryBackendService, Depends(get_memory_backend_service)],
+    table_name: str = Query(..., description="Memory table name to query"),
+    limit: int = Query(50, description="Maximum rows to return"),
+    instance_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Fetch rows from a Lakebase memory table.
+
+    Args:
+        table_name: Name of the memory table (crew_short_term_memory, etc.)
+        limit: Maximum number of rows to return (default: 50)
+        instance_name: Optional Lakebase instance name
+
+    Returns:
+        Dict with success, documents list, and total count
+    """
+    result = await service.get_lakebase_table_data(
+        table_name=table_name,
+        limit=limit,
+        instance_name=instance_name,
+    )
+    return result
+
+
+@router.get("/lakebase/entity-data")
+async def get_lakebase_entity_data(
+    group_context: GroupContextDep,
+    service: Annotated[MemoryBackendService, Depends(get_memory_backend_service)],
+    entity_table: str = Query("crew_entity_memory", description="Entity table name"),
+    limit: int = Query(200, description="Maximum entities to return"),
+    instance_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Fetch entity data from Lakebase for graph visualization.
+
+    Returns entities and relationships in the same format as the
+    Databricks entity-data endpoint, suitable for the EntityGraphVisualization
+    component.
+
+    Args:
+        entity_table: Name of the entity memory table
+        limit: Maximum number of entities to return
+        instance_name: Optional Lakebase instance name
+
+    Returns:
+        Dict with entities and relationships lists
+    """
+    result = await service.get_lakebase_entity_data(
+        entity_table=entity_table,
+        limit=limit,
+        instance_name=instance_name,
+    )
+    return result
+
+
+@router.post("/lakebase/save-config")
+async def save_lakebase_config(
+    request: Dict[str, Any],
+    group_context: GroupContextDep,
+    service: Annotated[MemoryBackendService, Depends(get_memory_backend_service)],
+) -> Dict[str, Any]:
+    """
+    Save Lakebase memory backend configuration.
+
+    Deletes existing configs and creates a new Lakebase config,
+    similar to the Databricks one-click-setup pattern.
+    """
+    if not is_workspace_admin(group_context):
+        raise ForbiddenError("Only workspace admins can configure memory backends")
+
+    group_id = group_context.primary_group_id
+    lakebase_config = request.get("lakebase_config", {})
+
+    # Delete existing configs first
+    try:
+        existing = await service.get_memory_backends(group_id)
+        for backend in existing:
+            await service.delete_memory_backend(group_id, str(backend.id))
+    except Exception as e:
+        logger.warning(f"Error cleaning up existing configs: {e}")
+
+    # Create new Lakebase config
+    from src.schemas.memory_backend import LakebaseMemoryConfig
+
+    config = MemoryBackendCreate(
+        name=f"Lakebase Setup {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        backend_type=MemoryBackendType.LAKEBASE,
+        lakebase_config=LakebaseMemoryConfig(**lakebase_config),
+        enable_short_term=True,
+        enable_long_term=True,
+        enable_entity=True,
+    )
+    backend = await service.create_memory_backend(group_id, config)
+    await service.set_default_backend(group_id, str(backend.id))
+
+    return {
+        "success": True,
+        "backend_id": str(backend.id),
+        "message": "Lakebase memory backend configured successfully",
+    }
 
 
 @router.post("/validate")
@@ -188,10 +384,14 @@ async def create_databricks_index(
 
     # Validate required parameters
     if not all([index_type, catalog, schema, table_name]):
-        raise BadRequestError("index_type, catalog, schema, and table_name are required")
+        raise BadRequestError(
+            "index_type, catalog, schema, and table_name are required"
+        )
 
     if index_type not in ["short_term", "long_term", "entity", "document"]:
-        raise BadRequestError("index_type must be one of: short_term, long_term, entity, document")
+        raise BadRequestError(
+            "index_type must be one of: short_term, long_term, entity, document"
+        )
 
     # Extract user token for OBO authentication
     user_token = extract_user_token_from_request(req)
@@ -492,7 +692,9 @@ async def one_click_databricks_setup(
             logger.warning(f"Failed to get unified auth: {e}")
 
     if not workspace_url:
-        raise BadRequestError("workspace_url is required and not available from unified auth")
+        raise BadRequestError(
+            "workspace_url is required and not available from unified auth"
+        )
 
     catalog = request.get("catalog", "ml")
     schema = request.get("schema", "agents")
@@ -662,7 +864,9 @@ async def delete_databricks_index(
 
     # Validate required parameters
     if not all([workspace_url, index_name, endpoint_name]):
-        raise BadRequestError("workspace_url, index_name, and endpoint_name are required")
+        raise BadRequestError(
+            "workspace_url, index_name, and endpoint_name are required"
+        )
 
     # Extract user token for OBO authentication
     user_token = extract_user_token_from_request(req)
@@ -777,7 +981,9 @@ async def switch_to_disabled_mode(
     """
     # Check permissions - only workspace admins can switch to disabled mode
     if not is_workspace_admin(group_context):
-        raise ForbiddenError("Only workspace admins can switch memory backend to disabled mode")
+        raise ForbiddenError(
+            "Only workspace admins can switch memory backend to disabled mode"
+        )
 
     # Delete all configurations and create disabled one
     result = await service.delete_all_and_create_disabled(
@@ -895,10 +1101,14 @@ async def empty_index(
 
     # Validate required parameters
     if not all([workspace_url, index_name, endpoint_name, index_type]):
-        raise BadRequestError("workspace_url, index_name, endpoint_name, and index_type are required")
+        raise BadRequestError(
+            "workspace_url, index_name, endpoint_name, and index_type are required"
+        )
 
     if index_type not in ["short_term", "long_term", "entity", "document"]:
-        raise BadRequestError("index_type must be one of: short_term, long_term, entity, document")
+        raise BadRequestError(
+            "index_type must be one of: short_term, long_term, entity, document"
+        )
 
     # Extract user token for OBO authentication
     user_token = extract_user_token_from_request(req)
