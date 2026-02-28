@@ -5,10 +5,7 @@
 export enum MemoryBackendType {
   DEFAULT = 'default', // CrewAI's default (ChromaDB + SQLite)
   DATABRICKS = 'databricks', // Databricks Vector Search
-  // Future backends can be added here
-  // PINECONE = 'pinecone',
-  // QDRANT = 'qdrant',
-  // WEAVIATE = 'weaviate',
+  LAKEBASE = 'lakebase', // Lakebase pgvector
 }
 
 export interface DatabricksMemoryConfig {
@@ -45,11 +42,21 @@ export interface DatabricksMemoryConfig {
   embedding_dimension?: number;
 }
 
+export interface LakebaseMemoryConfig {
+  instance_name?: string;
+  embedding_dimension?: number;
+  short_term_table?: string;
+  long_term_table?: string;
+  entity_table?: string;
+  tables_initialized?: boolean;
+}
+
 export interface MemoryBackendConfig {
   backend_type: MemoryBackendType;
 
   // Backend-specific configuration
   databricks_config?: DatabricksMemoryConfig;
+  lakebase_config?: LakebaseMemoryConfig;
 
   // Common configuration
   enable_short_term?: boolean;
@@ -83,6 +90,14 @@ export const DEFAULT_DATABRICKS_CONFIG: DatabricksMemoryConfig = {
   auth_type: 'default',
 };
 
+export const DEFAULT_LAKEBASE_CONFIG: LakebaseMemoryConfig = {
+  embedding_dimension: 1024,
+  short_term_table: 'crew_short_term_memory',
+  long_term_table: 'crew_long_term_memory',
+  entity_table: 'crew_entity_memory',
+  tables_initialized: false,
+};
+
 // Validation helpers
 export const isValidMemoryBackendConfig = (config: unknown): config is MemoryBackendConfig => {
   if (!config || typeof config !== 'object' || config === null) return false;
@@ -105,8 +120,9 @@ export const isValidMemoryBackendConfig = (config: unknown): config is MemoryBac
 // Helper to get display name for backend type
 export const getBackendDisplayName = (type: MemoryBackendType): string => {
   const displayNames: Record<MemoryBackendType, string> = {
-    [MemoryBackendType.DEFAULT]: 'Default (ChromaDB + SQLite)',
+    [MemoryBackendType.DEFAULT]: 'Local (ChromaDB + SQLite)',
     [MemoryBackendType.DATABRICKS]: 'Databricks Vector Search',
+    [MemoryBackendType.LAKEBASE]: 'Lakebase (pgvector)',
   };
   return displayNames[type] || type;
 };
@@ -114,8 +130,9 @@ export const getBackendDisplayName = (type: MemoryBackendType): string => {
 // Helper to get backend description
 export const getBackendDescription = (type: MemoryBackendType): string => {
   const descriptions: Record<MemoryBackendType, string> = {
-    [MemoryBackendType.DEFAULT]: 'Uses CrewAI\'s built-in memory storage with ChromaDB for vector storage and SQLite for long-term memory.',
+    [MemoryBackendType.DEFAULT]: 'Uses local ChromaDB for vector search and SQLite for long-term memory. No external infrastructure required.',
     [MemoryBackendType.DATABRICKS]: 'Uses Databricks Vector Search for scalable, enterprise-grade memory storage with Unity Catalog governance.',
+    [MemoryBackendType.LAKEBASE]: 'Uses your configured Lakebase PostgreSQL instance with pgvector for memory storage. Zero additional infrastructure required.',
   };
   return descriptions[type] || '';
 };

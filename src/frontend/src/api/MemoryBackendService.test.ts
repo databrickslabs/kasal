@@ -468,4 +468,183 @@ describe('MemoryBackendService', () => {
       });
     });
   });
+
+  describe('testLakebaseConnection', () => {
+    it('should test connection successfully', async () => {
+      const mockResponse = {
+        success: true,
+        message: 'Connected with pgvector support',
+        details: { pgvector_available: true, pg_version: 'PostgreSQL 15.4' },
+      };
+      (apiClient.post as Mock).mockResolvedValue({ data: mockResponse });
+
+      const result = await MemoryBackendService.testLakebaseConnection('kasal-lakebase1');
+
+      expect(apiClient.post).toHaveBeenCalledWith('/memory-backend/lakebase/test-connection', {
+        instance_name: 'kasal-lakebase1',
+      });
+      expect(result).toEqual(mockResponse);
+    });
+
+    it('should call without instance name', async () => {
+      const mockResponse = { success: true, message: 'Connected' };
+      (apiClient.post as Mock).mockResolvedValue({ data: mockResponse });
+
+      await MemoryBackendService.testLakebaseConnection();
+
+      expect(apiClient.post).toHaveBeenCalledWith('/memory-backend/lakebase/test-connection', {});
+    });
+
+    it('should handle connection errors', async () => {
+      const mockError = new AxiosError('Connection failed');
+      mockError.response = {
+        data: { detail: 'Connection refused' },
+        status: 500,
+        statusText: 'Internal Server Error',
+        headers: {},
+        config: { headers: {} } as any,
+      };
+      (apiClient.post as Mock).mockRejectedValue(mockError);
+
+      const result = await MemoryBackendService.testLakebaseConnection();
+
+      expect(result).toEqual({
+        success: false,
+        message: 'Connection refused',
+        details: { error: 'Connection refused' },
+      });
+    });
+  });
+
+  describe('initializeLakebaseTables', () => {
+    it('should initialize tables successfully', async () => {
+      const mockResponse = {
+        success: true,
+        message: 'All tables initialized',
+        tables: {
+          short_term: { success: true, table_name: 'crew_short_term_memory', message: 'OK' },
+        },
+      };
+      (apiClient.post as Mock).mockResolvedValue({ data: mockResponse });
+
+      const result = await MemoryBackendService.initializeLakebaseTables({ embedding_dimension: 1024 });
+
+      expect(apiClient.post).toHaveBeenCalledWith('/memory-backend/lakebase/initialize-tables', {
+        embedding_dimension: 1024,
+      });
+      expect(result).toEqual(mockResponse);
+    });
+
+    it('should handle initialization errors', async () => {
+      (apiClient.post as Mock).mockRejectedValue(new Error('Failed'));
+
+      const result = await MemoryBackendService.initializeLakebaseTables();
+
+      expect(result).toEqual({
+        success: false,
+        message: 'Failed to initialize tables',
+      });
+    });
+  });
+
+  describe('getLakebaseTableStats', () => {
+    it('should fetch table stats successfully', async () => {
+      const mockStats = {
+        short_term: { table_name: 'crew_short_term_memory', exists: true, row_count: 10 },
+        long_term: { table_name: 'crew_long_term_memory', exists: true, row_count: 5 },
+        entity: { table_name: 'crew_entity_memory', exists: true, row_count: 8 },
+      };
+      (apiClient.get as Mock).mockResolvedValue({ data: mockStats });
+
+      const result = await MemoryBackendService.getLakebaseTableStats('kasal-lakebase1');
+
+      expect(apiClient.get).toHaveBeenCalledWith('/memory-backend/lakebase/table-stats', {
+        params: { instance_name: 'kasal-lakebase1' },
+      });
+      expect(result).toEqual(mockStats);
+    });
+
+    it('should return empty object on error', async () => {
+      (apiClient.get as Mock).mockRejectedValue(new Error('Not found'));
+
+      const result = await MemoryBackendService.getLakebaseTableStats();
+
+      expect(result).toEqual({});
+    });
+  });
+
+  describe('getLakebaseTableData', () => {
+    it('should fetch table data successfully', async () => {
+      const mockResponse = {
+        success: true,
+        documents: [
+          { id: 'doc1', text: 'hello', agent: 'researcher', metadata: {} },
+        ],
+        total: 1,
+      };
+      (apiClient.get as Mock).mockResolvedValue({ data: mockResponse });
+
+      const result = await MemoryBackendService.getLakebaseTableData('crew_short_term_memory', 50, 'inst1');
+
+      expect(apiClient.get).toHaveBeenCalledWith('/memory-backend/lakebase/table-data', {
+        params: { table_name: 'crew_short_term_memory', limit: 50, instance_name: 'inst1' },
+      });
+      expect(result).toEqual(mockResponse);
+    });
+
+    it('should use default limit', async () => {
+      const mockResponse = { success: true, documents: [], total: 0 };
+      (apiClient.get as Mock).mockResolvedValue({ data: mockResponse });
+
+      await MemoryBackendService.getLakebaseTableData('crew_long_term_memory');
+
+      expect(apiClient.get).toHaveBeenCalledWith('/memory-backend/lakebase/table-data', {
+        params: { table_name: 'crew_long_term_memory', limit: 50 },
+      });
+    });
+
+    it('should return fallback on error', async () => {
+      (apiClient.get as Mock).mockRejectedValue(new Error('Network error'));
+
+      const result = await MemoryBackendService.getLakebaseTableData('crew_short_term_memory');
+
+      expect(result).toEqual({ success: false, documents: [], message: 'Failed to fetch table data' });
+    });
+  });
+
+  describe('getLakebaseEntityData', () => {
+    it('should fetch entity data successfully', async () => {
+      const mockResponse = {
+        entities: [{ id: 'e1', name: 'Alice', type: 'person', attributes: {} }],
+        relationships: [{ source: 'e1', target: 'e2', type: 'knows' }],
+      };
+      (apiClient.get as Mock).mockResolvedValue({ data: mockResponse });
+
+      const result = await MemoryBackendService.getLakebaseEntityData('crew_entity_memory', 200, 'inst1');
+
+      expect(apiClient.get).toHaveBeenCalledWith('/memory-backend/lakebase/entity-data', {
+        params: { entity_table: 'crew_entity_memory', limit: 200, instance_name: 'inst1' },
+      });
+      expect(result).toEqual(mockResponse);
+    });
+
+    it('should use default parameters', async () => {
+      const mockResponse = { entities: [], relationships: [] };
+      (apiClient.get as Mock).mockResolvedValue({ data: mockResponse });
+
+      await MemoryBackendService.getLakebaseEntityData();
+
+      expect(apiClient.get).toHaveBeenCalledWith('/memory-backend/lakebase/entity-data', {
+        params: { entity_table: 'crew_entity_memory', limit: 200 },
+      });
+    });
+
+    it('should return empty data on error', async () => {
+      (apiClient.get as Mock).mockRejectedValue(new Error('Connection refused'));
+
+      const result = await MemoryBackendService.getLakebaseEntityData();
+
+      expect(result).toEqual({ entities: [], relationships: [] });
+    });
+  });
 });

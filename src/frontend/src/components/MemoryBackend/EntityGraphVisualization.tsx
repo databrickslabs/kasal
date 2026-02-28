@@ -55,6 +55,10 @@ interface EntityGraphVisualizationProps {
   indexName?: string;
   workspaceUrl?: string;
   endpointName?: string;
+  /** When set to 'lakebase', fetches entity data from the Lakebase endpoint instead of Databricks */
+  dataSource?: 'databricks' | 'lakebase';
+  /** Lakebase instance name (used when dataSource is 'lakebase') */
+  lakebaseInstanceName?: string;
 }
 
 const EntityGraphVisualization: React.FC<EntityGraphVisualizationProps> = ({
@@ -63,6 +67,8 @@ const EntityGraphVisualization: React.FC<EntityGraphVisualizationProps> = ({
   indexName,
   workspaceUrl,
   endpointName,
+  dataSource = 'databricks',
+  lakebaseInstanceName,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const { isDarkMode } = useThemeStore();
@@ -107,9 +113,14 @@ const EntityGraphVisualization: React.FC<EntityGraphVisualizationProps> = ({
 
   // Fetch entity data from backend
   const fetchEntityData = useCallback(async () => {
-    if (!indexName || !workspaceUrl || !endpointName) {
-      logger.debug('Missing required props for fetching data');
-      return;
+    if (dataSource === 'lakebase') {
+      // Lakebase mode — no index/workspace/endpoint needed
+      logger.debug('Fetching entity data from Lakebase');
+    } else {
+      if (!indexName || !workspaceUrl || !endpointName) {
+        logger.debug('Missing required props for fetching data');
+        return;
+      }
     }
 
     logger.debug('Fetching entity data');
@@ -117,13 +128,20 @@ const EntityGraphVisualization: React.FC<EntityGraphVisualizationProps> = ({
     setError(null);
 
     try {
-      const response = await apiClient.get('/memory-backend/databricks/entity-data', {
-        params: {
-          index_name: indexName,
-          workspace_url: workspaceUrl,
-          endpoint_name: endpointName,
-        },
-      });
+      let response;
+      if (dataSource === 'lakebase') {
+        const params: Record<string, string | number> = { entity_table: 'crew_entity_memory', limit: 200 };
+        if (lakebaseInstanceName) params.instance_name = lakebaseInstanceName;
+        response = await apiClient.get('/memory-backend/lakebase/entity-data', { params });
+      } else {
+        response = await apiClient.get('/memory-backend/databricks/entity-data', {
+          params: {
+            index_name: indexName,
+            workspace_url: workspaceUrl,
+            endpoint_name: endpointName,
+          },
+        });
+      }
 
       const { entities, relationships } = response.data;
       logger.debug(`Received ${entities.length} entities and ${relationships.length} relationships`);
@@ -164,7 +182,7 @@ const EntityGraphVisualization: React.FC<EntityGraphVisualizationProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [indexName, workspaceUrl, endpointName, setGraphData, setLoading, setError]);
+  }, [dataSource, lakebaseInstanceName, indexName, workspaceUrl, endpointName, setGraphData, setLoading, setError]);
 
   // Fetch data when dialog opens
   useEffect(() => {
