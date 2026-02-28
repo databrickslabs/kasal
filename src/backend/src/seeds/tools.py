@@ -75,7 +75,7 @@ def get_tool_configs():
         "35": {
             "result_as_answer": False,
             "max_calls": 5,
-            "max_result_rows": 50
+            "max_result_rows": 200
         },  # GenieTool
         "71": {
             "result_as_answer": True,
