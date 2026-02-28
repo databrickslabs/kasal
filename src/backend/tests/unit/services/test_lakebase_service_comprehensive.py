@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from unittest.mock import Mock, MagicMock, patch, AsyncMock
 from typing import Optional, Dict, Any
@@ -572,3 +574,151 @@ class TestLakebaseServiceTestConnection:
         assert result["success"] is False
         assert "error_code" not in result
         assert result["error"] == "Connection refused"
+
+
+class TestMigrateExistingDataStreamSequenceReset:
+    """Tests for the sequence reset step inside migrate_existing_data_stream."""
+
+    def _build_service(self, mock_lb_engine):
+        """Create a LakebaseService with mocked sub-services."""
+        svc = LakebaseService.__new__(LakebaseService)
+        conn_svc = MagicMock()
+        # Async methods
+        conn_svc.generate_credentials = AsyncMock()
+        conn_svc.get_username = AsyncMock(return_value="user@example.com")
+        # Sync methods stay as MagicMock
+        conn_svc.create_lakebase_engine_sync = MagicMock(return_value=mock_lb_engine)
+        svc.connection_service = conn_svc
+        svc.schema_service = MagicMock()
+        svc.permission_service = MagicMock()
+        svc.config_repository = AsyncMock()
+        svc.session = MagicMock()
+        svc.user_token = "tok"
+        svc.user_email = "user@example.com"
+        svc.migration_service = MagicMock()
+        return svc
+
+    async def _collect_events(self, async_gen):
+        """Consume all events from an async generator."""
+        events = []
+        async for event in async_gen:
+            events.append(event)
+        return events
+
+    def _make_lb_engine(self):
+        """Build a mock Lakebase engine with connect/begin context managers."""
+        mock_lb_engine = MagicMock()
+        mock_verify_conn = MagicMock()
+        mock_verify_result = MagicMock()
+        mock_verify_result.scalar.return_value = "user@example.com"
+        mock_verify_conn.execute.return_value = mock_verify_result
+        mock_verify_conn.__enter__ = MagicMock(return_value=mock_verify_conn)
+        mock_verify_conn.__exit__ = MagicMock(return_value=False)
+        mock_lb_engine.connect.return_value = mock_verify_conn
+        mock_lb_begin = MagicMock()
+        mock_lb_begin.__enter__ = MagicMock(return_value=mock_lb_begin)
+        mock_lb_begin.__exit__ = MagicMock(return_value=False)
+        mock_lb_engine.begin.return_value = mock_lb_begin
+        return mock_lb_engine
+
+    def _make_mig_service(self, reset_return=None, reset_side_effect=None):
+        """Build a mock migration service for single-table migration."""
+        mock_mig = MagicMock()
+        mock_mig.get_table_list_sync.return_value = ["users"]
+        mock_mig.get_sorted_tables.return_value = ["users"]
+        mock_mig.get_migration_waves.return_value = [["users"]]
+        mock_mig.migrate_table_data_sync.return_value = (5, None)
+        if reset_side_effect:
+            mock_mig.reset_sequences_sync.side_effect = reset_side_effect
+        elif reset_return is not None:
+            mock_mig.reset_sequences_sync.return_value = reset_return
+        else:
+            mock_mig.reset_sequences_sync.return_value = [("users_id_seq", True, None)]
+        return mock_mig
+
+    def _setup_service_and_mocks(self, MockMigSvc, mock_create_engine, mock_settings, mock_mig):
+        """Wire up service, credential mock, engine, and migration service."""
+        mock_lb_engine = self._make_lb_engine()
+        svc = self._build_service(mock_lb_engine)
+
+        mock_cred = MagicMock()
+        mock_cred.token = "test-token"
+        svc.connection_service.generate_credentials = AsyncMock(return_value=mock_cred)
+
+        mock_settings.DATABASE_URI = "sqlite:///test.db"
+        mock_create_engine.return_value = MagicMock()
+        MockMigSvc.return_value = mock_mig
+
+        svc.schema_service.create_schema_sync = MagicMock()
+        svc.schema_service.create_tables_sync_stream = MagicMock(
+            return_value=iter([{"type": "success", "message": "ok", "table": "users", "success": True}])
+        )
+        return svc, mock_lb_engine
+
+    @pytest.mark.asyncio
+    @patch("src.services.lakebase_service.LAKEBASE_AVAILABLE", True)
+    @patch("src.services.lakebase_service.settings")
+    @patch("src.services.lakebase_service.create_engine")
+    @patch("src.services.lakebase_service.LakebaseMigrationService")
+    async def test_sequence_reset_called_after_migration(
+        self, MockMigSvc, mock_create_engine, mock_settings
+    ):
+        """After successful migration, reset_sequences_sync should be called."""
+        mock_mig = self._make_mig_service(reset_return=[("users_id_seq", True, None)])
+        svc, mock_lb_engine = self._setup_service_and_mocks(
+            MockMigSvc, mock_create_engine, mock_settings, mock_mig
+        )
+
+        events = await self._collect_events(
+            svc.migrate_existing_data_stream("inst", "https://example.com", migrate_data=True)
+        )
+        messages = [e.get("message", "") for e in events]
+
+        mock_mig.reset_sequences_sync.assert_called_once_with(mock_lb_engine, ["users"])
+        assert any("Reset 1 database sequence" in m for m in messages)
+
+    @pytest.mark.asyncio
+    @patch("src.services.lakebase_service.LAKEBASE_AVAILABLE", True)
+    @patch("src.services.lakebase_service.settings")
+    @patch("src.services.lakebase_service.create_engine")
+    @patch("src.services.lakebase_service.LakebaseMigrationService")
+    async def test_sequence_reset_error_yields_warning(
+        self, MockMigSvc, mock_create_engine, mock_settings
+    ):
+        """If reset_sequences_sync raises, a warning event should be yielded."""
+        mock_mig = self._make_mig_service(reset_side_effect=Exception("connection lost"))
+        svc, _ = self._setup_service_and_mocks(
+            MockMigSvc, mock_create_engine, mock_settings, mock_mig
+        )
+
+        events = await self._collect_events(
+            svc.migrate_existing_data_stream("inst", "https://example.com", migrate_data=True)
+        )
+        messages = [e.get("message", "") for e in events]
+
+        assert any("Sequence reset encountered an error" in m for m in messages)
+
+    @pytest.mark.asyncio
+    @patch("src.services.lakebase_service.LAKEBASE_AVAILABLE", True)
+    @patch("src.services.lakebase_service.settings")
+    @patch("src.services.lakebase_service.create_engine")
+    @patch("src.services.lakebase_service.LakebaseMigrationService")
+    async def test_sequence_reset_reports_failed_sequences(
+        self, MockMigSvc, mock_create_engine, mock_settings
+    ):
+        """Failed individual sequences should be reported as warnings."""
+        mock_mig = self._make_mig_service(reset_return=[
+            ("users_id_seq", True, None),
+            ("bad_id_seq", False, "table not found"),
+        ])
+        svc, _ = self._setup_service_and_mocks(
+            MockMigSvc, mock_create_engine, mock_settings, mock_mig
+        )
+
+        events = await self._collect_events(
+            svc.migrate_existing_data_stream("inst", "https://example.com", migrate_data=True)
+        )
+        messages = [e.get("message", "") for e in events]
+
+        assert any("Reset 1 database sequence" in m for m in messages)
+        assert any("Could not reset sequence bad_id_seq" in m for m in messages)

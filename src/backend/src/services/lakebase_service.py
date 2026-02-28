@@ -980,6 +980,28 @@ class LakebaseService(BaseService):
                                 in_flight_names = sorted(futures[f] for f in pending)
                                 logger.info(f"Wave {wave_idx + 1}: {len(pending)} tables still in-flight: {in_flight_names}")
 
+            # Reset PostgreSQL sequences after data migration
+            # (bulk inserts with explicit IDs leave sequences out of sync)
+            if migrated_tables:
+                yield {"type": "progress", "message": "🔄 Resetting database sequences..."}
+                try:
+                    loop = asyncio.get_event_loop()
+                    seq_results = await loop.run_in_executor(
+                        None,
+                        self.migration_service.reset_sequences_sync,
+                        lakebase_engine,
+                        [t["table"] for t in migrated_tables]
+                    )
+                    reset_count = sum(1 for _, ok, _ in seq_results if ok)
+                    if reset_count > 0:
+                        yield {"type": "success", "message": f"✅ Reset {reset_count} database sequence(s)"}
+                    failed_seqs = [(n, e) for n, ok, e in seq_results if not ok]
+                    for seq_name, err in failed_seqs:
+                        yield {"type": "warning", "message": f"⚠️ Could not reset sequence {seq_name}: {err}"}
+                except Exception as e:
+                    logger.error(f"Error resetting sequences: {e}")
+                    yield {"type": "warning", "message": f"⚠️ Sequence reset encountered an error: {e}"}
+
             # Dispose engines
             source_engine.dispose()
             lakebase_engine.dispose()
