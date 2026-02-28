@@ -697,13 +697,18 @@ class LakebaseService(BaseService):
 
             # Handle schema recreation if requested
             if recreate_schema:
-                with lakebase_engine.begin() as conn:
-                    try:
-                        yield {"type": "progress", "message": "🗑️ Dropping existing kasal schema..."}
+                yield {"type": "progress", "message": "🗑️ Dropping existing kasal schema..."}
+                try:
+                    with lakebase_engine.begin() as conn:
+                        conn.execute(text(f"ALTER SCHEMA kasal OWNER TO \"{user_email}\""))
+                except Exception:
+                    pass  # Schema may not exist yet — that's fine
+                try:
+                    with lakebase_engine.begin() as conn:
                         conn.execute(text("DROP SCHEMA IF EXISTS kasal CASCADE"))
-                        yield {"type": "success", "message": "✅ Dropped kasal schema"}
-                    except Exception as drop_error:
-                        yield {"type": "warning", "message": f"Could not drop schema (may be owned by different role), continuing..."}
+                    yield {"type": "success", "message": "✅ Dropped kasal schema"}
+                except Exception as drop_error:
+                    yield {"type": "warning", "message": f"Could not drop schema: {drop_error}. Continuing..."}
 
             # Create schema using schema service
             with lakebase_engine.begin() as conn:
@@ -1316,9 +1321,21 @@ class LakebaseService(BaseService):
 
         except Exception as e:
             logger.error(f"Connection test failed: {e}")
+            error_msg = str(e)
+
+            # Detect missing postgres scope — the SPN needs a Database resource added to the App
+            if "required scopes: postgres" in error_msg.lower():
+                client_id = os.environ.get("DATABRICKS_CLIENT_ID", "")
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "error_code": "MISSING_DATABASE_RESOURCE",
+                    "client_id": client_id,
+                }
+
             return {
                 "success": False,
-                "error": str(e)
+                "error": error_msg,
             }
 
     async def get_workspace_info(self) -> Dict[str, Any]:

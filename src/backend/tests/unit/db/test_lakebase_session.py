@@ -35,6 +35,7 @@ class TestLakebaseSessionFactoryInit:
         assert factory.instance_name == "kasal-lakebase"
         assert factory.user_token is None
         assert factory.user_email is None
+        assert factory.group_id is None
         assert factory._workspace_client is None
         assert factory._engine is None
         assert factory._session_factory is None
@@ -49,10 +50,12 @@ class TestLakebaseSessionFactoryInit:
             instance_name="my-instance",
             user_token="tok-abc",
             user_email="user@example.com",
+            group_id="group-123",
         )
         assert factory.instance_name == "my-instance"
         assert factory.user_token == "tok-abc"
         assert factory.user_email == "user@example.com"
+        assert factory.group_id == "group-123"
 
     def test_token_holder_is_mutable_dict(self):
         """Test token holder is a fresh mutable dict on each instance."""
@@ -71,20 +74,21 @@ class TestGetWorkspaceClient:
 
     @pytest.mark.asyncio
     async def test_creates_client_on_first_call(self):
-        """Test that a workspace client is created via get_workspace_client."""
+        """Test that a workspace client is created via get_workspace_client with user_token=None (PAT only)."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
         factory = LakebaseSessionFactory(user_token="tok-123")
         mock_client = MagicMock()
 
         with patch(
-            "src.db.lakebase_session.get_workspace_client",
+            "src.utils.databricks_auth.get_workspace_client",
             new_callable=AsyncMock,
             return_value=mock_client,
         ) as mock_get:
             result = await factory._get_workspace_client()
             assert result is mock_client
-            mock_get.assert_awaited_once_with(user_token="tok-123")
+            # OBO is never used — always passes user_token=None
+            mock_get.assert_awaited_once_with(user_token=None, group_id=None)
 
     @pytest.mark.asyncio
     async def test_returns_cached_client_on_subsequent_calls(self):
@@ -95,7 +99,7 @@ class TestGetWorkspaceClient:
         mock_client = MagicMock()
 
         with patch(
-            "src.db.lakebase_session.get_workspace_client",
+            "src.utils.databricks_auth.get_workspace_client",
             new_callable=AsyncMock,
             return_value=mock_client,
         ) as mock_get:
@@ -113,12 +117,13 @@ class TestGetWorkspaceClient:
         factory = LakebaseSessionFactory()
 
         with patch(
-            "src.db.lakebase_session.get_workspace_client",
+            "src.utils.databricks_auth.get_workspace_client",
             new_callable=AsyncMock,
             return_value=None,
-        ):
+        ) as mock_get:
             with pytest.raises(ValueError, match="Failed to create workspace client"):
                 await factory._get_workspace_client()
+            mock_get.assert_awaited_once_with(user_token=None, group_id=None)
 
     @pytest.mark.asyncio
     async def test_raises_on_exception(self):
@@ -128,12 +133,79 @@ class TestGetWorkspaceClient:
         factory = LakebaseSessionFactory()
 
         with patch(
-            "src.db.lakebase_session.get_workspace_client",
+            "src.utils.databricks_auth.get_workspace_client",
             new_callable=AsyncMock,
             side_effect=RuntimeError("connection failed"),
-        ):
+        ) as mock_get:
             with pytest.raises(RuntimeError, match="connection failed"):
                 await factory._get_workspace_client()
+            mock_get.assert_awaited_once_with(user_token=None, group_id=None)
+
+    @pytest.mark.asyncio
+    async def test_uses_spn_oauth_when_env_vars_set(self):
+        """Test that SPN OAuth is preferred when all env vars are present."""
+        from src.db.lakebase_session import LakebaseSessionFactory
+
+        factory = LakebaseSessionFactory()
+        env = {
+            "DATABRICKS_CLIENT_ID": "test-client-id",
+            "DATABRICKS_CLIENT_SECRET": "test-secret",
+            "DATABRICKS_HOST": "https://example.com",
+        }
+        mock_ws = MagicMock()
+
+        with patch.dict(os.environ, env, clear=False), \
+             patch("src.db.lakebase_session.WorkspaceClient", return_value=mock_ws) as mock_cls:
+            result = await factory._get_workspace_client()
+
+            assert result is mock_ws
+            assert factory._workspace_client is mock_ws
+            mock_cls.assert_called_once_with(
+                host="https://example.com",
+                client_id="test-client-id",
+                client_secret="test-secret",
+            )
+
+    @pytest.mark.asyncio
+    async def test_spn_oauth_is_cached(self):
+        """Test that SPN workspace client is cached on subsequent calls."""
+        from src.db.lakebase_session import LakebaseSessionFactory
+
+        factory = LakebaseSessionFactory()
+        env = {
+            "DATABRICKS_CLIENT_ID": "test-client-id",
+            "DATABRICKS_CLIENT_SECRET": "test-secret",
+            "DATABRICKS_HOST": "https://example.com",
+        }
+        mock_ws = MagicMock()
+
+        with patch.dict(os.environ, env, clear=False), \
+             patch("src.db.lakebase_session.WorkspaceClient", return_value=mock_ws) as mock_cls:
+            first = await factory._get_workspace_client()
+            second = await factory._get_workspace_client()
+
+            assert first is second
+            mock_cls.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_pat_when_spn_env_incomplete(self):
+        """Test fallback to PAT when SPN env vars are incomplete (OBO never used)."""
+        from src.db.lakebase_session import LakebaseSessionFactory
+
+        factory = LakebaseSessionFactory(user_token="tok-abc")
+        mock_client = MagicMock()
+
+        # Only CLIENT_ID set, no SECRET — should fall back to PAT
+        with patch.dict(os.environ, {"DATABRICKS_CLIENT_ID": "id"}, clear=True), \
+             patch(
+                 "src.utils.databricks_auth.get_workspace_client",
+                 new_callable=AsyncMock,
+                 return_value=mock_client,
+             ) as mock_get:
+            result = await factory._get_workspace_client()
+            assert result is mock_client
+            # OBO is never used — always passes user_token=None
+            mock_get.assert_awaited_once_with(user_token=None, group_id=None)
 
 
 # ---------------------------------------------------------------------------
@@ -548,6 +620,8 @@ class TestGetSession:
 
         factory._engine = MagicMock()
         factory._session_factory = mock_sf
+        # Track the current event loop so _is_engine_loop_stale() returns False
+        factory._engine_loop_id = id(asyncio.get_running_loop())
 
         async with factory.get_session() as session:
             assert session is mock_session
@@ -631,6 +705,7 @@ class TestGetSession:
 
         factory._engine = MagicMock()
         factory._session_factory = mock_sf
+        factory._engine_loop_id = id(asyncio.get_running_loop())
 
         with patch.object(factory, "create_engine", new_callable=AsyncMock) as mock_ce:
             with pytest.raises(Exception, match="authentication failed"):
@@ -655,6 +730,7 @@ class TestGetSession:
 
         factory._engine = MagicMock()
         factory._session_factory = mock_sf
+        factory._engine_loop_id = id(asyncio.get_running_loop())
 
         with patch.object(factory, "create_engine", new_callable=AsyncMock):
             with pytest.raises(Exception, match="password expired"):
@@ -677,6 +753,7 @@ class TestGetSession:
 
         factory._engine = MagicMock()
         factory._session_factory = mock_sf
+        factory._engine_loop_id = id(asyncio.get_running_loop())
 
         with patch.object(factory, "create_engine", new_callable=AsyncMock) as mock_ce:
             with pytest.raises(ValueError, match="some data error"):
@@ -701,6 +778,7 @@ class TestGetSession:
 
         factory._engine = MagicMock()
         factory._session_factory = mock_sf
+        factory._engine_loop_id = id(asyncio.get_running_loop())
 
         # GeneratorExit is a BaseException, not an Exception.
         # The code catches it explicitly. We verify the code path by
@@ -1004,7 +1082,7 @@ class TestGetLakebaseSession:
                 async with mod.get_lakebase_session() as session:
                     assert session is mock_session
 
-                MockFactory.assert_called_once_with("env-instance", None, None)
+                MockFactory.assert_called_once_with("env-instance", user_email=None, group_id=None)
         finally:
             mod._lakebase_factory = original
 
@@ -1030,7 +1108,6 @@ class TestGetLakebaseSession:
             ) as MockFactory:
                 mock_factory_instance = MagicMock()
                 mock_factory_instance.instance_name = "new-instance"
-                mock_factory_instance.user_token = None
                 mock_factory_instance.user_email = None
                 mock_factory_instance.get_session = MagicMock(return_value=mock_inner_ctx)
                 MockFactory.return_value = mock_factory_instance
@@ -1038,13 +1115,13 @@ class TestGetLakebaseSession:
                 async with mod.get_lakebase_session(instance_name="new-instance") as session:
                     pass
 
-                MockFactory.assert_called_once_with("new-instance", None, None)
+                MockFactory.assert_called_once_with("new-instance", user_email=None, group_id=None)
         finally:
             mod._lakebase_factory = original
 
     @pytest.mark.asyncio
-    async def test_token_refresh_triggers_engine_recreation(self):
-        """Test that providing a new token triggers create_engine."""
+    async def test_user_token_is_ignored_for_auth(self):
+        """Test that user_token parameter is accepted but does not trigger engine recreation."""
         import src.db.lakebase_session as mod
 
         mock_session = AsyncMock()
@@ -1054,7 +1131,6 @@ class TestGetLakebaseSession:
 
         mock_factory = MagicMock()
         mock_factory.instance_name = "kasal-lakebase"
-        mock_factory.user_token = "old-token"
         mock_factory.user_email = None
         mock_factory.get_session = MagicMock(return_value=mock_inner_ctx)
         mock_factory.create_engine = AsyncMock()
@@ -1063,11 +1139,11 @@ class TestGetLakebaseSession:
         try:
             mod._lakebase_factory = mock_factory
 
-            async with mod.get_lakebase_session(user_token="new-token") as session:
+            # user_token is accepted but NOT used for auth — no engine recreation
+            async with mod.get_lakebase_session(user_token="some-token") as session:
                 pass
 
-            mock_factory.create_engine.assert_awaited_once()
-            assert mock_factory.user_token == "new-token"
+            mock_factory.create_engine.assert_not_awaited()
         finally:
             mod._lakebase_factory = original
 
@@ -1157,7 +1233,7 @@ class TestGetLakebaseSession:
                 async with mod.get_lakebase_session() as session:
                     pass
 
-                MockFactory.assert_called_once_with("custom-from-env", None, None)
+                MockFactory.assert_called_once_with("custom-from-env", user_email=None, group_id=None)
         finally:
             mod._lakebase_factory = original
 
@@ -1190,7 +1266,7 @@ class TestGetLakebaseSession:
                 async with mod.get_lakebase_session() as session:
                     pass
 
-                MockFactory.assert_called_once_with("kasal-lakebase", None, None)
+                MockFactory.assert_called_once_with("kasal-lakebase", user_email=None, group_id=None)
         finally:
             mod._lakebase_factory = original
 

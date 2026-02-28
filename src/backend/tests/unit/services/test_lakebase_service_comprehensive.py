@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import Mock, MagicMock, patch, AsyncMock
 from typing import Optional, Dict, Any
 
 # Test LakebaseService - based on actual code inspection
@@ -504,3 +504,71 @@ class TestLakebaseCrossImplementationConsistency:
     @pytest.mark.parametrize("email", ["user@example.com", "a+b@c.co.uk"])
     def test_quote_pg_role_consistent(self, email):
         assert permission_quote_pg_role(email) == schema_quote_pg_role(email)
+
+
+# ---------------------------------------------------------------------------
+# LakebaseService.test_connection — scope error detection
+# ---------------------------------------------------------------------------
+class TestLakebaseServiceTestConnection:
+    """Tests for test_connection error handling."""
+
+    @pytest.mark.asyncio
+    async def test_scope_error_returns_missing_database_resource(self):
+        """test_connection should return MISSING_DATABASE_RESOURCE for postgres scope errors."""
+        from src.services.lakebase_service import LakebaseService
+
+        svc = LakebaseService.__new__(LakebaseService)
+        svc.connection_service = MagicMock()
+
+        mock_ws = MagicMock()
+        mock_ws.database.get_database_instance.side_effect = Exception(
+            "Provided OAuth token does not have required scopes: postgres"
+        )
+
+        with patch.object(svc, "get_workspace_client", new_callable=AsyncMock, return_value=mock_ws), \
+             patch.dict("os.environ", {"DATABRICKS_CLIENT_ID": "test-spn-id"}):
+            result = await svc.test_connection("my-instance")
+
+        assert result["success"] is False
+        assert result["error_code"] == "MISSING_DATABASE_RESOURCE"
+        assert result["client_id"] == "test-spn-id"
+        assert "required scopes: postgres" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_scope_error_without_client_id(self):
+        """test_connection should return empty client_id when env var not set."""
+        from src.services.lakebase_service import LakebaseService
+
+        svc = LakebaseService.__new__(LakebaseService)
+        svc.connection_service = MagicMock()
+
+        mock_ws = MagicMock()
+        mock_ws.database.get_database_instance.side_effect = Exception(
+            "Provided OAuth token does not have required scopes: postgres"
+        )
+
+        with patch.object(svc, "get_workspace_client", new_callable=AsyncMock, return_value=mock_ws), \
+             patch.dict("os.environ", {}, clear=True):
+            result = await svc.test_connection("my-instance")
+
+        assert result["success"] is False
+        assert result["error_code"] == "MISSING_DATABASE_RESOURCE"
+        assert result["client_id"] == ""
+
+    @pytest.mark.asyncio
+    async def test_generic_error_has_no_error_code(self):
+        """test_connection should NOT set error_code for non-scope errors."""
+        from src.services.lakebase_service import LakebaseService
+
+        svc = LakebaseService.__new__(LakebaseService)
+        svc.connection_service = MagicMock()
+
+        mock_ws = MagicMock()
+        mock_ws.database.get_database_instance.side_effect = Exception("Connection refused")
+
+        with patch.object(svc, "get_workspace_client", new_callable=AsyncMock, return_value=mock_ws):
+            result = await svc.test_connection("my-instance")
+
+        assert result["success"] is False
+        assert "error_code" not in result
+        assert result["error"] == "Connection refused"

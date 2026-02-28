@@ -1112,7 +1112,10 @@ def is_scope_error(error: Exception) -> bool:
     ])
 
 
-async def get_workspace_client(user_token: Optional[str] = None) -> Optional[WorkspaceClient]:
+async def get_workspace_client(
+    user_token: Optional[str] = None,
+    group_id: Optional[str] = None,
+) -> Optional[WorkspaceClient]:
     """
     Get a Databricks WorkspaceClient with appropriate authentication.
 
@@ -1126,6 +1129,8 @@ async def get_workspace_client(user_token: Optional[str] = None) -> Optional[Wor
     Args:
         user_token: Optional user access token for OBO authentication.
                    If None, skips OBO and uses PAT/SPN (service-level auth).
+        group_id: Optional group_id for PAT lookup. Useful for background
+                 threads where UserContext is not available.
 
     Returns:
         Optional[WorkspaceClient]: Configured workspace client
@@ -1136,10 +1141,13 @@ async def get_workspace_client(user_token: Optional[str] = None) -> Optional[Wor
 
         # Service-level (no OBO, uses PAT/SPN)
         client = await get_workspace_client(user_token=None)
+
+        # Background thread with explicit group_id for PAT lookup
+        client = await get_workspace_client(user_token=None, group_id="my_group")
     """
     try:
         # Get authentication context using unified chain
-        auth = await get_auth_context(user_token=user_token)
+        auth = await get_auth_context(user_token=user_token, group_id=group_id)
         if not auth:
             logger.error("Failed to get authentication context")
             return None

@@ -4,12 +4,18 @@ Lakebase session factory for managing database connections when using Databricks
 Uses the do_connect event pattern per Databricks Apps Cookbook for token injection,
 with a background task that refreshes tokens every 50 minutes (tokens expire at 60 min).
 The PG username is the SPN client_id (DATABRICKS_CLIENT_ID env var).
+
+Authentication for Lakebase memory operations:
+  - Deployed (Databricks Apps): SPN (client_id + client_secret)
+  - Local dev: PAT (Personal Access Token from API Keys or environment)
+  - OBO is NEVER used for Lakebase connections
 """
 import os
 import uuid
 import time
 import asyncio
 import logging
+import threading
 from typing import AsyncGenerator, Optional
 from contextlib import asynccontextmanager
 
@@ -18,7 +24,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from databricks.sdk import WorkspaceClient
 
 from src.core.logger import LoggerManager
-from src.utils.databricks_auth import get_workspace_client
 
 logger_manager = LoggerManager.get_instance()
 logger = logging.getLogger(__name__)
@@ -30,27 +35,35 @@ TOKEN_REFRESH_INTERVAL_SECONDS = 50 * 60
 class LakebaseSessionFactory:
     """Factory for creating Lakebase database sessions with do_connect token injection."""
 
-    def __init__(self, instance_name: str = "kasal-lakebase", user_token: Optional[str] = None, user_email: Optional[str] = None):
+    def __init__(self, instance_name: str = "kasal-lakebase", user_token: Optional[str] = None, user_email: Optional[str] = None, group_id: Optional[str] = None):
         """
         Initialize Lakebase session factory.
 
         Args:
             instance_name: Name of the Lakebase instance
-            user_token: Optional user token for authentication
+            user_token: Unused (kept for API compat). Auth uses SPN or PAT only.
             user_email: Optional user email for Lakebase authentication
+            group_id: Optional group_id for PAT lookup in background threads
+                     where UserContext is not available.
         """
         self.instance_name = instance_name
         self.user_token = user_token
         self.user_email = user_email
+        self.group_id = group_id
         self._workspace_client = None
         self._engine = None
         self._session_factory = None
         self._token_holder: dict = {"token": "", "refreshed_at": 0.0}
         self._refresh_task: Optional[asyncio.Task] = None
+        self._engine_loop_id: Optional[int] = None  # Track which event loop owns the engine
 
     async def _get_workspace_client(self) -> WorkspaceClient:
         """
-        Get or create Databricks workspace client with proper authentication hierarchy.
+        Get or create Databricks workspace client for Lakebase.
+
+        Authentication priority (OBO is NEVER used):
+        1. SPN OAuth (client credentials) — for deployed Databricks Apps
+        2. PAT — from API Keys Service or Databricks CLI profile
 
         Returns:
             WorkspaceClient configured with appropriate authentication
@@ -59,12 +72,36 @@ class LakebaseSessionFactory:
             return self._workspace_client
 
         try:
-            self._workspace_client = await get_workspace_client(user_token=self.user_token)
+            # Priority 1: SPN OAuth — required when deployed as a Databricks App
+            client_id = os.getenv("DATABRICKS_CLIENT_ID")
+            client_secret = os.getenv("DATABRICKS_CLIENT_SECRET")
+            host = os.getenv("DATABRICKS_HOST")
+
+            if client_id and client_secret and host:
+                logger.info("[LAKEBASE SESSION] Using SPN OAuth (client credentials)")
+                self._workspace_client = WorkspaceClient(
+                    host=host,
+                    client_id=client_id,
+                    client_secret=client_secret
+                )
+                logger.info("[LAKEBASE SESSION] SPN WorkspaceClient created successfully")
+                return self._workspace_client
+
+            # Priority 2: PAT — pass user_token=None to skip OBO entirely
+            # Pass group_id explicitly so PAT lookup works in background threads
+            # where UserContext is not available.
+            logger.info(f"[LAKEBASE SESSION] No SPN credentials, trying PAT (local dev, group_id={self.group_id})")
+            from src.utils.databricks_auth import get_workspace_client
+            self._workspace_client = await get_workspace_client(user_token=None, group_id=self.group_id)
 
             if not self._workspace_client:
-                raise ValueError("Failed to create workspace client - no authentication available")
+                raise ValueError(
+                    "Failed to create workspace client for Lakebase. "
+                    "For deployed apps: set DATABRICKS_HOST, DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET. "
+                    "For local dev: configure a PAT via API Keys (Configuration → API Keys) or Databricks CLI profile."
+                )
 
-            logger.info("Successfully created workspace client using centralized auth")
+            logger.info("[LAKEBASE SESSION] Local dev WorkspaceClient created via PAT")
             return self._workspace_client
 
         except Exception as e:
@@ -185,14 +222,33 @@ class LakebaseSessionFactory:
         try:
             # Dispose of old engine if exists
             if self._engine:
-                await self._engine.dispose()
+                try:
+                    await self._engine.dispose()
+                except Exception:
+                    pass  # Engine may belong to a closed event loop
 
             # Cancel old refresh task if exists
             if self._refresh_task and not self._refresh_task.done():
                 self._refresh_task.cancel()
 
+            # Reset cached workspace client to force re-authentication
+            self._workspace_client = None
+
             # Get fresh connection string (also refreshes token into holder)
             connection_url = await self.get_connection_string()
+
+            # Check if NullPool is requested (crew threads set USE_NULLPOOL=true)
+            use_nullpool = os.environ.get("USE_NULLPOOL", "").lower() == "true"
+
+            pool_kwargs = {}
+            if use_nullpool:
+                from sqlalchemy.pool import NullPool
+                pool_kwargs["poolclass"] = NullPool
+                logger.info("[LAKEBASE SESSION] Using NullPool (crew thread mode)")
+            else:
+                pool_kwargs["pool_size"] = 5
+                pool_kwargs["max_overflow"] = 10
+                pool_kwargs["pool_recycle"] = 3600  # Aligned with 1-hour token expiry
 
             # Create engine with pool_pre_ping=False (required for do_connect pattern)
             self._engine = create_async_engine(
@@ -200,16 +256,14 @@ class LakebaseSessionFactory:
                 echo=False,
                 future=True,
                 pool_pre_ping=False,   # Required: conflicts with do_connect token injection
-                pool_size=5,
-                max_overflow=10,
-                pool_recycle=3600,      # Aligned with 1-hour token expiry
                 connect_args={
                     "ssl": "require",
                     "server_settings": {
                         "jit": "off",
                         "search_path": "kasal"
                     }
-                }
+                },
+                **pool_kwargs
             )
 
             # Attach do_connect event listener to inject token from holder
@@ -227,14 +281,33 @@ class LakebaseSessionFactory:
                 class_=AsyncSession
             )
 
-            # Start background token refresh task
-            self._refresh_task = asyncio.create_task(self._schedule_token_refresh())
+            # Track which event loop owns this engine
+            try:
+                self._engine_loop_id = id(asyncio.get_running_loop())
+            except RuntimeError:
+                self._engine_loop_id = None
 
-            logger.info(f"Created Lakebase engine with do_connect token injection for instance: {self.instance_name}")
+            # Start background token refresh task (only for long-lived pools)
+            if not use_nullpool:
+                self._refresh_task = asyncio.create_task(self._schedule_token_refresh())
+            else:
+                self._refresh_task = None
+
+            logger.info(f"Created Lakebase engine for instance: {self.instance_name} (nullpool={use_nullpool})")
 
         except Exception as e:
             logger.error(f"Error creating Lakebase engine: {e}")
             raise
+
+    def _is_engine_loop_stale(self) -> bool:
+        """Check if the engine was created in a different event loop."""
+        if not self._engine or self._engine_loop_id is None:
+            return True
+        try:
+            current_loop_id = id(asyncio.get_running_loop())
+            return current_loop_id != self._engine_loop_id
+        except RuntimeError:
+            return True
 
     @asynccontextmanager
     async def get_session(self):
@@ -245,9 +318,11 @@ class LakebaseSessionFactory:
         Yields:
             AsyncSession connected to Lakebase
         """
-        # Create engine if not exists or refresh if needed
-        if not self._engine or not self._session_factory:
+        # Recreate engine if not exists, or if event loop changed (crew thread)
+        if not self._engine or not self._session_factory or self._is_engine_loop_stale():
             try:
+                if self._is_engine_loop_stale():
+                    logger.info("[LAKEBASE SESSION] Event loop changed, recreating engine")
                 await self.create_engine()
             except Exception as e:
                 logger.error(f"Error creating Lakebase session: {e}")
@@ -283,14 +358,21 @@ class LakebaseSessionFactory:
             self._refresh_task = None
 
         if self._engine:
-            await self._engine.dispose()
+            try:
+                await self._engine.dispose()
+            except Exception:
+                pass  # Engine may belong to a closed event loop
             self._engine = None
             self._session_factory = None
+            self._engine_loop_id = None
             logger.info(f"Disposed Lakebase engine for instance {self.instance_name}")
 
 
-# Global instance for reuse
+# Global instance for the main event loop (API endpoints)
 _lakebase_factory: Optional[LakebaseSessionFactory] = None
+
+# Thread-local factory for crew threads (each thread gets its own factory/engine)
+_thread_local = threading.local()
 
 
 async def dispose_lakebase_factory() -> None:
@@ -318,22 +400,33 @@ async def dispose_lakebase_factory() -> None:
         logger.debug("No Lakebase factory to dispose")
 
 
+def _is_crew_thread() -> bool:
+    """Check if we're running in a crew thread (USE_NULLPOOL indicates sync-async bridge)."""
+    return os.environ.get("USE_NULLPOOL", "").lower() == "true"
+
+
 @asynccontextmanager
 async def get_lakebase_session(
     instance_name: str = None,
     user_token: Optional[str] = None,
-    user_email: Optional[str] = None
+    user_email: Optional[str] = None,
+    group_id: Optional[str] = None,
 ) -> AsyncGenerator[AsyncSession, None]:
     """
     Get a Lakebase database session with proper transaction management.
 
-    This function handles the complete session lifecycle including
-    commit, rollback, and close operations.
+    Authentication: Uses SPN (deployed) or PAT (local dev). OBO is never used.
+    The user_token parameter is accepted for API compatibility but not used for auth.
+
+    For crew threads (USE_NULLPOOL=true), uses a thread-local factory to avoid
+    event loop conflicts with the main application's factory.
 
     Args:
         instance_name: Optional instance name override
-        user_token: Optional user token for authentication
+        user_token: Accepted for API compat, not used for authentication
         user_email: Optional user email for Lakebase authentication
+        group_id: Optional group_id for PAT lookup in background threads
+                 where UserContext is not available.
 
     Yields:
         AsyncSession connected to Lakebase
@@ -344,15 +437,36 @@ async def get_lakebase_session(
     if not instance_name:
         instance_name = os.getenv("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
 
-    # Create or update factory
-    if not _lakebase_factory or _lakebase_factory.instance_name != instance_name:
-        _lakebase_factory = LakebaseSessionFactory(instance_name, user_token, user_email)
+    # Crew threads: use thread-local factory to avoid event loop conflicts
+    if _is_crew_thread():
+        factory = getattr(_thread_local, 'factory', None)
+        if not factory or factory.instance_name != instance_name:
+            factory = LakebaseSessionFactory(instance_name, user_email=user_email, group_id=group_id)
+            _thread_local.factory = factory
+            logger.info(f"[LAKEBASE SESSION] Created thread-local factory for crew thread (instance: {instance_name}, group_id={group_id})")
 
-    # Update token and email if provided
-    if user_token and _lakebase_factory.user_token != user_token:
-        _lakebase_factory.user_token = user_token
-        # Force engine recreation with new token
-        await _lakebase_factory.create_engine()
+        async with factory.get_session() as session:
+            try:
+                yield session
+                await session.commit()
+            except GeneratorExit:
+                pass
+            except Exception:
+                try:
+                    await session.rollback()
+                except Exception:
+                    pass
+                raise
+            finally:
+                try:
+                    await session.close()
+                except Exception:
+                    pass
+        return
+
+    # Main event loop: use global factory
+    if not _lakebase_factory or _lakebase_factory.instance_name != instance_name:
+        _lakebase_factory = LakebaseSessionFactory(instance_name, user_email=user_email, group_id=group_id)
 
     if user_email and _lakebase_factory.user_email != user_email:
         _lakebase_factory.user_email = user_email

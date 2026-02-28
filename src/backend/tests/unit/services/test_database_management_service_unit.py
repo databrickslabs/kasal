@@ -563,6 +563,39 @@ class TestExportToVolume:
         assert result["success"] is False
         assert "boom" in result["error"]
 
+    @pytest.mark.asyncio
+    async def test_export_auth_exception_uses_fallback_url(self, service, mock_repository):
+        """When get_auth_context raises an exception, fallback workspace URL is used."""
+        with patch(
+            "src.services.database_management_service.DatabaseBackupRepository.get_database_type",
+            return_value="sqlite",
+        ), patch(
+            "src.services.database_management_service.settings"
+        ) as mock_settings, patch(
+            "src.services.database_management_service.os.path.isabs", return_value=True
+        ), patch(
+            "src.services.database_management_service.os.path.exists", return_value=True
+        ), patch(
+            "src.services.database_management_service.os.path.getsize", return_value=1024
+        ), patch(
+            "src.utils.databricks_auth.get_auth_context",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("auth failed"),
+        ):
+            mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
+            mock_repository.create_sqlite_backup.return_value = {
+                "success": True,
+                "backup_path": "/Volumes/c/s/v/backup.db",
+                "backup_size": 512,
+            }
+            mock_repository.cleanup_old_backups.return_value = {"success": True, "deleted": []}
+            mock_repository.list_backups.return_value = []
+
+            result = await service.export_to_volume(catalog="c", schema="s", volume_name="v")
+
+        assert result["success"] is True
+        assert "your-workspace" in result["volume_browse_url"]
+
 
 # ===================================================================
 # import_from_volume Tests
@@ -956,6 +989,30 @@ class TestListBackups:
         assert "your-workspace" in result["backups"][0]["databricks_url"]
 
     @pytest.mark.asyncio
+    async def test_list_backups_with_workspace_url_from_auth(self, service, mock_repository):
+        """When asyncio.run(get_auth_context()) returns a workspace URL, it is used."""
+        import asyncio
+
+        mock_repository.list_backups.return_value = [
+            {
+                "filename": "backup.db",
+                "size": 1024,
+                "created_at": datetime(2024, 6, 1),
+                "backup_type": "sqlite",
+            }
+        ]
+
+        # The list_backups method does `import asyncio; asyncio.run(get_auth_context())`
+        # which fails in a running loop.  We patch asyncio.run at the builtins level.
+        mock_auth = SimpleNamespace(workspace_url="https://my-ws.databricks.com/")
+        original_run = asyncio.run
+        with patch.object(asyncio, "run", return_value=mock_auth):
+            result = await service.list_backups(catalog="c", schema="s", volume_name="v")
+
+        assert result["success"] is True
+        assert "my-ws" in result["backups"][0]["databricks_url"]
+
+    @pytest.mark.asyncio
     async def test_list_backups_exception(self, service, mock_repository):
         """Repository exception is caught and returned as error."""
         mock_repository.list_backups.side_effect = RuntimeError("connection lost")
@@ -1002,10 +1059,9 @@ class TestGetDatabaseInfo:
 
             # Lakebase config returns None
             with patch(
-                "src.services.database_management_service.get_lakebase_config_from_db",
+                "src.db.database_router.get_lakebase_config_from_db",
                 new_callable=AsyncMock,
                 return_value=None,
-                create=True,
             ):
                 result = await service.get_database_info()
 
@@ -1039,10 +1095,9 @@ class TestGetDatabaseInfo:
             }
 
             with patch(
-                "src.services.database_management_service.get_lakebase_config_from_db",
+                "src.db.database_router.get_lakebase_config_from_db",
                 new_callable=AsyncMock,
                 return_value=None,
-                create=True,
             ):
                 result = await service.get_database_info()
 
@@ -1075,10 +1130,9 @@ class TestGetDatabaseInfo:
             }
 
             with patch(
-                "src.services.database_management_service.get_lakebase_config_from_db",
+                "src.db.database_router.get_lakebase_config_from_db",
                 new_callable=AsyncMock,
                 return_value=None,
-                create=True,
             ):
                 result = await service.get_database_info()
 
@@ -1102,10 +1156,9 @@ class TestGetDatabaseInfo:
             }
 
             with patch(
-                "src.services.database_management_service.get_lakebase_config_from_db",
+                "src.db.database_router.get_lakebase_config_from_db",
                 new_callable=AsyncMock,
                 return_value=None,
-                create=True,
             ):
                 result = await service.get_database_info()
 
@@ -1129,10 +1182,9 @@ class TestGetDatabaseInfo:
             }
 
             with patch(
-                "src.services.database_management_service.get_lakebase_config_from_db",
+                "src.db.database_router.get_lakebase_config_from_db",
                 new_callable=AsyncMock,
                 return_value=None,
-                create=True,
             ):
                 result = await service.get_database_info()
 
@@ -1157,10 +1209,9 @@ class TestGetDatabaseInfo:
             }
 
             with patch(
-                "src.services.database_management_service.get_lakebase_config_from_db",
+                "src.db.database_router.get_lakebase_config_from_db",
                 new_callable=AsyncMock,
                 return_value=None,
-                create=True,
             ):
                 await service.get_database_info(session=extra_session)
 
@@ -1180,10 +1231,9 @@ class TestGetDatabaseInfo:
             }
 
             with patch(
-                "src.services.database_management_service.get_lakebase_config_from_db",
+                "src.db.database_router.get_lakebase_config_from_db",
                 new_callable=AsyncMock,
                 return_value=None,
-                create=True,
             ):
                 result = await service.get_database_info()
 
@@ -1867,3 +1917,37 @@ class TestRunHousekeeping:
 
         assert result["success"] is True
         assert result["total_deleted"] == 0
+
+    @pytest.mark.asyncio
+    async def test_run_housekeeping_vacuum_failure_is_non_fatal(self, service, mock_session):
+        """When SQLite VACUUM fails, housekeeping still succeeds."""
+        mock_history_result = {
+            'executionhistory': 1, 'taskstatus': 0, 'errortrace': 0,
+        }
+
+        mock_trace_ref = MagicMock(rowcount=0)
+        mock_trace_date = MagicMock(rowcount=0)
+        mock_llm = MagicMock(rowcount=0)
+
+        # 4th call is the VACUUM which raises
+        mock_session.execute = AsyncMock(
+            side_effect=[mock_trace_ref, mock_trace_date, mock_llm, RuntimeError("VACUUM locked")]
+        )
+
+        with patch(
+            "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
+            new_callable=AsyncMock,
+            return_value=mock_history_result,
+        ), patch(
+            "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
+            new_callable=AsyncMock,
+            return_value=0,
+        ), patch(
+            "src.services.database_management_service.DatabaseBackupRepository"
+        ) as MockBackupRepo:
+            MockBackupRepo.get_database_type.return_value = "sqlite"
+
+            result = await service.run_housekeeping("2025-01-01")
+
+        assert result["success"] is True
+        assert result["deleted"]["executionhistory"] == 1

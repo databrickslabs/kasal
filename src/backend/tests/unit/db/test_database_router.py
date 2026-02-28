@@ -5,6 +5,10 @@ Tests the routing logic that selects between regular database (PostgreSQL/SQLite
 and Lakebase sessions, including configuration reading, enable/disable checks,
 and the get_smart_db_session async generator with all its edge cases.
 """
+import json
+import os
+import sqlite3
+import tempfile
 import pytest
 from contextvars import Token
 from types import SimpleNamespace
@@ -32,103 +36,164 @@ def _make_async_ctx(session):
 # ---------------------------------------------------------------------------
 
 class TestGetLakebaseConfigFromDb:
-    """Tests for get_lakebase_config_from_db."""
+    """Tests for get_lakebase_config_from_db (reads directly from SQLite)."""
+
+    @pytest.fixture
+    def tmp_db(self, tmp_path):
+        """Create a temp SQLite DB with a database_configs table."""
+        db_file = tmp_path / "app.db"
+        conn = sqlite3.connect(str(db_file))
+        conn.execute("CREATE TABLE database_configs (key TEXT PRIMARY KEY, value TEXT)")
+        conn.commit()
+        conn.close()
+        return str(db_file)
 
     @pytest.mark.asyncio
-    async def test_returns_config_value_when_found(self):
-        """When a LakebaseConfig row exists, return its value dict."""
+    async def test_returns_config_value_when_found(self, tmp_db):
+        """When a lakebase config row exists in SQLite, return its value dict."""
         expected_config = {
             "enabled": True,
             "endpoint": "https://example.com",
             "migration_completed": True,
             "instance_name": "my-instance",
         }
+        conn = sqlite3.connect(tmp_db)
+        conn.execute(
+            "INSERT INTO database_configs (key, value) VALUES (?, ?)",
+            ("lakebase", json.dumps(expected_config)),
+        )
+        conn.commit()
+        conn.close()
 
-        mock_config_entry = MagicMock()
-        mock_config_entry.value = expected_config
+        mock_settings = MagicMock()
+        mock_settings.SQLITE_DB_PATH = tmp_db
 
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_config_entry
-
-        mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        mock_factory = MagicMock(return_value=_make_async_ctx(mock_session))
-
-        with (
-            patch("src.db.database_router.async_session_factory", mock_factory),
-            patch("src.db.database_router.select") as mock_select,
-        ):
-            # Also patch the inner import of async_session_factory
-            with patch.dict(
-                "sys.modules",
-                {"src.models.database_config": MagicMock(LakebaseConfig=MagicMock())},
-            ):
-                # Need to re-import to use patched module; easier to just patch the
-                # already-imported references inside the function. Since the function
-                # does `from src.db.session import async_session_factory` at call time,
-                # we patch that path too.
-                with patch(
-                    "src.db.session.async_session_factory", mock_factory
-                ):
-                    from src.db.database_router import get_lakebase_config_from_db
-
-                    result = await get_lakebase_config_from_db()
+        with patch("src.db.database_router.os.path.exists", return_value=True), \
+             patch("src.db.session.settings", mock_settings):
+            from src.db.database_router import get_lakebase_config_from_db
+            result = await get_lakebase_config_from_db()
 
         assert result == expected_config
 
     @pytest.mark.asyncio
-    async def test_returns_none_when_no_config_row(self):
-        """When no LakebaseConfig row is found, return None."""
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
+    async def test_returns_none_when_no_config_row(self, tmp_db):
+        """When no lakebase row exists, return None."""
+        mock_settings = MagicMock()
+        mock_settings.SQLITE_DB_PATH = tmp_db
 
-        mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        mock_factory = MagicMock(return_value=_make_async_ctx(mock_session))
-
-        with (
-            patch("src.db.session.async_session_factory", mock_factory),
-        ):
+        with patch("src.db.database_router.os.path.exists", return_value=True), \
+             patch("src.db.session.settings", mock_settings):
             from src.db.database_router import get_lakebase_config_from_db
-
             result = await get_lakebase_config_from_db()
 
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_returns_none_when_config_value_is_none(self):
-        """When config entry exists but value is None, return None."""
-        mock_config_entry = MagicMock()
-        mock_config_entry.value = None
+    async def test_returns_none_when_db_file_missing(self):
+        """When the SQLite file does not exist, return None."""
+        mock_settings = MagicMock()
+        mock_settings.SQLITE_DB_PATH = "/tmp/nonexistent_db_file.db"
 
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_config_entry
-
-        mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        mock_factory = MagicMock(return_value=_make_async_ctx(mock_session))
-
-        with patch("src.db.session.async_session_factory", mock_factory):
+        with patch("src.db.session.settings", mock_settings):
             from src.db.database_router import get_lakebase_config_from_db
+            result = await get_lakebase_config_from_db()
 
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_value_is_empty_string(self, tmp_db):
+        """When config row value is empty string (falsy), return None."""
+        conn = sqlite3.connect(tmp_db)
+        conn.execute(
+            "INSERT INTO database_configs (key, value) VALUES (?, ?)",
+            ("lakebase", ""),
+        )
+        conn.commit()
+        conn.close()
+
+        mock_settings = MagicMock()
+        mock_settings.SQLITE_DB_PATH = tmp_db
+
+        with patch("src.db.database_router.os.path.exists", return_value=True), \
+             patch("src.db.session.settings", mock_settings):
+            from src.db.database_router import get_lakebase_config_from_db
             result = await get_lakebase_config_from_db()
 
         assert result is None
 
     @pytest.mark.asyncio
     async def test_returns_none_on_exception(self):
-        """When a database error occurs, return None gracefully."""
-        mock_factory = MagicMock(side_effect=Exception("DB unavailable"))
+        """When a database error occurs (e.g., no table), return None gracefully."""
+        # Create a DB file without the expected table
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            tmp_path = f.name
+        try:
+            conn = sqlite3.connect(tmp_path)
+            conn.close()
 
-        with patch("src.db.session.async_session_factory", mock_factory):
+            mock_settings = MagicMock()
+            mock_settings.SQLITE_DB_PATH = tmp_path
+
+            with patch("src.db.database_router.os.path.exists", return_value=True), \
+                 patch("src.db.session.settings", mock_settings):
+                from src.db.database_router import get_lakebase_config_from_db
+                result = await get_lakebase_config_from_db()
+
+            assert result is None
+        finally:
+            os.unlink(tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_relative_path_converted_to_absolute(self, tmp_path):
+        """When SQLITE_DB_PATH is relative, it is converted to absolute."""
+        db_file = tmp_path / "app.db"
+        conn = sqlite3.connect(str(db_file))
+        conn.execute("CREATE TABLE database_configs (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute(
+            "INSERT INTO database_configs (key, value) VALUES (?, ?)",
+            ("lakebase", json.dumps({"enabled": True})),
+        )
+        conn.commit()
+        conn.close()
+
+        mock_settings = MagicMock()
+        mock_settings.SQLITE_DB_PATH = None  # triggers fallback
+
+        with patch("src.db.database_router.os.path.exists", return_value=True), \
+             patch("src.db.database_router.os.path.isabs", return_value=False), \
+             patch("src.db.database_router.os.path.abspath", return_value=str(db_file)), \
+             patch("src.db.session.settings", mock_settings):
             from src.db.database_router import get_lakebase_config_from_db
-
             result = await get_lakebase_config_from_db()
 
-        assert result is None
+        assert result == {"enabled": True}
+
+    @pytest.mark.asyncio
+    async def test_returns_non_string_value_directly(self, tmp_db):
+        """When the row value is not a string (e.g., already dict), return it directly.
+
+        Note: SQLite stores TEXT so this tests the isinstance check branch.
+        Since sqlite3 always returns strings, this tests the non-string branch
+        via direct mock.
+        """
+        mock_settings = MagicMock()
+        mock_settings.SQLITE_DB_PATH = tmp_db
+
+        # Patch sqlite3.connect to return a cursor that returns a non-string value
+        expected = {"enabled": True, "endpoint": "https://example.com"}
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.return_value = (expected,)  # value is already a dict
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+
+        with patch("src.db.database_router.os.path.exists", return_value=True), \
+             patch("src.db.session.settings", mock_settings), \
+             patch("sqlite3.connect", return_value=mock_conn):
+            from src.db.database_router import get_lakebase_config_from_db
+            result = await get_lakebase_config_from_db()
+
+        assert result == expected
+        mock_conn.close.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -228,12 +293,69 @@ class TestIsLakebaseEnabled:
         assert not result
 
     @pytest.mark.asyncio
-    async def test_returns_false_when_migration_not_completed(self):
-        """When migration_completed is False, Lakebase is disabled."""
+    async def test_returns_false_when_migration_not_completed_and_no_alternatives(self):
+        """When migration_completed is False and no database_type or instance_status, disabled."""
         config = {
             "enabled": True,
             "endpoint": "https://example.com",
             "migration_completed": False,
+        }
+        with patch(
+            "src.db.database_router.get_lakebase_config_from_db",
+            new_callable=AsyncMock,
+            return_value=config,
+        ):
+            from src.db.database_router import is_lakebase_enabled
+
+            result = await is_lakebase_enabled()
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_returns_true_when_database_type_is_lakebase(self):
+        """When migration_completed missing but database_type is 'lakebase', enabled."""
+        config = {
+            "enabled": True,
+            "endpoint": "https://example.com",
+            "database_type": "lakebase",
+        }
+        with patch(
+            "src.db.database_router.get_lakebase_config_from_db",
+            new_callable=AsyncMock,
+            return_value=config,
+        ):
+            from src.db.database_router import is_lakebase_enabled
+
+            result = await is_lakebase_enabled()
+
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_returns_true_when_instance_status_is_ready(self):
+        """When migration_completed missing but instance_status is 'READY', enabled."""
+        config = {
+            "enabled": True,
+            "endpoint": "https://example.com",
+            "instance_status": "READY",
+        }
+        with patch(
+            "src.db.database_router.get_lakebase_config_from_db",
+            new_callable=AsyncMock,
+            return_value=config,
+        ):
+            from src.db.database_router import is_lakebase_enabled
+
+            result = await is_lakebase_enabled()
+
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_returns_false_when_instance_status_is_creating(self):
+        """When instance_status is not READY and no migration_completed, disabled."""
+        config = {
+            "enabled": True,
+            "endpoint": "https://example.com",
+            "instance_status": "CREATING",
         }
         with patch(
             "src.db.database_router.get_lakebase_config_from_db",
@@ -1157,8 +1279,8 @@ class TestIsLakebaseEnabledEdgeCases:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_returns_false_when_migration_completed_key_missing(self):
-        """When migration_completed key is missing, defaults to False."""
+    async def test_returns_false_when_all_tertiary_keys_missing(self):
+        """When migration_completed, database_type, instance_status are all absent, disabled."""
         config = {
             "enabled": True,
             "endpoint": "https://example.com",
@@ -1221,49 +1343,60 @@ class TestGetLakebaseConfigFromDbEmptyValue:
     """Edge cases for get_lakebase_config_from_db with empty/falsy config values."""
 
     @pytest.mark.asyncio
-    async def test_returns_none_when_value_is_empty_dict(self):
-        """When config entry has an empty dict, it is falsy so return None."""
-        mock_config_entry = MagicMock()
-        mock_config_entry.value = {}
+    async def test_returns_none_when_value_is_null_row(self):
+        """When config row value is NULL in SQLite, return None."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            tmp_path = f.name
+        try:
+            conn = sqlite3.connect(tmp_path)
+            conn.execute("CREATE TABLE database_configs (key TEXT PRIMARY KEY, value TEXT)")
+            conn.execute(
+                "INSERT INTO database_configs (key, value) VALUES (?, ?)",
+                ("lakebase", None),
+            )
+            conn.commit()
+            conn.close()
 
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_config_entry
+            mock_settings = MagicMock()
+            mock_settings.SQLITE_DB_PATH = tmp_path
 
-        mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=mock_result)
+            with patch("src.db.database_router.os.path.exists", return_value=True), \
+                 patch("src.db.session.settings", mock_settings):
+                from src.db.database_router import get_lakebase_config_from_db
+                result = await get_lakebase_config_from_db()
 
-        mock_factory = MagicMock(return_value=_make_async_ctx(mock_session))
-
-        with patch("src.db.session.async_session_factory", mock_factory):
-            from src.db.database_router import get_lakebase_config_from_db
-
-            result = await get_lakebase_config_from_db()
-
-        # Empty dict is falsy in `if config_entry and config_entry.value`
-        assert result is None
+            assert result is None
+        finally:
+            os.unlink(tmp_path)
 
     @pytest.mark.asyncio
-    async def test_returns_value_when_non_empty_dict(self):
-        """When config entry has a non-empty dict, return it."""
+    async def test_returns_value_when_non_empty_json(self):
+        """When config row has valid JSON, return the parsed dict."""
         config_value = {"enabled": False}
 
-        mock_config_entry = MagicMock()
-        mock_config_entry.value = config_value
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            tmp_path = f.name
+        try:
+            conn = sqlite3.connect(tmp_path)
+            conn.execute("CREATE TABLE database_configs (key TEXT PRIMARY KEY, value TEXT)")
+            conn.execute(
+                "INSERT INTO database_configs (key, value) VALUES (?, ?)",
+                ("lakebase", json.dumps(config_value)),
+            )
+            conn.commit()
+            conn.close()
 
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_config_entry
+            mock_settings = MagicMock()
+            mock_settings.SQLITE_DB_PATH = tmp_path
 
-        mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=mock_result)
+            with patch("src.db.database_router.os.path.exists", return_value=True), \
+                 patch("src.db.session.settings", mock_settings):
+                from src.db.database_router import get_lakebase_config_from_db
+                result = await get_lakebase_config_from_db()
 
-        mock_factory = MagicMock(return_value=_make_async_ctx(mock_session))
-
-        with patch("src.db.session.async_session_factory", mock_factory):
-            from src.db.database_router import get_lakebase_config_from_db
-
-            result = await get_lakebase_config_from_db()
-
-        assert result == config_value
+            assert result == config_value
+        finally:
+            os.unlink(tmp_path)
 
 
 # ---------------------------------------------------------------------------

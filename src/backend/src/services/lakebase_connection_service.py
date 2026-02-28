@@ -37,8 +37,8 @@ class LakebaseConnectionService(BaseService):
         Initialize Lakebase connection service.
 
         Args:
-            user_token: Optional user token for Databricks authentication (OBO)
-            user_email: Optional user email for Lakebase authentication
+            user_token: Optional user token for local-dev fallback auth.
+            user_email: Optional user email (local dev fallback for PG username).
         """
         # Don't call super().__init__ since we don't have a session
         self.user_token = user_token
@@ -49,28 +49,46 @@ class LakebaseConnectionService(BaseService):
         """
         Get or create Databricks workspace client for Lakebase.
 
-        Uses Lakebase-specific authentication priority (OBO -> PAT -> SPN).
+        When deployed as a Databricks App, Lakebase requires an OAuth token
+        with the 'postgres' scope. Only SPN OAuth (client credentials)
+        provides this scope, so SPN is used when available.
+
+        For local development (no SPN env vars), falls back to the generic
+        auth chain (PAT / OBO) which works when connecting from a developer
+        machine that already has a Lakebase role.
 
         Returns:
             WorkspaceClient configured with appropriate credentials
 
         Raises:
-            ValueError: If WorkspaceClient creation fails
+            ValueError: If no authentication method is available
         """
         if not self._workspace_client:
-            logger.info("Creating WorkspaceClient for Lakebase (lazy initialization)")
+            client_id = os.getenv("DATABRICKS_CLIENT_ID")
+            client_secret = os.getenv("DATABRICKS_CLIENT_SECRET")
+            host = os.getenv("DATABRICKS_HOST")
+
+            # SPN OAuth — required when deployed as a Databricks App
+            if client_id and client_secret and host:
+                logger.info("[LAKEBASE AUTH] Using SPN OAuth (client credentials) — required for postgres scope")
+                self._workspace_client = WorkspaceClient(
+                    host=host,
+                    client_id=client_id,
+                    client_secret=client_secret
+                )
+                logger.info("[LAKEBASE AUTH] SPN WorkspaceClient created successfully")
+                return self._workspace_client
+
+            # Local dev fallback — PAT/OBO via generic auth chain
+            logger.info("[LAKEBASE AUTH] No SPN credentials, falling back to PAT/OBO (local dev)")
             self._workspace_client = await get_workspace_client(self.user_token)
             if not self._workspace_client:
-                error_msg = (
-                    "Failed to create WorkspaceClient for Lakebase operations. "
-                    "No authentication method available. Please configure Databricks authentication:\n"
-                    "  1. OBO: User token from request headers (automatic when authenticated)\n"
-                    "  2. PAT: Configure via API Keys Service (Configuration -> API Keys)\n"
-                    "  3. SPN: Configure via Databricks authentication settings"
+                raise ValueError(
+                    "Failed to create WorkspaceClient for Lakebase. "
+                    "For deployed apps: set DATABRICKS_HOST, DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET. "
+                    "For local dev: configure a PAT via API Keys or Databricks CLI profile."
                 )
-                logger.error(error_msg)
-                raise ValueError(error_msg)
-            logger.info("Successfully created WorkspaceClient for Lakebase")
+            logger.info("[LAKEBASE AUTH] Local dev WorkspaceClient created via PAT/OBO")
         return self._workspace_client
 
     def get_spn_username(self) -> Optional[str]:

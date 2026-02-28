@@ -39,21 +39,25 @@ def _validate_identifier(name: str, kind: str = "identifier") -> str:
     return name
 
 
-def _quote_pg_role(email: str) -> str:
-    """Safely quote a PostgreSQL role name derived from an email address.
+def _quote_pg_role(identifier: str) -> str:
+    """Safely quote a PostgreSQL role name.
 
-    Validates the email against a strict pattern and escapes embedded
-    double-quotes so the result is safe for use as a quoted identifier
-    in GRANT / ALTER DEFAULT PRIVILEGES statements.
+    Accepts either an email address (local dev) or a UUID client_id
+    (SPN in deployed Databricks Apps). Escapes embedded double-quotes
+    so the result is safe for use as a quoted identifier in GRANT /
+    ALTER DEFAULT PRIVILEGES statements.
 
     Raises:
-        ValueError: If the email does not match the expected format.
+        ValueError: If the identifier does not match expected formats.
     """
-    if not email or not re.match(
-        r'^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$', email
-    ):
-        raise ValueError(f"Invalid email for PostgreSQL role: {email!r}")
-    return '"' + email.replace('"', '""') + '"'
+    # Email pattern (local dev)
+    _EMAIL_RE = re.compile(r'^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$')
+    # UUID pattern (SPN client_id)
+    _UUID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE)
+
+    if not identifier or not (_EMAIL_RE.match(identifier) or _UUID_RE.match(identifier)):
+        raise ValueError(f"Invalid PostgreSQL role identifier: {identifier!r}")
+    return '"' + identifier.replace('"', '""') + '"'
 
 
 class LakebaseSchemaService(BaseService):
@@ -93,13 +97,16 @@ class LakebaseSchemaService(BaseService):
             if recreate:
                 try:
                     async with engine.begin() as conn:
+                        await conn.execute(text(f'ALTER SCHEMA kasal OWNER TO {safe_role}'))
+                except Exception:
+                    pass  # Schema may not exist yet
+                try:
+                    async with engine.begin() as conn:
                         logger.info("Dropping existing kasal schema (if exists)...")
                         await conn.execute(text("DROP SCHEMA IF EXISTS kasal CASCADE"))
                         logger.info("Dropped kasal schema")
                 except Exception as drop_error:
-                    logger.warning(
-                        f"Could not drop schema (may be owned by different role): {drop_error}"
-                    )
+                    logger.warning(f"Could not drop schema: {drop_error}")
                     logger.info("Proceeding with CREATE SCHEMA IF NOT EXISTS...")
                     # Transaction was aborted, but that's ok - we'll create schema in next transaction
 
@@ -164,13 +171,16 @@ class LakebaseSchemaService(BaseService):
             if recreate:
                 try:
                     with engine.begin() as conn:
+                        conn.execute(text(f'ALTER SCHEMA kasal OWNER TO {safe_role}'))
+                except Exception:
+                    pass  # Schema may not exist yet
+                try:
+                    with engine.begin() as conn:
                         logger.info("Dropping existing kasal schema (if exists)...")
                         conn.execute(text("DROP SCHEMA IF EXISTS kasal CASCADE"))
                         logger.info("Dropped kasal schema")
                 except Exception as drop_error:
-                    logger.warning(
-                        f"Could not drop schema (may be owned by different role): {drop_error}"
-                    )
+                    logger.warning(f"Could not drop schema: {drop_error}")
                     logger.info("Proceeding with CREATE SCHEMA IF NOT EXISTS...")
 
             # Create schema in a fresh transaction
