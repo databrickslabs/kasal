@@ -117,13 +117,20 @@ vi.mock('./EndpointsDisplay', () => ({
 vi.mock('./EntityGraphVisualization', () => ({
   __esModule: true,
   default: (props: Record<string, unknown>) => (
-    <div data-testid="entity-graph-visualization" data-open={String(props.open)} />
+    <div data-testid={`entity-graph-visualization-${props.dataSource || 'databricks'}`} data-open={String(props.open)} />
   ),
 }));
 
 vi.mock('./IndexDocumentsDialog', () => ({
   IndexDocumentsDialog: (props: Record<string, unknown>) => (
     <div data-testid="index-documents-dialog" data-open={String(props.open)} />
+  ),
+}));
+
+vi.mock('./LakebaseDocumentsDialog', () => ({
+  __esModule: true,
+  default: (props: Record<string, unknown>) => (
+    <div data-testid="lakebase-documents-dialog" data-open={String(props.open)} />
   ),
 }));
 
@@ -225,7 +232,7 @@ describe('DatabricksOneClickSetup', () => {
   // -----------------------------------------------------------------------
   // 3. After loading, shows the disabled/databricks radio options
   // -----------------------------------------------------------------------
-  it('shows disabled and databricks radio options after loading', async () => {
+  it('shows radio options after loading', async () => {
     await act(async () => {
       renderComponent();
     });
@@ -237,16 +244,17 @@ describe('DatabricksOneClickSetup', () => {
 
     // The radio options should be visible
     const radioGroup = screen.getAllByRole('radio');
-    expect(radioGroup.length).toBeGreaterThanOrEqual(2);
+    expect(radioGroup.length).toBeGreaterThanOrEqual(3);
 
     expect(screen.getByText('Databricks Vector Search')).toBeInTheDocument();
-    expect(screen.getByText('Disabled')).toBeInTheDocument();
+    expect(screen.getByText('Lakebase (pgvector)')).toBeInTheDocument();
+    expect(screen.getByText('Local')).toBeInTheDocument();
   });
 
   // -----------------------------------------------------------------------
   // 4. Shows "Disabled" info alert when in disabled mode
   // -----------------------------------------------------------------------
-  it('shows info alert about disabled memory when mode is disabled', async () => {
+  it('shows info alert about local storage when mode is disabled (local)', async () => {
     await act(async () => {
       renderComponent();
     });
@@ -255,9 +263,9 @@ describe('DatabricksOneClickSetup', () => {
       expect(screen.queryByText('Loading memory configuration...')).not.toBeInTheDocument();
     });
 
-    // The default mode is 'disabled' since the API returns empty config
+    // The default mode is 'disabled' (local) since the API returns empty config
     expect(
-      screen.getByText('Memory storage is disabled. Agents will not persist information between conversations.'),
+      screen.getByText(/Uses local storage with ChromaDB for vector search and SQLite for long-term memory/),
     ).toBeInTheDocument();
   });
 
@@ -506,7 +514,7 @@ describe('DatabricksOneClickSetup', () => {
   // -----------------------------------------------------------------------
   // Additional: Switching to disabled mode calls updateConfig with DEFAULT
   // -----------------------------------------------------------------------
-  it('calls updateConfig with DEFAULT backend type when switching to disabled', async () => {
+  it('calls updateConfig with DEFAULT backend type when switching to local', async () => {
     await act(async () => {
       renderComponent();
     });
@@ -521,10 +529,10 @@ describe('DatabricksOneClickSetup', () => {
       fireEvent.click(databricksRadio);
     });
 
-    // Then switch back to disabled
-    const disabledRadio = screen.getByLabelText(/Disabled/i);
+    // Then switch back to local (disabled)
+    const localRadio = screen.getByLabelText(/Local/i);
     await act(async () => {
-      fireEvent.click(disabledRadio);
+      fireEvent.click(localRadio);
     });
 
     await waitFor(() => {
@@ -624,9 +632,13 @@ describe('DatabricksOneClickSetup', () => {
     expect(resultDialog).toBeInTheDocument();
     expect(resultDialog).toHaveAttribute('data-open', 'false');
 
-    const vizDialog = screen.getByTestId('entity-graph-visualization');
+    const vizDialog = screen.getByTestId('entity-graph-visualization-databricks');
     expect(vizDialog).toBeInTheDocument();
     expect(vizDialog).toHaveAttribute('data-open', 'false');
+
+    const lakebaseVizDialog = screen.getByTestId('entity-graph-visualization-lakebase');
+    expect(lakebaseVizDialog).toBeInTheDocument();
+    expect(lakebaseVizDialog).toHaveAttribute('data-open', 'false');
   });
 
   // -----------------------------------------------------------------------

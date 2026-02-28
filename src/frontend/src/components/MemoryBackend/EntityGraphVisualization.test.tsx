@@ -598,4 +598,87 @@ describe('EntityGraphVisualization', () => {
 
     expect(mockActions.initializeGraph).toHaveBeenCalled();
   });
+
+  describe('Lakebase data source', () => {
+    const lakebaseProps = {
+      open: true,
+      onClose: vi.fn(),
+      dataSource: 'lakebase' as const,
+      lakebaseInstanceName: 'kasal-lakebase1',
+    };
+
+    it('fetches from Lakebase endpoint when dataSource is lakebase', async () => {
+      render(<EntityGraphVisualization {...lakebaseProps} />);
+      await waitFor(() => {
+        expect(mockApiClient.get).toHaveBeenCalledWith('/memory-backend/lakebase/entity-data', {
+          params: {
+            entity_table: 'crew_entity_memory',
+            limit: 200,
+            instance_name: 'kasal-lakebase1',
+          },
+        });
+      });
+    });
+
+    it('does not require indexName/workspaceUrl/endpointName for Lakebase', async () => {
+      render(<EntityGraphVisualization {...lakebaseProps} />);
+      await waitFor(() => {
+        expect(mockApiClient.get).toHaveBeenCalledTimes(1);
+      });
+      // Should NOT have called Databricks endpoint
+      expect(mockApiClient.get).not.toHaveBeenCalledWith(
+        '/memory-backend/databricks/entity-data',
+        expect.anything()
+      );
+    });
+
+    it('fetches from Lakebase without instance_name when not provided', async () => {
+      render(
+        <EntityGraphVisualization
+          open={true}
+          onClose={vi.fn()}
+          dataSource="lakebase"
+        />
+      );
+      await waitFor(() => {
+        expect(mockApiClient.get).toHaveBeenCalledWith('/memory-backend/lakebase/entity-data', {
+          params: {
+            entity_table: 'crew_entity_memory',
+            limit: 200,
+          },
+        });
+      });
+    });
+
+    it('processes Lakebase entity data into graph format', async () => {
+      render(<EntityGraphVisualization {...lakebaseProps} />);
+      await waitFor(() => {
+        expect(mockActions.setGraphData).toHaveBeenCalled();
+      });
+      const callArg = mockActions.setGraphData.mock.calls[0][0];
+      expect(callArg.nodes).toHaveLength(2);
+      expect(callArg.links).toHaveLength(1);
+    });
+
+    it('handles Lakebase fetch error', async () => {
+      mockApiClient.get.mockRejectedValueOnce(new Error('Lakebase connection failed'));
+      render(<EntityGraphVisualization {...lakebaseProps} />);
+      await waitFor(() => {
+        expect(mockActions.setError).toHaveBeenCalledWith('Lakebase connection failed');
+      });
+    });
+
+    it('defaults to Databricks data source when not specified', async () => {
+      render(<EntityGraphVisualization {...defaultProps} />);
+      await waitFor(() => {
+        expect(mockApiClient.get).toHaveBeenCalledWith('/memory-backend/databricks/entity-data', {
+          params: {
+            index_name: 'test-index',
+            workspace_url: 'https://example.com',
+            endpoint_name: 'test-endpoint',
+          },
+        });
+      });
+    });
+  });
 });
