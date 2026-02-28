@@ -37,6 +37,15 @@ class TestDefaultModelsDataStructure:
         assert "claude-3-5-sonnet-20241022" in DEFAULT_MODELS
         assert "databricks-llama-4-maverick" in DEFAULT_MODELS
         assert "deepseek-chat" in DEFAULT_MODELS
+        assert "databricks-gpt-5-3-codex" in DEFAULT_MODELS
+
+    def test_databricks_gpt_5_3_codex_config(self):
+        """Test that databricks-gpt-5-3-codex has correct configuration."""
+        config = DEFAULT_MODELS["databricks-gpt-5-3-codex"]
+        assert config["provider"] == "databricks"
+        assert config["name"] == "databricks-gpt-5-3-codex"
+        assert config["context_window"] == 400000
+        assert config["max_output_tokens"] == 128000
 
     def test_required_fields_present(self):
         """Test that every model has the required fields."""

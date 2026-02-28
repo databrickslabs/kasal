@@ -385,6 +385,13 @@ DEFAULT_MODELS = {
         "context_window": 400000,
         "max_output_tokens": 128000
     },
+    "databricks-gpt-5-3-codex": {
+        "name": "databricks-gpt-5-3-codex",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 400000,
+        "max_output_tokens": 128000
+    },
     "databricks-gpt-5-mini": {
         "name": "databricks-gpt-5-mini",
         "temperature": 0.7,
