@@ -2,7 +2,8 @@ import React from 'react';
 import { useUILayoutStore } from '../../store/uiLayout';
 
 export function useChatPanelResize(
-  setChatPanelWidth: (width: number) => void
+  setChatPanelWidth: (width: number) => void,
+  maxWidthOverride?: number
 ): { handleResizeStart: (e: React.MouseEvent) => void } {
   const [isResizing, setIsResizing] = React.useState(false);
   const throttleRef = React.useRef<number>(0);
@@ -32,7 +33,7 @@ export function useChatPanelResize(
       }
 
       const minWidth = 280; // Minimum chat panel width
-      const maxWidth = Math.min(800, window.innerWidth * 0.6); // Max 60% of screen
+      const maxWidth = maxWidthOverride ?? Math.min(800, window.innerWidth * 0.6); // Max 60% of screen
 
       setChatPanelWidth(Math.min(Math.max(newWidth, minWidth), maxWidth));
 
@@ -42,7 +43,7 @@ export function useChatPanelResize(
       });
       window.dispatchEvent(event);
     },
-    [isResizing, setChatPanelWidth, chatPanelSide, leftSidebarBaseWidth]
+    [isResizing, setChatPanelWidth, chatPanelSide, leftSidebarBaseWidth, maxWidthOverride]
   );
 
   const handleResizeEnd = React.useCallback(() => {
