@@ -718,6 +718,30 @@ const MCPConfiguration: React.FC = () => {
   };
 
 
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 200 }}>
+        <CircularProgress />
+        <Typography variant="body2" sx={{ ml: 2 }}>
+          Loading MCP configuration...
+        </Typography>
+      </Box>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <Box sx={{ minHeight: 200 }}>
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {loadError}
+        </Alert>
+        <Button variant="outlined" onClick={loadMcpServers}>
+          Retry
+        </Button>
+      </Box>
+    );
+  }
+
   return (
     <Box>
       <Box sx={{
@@ -731,7 +755,6 @@ const MCPConfiguration: React.FC = () => {
           <Typography variant="h6">
             {t('configuration.mcp.title', { defaultValue: 'MCP Server Configuration' })}
           </Typography>
-          {loading && <CircularProgress size={20} sx={{ ml: 2 }} />}
         </Box>
         <FormControlLabel
           control={
@@ -785,15 +808,7 @@ const MCPConfiguration: React.FC = () => {
         </Box>
 
         <Box sx={{ mt: 2 }}>
-          {loading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-              <CircularProgress size={28} />
-            </Box>
-          ) : loadError ? (
-            <Alert severity="error" sx={{ my: 2 }}>
-              {loadError}
-            </Alert>
-          ) : mcpConfig.servers.length === 0 ? (
+          {mcpConfig.servers.length === 0 ? (
             <Typography variant="body2" color="text.secondary" align="center" sx={{ py: 3 }}>
               {t('configuration.mcp.noServers', { defaultValue: 'No MCP servers configured yet.' })}
             </Typography>

@@ -47,6 +47,7 @@ const PowerBIConfiguration: React.FC<PowerBIConfigurationProps> = ({ onSaved }) 
     enabled: false,
   });
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [status, setStatus] = useState<PowerBIStatus | null>(null);
   const [notification, setNotification] = useState({
     open: false,
@@ -65,6 +66,8 @@ const PowerBIConfiguration: React.FC<PowerBIConfigurationProps> = ({ onSaved }) 
         setStatus(statusResponse.data);
       } catch (error) {
         console.error('Error loading Power BI configuration:', error);
+      } finally {
+        setInitialLoading(false);
       }
     };
 
@@ -124,6 +127,17 @@ const PowerBIConfiguration: React.FC<PowerBIConfigurationProps> = ({ onSaved }) 
       enabled: event.target.checked,
     });
   };
+
+  if (initialLoading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 200 }}>
+        <CircularProgress />
+        <Typography variant="body2" sx={{ ml: 2 }}>
+          Loading Power BI configuration...
+        </Typography>
+      </Box>
+    );
+  }
 
   return (
     <Paper elevation={2} sx={{ p: 3 }}>

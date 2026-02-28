@@ -63,6 +63,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
     knowledge_chunk_overlap: 200,
   });
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [tokenStatus, setTokenStatus] = useState<DatabricksTokenStatus | null>(null);
   const [notification, setNotification] = useState({
     open: false,
@@ -154,8 +155,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
       }
     };
 
-    loadConfig();
-    checkMemoryBackendConfig();
+    Promise.all([loadConfig(), checkMemoryBackendConfig()]).finally(() => setInitialLoading(false));
   }, []);
 
   const handleSaveConfig = async () => {
@@ -349,6 +349,17 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
       setCheckingConnection(false);
     }
   };
+
+  if (initialLoading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 200 }}>
+        <CircularProgress />
+        <Typography variant="body2" sx={{ ml: 2 }}>
+          Loading Databricks configuration...
+        </Typography>
+      </Box>
+    );
+  }
 
   return (
     <Box>
