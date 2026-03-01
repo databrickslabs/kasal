@@ -1448,16 +1448,12 @@ class ToolFactory:
                 return tool_class(**tool_args)
 
             elif tool_name == "MCPTool":
-                # MCPTool might need special configuration
-                # Check if MCPTool exists and can be created
-                if MCPTool is None:
-                    logger.error("MCPTool is not available - MCP integration may not be installed")
-                    return None
-
-                # Create MCPTool with configuration
-                tool_config['result_as_answer'] = result_as_answer
-                logger.info(f"Creating MCPTool with config: {tool_config}")
-                return tool_class(**tool_config)
+                # MCPTool is a marker that signals MCP integration should be used.
+                # Actual MCP tools are created by MCPIntegration.create_mcp_tools_for_task
+                # in task_helpers.py using tool_configs.MCP_SERVERS — before this code runs.
+                # Return (True, []) so task_helpers treats this as an MCP marker (no-op).
+                logger.info("MCPTool selected - MCP tools are managed by MCPIntegration via tool_configs.MCP_SERVERS")
+                return (True, [])
 
             # Power BI Connector Tool
             elif tool_name == "PowerBIConnectorTool":
