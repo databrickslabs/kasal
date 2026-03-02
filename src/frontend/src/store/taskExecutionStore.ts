@@ -207,13 +207,16 @@ if (typeof window !== 'undefined') {
     const taskName = extractTaskName(trace);
     const status = mapEventToStatus(trace.event_type);
 
+    console.log(`[TaskFSM] traceUpdate received | event=${trace.event_type} | taskId=${taskId} | taskName=${taskName} | status=${status}`);
+
     if (taskId) {
-      useTaskExecutionStore.getState().transition(taskId, status, {
+      const ok = useTaskExecutionStore.getState().transition(taskId, status, {
         task_name: taskName ?? '',
         ...(status === 'running' && { started_at: trace.created_at }),
         ...(status === 'completed' && { completed_at: trace.created_at }),
         ...(status === 'failed' && { failed_at: trace.created_at }),
       });
+      console.log(`[TaskFSM] transition ${ok ? 'OK' : 'REJECTED'} | taskId=${taskId} | status=${status} | storeSize=${useTaskExecutionStore.getState().taskStates.size}`);
     }
   }) as EventListener);
 
