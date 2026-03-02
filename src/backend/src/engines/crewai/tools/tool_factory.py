@@ -711,6 +711,10 @@ class ToolFactory:
                     if resolved_count > 0:
                         logger.info(f"[ToolFactory] ✓ Resolved {resolved_count} placeholders in {tool_name} config")
 
+                    # Remove execution_inputs from tool_config after placeholder resolution
+                    # Tool constructors don't accept this key and will raise TypeError
+                    tool_config.pop('execution_inputs', None)
+
             # Parse JSON strings for PowerBI Analysis Tool context enrichment fields
             if "Power BI" in tool_name and "Analysis" in tool_name:
                 import json
