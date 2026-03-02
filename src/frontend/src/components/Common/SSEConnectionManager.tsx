@@ -3,12 +3,16 @@
  *
  * Manages a single global Server-Sent Events connection that receives
  * updates for all jobs. Feeds updates to the runStatus store.
+ *
+ * Includes a polling fallback (useTracePolling) that activates automatically
+ * when SSE fails to deliver data (e.g. Databricks Apps HTTP/2 proxy).
  */
 
 import { useEffect, memo, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
 import { useRunStatusStore } from '../../store/runStatus';
 import { useGlobalExecutionSSE } from '../../hooks/global/useSSE';
+import { useTracePolling } from '../../hooks/global/useTracePolling';
 
 /**
  * Generate user-friendly error message based on error type
@@ -106,7 +110,8 @@ const GlobalSSEConnection: React.FC = () => {
 
   const onDisconnect = useCallback(() => {
     console.log('[GlobalSSE] Disconnected from global execution stream');
-  }, []);
+    setSSEConnected(false);
+  }, [setSSEConnected]);
 
   const onError = useCallback((error: any) => {
     if (error.isFatal) {
@@ -130,14 +135,16 @@ const GlobalSSEConnection: React.FC = () => {
   const { connectionState } = useGlobalExecutionSSE(
     onMessage,
     {
-      autoReconnect: true,
-      maxReconnectAttempts: 10,
-      reconnectDelay: 3000,
+      maxReconnectAttempts: 50,
       onConnect,
       onDisconnect,
       onError,
     }
   );
+
+  // Trace polling fallback — activates automatically when SSE fails to deliver
+  // data within a grace period after job creation.
+  useTracePolling();
 
   useEffect(() => {
     console.log(`[GlobalSSE] Connection state: ${connectionState}`);

@@ -5,11 +5,13 @@ This module manages SSE connections and provides methods to broadcast
 execution updates, traces, and other real-time events to connected clients.
 """
 
-from typing import Dict, Set, Optional, Any, AsyncGenerator
+from typing import Dict, List, Set, Optional, Any, AsyncGenerator, Tuple
+from collections import deque
 from datetime import datetime
 from uuid import UUID
 import asyncio
 import json
+import threading
 
 from src.core.logger import LoggerManager
 
@@ -89,6 +91,18 @@ class SSEConnectionManager:
         # Track connection metadata for monitoring
         self.connection_count = 0
 
+        # Replay buffer: when the Databricks Apps proxy drops the SSE
+        # connection (see ES ticket — ~75 % failure rate), the browser's
+        # EventSource automatically reconnects and sends Last-Event-ID.
+        # We replay any events the client missed from this buffer.
+        self._event_id: int = 0
+        self._event_id_lock = threading.Lock()
+        # Per-job buffer: job_id → deque of (event_id, SSEEvent)
+        self._replay_buffer: Dict[str, deque] = {}
+        # Global buffer for "stream-all" replay
+        self._global_replay: deque = deque(maxlen=500)
+        self._replay_max_per_job = 200
+
     def create_event_queue(self, job_id: str) -> asyncio.Queue:
         """
         Create a new event queue for a job subscription.
@@ -107,8 +121,8 @@ class SSEConnectionManager:
         self.connection_count += 1
 
         logger.info(
-            f"SSE connection created for job {job_id}. "
-            f"Total connections: {self.connection_count}"
+            f"[SSE_STREAM] queue created | job={job_id} | "
+            f"total_connections={self.connection_count}"
         )
 
         return queue
@@ -132,8 +146,8 @@ class SSEConnectionManager:
             self.connection_count -= 1
 
         logger.info(
-            f"SSE connection closed for job {job_id}. "
-            f"Remaining connections: {self.connection_count}"
+            f"[SSE_STREAM] queue removed | job={job_id} | "
+            f"remaining_connections={self.connection_count}"
         )
 
     async def broadcast_to_job(
@@ -153,6 +167,18 @@ class SSEConnectionManager:
             Number of clients that received the event
         """
         sent_count = 0
+
+        # Assign a sequential event ID for replay-on-reconnect
+        with self._event_id_lock:
+            self._event_id += 1
+            eid = self._event_id
+        event.id = str(eid)
+
+        # Buffer for replay when proxy drops the connection
+        if job_id not in self._replay_buffer:
+            self._replay_buffer[job_id] = deque(maxlen=self._replay_max_per_job)
+        self._replay_buffer[job_id].append((eid, event))
+        self._global_replay.append((eid, event))
 
         # Broadcast to job-specific subscribers
         if job_id in self.job_queues:
@@ -224,6 +250,23 @@ class SSEConnectionManager:
             }
         }
 
+    def get_replay_events(
+        self, job_id: str, last_event_id: int
+    ) -> List[SSEEvent]:
+        """
+        Return buffered events after *last_event_id* for replay on reconnect.
+
+        For "stream-all" streams (job_id starts with ``all_groups_``) we
+        search the global replay buffer; for per-job streams we search the
+        job-specific buffer.
+        """
+        buf = (
+            self._global_replay
+            if job_id.startswith("all_groups_")
+            else self._replay_buffer.get(job_id, deque())
+        )
+        return [evt for eid, evt in buf if eid > last_event_id]
+
 
 # Global SSE manager instance
 sse_manager = SSEConnectionManager()
@@ -232,7 +275,8 @@ sse_manager = SSEConnectionManager()
 async def event_stream_generator(
     job_id: str,
     timeout: int = 3600,
-    heartbeat_interval: int = 30
+    heartbeat_interval: int = 30,
+    last_event_id: Optional[int] = None,
 ) -> AsyncGenerator[str, None]:
     """
     Generator function for SSE event streams.
@@ -241,50 +285,87 @@ async def event_stream_generator(
         job_id: The job ID to stream events for
         timeout: Maximum time to keep connection alive (seconds)
         heartbeat_interval: Interval for sending keepalive comments (seconds)
+        last_event_id: If set, replay buffered events after this ID before
+            switching to live streaming.  The browser sends this automatically
+            via the ``Last-Event-ID`` header on reconnect.
 
     Yields:
         SSE-formatted event strings
     """
     queue = sse_manager.create_event_queue(job_id)
+    logger.info(
+        f"[SSE_STREAM] Generator started | job={job_id} | timeout={timeout}s | "
+        f"heartbeat={heartbeat_interval}s | last_event_id={last_event_id}"
+    )
 
     try:
         start_time = datetime.now()
 
-        # Send initial connection event
-        yield SSEEvent(
+        # Replay missed events on reconnect (Databricks Apps proxy drops)
+        if last_event_id is not None:
+            missed = sse_manager.get_replay_events(job_id, last_event_id)
+            if missed:
+                logger.info(
+                    f"[SSE_STREAM] Replaying {len(missed)} events after id {last_event_id}"
+                )
+                for evt in missed:
+                    yield evt.format()
+
+        # Send initial connection event immediately
+        connected_event = SSEEvent(
             data={"message": f"Connected to job {job_id}"},
             event="connected",
-            retry=5000
+            retry=3000,
         ).format()
+        logger.info(
+            f"[SSE_STREAM] Yielding connected event | job={job_id} | "
+            f"len={len(connected_event)} bytes"
+        )
+        yield connected_event
+
+        # Send an immediate heartbeat to push data through the proxy
+        immediate_hb = f": heartbeat {datetime.now().isoformat()}\n\n"
+        logger.info(f"[SSE_STREAM] Yielding immediate heartbeat | job={job_id}")
+        yield immediate_hb
 
         last_heartbeat = datetime.now()
+        loop_count = 0
 
         while True:
+            loop_count += 1
             # Check timeout
             elapsed = (datetime.now() - start_time).total_seconds()
             if elapsed > timeout:
-                logger.info(f"SSE stream timeout for job {job_id}")
+                logger.info(f"[SSE_STREAM] Stream timeout | job={job_id} | elapsed={elapsed:.0f}s")
                 break
 
             # Send heartbeat comment to keep connection alive
-            if (datetime.now() - last_heartbeat).total_seconds() > heartbeat_interval:
-                yield f": heartbeat {datetime.now().isoformat()}\n\n"
+            since_hb = (datetime.now() - last_heartbeat).total_seconds()
+            if since_hb > heartbeat_interval:
+                hb = f": heartbeat {datetime.now().isoformat()}\n\n"
+                if loop_count <= 10 or loop_count % 20 == 0:
+                    logger.info(
+                        f"[SSE_STREAM] Heartbeat #{loop_count} | job={job_id} | "
+                        f"elapsed={elapsed:.0f}s | since_last_hb={since_hb:.0f}s"
+                    )
+                yield hb
                 last_heartbeat = datetime.now()
 
             try:
                 # Wait for event with short timeout to allow heartbeat checks
                 event = await asyncio.wait_for(queue.get(), timeout=5.0)
+                logger.info(
+                    f"[SSE_STREAM] Event received | job={job_id} | "
+                    f"event_type={event.event} | event_id={event.id}"
+                )
                 yield event.format()
 
                 # If this is a completion event, close per-job streams only.
-                # The global stream (all_groups_*) must stay open to serve
-                # subsequent jobs — it should only close on timeout or client
-                # disconnect.
                 if not job_id.startswith('all_groups_') and isinstance(event.data, dict):
                     status = event.data.get('status')
                     if status in ['completed', 'failed', 'stopped']:
                         logger.info(
-                            f"Job {job_id} finished with status {status}, closing SSE stream"
+                            f"[SSE_STREAM] Job finished | job={job_id} | status={status}"
                         )
                         break
 
@@ -292,13 +373,13 @@ async def event_stream_generator(
                 # No event received, continue loop for heartbeat
                 continue
             except asyncio.CancelledError:
-                logger.info(f"SSE stream cancelled for job {job_id}")
+                logger.info(f"[SSE_STREAM] Stream cancelled | job={job_id}")
                 break
 
     except (asyncio.CancelledError, GeneratorExit):
-        logger.info(f"SSE stream cancelled/disconnected for job {job_id}")
+        logger.info(f"[SSE_STREAM] Stream disconnected | job={job_id}")
     except Exception as e:
-        logger.error(f"Error in SSE stream for job {job_id}: {e}")
+        logger.error(f"[SSE_STREAM] Stream error | job={job_id} | error={e}")
     finally:
-        # Clean up
         sse_manager.remove_event_queue(job_id, queue)
+        logger.info(f"[SSE_STREAM] Stream cleanup done | job={job_id}")
