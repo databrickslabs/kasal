@@ -446,45 +446,114 @@ class DispatcherService:
 
                 import mlflow
 
-                # Enable OBO → PAT → SPN fallback chain for MLflow authentication
-                # This matches the pattern used by LLM authentication
+                # MLflow auth: use SPN credentials (DATABRICKS_CLIENT_ID /
+                # DATABRICKS_CLIENT_SECRET / DATABRICKS_HOST) injected by the
+                # Databricks Apps platform.  Extract a bearer token up-front
+                # so the MLflow exporter uses simple HOST + TOKEN auth.
+                #
+                # The platform also injects DATABRICKS_TOKEN (a PAT) which
+                # conflicts with SPN in the SDK ("more than one authorization
+                # method").  We strip PAT vars before the SDK call and
+                # restore them after.
                 try:
-                    from src.utils.databricks_auth import (
-                        get_auth_context,
-                        is_scope_error,
+                    host = os.environ.get("DATABRICKS_HOST", "")
+                    client_id = os.environ.get("DATABRICKS_CLIENT_ID", "")
+                    client_secret = os.environ.get("DATABRICKS_CLIENT_SECRET", "")
+
+                    # NOTE: Databricks Apps proxy redacts log lines containing
+                    # words like SECRET/TOKEN/BEARER.  Use neutral wording.
+                    logger.info(
+                        "[Dispatcher] MLflow auth env — "
+                        "host=%s, spn_id=%s, spn_cred=%s",
+                        "yes" if host else "no",
+                        "yes" if client_id else "no",
+                        "yes" if client_secret else "no",
                     )
 
-                    # Extract user_token from group_context if available
-                    user_token = (
-                        getattr(group_context, "access_token", None)
-                        if group_context
-                        else None
-                    )
-
-                    # Try with OBO first (if user_token available)
-                    auth = asyncio.run(get_auth_context(user_token=user_token))
-                    if auth:
-                        os.environ["DATABRICKS_HOST"] = auth.workspace_url
-                        os.environ["DATABRICKS_TOKEN"] = auth.token
-                        logger.info(
-                            f"[Dispatcher] MLflow configured with {auth.auth_method} authentication"
-                        )
-                    else:
+                    # SPN credentials are required — skip MLflow if absent
+                    if not (host and client_id and client_secret):
                         logger.warning(
-                            "[Dispatcher] No Databricks authentication available for MLflow"
+                            "[Dispatcher] SPN credentials required for MLflow — skipping"
                         )
-                        return
+                        return False
 
-                    # Ensure Databricks tracking
+                    auth_method = None
+                    workspace_url = host.rstrip("/") if host else ""
+
+                    # Extract credential via SDK
+                    logger.info("[Dispatcher] Attempting SPN credential extraction")
+                    try:
+                        from databricks.sdk import WorkspaceClient as _WC
+
+                        logger.info("[Dispatcher] SDK imported OK")
+
+                        # Temporarily strip PAT/API-KEY from env to prevent
+                        # SDK dual-auth conflict (oauth + pat)
+                        _pat_backup = {}
+                        for _k in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY"):
+                            if _k in os.environ:
+                                _pat_backup[_k] = os.environ.pop(_k)
+                        try:
+                            w = _WC(
+                                host=host,
+                                client_id=client_id,
+                                client_secret=client_secret,
+                            )
+                            headers = w.config.authenticate()
+                        finally:
+                            os.environ.update(_pat_backup)
+
+                        logger.info("[Dispatcher] authenticate() returned OK")
+                        auth_header = headers.get("Authorization", "")
+                        logger.info(
+                            "[Dispatcher] auth header length=%d, prefix=%s",
+                            len(auth_header),
+                            auth_header[:7] if auth_header else "(empty)",
+                        )
+                        if auth_header.startswith("Bearer "):
+                            extracted = auth_header[len("Bearer "):]
+                            os.environ["DATABRICKS_TOKEN"] = extracted
+                            if not workspace_url.startswith("http"):
+                                workspace_url = f"https://{workspace_url}"
+                            os.environ["DATABRICKS_HOST"] = workspace_url
+                            auth_method = "service_principal"
+                            logger.info(
+                                "[Dispatcher] SPN credential set (len=%d)",
+                                len(extracted),
+                            )
+
+                            # NOTE: Do NOT remove SPN vars here — this runs
+                            # in the main server process and must preserve
+                            # them for subsequent requests.
+                        else:
+                            logger.warning(
+                                "[Dispatcher] Unexpected auth header format"
+                            )
+                    except Exception as spn_err:
+                        logger.warning(
+                            "[Dispatcher] SPN extraction failed: %s: %s",
+                            type(spn_err).__name__, spn_err,
+                        )
+
+                    if not auth_method:
+                        logger.warning(
+                            "[Dispatcher] SPN credential extraction failed — MLflow cannot be configured"
+                        )
+                        return False
+
                     mlflow.set_tracking_uri("databricks")
 
                     # Get MLflow experiment name from Databricks config via service
                     exp_name = "/Shared/kasal-crew-execution-traces"  # Default fallback
                     try:
-                        databricks_service = DatabricksService(group_id=group_id)
-                        db_config = asyncio.run(
-                            databricks_service.get_databricks_config()
-                        )
+                        from src.db.session import async_session_factory
+
+                        async def _fetch_experiment_name():
+                            async with async_session_factory() as sess:
+                                svc = DatabricksService(sess, group_id=group_id)
+                                return await svc.get_databricks_config()
+
+                        db_config = asyncio.run(_fetch_experiment_name())
                         if db_config and db_config.mlflow_experiment_name:
                             # Ensure experiment name starts with /Shared/ for proper organization
                             if not db_config.mlflow_experiment_name.startswith("/"):
@@ -496,44 +565,10 @@ class DispatcherService:
                             f"[Dispatcher] Could not fetch MLflow experiment name from config: {config_err}, using default"
                         )
 
-                    # Try to set experiment - this may fail with scope error if using OBO
-                    try:
-                        exp = mlflow.set_experiment(exp_name)
-                        logger.info(
-                            f"[Dispatcher] MLflow experiment set successfully with {auth.auth_method}"
-                        )
-                    except Exception as mlflow_e:
-                        # Check if this is a scope error (OBO token lacks MLflow permissions)
-                        if is_scope_error(mlflow_e) and user_token:
-                            logger.warning(
-                                f"[Dispatcher] OBO token lacks MLflow scopes, falling back to PAT/SPN: {mlflow_e}"
-                            )
-                            # Retry with PAT/SPN fallback (no user_token)
-                            auth_fallback = asyncio.run(
-                                get_auth_context(user_token=None)
-                            )
-                            if auth_fallback:
-                                os.environ["DATABRICKS_HOST"] = (
-                                    auth_fallback.workspace_url
-                                )
-                                os.environ["DATABRICKS_TOKEN"] = auth_fallback.token
-                                logger.info(
-                                    f"[Dispatcher] MLflow reconfigured with {auth_fallback.auth_method} authentication"
-                                )
-                                # Retry experiment creation with fallback auth
-                                mlflow.set_tracking_uri("databricks")
-                                exp = mlflow.set_experiment(exp_name)
-                                logger.info(
-                                    f"[Dispatcher] MLflow experiment set successfully with {auth_fallback.auth_method} fallback"
-                                )
-                            else:
-                                logger.error(
-                                    "[Dispatcher] PAT/SPN fallback auth also failed"
-                                )
-                                raise
-                        else:
-                            # Not a scope error or already using PAT/SPN, re-raise
-                            raise
+                    exp = mlflow.set_experiment(exp_name)
+                    logger.info(
+                        f"[Dispatcher] MLflow experiment set successfully with {auth_method}"
+                    )
 
                 except Exception as auth_e:
                     logger.warning(
@@ -589,7 +624,10 @@ class DispatcherService:
                     )
 
             # Run setup off the event loop
-            await asyncio.to_thread(_setup_mlflow_sync)
+            setup_ok = await asyncio.to_thread(_setup_mlflow_sync)
+            if setup_ok is False:
+                logger.info("[Dispatcher] MLflow setup returned False — tracing disabled")
+                return False
             logger.info(
                 "[Dispatcher] MLflow tracing configured (experiment and autolog)"
             )
@@ -1374,7 +1412,8 @@ Please analyze this message and provide your intent classification."""
                     # Spawn progressive generation in background
                     asyncio.create_task(
                         self.crew_service.create_crew_progressive(
-                            streaming_request, group_context, generation_id
+                            streaming_request, group_context, generation_id,
+                            mlflow_enabled=mlflow_enabled,
                         )
                     )
                     generation_result = {

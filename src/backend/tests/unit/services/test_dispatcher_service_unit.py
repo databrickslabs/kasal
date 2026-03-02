@@ -431,6 +431,217 @@ class TestMaybeEnableMlflowTracing:
 
 
 # ===================================================================
+# Tests for _setup_mlflow_sync (SPN auth paths inside _maybe_enable_mlflow_tracing)
+# ===================================================================
+
+
+class TestSetupMlflowSyncAuth:
+    """Test SPN credential extraction inside _setup_mlflow_sync.
+
+    Auth policy: use SPN env vars (DATABRICKS_HOST + CLIENT_ID + CLIENT_SECRET)
+    injected by the Databricks Apps platform.  Strip PAT before SDK call to
+    avoid dual-auth conflict.  Do NOT remove SPN vars from the main process.
+
+    We capture the inner closure via asyncio.to_thread mock, then invoke it
+    within the test's patched environment.
+    """
+
+    @pytest.mark.asyncio
+    async def test_spn_env_extracts_token(self):
+        """When SPN env vars are set, bearer token is extracted and DATABRICKS_TOKEN is set."""
+        import os
+
+        svc = _build_service()
+        gc = _make_group_context()
+
+        spn_env = {
+            "DATABRICKS_CLIENT_ID": "test-cid",
+            "DATABRICKS_CLIENT_SECRET": "test-secret",
+            "DATABRICKS_HOST": "https://example.com",
+        }
+
+        mock_wc_instance = MagicMock()
+        mock_wc_instance.config.authenticate.return_value = {
+            "Authorization": "Bearer spn-token-123",
+        }
+        mock_wc_cls = MagicMock(return_value=mock_wc_instance)
+
+        mock_mlflow = MagicMock()
+        mock_mlflow.set_experiment.return_value = SimpleNamespace(experiment_id="exp-1")
+
+        captured_fn = None
+
+        async def _fake_to_thread(fn, *_a, **_kw):
+            nonlocal captured_fn
+            captured_fn = fn
+
+        with patch("src.services.dispatcher_service.MLflowService") as MockMlf:
+            inst = MockMlf.return_value
+            inst.is_enabled = AsyncMock(return_value=True)
+            with patch("asyncio.to_thread", side_effect=_fake_to_thread):
+                result = await svc._maybe_enable_mlflow_tracing(gc)
+
+        assert result is True
+        assert captured_fn is not None
+
+        with (
+            patch.dict(os.environ, spn_env, clear=False),
+            patch.dict("sys.modules", {
+                "mlflow": mock_mlflow,
+                "mlflow.tracing.destination": MagicMock(),
+                "databricks.sdk": MagicMock(WorkspaceClient=mock_wc_cls),
+            }),
+        ):
+            captured_fn()
+            assert os.environ.get("DATABRICKS_TOKEN") == "spn-token-123"
+            # SPN vars must NOT be removed from main process
+            assert os.environ.get("DATABRICKS_CLIENT_ID") == "test-cid"
+            assert os.environ.get("DATABRICKS_CLIENT_SECRET") == "test-secret"
+            mock_mlflow.set_tracking_uri.assert_called_with("databricks")
+
+    @pytest.mark.asyncio
+    async def test_no_spn_env_returns_false(self):
+        """When SPN env vars are missing, _setup_mlflow_sync returns False (skip MLflow)."""
+        import os
+
+        svc = _build_service()
+        gc = _make_group_context()
+
+        mock_mlflow = MagicMock()
+
+        captured_fn = None
+
+        async def _fake_to_thread(fn, *_a, **_kw):
+            nonlocal captured_fn
+            captured_fn = fn
+
+        with patch("src.services.dispatcher_service.MLflowService") as MockMlf:
+            inst = MockMlf.return_value
+            inst.is_enabled = AsyncMock(return_value=True)
+            with patch("asyncio.to_thread", side_effect=_fake_to_thread):
+                result = await svc._maybe_enable_mlflow_tracing(gc)
+
+        assert result is True
+        assert captured_fn is not None
+
+        clean_env = {k: v for k, v in os.environ.items()
+                     if k not in ("DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET",
+                                  "DATABRICKS_HOST", "DATABRICKS_TOKEN")}
+
+        with (
+            patch.dict(os.environ, clean_env, clear=True),
+            patch.dict("sys.modules", {"mlflow": mock_mlflow}),
+        ):
+            ret = captured_fn()
+            assert ret is False
+
+        mock_mlflow.set_tracking_uri.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_spn_extraction_failure_returns_false(self):
+        """When SPN extraction fails, _setup_mlflow_sync returns False."""
+        import os
+
+        svc = _build_service()
+        gc = _make_group_context()
+
+        spn_env = {
+            "DATABRICKS_CLIENT_ID": "test-cid",
+            "DATABRICKS_CLIENT_SECRET": "test-secret",
+            "DATABRICKS_HOST": "https://example.com",
+        }
+
+        mock_wc_cls = MagicMock(side_effect=RuntimeError("SDK error"))
+        mock_mlflow = MagicMock()
+
+        captured_fn = None
+
+        async def _fake_to_thread(fn, *_a, **_kw):
+            nonlocal captured_fn
+            captured_fn = fn
+
+        with patch("src.services.dispatcher_service.MLflowService") as MockMlf:
+            inst = MockMlf.return_value
+            inst.is_enabled = AsyncMock(return_value=True)
+            with patch("asyncio.to_thread", side_effect=_fake_to_thread):
+                result = await svc._maybe_enable_mlflow_tracing(gc)
+
+        assert result is True
+        assert captured_fn is not None
+
+        with (
+            patch.dict(os.environ, spn_env, clear=False),
+            patch.dict("sys.modules", {
+                "mlflow": mock_mlflow,
+                "databricks.sdk": MagicMock(WorkspaceClient=mock_wc_cls),
+            }),
+        ):
+            ret = captured_fn()
+            assert ret is False
+
+        mock_mlflow.set_tracking_uri.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_strips_pat_during_sdk_call(self):
+        """PAT env vars are temporarily stripped during WorkspaceClient construction."""
+        import os
+
+        svc = _build_service()
+        gc = _make_group_context()
+
+        spn_env = {
+            "DATABRICKS_CLIENT_ID": "test-cid",
+            "DATABRICKS_CLIENT_SECRET": "test-secret",
+            "DATABRICKS_HOST": "https://example.com",
+            "DATABRICKS_TOKEN": "old-pat-token",
+        }
+
+        captured_env_during_call = {}
+
+        def _capturing_wc(*args, **kwargs):
+            captured_env_during_call["DATABRICKS_TOKEN"] = os.environ.get("DATABRICKS_TOKEN")
+            mock_inst = MagicMock()
+            mock_inst.config.authenticate.return_value = {
+                "Authorization": "Bearer spn-extracted-tok",
+            }
+            return mock_inst
+
+        mock_wc_cls = MagicMock(side_effect=_capturing_wc)
+
+        mock_mlflow = MagicMock()
+        mock_mlflow.set_experiment.return_value = SimpleNamespace(experiment_id="exp-1")
+
+        captured_fn = None
+
+        async def _fake_to_thread(fn, *_a, **_kw):
+            nonlocal captured_fn
+            captured_fn = fn
+
+        with patch("src.services.dispatcher_service.MLflowService") as MockMlf:
+            inst = MockMlf.return_value
+            inst.is_enabled = AsyncMock(return_value=True)
+            with patch("asyncio.to_thread", side_effect=_fake_to_thread):
+                result = await svc._maybe_enable_mlflow_tracing(gc)
+
+        assert result is True
+        assert captured_fn is not None
+
+        with (
+            patch.dict(os.environ, spn_env, clear=False),
+            patch.dict("sys.modules", {
+                "mlflow": mock_mlflow,
+                "mlflow.tracing.destination": MagicMock(),
+                "databricks.sdk": MagicMock(WorkspaceClient=mock_wc_cls),
+            }),
+        ):
+            captured_fn()
+            # PAT should have been stripped during SDK call
+            assert captured_env_during_call["DATABRICKS_TOKEN"] is None
+            # After extraction, new token should be set
+            assert os.environ.get("DATABRICKS_TOKEN") == "spn-extracted-tok"
+
+
+# ===================================================================
 # Tests for detect_intent
 # ===================================================================
 
