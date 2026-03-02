@@ -237,7 +237,7 @@ class LLMManager:
                 user_token = UserContext.get_user_token()
 
                 # Get authentication context (OBO → PAT → Service Principal)
-                auth = await get_auth_context(user_token=user_token)
+                auth = await get_auth_context(user_token=user_token, group_id=group_id)
                 if auth:
                     # Pass authentication directly to CrewAI LLM (thread-safe)
                     api_key = auth.token
@@ -460,7 +460,8 @@ class LLMManager:
 
                     # Use unified authentication (OBO → OAuth → PAT)
                     embedding_logger.info("Attempting unified Databricks authentication for embeddings")
-                    auth = await get_auth_context(user_token=user_token)
+                    emb_group_id = LLMManager._get_group_id_from_context(required=False)
+                    auth = await get_auth_context(user_token=user_token, group_id=emb_group_id)
                     if auth:
                         embedding_logger.info(f"Using Databricks {auth.auth_method} authentication for embeddings")
                         # For OAuth/OBO, use headers approach

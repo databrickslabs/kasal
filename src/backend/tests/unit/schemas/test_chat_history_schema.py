@@ -57,10 +57,21 @@ class TestChatHistoryBase:
         assert chat.confidence == "0.95"
         assert chat.generation_result == {"agent_id": "agent-123", "status": "success"}
 
+    def test_result_message_type_accepted(self):
+        """Test that 'result' is accepted as a valid message_type (added for chat history 422 fix)."""
+        data = {
+            "session_id": "session-result",
+            "user_id": "user-result",
+            "message_type": "result",
+            "content": "Final result content"
+        }
+        chat = ChatHistoryBase(**data)
+        assert chat.message_type == "result"
+
     def test_message_type_validation(self):
         """Test message_type field validation."""
-        valid_types = ["user", "assistant", "execution", "trace"]
-        
+        valid_types = ["user", "assistant", "execution", "trace", "result"]
+
         for msg_type in valid_types:
             data = {
                 "session_id": "session-test",
@@ -409,6 +420,16 @@ class TestSaveMessageRequest:
         assert request.intent == "generate_agent"
         assert request.confidence == 0.92
         assert request.generation_result == {"result": "success"}
+
+    def test_save_message_request_result_type(self):
+        """Test SaveMessageRequest accepts 'result' message_type (chat history 422 fix)."""
+        data = {
+            "session_id": "save-session",
+            "message_type": "result",
+            "content": "Final execution result"
+        }
+        request = SaveMessageRequest(**data)
+        assert request.message_type == "result"
 
     def test_save_message_request_minimal(self):
         """Test SaveMessageRequest with minimal required fields."""

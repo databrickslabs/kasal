@@ -9,7 +9,7 @@ class ChatHistoryBase(BaseModel):
     """Base Pydantic model for ChatHistory with shared attributes."""
     session_id: str = Field(..., description="Chat session identifier")
     user_id: str = Field(..., description="User identifier")
-    message_type: str = Field(..., pattern="^(user|assistant|execution|trace)$", description="Message type: user, assistant, execution, or trace")
+    message_type: str = Field(..., pattern="^(user|assistant|execution|trace|result)$", description="Message type: user, assistant, execution, trace, or result")
     content: str = Field(..., min_length=1, description="Message content")
     intent: Optional[str] = Field(None, description="Detected intent (generate_agent, generate_task, etc.)")
     confidence: Optional[str] = Field(None, description="Confidence score as string")
@@ -85,7 +85,7 @@ class ChatHistoryListResponse(BaseModel):
 class SaveMessageRequest(BaseModel):
     """Schema for saving a chat message via API."""
     session_id: str = Field(..., description="Chat session identifier")
-    message_type: str = Field(..., pattern="^(user|assistant|execution|trace)$", description="Message type")
+    message_type: str = Field(..., pattern="^(user|assistant|execution|trace|result)$", description="Message type")
     content: str = Field(..., min_length=1, description="Message content")
     intent: Optional[str] = Field(None, description="Detected intent")
     confidence: Optional[float] = Field(None, ge=0.0, le=1.0, description="Confidence score")
