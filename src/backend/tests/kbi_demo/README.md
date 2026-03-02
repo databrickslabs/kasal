@@ -22,7 +22,7 @@ Python script that demonstrates the converters in action:
 
 **Usage:**
 ```bash
-cd /Users/david.schwarzenbacher/workspace/kasal/src/backend
+cd src/backend
 python3 tests/kbi_demo/test_excise_tax_demo.py
 ```
 

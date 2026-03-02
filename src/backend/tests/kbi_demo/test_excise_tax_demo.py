@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 
 # Add the converters module to the path
-sys.path.insert(0, '/Users/david.schwarzenbacher/workspace/kasal/src/backend/src')
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / 'src'))
 
 from converters.common.transformers.yaml import YAMLKPIParser
 from converters.outbound.dax.generator import DAXGenerator

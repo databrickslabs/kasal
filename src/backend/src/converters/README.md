@@ -245,7 +245,7 @@ async def test_convert_endpoint(client):
 
 ## Migration from yaml2dax
 
-The existing code at `/Users/david.schwarzenbacher/Downloads/yaml2dax_clean/api/src/yaml2dax`
+The existing code at `<path-to-yaml2dax>/api/src/yaml2dax`
 will be migrated into this structure:
 
 | yaml2dax Module | New Location |
