@@ -9,14 +9,11 @@ This module contains:
 - Helper functions for dataset building, trace discovery, and scorer configuration
 """
 
-import logging
 import os
-import asyncio
 from typing import Dict, Any, List, Optional
 from json import dumps
 
 from src.core.logger import LoggerManager
-from src.services.mlflow_scope_error_handler import MLflowScopeErrorHandler
 
 logger = LoggerManager.get_instance().system
 
@@ -29,7 +26,6 @@ class MLflowEvaluationRunner:
     - Create MLflow evaluation runs
     - Build evaluation datasets from execution history and traces
     - Configure and run GenAI scorers
-    - Handle scope errors with PAT/SPN fallback
     """
 
     def __init__(
@@ -74,7 +70,6 @@ class MLflowEvaluationRunner:
 
         # Set up environment variables within thread context only
         old_env = self._save_environment_vars()
-        scope_handler = MLflowScopeErrorHandler(auth_ctx)
 
         try:
             if auth_ctx:
@@ -87,20 +82,11 @@ class MLflowEvaluationRunner:
                 "/Shared/kasal-crew-execution-traces"
             )
 
-            # Set experiment with scope error handling
-            try:
-                eval_exp = mlflow.set_experiment(eval_exp_name)
-            except Exception as mlflow_e:
-                eval_exp = scope_handler.handle_and_retry(
-                    mlflow_e,
-                    lambda: mlflow.set_experiment(eval_exp_name),
-                    "set_experiment"
-                )
+            eval_exp = mlflow.set_experiment(eval_exp_name)
 
             # Discover related traces and build evaluation dataset
             related_trace_ids, records = self._discover_traces_and_build_dataset(
-                auth_ctx,
-                scope_handler
+                auth_ctx
             )
 
             # Fallback to single-record dataset if trace-derived dataset is empty
@@ -161,14 +147,12 @@ class MLflowEvaluationRunner:
     def _discover_traces_and_build_dataset(
         self,
         auth_ctx: Optional[Any],
-        scope_handler: MLflowScopeErrorHandler
     ) -> tuple[List[str], List[Dict[str, Any]]]:
         """
         Discover related MLflow traces and build evaluation dataset from them.
 
         Args:
             auth_ctx: Authentication context
-            scope_handler: Scope error handler for fallback
 
         Returns:
             Tuple of (related_trace_ids, records)
@@ -199,15 +183,7 @@ class MLflowEvaluationRunner:
                         "/Shared/kasal-crew-execution-traces"
                     )
 
-                    # Get experiment with scope error handling
-                    try:
-                        traces_exp = mlflow.get_experiment_by_name(traces_exp_name)
-                    except Exception as exp_error:
-                        traces_exp = scope_handler.handle_and_retry(
-                            exp_error,
-                            lambda: mlflow.get_experiment_by_name(traces_exp_name),
-                            "get_experiment_by_name"
-                        )
+                    traces_exp = mlflow.get_experiment_by_name(traces_exp_name)
 
                     traces_exp_id = str(getattr(traces_exp, "experiment_id", "")) if traces_exp else ""
                     df = search_traces(experiment_ids=[traces_exp_id]) if traces_exp_id else search_traces()
@@ -411,7 +387,6 @@ class MLflowEvaluationRunner:
 
         # Set up environment variables within thread context only
         old_env = self._save_environment_vars()
-        scope_handler = MLflowScopeErrorHandler(auth_ctx)
 
         try:
             if auth_ctx:
@@ -422,8 +397,7 @@ class MLflowEvaluationRunner:
 
             # Discover traces and build dataset (reuse existing logic)
             related_trace_ids, records = self._discover_traces_and_build_dataset(
-                auth_ctx,
-                scope_handler
+                auth_ctx
             )
 
             # Fallback to single-record dataset if trace-derived dataset is empty

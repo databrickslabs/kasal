@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter
 
 from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
@@ -70,7 +70,6 @@ async def set_evaluation_status(
 @router.post("/evaluate", response_model=MLflowEvaluateResponse)
 async def trigger_evaluation(
     payload: MLflowEvaluateRequest,
-    request: Request,
     session: SessionDep,
     group_ctx: GroupContextDep,
 ) -> MLflowEvaluateResponse:
@@ -80,15 +79,6 @@ async def trigger_evaluation(
     if not group_ctx or not group_ctx.primary_group_id:
         raise ForbiddenError("Group context required for MLflow operations")
     svc = MLflowService(session, group_id=group_ctx.primary_group_id)
-    # Prefer OBO user token when present; fallback handled in service
-    try:
-        from src.utils.databricks_auth import extract_user_token_from_request
-
-        user_token = extract_user_token_from_request(request)
-        if user_token:
-            svc.set_user_token(user_token)
-    except Exception:
-        pass
     info = await svc.trigger_evaluation(payload.job_id)
     return MLflowEvaluateResponse(**info)
 
@@ -98,7 +88,7 @@ from typing import Dict, Optional
 
 @router.get("/experiment-info", response_model=Dict)
 async def get_mlflow_experiment_info(
-    request: Request, session: SessionDep, group_ctx: GroupContextDep
+    session: SessionDep, group_ctx: GroupContextDep
 ) -> Dict:
     """
     Return MLflow experiment info used for tracing UI deep links.
@@ -111,22 +101,11 @@ async def get_mlflow_experiment_info(
 
     svc = MLflowService(session, group_id=group_ctx.primary_group_id)
 
-    # Prefer OBO user token when present; fallback handled in service
-    try:
-        from src.utils.databricks_auth import extract_user_token_from_request
-
-        user_token = extract_user_token_from_request(request)
-        if user_token:
-            svc.set_user_token(user_token)
-    except Exception:
-        pass
-
     return await svc.get_experiment_info()
 
 
 @router.get("/trace-link", response_model=Dict)
 async def get_trace_deeplink(
-    request: Request,
     session: SessionDep,
     group_ctx: GroupContextDep,
     job_id: Optional[str] = None,
@@ -149,15 +128,5 @@ async def get_trace_deeplink(
         raise ForbiddenError("Group context required for MLflow operations")
 
     svc = MLflowService(session, group_id=group_ctx.primary_group_id)
-
-    # Prefer OBO user token when present; fallback handled in service
-    try:
-        from src.utils.databricks_auth import extract_user_token_from_request
-
-        user_token = extract_user_token_from_request(request)
-        if user_token:
-            svc.set_user_token(user_token)
-    except Exception:
-        pass
 
     return await svc.get_trace_deeplink(job_id=job_id)
