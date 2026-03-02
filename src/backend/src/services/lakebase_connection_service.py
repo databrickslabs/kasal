@@ -68,14 +68,25 @@ class LakebaseConnectionService(BaseService):
             client_secret = os.getenv("DATABRICKS_CLIENT_SECRET")
             host = os.getenv("DATABRICKS_HOST")
 
-            # SPN OAuth — required when deployed as a Databricks App
+            # SPN OAuth — required when deployed as a Databricks App.
+            # The platform also injects DATABRICKS_TOKEN (PAT) which
+            # conflicts with SPN in the SDK ("more than one authorization
+            # method").  Strip PAT vars before the SDK call and restore
+            # after — same pattern as mlflow_setup.py.
             if client_id and client_secret and host:
                 logger.info("[LAKEBASE AUTH] Using SPN OAuth (client credentials) — required for postgres scope")
-                self._workspace_client = WorkspaceClient(
-                    host=host,
-                    client_id=client_id,
-                    client_secret=client_secret
-                )
+                _pat_backup = {}
+                for _k in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY"):
+                    if _k in os.environ:
+                        _pat_backup[_k] = os.environ.pop(_k)
+                try:
+                    self._workspace_client = WorkspaceClient(
+                        host=host,
+                        client_id=client_id,
+                        client_secret=client_secret,
+                    )
+                finally:
+                    os.environ.update(_pat_backup)
                 logger.info("[LAKEBASE AUTH] SPN WorkspaceClient created successfully")
                 return self._workspace_client
 

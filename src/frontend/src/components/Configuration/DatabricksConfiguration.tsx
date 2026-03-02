@@ -395,9 +395,19 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
 
         {/* MLflow Tracking Section */}
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Typography variant="subtitle2" color="text.secondary">
-            {t('configuration.databricks.mlflow.title', { defaultValue: 'MLflow Tracking' })}
-          </Typography>
+          <Box>
+            <Typography variant="subtitle2" color="text.secondary">
+              {t('configuration.databricks.mlflow.title', { defaultValue: 'MLflow Tracking' })}
+            </Typography>
+            <a
+              href="https://docs.databricks.com/aws/en/dev-tools/databricks-apps/mlflow"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontSize: '0.75em' }}
+            >
+              How to add MLflow experiment to your Databricks App
+            </a>
+          </Box>
           <FormControlLabel
             control={
               <Switch

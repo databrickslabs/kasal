@@ -334,12 +334,54 @@ if str(settings.DATABASE_URI).startswith('sqlite'):
 
 # Create session factories for both engines (avoid recreating on each request)
 # Main session factory (uses default engine based on USE_NULLPOOL setting)
-async_session_factory = async_sessionmaker(
+_local_session_factory = async_sessionmaker(
     engine,
     expire_on_commit=False,
     autoflush=False,  # Disable autoflush to prevent SQLite locking issues
     autocommit=False,  # Explicit transaction control
 )
+
+
+class _SwappableSessionFactory:
+    """Wrapper around async_sessionmaker that can be hot-swapped to Lakebase.
+
+    Every module that does ``from src.db.session import async_session_factory``
+    receives a reference to the **same** mutable instance.  Calling
+    ``async_session_factory.activate_lakebase(lakebase_sessionmaker)`` replaces
+    the underlying factory so that *all* existing callers automatically start
+    producing Lakebase sessions — zero call-site changes required.
+    """
+
+    def __init__(self, default_factory):
+        self._factory = default_factory
+        self._is_lakebase = False
+
+    # --- async_sessionmaker-compatible interface ---
+
+    def __call__(self):
+        """Return a new AsyncSession (same as async_sessionmaker.__call__)."""
+        return self._factory()
+
+    # --- hot-swap API ---
+
+    def activate_lakebase(self, lakebase_factory):
+        """Replace the underlying factory with a Lakebase-backed one."""
+        self._factory = lakebase_factory
+        self._is_lakebase = True
+        logger.info("[SESSION FACTORY] Swapped to Lakebase engine")
+
+    def deactivate_lakebase(self):
+        """Revert to the local (SQLite / PG) factory."""
+        self._factory = _local_session_factory
+        self._is_lakebase = False
+        logger.info("[SESSION FACTORY] Reverted to local engine")
+
+    @property
+    def is_lakebase(self) -> bool:
+        return self._is_lakebase
+
+
+async_session_factory = _SwappableSessionFactory(_local_session_factory)
 
 # ContextVar holding the current request-scoped session (set by DI providers)
 _request_session: ContextVar[Optional[AsyncSession]] = ContextVar(
