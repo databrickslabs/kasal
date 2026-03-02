@@ -111,6 +111,12 @@ async def get_group_context(
             logger.error(f"Unauthorized group access attempt: {e}")
             from fastapi import HTTPException
             raise HTTPException(status_code=403, detail=str(e))
+        except Exception as e:
+            # Database or other unexpected errors during group resolution.
+            # Return empty GroupContext so the endpoint's own ForbiddenError
+            # check can cleanly return 403 instead of crashing with 500.
+            logger.error(f"Error resolving group context for {user_email}: {e}")
+            return GroupContext()
 
     # Fallback: No group context available
     logger.debug("No email header found, returning empty group context")
