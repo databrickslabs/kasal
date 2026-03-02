@@ -27,10 +27,8 @@ import asyncio
 from sqlalchemy import text
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.base import BaseHTTPMiddleware
-
 # Get logger after configuration
 logger = logging.getLogger("kasal")
 
@@ -70,52 +68,67 @@ def create_parser():
     )
     return parser
 
-class SPAMiddleware(BaseHTTPMiddleware):
-    """Middleware to serve SPA frontend for non-API routes."""
+
+class SPAMiddleware:
+    """Pure ASGI middleware to serve SPA frontend for non-API routes.
+
+    Unlike BaseHTTPMiddleware, this does NOT buffer StreamingResponse bodies,
+    which is critical for SSE streams to work through HTTP/2 proxies
+    (e.g. Databricks Apps).
+    """
 
     def __init__(self, app, frontend_dir):
-        super().__init__(app)
-        # Convert to Path object if it's a string
+        self.app = app
         self.frontend_dir = Path(frontend_dir) if isinstance(frontend_dir, str) else frontend_dir
         self.index_path = self.frontend_dir / "index.html"
 
-        # Verify that index.html exists
         if not self.index_path.exists():
             logger.error(f"index.html not found at {self.index_path}")
         else:
             logger.info(f"Found index.html at {self.index_path}")
-
-            # Log frontend directory contents
             logger.info(f"Frontend directory contents:")
             for item in os.listdir(str(self.frontend_dir)):
                 logger.info(f"  - {item}")
 
-    async def dispatch(self, request, call_next):
-        path = request.url.path
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope["path"]
 
         # Skip API routes, static files, manifest, and markdown files
         if (path.startswith("/api/") or
             path.startswith("/api-docs") or
-            path.startswith("/assets/") or  # Vite build output
+            path.startswith("/assets/") or
             path == "/favicon.ico" or
             path == "/manifest.json" or
             path == "/robots.txt" or
             path.endswith(".md") or
             path.endswith(".png") or
             path.endswith(".ico")):
-            # Let the main router handle these paths
-            logger.info(f"Skipping middleware for path: {path}")
-            return await call_next(request)
+            await self.app(scope, receive, send)
+            return
 
         # For all other routes, serve the SPA's index.html
         if self.index_path.exists():
-            logger.info(f"Serving SPA for path: {path}")
-            with open(self.index_path, "r") as f:
-                content = f.read()
-            return HTMLResponse(content)
+            content = self.index_path.read_bytes()
+            await send({
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [
+                    [b"content-type", b"text/html; charset=utf-8"],
+                    [b"content-length", str(len(content)).encode()],
+                ],
+            })
+            await send({
+                "type": "http.response.body",
+                "body": content,
+            })
+            return
 
         # If index.html doesn't exist, continue with normal routing
-        return await call_next(request)
+        await self.app(scope, receive, send)
 
 async def initialize_database():
     """
@@ -305,6 +318,12 @@ def run_app():
         for route in original_app.routes:
             app.routes.append(route)
 
+        # Copy exception handlers from the original app so that custom
+        # exceptions (NotFoundError → 404, ConflictError → 409, etc.)
+        # return proper HTTP status codes instead of generic 500.
+        for exc_class, handler in original_app.exception_handlers.items():
+            app.add_exception_handler(exc_class, handler)
+
         # Add CORS middleware
         app.add_middleware(
             CORSMiddleware,
@@ -371,6 +390,12 @@ def run_app():
                         if os.path.exists(file_path):
                             return FileResponse(file_path, media_type="text/markdown")
                     raise HTTPException(status_code=404, detail="File not found")
+
+        # Add UserContextMiddleware to extract user tokens and group context
+        # from Databricks Apps proxy headers (X-Forwarded-Access-Token,
+        # X-Forwarded-Email, etc.).  Must be added BEFORE the SPA middleware.
+        from src.utils.user_context import UserContextMiddleware
+        app.add_middleware(UserContextMiddleware)
 
         # Add middleware to serve frontend for all non-API routes
         app.add_middleware(SPAMiddleware, frontend_dir=frontend_static_dir)

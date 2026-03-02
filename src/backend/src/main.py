@@ -21,8 +21,6 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
-from starlette.middleware.base import BaseHTTPMiddleware
-
 from src.api import api_router
 from src.config.settings import settings
 from src.core.logger import LoggerManager
@@ -244,6 +242,28 @@ async def lifespan(app: FastAPI):
     else:
         system_logger.warning("Skipping seeding as database is not initialized.")
 
+    # ── Activate Lakebase session factory if Lakebase is the configured DB ──
+    # This swaps the global async_session_factory so that ALL existing callers
+    # (background tasks, services, UnitOfWork) automatically use Lakebase.
+    if db_initialized:
+        try:
+            from src.db.database_router import is_lakebase_enabled, get_lakebase_config_from_db
+            if await is_lakebase_enabled():
+                config = await get_lakebase_config_from_db()
+                instance_name = (
+                    (config or {}).get("instance_name")
+                    or os.environ.get("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
+                )
+                from src.db.lakebase_session import LakebaseSessionFactory
+                lb_factory = LakebaseSessionFactory(instance_name)
+                await lb_factory.create_engine()
+                async_session_factory.activate_lakebase(lb_factory._session_factory)
+                system_logger.info(
+                    f"Activated Lakebase session factory (instance: {instance_name})"
+                )
+        except Exception as e:
+            system_logger.warning(f"Lakebase activation skipped: {e}")
+
     # Initialize scheduler on startup only if database is initialized
     if db_initialized:
         system_logger.info("Initializing scheduler...")
@@ -414,30 +434,40 @@ app.add_middleware(
 )
 
 
-# Add local development authentication middleware
-async def local_dev_auth_middleware(request: Request, call_next):
-    """
-    Middleware to inject authentication headers for local development.
+# ---------------------------------------------------------------------------
+# Pure ASGI middleware (NOT BaseHTTPMiddleware) to avoid buffering
+# StreamingResponse bodies, which breaks SSE streams through HTTP/2 proxies.
+# See: https://github.com/encode/starlette/issues/1012
+# ---------------------------------------------------------------------------
+
+
+class LocalDevAuthMiddleware:
+    """Pure ASGI middleware to inject auth headers for local development.
 
     When running locally (not in Databricks Apps), this adds default headers
     so developers can use the app without OAuth/OBO authentication.
     """
-    # Check if we're in local development (no X-Forwarded-Email header present)
-    if not request.headers.get("X-Forwarded-Email") and not request.headers.get("X-Auth-Request-Email"):
-        # Inject default local dev user headers
-        request.scope["headers"].append((b"x-forwarded-email", b"david.schwarzenbacher@databricks.com"))
-        logger.debug("[LOCAL_DEV_AUTH] Injected default authentication headers for local development")
 
-    response = await call_next(request)
-    return response
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            headers = dict(scope.get("headers", []))
+            if b"x-forwarded-email" not in headers and b"x-auth-request-email" not in headers:
+                scope["headers"] = list(scope.get("headers", [])) + [
+                    (b"x-forwarded-email", os.environ.get("LOCAL_DEV_EMAIL", "admin@admin.com").encode())
+                ]
+                logger.debug("[LOCAL_DEV_AUTH] Injected default authentication headers for local development")
+        await self.app(scope, receive, send)
 
 
-app.add_middleware(BaseHTTPMiddleware, dispatch=local_dev_auth_middleware)
+app.add_middleware(LocalDevAuthMiddleware)
 
 # Add user context middleware to extract user tokens from Databricks Apps headers
-from src.utils.user_context import user_context_middleware
+from src.utils.user_context import UserContextMiddleware  # noqa: E402
 
-app.add_middleware(BaseHTTPMiddleware, dispatch=user_context_middleware)
+app.add_middleware(UserContextMiddleware)
 
 
 # ---------------------------------------------------------------------------
