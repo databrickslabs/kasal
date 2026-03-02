@@ -6,10 +6,23 @@ and configuration settings that apply to all tests.
 """
 import os
 import sys
+import warnings
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 from datetime import datetime, UTC
+
+# Suppress noisy third-party warnings early (before module imports trigger them).
+# These come from pyspark (distutils), starlette (python_multipart), and mlflow
+# (type hints) and are not actionable — they originate in vendored dependencies.
+warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"pyspark\..*")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"distutils\..*")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"pydantic\..*")
+warnings.filterwarnings("ignore", category=PendingDeprecationWarning, module=r"starlette\..*")
+warnings.filterwarnings("ignore", category=PendingDeprecationWarning, module=r"multipart\..*")
+warnings.filterwarnings("ignore", message=r".*type hints.*predict.*", category=UserWarning)
+warnings.filterwarnings("ignore", category=RuntimeWarning, module=r"multiprocessing\..*")
+warnings.filterwarnings("ignore", category=RuntimeWarning, module=r"asyncio\..*")
 
 # Add the backend directory to the Python path so that 'src' can be imported
 backend_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
