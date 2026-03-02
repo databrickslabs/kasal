@@ -51,7 +51,7 @@ async def test_set_mlflow_status_true_false():
         svc_cls.return_value = svc
         out = await set_mlflow_status(MLflowConfigUpdate(enabled=True), session=session, group_ctx=group_ctx)
         assert out.enabled is True
-        
+
         svc.set_enabled = AsyncMock(return_value=False)
         with pytest.raises(NotFoundError) as ei:
             await set_mlflow_status(MLflowConfigUpdate(enabled=False), session=session, group_ctx=group_ctx)
@@ -78,40 +78,38 @@ async def test_trigger_evaluation_requires_job():
     session = AsyncMock()
     group_ctx = Group('g1')
     with pytest.raises(BadRequestError) as ei:
-        await trigger_evaluation(MLflowEvaluateRequest(job_id=""), request=Mock(), session=session, group_ctx=group_ctx)
+        await trigger_evaluation(MLflowEvaluateRequest(job_id=""), session=session, group_ctx=group_ctx)
     assert ei.value.status_code == 400
 
 
 @pytest.mark.asyncio
-async def test_trigger_evaluation_success_and_user_token():
+async def test_trigger_evaluation_success():
+    """Test trigger_evaluation delegates to MLflowService without OBO token injection."""
     session = AsyncMock()
     group_ctx = Group('g1')
-    req = Mock()
-    with patch('src.api.mlflow_router.MLflowService') as svc_cls, \
-         patch('src.utils.databricks_auth.extract_user_token_from_request', return_value='tok'):
+    with patch('src.api.mlflow_router.MLflowService') as svc_cls:
         svc = AsyncMock()
         svc.trigger_evaluation = AsyncMock(return_value={'run_id': '1'})
         svc_cls.return_value = svc
-        out = await trigger_evaluation(MLflowEvaluateRequest(job_id='job1'), request=req, session=session, group_ctx=group_ctx)
+        out = await trigger_evaluation(MLflowEvaluateRequest(job_id='job1'), session=session, group_ctx=group_ctx)
         assert out.run_id == '1'
-        svc.set_user_token.assert_called_once_with('tok')
+        svc.trigger_evaluation.assert_called_once_with('job1')
 
 
 @pytest.mark.asyncio
 async def test_get_experiment_info_and_trace_deeplink():
+    """Test experiment info and trace deeplink endpoints without Request parameter."""
     session = AsyncMock()
     group_ctx = Group('g1')
-    req = Mock()
-    with patch('src.api.mlflow_router.MLflowService') as svc_cls, \
-         patch('src.utils.databricks_auth.extract_user_token_from_request', return_value=None):
+    with patch('src.api.mlflow_router.MLflowService') as svc_cls:
         svc = AsyncMock()
         svc.get_experiment_info = AsyncMock(return_value={'experiment_id': 'exp'})
         svc.get_trace_deeplink = AsyncMock(return_value={'url': 'https://example.com'})
         svc_cls.return_value = svc
 
-        info = await get_mlflow_experiment_info(request=req, session=session, group_ctx=group_ctx)
+        info = await get_mlflow_experiment_info(session=session, group_ctx=group_ctx)
         assert info['experiment_id'] == 'exp'
 
-        link = await get_trace_deeplink(request=req, session=session, group_ctx=group_ctx, job_id='jobx')
+        link = await get_trace_deeplink(session=session, group_ctx=group_ctx, job_id='jobx')
         assert link['url'].startswith('http')
 
