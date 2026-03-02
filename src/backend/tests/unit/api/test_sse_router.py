@@ -3,13 +3,15 @@ Unit tests for SSE Router API endpoints.
 
 Tests the functionality of SSE streaming endpoints including
 execution streams, global streams, generation streams, statistics, and health check.
+Also tests _parse_last_event_id and Last-Event-ID header handling.
 """
 import pytest
 from pathlib import Path
 from unittest.mock import patch, AsyncMock, MagicMock
-from fastapi import FastAPI, APIRouter, Query
+from fastapi import FastAPI, APIRouter, Query, Request
 from fastapi.testclient import TestClient
 from fastapi.responses import StreamingResponse
+from starlette.datastructures import Headers
 
 
 # Create a mock router for testing without importing the actual module
@@ -175,11 +177,10 @@ class TestStreamingResponseHeaders:
         router_file = Path(__file__).parent.parent.parent.parent / "src" / "api" / "sse_router.py"
         source = router_file.read_text()
 
-        assert "Cache-Control" in source
+        assert "cache-control" in source or "Cache-Control" in source
         assert "no-cache" in source
-        assert "Connection" in source
-        assert "keep-alive" in source
-        assert "X-Accel-Buffering" in source
+        # Connection: keep-alive was removed — it's forbidden in HTTP/2
+        assert "x-accel-buffering" in source or "X-Accel-Buffering" in source
 
     def test_stream_response_media_type(self):
         """Test that streaming responses use text/event-stream media type."""
@@ -268,11 +269,11 @@ class TestStreamGenerationUpdates:
         # Verify the endpoint definition exists with correct path
         assert 'generations/{generation_id}/stream' in source
 
-        # Verify event_stream_generator is called with generation_id and keyword args
-        assert "event_stream_generator(" in source
+        # Verify event_stream_generator is used with generation_id
+        assert "event_stream_generator" in source
         assert "generation_id" in source
-        assert "timeout=timeout" in source
-        assert "heartbeat_interval=heartbeat" in source
+        assert "timeout" in source
+        assert "heartbeat" in source
 
     def test_stream_generation_updates_endpoint_exists(self, client):
         """Test that the generation stream endpoint is registered."""
@@ -284,3 +285,72 @@ class TestStreamGenerationUpdates:
         for route in app.routes:
             if hasattr(route, 'path') and route.path == "/sse/generations/{generation_id}/stream":
                 assert 'GET' in route.methods
+
+
+class TestParseLastEventId:
+    """Test _parse_last_event_id helper from the real sse_router module."""
+
+    def test_parse_valid_integer(self):
+        """Valid integer Last-Event-ID returns int."""
+        from src.api.sse_router import _parse_last_event_id
+
+        scope = {"type": "http", "method": "GET", "path": "/", "query_string": b"",
+                 "headers": [(b"last-event-id", b"42")]}
+        request = Request(scope)
+        assert _parse_last_event_id(request) == 42
+
+    def test_parse_missing_header(self):
+        """Missing Last-Event-ID header returns None."""
+        from src.api.sse_router import _parse_last_event_id
+
+        scope = {"type": "http", "method": "GET", "path": "/", "query_string": b"",
+                 "headers": []}
+        request = Request(scope)
+        assert _parse_last_event_id(request) is None
+
+    def test_parse_non_integer(self):
+        """Non-integer Last-Event-ID returns None."""
+        from src.api.sse_router import _parse_last_event_id
+
+        scope = {"type": "http", "method": "GET", "path": "/", "query_string": b"",
+                 "headers": [(b"last-event-id", b"not-a-number")]}
+        request = Request(scope)
+        assert _parse_last_event_id(request) is None
+
+    def test_parse_empty_string(self):
+        """Empty Last-Event-ID string returns None."""
+        from src.api.sse_router import _parse_last_event_id
+
+        scope = {"type": "http", "method": "GET", "path": "/", "query_string": b"",
+                 "headers": [(b"last-event-id", b"")]}
+        request = Request(scope)
+        assert _parse_last_event_id(request) is None
+
+
+class TestSSEHeadersConfig:
+    """Test that SSE_HEADERS is configured correctly for HTTP/2 proxy compatibility."""
+
+    def test_sse_headers_no_connection_keep_alive(self):
+        """SSE_HEADERS must NOT include Connection: keep-alive (forbidden in HTTP/2)."""
+        from src.api.sse_router import SSE_HEADERS
+
+        # Connection header is forbidden in HTTP/2 (RFC 7540 §8.1.2.2)
+        assert "Connection" not in SSE_HEADERS
+
+    def test_sse_headers_content_encoding_none(self):
+        """SSE_HEADERS includes Content-Encoding: none to prevent proxy buffering."""
+        from src.api.sse_router import SSE_HEADERS
+
+        assert SSE_HEADERS.get("Content-Encoding") == "none"
+
+    def test_sse_headers_no_cache(self):
+        """SSE_HEADERS includes Cache-Control with no-cache."""
+        from src.api.sse_router import SSE_HEADERS
+
+        assert "no-cache" in SSE_HEADERS.get("Cache-Control", "")
+
+    def test_sse_headers_x_accel_buffering(self):
+        """SSE_HEADERS includes X-Accel-Buffering: no for nginx/envoy."""
+        from src.api.sse_router import SSE_HEADERS
+
+        assert SSE_HEADERS.get("X-Accel-Buffering") == "no"

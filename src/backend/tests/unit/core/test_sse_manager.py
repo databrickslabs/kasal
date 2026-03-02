@@ -318,6 +318,124 @@ class TestSSEConnectionManager:
         assert stats["connections_per_job"] == {}
 
 
+class TestReplayBuffer:
+    """Test cases for the SSE replay buffer (reconnect support)."""
+
+    @pytest.mark.asyncio
+    async def test_broadcast_assigns_sequential_event_ids(self):
+        """Broadcast assigns monotonically increasing event IDs."""
+        manager = SSEConnectionManager()
+        queue = manager.create_event_queue("job-1")
+
+        e1 = SSEEvent(data={"seq": 1})
+        e2 = SSEEvent(data={"seq": 2})
+        e3 = SSEEvent(data={"seq": 3})
+
+        await manager.broadcast_to_job("job-1", e1)
+        await manager.broadcast_to_job("job-1", e2)
+        await manager.broadcast_to_job("job-1", e3)
+
+        assert e1.id == "1"
+        assert e2.id == "2"
+        assert e3.id == "3"
+
+    @pytest.mark.asyncio
+    async def test_replay_buffer_stores_events(self):
+        """Events are stored in the per-job replay buffer after broadcast."""
+        manager = SSEConnectionManager()
+        manager.create_event_queue("job-1")
+
+        evt = SSEEvent(data={"msg": "hello"})
+        await manager.broadcast_to_job("job-1", evt)
+
+        assert "job-1" in manager._replay_buffer
+        assert len(manager._replay_buffer["job-1"]) == 1
+        stored_id, stored_evt = manager._replay_buffer["job-1"][0]
+        assert stored_id == 1
+        assert stored_evt is evt
+
+    @pytest.mark.asyncio
+    async def test_get_replay_events_returns_after_last_id(self):
+        """get_replay_events returns only events after the given last_event_id."""
+        manager = SSEConnectionManager()
+        manager.create_event_queue("job-1")
+
+        events = []
+        for i in range(5):
+            e = SSEEvent(data={"i": i})
+            await manager.broadcast_to_job("job-1", e)
+            events.append(e)
+
+        # Client received up to event 2, wants 3, 4, 5
+        replayed = manager.get_replay_events("job-1", 2)
+        assert len(replayed) == 3
+        assert replayed[0] is events[2]
+        assert replayed[1] is events[3]
+        assert replayed[2] is events[4]
+
+    @pytest.mark.asyncio
+    async def test_get_replay_events_returns_empty_for_unknown_job(self):
+        """get_replay_events returns empty list for a job with no buffer."""
+        manager = SSEConnectionManager()
+        replayed = manager.get_replay_events("nonexistent-job", 0)
+        assert replayed == []
+
+    @pytest.mark.asyncio
+    async def test_get_replay_events_global_for_all_groups(self):
+        """stream-all jobs (all_groups_*) use the global replay buffer."""
+        manager = SSEConnectionManager()
+        manager.create_event_queue("job-A")
+        manager.create_event_queue("job-B")
+
+        e1 = SSEEvent(data={"job": "A"})
+        e2 = SSEEvent(data={"job": "B"})
+        await manager.broadcast_to_job("job-A", e1)
+        await manager.broadcast_to_job("job-B", e2)
+
+        # Global replay should contain both events
+        replayed = manager.get_replay_events("all_groups_grp1", 0)
+        assert len(replayed) == 2
+
+    @pytest.mark.asyncio
+    async def test_replay_buffer_respects_max_size(self):
+        """Per-job replay buffer caps at _replay_max_per_job entries."""
+        manager = SSEConnectionManager()
+        manager._replay_max_per_job = 5  # small for testing
+        # Reset the per-job buffer deque with the new maxlen
+        manager.create_event_queue("job-1")
+
+        for i in range(10):
+            e = SSEEvent(data={"i": i})
+            await manager.broadcast_to_job("job-1", e)
+
+        # Only 5 most recent should remain in the per-job buffer
+        assert len(manager._replay_buffer["job-1"]) == 5
+        # The first entry should be event 6 (0-indexed i=5)
+        first_id, _ = manager._replay_buffer["job-1"][0]
+        assert first_id == 6
+
+    @pytest.mark.asyncio
+    async def test_global_replay_buffer_max_size(self):
+        """Global replay buffer caps at 500 entries."""
+        manager = SSEConnectionManager()
+        manager.create_event_queue("job-1")
+
+        # Global buffer has maxlen=500
+        assert manager._global_replay.maxlen == 500
+
+    @pytest.mark.asyncio
+    async def test_broadcast_stores_in_both_buffers(self):
+        """Each broadcast stores in both per-job and global buffers."""
+        manager = SSEConnectionManager()
+        manager.create_event_queue("job-1")
+
+        e = SSEEvent(data={"x": 1})
+        await manager.broadcast_to_job("job-1", e)
+
+        assert len(manager._replay_buffer["job-1"]) == 1
+        assert len(manager._global_replay) == 1
+
+
 class TestEventStreamGenerator:
     """Test cases for event_stream_generator function."""
 
@@ -350,6 +468,9 @@ class TestEventStreamGenerator:
             gen = event_stream_generator("job-123", timeout=10, heartbeat_interval=30)
 
             # Skip connection event
+            await gen.__anext__()
+
+            # Skip immediate heartbeat (added for proxy push-through)
             await gen.__anext__()
 
             # Get queued event
@@ -427,6 +548,39 @@ class TestEventStreamGenerator:
                     break
 
             mock_manager.remove_event_queue.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_generator_replays_missed_events_on_reconnect(self):
+        """Generator replays buffered events when last_event_id is provided."""
+        with patch('src.core.sse_manager.sse_manager') as mock_manager:
+            mock_queue = asyncio.Queue()
+            mock_manager.create_event_queue.return_value = mock_queue
+
+            # Simulate 2 missed events
+            missed_event_1 = SSEEvent(data={"status": "step1"}, event="update", id="3")
+            missed_event_2 = SSEEvent(data={"status": "step2"}, event="update", id="4")
+            mock_manager.get_replay_events.return_value = [missed_event_1, missed_event_2]
+
+            # Put a completion event so the stream ends
+            completion = SSEEvent(
+                data={"status": "completed"},
+                event="execution_update"
+            )
+            await mock_queue.put(completion)
+
+            gen = event_stream_generator("job-123", timeout=10, heartbeat_interval=30, last_event_id=2)
+
+            events = []
+            async for event in gen:
+                events.append(event)
+                if len(events) > 10:
+                    break
+
+            # Should have: 2 replayed + connected + heartbeat + completion
+            mock_manager.get_replay_events.assert_called_once_with("job-123", 2)
+            # Verify replay events come first
+            assert "step1" in events[0]
+            assert "step2" in events[1]
 
     @pytest.mark.asyncio
     async def test_generator_cleanup_on_exit(self):
