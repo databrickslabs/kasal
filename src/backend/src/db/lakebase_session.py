@@ -79,11 +79,20 @@ class LakebaseSessionFactory:
 
             if client_id and client_secret and host:
                 logger.info("[LAKEBASE SESSION] Using SPN OAuth (client credentials)")
-                self._workspace_client = WorkspaceClient(
-                    host=host,
-                    client_id=client_id,
-                    client_secret=client_secret
-                )
+                # Strip PAT vars to prevent SDK dual-auth conflict (oauth + pat)
+                # Same pattern as mlflow_setup.py
+                _pat_backup = {}
+                for _k in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY"):
+                    if _k in os.environ:
+                        _pat_backup[_k] = os.environ.pop(_k)
+                try:
+                    self._workspace_client = WorkspaceClient(
+                        host=host,
+                        client_id=client_id,
+                        client_secret=client_secret,
+                    )
+                finally:
+                    os.environ.update(_pat_backup)
                 logger.info("[LAKEBASE SESSION] SPN WorkspaceClient created successfully")
                 return self._workspace_client
 

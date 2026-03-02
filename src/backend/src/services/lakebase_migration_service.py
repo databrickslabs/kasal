@@ -675,6 +675,27 @@ class LakebaseMigrationService(BaseService):
             with lakebase_engine.connect() as lakebase_conn:
                 lakebase_conn.execute(text("SET search_path TO kasal"))
                 lakebase_conn.commit()
+
+                # Clear existing data to avoid duplicate key errors
+                # (e.g. seed data inserted by a previous schema-only migration).
+                # Try DELETE first; fall back to TRUNCATE CASCADE for FK deps.
+                try:
+                    lakebase_conn.execute(text(f'DELETE FROM "{safe_table}"'))
+                    lakebase_conn.commit()
+                except Exception:
+                    lakebase_conn.rollback()
+                    try:
+                        lakebase_conn.execute(
+                            text(f'TRUNCATE TABLE "{safe_table}" CASCADE')
+                        )
+                        lakebase_conn.commit()
+                    except Exception as trunc_err:
+                        lakebase_conn.rollback()
+                        logger.warning(
+                            f"  ↳ Could not clear {table_name}: {trunc_err}"
+                        )
+                logger.debug(f"  ↳ Cleared existing data from {table_name}")
+
                 for batch_start in range(0, len(converted_rows), batch_size):
                     batch = converted_rows[batch_start : batch_start + batch_size]
 

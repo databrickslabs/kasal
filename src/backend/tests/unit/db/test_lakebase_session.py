@@ -22,6 +22,36 @@ from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
 
 # ---------------------------------------------------------------------------
+# Module-level isolation fixture: prevents cross-file env-var contamination
+# (e.g. DATABRICKS_HOST set by other test files leaking into these tests).
+# ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _isolate_lakebase_env(monkeypatch):
+    """Reset environment variables and module globals that affect lakebase behaviour."""
+    import src.db.lakebase_session as _mod
+
+    # Save and reset the module-level global factory
+    _orig = _mod._lakebase_factory
+    _mod._lakebase_factory = None
+
+    # Remove env vars that change code paths inside lakebase_session
+    for _var in (
+        "USE_NULLPOOL",
+        "LAKEBASE_INSTANCE_NAME",
+        "DATABRICKS_HOST",
+        "DATABRICKS_CLIENT_ID",
+        "DATABRICKS_CLIENT_SECRET",
+        "DATABRICKS_TOKEN",
+        "DATABRICKS_API_KEY",
+    ):
+        monkeypatch.delenv(_var, raising=False)
+
+    yield
+
+    _mod._lakebase_factory = _orig
+
+
+# ---------------------------------------------------------------------------
 # LakebaseSessionFactory.__init__
 # ---------------------------------------------------------------------------
 class TestLakebaseSessionFactoryInit:
