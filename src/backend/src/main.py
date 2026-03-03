@@ -258,6 +258,8 @@ async def lifespan(app: FastAPI):
                 lb_factory = LakebaseSessionFactory(instance_name)
                 await lb_factory.create_engine()
                 async_session_factory.activate_lakebase(lb_factory._session_factory)
+                from src.db.lakebase_state import mark_lakebase_activated
+                mark_lakebase_activated()
                 system_logger.info(
                     f"Activated Lakebase session factory (instance: {instance_name})"
                 )

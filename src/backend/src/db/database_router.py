@@ -4,6 +4,7 @@ Database router that automatically selects between regular database (PostgreSQL/
 This module provides a routing mechanism to dynamically choose the appropriate database
 backend based on configuration stored in the database itself.
 """
+import asyncio
 import os
 import logging
 from typing import AsyncGenerator, Optional, Dict, Any
@@ -14,6 +15,8 @@ from sqlalchemy import select
 
 from src.db.session import async_session_factory, _request_session
 from src.db.lakebase_session import get_lakebase_session
+from src.db.lakebase_state import is_fallback_allowed, record_successful_connection
+from src.core.exceptions import LakebaseUnavailableError
 from src.core.logger import LoggerManager
 
 logger_manager = LoggerManager.get_instance()
@@ -152,32 +155,55 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
 
     if use_lakebase:
         session_yielded = False
-        try:
-            logger.debug(f"  • Instance: {instance_name}")
-            logger.debug(f"  • Endpoint: {config.get('endpoint') if config else 'N/A'}")
-            async with get_lakebase_session(instance_name, user_token, user_email) as session:
-                token = _request_session.set(session)
-                try:
-                    session_yielded = True
-                    yield session
-                finally:
+        last_error: Optional[Exception] = None
+        max_retries = 3
+        backoff_delays = [0.5, 1.0, 2.0]
+
+        for attempt in range(max_retries):
+            try:
+                logger.debug(f"  • Instance: {instance_name} (attempt {attempt + 1}/{max_retries})")
+                logger.debug(f"  • Endpoint: {config.get('endpoint') if config else 'N/A'}")
+                async with get_lakebase_session(instance_name, user_token, user_email) as session:
+                    record_successful_connection()
+                    token = _request_session.set(session)
                     try:
-                        _request_session.reset(token)
-                    except ValueError:
-                        pass
-            return
-        except GeneratorExit:
-            # Client disconnected — don't fall through, just exit
-            return
-        except Exception as e:
-            if session_yielded:
-                # Error occurred DURING request processing (after yield).
-                # Cannot fall through — generator already yielded once.
-                raise
-            # Error occurred during session CREATION (before yield).
-            # Safe to fall through to regular DB — no yield has happened yet.
-            logger.error(f"Failed to create Lakebase session, falling back to regular DB: {e}")
+                        session_yielded = True
+                        yield session
+                    finally:
+                        try:
+                            _request_session.reset(token)
+                        except ValueError:
+                            pass
+                return
+            except GeneratorExit:
+                return
+            except Exception as e:
+                if session_yielded:
+                    raise
+                last_error = e
+                if attempt < max_retries - 1:
+                    delay = backoff_delays[attempt]
+                    logger.warning(
+                        f"Lakebase connection attempt {attempt + 1}/{max_retries} failed: {e}. "
+                        f"Retrying in {delay}s..."
+                    )
+                    await asyncio.sleep(delay)
+
+        # All retries exhausted
+        if is_fallback_allowed():
+            logger.warning(
+                f"Lakebase unavailable during startup after {max_retries} attempts, "
+                f"falling back to local DB: {last_error}"
+            )
             use_lakebase = False
+        else:
+            logger.error(
+                f"Lakebase unavailable after {max_retries} attempts "
+                f"(fallback disabled — data was written to Lakebase): {last_error}"
+            )
+            raise LakebaseUnavailableError(
+                f"Lakebase database unreachable after {max_retries} retries: {last_error}"
+            )
 
     # Use regular database session with proper lifecycle management
     logger.debug("🔄 DATABASE ROUTER: Using PostgreSQL/SQLite")
