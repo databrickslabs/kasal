@@ -1,5 +1,4 @@
 command: ['python', 'entrypoint.py']
-
 environment_vars:
   PYTHONPATH: './backend:${PYTHONPATH}'
   PYTHONUNBUFFERED: '1'
@@ -13,31 +12,6 @@ environment_vars:
   KASAL_LOG_CONSOLE: 'true'         # Enable console output
   KASAL_LOG_FILE: 'true'            # Enable file logging
 
-  # Database Configuration
-  # Default: SQLite (no additional setup required)
-  # To use PostgreSQL / Lakebase: set DATABASE_TYPE to 'postgres', uncomment the
-  # Postgres env vars below, create a secret scope named 'kasal' with keys
-  # 'lakebase_server' and 'lakebase_pat', and uncomment the resources and apt_packages sections.
-  DATABASE_TYPE: 'sqlite'
+apt_packages:
+  - libpq-dev
 
-  # DATABASE_TYPE: 'postgres'
-  # POSTGRES_SERVER: <valueFrom lakebase-server>
-  # POSTGRES_USER: 'your-email@databricks.com'
-  # POSTGRES_PASSWORD: <valueFrom lakebase-pat>
-  # POSTGRES_DB: 'kasal'
-  # POSTGRES_PORT: '5432'
-  # POSTGRES_SSL: 'true'
-  # LAKEBASE_INSTANCE_NAME: 'kasal-db'
-
-# resources:
-#   - name: lakebase-server
-#     type: secret
-#     scope: kasal
-#     key: lakebase_server
-#   - name: lakebase-pat
-#     type: secret
-#     scope: kasal
-#     key: lakebase_pat
-
-# apt_packages:
-#   - libpq-dev
