@@ -3,7 +3,7 @@ Unit tests for MLflowEvaluationRunner.
 
 Tests cover:
 - Constructor initialization
-- create_run() success path, env var management, scope error fallback, fallback dataset
+- create_run() success path, env var management, fallback dataset
 - complete_evaluation() with basic/extra scorers, env var restoration on failure
 - _discover_traces_and_build_dataset() stored trace ID, search fallback, error handling
 - _extract_records_from_traces() record extraction and row filtering
@@ -546,10 +546,9 @@ class TestDiscoverTracesAndBuildDataset:
         with patch.dict(sys.modules, {"mlflow": mock_mlflow}):
             exec_obj = _make_exec_obj(mlflow_trace_id="stored-trace-abc")
             runner = _make_runner(exec_obj=exec_obj)
-            scope_handler = MagicMock()
 
             trace_ids, records = runner._discover_traces_and_build_dataset(
-                _make_auth_ctx(), scope_handler
+                _make_auth_ctx()
             )
 
             assert trace_ids == ["stored-trace-abc"]
@@ -577,10 +576,9 @@ class TestDiscoverTracesAndBuildDataset:
         with patch.dict(sys.modules, {"mlflow": mock_mlflow}):
             exec_obj = _make_exec_obj(mlflow_trace_id=None)
             runner = _make_runner(exec_obj=exec_obj)
-            scope_handler = MagicMock()
 
             trace_ids, records = runner._discover_traces_and_build_dataset(
-                _make_auth_ctx(), scope_handler
+                _make_auth_ctx()
             )
 
             assert "found-trace-1" in trace_ids
@@ -596,40 +594,13 @@ class TestDiscoverTracesAndBuildDataset:
         with patch.dict(sys.modules, {"mlflow": mock_mlflow}):
             exec_obj = _make_exec_obj(mlflow_trace_id=None)
             runner = _make_runner(exec_obj=exec_obj)
-            scope_handler = MagicMock()
 
             trace_ids, records = runner._discover_traces_and_build_dataset(
-                _make_auth_ctx(), scope_handler
+                _make_auth_ctx()
             )
 
             assert trace_ids == []
             assert records == []
-
-    def test_handles_scope_error_on_get_experiment(self):
-        """Falls back via scope_handler when get_experiment_by_name raises."""
-        import sys
-        mock_mlflow = MagicMock()
-
-        search_df = pd.DataFrame({
-            "trace_id": ["t1"],
-            "attributes": [{"execution_id": "exec-123", "prompt": "q", "output": "a"}],
-        })
-        mock_mlflow.search_traces = MagicMock(return_value=search_df)
-        mock_mlflow.get_experiment_by_name.side_effect = RuntimeError("scope error")
-
-        fallback_exp = SimpleNamespace(experiment_id="exp-fallback")
-        scope_handler = MagicMock()
-        scope_handler.handle_and_retry.return_value = fallback_exp
-
-        with patch.dict(sys.modules, {"mlflow": mock_mlflow}):
-            exec_obj = _make_exec_obj(mlflow_trace_id=None)
-            runner = _make_runner(exec_obj=exec_obj)
-
-            trace_ids, records = runner._discover_traces_and_build_dataset(
-                _make_auth_ctx(), scope_handler
-            )
-
-            scope_handler.handle_and_retry.assert_called_once()
 
     def test_returns_empty_when_search_returns_none(self):
         """Returns empty lists when search_traces returns None."""
@@ -641,10 +612,9 @@ class TestDiscoverTracesAndBuildDataset:
         with patch.dict(sys.modules, {"mlflow": mock_mlflow}):
             exec_obj = _make_exec_obj(mlflow_trace_id=None)
             runner = _make_runner(exec_obj=exec_obj)
-            scope_handler = MagicMock()
 
             trace_ids, records = runner._discover_traces_and_build_dataset(
-                _make_auth_ctx(), scope_handler
+                _make_auth_ctx()
             )
 
             assert trace_ids == []
@@ -743,69 +713,19 @@ class TestCreateRun:
         mock_mlflow = MagicMock()
         mock_mlflow.set_experiment.side_effect = RuntimeError("fail")
 
-        mock_scope_handler = MagicMock()
-        mock_scope_handler.handle_and_retry.side_effect = RuntimeError("fail again")
-
         with patch.dict(sys.modules, {"mlflow": mock_mlflow}):
-            with patch(f"{MOD}.MLflowScopeErrorHandler", return_value=mock_scope_handler):
-                runner = _make_runner()
-                auth_ctx = _make_auth_ctx()
+            runner = _make_runner()
+            auth_ctx = _make_auth_ctx()
 
-                saved_env = {"DATABRICKS_HOST": "original"}
-                runner._save_environment_vars = MagicMock(return_value=saved_env)
-                runner._set_environment_vars = MagicMock()
-                runner._restore_environment_vars = MagicMock()
+            saved_env = {"DATABRICKS_HOST": "original"}
+            runner._save_environment_vars = MagicMock(return_value=saved_env)
+            runner._set_environment_vars = MagicMock()
+            runner._restore_environment_vars = MagicMock()
 
-                with pytest.raises(RuntimeError):
-                    runner.create_run(auth_ctx)
+            with pytest.raises(RuntimeError):
+                runner.create_run(auth_ctx)
 
-                runner._restore_environment_vars.assert_called_once_with(saved_env, auth_ctx)
-
-    def test_create_run_scope_error_fallback(self):
-        """Falls back via scope handler when set_experiment raises scope error."""
-        import sys
-        mock_mlflow = MagicMock()
-
-        # First call to set_experiment fails, scope handler retries, second call succeeds
-        mock_experiment = SimpleNamespace(experiment_id="exp-100")
-        mock_mlflow.set_experiment.side_effect = [
-            RuntimeError("does not have required scopes"),
-            mock_experiment,  # For the second call before start_run
-        ]
-
-        mock_run_info = SimpleNamespace(run_id="run-fallback", experiment_id="exp-100")
-        mock_run = MagicMock()
-        mock_run.info = mock_run_info
-        mock_run.__enter__ = MagicMock(return_value=mock_run)
-        mock_run.__exit__ = MagicMock(return_value=False)
-        mock_mlflow.start_run.return_value = mock_run
-        mock_mlflow.data.from_pandas.return_value = MagicMock()
-
-        mock_scope_handler = MagicMock()
-        mock_scope_handler.handle_and_retry.return_value = mock_experiment
-
-        mock_pd = MagicMock()
-        mock_df = MagicMock()
-        mock_df.__len__ = MagicMock(return_value=1)
-        mock_df.columns = ["messages", "predictions"]
-        mock_pd.DataFrame.from_records.return_value = mock_df
-
-        with patch.dict(sys.modules, {"mlflow": mock_mlflow, "pandas": mock_pd}):
-            with patch(f"{MOD}.MLflowScopeErrorHandler", return_value=mock_scope_handler):
-                runner = _make_runner()
-                auth_ctx = _make_auth_ctx()
-                runner._save_environment_vars = MagicMock(return_value={})
-                runner._set_environment_vars = MagicMock()
-                runner._restore_environment_vars = MagicMock()
-                runner._discover_traces_and_build_dataset = MagicMock(return_value=([], []))
-                runner._log_run_parameters = MagicMock()
-                runner._log_baseline_metrics = MagicMock()
-                runner._log_artifacts = MagicMock()
-
-                result = runner.create_run(auth_ctx)
-
-                mock_scope_handler.handle_and_retry.assert_called_once()
-                assert result["run_id"] == "run-fallback"
+            runner._restore_environment_vars.assert_called_once_with(saved_env, auth_ctx)
 
     def test_create_run_fallback_to_single_record(self):
         """Uses single-record fallback when trace discovery returns empty records."""
@@ -1092,26 +1012,25 @@ class TestCompleteEvaluation:
         mock_mlflow.set_tracking_uri.side_effect = RuntimeError("boom")
 
         with patch.dict(sys.modules, {"mlflow": mock_mlflow}):
-            with patch(f"{MOD}.MLflowScopeErrorHandler"):
-                runner = _make_runner()
-                auth_ctx = _make_auth_ctx()
+            runner = _make_runner()
+            auth_ctx = _make_auth_ctx()
 
-                saved_env = {"DATABRICKS_HOST": "original"}
-                runner._save_environment_vars = MagicMock(return_value=saved_env)
-                runner._set_environment_vars = MagicMock()
-                runner._restore_environment_vars = MagicMock()
-                runner._discover_traces_and_build_dataset = MagicMock(
-                    side_effect=RuntimeError("discover failed")
-                )
+            saved_env = {"DATABRICKS_HOST": "original"}
+            runner._save_environment_vars = MagicMock(return_value=saved_env)
+            runner._set_environment_vars = MagicMock()
+            runner._restore_environment_vars = MagicMock()
+            runner._discover_traces_and_build_dataset = MagicMock(
+                side_effect=RuntimeError("discover failed")
+            )
 
-                # complete_evaluation catches exceptions internally, so it may not raise
-                # but _restore should always be called via finally
-                try:
-                    runner.complete_evaluation("run-abc", auth_ctx)
-                except Exception:
-                    pass
+            # complete_evaluation catches exceptions internally, so it may not raise
+            # but _restore should always be called via finally
+            try:
+                runner.complete_evaluation("run-abc", auth_ctx)
+            except Exception:
+                pass
 
-                runner._restore_environment_vars.assert_called_once_with(saved_env, auth_ctx)
+            runner._restore_environment_vars.assert_called_once_with(saved_env, auth_ctx)
 
     def test_complete_evaluation_no_auth_ctx(self):
         """complete_evaluation works with auth_ctx=None."""

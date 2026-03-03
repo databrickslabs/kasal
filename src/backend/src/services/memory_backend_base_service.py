@@ -74,7 +74,12 @@ class MemoryBackendBaseService:
                 if not config.databricks_config:
                     raise ValueError("Databricks configuration is required for Databricks backend")
                 data["databricks_config"] = config.databricks_config.model_dump()
-            
+
+            if config.backend_type == MemoryBackendType.LAKEBASE:
+                if not config.lakebase_config:
+                    raise ValueError("Lakebase configuration is required for Lakebase backend")
+                data["lakebase_config"] = config.lakebase_config.model_dump()
+
             if config.custom_config:
                 data["custom_config"] = config.custom_config
             

@@ -107,18 +107,11 @@ export const GenieSpaceSelector: React.FC<GenieSpaceSelectorProps> = ({
           // First check if we already have this space in options
           let selected = options.find(opt => opt.id === value);
 
-          // If not found in options and we have a value, try to fetch it
+          // If not found in options and we have a value, fetch by ID directly
           if (!selected && value) {
             try {
-              // Search for the specific space by ID
-              const response = await GenieService.searchSpaces({
-                search_query: value,
-                page_size: 10,
-                enabled_only: false
-              });
-
-              // Find the exact match by ID
-              selected = response.spaces.find(space => space.id === value);
+              const space = await GenieService.getSpaceDetails(value);
+              selected = space;
 
               if (selected) {
                 // Add to options if not already there

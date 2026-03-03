@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
   Button,
@@ -16,6 +16,7 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  DialogContentText,
   Chip,
   Grid,
   Card,
@@ -39,14 +40,13 @@ import {
   Refresh as RefreshIcon,
   Storage as StorageIcon,
   OpenInNew as OpenInNewIcon,
-  Add as AddIcon,
   CheckCircle as CheckIcon,
   Error as ErrorIcon,
   Warning as WarningIcon,
   Info as InfoIcon,
   CloudQueue as CloudIcon,
-  Save as SaveIcon,
   DataObject as DataObjectIcon,
+  DeleteSweep as DeleteSweepIcon,
 } from '@mui/icons-material';
 import { apiClient, config } from '../../config/api/ApiConfig';
 import { useDatabaseStore } from '../../store/databaseStore';
@@ -78,8 +78,10 @@ interface DatabaseInfo {
   tables?: Record<string, number>;
   total_tables?: number;
   error?: string;
+  lakebase_enabled?: boolean;
   lakebase_instance?: string;
   lakebase_endpoint?: string;
+  connection_error?: string;
 }
 
 interface BackupFile {
@@ -157,6 +159,14 @@ interface LakebaseInstance {
   node_count?: number;
 }
 
+interface LakebaseInstanceOption {
+  name: string;
+  state: string | null;
+  capacity: string | null;
+  read_write_dns: string | null;
+  node_count: number | null;
+}
+
 interface TabPanelProps {
   children?: React.ReactNode;
   index: number;
@@ -190,8 +200,6 @@ const DatabaseManagement: React.FC = () => {
     setDatabaseInfo,
     lakebaseConfig,
     setLakebaseConfig,
-    lakebaseMode,
-    setLakebaseMode,
     schemaExists,
     setSchemaExists,
     showMigrationDialog,
@@ -202,8 +210,6 @@ const DatabaseManagement: React.FC = () => {
     setLoading,
     checkingInstance,
     setCheckingInstance,
-    creatingInstance,
-    setCreatingInstance,
     error,
     setError,
     success,
@@ -212,7 +218,6 @@ const DatabaseManagement: React.FC = () => {
 
   // Local state for non-Lakebase features
   const [lakebaseBackend, setLakebaseBackend] = useState<'disabled' | 'lakebase'>('disabled');
-  const [manualMode] = useState(false);
   const [disableConfirmDialog, setDisableConfirmDialog] = useState(false);
   const [backups, setBackups] = useState<BackupList | null>(null);
   const [exportDialog, setExportDialog] = useState(false);
@@ -225,6 +230,7 @@ const DatabaseManagement: React.FC = () => {
   // Migration logs dialog state
   const [migrationLogsDialog, setMigrationLogsDialog] = useState(false);
   const [migrationLogs, setMigrationLogs] = useState<string[]>([]);
+  const migrationLogsEndRef = useRef<HTMLDivElement>(null);
 
   // Export/Import form state
   const [catalog, setCatalog] = useState('users');
@@ -232,8 +238,34 @@ const DatabaseManagement: React.FC = () => {
   const [volumeName, setVolumeName] = useState('kasal_backups');
   const [hasDatabricksApiKey, setHasDatabricksApiKey] = useState(false);
 
+  // Lakebase instance dropdown state
+  const [lakebaseInstances, setLakebaseInstances] = useState<LakebaseInstanceOption[]>([]);
+  const [loadingInstances, setLoadingInstances] = useState(false);
+  const [instanceLoadError, setInstanceLoadError] = useState(false);
+
+  // Housekeeping state
+  const [housekeepingDate, setHousekeepingDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().split('T')[0];
+  });
+  const [housekeepingLoading, setHousekeepingLoading] = useState(false);
+  const [housekeepingResult, setHousekeepingResult] = useState<{
+    success: boolean;
+    deleted?: Record<string, number>;
+    total_deleted?: number;
+    cutoff_date?: string;
+    error?: string;
+  } | null>(null);
+  const [showHousekeepingConfirm, setShowHousekeepingConfirm] = useState(false);
+
   // Feature flag - set to true to enable Lakebase feature
-  const showLakebase = false;
+  const showLakebase = true;
+
+  // Auto-scroll migration logs to bottom when new lines are added
+  useEffect(() => {
+    migrationLogsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [migrationLogs]);
 
   // Load database info on mount
   useEffect(() => {
@@ -267,6 +299,21 @@ const DatabaseManagement: React.FC = () => {
       setHasDatabricksApiKey(false);
     }
   };
+
+  const loadLakebaseInstances = useCallback(async () => {
+    try {
+      setLoadingInstances(true);
+      setInstanceLoadError(false);
+      const response = await apiClient.get<LakebaseInstanceOption[]>('/database-management/lakebase/instances');
+      setLakebaseInstances(response.data || []);
+    } catch (err) {
+      console.error('Failed to load Lakebase instances:', err);
+      setInstanceLoadError(true);
+      setLakebaseInstances([]);
+    } finally {
+      setLoadingInstances(false);
+    }
+  }, []);
 
   const checkLakebaseInstance = useCallback(async (instanceName: string) => {
     try {
@@ -331,39 +378,6 @@ const DatabaseManagement: React.FC = () => {
       setCheckingInstance(false);
     }
   }, [setLakebaseConfig, setCheckingInstance, checkLakebaseInstance]);
-
-  const createLakebaseInstance = async () => {
-    try {
-      setCreatingInstance(true);
-      setError(null);
-
-      const response = await apiClient.post<LakebaseInstance>('/database-management/lakebase/create', {
-        instance_name: lakebaseConfig.instance_name,
-        capacity: lakebaseConfig.capacity,
-        retention_days: lakebaseConfig.retention_days,
-        node_count: lakebaseConfig.node_count
-      });
-
-      setLakebaseConfig({
-        enabled: true,
-        instance_status: 'READY',
-        endpoint: response.data.read_write_dns,
-        created_at: response.data.created_at
-      });
-
-      setSuccess(`Lakebase instance "${response.data.name}" created successfully!`);
-
-      // Save configuration
-      await saveLakebaseConfig();
-    } catch (err: unknown) {
-      const errorMessage = isErrorWithResponse(err)
-        ? err.response?.data?.detail || 'Failed to create Lakebase instance'
-        : 'Failed to create Lakebase instance';
-      setError(errorMessage);
-    } finally {
-      setCreatingInstance(false);
-    }
-  };
 
   const saveLakebaseConfig = async () => {
     try {
@@ -557,7 +571,8 @@ const DatabaseManagement: React.FC = () => {
               const event = JSON.parse(line.substring(6));
               let logMessage = '';
 
-              // Handle different event types
+              // Handle different event types — all progress goes to the logs dialog only.
+              // The success banner gets a single final message when migration completes.
               switch (event.type) {
                 case 'start':
                 case 'info':
@@ -567,21 +582,18 @@ const DatabaseManagement: React.FC = () => {
                   logMessage = event.message;
                   allLogs.push(logMessage);
                   setMigrationLogs([...allLogs]);
-                  setSuccess(allLogs.slice(-5).join('\n')); // Show last 5 in success banner
                   break;
 
                 case 'table_start':
                   logMessage = `[${event.progress}/${event.total}] ${event.message}`;
                   allLogs.push(logMessage);
                   setMigrationLogs([...allLogs]);
-                  setSuccess(allLogs.slice(-5).join('\n'));
                   break;
 
                 case 'table_complete':
                   logMessage = `[${event.progress}/${event.total}] ${event.message}`;
                   allLogs.push(logMessage);
                   setMigrationLogs([...allLogs]);
-                  setSuccess(allLogs.slice(-5).join('\n'));
                   break;
 
                 case 'table_error':
@@ -594,10 +606,9 @@ const DatabaseManagement: React.FC = () => {
                   allLogs.push('');
                   allLogs.push(event.message);
                   setMigrationLogs([...allLogs]);
-                  setSuccess(allLogs.slice(-5).join('\n'));
                   break;
 
-                case 'result':
+                case 'result': {
                   // Final result with full details
                   allLogs.push('');
                   allLogs.push('📊 Migration Summary:');
@@ -614,8 +625,15 @@ const DatabaseManagement: React.FC = () => {
                   }
 
                   setMigrationLogs([...allLogs]);
-                  setSuccess(allLogs.slice(-10).join('\n')); // Show last 10 for summary
+
+                  // Show final summary in the appropriate banner
+                  if (event.success) {
+                    setSuccess(`Migration complete — ${event.total_tables} tables, ${event.total_rows.toLocaleString()} rows in ${event.duration.toFixed(1)}s`);
+                  } else {
+                    setError(`Migration failed — ${event.failed_tables_details?.length || 0} table(s) failed. Lakebase disabled, using SQLite.`);
+                  }
                   break;
+                }
 
                 case 'error':
                   setError(event.message);
@@ -629,8 +647,9 @@ const DatabaseManagement: React.FC = () => {
         }
       }
 
-      // Refresh config to get migration status
+      // Refresh config and database info to reflect the backend switch
       await loadLakebaseConfig();
+      await loadDatabaseInfo();
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to start migration';
       setError(errorMessage);
@@ -656,7 +675,9 @@ const DatabaseManagement: React.FC = () => {
       };
 
       await apiClient.post<LakebaseConfig>('/database-management/lakebase/config', configToSave);
-      setSuccess('Lakebase disabled and configuration deleted. System now using SQLite (or PostgreSQL in local development).');
+      setSuccess('Lakebase disabled. All sessions switched back to SQLite/PostgreSQL.');
+      // Reload database info to reflect the backend change in the General tab
+      await loadDatabaseInfo();
     } catch (err: unknown) {
       const errorMessage = isErrorWithResponse(err)
         ? err.response?.data?.detail || 'Failed to disable Lakebase'
@@ -704,6 +725,17 @@ const DatabaseManagement: React.FC = () => {
     }
   };
 
+  if (loading && !databaseInfo) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 200 }}>
+        <CircularProgress />
+        <Typography variant="body2" sx={{ ml: 2 }}>
+          Loading database management...
+        </Typography>
+      </Box>
+    );
+  }
+
   return (
     <Box>
       <Typography variant="h6" sx={{ mb: 3 }}>
@@ -728,13 +760,22 @@ const DatabaseManagement: React.FC = () => {
               </Typography>
               <Grid container spacing={2}>
                 <Grid item xs={12}>
-                  <Alert severity={databaseInfo.database_type === 'lakebase' ? 'success' : 'info'}>
+                  <Alert severity={
+                    databaseInfo.database_type === 'lakebase'
+                      ? (databaseInfo.connection_error ? 'warning' : 'success')
+                      : 'info'
+                  }>
                     <Typography variant="body2" fontWeight="bold">
                       Current Database Backend: {databaseInfo.database_type?.toUpperCase()}
                     </Typography>
                     {databaseInfo.database_type === 'lakebase' && databaseInfo.lakebase_instance && (
-                      <Typography variant="caption">
+                      <Typography variant="caption" display="block">
                         Connected to Lakebase instance: {databaseInfo.lakebase_instance}
+                      </Typography>
+                    )}
+                    {databaseInfo.connection_error && (
+                      <Typography variant="caption" display="block" color="warning.dark" sx={{ mt: 0.5 }}>
+                        {databaseInfo.connection_error}
                       </Typography>
                     )}
                   </Alert>
@@ -800,6 +841,118 @@ const DatabaseManagement: React.FC = () => {
             </CardContent>
           </Card>
         )}
+        {/* Data Housekeeping Card */}
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Typography variant="h6" gutterBottom>
+              Data Housekeeping
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Delete execution history, traces, logs, and LLM logs older than a specified date.
+              This can reduce database size and speed up migrations.
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+              <TextField
+                type="date"
+                label="Cutoff Date"
+                value={housekeepingDate}
+                onChange={(e) => {
+                  setHousekeepingDate(e.target.value);
+                  setHousekeepingResult(null);
+                }}
+                InputLabelProps={{ shrink: true }}
+                helperText="Records older than this date will be deleted"
+                sx={{ minWidth: 200 }}
+              />
+              <Button
+                variant="outlined"
+                color="warning"
+                startIcon={housekeepingLoading ? <CircularProgress size={18} /> : <DeleteSweepIcon />}
+                onClick={() => setShowHousekeepingConfirm(true)}
+                disabled={housekeepingLoading || !housekeepingDate}
+                sx={{ mt: 1 }}
+              >
+                {housekeepingLoading ? 'Running...' : 'Run Housekeeping'}
+              </Button>
+            </Box>
+            {housekeepingResult && housekeepingResult.success && (
+              <Alert severity="success" sx={{ mt: 2 }}>
+                <Typography variant="body2" fontWeight="bold">
+                  Housekeeping completed — {housekeepingResult.total_deleted} records deleted
+                </Typography>
+                <Box sx={{ mt: 1 }}>
+                  {housekeepingResult.deleted && Object.entries(housekeepingResult.deleted).map(([table, count]) => (
+                    <Chip
+                      key={table}
+                      label={`${table}: ${count}`}
+                      size="small"
+                      sx={{ m: 0.5 }}
+                      color={count > 0 ? 'primary' : 'default'}
+                      variant={count > 0 ? 'filled' : 'outlined'}
+                    />
+                  ))}
+                </Box>
+              </Alert>
+            )}
+            {housekeepingResult && !housekeepingResult.success && (
+              <Alert severity="error" sx={{ mt: 2 }}>
+                {housekeepingResult.error || 'Housekeeping failed'}
+              </Alert>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Housekeeping Confirmation Dialog */}
+        <Dialog open={showHousekeepingConfirm} onClose={() => setShowHousekeepingConfirm(false)}>
+          <DialogTitle>Confirm Data Housekeeping</DialogTitle>
+          <DialogContent>
+            <DialogContentText>
+              This will permanently delete all records older than <strong>{housekeepingDate}</strong> from the following tables:
+            </DialogContentText>
+            <Box sx={{ mt: 1, ml: 2 }}>
+              <Typography variant="body2">• executionhistory (+ taskstatus, errortrace)</Typography>
+              <Typography variant="body2">• execution_trace</Typography>
+              <Typography variant="body2">• execution_logs</Typography>
+              <Typography variant="body2">• llmlog</Typography>
+            </Box>
+            <DialogContentText sx={{ mt: 2 }}>
+              This action cannot be undone. Are you sure?
+            </DialogContentText>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setShowHousekeepingConfirm(false)}>Cancel</Button>
+            <Button
+              color="warning"
+              variant="contained"
+              onClick={async () => {
+                setShowHousekeepingConfirm(false);
+                setHousekeepingLoading(true);
+                setHousekeepingResult(null);
+                try {
+                  const response = await apiClient.post('/database-management/housekeeping', {
+                    cutoff_date: housekeepingDate,
+                  });
+                  setHousekeepingResult(response.data);
+                  // Refresh database info to show updated row counts
+                  loadDatabaseInfo();
+                } catch (err) {
+                  if (isErrorWithResponse(err)) {
+                    setHousekeepingResult({
+                      success: false,
+                      error: err.response?.data?.detail || err.response?.data?.error || err.message || 'Housekeeping failed',
+                    });
+                  } else {
+                    setHousekeepingResult({ success: false, error: 'Housekeeping failed' });
+                  }
+                } finally {
+                  setHousekeepingLoading(false);
+                }
+              }}
+            >
+              Delete Old Data
+            </Button>
+          </DialogActions>
+        </Dialog>
       </TabPanel>
 
       {/* Databricks Import/Export Tab */}
@@ -928,7 +1081,7 @@ const DatabaseManagement: React.FC = () => {
             </FormLabel>
             <RadioGroup
               value={lakebaseBackend}
-              onChange={async (e) => {
+              onChange={(e) => {
                 const newValue = e.target.value as 'disabled' | 'lakebase';
 
                 // If switching to disabled, show confirmation dialog
@@ -937,38 +1090,11 @@ const DatabaseManagement: React.FC = () => {
                   return;
                 }
 
-                // Otherwise, proceed with enabling Lakebase
+                // Selecting "Databricks Lakebase" just expands the configuration form.
+                // Actual enabling happens when the user connects to or creates an instance.
                 setLakebaseBackend(newValue);
-                setLakebaseConfig({ enabled: newValue === 'lakebase' });
-
-                // Immediately save the configuration to apply changes
-                try {
-                  setLoading(true);
-                  setError(null);
-
-                  const configToSave = {
-                    ...lakebaseConfig,
-                    enabled: newValue === 'lakebase'
-                  };
-
-                  await apiClient.post<LakebaseConfig>('/database-management/lakebase/config', configToSave);
-
-                  if (newValue === 'disabled') {
-                    setSuccess('Lakebase disabled and configuration deleted. System now using PostgreSQL/SQLite.');
-                  } else {
-                    setSuccess('Lakebase enabled. System will use Lakebase when available.');
-                  }
-                } catch (err: unknown) {
-                  const errorMessage = isErrorWithResponse(err)
-                    ? err.response?.data?.detail || 'Failed to update Lakebase configuration'
-                    : 'Failed to update Lakebase configuration';
-                  setError(errorMessage);
-                  // Revert the UI state on error
-                  setLakebaseBackend(newValue === 'lakebase' ? 'disabled' : 'lakebase');
-                  setLakebaseConfig({ enabled: newValue !== 'lakebase' });
-                } finally {
-                  setLoading(false);
-                }
+                setError(null);
+                setSuccess(null);
               }}
             >
               <FormControlLabel
@@ -1002,6 +1128,28 @@ const DatabaseManagement: React.FC = () => {
           {lakebaseBackend === 'lakebase' && (
             <>
               <Divider sx={{ mb: 3 }} />
+
+              {/* Databricks App Setup Prerequisites - only show when not connected */}
+              {!(lakebaseConfig.enabled && lakebaseConfig.instance_status === 'READY') && (
+                <Alert severity="info" icon={<InfoIcon />} sx={{ mb: 3 }}>
+                  <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Databricks App Setup</Typography>
+                  <Typography variant="body2" component="div">
+                    Before connecting, ensure your App&apos;s service principal has Lakebase access:
+                    <ol style={{ margin: '4px 0 0 0', paddingLeft: '20px' }}>
+                      <li>Add a <strong>Database</strong> resource to your App in the Databricks UI</li>
+                      <li>Create a PostgreSQL role for the service principal on the Lakebase instance</li>
+                    </ol>
+                    <a
+                      href="https://docs.databricks.com/aws/en/dev-tools/databricks-apps/lakebase"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ fontSize: '0.85em' }}
+                    >
+                      Databricks Lakebase App docs <OpenInNewIcon sx={{ fontSize: 14, verticalAlign: 'middle', ml: 0.5 }} />
+                    </a>
+                  </Typography>
+                </Alert>
+              )}
 
               {/* Current Status Section */}
               <Box sx={{ mb: 3 }}>
@@ -1058,81 +1206,115 @@ const DatabaseManagement: React.FC = () => {
                     >
                       Refresh Status
                     </Button>
+                    {migrationLogs.length > 0 && (
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        startIcon={<DataObjectIcon />}
+                        onClick={() => setMigrationLogsDialog(true)}
+                        sx={{ ml: 1 }}
+                      >
+                        Migration Logs
+                      </Button>
+                    )}
                   </Box>
                 )}
               </Box>
 
+              {!(lakebaseConfig.enabled && lakebaseConfig.instance_status === 'READY') && (
+              <>
               <Divider sx={{ mb: 3 }} />
 
-              {/* Connection Mode Selection - Clear toggle between Create and Connect */}
-              <Box sx={{ mb: 3 }}>
-                <Typography variant="subtitle1" sx={{ mb: 2 }}>
-                  How would you like to set up Lakebase?
-                </Typography>
-                <Grid container spacing={2}>
-                  <Grid item xs={12} md={6}>
-                    <Card
-                      variant={lakebaseMode === 'connect' ? 'outlined' : 'elevation'}
-                      sx={{
-                        border: lakebaseMode === 'connect' ? '2px solid' : 'none',
-                        borderColor: lakebaseMode === 'connect' ? 'primary.main' : 'transparent',
-                        cursor: 'pointer',
-                        height: '100%'
-                      }}
-                      onClick={() => setLakebaseMode('connect')}
-                    >
-                      <CardContent>
-                        <Typography variant="h6" gutterBottom color={lakebaseMode === 'connect' ? 'primary' : 'inherit'}>
-                          Connect to Existing Instance
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          I already have a Lakebase instance and want to connect to it
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                  <Grid item xs={12} md={6}>
-                    <Card
-                      variant={lakebaseMode === 'create' ? 'outlined' : 'elevation'}
-                      sx={{
-                        border: lakebaseMode === 'create' ? '2px solid' : 'none',
-                        borderColor: lakebaseMode === 'create' ? 'primary.main' : 'transparent',
-                        cursor: 'pointer',
-                        height: '100%'
-                      }}
-                      onClick={() => setLakebaseMode('create')}
-                    >
-                      <CardContent>
-                        <Typography variant="h6" gutterBottom color={lakebaseMode === 'create' ? 'primary' : 'inherit'}>
-                          Create New Instance
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          Create a new Lakebase instance in my Databricks workspace
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                </Grid>
-              </Box>
-
               {/* Connect to Existing Instance Form */}
-              {lakebaseMode === 'connect' && (
-                <Box sx={{ mb: 3 }}>
+              <Box sx={{ mb: 3 }}>
                   <Paper sx={{ p: 2, backgroundColor: 'background.default' }}>
                     <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 'bold' }}>
                       Connect to Existing Lakebase Instance
                     </Typography>
                     <Grid container spacing={2}>
                       <Grid item xs={12}>
-                        <TextField
-                          fullWidth
-                          label="Instance Name"
-                          value={lakebaseConfig.instance_name}
-                          onChange={(e) => setLakebaseConfig({ ...lakebaseConfig, instance_name: e.target.value })}
-                          helperText="Name of your existing Lakebase instance"
-                          placeholder="kasal-lakebase"
-                          required
-                        />
+                        {instanceLoadError ? (
+                          /* Fallback: show text field if API call fails */
+                          <TextField
+                            fullWidth
+                            label="Instance Name"
+                            value={lakebaseConfig.instance_name}
+                            onChange={(e) => setLakebaseConfig({ ...lakebaseConfig, instance_name: e.target.value })}
+                            helperText={
+                              <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                Could not load instances. Enter the name manually.
+                                <Button size="small" onClick={loadLakebaseInstances} sx={{ minWidth: 'auto', p: 0, textTransform: 'none' }}>
+                                  Retry
+                                </Button>
+                              </Box>
+                            }
+                            placeholder="kasal-lakebase"
+                            required
+                          />
+                        ) : (
+                          <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+                            <FormControl fullWidth required>
+                              <InputLabel>Instance Name</InputLabel>
+                              <Select
+                                value={lakebaseConfig.instance_name || ''}
+                                onChange={(e) => {
+                                  const selectedName = e.target.value;
+                                  const selectedInstance = lakebaseInstances.find(i => i.name === selectedName);
+                                  setLakebaseConfig({
+                                    ...lakebaseConfig,
+                                    instance_name: selectedName,
+                                    endpoint: selectedInstance?.read_write_dns || '',
+                                    instance_status: selectedInstance?.read_write_dns ? 'READY' : 'NOT_CREATED'
+                                  });
+                                }}
+                                label="Instance Name"
+                                onOpen={() => {
+                                  if (lakebaseInstances.length === 0 && !loadingInstances) {
+                                    loadLakebaseInstances();
+                                  }
+                                }}
+                                disabled={loadingInstances}
+                                startAdornment={loadingInstances ? <CircularProgress size={18} sx={{ mr: 1 }} /> : undefined}
+                              >
+                                {lakebaseInstances.length === 0 && !loadingInstances && (
+                                  <MenuItem disabled value="">
+                                    <em>No instances found</em>
+                                  </MenuItem>
+                                )}
+                                {lakebaseInstances.map((inst) => (
+                                  <MenuItem key={inst.name} value={inst.name}>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
+                                      <Typography>{inst.name}</Typography>
+                                      <Chip
+                                        label={inst.state || 'UNKNOWN'}
+                                        size="small"
+                                        color={
+                                          inst.state === 'READY' || inst.state === 'AVAILABLE' || inst.state === 'RUNNING'
+                                            ? 'success'
+                                            : inst.state === 'STOPPED' || inst.state === 'STOPPING'
+                                            ? 'warning'
+                                            : inst.state === 'ERROR' || inst.state === 'FAILED'
+                                            ? 'error'
+                                            : 'default'
+                                        }
+                                        sx={{ ml: 'auto' }}
+                                      />
+                                    </Box>
+                                  </MenuItem>
+                                ))}
+                              </Select>
+                              <FormHelperText>Select an existing Lakebase instance from your workspace</FormHelperText>
+                            </FormControl>
+                            <IconButton
+                              onClick={loadLakebaseInstances}
+                              disabled={loadingInstances}
+                              title="Refresh instances"
+                              sx={{ mt: 1 }}
+                            >
+                              <RefreshIcon />
+                            </IconButton>
+                          </Box>
+                        )}
                       </Grid>
                       <Grid item xs={12}>
                         <TextField
@@ -1144,10 +1326,61 @@ const DatabaseManagement: React.FC = () => {
                             endpoint: e.target.value,
                             instance_status: e.target.value ? 'READY' : 'NOT_CREATED'
                           })}
-                          helperText="Leave empty to auto-detect, or enter manually (e.g., instance-xxxx.database.cloud.databricks.com)"
+                          helperText="Auto-populated from selected instance, or enter manually"
                           placeholder="instance-xxxx.database.cloud.databricks.com"
                         />
                       </Grid>
+
+                      {/* Setup Option */}
+                      <Grid item xs={12}>
+                        <FormControl component="fieldset">
+                          <FormLabel component="legend" sx={{ mb: 1 }}>
+                            Setup Option
+                          </FormLabel>
+                          <RadioGroup
+                            value={migrationOption}
+                            onChange={(e) => setMigrationOption(e.target.value as 'recreate' | 'use' | 'schema_only')}
+                          >
+                            <FormControlLabel
+                              value="recreate"
+                              control={<Radio />}
+                              label={
+                                <Box>
+                                  <Typography variant="body2" fontWeight="bold">Migrate Schema & Data</Typography>
+                                  <Typography variant="caption" color="text.secondary">
+                                    Create schema and copy all data from current database
+                                  </Typography>
+                                </Box>
+                              }
+                            />
+                            <FormControlLabel
+                              value="schema_only"
+                              control={<Radio />}
+                              label={
+                                <Box>
+                                  <Typography variant="body2" fontWeight="bold">Schema Only</Typography>
+                                  <Typography variant="caption" color="text.secondary">
+                                    Create empty tables without migrating data
+                                  </Typography>
+                                </Box>
+                              }
+                            />
+                            <FormControlLabel
+                              value="use"
+                              control={<Radio />}
+                              label={
+                                <Box>
+                                  <Typography variant="body2" fontWeight="bold">Use Existing Data</Typography>
+                                  <Typography variant="caption" color="text.secondary">
+                                    Instance already has Kasal schema and data — just connect
+                                  </Typography>
+                                </Box>
+                              }
+                            />
+                          </RadioGroup>
+                        </FormControl>
+                      </Grid>
+
                       <Grid item xs={12}>
                         <Button
                           variant="contained"
@@ -1162,158 +1395,71 @@ const DatabaseManagement: React.FC = () => {
                               // Test connection and get schema/migration status
                               const testResponse = await apiClient.get(`/database-management/lakebase/test/${lakebaseConfig.instance_name}`);
 
+                              // Check if the connection test itself failed
+                              if (!testResponse.data.success) {
+                                if (testResponse.data.error_code === 'MISSING_DATABASE_RESOURCE') {
+                                  const clientId = testResponse.data.client_id || '<your-service-principal-client-id>';
+                                  setError(
+                                    `The service principal's OAuth token is missing the "postgres" scope.\n\n` +
+                                    `Step 1: In your Databricks App settings, add a Database resource pointing to your Lakebase instance.\n\n` +
+                                    `Step 2: Create a PostgreSQL role for the service principal:\n` +
+                                    `  CREATE ROLE \`${clientId}\` LOGIN;\n` +
+                                    `  GRANT ALL ON SCHEMA public TO \`${clientId}\`;\n\n` +
+                                    `After completing these steps, click Connect again.`
+                                  );
+                                } else {
+                                  setError(`Connection test failed: ${testResponse.data.error || 'Unknown error'}. Verify the instance is running and accessible.`);
+                                }
+                                return;
+                              }
+
                               // Save the configuration
                               await saveLakebaseConfig();
 
-                              // Update state with schema information
                               const hasSchema = testResponse.data.has_kasal_schema;
                               setSchemaExists(hasSchema);
 
-                              // Update config with migration status
-                              setLakebaseConfig({
-                                migration_status: testResponse.data.migration_status,
-                                migration_completed: !testResponse.data.migration_needed
-                              });
-
-                              // Show migration dialog with options
-                              if (hasSchema) {
-                                setMigrationOption('use'); // Default to use existing
-                                setSuccess(`Connected successfully! Found ${testResponse.data.table_count} table(s) in kasal schema.`);
+                              if (migrationOption === 'use') {
+                                // Use existing — verify schema exists, then enable directly
+                                if (!hasSchema) {
+                                  setError('No kasal schema found on this instance. Please use "Migrate Schema & Data" or "Schema Only" instead.');
+                                  return;
+                                }
+                                const response = await apiClient.post('/database-management/lakebase/enable', {
+                                  instance_name: lakebaseConfig.instance_name,
+                                  endpoint: lakebaseConfig.endpoint
+                                });
+                                if (response.data.success) {
+                                  setSuccess(`Connected to Lakebase. Using existing schema with ${testResponse.data.table_count} table(s).`);
+                                  // Refresh config and info in background — don't block the button
+                                  loadLakebaseConfig().catch(() => {});
+                                  loadDatabaseInfo().catch(() => {});
+                                }
                               } else {
-                                setMigrationOption('recreate'); // No schema exists, will create
-                                setSuccess(`Connected successfully! No kasal schema found.`);
+                                // Migrate schema+data or schema only
+                                const migrateData = migrationOption === 'recreate';
+                                setSuccess(`Connected successfully! Starting ${migrateData ? 'schema & data migration' : 'schema creation'}...`);
+                                await migrateLakebase(true, migrateData);
                               }
-
-                              // Show migration dialog
-                              setShowMigrationDialog(true);
-                            } catch (err) {
-                              setError('Failed to connect to instance. Please verify the instance name and ensure it is running.');
+                            } catch (err: unknown) {
+                              const errorMessage = isErrorWithResponse(err)
+                                ? err.response?.data?.detail || 'Failed to connect to instance. Please verify the instance name and ensure it is running.'
+                                : 'Failed to connect to instance. Please verify the instance name and ensure it is running.';
+                              setError(errorMessage);
                             } finally {
                               setLoading(false);
                             }
                           }}
                           disabled={!lakebaseConfig.instance_name || loading}
                         >
-                          Connect to Instance
+                          {loading ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
+                          {migrationOption === 'use' ? 'Connect' : migrationOption === 'schema_only' ? 'Connect & Create Schema' : 'Connect & Migrate'}
                         </Button>
                       </Grid>
                     </Grid>
                   </Paper>
                 </Box>
-              )}
-
-              {/* Create New Instance Form */}
-              {lakebaseMode === 'create' && (
-                <Box sx={{ mb: 3 }}>
-                  <Paper sx={{ p: 2, backgroundColor: 'background.default' }}>
-                    <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 'bold' }}>
-                      Create New Lakebase Instance
-                    </Typography>
-                    <Grid container spacing={2}>
-                      <Grid item xs={12} md={6}>
-                        <TextField
-                          fullWidth
-                          label="Instance Name"
-                          value={lakebaseConfig.instance_name}
-                          onChange={(e) => setLakebaseConfig({ ...lakebaseConfig, instance_name: e.target.value })}
-                          helperText="1-63 characters, letters and hyphens only"
-                          placeholder="kasal-lakebase"
-                          required
-                        />
-                      </Grid>
-                      <Grid item xs={12} md={6}>
-                        <FormControl fullWidth>
-                          <InputLabel>Capacity</InputLabel>
-                          <Select
-                            value={lakebaseConfig.capacity}
-                            onChange={(e) => setLakebaseConfig({ ...lakebaseConfig, capacity: e.target.value })}
-                            label="Capacity"
-                          >
-                            <MenuItem value="CU_1">CU_1 (Small - 1 compute unit)</MenuItem>
-                            <MenuItem value="CU_2">CU_2 (Medium - 2 compute units)</MenuItem>
-                            <MenuItem value="CU_4">CU_4 (Large - 4 compute units)</MenuItem>
-                          </Select>
-                          <FormHelperText>Select compute capacity based on your workload</FormHelperText>
-                        </FormControl>
-                      </Grid>
-                      <Grid item xs={12} md={6}>
-                        <TextField
-                          fullWidth
-                          type="number"
-                          label="Backup Retention (Days)"
-                          value={lakebaseConfig.retention_days}
-                          onChange={(e) => setLakebaseConfig({ ...lakebaseConfig, retention_days: parseInt(e.target.value) })}
-                          inputProps={{ min: 2, max: 35 }}
-                          helperText="How long to keep backups (2-35 days)"
-                        />
-                      </Grid>
-                      <Grid item xs={12} md={6}>
-                        <TextField
-                          fullWidth
-                          type="number"
-                          label="High Availability Nodes"
-                          value={lakebaseConfig.node_count}
-                          onChange={(e) => setLakebaseConfig({ ...lakebaseConfig, node_count: parseInt(e.target.value) })}
-                          inputProps={{ min: 1, max: 3 }}
-                          helperText="1 = Basic, 2+ = High Availability"
-                        />
-                      </Grid>
-                      <Grid item xs={12}>
-                        <Alert severity="info" sx={{ mb: 2 }}>
-                          Creating a new instance will provision resources in your Databricks workspace.
-                          This may take 3-5 minutes.
-                        </Alert>
-                        <Button
-                          variant="contained"
-                          onClick={createLakebaseInstance}
-                          disabled={!lakebaseConfig.instance_name || creatingInstance || lakebaseConfig.instance_status === 'READY'}
-                        >
-                          {creatingInstance ? 'Creating Instance...' : 'Create Instance'}
-                        </Button>
-                      </Grid>
-                    </Grid>
-                  </Paper>
-                </Box>
-              )}
-
-              {/* Action Buttons */}
-              <Box sx={{ mt: 3, display: 'flex', gap: 2 }}>
-                {!manualMode && lakebaseConfig.instance_status === 'NOT_CREATED' && (
-                  <Button
-                    variant="contained"
-                    startIcon={creatingInstance ? <CircularProgress size={20} /> : <AddIcon />}
-                    onClick={createLakebaseInstance}
-                    disabled={creatingInstance || !lakebaseConfig.instance_name}
-                  >
-                    Create Lakebase Instance
-                  </Button>
-                )}
-
-                {(manualMode || lakebaseConfig.instance_status !== 'NOT_CREATED') && (
-                  <Button
-                    variant="contained"
-                    startIcon={<SaveIcon />}
-                    onClick={saveLakebaseConfig}
-                    disabled={loading || (!manualMode && lakebaseConfig.instance_status === 'NOT_CREATED')}
-                  >
-                    Save Configuration
-                  </Button>
-                )}
-              </Box>
-
-              {/* Info Alert - Only show when creating a new instance */}
-              {lakebaseMode === 'create' && (
-                <Alert severity="info" sx={{ mt: 3 }}>
-                  <Typography variant="body2">
-                    <strong>Lakebase</strong> is a fully-managed PostgreSQL OLTP engine within Databricks that provides:
-                  </Typography>
-                  <ul style={{ margin: '8px 0 0 0', paddingLeft: '20px' }}>
-                    <li>High availability with automatic failover</li>
-                    <li>Point-in-time restore and automated backups</li>
-                    <li>Built-in monitoring and alerting</li>
-                    <li>Seamless integration with Databricks ecosystem</li>
-                  </ul>
-                </Alert>
+              </>
               )}
             </>
           )}
@@ -1438,7 +1584,7 @@ const DatabaseManagement: React.FC = () => {
       )}
       {error && (
         <Alert severity="error" onClose={() => setError(null)} sx={{ mt: 2 }}>
-          {error}
+          <Typography sx={{ whiteSpace: 'pre-line' }}>{error}</Typography>
         </Alert>
       )}
 
@@ -1447,147 +1593,121 @@ const DatabaseManagement: React.FC = () => {
       <Dialog
         open={showMigrationDialog}
         onClose={() => setShowMigrationDialog(false)}
-        maxWidth="md"
+        maxWidth="sm"
         fullWidth
       >
         <DialogTitle>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <DataObjectIcon color="primary" />
-            Lakebase Migration Options
+            Setup Lakebase
           </Box>
         </DialogTitle>
         <DialogContent>
-          {schemaExists ? (
-            <Alert severity="info" sx={{ mb: 3 }}>
-              Found existing <strong>kasal</strong> schema with {lakebaseConfig.migration_result?.total_tables || 'data'} in Lakebase.
-            </Alert>
-          ) : (
-            <Alert severity="warning" sx={{ mb: 3 }}>
-              No <strong>kasal</strong> schema found in Lakebase. A new schema will be created.
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            {schemaExists
+              ? 'A kasal schema already exists in Lakebase. Choose how to proceed.'
+              : 'Choose how to set up your Lakebase instance.'}
+          </Typography>
+
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+            {/* Primary action: Migrate Data */}
+            <Button
+              variant="contained"
+              color="primary"
+              fullWidth
+              disabled={loading}
+              startIcon={<UploadIcon />}
+              onClick={async () => {
+                setShowMigrationDialog(false);
+                await migrateLakebase(true, true);
+              }}
+              sx={{ justifyContent: 'flex-start', py: 1.5, px: 2, textTransform: 'none' }}
+            >
+              <Box sx={{ textAlign: 'left' }}>
+                <Typography variant="body1" fontWeight="bold">
+                  {schemaExists ? 'Recreate and Migrate Data' : 'Migrate Data'}
+                </Typography>
+                <Typography variant="caption" sx={{ opacity: 0.85 }}>
+                  {schemaExists
+                    ? 'Reset schema and copy all data from current database'
+                    : 'Create schema and copy all data from current database'}
+                </Typography>
+              </Box>
+            </Button>
+
+            {/* Secondary action: Schema Only */}
+            <Button
+              variant="outlined"
+              fullWidth
+              disabled={loading}
+              startIcon={<StorageIcon />}
+              onClick={async () => {
+                setShowMigrationDialog(false);
+                await migrateLakebase(true, false);
+              }}
+              sx={{ justifyContent: 'flex-start', py: 1.5, px: 2, textTransform: 'none' }}
+            >
+              <Box sx={{ textAlign: 'left' }}>
+                <Typography variant="body1" fontWeight="bold">
+                  {schemaExists ? 'Recreate Schema Only' : 'Schema Only'}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Create empty tables without migrating data
+                </Typography>
+              </Box>
+            </Button>
+
+            {/* Use Existing / Connect without migration */}
+            {schemaExists ? (
+              <Button
+                variant="outlined"
+                fullWidth
+                startIcon={<CheckIcon />}
+                onClick={async () => {
+                  setShowMigrationDialog(false);
+                  try {
+                    setLoading(true);
+                    const response = await apiClient.post('/database-management/lakebase/enable', {
+                      instance_name: lakebaseConfig.instance_name,
+                      endpoint: lakebaseConfig.endpoint
+                    });
+                    if (response.data.success) {
+                      setSuccess('Connected to Lakebase. Using existing schema.');
+                      await loadLakebaseConfig();
+                      await loadDatabaseInfo();
+                    }
+                  } catch (err: unknown) {
+                    const errorMessage = isErrorWithResponse(err)
+                      ? err.response?.data?.detail || 'Failed to enable Lakebase'
+                      : 'Failed to enable Lakebase';
+                    setError(errorMessage);
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+                sx={{ justifyContent: 'flex-start', py: 1.5, px: 2, textTransform: 'none' }}
+              >
+                <Box sx={{ textAlign: 'left' }}>
+                  <Typography variant="body1" fontWeight="bold">
+                    Use Existing Schema
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Connect to the existing kasal schema as-is
+                  </Typography>
+                </Box>
+              </Button>
+            ) : null}
+          </Box>
+
+          {schemaExists && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              Recreate options will delete existing data in the kasal schema.
             </Alert>
           )}
-
-          <FormControl component="fieldset">
-            <FormLabel component="legend">Choose migration strategy:</FormLabel>
-            <RadioGroup
-              value={migrationOption}
-              onChange={(e) => setMigrationOption(e.target.value as 'recreate' | 'use' | 'schema_only')}
-            >
-              {schemaExists && (
-                <FormControlLabel
-                  value="use"
-                  control={<Radio />}
-                  label={
-                    <Box>
-                      <Typography variant="body1" fontWeight="bold">
-                        Use Existing Schema
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Connect to existing kasal schema without modification. Use this if data is already migrated.
-                      </Typography>
-                    </Box>
-                  }
-                />
-              )}
-              <FormControlLabel
-                value="schema_only"
-                control={<Radio />}
-                label={
-                  <Box>
-                    <Typography variant="body1" fontWeight="bold">
-                      {schemaExists ? 'Recreate Schema (No Data)' : 'Create Schema (No Data)'}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {schemaExists
-                        ? 'Drop existing kasal schema and create empty table structure. No data will be migrated.'
-                        : 'Create empty table structure in kasal schema. No data will be migrated.'}
-                    </Typography>
-                    {schemaExists && (
-                      <Alert severity="warning" sx={{ mt: 1 }}>
-                        <strong>Warning:</strong> Existing data in kasal schema will be permanently deleted!
-                      </Alert>
-                    )}
-                  </Box>
-                }
-              />
-              <FormControlLabel
-                value="recreate"
-                control={<Radio />}
-                label={
-                  <Box>
-                    <Typography variant="body1" fontWeight="bold">
-                      {schemaExists ? 'Recreate Schema and Migrate Data' : 'Create Schema and Migrate Data'}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {schemaExists
-                        ? 'Drop existing kasal schema, recreate it, and migrate all data from source database.'
-                        : 'Create new kasal schema and migrate all data from source database.'}
-                    </Typography>
-                    {schemaExists && (
-                      <Alert severity="warning" sx={{ mt: 1 }}>
-                        <strong>Warning:</strong> Existing data in kasal schema will be permanently deleted!
-                      </Alert>
-                    )}
-                  </Box>
-                }
-              />
-            </RadioGroup>
-          </FormControl>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setShowMigrationDialog(false)}>
             Cancel
-          </Button>
-          {!schemaExists && (
-            <Button
-              onClick={async () => {
-                setShowMigrationDialog(false);
-                // Connect without migration - just enable Lakebase
-                try {
-                  setLoading(true);
-                  const response = await apiClient.post('/database-management/lakebase/enable', {
-                    instance_name: lakebaseConfig.instance_name,
-                    endpoint: lakebaseConfig.endpoint
-                  });
-                  if (response.data.success) {
-                    setSuccess('Connected to Lakebase without migration. Schema will be created on first use.');
-                    await loadLakebaseConfig();
-                    await loadDatabaseInfo();
-                  }
-                } catch (err: unknown) {
-                  const errorMessage = isErrorWithResponse(err)
-                    ? err.response?.data?.detail || 'Failed to connect to Lakebase'
-                    : 'Failed to connect to Lakebase';
-                  setError(errorMessage);
-                } finally {
-                  setLoading(false);
-                }
-              }}
-              variant="outlined"
-              startIcon={<CheckIcon />}
-            >
-              Connect without Migration
-            </Button>
-          )}
-          <Button
-            onClick={async () => {
-              setShowMigrationDialog(false);
-              if (migrationOption === 'recreate') {
-                // Trigger migration with recreate and data migration
-                await migrateLakebase(true, true);
-              } else if (migrationOption === 'schema_only') {
-                // Trigger schema creation only (no data migration)
-                await migrateLakebase(true, false);
-              } else {
-                // Just connect without migration
-                setSuccess('Connected to Lakebase successfully. Using existing schema.');
-              }
-            }}
-            variant="contained"
-            color="primary"
-            startIcon={migrationOption === 'recreate' || migrationOption === 'schema_only' ? <UploadIcon /> : <CheckIcon />}
-          >
-            {migrationOption === 'recreate' ? 'Migrate Data' : migrationOption === 'schema_only' ? 'Create Schema' : 'Connect'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1638,6 +1758,8 @@ const DatabaseManagement: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+
 
       {/* Migration Logs Dialog */}
       <Dialog
@@ -1694,6 +1816,7 @@ const DatabaseManagement: React.FC = () => {
                 </Box>
               ))
             )}
+            <div ref={migrationLogsEndRef} />
           </Box>
         </DialogContent>
         <DialogActions>

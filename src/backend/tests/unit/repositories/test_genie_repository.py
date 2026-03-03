@@ -87,13 +87,11 @@ class TestGenieRepository:
         """Test repository initialization with auth config"""
         repository = GenieRepository(auth_config)
         assert repository.auth_config == auth_config
-        assert repository.base_url == "https://test-workspace.cloud.databricks.com/api/2.0/genie"
 
     def test_init_without_auth_config(self):
         """Test repository initialization without auth config"""
         repository = GenieRepository()
         assert repository.auth_config is None
-        assert repository.base_url == ""
 
     def test_build_headers_with_auth(self, repository):
         """Test header building with authentication"""
@@ -134,14 +132,16 @@ class TestGenieRepository:
 
         assert headers == expected_headers
 
-    def test_base_url_host_with_trailing_slash(self):
-        """Test base_url strips trailing slash from host (covers line 73)."""
+    @pytest.mark.asyncio
+    async def test_make_url_host_with_trailing_slash(self):
+        """Test _make_url strips trailing slash from host."""
         auth_config = GenieAuthConfig(
             host="https://test-workspace.cloud.databricks.com/",
             pat_token="test-token"
         )
         repository = GenieRepository(auth_config)
-        assert repository.base_url == "https://test-workspace.cloud.databricks.com/api/2.0/genie"
+        url = await repository._make_url("/api/2.0/genie/spaces")
+        assert url == "https://test-workspace.cloud.databricks.com/api/2.0/genie/spaces"
 
     @patch(AUTH_PATCH)
     @pytest.mark.asyncio
@@ -446,13 +446,12 @@ class TestGenieRepository:
         assert result.next_page_token is None
         assert result.total_fetched == 0
 
-    def test_build_url_construction(self, repository):
-        """Test URL construction for different endpoints"""
-        base_url = repository.base_url
-
-        spaces_url = f"{base_url}/spaces"
-        search_url = f"{base_url}/spaces/search"
-        conversations_url = f"{base_url}/conversations"
+    @pytest.mark.asyncio
+    async def test_make_url_construction(self, repository):
+        """Test URL construction for different endpoints via _make_url"""
+        spaces_url = await repository._make_url("/api/2.0/genie/spaces")
+        search_url = await repository._make_url("/api/2.0/genie/spaces/search")
+        conversations_url = await repository._make_url("/api/2.0/genie/conversations")
 
         assert spaces_url == "https://test-workspace.cloud.databricks.com/api/2.0/genie/spaces"
         assert search_url == "https://test-workspace.cloud.databricks.com/api/2.0/genie/spaces/search"
@@ -957,16 +956,16 @@ class TestGetSpacesAdvanced:
 
     @patch(AUTH_PATCH)
     @pytest.mark.asyncio
-    async def test_get_spaces_search_limited_hits_max_pages(self, mock_get_auth, repo):
-        """Test get_spaces with search_query hitting max pages returns current_token (covers lines 326-328)."""
+    async def test_get_spaces_search_fetches_all_pages(self, mock_get_auth, repo):
+        """Test get_spaces with search_query fetches all pages for client-side filtering."""
         mock_get_auth.return_value = _make_auth_mock()
 
-        # Create 5 pages (max_pages_for_search = 5), each with a next_page_token
+        # Create 5 pages, last one without next_page_token
         pages = []
         for i in range(5):
             data = {
                 "spaces": [{"id": f"s{i}", "name": f"Space {i}"}],
-                "next_page_token": f"token-{i+1}"
+                "next_page_token": f"token-{i+1}" if i < 4 else None
             }
             pages.append(_make_http_response(json_data=data))
 
@@ -977,9 +976,12 @@ class TestGetSpacesAdvanced:
             enabled_only=False
         )
 
+        # Should fetch all 5 pages (no artificial cap)
         assert repo._client.get.call_count == 5
-        assert result.next_page_token == "token-5"
-        assert result.has_more is True
+        # All pages fetched, so no pagination token
+        assert result.next_page_token is None
+        assert result.has_more is False
+        assert len(result.spaces) == 5
 
     @patch(AUTH_PATCH)
     @pytest.mark.asyncio

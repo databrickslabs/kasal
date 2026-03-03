@@ -5,6 +5,7 @@ This module provides functions for CRUD operations on execution traces.
 """
 
 import logging
+from datetime import datetime
 from typing import List, Optional, Dict, Any, Tuple
 from sqlalchemy import delete, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -316,11 +317,21 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
 
         Raises:
             ValueError: If job_id is provided but doesn't exist in ExecutionHistory
+                        (skipped in subprocess mode where the job record may live
+                        in Lakebase and not be visible to the local DB connection)
         """
-        # Check if the job exists first
+        import os
+
         job_id = trace_data.get("job_id")
-        if job_id:
-            # Check if job exists in executionhistory
+        is_subprocess = os.environ.get("CREW_SUBPROCESS_MODE") == "true"
+
+        if job_id and not is_subprocess:
+            # Check if job exists in executionhistory (main process only).
+            # In subprocess mode we skip this check because:
+            # 1. The subprocess already validated the job_id at launch
+            # 2. When Lakebase is the active backend, execution_history lives
+            #    in Lakebase but the subprocess OTel exporter uses a local
+            #    NullPool engine that can't see Lakebase data
             stmt = select(ExecutionHistory).where(ExecutionHistory.job_id == job_id)
             result = await self.session.execute(stmt)
             job_exists = result.scalars().first()
@@ -334,6 +345,8 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
                 if "run_id" not in trace_data and job_exists:
                     trace_data["run_id"] = job_exists.id
                     logger.info(f"Setting run_id={job_exists.id} for existing job {job_id}")
+        elif job_id and is_subprocess:
+            logger.debug(f"Subprocess mode: skipping job existence check for {job_id}")
 
         # Create the trace with the existing job
         return await self._create(trace_data)
@@ -473,6 +486,26 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             Number of deleted records
         """
         return await self._delete_all()
+
+    async def delete_older_than(self, cutoff: datetime) -> int:
+        """
+        Delete all execution traces older than a cutoff date.
+
+        Args:
+            cutoff: Delete records with created_at before this datetime
+
+        Returns:
+            Number of deleted records
+        """
+        try:
+            stmt = delete(ExecutionTrace).where(ExecutionTrace.created_at < cutoff)
+            result = await self.session.execute(stmt)
+            await self.session.flush()
+            return result.rowcount
+        except SQLAlchemyError as e:
+            await self.session.rollback()
+            logger.error(f"Database error deleting traces older than {cutoff}: {str(e)}")
+            raise
 
     async def get_crew_checkpoints_by_job_id(self, job_id: str) -> List[Dict[str, Any]]:
         """

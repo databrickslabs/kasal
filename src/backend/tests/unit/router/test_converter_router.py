@@ -76,9 +76,17 @@ class MockConfigResponse:
         self.source_format = source_format
         self.target_format = target_format
         self.configuration = {}
+        self.description = None
+        self.is_public = False
+        self.is_template = False
+        self.tags = None
+        self.use_count = 0
+        self.last_used_at = None
+        self.group_id = "group-1"
         self.created_by_email = "user@example.com"
         self.created_at = datetime.utcnow()
         self.updated_at = datetime.utcnow()
+        self.extra_metadata = None
 
     def model_dump(self):
         return {
@@ -87,9 +95,17 @@ class MockConfigResponse:
             "source_format": self.source_format,
             "target_format": self.target_format,
             "configuration": self.configuration,
+            "description": self.description,
+            "is_public": self.is_public,
+            "is_template": self.is_template,
+            "tags": self.tags,
+            "use_count": self.use_count,
+            "last_used_at": self.last_used_at,
+            "group_id": self.group_id,
             "created_by_email": self.created_by_email,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
+            "extra_metadata": self.extra_metadata,
         }
 
 

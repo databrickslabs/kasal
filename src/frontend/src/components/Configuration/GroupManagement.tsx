@@ -32,6 +32,7 @@ import {
   Fab,
   Zoom,
   LinearProgress,
+  CircularProgress,
   Menu,
   MenuList,
   DialogContentText,
@@ -72,7 +73,7 @@ const GroupManagement: React.FC = () => {
   const [assignUserDialogOpen, setAssignUserDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [groupToDelete, setGroupToDelete] = useState<Group | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [_viewMode, _setViewMode] = useState<'groups' | 'users'>('groups');
   const [menuAnchorEl, setMenuAnchorEl] = useState<null | HTMLElement>(null);
@@ -111,17 +112,22 @@ const GroupManagement: React.FC = () => {
     group.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const loadGroups = useCallback(async () => {
-    setLoading(true);
+  const loadGroups = useCallback(async (showSpinner = true) => {
+    if (showSpinner) setLoading(true);
     try {
       const groupService = GroupService.getInstance();
       const groupsData = await groupService.getGroups();
       setGroups(groupsData);
+      // Keep selectedGroup in sync with refreshed data
+      setSelectedGroup(prev => {
+        if (!prev) return prev;
+        return groupsData.find(g => g.id === prev.id) || prev;
+      });
     } catch (error) {
       console.error('Error loading workspaces:', error);
       showNotification('Failed to load workspaces', 'error');
     } finally {
-      setLoading(false);
+      if (showSpinner) setLoading(false);
     }
   }, []);
 
@@ -239,7 +245,8 @@ const GroupManagement: React.FC = () => {
       }
 
       loadGroupUsers(selectedGroup.id);
-
+      // Refresh workspace list to update user_count (no spinner)
+      await loadGroups(false);
       // Refresh GroupSelector to show updated workspace list
       await refreshGroupStore();
     } catch (error) {
@@ -321,6 +328,8 @@ const GroupManagement: React.FC = () => {
       setUserToRemove(null);
       showNotification('Member removed successfully', 'success');
       loadGroupUsers(selectedGroup.id);
+      // Refresh workspace list to update user_count (no spinner)
+      await loadGroups(false);
     } catch (error) {
       console.error('Error removing member from workspace:', error);
       showNotification('Failed to remove member', 'error');
@@ -409,6 +418,17 @@ const GroupManagement: React.FC = () => {
       <Box sx={{ p: 3, textAlign: 'center' }}>
         <LinearProgress sx={{ mb: 2 }} />
         <Typography color="text.secondary">Checking permissions...</Typography>
+      </Box>
+    );
+  }
+
+  if (loading && groups.length === 0) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 200 }}>
+        <CircularProgress />
+        <Typography variant="body2" sx={{ ml: 2 }}>
+          Loading workspace management...
+        </Typography>
       </Box>
     );
   }

@@ -57,7 +57,7 @@ class UnitOfWork:
     async def __aenter__(self):
         """
         Enter async context and create all repositories with a single session.
-        
+
         Returns:
             UnitOfWork: Self reference with all repositories initialized
         """
@@ -84,11 +84,11 @@ class UnitOfWork:
 
         logger.debug("UnitOfWork initialized with repositories")
         return self
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """
         Exit the async context, committing or rolling back as appropriate.
-        
+
         Args:
             exc_type: Exception type if an exception occurred, else None
             exc_val: Exception value if an exception occurred, else None
@@ -112,7 +112,6 @@ class UnitOfWork:
             # Always close the session to release connections back to the pool
             await self._session.close()
             logger.debug("UnitOfWork session closed and released to pool")
-            
             # Additional cleanup to help the garbage collector
             self.tool_repository = None
             self.api_key_repository = None

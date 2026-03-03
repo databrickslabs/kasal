@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from typing import Optional, Dict, Any
 
 # Test MLflowService - based on actual code inspection
@@ -14,15 +14,14 @@ class TestMLflowServiceInit:
         """Test MLflowService __init__ with valid group_id"""
         mock_session = Mock()
         group_id = "test-group-id"
-        
+
         service = MLflowService(mock_session, group_id)
-        
+
         assert service.session == mock_session
         assert service.group_id == group_id
         assert hasattr(service, 'repo')
         assert hasattr(service, 'exec_repo')
         assert hasattr(service, 'model_config_service')
-        assert service._user_token is None
 
     def test_mlflow_service_init_none_group_id(self):
         """Test MLflowService __init__ raises ValueError for None group_id"""
@@ -127,58 +126,8 @@ class TestMLflowServiceBasicMethods:
         self.service.repo.set_evaluation_enabled.assert_called_once_with(enabled=False, group_id=self.group_id)
 
 
-class TestMLflowServiceUserToken:
-    """Test MLflowService user token methods"""
-
-    def setup_method(self):
-        """Set up test fixtures"""
-        self.mock_session = Mock()
-        self.group_id = "test-group-id"
-        self.service = MLflowService(self.mock_session, self.group_id)
-
-    def test_set_user_token_valid_string(self):
-        """Test set_user_token with valid string"""
-        token = "valid-token"
-        
-        self.service.set_user_token(token)
-        
-        assert self.service._user_token == token
-
-    def test_set_user_token_none(self):
-        """Test set_user_token with None"""
-        self.service.set_user_token(None)
-        
-        assert self.service._user_token is None
-
-    def test_set_user_token_empty_string(self):
-        """Test set_user_token with empty string"""
-        self.service.set_user_token("")
-        
-        assert self.service._user_token is None
-
-    def test_set_user_token_whitespace_string(self):
-        """Test set_user_token with whitespace string"""
-        self.service.set_user_token("   ")
-        
-        assert self.service._user_token is None
-
-    def test_set_user_token_non_string(self):
-        """Test set_user_token with non-string value"""
-        self.service.set_user_token(123)
-        
-        assert self.service._user_token is None
-
-    def test_set_user_token_exception_handling(self):
-        """Test set_user_token handles exceptions gracefully"""
-        # Mock isinstance to raise an exception
-        with patch('builtins.isinstance', side_effect=Exception("Test error")):
-            self.service.set_user_token("test-token")
-            
-            assert self.service._user_token is None
-
-
 class TestMLflowServiceSetupAuth:
-    """Test MLflowService _setup_mlflow_auth method"""
+    """Test MLflowService _setup_mlflow_auth method (SPN -> PAT priority)"""
 
     def setup_method(self):
         """Set up test fixtures"""
@@ -187,65 +136,88 @@ class TestMLflowServiceSetupAuth:
         self.service = MLflowService(self.mock_session, self.group_id)
 
     @pytest.mark.asyncio
-    @patch('src.utils.databricks_auth.get_auth_context')
-    async def test_setup_mlflow_auth_success(self, mock_get_auth_context):
-        """Test _setup_mlflow_auth with successful authentication"""
+    async def test_setup_mlflow_auth_pat_success(self):
+        """Test _setup_mlflow_auth with successful PAT authentication (no SPN env vars)"""
         mock_auth = Mock()
         mock_auth.workspace_url = "https://workspace.databricks.com"
         mock_auth.auth_method = "pat"
-        mock_get_auth_context.return_value = mock_auth
-        
-        result = await self.service._setup_mlflow_auth()
-        
-        assert result == mock_auth
-        mock_get_auth_context.assert_called_once_with(user_token=None)
+
+        with patch.dict('os.environ', {}, clear=False), \
+             patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+            import os
+            os.environ.pop("DATABRICKS_CLIENT_ID", None)
+            os.environ.pop("DATABRICKS_CLIENT_SECRET", None)
+            mock_get_auth.return_value = mock_auth
+
+            result = await self.service._setup_mlflow_auth()
+
+            assert result == mock_auth
+            mock_get_auth.assert_called_once_with(user_token=None)
 
     @pytest.mark.asyncio
-    @patch('src.utils.databricks_auth.get_auth_context')
-    async def test_setup_mlflow_auth_with_user_token(self, mock_get_auth_context):
-        """Test _setup_mlflow_auth with user token"""
-        self.service._user_token = "test-token"
+    async def test_setup_mlflow_auth_always_passes_none_user_token(self):
+        """Test _setup_mlflow_auth always passes user_token=None (no OBO)"""
         mock_auth = Mock()
         mock_auth.workspace_url = "https://workspace.databricks.com"
-        mock_auth.auth_method = "obo"
-        mock_get_auth_context.return_value = mock_auth
-        
-        result = await self.service._setup_mlflow_auth()
-        
-        assert result == mock_auth
-        mock_get_auth_context.assert_called_once_with(user_token="test-token")
+        mock_auth.auth_method = "pat"
+
+        with patch.dict('os.environ', {}, clear=False), \
+             patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+            import os
+            os.environ.pop("DATABRICKS_CLIENT_ID", None)
+            os.environ.pop("DATABRICKS_CLIENT_SECRET", None)
+            mock_get_auth.return_value = mock_auth
+
+            result = await self.service._setup_mlflow_auth()
+
+            assert result == mock_auth
+            # Verify user_token is always None (no OBO)
+            mock_get_auth.assert_called_once_with(user_token=None)
 
     @pytest.mark.asyncio
-    @patch('src.utils.databricks_auth.get_auth_context')
-    async def test_setup_mlflow_auth_no_auth(self, mock_get_auth_context):
+    async def test_setup_mlflow_auth_no_auth(self):
         """Test _setup_mlflow_auth when no authentication available"""
-        mock_get_auth_context.return_value = None
-        
-        result = await self.service._setup_mlflow_auth()
-        
-        assert result is None
+        with patch.dict('os.environ', {}, clear=False), \
+             patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+            import os
+            os.environ.pop("DATABRICKS_CLIENT_ID", None)
+            os.environ.pop("DATABRICKS_CLIENT_SECRET", None)
+            mock_get_auth.return_value = None
+
+            result = await self.service._setup_mlflow_auth()
+
+            assert result is None
 
     @pytest.mark.asyncio
-    @patch('src.utils.databricks_auth.get_auth_context')
-    async def test_setup_mlflow_auth_no_workspace_url(self, mock_get_auth_context):
+    async def test_setup_mlflow_auth_no_workspace_url(self):
         """Test _setup_mlflow_auth when auth has no workspace_url"""
         mock_auth = Mock()
         mock_auth.workspace_url = None
-        mock_get_auth_context.return_value = mock_auth
-        
-        result = await self.service._setup_mlflow_auth()
-        
-        assert result is None
+
+        with patch.dict('os.environ', {}, clear=False), \
+             patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+            import os
+            os.environ.pop("DATABRICKS_CLIENT_ID", None)
+            os.environ.pop("DATABRICKS_CLIENT_SECRET", None)
+            mock_get_auth.return_value = mock_auth
+
+            result = await self.service._setup_mlflow_auth()
+
+            assert result is None
 
     @pytest.mark.asyncio
-    @patch('src.utils.databricks_auth.get_auth_context')
-    async def test_setup_mlflow_auth_exception(self, mock_get_auth_context):
+    async def test_setup_mlflow_auth_exception(self):
         """Test _setup_mlflow_auth handles exceptions"""
-        mock_get_auth_context.side_effect = Exception("Test error")
-        
-        result = await self.service._setup_mlflow_auth()
-        
-        assert result is None
+        with patch.dict('os.environ', {}, clear=False), \
+             patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+            import os
+            os.environ.pop("DATABRICKS_CLIENT_ID", None)
+            os.environ.pop("DATABRICKS_CLIENT_SECRET", None)
+            mock_get_auth.side_effect = Exception("Test error")
+
+            result = await self.service._setup_mlflow_auth()
+
+            assert result is None
 
 
 class TestMLflowServiceAttributes:
@@ -255,21 +227,19 @@ class TestMLflowServiceAttributes:
         """Test that service has all required attributes after initialization"""
         mock_session = Mock()
         group_id = "test-group-id"
-        
+
         service = MLflowService(mock_session, group_id)
-        
+
         # Check all required attributes exist
         assert hasattr(service, 'session')
         assert hasattr(service, 'group_id')
         assert hasattr(service, 'repo')
         assert hasattr(service, 'exec_repo')
         assert hasattr(service, 'model_config_service')
-        assert hasattr(service, '_user_token')
-        
+
         # Check attribute types
         assert service.session == mock_session
         assert service.group_id == group_id
-        assert service._user_token is None
 
 
 class TestMLflowServiceAsyncMethods:

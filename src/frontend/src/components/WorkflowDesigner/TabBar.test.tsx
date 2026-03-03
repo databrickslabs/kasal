@@ -211,9 +211,7 @@ describe('TabBar', () => {
       renderTabBar();
       openNewTabMenu();
       expect(screen.getByText('New Empty Canvas')).toBeInTheDocument();
-      expect(screen.getByText('Load Existing Plans')).toBeInTheDocument();
-      expect(screen.getByText('Load Existing Agents')).toBeInTheDocument();
-      expect(screen.getByText('Load Existing Tasks')).toBeInTheDocument();
+      expect(screen.getByText('Load from Catalog')).toBeInTheDocument();
     });
 
     it('creates a new empty canvas', () => {
@@ -229,48 +227,18 @@ describe('TabBar', () => {
       expect(mockCreateTab).not.toHaveBeenCalled();
     });
 
-    it('calls onLoadCrew when clicking Load Existing Plans', () => {
+    it('calls onLoadCrew when clicking Load from Catalog', () => {
       const onLoadCrew = vi.fn();
       renderTabBar({ onLoadCrew });
       openNewTabMenu();
-      fireEvent.click(screen.getByText('Load Existing Plans'));
+      fireEvent.click(screen.getByText('Load from Catalog'));
       expect(onLoadCrew).toHaveBeenCalled();
     });
 
-    it('handles Load Existing Plans without onLoadCrew callback', () => {
+    it('handles Load from Catalog without onLoadCrew callback', () => {
       renderTabBar();
       openNewTabMenu();
-      fireEvent.click(screen.getByText('Load Existing Plans'));
-      // No error thrown
-    });
-
-    it('calls onLoadAgents when clicking Load Existing Agents', () => {
-      const onLoadAgents = vi.fn();
-      renderTabBar({ onLoadAgents });
-      openNewTabMenu();
-      fireEvent.click(screen.getByText('Load Existing Agents'));
-      expect(onLoadAgents).toHaveBeenCalled();
-    });
-
-    it('handles Load Existing Agents without onLoadAgents callback', () => {
-      renderTabBar();
-      openNewTabMenu();
-      fireEvent.click(screen.getByText('Load Existing Agents'));
-      // No error thrown
-    });
-
-    it('calls onLoadTasks when clicking Load Existing Tasks', () => {
-      const onLoadTasks = vi.fn();
-      renderTabBar({ onLoadTasks });
-      openNewTabMenu();
-      fireEvent.click(screen.getByText('Load Existing Tasks'));
-      expect(onLoadTasks).toHaveBeenCalled();
-    });
-
-    it('handles Load Existing Tasks without onLoadTasks callback', () => {
-      renderTabBar();
-      openNewTabMenu();
-      fireEvent.click(screen.getByText('Load Existing Tasks'));
+      fireEvent.click(screen.getByText('Load from Catalog'));
       // No error thrown
     });
   });
@@ -1111,6 +1079,182 @@ describe('TabBar', () => {
       // The mock always returns false, but covers the hook call path
       renderTabBar();
       expect(screen.getByText('Tab One')).toBeInTheDocument();
+    });
+  });
+
+  // ---------- Mobile responsive ----------
+
+  describe('isMobile prop', () => {
+    it('renders with isMobile=false by default', () => {
+      renderTabBar();
+      expect(screen.getByText('Tab One')).toBeInTheDocument();
+    });
+
+    it('renders with compact styling when isMobile=true', () => {
+      renderTabBar({ isMobile: true });
+      expect(screen.getByText('Tab One')).toBeInTheDocument();
+    });
+
+    it('hides execution status chips on mobile', () => {
+      storeTabs = [makeTab({ executionStatus: 'completed', lastExecutionTime: new Date().toISOString() })];
+      mockGetTabsForCurrentGroup.mockReturnValue(storeTabs);
+
+      // On desktop, the Completed chip should appear
+      const { unmount } = renderTabBar({ isMobile: false });
+      expect(screen.queryByText('Completed')).toBeInTheDocument();
+      unmount();
+
+      // On mobile, the Completed chip should be hidden
+      renderTabBar({ isMobile: true });
+      expect(screen.queryByText('Completed')).not.toBeInTheDocument();
+    });
+
+    it('hides running chip on mobile', () => {
+      storeTabs = [makeTab({ executionStatus: 'running' })];
+      mockGetTabsForCurrentGroup.mockReturnValue(storeTabs);
+
+      const { unmount } = renderTabBar({ isMobile: false, isRunning: true, runningTabId: 'tab-1' });
+      expect(screen.queryByText('Running')).toBeInTheDocument();
+      unmount();
+
+      renderTabBar({ isMobile: true, isRunning: true, runningTabId: 'tab-1' });
+      expect(screen.queryByText('Running')).not.toBeInTheDocument();
+    });
+
+    it('hides failed chip on mobile', () => {
+      storeTabs = [makeTab({ executionStatus: 'failed', lastExecutionTime: new Date().toISOString() })];
+      mockGetTabsForCurrentGroup.mockReturnValue(storeTabs);
+
+      const { unmount } = renderTabBar({ isMobile: false });
+      expect(screen.queryByText('Failed')).toBeInTheDocument();
+      unmount();
+
+      renderTabBar({ isMobile: true });
+      expect(screen.queryByText('Failed')).not.toBeInTheDocument();
+    });
+
+    it('still shows unsaved indicator dot on mobile', () => {
+      storeTabs = [makeTab({ isDirty: true })];
+      mockGetTabsForCurrentGroup.mockReturnValue(storeTabs);
+
+      renderTabBar({ isMobile: true });
+      // The dirty dot has tooltip "Unsaved changes"
+      expect(screen.getByText('Tab One')).toBeInTheDocument();
+    });
+  });
+
+  // ---------- Max Tabs ----------
+
+  describe('max tabs limit', () => {
+    it('only renders up to maxTabs visible tabs', () => {
+      const manyTabs = Array.from({ length: 8 }, (_, i) =>
+        makeTab({ id: `tab-${i}`, name: `Tab ${i}` })
+      );
+      storeTabs = manyTabs;
+      mockGetTabsForCurrentGroup.mockReturnValue(manyTabs);
+
+      renderTabBar({ maxTabs: 5 });
+
+      // First 5 visible
+      for (let i = 0; i < 5; i++) {
+        expect(screen.getByText(`Tab ${i}`)).toBeInTheDocument();
+      }
+      // Tabs beyond the limit not rendered
+      expect(screen.queryByText('Tab 5')).not.toBeInTheDocument();
+      expect(screen.queryByText('Tab 7')).not.toBeInTheDocument();
+    });
+
+    it('shows a +N chip when tabs exceed maxTabs', () => {
+      const manyTabs = Array.from({ length: 7 }, (_, i) =>
+        makeTab({ id: `tab-${i}`, name: `Tab ${i}` })
+      );
+      storeTabs = manyTabs;
+      mockGetTabsForCurrentGroup.mockReturnValue(manyTabs);
+
+      renderTabBar({ maxTabs: 5 });
+
+      expect(screen.getByText('+2')).toBeInTheDocument();
+    });
+
+    it('does not show +N chip when within limit', () => {
+      storeTabs = [makeTab()];
+      mockGetTabsForCurrentGroup.mockReturnValue(storeTabs);
+
+      renderTabBar({ maxTabs: 5 });
+
+      expect(screen.queryByText(/^\+\d+$/)).not.toBeInTheDocument();
+    });
+
+    it('disables new tab button when max tabs reached', () => {
+      const manyTabs = Array.from({ length: 5 }, (_, i) =>
+        makeTab({ id: `tab-${i}`, name: `Tab ${i}` })
+      );
+      storeTabs = manyTabs;
+      mockGetTabsForCurrentGroup.mockReturnValue(manyTabs);
+
+      const { container } = renderTabBar({ maxTabs: 5 });
+
+      // The add icon button (contains AddIcon + ArrowDropDownIcon) should be disabled
+      const buttons = container.querySelectorAll('button[disabled]');
+      const addButton = Array.from(buttons).find(btn =>
+        btn.querySelector('[data-testid="AddIcon"]')
+      );
+      expect(addButton).toBeTruthy();
+    });
+
+    it('does not call createTab when max tabs reached', () => {
+      const manyTabs = Array.from({ length: 3 }, (_, i) =>
+        makeTab({ id: `tab-${i}`, name: `Tab ${i}` })
+      );
+      storeTabs = manyTabs;
+      mockGetTabsForCurrentGroup.mockReturnValue(manyTabs);
+
+      const { container } = renderTabBar({ maxTabs: 3 });
+
+      // The add button is disabled so clicking it is a no-op
+      const buttons = container.querySelectorAll('button');
+      const addButton = Array.from(buttons).find(btn =>
+        btn.querySelector('[data-testid="AddIcon"]')
+      );
+      expect(addButton).toBeTruthy();
+      fireEvent.click(addButton!);
+      expect(mockCreateTab).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------- Tab Width Shrinking ----------
+
+  describe('tab width shrinking', () => {
+    it('uses default maxWidth (200px) when container is wide enough', () => {
+      storeTabs = [makeTab()];
+      mockGetTabsForCurrentGroup.mockReturnValue(storeTabs);
+
+      const { container } = renderTabBar();
+
+      const tabRoot = container.querySelector('.MuiTab-root');
+      expect(tabRoot).toBeInTheDocument();
+      // With no ResizeObserver (containerWidth=0), falls back to default
+      // or with one tab the total is well within any threshold
+    });
+
+    it('uses 120px default maxWidth on mobile', () => {
+      storeTabs = [makeTab()];
+      mockGetTabsForCurrentGroup.mockReturnValue(storeTabs);
+
+      const { container } = renderTabBar({ isMobile: true });
+
+      const tabRoot = container.querySelector('.MuiTab-root');
+      expect(tabRoot).toBeInTheDocument();
+    });
+
+    it('renders tabs with the MuiTab-root class', () => {
+      storeTabs = [makeTab()];
+      mockGetTabsForCurrentGroup.mockReturnValue(storeTabs);
+
+      const { container } = renderTabBar();
+
+      const tabRoot = container.querySelector('.MuiTab-root');
+      expect(tabRoot).toBeInTheDocument();
     });
   });
 });

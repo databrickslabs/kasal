@@ -12,6 +12,7 @@ from src.core.exceptions import (
     ConflictError,
     ForbiddenError,
     KasalError,
+    LakebaseUnavailableError,
     NotFoundError,
 )
 
@@ -162,11 +163,40 @@ class TestBadRequestError:
 
 
 # ---------------------------------------------------------------------------
+# LakebaseUnavailableError
+# ---------------------------------------------------------------------------
+class TestLakebaseUnavailableError:
+    def test_default_status_code(self):
+        exc = LakebaseUnavailableError()
+        assert exc.status_code == 503
+
+    def test_default_detail(self):
+        exc = LakebaseUnavailableError()
+        assert exc.detail == "Database connection unavailable"
+
+    def test_custom_detail(self):
+        exc = LakebaseUnavailableError(detail="Lakebase unreachable after 3 retries")
+        assert exc.detail == "Lakebase unreachable after 3 retries"
+        assert exc.status_code == 503
+
+    def test_inherits_kasal_error(self):
+        assert issubclass(LakebaseUnavailableError, KasalError)
+
+    def test_caught_as_kasal_error(self):
+        with pytest.raises(KasalError):
+            raise LakebaseUnavailableError()
+
+    def test_str(self):
+        exc = LakebaseUnavailableError(detail="connection timeout")
+        assert str(exc) == "connection timeout"
+
+
+# ---------------------------------------------------------------------------
 # Cross-cutting: hierarchy / polymorphism
 # ---------------------------------------------------------------------------
 class TestExceptionHierarchy:
     def test_all_subclasses_are_kasal_error(self):
-        for cls in (NotFoundError, ConflictError, ForbiddenError, BadRequestError):
+        for cls in (NotFoundError, ConflictError, ForbiddenError, BadRequestError, LakebaseUnavailableError):
             assert issubclass(cls, KasalError)
             assert issubclass(cls, Exception)
 
@@ -176,6 +206,7 @@ class TestExceptionHierarchy:
             ConflictError: 409,
             ForbiddenError: 403,
             BadRequestError: 400,
+            LakebaseUnavailableError: 503,
             KasalError: 500,
         }
         for cls, expected_code in codes.items():

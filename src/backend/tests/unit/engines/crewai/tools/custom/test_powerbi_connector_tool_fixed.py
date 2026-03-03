@@ -65,12 +65,10 @@ class TestPowerBIConnectorTool:
 
     # ========== Run Method Tests - Success Paths ==========
 
-    @patch('src.converters.pipeline.ConversionPipeline')
-    def test_run_dax_output_success(self, mock_pipeline_class, tool):
+    def test_run_dax_output_success(self, tool):
         """Test _run with DAX output format"""
-        mock_instance = Mock()
-        mock_pipeline_class.return_value = mock_instance
-        mock_instance.execute.return_value = {
+        mock_pipeline = Mock()
+        mock_pipeline.execute.return_value = {
             "success": True,
             "output": [
                 {"name": "Total Sales", "expression": "SUM(Sales[Amount])", "description": "Total"}
@@ -78,6 +76,7 @@ class TestPowerBIConnectorTool:
             "measure_count": 1,
             "errors": []
         }
+        tool._pipeline = mock_pipeline
 
         result = tool._run(
             semantic_model_id="model123",
@@ -89,17 +88,16 @@ class TestPowerBIConnectorTool:
         assert "Power BI Measures Converted to DAX" in result
         assert "Total Sales" in result
 
-    @patch('src.converters.pipeline.ConversionPipeline')
-    def test_run_sql_output_success(self, mock_pipeline_class, tool):
+    def test_run_sql_output_success(self, tool):
         """Test _run with SQL output format"""
-        mock_instance = Mock()
-        mock_pipeline_class.return_value = mock_instance
-        mock_instance.execute.return_value = {
+        mock_pipeline = Mock()
+        mock_pipeline.execute.return_value = {
             "success": True,
             "output": "SELECT SUM(amount) as total_sales FROM sales",
             "measure_count": 1,
             "errors": []
         }
+        tool._pipeline = mock_pipeline
 
         result = tool._run(
             semantic_model_id="model123",
@@ -111,17 +109,16 @@ class TestPowerBIConnectorTool:
         assert "Power BI Measures Converted to SQL" in result
         assert "SELECT SUM(amount)" in result
 
-    @patch('src.converters.pipeline.ConversionPipeline')
-    def test_run_pipeline_failure(self, mock_pipeline_class, tool):
+    def test_run_pipeline_failure(self, tool):
         """Test _run handles pipeline execution failure"""
-        mock_instance = Mock()
-        mock_pipeline_class.return_value = mock_instance
-        mock_instance.execute.return_value = {
+        mock_pipeline = Mock()
+        mock_pipeline.execute.return_value = {
             "success": False,
             "output": None,
             "measure_count": 0,
             "errors": ["Connection failed"]
         }
+        tool._pipeline = mock_pipeline
 
         result = tool._run(
             semantic_model_id="model123",

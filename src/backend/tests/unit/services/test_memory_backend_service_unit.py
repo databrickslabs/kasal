@@ -1,6 +1,6 @@
 import pytest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from src.services.memory_backend_service import MemoryBackendService
 
@@ -100,4 +100,24 @@ async def test_delegations_and_error_paths(monkeypatch):
     auth_mod.get_auth_context = fake_auth
     info = await svc.get_workspace_url()
     assert info["workspace_url"] == "https://ws" and info["detected"] is True
+
+    # Lakebase delegation methods
+    mock_lakebase_svc = SimpleNamespace(
+        get_table_data=AsyncMock(return_value={"success": True, "documents": [{"id": "d1"}], "total": 1}),
+        get_entity_data=AsyncMock(return_value={"entities": [{"id": "e1"}], "relationships": []}),
+        test_connection=AsyncMock(return_value={"success": True}),
+        initialize_tables=AsyncMock(return_value={"success": True}),
+        get_table_stats=AsyncMock(return_value={"short_term": {"exists": True, "row_count": 5}}),
+    )
+    with patch.object(svc, '_get_lakebase_service', return_value=mock_lakebase_svc):
+        # get_lakebase_table_data delegation
+        table_data = await svc.get_lakebase_table_data("crew_short_term_memory", limit=10, instance_name="inst1")
+        assert table_data["success"] is True
+        assert table_data["documents"][0]["id"] == "d1"
+        mock_lakebase_svc.get_table_data.assert_awaited_once_with(table_name="crew_short_term_memory", limit=10)
+
+        # get_lakebase_entity_data delegation
+        entity_data = await svc.get_lakebase_entity_data(entity_table="crew_entity_memory", limit=100, instance_name="inst1")
+        assert entity_data["entities"][0]["id"] == "e1"
+        mock_lakebase_svc.get_entity_data.assert_awaited_once_with(entity_table="crew_entity_memory", limit=100)
 

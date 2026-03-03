@@ -19,6 +19,15 @@ import {
   IconButton,
   Switch,
   Divider,
+  Button,
+  Chip,
+  TextField,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  FormHelperText,
+  Tooltip,
 } from '@mui/material';
 import {
   CloudSync as CloudSyncIcon,
@@ -26,21 +35,32 @@ import {
   PowerSettingsNew as PowerOffIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
+  Storage as StorageIcon,
+  CheckCircle as CheckCircleIcon,
+  Error as ErrorIcon,
+  Add as AddIcon,
+  Refresh as RefreshIcon,
+  Visibility as VisibilityIcon,
+  AccountTree as AccountTreeIcon,
+  Save as SaveIcon,
 } from '@mui/icons-material';
 import { AxiosError } from 'axios';
 import { apiClient } from '../../config/api/ApiConfig';
 import { useMemoryBackendStore } from '../../store/memoryBackend';
 import DatabricksVectorSearchService from '../../api/DatabricksVectorSearchService';
-import { 
-  MemoryBackendType, 
-  EndpointInfo, 
-  IndexInfo, 
-  SavedConfigInfo, 
+import {
+  MemoryBackendType,
+  EndpointInfo,
+  IndexInfo,
+  SavedConfigInfo,
   SetupResult,
   IndexInfoState,
   ManualConfig,
-  DatabricksMemoryConfig as DatabricksConfig
+  DatabricksMemoryConfig as DatabricksConfig,
+  LakebaseMemoryConfig,
+  DEFAULT_LAKEBASE_CONFIG,
 } from '../../types/memoryBackend';
+import { MemoryBackendService } from '../../api/MemoryBackendService';
 import { EMBEDDING_MODELS } from './constants';
 import { 
   validateVectorSearchIndexName
@@ -54,9 +74,10 @@ import { EditConfigurationForm } from './EditConfigurationForm';
 import { EndpointsDisplay } from './EndpointsDisplay';
 import EntityGraphVisualization from './EntityGraphVisualization';
 import { IndexDocumentsDialog } from './IndexDocumentsDialog';
+import LakebaseDocumentsDialog from './LakebaseDocumentsDialog';
 
 export const DatabricksOneClickSetup: React.FC = () => {
-  const [mode, setMode] = useState<'disabled' | 'databricks'>('disabled');
+  const [mode, setMode] = useState<'disabled' | 'databricks' | 'lakebase'>('disabled');
   const [setupMode, setSetupMode] = useState<'auto' | 'manual'>('auto');
   const [detectedWorkspaceUrl, setDetectedWorkspaceUrl] = useState<string | null>(null);
   const [catalog, setCatalog] = useState('ml');
@@ -75,6 +96,14 @@ export const DatabricksOneClickSetup: React.FC = () => {
   const [hasCheckedInitialConfig, setHasCheckedInitialConfig] = useState(false);
   const [advancedSettingsExpanded, setAdvancedSettingsExpanded] = useState(false);
   const [enableRelationshipRetrieval, setEnableRelationshipRetrieval] = useState(false);
+
+  // Lakebase state
+  const [lakebaseConfig, setLakebaseConfig] = useState<LakebaseMemoryConfig>(DEFAULT_LAKEBASE_CONFIG);
+  const [lakebaseStatus, setLakebaseStatus] = useState<{ success: boolean; message: string } | null>(null);
+  const [lakebaseLoading, setLakebaseLoading] = useState(false);
+  const [lakebaseInstances, setLakebaseInstances] = useState<Array<{ name: string; state: string; capacity?: string; read_write_dns?: string }>>([]);
+  const [lakebaseInstancesLoading, setLakebaseInstancesLoading] = useState(false);
+  const [lakebaseTableStats, setLakebaseTableStats] = useState<Record<string, { table_name: string; exists: boolean; row_count: number }> | null>(null);
   
   // Save relationship retrieval setting when it changes
   const handleRelationshipRetrievalChange = async (enabled: boolean) => {
@@ -117,6 +146,14 @@ export const DatabricksOneClickSetup: React.FC = () => {
     type: 'short_term' | 'long_term' | 'entity' | 'document';
     endpointName: string;
   } | null>(null);
+
+  // Lakebase documents/visualization dialogs
+  const [lakebaseDocsOpen, setLakebaseDocsOpen] = useState(false);
+  const [selectedLakebaseTable, setSelectedLakebaseTable] = useState<{
+    tableName: string;
+    memoryType: 'short_term' | 'long_term' | 'entity';
+  } | null>(null);
+  const [lakebaseEntityGraphOpen, setLakebaseEntityGraphOpen] = useState(false);
   
   const { 
     updateConfig,
@@ -286,7 +323,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
     }
   };
   
-  const processConfigResponse = (configData: { backend_type?: string; databricks_config?: DatabricksConfig; id?: string; enable_relationship_retrieval?: boolean }) => {
+  const processConfigResponse = (configData: { backend_type?: string; databricks_config?: DatabricksConfig; lakebase_config?: LakebaseMemoryConfig; id?: string; enable_relationship_retrieval?: boolean }) => {
     console.log('processConfigResponse - Full configData:', configData);
     console.log('processConfigResponse - backend_type:', configData?.backend_type);
     console.log('processConfigResponse - databricks_config:', configData?.databricks_config);
@@ -324,6 +361,20 @@ export const DatabricksOneClickSetup: React.FC = () => {
       
       // Load relationship retrieval setting from the top-level config
       setEnableRelationshipRetrieval(configData.enable_relationship_retrieval || false);
+    } else if (configData && configData.backend_type === MemoryBackendType.LAKEBASE) {
+      // Lakebase backend
+      setSavedConfig({
+        backend_id: configData.id
+      });
+      if (configData.lakebase_config) {
+        setLakebaseConfig(configData.lakebase_config);
+        // Auto-load table stats if tables were previously initialized
+        if (configData.lakebase_config.tables_initialized && configData.lakebase_config.instance_name) {
+          loadLakebaseTableStats(configData.lakebase_config.instance_name);
+        }
+      }
+      setMode('lakebase');
+      loadLakebaseInstances();
     } else if (configData && configData.backend_type === MemoryBackendType.DEFAULT) {
       // When in disabled mode, clear the saved databricks config but keep the backend_id
       setSavedConfig({
@@ -334,9 +385,9 @@ export const DatabricksOneClickSetup: React.FC = () => {
   };
 
   const handleModeChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const newMode = event.target.value as 'disabled' | 'databricks';
+    const newMode = event.target.value as 'disabled' | 'databricks' | 'lakebase';
     setMode(newMode);
-    
+
     if (newMode === 'disabled') {
       // Update store to use DEFAULT backend with all memory types disabled
       updateConfig({
@@ -345,22 +396,73 @@ export const DatabricksOneClickSetup: React.FC = () => {
         enable_long_term: false,
         enable_entity: false,
       });
-      
+
       // Delete all configurations from the memory backend table and create disabled config
       try {
         // Use the new endpoint that deletes all configs and creates a disabled one
         const result = await DatabricksVectorSearchService.switchToDisabledMode();
         console.log('Switched to disabled mode:', result);
-        
+
         // Clear saved config
         setSavedConfig(null);
-        
+
         // Show success message
         setError(''); // Clear any previous errors
       } catch (error) {
         console.error('Failed to save disabled mode:', error);
         setError('Failed to save disabled mode. Please try again.');
       }
+    } else if (newMode === 'lakebase') {
+      // Reset lakebase status when switching to lakebase and load instances
+      setLakebaseStatus(null);
+      setLakebaseConfig(DEFAULT_LAKEBASE_CONFIG);
+      loadLakebaseInstances();
+    }
+  };
+
+  const loadLakebaseInstances = async () => {
+    setLakebaseInstancesLoading(true);
+    try {
+      const response = await apiClient.get('/database-management/lakebase/instances');
+      setLakebaseInstances(response.data || []);
+    } catch (err) {
+      console.error('Failed to load Lakebase instances:', err);
+      setLakebaseInstances([]);
+    } finally {
+      setLakebaseInstancesLoading(false);
+    }
+  };
+
+  const loadLakebaseTableStats = async (instanceName: string) => {
+    try {
+      const stats = await MemoryBackendService.getLakebaseTableStats(instanceName);
+      setLakebaseTableStats(stats);
+      const allExist = Object.values(stats).every((s: { exists: boolean }) => s.exists);
+      setLakebaseConfig(prev => ({ ...prev, tables_initialized: allExist }));
+    } catch {
+      setLakebaseTableStats(null);
+    }
+  };
+
+  const handleSaveLakebaseConfig = async () => {
+    try {
+      const saveResult = await apiClient.post('/memory-backend/lakebase/save-config', {
+        lakebase_config: lakebaseConfig,
+      });
+      setSavedConfig({ backend_id: saveResult.data.backend_id });
+      updateConfig({
+        backend_type: MemoryBackendType.LAKEBASE,
+        lakebase_config: lakebaseConfig,
+        enable_short_term: true,
+        enable_long_term: true,
+        enable_entity: true,
+      });
+      setLakebaseStatus({ success: true, message: 'Configuration saved successfully' });
+    } catch (error) {
+      setLakebaseStatus({
+        success: false,
+        message: `Failed to save configuration: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      });
     }
   };
 
@@ -1255,12 +1357,23 @@ export const DatabricksOneClickSetup: React.FC = () => {
           sx={{ mr: 3 }}
         />
         <FormControlLabel
+          value="lakebase"
+          control={<Radio size="small" />}
+          label={
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <StorageIcon sx={{ fontSize: 18, mr: 0.5 }} />
+              Lakebase (pgvector)
+            </Box>
+          }
+          sx={{ mr: 3 }}
+        />
+        <FormControlLabel
           value="disabled"
           control={<Radio size="small" />}
           label={
             <Box sx={{ display: 'flex', alignItems: 'center' }}>
-              <PowerOffIcon sx={{ fontSize: 18, mr: 0.5 }} />
-              Disabled
+              <MemoryIcon sx={{ fontSize: 18, mr: 0.5 }} />
+              Local
             </Box>
           }
         />
@@ -1484,9 +1597,361 @@ export const DatabricksOneClickSetup: React.FC = () => {
         </Box>
       </Collapse>
 
+      <Collapse in={mode === 'lakebase'}>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+
+          {/* Status alert or info */}
+          {lakebaseStatus ? (
+            <Alert
+              severity={lakebaseStatus.success ? 'success' : 'error'}
+              onClose={() => setLakebaseStatus(null)}
+            >
+              {lakebaseStatus.message}
+            </Alert>
+          ) : (
+            <Alert severity="info">
+              Uses your existing Lakebase PostgreSQL instance with pgvector for vector similarity search.
+              Memory tables are created alongside your application tables — no additional infrastructure required.
+            </Alert>
+          )}
+
+          {/* Databricks App Setup instructions */}
+          <Alert severity="warning" sx={{ '& .MuiAlert-message': { width: '100%' } }}>
+            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Databricks App Setup</Typography>
+            <Typography variant="body2" sx={{ mb: 0.5 }}>
+              Before connecting, ensure your App&apos;s service principal has Lakebase access:
+            </Typography>
+            <Box component="ol" sx={{ m: 0, pl: 2.5, '& li': { mb: 0.25 } }}>
+              <Typography component="li" variant="body2">
+                Add a <strong>Database</strong> resource to your App in the Databricks UI
+              </Typography>
+              <Typography component="li" variant="body2">
+                Create a <strong>PostgreSQL role</strong> for the service principal on the Lakebase instance
+              </Typography>
+            </Box>
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+              See{' '}
+              <a
+                href="https://docs.databricks.com/en/dev-tools/databricks-apps/lakebase.html"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: 'inherit' }}
+              >
+                Databricks Lakebase App docs
+              </a>
+              {' '}for details.
+            </Typography>
+          </Alert>
+
+          {/* Connection section */}
+          <Box>
+            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1.5, textTransform: 'uppercase', fontSize: '0.7rem', letterSpacing: '0.08em' }}>
+              Connection
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
+              <FormControl sx={{ flex: 1 }} required>
+                <InputLabel size="small">Lakebase Instance</InputLabel>
+                <Select
+                  size="small"
+                  value={lakebaseConfig.instance_name || ''}
+                  onChange={(e) => {
+                    setLakebaseConfig(prev => ({ ...prev, instance_name: e.target.value as string, tables_initialized: false }));
+                    setLakebaseStatus(null);
+                    setLakebaseTableStats(null);
+                  }}
+                  label="Lakebase Instance"
+                  disabled={lakebaseInstancesLoading}
+                  endAdornment={lakebaseInstancesLoading ? <CircularProgress size={18} sx={{ mr: 2 }} /> : undefined}
+                >
+                  <MenuItem value="">
+                    <em>Select an instance</em>
+                  </MenuItem>
+                  {lakebaseInstances.map((inst) => (
+                    <MenuItem key={inst.name} value={inst.name}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                        <Typography variant="body2">{inst.name}</Typography>
+                        <Chip
+                          label={inst.state}
+                          size="small"
+                          color={inst.state === 'ACTIVE' || inst.state === 'AVAILABLE' ? 'success' : 'default'}
+                          sx={{ height: 20, fontSize: '0.7rem', ml: 2 }}
+                        />
+                      </Box>
+                    </MenuItem>
+                  ))}
+                </Select>
+                <FormHelperText>
+                  {lakebaseInstances.length === 0 && !lakebaseInstancesLoading
+                    ? 'No instances found. Create one in Database Management first.'
+                    : 'Select the Lakebase instance for memory storage'}
+                </FormHelperText>
+              </FormControl>
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={lakebaseInstancesLoading ? <CircularProgress size={14} /> : <RefreshIcon />}
+                disabled={lakebaseInstancesLoading}
+                onClick={loadLakebaseInstances}
+                sx={{ mt: '4px', minWidth: 'auto', px: 1.5, whiteSpace: 'nowrap' }}
+              >
+                Refresh
+              </Button>
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={lakebaseLoading ? <CircularProgress size={14} /> : undefined}
+                disabled={lakebaseLoading || !lakebaseConfig.instance_name}
+                onClick={async () => {
+                  setLakebaseLoading(true);
+                  try {
+                    const result = await MemoryBackendService.testLakebaseConnection(lakebaseConfig.instance_name);
+                    setLakebaseStatus(result);
+                  } catch {
+                    setLakebaseStatus({ success: false, message: 'Connection test failed' });
+                  } finally {
+                    setLakebaseLoading(false);
+                  }
+                }}
+                sx={{ mt: '4px', minWidth: 'auto', px: 1.5, whiteSpace: 'nowrap' }}
+              >
+                Test Connection
+              </Button>
+            </Box>
+          </Box>
+
+          {/* Configuration section */}
+          <Box>
+            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1.5, textTransform: 'uppercase', fontSize: '0.7rem', letterSpacing: '0.08em' }}>
+              Configuration
+            </Typography>
+            <TextField
+              fullWidth
+              label="Embedding Dimension"
+              type="number"
+              size="small"
+              value={lakebaseConfig.embedding_dimension || 1024}
+              onChange={(e) => {
+                setLakebaseConfig(prev => ({
+                  ...prev,
+                  embedding_dimension: parseInt(e.target.value) || 1024,
+                }));
+              }}
+              helperText="Must match your embedding model (1024 for databricks-gte-large-en)"
+            />
+          </Box>
+
+          <Divider />
+
+          {/* Setup section */}
+          <Box>
+            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1.5, textTransform: 'uppercase', fontSize: '0.7rem', letterSpacing: '0.08em' }}>
+              Setup
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
+              <Button
+                variant="contained"
+                startIcon={lakebaseLoading ? <CircularProgress size={18} /> : <StorageIcon />}
+                disabled={lakebaseLoading || !lakebaseConfig.instance_name}
+                onClick={async () => {
+                  setLakebaseLoading(true);
+                  try {
+                    const result = await MemoryBackendService.initializeLakebaseTables({
+                      instance_name: lakebaseConfig.instance_name,
+                      embedding_dimension: lakebaseConfig.embedding_dimension,
+                      short_term_table: lakebaseConfig.short_term_table,
+                      long_term_table: lakebaseConfig.long_term_table,
+                      entity_table: lakebaseConfig.entity_table,
+                    });
+                    if (result.success) {
+                      setLakebaseConfig(prev => ({ ...prev, tables_initialized: true }));
+
+                      // Save config to backend
+                      try {
+                        const saveResult = await apiClient.post('/memory-backend/lakebase/save-config', {
+                          lakebase_config: {
+                            ...lakebaseConfig,
+                            tables_initialized: true,
+                          },
+                        });
+                        setSavedConfig({ backend_id: saveResult.data.backend_id });
+                        updateConfig({
+                          backend_type: MemoryBackendType.LAKEBASE,
+                          lakebase_config: { ...lakebaseConfig, tables_initialized: true },
+                          enable_short_term: true,
+                          enable_long_term: true,
+                          enable_entity: true,
+                        });
+                      } catch (saveError) {
+                        console.error('Failed to save Lakebase config:', saveError);
+                        setLakebaseStatus({ success: true, message: 'Tables initialized but failed to save configuration. Try again.' });
+                      }
+
+                      // Load table stats
+                      if (lakebaseConfig.instance_name) {
+                        await loadLakebaseTableStats(lakebaseConfig.instance_name);
+                      }
+                    }
+                    setLakebaseStatus({ success: result.success, message: result.message });
+                  } catch {
+                    setLakebaseStatus({ success: false, message: 'Failed to initialize tables' });
+                  } finally {
+                    setLakebaseLoading(false);
+                  }
+                }}
+                sx={{ py: 1 }}
+              >
+                {lakebaseConfig.tables_initialized ? 'Re-initialize Tables' : 'Initialize Tables'}
+              </Button>
+              <Button
+                variant="outlined"
+                startIcon={<SaveIcon />}
+                disabled={!lakebaseConfig.instance_name}
+                onClick={handleSaveLakebaseConfig}
+                sx={{ py: 1 }}
+              >
+                Save Configuration
+              </Button>
+              <Button
+                variant="text"
+                size="small"
+                startIcon={<RefreshIcon />}
+                disabled={lakebaseLoading || !lakebaseConfig.instance_name}
+                onClick={async () => {
+                  setLakebaseLoading(true);
+                  try {
+                    await loadLakebaseTableStats(lakebaseConfig.instance_name!);
+                  } finally {
+                    setLakebaseLoading(false);
+                  }
+                }}
+              >
+                Refresh Status
+              </Button>
+            </Box>
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+              Enables pgvector extension and creates memory tables with HNSW indexes
+            </Typography>
+          </Box>
+
+          {/* Table Status Display */}
+          {(lakebaseTableStats || lakebaseConfig.tables_initialized) && (
+            <>
+              <Divider />
+              <Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1.5 }}>
+                  <Typography variant="subtitle2" color="text.secondary" sx={{ textTransform: 'uppercase', fontSize: '0.7rem', letterSpacing: '0.08em' }}>
+                    Memory Tables
+                  </Typography>
+                  {lakebaseConfig.tables_initialized && (
+                    <Chip
+                      icon={<CheckCircleIcon />}
+                      label="Active"
+                      color="success"
+                      size="small"
+                      sx={{ ml: 1.5, height: 22 }}
+                    />
+                  )}
+                </Box>
+                {lakebaseTableStats ? (
+                  <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
+                    <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <Box component="thead">
+                        <Box component="tr" sx={{ bgcolor: 'action.hover' }}>
+                          <Box component="th" sx={{ px: 2, py: 1, textAlign: 'left' }}>
+                            <Typography variant="caption" fontWeight={600} color="text.secondary">Type</Typography>
+                          </Box>
+                          <Box component="th" sx={{ px: 2, py: 1, textAlign: 'left' }}>
+                            <Typography variant="caption" fontWeight={600} color="text.secondary">Table Name</Typography>
+                          </Box>
+                          <Box component="th" sx={{ px: 2, py: 1, textAlign: 'center' }}>
+                            <Typography variant="caption" fontWeight={600} color="text.secondary">Status</Typography>
+                          </Box>
+                          <Box component="th" sx={{ px: 2, py: 1, textAlign: 'right' }}>
+                            <Typography variant="caption" fontWeight={600} color="text.secondary">Rows</Typography>
+                          </Box>
+                          <Box component="th" sx={{ px: 2, py: 1, textAlign: 'center' }}>
+                            <Typography variant="caption" fontWeight={600} color="text.secondary">Actions</Typography>
+                          </Box>
+                        </Box>
+                      </Box>
+                      <Box component="tbody">
+                        {Object.entries(lakebaseTableStats).map(([type, stats]) => (
+                          <Box component="tr" key={type} sx={{ '&:not(:last-child)': { borderBottom: '1px solid', borderColor: 'divider' } }}>
+                            <Box component="td" sx={{ px: 2, py: 1.5 }}>
+                              <Typography variant="body2" fontWeight={500} sx={{ textTransform: 'capitalize' }}>
+                                {type.replace(/_/g, ' ')}
+                              </Typography>
+                            </Box>
+                            <Box component="td" sx={{ px: 2, py: 1.5 }}>
+                              <Typography variant="body2" color="text.secondary" sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
+                                {stats.table_name}
+                              </Typography>
+                            </Box>
+                            <Box component="td" sx={{ px: 2, py: 1.5, textAlign: 'center' }}>
+                              {stats.exists ? (
+                                <Chip icon={<CheckCircleIcon />} label="Ready" color="success" size="small" variant="outlined" sx={{ height: 22, fontSize: '0.75rem' }} />
+                              ) : (
+                                <Chip icon={<ErrorIcon />} label="Missing" color="error" size="small" variant="outlined" sx={{ height: 22, fontSize: '0.75rem' }} />
+                              )}
+                            </Box>
+                            <Box component="td" sx={{ px: 2, py: 1.5, textAlign: 'right' }}>
+                              <Typography variant="body2" color="text.secondary">
+                                {stats.exists ? stats.row_count.toLocaleString() : '—'}
+                              </Typography>
+                            </Box>
+                            <Box component="td" sx={{ px: 2, py: 1.5, textAlign: 'center' }}>
+                              <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.5 }}>
+                                {stats.exists && stats.row_count > 0 && (
+                                  <>
+                                    <Tooltip title="View Data">
+                                      <IconButton
+                                        size="small"
+                                        onClick={() => {
+                                          setSelectedLakebaseTable({
+                                            tableName: stats.table_name,
+                                            memoryType: type as 'short_term' | 'long_term' | 'entity',
+                                          });
+                                          setLakebaseDocsOpen(true);
+                                        }}
+                                      >
+                                        <VisibilityIcon fontSize="small" />
+                                      </IconButton>
+                                    </Tooltip>
+                                    {type === 'entity' && (
+                                      <Tooltip title="Visualize Graph">
+                                        <IconButton
+                                          size="small"
+                                          color="primary"
+                                          onClick={() => setLakebaseEntityGraphOpen(true)}
+                                        >
+                                          <AccountTreeIcon fontSize="small" />
+                                        </IconButton>
+                                      </Tooltip>
+                                    )}
+                                  </>
+                                )}
+                              </Box>
+                            </Box>
+                          </Box>
+                        ))}
+                      </Box>
+                    </Box>
+                  </Paper>
+                ) : (
+                  <Typography variant="body2" color="text.secondary">
+                    Tables initialized. Click &quot;Refresh Status&quot; to see details.
+                  </Typography>
+                )}
+              </Box>
+            </>
+          )}
+        </Box>
+      </Collapse>
+
       <Collapse in={mode === 'disabled'}>
         <Alert severity="info" sx={{ mt: 2 }}>
-          Memory storage is disabled. Agents will not persist information between conversations.
+          Uses local storage with ChromaDB for vector search and SQLite for long-term memory.
+          No external infrastructure needed — all data is stored locally on the server.
         </Alert>
       </Collapse>
 
@@ -1523,6 +1988,28 @@ export const DatabricksOneClickSetup: React.FC = () => {
           backendId={savedConfig?.backend_id}
         />
       )}
+
+      {/* Lakebase Documents Dialog */}
+      {selectedLakebaseTable && (
+        <LakebaseDocumentsDialog
+          open={lakebaseDocsOpen}
+          onClose={() => {
+            setLakebaseDocsOpen(false);
+            setSelectedLakebaseTable(null);
+          }}
+          tableName={selectedLakebaseTable.tableName}
+          memoryType={selectedLakebaseTable.memoryType}
+          instanceName={lakebaseConfig.instance_name}
+        />
+      )}
+
+      {/* Lakebase Entity Graph Visualization */}
+      <EntityGraphVisualization
+        open={lakebaseEntityGraphOpen}
+        onClose={() => setLakebaseEntityGraphOpen(false)}
+        dataSource="lakebase"
+        lakebaseInstanceName={lakebaseConfig.instance_name}
+      />
       </Paper>
     </Box>
   );

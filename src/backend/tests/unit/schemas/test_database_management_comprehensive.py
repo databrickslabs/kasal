@@ -453,6 +453,66 @@ class TestMemoryBackendInfo:
         assert backend.group_id == "group-123"
 
 
+class TestDatabaseInfoResponse:
+    """Test DatabaseInfoResponse schema."""
+
+    def test_database_info_response_with_lakebase_fields(self):
+        """Test DatabaseInfoResponse with all lakebase-specific fields populated."""
+        response = DatabaseInfoResponse(
+            success=True,
+            database_type="lakebase",
+            tables={"agents": 20, "tasks": 15},
+            total_tables=2,
+            memory_backends=[],
+            lakebase_enabled=True,
+            lakebase_instance="my-lakebase-instance",
+            lakebase_endpoint="https://example.com/lakebase",
+        )
+
+        assert response.success is True
+        assert response.database_type == "lakebase"
+        assert response.lakebase_enabled is True
+        assert response.lakebase_instance == "my-lakebase-instance"
+        assert response.lakebase_endpoint == "https://example.com/lakebase"
+        assert response.connection_error is None
+        assert response.tables == {"agents": 20, "tasks": 15}
+        assert response.total_tables == 2
+
+    def test_database_info_response_with_connection_error(self):
+        """Test DatabaseInfoResponse with connection_error field set."""
+        response = DatabaseInfoResponse(
+            success=True,
+            database_type="lakebase",
+            tables={},
+            total_tables=0,
+            memory_backends=[],
+            lakebase_enabled=True,
+            lakebase_instance="my-lakebase-instance",
+            lakebase_endpoint="https://example.com/lakebase",
+            connection_error="Lakebase is configured but the connection failed.",
+        )
+
+        assert response.success is True
+        assert response.database_type == "lakebase"
+        assert response.lakebase_enabled is True
+        assert response.connection_error == "Lakebase is configured but the connection failed."
+        assert response.tables == {}
+        assert response.total_tables == 0
+
+    def test_database_info_response_defaults(self):
+        """Test DatabaseInfoResponse lakebase fields all default to None."""
+        response = DatabaseInfoResponse(success=True)
+
+        assert response.success is True
+        assert response.lakebase_enabled is None
+        assert response.lakebase_instance is None
+        assert response.lakebase_endpoint is None
+        assert response.connection_error is None
+        assert response.database_type is None
+        assert response.tables is None
+        assert response.total_tables is None
+
+
 class TestDeleteBackupRequest:
     """Test DeleteBackupRequest schema."""
 

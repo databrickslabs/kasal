@@ -4,6 +4,7 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { urlPattern, isMarkdown } from '../utils/textProcessing';
+import { CodeBlock } from './CodeBlock';
 
 // Render text with clickable links
 export const renderWithLinks = (text: string) => {
@@ -146,25 +147,9 @@ export const MessageContent: React.FC<MessageContentProps> = ({ content }) => {
                 </code>
               );
             }
-            return (
-              <pre
-                style={{
-                  backgroundColor: 'rgba(0, 0, 0, 0.05)',
-                  padding: 12,
-                  borderRadius: 8,
-                  overflow: 'auto',
-                  fontFamily: 'monospace',
-                  fontSize: '0.875em',
-                  margin: '8px 0',
-                  maxWidth: '100%',
-                  maxHeight: '400px',
-                }}
-              >
-                <code className={className} {...props}>
-                  {children}
-                </code>
-              </pre>
-            );
+            const lang = className?.replace('language-', '') || '';
+            const codeString = String(children).replace(/\n$/, '');
+            return <CodeBlock language={lang} code={codeString} />;
           }
         }}
       >

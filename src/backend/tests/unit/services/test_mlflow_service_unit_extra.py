@@ -7,17 +7,16 @@ from src.services.mlflow_service import MLflowService
 
 
 @pytest.mark.asyncio
-async def test_set_user_token_and_setup_auth_paths(monkeypatch):
+async def test_setup_auth_paths(monkeypatch):
+    """Test _setup_mlflow_auth returns None when no auth, and auth when available."""
     svc = MLflowService(session=SimpleNamespace(), group_id="g1")
 
-    # set_user_token normalization
-    svc.set_user_token(" ")
-    assert svc._user_token is None
-    svc.set_user_token("tok")
-    assert svc._user_token == "tok"
-
-    # _setup_mlflow_auth -> None when no auth
     import sys
+
+    # Ensure SPN env vars are not set so we fall through to PAT
+    monkeypatch.delenv("DATABRICKS_CLIENT_ID", raising=False)
+    monkeypatch.delenv("DATABRICKS_CLIENT_SECRET", raising=False)
+
     # _setup_mlflow_auth -> None when no auth
     fake_mod = SimpleNamespace()
     async def no_auth(**kwargs):
@@ -26,9 +25,10 @@ async def test_set_user_token_and_setup_auth_paths(monkeypatch):
     monkeypatch.setitem(sys.modules, 'src.utils.databricks_auth', fake_mod)
     assert await svc._setup_mlflow_auth() is None
 
-    # returns auth when available
+    # returns auth when available (always passes user_token=None)
     async def yes_auth(**kwargs):
-        return SimpleNamespace(workspace_url="https://ws", token="t", auth_method="obo")
+        assert kwargs.get("user_token") is None, "Should always pass user_token=None"
+        return SimpleNamespace(workspace_url="https://ws", token="t", auth_method="pat")
     fake_mod.get_auth_context = yes_auth
     monkeypatch.setitem(sys.modules, 'src.utils.databricks_auth', fake_mod)
     auth = await svc._setup_mlflow_auth()
@@ -99,7 +99,7 @@ async def test_get_trace_deeplink_with_auth_and_experiment_id(monkeypatch):
 
     fake_auth_mod = SimpleNamespace()
     async def yes_auth(**kwargs):
-        return SimpleNamespace(workspace_url="https://acme.databricks.com", token="t", auth_method="obo")
+        return SimpleNamespace(workspace_url="https://acme.databricks.com", token="t", auth_method="pat")
     fake_auth_mod.get_auth_context = yes_auth
     monkeypatch.setitem(sys.modules, 'src.utils.databricks_auth', fake_auth_mod)
 

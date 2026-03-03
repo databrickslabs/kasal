@@ -45,11 +45,12 @@ import {
 } from '@mui/icons-material';
 
 import { useMemoryBackendStore } from '../../store/memoryBackend';
-import { 
-  MemoryBackendType, 
-  getBackendDisplayName, 
+import {
+  MemoryBackendType,
+  getBackendDisplayName,
   getBackendDescription,
   DatabricksMemoryConfig,
+  DEFAULT_LAKEBASE_CONFIG,
 } from '../../types/memoryBackend';
 import { DefaultMemoryBackendService } from '../../api/DefaultMemoryBackendService';
 import { MemoryBackendService } from '../../api/MemoryBackendService';
@@ -79,6 +80,7 @@ export const MemoryBackendConfig: React.FC<MemoryBackendConfigProps> = ({
     clearError,
   } = useMemoryBackendStore();
 
+  const [lakebaseStatus, setLakebaseStatus] = useState<{ success: boolean; message: string } | null>(null);
   const [expandedSections, setExpandedSections] = useState({
     authentication: false,
     advanced: false,
@@ -169,14 +171,23 @@ export const MemoryBackendConfig: React.FC<MemoryBackendConfigProps> = ({
 
   const handleBackendTypeChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const newType = event.target.value as MemoryBackendType;
-    updateConfig({ 
+    updateConfig({
       backend_type: newType,
-      databricks_config: newType === MemoryBackendType.DATABRICKS 
-        ? { 
+      databricks_config: newType === MemoryBackendType.DATABRICKS
+        ? {
             endpoint_name: '',
             short_term_index: '',
             embedding_dimension: 1024,
             auth_type: 'default',
+          }
+        : undefined,
+      lakebase_config: newType === MemoryBackendType.LAKEBASE
+        ? {
+            embedding_dimension: 1024,
+            short_term_table: 'crew_short_term_memory',
+            long_term_table: 'crew_long_term_memory',
+            entity_table: 'crew_entity_memory',
+            tables_initialized: false,
           }
         : undefined,
     });
@@ -564,6 +575,149 @@ export const MemoryBackendConfig: React.FC<MemoryBackendConfigProps> = ({
     );
   };
 
+  const renderLakebaseConfig = () => {
+    if (config.backend_type !== MemoryBackendType.LAKEBASE) return null;
+
+    const lakebaseConfig = config.lakebase_config || DEFAULT_LAKEBASE_CONFIG;
+
+    return (
+      <Box sx={{ mt: 2 }}>
+        <Typography variant="h6" sx={{ mb: 2 }}>
+          <StorageIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+          Lakebase pgvector Configuration
+        </Typography>
+
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Uses your existing Lakebase PostgreSQL instance with pgvector extension.
+          No additional infrastructure is required — memory tables are created alongside your application tables.
+        </Alert>
+
+        {/* Connection Test */}
+        <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={async () => {
+              try {
+                const result = await MemoryBackendService.testLakebaseConnection();
+                setLakebaseStatus(result);
+              } catch {
+                setLakebaseStatus({ success: false, message: 'Connection test failed' });
+              }
+            }}
+          >
+            Test Connection
+          </Button>
+          {lakebaseStatus && (
+            <Chip
+              icon={lakebaseStatus.success ? <CheckCircleIcon /> : <ErrorIcon />}
+              label={lakebaseStatus.message}
+              color={lakebaseStatus.success ? 'success' : 'error'}
+              size="small"
+              variant="outlined"
+            />
+          )}
+        </Box>
+
+        {/* Embedding Dimension */}
+        <TextField
+          label="Embedding Dimension"
+          type="number"
+          size="small"
+          value={lakebaseConfig.embedding_dimension || 1024}
+          onChange={(e) => {
+            updateConfig({
+              lakebase_config: {
+                ...lakebaseConfig,
+                embedding_dimension: parseInt(e.target.value) || 1024,
+              },
+            });
+          }}
+          sx={{ mb: 2, width: 200 }}
+          helperText="Must match your embedding model (1024 for databricks-gte-large-en)"
+        />
+
+        {/* Initialize Tables */}
+        <Box sx={{ mb: 2 }}>
+          <Button
+            variant="contained"
+            size="small"
+            startIcon={<AddIcon />}
+            onClick={async () => {
+              try {
+                const result = await MemoryBackendService.initializeLakebaseTables({
+                  embedding_dimension: lakebaseConfig.embedding_dimension,
+                  short_term_table: lakebaseConfig.short_term_table,
+                  long_term_table: lakebaseConfig.long_term_table,
+                  entity_table: lakebaseConfig.entity_table,
+                });
+                if (result.success) {
+                  updateConfig({
+                    lakebase_config: {
+                      ...lakebaseConfig,
+                      tables_initialized: true,
+                    },
+                  });
+                }
+                setLakebaseStatus({ success: result.success, message: result.message });
+              } catch {
+                setLakebaseStatus({ success: false, message: 'Failed to initialize tables' });
+              }
+            }}
+          >
+            Initialize Tables
+          </Button>
+          <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+            Creates pgvector extension and memory tables with HNSW indexes
+          </Typography>
+        </Box>
+
+        {/* Table Status */}
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>
+            Table Status
+          </Typography>
+          <Button
+            variant="text"
+            size="small"
+            startIcon={<RefreshIcon />}
+            onClick={async () => {
+              try {
+                const stats = await MemoryBackendService.getLakebaseTableStats();
+                const allExist = Object.values(stats).every(s => s.exists);
+                updateConfig({
+                  lakebase_config: {
+                    ...lakebaseConfig,
+                    tables_initialized: allExist,
+                  },
+                });
+                // Update UI with stats info
+                const statusParts = Object.entries(stats).map(
+                  ([type, s]) => `${type}: ${s.exists ? `${s.row_count} rows` : 'not found'}`
+                );
+                setLakebaseStatus({ success: allExist, message: statusParts.join(' | ') });
+              } catch {
+                setLakebaseStatus({ success: false, message: 'Failed to get table stats' });
+              }
+            }}
+          >
+            Check Table Status
+          </Button>
+          {lakebaseConfig.tables_initialized && (
+            <Chip
+              icon={<CheckCircleIcon />}
+              label="Tables initialized"
+              color="success"
+              size="small"
+              variant="outlined"
+              sx={{ ml: 1 }}
+            />
+          )}
+        </Box>
+      </Box>
+    );
+  };
+
   return (
     <Paper sx={{ p: embedded ? 2 : 3 }}>
       {!embedded && (
@@ -617,44 +771,51 @@ export const MemoryBackendConfig: React.FC<MemoryBackendConfigProps> = ({
         </RadioGroup>
       </FormControl>
 
-      {/* Memory Type Toggles */}
-      <Box sx={{ mt: 3, mb: 2 }}>
-        <Typography variant="subtitle1" sx={{ mb: 1 }}>
-          Enabled Memory Types
-        </Typography>
-        <FormControlLabel
-          control={
-            <Switch
-              checked={config.enable_short_term ?? true}
-              onChange={(e) => updateConfig({ enable_short_term: e.target.checked })}
-            />
-          }
-          label="Short-term Memory"
-        />
-        <FormControlLabel
-          control={
-            <Switch
-              checked={config.enable_long_term ?? true}
-              onChange={(e) => updateConfig({ enable_long_term: e.target.checked })}
-            />
-          }
-          label="Long-term Memory"
-        />
-        <FormControlLabel
-          control={
-            <Switch
-              checked={config.enable_entity ?? true}
-              onChange={(e) => updateConfig({ enable_entity: e.target.checked })}
-            />
-          }
-          label="Entity Memory"
-        />
-      </Box>
+      {/* Memory Type Toggles - only show for active backends */}
+      {config.backend_type !== MemoryBackendType.DEFAULT && (
+        <Box sx={{ mt: 3, mb: 2 }}>
+          <Typography variant="subtitle1" sx={{ mb: 1 }}>
+            Enabled Memory Types
+          </Typography>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={config.enable_short_term ?? true}
+                onChange={(e) => updateConfig({ enable_short_term: e.target.checked })}
+              />
+            }
+            label="Short-term Memory"
+          />
+          <FormControlLabel
+            control={
+              <Switch
+                checked={config.enable_long_term ?? true}
+                onChange={(e) => updateConfig({ enable_long_term: e.target.checked })}
+              />
+            }
+            label="Long-term Memory"
+          />
+          <FormControlLabel
+            control={
+              <Switch
+                checked={config.enable_entity ?? true}
+                onChange={(e) => updateConfig({ enable_entity: e.target.checked })}
+              />
+            }
+            label="Entity Memory"
+          />
+        </Box>
+      )}
 
-      <Divider sx={{ my: 3 }} />
+      {config.backend_type !== MemoryBackendType.DEFAULT && (
+        <>
+          <Divider sx={{ my: 3 }} />
 
-      {/* Backend-specific configuration */}
-      {renderDatabricksConfig()}
+          {/* Backend-specific configuration */}
+          {renderDatabricksConfig()}
+          {renderLakebaseConfig()}
+        </>
+      )}
 
       {/* Validation Errors */}
       {validationErrors.length > 0 && (

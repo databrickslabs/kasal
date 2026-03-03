@@ -57,16 +57,22 @@ class MockConversionJob:
 
 class MockSavedConfiguration:
     def __init__(self, id=1, name="Config", source_format="powerbi",
-                 target_format="dax", created_by_email="user@example.com"):
+                 target_format="dax", created_by_email="user@example.com",
+                 is_public=False, is_template=False, use_count=0):
         self.id = id
         self.name = name
         self.source_format = source_format
         self.target_format = target_format
         self.configuration = {"option1": "value1"}
+        self.description = None
         self.created_by_email = created_by_email
-        self.is_public = False
-        self.is_template = False
-        self.use_count = 0
+        self.is_public = is_public
+        self.is_template = is_template
+        self.tags = None
+        self.use_count = use_count
+        self.last_used_at = None
+        self.group_id = "group-1"
+        self.extra_metadata = None
         self.created_at = datetime.utcnow()
         self.updated_at = datetime.utcnow()
 

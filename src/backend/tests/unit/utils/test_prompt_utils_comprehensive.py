@@ -248,7 +248,124 @@ class TestRobustJsonParser:
     def test_robust_json_parser_numeric_values(self):
         """Test robust_json_parser with various numeric values."""
         json_with_numbers = '{"int": 42, "float": 3.14, "negative": -10, "zero": 0}'
-        
+
         result = robust_json_parser(json_with_numbers)
-        
+
         assert result == {"int": 42, "float": 3.14, "negative": -10, "zero": 0}
+
+    # ---- Step 1b: Truncated code blocks (no closing ```) ----
+
+    def test_truncated_code_block_valid_json(self):
+        """Step 1b: code block with opening ``` but no closing ```, valid JSON inside."""
+        text = '```json\n{"name": "test", "value": 123}\n'
+        result = robust_json_parser(text)
+        assert result == {"name": "test", "value": 123}
+
+    def test_truncated_code_block_plain_fence(self):
+        """Step 1b: plain ``` fence (no 'json' tag) with no closing ```, valid JSON."""
+        text = '```\n{"key": "value"}\n'
+        result = robust_json_parser(text)
+        assert result == {"key": "value"}
+
+    def test_truncated_code_block_invalid_json_continues(self, caplog):
+        """Step 1b: truncated code block with also-truncated JSON falls through to later steps."""
+        text = '```json\n{"name": "test", "description": "cut off here'
+        with caplog.at_level(logging.INFO):
+            result = robust_json_parser(text)
+        # Step 1b should log extraction, then continue; step 9 should recover
+        assert "Truncated code block" in caplog.text or "truncated" in caplog.text.lower()
+        assert result["name"] == "test"
+
+    # ---- Step 9: Aggressive truncation recovery ----
+
+    def test_step9_truncated_string_and_braces(self):
+        """Step 9: JSON truncated mid-string with unbalanced braces - close string + balance."""
+        text = '{"name": "Gather Swiss News", "description": "Research the latest news'
+        result = robust_json_parser(text)
+        assert result["name"] == "Gather Swiss News"
+        assert "Research" in result["description"]
+
+    def test_step9_escaped_chars_in_string(self):
+        """Step 9: truncated JSON with escaped quotes inside strings."""
+        text = '{"msg": "She said \\"hello\\"", "detail": "truncated value'
+        result = robust_json_parser(text)
+        assert result["msg"] == 'She said "hello"'
+        assert "truncated" in result["detail"]
+
+    def test_step9_nested_objects(self):
+        """Step 9: truncated JSON with nested objects requiring multiple closing braces."""
+        text = '{"outer": {"inner": {"deep": "value'
+        result = robust_json_parser(text)
+        assert result["outer"]["inner"]["deep"] == "value"
+
+    def test_step9_nested_arrays(self):
+        """Step 9: truncated JSON with nested arrays requiring closing brackets."""
+        text = '{"items": ["a", "b'
+        result = robust_json_parser(text)
+        assert result["items"][0] == "a"
+
+    def test_step9_mixed_braces_and_brackets(self):
+        """Step 9: truncated JSON with mixed objects and arrays."""
+        text = '{"data": [{"id": 1, "name": "test'
+        result = robust_json_parser(text)
+        assert result["data"][0]["id"] == 1
+
+    def test_step9_trailing_comma_before_truncation(self):
+        """Step 9: truncated JSON that also has a trailing comma."""
+        text = '{"a": 1, "b": 2,'
+        result = robust_json_parser(text)
+        assert result == {"a": 1, "b": 2}
+
+    def test_step9_failure_still_raises(self):
+        """Step 9: input that even aggressive recovery cannot fix still raises ValueError."""
+        # A string with mismatched structure that can't form valid JSON
+        text = '{"key": "value" "bad": "no comma"'
+        with pytest.raises(ValueError, match="Could not parse response as JSON"):
+            robust_json_parser(text)
+
+    def test_step9_no_open_string_balanced_braces(self):
+        """Step 9: truncated JSON where string is closed but braces are not."""
+        text = '{"name": "test", "count": 42'
+        result = robust_json_parser(text)
+        assert result["name"] == "test"
+        assert result["count"] == 42
+
+    def test_step9_escaped_backslash_at_end(self):
+        """Step 9: string ending with escaped backslash before truncation."""
+        text = '{"path": "C:\\\\Users\\\\name", "other": "trunc'
+        result = robust_json_parser(text)
+        assert "C:\\Users\\name" in result["path"]
+
+    def test_step9_logging_on_recovery(self, caplog):
+        """Step 9: verify logging when string closing and brace balancing occur."""
+        text = '{"key": "truncated value'
+        with caplog.at_level(logging.INFO):
+            result = robust_json_parser(text)
+        assert result["key"] == "truncated value"
+        assert "Closed open string" in caplog.text
+        assert "Balanced" in caplog.text
+
+    def test_step9_closed_inner_object_with_truncated_outer(self):
+        """Step 9: inner object is properly closed but outer object is truncated.
+
+        This exercises the stack.pop() branch in step 9's brace balancer
+        where a closing brace matches the stack top.
+        """
+        # Inner {"id": 1} is complete, but outer object has no closing }
+        # Step 2 extracts up to last }, step 9 closes the remainder
+        text = '{"complete": {"id": 1}, "pending": "trunc'
+        result = robust_json_parser(text)
+        assert result["complete"] == {"id": 1}
+
+    def test_step9_closed_inner_array_with_truncated_outer(self):
+        """Step 9: inner array is closed but outer is truncated — exercises ] pop.
+
+        The inner array closing ] causes a stack pop while the outer { remains
+        unclosed, requiring step 9 to add the final }.
+        """
+        # Must have a } somewhere so step 2 extracts an object (not just the array),
+        # but the extraction is still invalid JSON, eventually reaching step 9.
+        text = '{"items": [{"id": 1}], "extra": "trunc'
+        result = robust_json_parser(text)
+        # Step 2 extracts up to last }, step 9 finishes it
+        assert result["items"] == [{"id": 1}]

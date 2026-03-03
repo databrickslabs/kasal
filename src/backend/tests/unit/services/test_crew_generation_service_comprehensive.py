@@ -1816,6 +1816,7 @@ class TestProgressiveGeneration:
         req.prompt = prompt
         req.model = model
         req.tools = tools or []
+        req.original_prompt = None
         return req
 
     def _make_plan(self, agents=None, tasks=None, process_type="sequential", complexity="standard"):
@@ -1865,8 +1866,16 @@ class TestProgressiveGeneration:
             def __enter__(self):
                 # Patch sse_manager.broadcast_to_job
                 p_sse = patch("src.services.crew_generation_service.sse_manager")
-                # Patch async_session_factory
-                p_session = patch("src.services.crew_generation_service.async_session_factory", create=True)
+                # Patch async_session_factory at its source (the function
+                # uses a local import: ``from src.db.session import async_session_factory``)
+                p_session = patch("src.db.session.async_session_factory")
+                # Patch is_lakebase_enabled so the code takes the local-DB path
+                # (the function does: ``from src.db.database_router import is_lakebase_enabled``)
+                p_lakebase = patch(
+                    "src.db.database_router.is_lakebase_enabled",
+                    new_callable=AsyncMock,
+                    return_value=False,
+                )
                 # Patch the plan generation
                 p_plan = patch.object(service, "_generate_crew_plan", new_callable=AsyncMock)
                 # Patch AgentGenerationService
@@ -1880,18 +1889,19 @@ class TestProgressiveGeneration:
                 # Patch _get_tool_details
                 p_gtd = patch.object(service, "_get_tool_details", new_callable=AsyncMock)
 
-                self._patches = [p_sse, p_session, p_plan, p_agent_svc,
+                self._patches = [p_sse, p_session, p_lakebase, p_plan, p_agent_svc,
                                  p_task_svc, p_repo, p_tool_svc, p_gtd]
                 ms = [p.start() for p in self._patches]
 
                 mock_sse = ms[0]
                 mock_session_factory = ms[1]
-                mock_plan = ms[2]
-                mock_agent_svc_cls = ms[3]
-                mock_task_svc_cls = ms[4]
-                mock_repo_cls = ms[5]
-                mock_tool_svc_cls = ms[6]
-                mock_gtd = ms[7]
+                # ms[2] = is_lakebase_enabled (already configured via new_callable)
+                mock_plan = ms[3]
+                mock_agent_svc_cls = ms[4]
+                mock_task_svc_cls = ms[5]
+                mock_repo_cls = ms[6]
+                mock_tool_svc_cls = ms[7]
+                mock_gtd = ms[8]
 
                 # Configure SSE manager
                 mock_sse.broadcast_to_job = AsyncMock()
@@ -2021,7 +2031,7 @@ class TestProgressiveGeneration:
         agent_saved_2 = {"id": "agent-id-2", "name": "Agent2", "role": "R2"}
         task_saved = {"id": "task-id-1", "name": "Task2", "description": "desc"}
 
-        request = self._make_progressive_request()
+        request = self._make_progressive_request(prompt="build a crew with 2 agents and 1 task")
         gen_id = "gen-agent-err"
 
         with self._progressive_patches(plan=plan, agent_saved=agent_saved_2, task_saved=task_saved) as m:
@@ -2118,7 +2128,7 @@ class TestProgressiveGeneration:
             ],
         )
 
-        request = self._make_progressive_request()
+        request = self._make_progressive_request(prompt="build a crew with 2 agents and 2 tasks")
         gen_id = "gen-interleaved"
 
         agent_saves = [
@@ -2202,7 +2212,7 @@ class TestProgressiveGeneration:
         )
         # Tasks have no "context" key -- the method should auto-chain them
 
-        request = self._make_progressive_request()
+        request = self._make_progressive_request(prompt="build a crew, use 3 tasks")
         gen_id = "gen-seq-chain"
 
         task_saves = [
@@ -2398,7 +2408,7 @@ class TestProgressiveGeneration:
             tr.llm_guardrail = None
             task_responses.append(tr)
 
-        request = self._make_progressive_request()
+        request = self._make_progressive_request(prompt="build a crew, use 2 tasks")
         gen_id = "gen-unassigned"
 
         with self._progressive_patches(plan=plan, agent_saved=agent_saved) as m:

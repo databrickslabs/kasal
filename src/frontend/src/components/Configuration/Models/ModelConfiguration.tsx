@@ -685,8 +685,11 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 200 }}>
         <CircularProgress />
+        <Typography variant="body2" sx={{ ml: 2 }}>
+          Loading models...
+        </Typography>
       </Box>
     );
   }

@@ -9,22 +9,13 @@ import { config } from '../../config/api/ApiConfig';
 
 export interface SSEOptions {
   /**
-   * Whether to automatically reconnect on connection loss
-   * @default true
-   */
-  autoReconnect?: boolean;
-
-  /**
-   * Maximum number of reconnection attempts
-   * @default 5
+   * Maximum consecutive errors before giving up entirely.
+   * Native EventSource auto-reconnects with Last-Event-ID on each drop,
+   * so this should be high — Databricks Apps proxy drops ~75% of SSE
+   * connections (known infra bug) and reconnection is expected.
+   * @default 50
    */
   maxReconnectAttempts?: number;
-
-  /**
-   * Base delay for reconnection (will use exponential backoff)
-   * @default 1000
-   */
-  reconnectDelay?: number;
 
   /**
    * Whether the hook is enabled (useful for conditional connections)
@@ -63,9 +54,7 @@ export const useSSE = <T = any>(
   options: SSEOptions = {}
 ) => {
   const {
-    autoReconnect = true,
-    maxReconnectAttempts = 5,
-    reconnectDelay = 1000,
+    maxReconnectAttempts = 50,
     enabled = true,
     onConnect,
     onDisconnect,
@@ -73,8 +62,7 @@ export const useSSE = <T = any>(
   } = options;
 
   const eventSourceRef = useRef<EventSource | null>(null);
-  const reconnectAttemptsRef = useRef(0);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const consecutiveErrorsRef = useRef(0);
   const [connectionState, setConnectionState] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected');
 
   // CRITICAL: Use refs for callbacks to prevent useEffect from re-running
@@ -111,21 +99,34 @@ export const useSSE = <T = any>(
     }
 
     const url = endpoint.startsWith('http') ? endpoint : `${config.apiUrl}${endpoint}`;
+    const t0 = Date.now();
 
-    console.log(`[SSE] Connecting to: ${url}`);
+    console.log(`[SSE] ${new Date().toISOString()} | CONNECT  | ${endpoint} | url=${url}`);
     setConnectionState('connecting');
+    consecutiveErrorsRef.current = 0;
 
     const eventSource = new EventSource(url);
     eventSourceRef.current = eventSource;
 
+    // --- onopen ---
     eventSource.onopen = () => {
-      console.log(`[SSE] Connected to: ${endpoint}`);
+      const dt = Date.now() - t0;
+      console.log(
+        `[SSE] ${new Date().toISOString()} | OPEN     | ${endpoint} | ` +
+        `readyState=${eventSource.readyState} | took ${dt}ms`
+      );
       setConnectionState('connected');
-      reconnectAttemptsRef.current = 0; // Reset reconnect counter on successful connection
+      consecutiveErrorsRef.current = 0;
       onConnectRef.current?.();
     };
 
+    // --- onmessage (unnamed events) ---
     eventSource.onmessage = (event) => {
+      console.log(
+        `[SSE] ${new Date().toISOString()} | MESSAGE  | ${endpoint} | ` +
+        `id=${event.lastEventId} | type=${(event as any).type} | ` +
+        `data=${event.data?.substring(0, 120)}`
+      );
       try {
         const data = JSON.parse(event.data);
         onMessageRef.current({
@@ -135,118 +136,72 @@ export const useSSE = <T = any>(
         });
       } catch (error) {
         console.error('[SSE] Error parsing message:', error);
-        // Pass parsing errors to onError callback with context
-        const parseError = new Event('error');
-        (parseError as any).message = 'Failed to parse SSE message';
-        (parseError as any).originalError = error;
-        onErrorRef.current?.(parseError);
       }
     };
 
-    eventSource.onerror = (error) => {
-      console.error(`[SSE] Connection error for ${endpoint}:`, error);
-      setConnectionState('disconnected');
+    // --- onerror ---
+    // Do NOT call eventSource.close() here — let the browser's native
+    // EventSource reconnection handle retry with Last-Event-ID.
+    eventSource.onerror = () => {
+      consecutiveErrorsRef.current += 1;
+      const attempt = consecutiveErrorsRef.current;
+      const dt = Date.now() - t0;
 
-      // Create enhanced error with context
-      const enhancedError = error as Event;
-      (enhancedError as any).endpoint = endpoint;
-      (enhancedError as any).reconnectAttempt = reconnectAttemptsRef.current + 1;
-      (enhancedError as any).maxAttempts = maxReconnectAttempts;
+      console.warn(
+        `[SSE] ${new Date().toISOString()} | ERROR #${attempt} | ${endpoint} | ` +
+        `readyState=${eventSource.readyState} ` +
+        `(${eventSource.readyState === 0 ? 'CONNECTING' : eventSource.readyState === 1 ? 'OPEN' : 'CLOSED'}) | ` +
+        `elapsed=${dt}ms since connect`
+      );
 
-      onErrorRef.current?.(enhancedError);
+      setConnectionState(
+        eventSource.readyState === EventSource.CONNECTING ? 'connecting' : 'disconnected'
+      );
+
       onDisconnectRef.current?.();
 
-      // Attempt to reconnect
-      if (
-        autoReconnect &&
-        reconnectAttemptsRef.current < maxReconnectAttempts &&
-        eventSource.readyState !== EventSource.CONNECTING
-      ) {
-        reconnectAttemptsRef.current += 1;
-        const delay = reconnectDelay * Math.pow(2, reconnectAttemptsRef.current - 1);
-
-        console.log(
-          `[SSE] Reconnect attempt ${reconnectAttemptsRef.current}/${maxReconnectAttempts} in ${delay}ms`
+      // Only give up after many consecutive failures
+      if (attempt >= maxReconnectAttempts) {
+        console.error(
+          `[SSE] ${new Date().toISOString()} | GIVE UP  | ${endpoint} | ` +
+          `${maxReconnectAttempts} consecutive errors`
         );
-
-        reconnectTimeoutRef.current = setTimeout(() => {
-          connect();
-        }, delay);
-      } else if (reconnectAttemptsRef.current >= maxReconnectAttempts) {
-        console.error(`[SSE] Max reconnect attempts (${maxReconnectAttempts}) reached for ${endpoint}`);
-        // Notify that max attempts reached
-        const maxAttemptsError = new Event('error');
-        (maxAttemptsError as any).message = 'Max reconnection attempts reached';
-        (maxAttemptsError as any).endpoint = endpoint;
-        (maxAttemptsError as any).isFatal = true;
-        onErrorRef.current?.(maxAttemptsError);
+        eventSource.close();
+        eventSourceRef.current = null;
+        setConnectionState('disconnected');
       }
-
-      // Close the errored connection
-      eventSource.close();
     };
 
-    // Add custom event listeners for specific event types
-    eventSource.addEventListener('execution_update', (event: any) => {
-      try {
-        const data = JSON.parse(event.data);
-        onMessageRef.current({
-          data,
-          event: 'execution_update',
-          id: event.lastEventId
-        });
-      } catch (error) {
-        console.error('[SSE] Error parsing execution_update:', error);
-      }
-    });
+    // --- Named event listeners (with logging) ---
+    const namedEvents = ['execution_update', 'trace', 'hitl_request', 'connected'] as const;
+    for (const eventType of namedEvents) {
+      eventSource.addEventListener(eventType, (event: any) => {
+        console.log(
+          `[SSE] ${new Date().toISOString()} | EVENT    | ${endpoint} | ` +
+          `type=${eventType} | id=${event.lastEventId} | ` +
+          `data=${event.data?.substring(0, 120)}`
+        );
+        try {
+          const data = JSON.parse(event.data);
+          if (eventType === 'connected') {
+            // Just log, don't dispatch
+            return;
+          }
+          onMessageRef.current({
+            data,
+            event: eventType,
+            id: event.lastEventId
+          });
+        } catch (error) {
+          console.error(`[SSE] Error parsing ${eventType}:`, error);
+        }
+      });
+    }
 
-    eventSource.addEventListener('trace', (event: any) => {
-      try {
-        const data = JSON.parse(event.data);
-        onMessageRef.current({
-          data,
-          event: 'trace',
-          id: event.lastEventId
-        });
-      } catch (error) {
-        console.error('[SSE] Error parsing trace:', error);
-      }
-    });
-
-    eventSource.addEventListener('hitl_request', (event: any) => {
-      try {
-        const data = JSON.parse(event.data);
-        onMessageRef.current({
-          data,
-          event: 'hitl_request',
-          id: event.lastEventId
-        });
-      } catch (error) {
-        console.error('[SSE] Error parsing hitl_request:', error);
-      }
-    });
-
-    eventSource.addEventListener('connected', (event: any) => {
-      try {
-        const data = JSON.parse(event.data);
-        console.log('[SSE] Connection confirmed:', data);
-      } catch (error) {
-        console.error('[SSE] Error parsing connected event:', error);
-      }
-    });
-
-  // CRITICAL: Only include stable values in dependencies, NOT callbacks
-  // Callbacks are accessed via refs to prevent reconnection cycles
-  }, [endpoint, enabled, autoReconnect, maxReconnectAttempts, reconnectDelay]);
+  }, [endpoint, enabled, maxReconnectAttempts]);
 
   const disconnect = useCallback(() => {
     console.log(`[SSE] Disconnecting from: ${endpoint}`);
-
-    // Clear reconnect timeout
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
 
     // Close connection
     if (eventSourceRef.current) {
@@ -258,8 +213,6 @@ export const useSSE = <T = any>(
   }, [endpoint]);
 
   // Connect on mount or when endpoint/enabled changes
-  // CRITICAL: Only depend on endpoint and enabled, NOT on connect/disconnect
-  // since those functions now use refs and don't need to trigger reconnects
   useEffect(() => {
     if (enabled && endpoint) {
       connect();

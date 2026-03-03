@@ -45,8 +45,16 @@ class GenieInput(BaseModel):
 class GenieTool(BaseTool):
     name: str = "GenieTool"
     description: str = (
-        "A tool that uses Genie to find information about customers and business data. "
-        "Input should be a specific business question."
+        "A tool that uses Genie to query databases via natural language. "
+        "IMPORTANT query guidelines:\n"
+        "- ALWAYS prefer aggregated queries (SUM, COUNT, AVG, GROUP BY, TOP N) over fetching raw rows.\n"
+        "- Ask for summaries, rankings, and computed metrics instead of full row dumps.\n"
+        "- Use filters (date ranges, categories) to narrow results.\n"
+        "- Only request raw/detailed rows when you need specific records (< 100 rows).\n"
+        "Good: 'What are the top 10 campaigns by conversion rate in 2023?'\n"
+        "Good: 'What is the total spend and average ROI by campaign type?'\n"
+        "Bad: 'Show me all campaign data' (returns thousands of rows)\n"
+        "Input should be a specific, focused business question."
     )
     # Add alternative names for the tool
     aliases: List[str] = ["Genie", "DatabricksGenie", "DataSearch"]
@@ -64,7 +72,7 @@ class GenieTool(BaseTool):
     _group_id: str = PrivateAttr(default=None)  # For PAT authentication fallback
     _call_count: int = PrivateAttr(default=0)  # Tracks how many times _run has been invoked
     _max_calls: int = PrivateAttr(default=5)  # Configurable call limit per tool instance
-    _max_result_rows: int = PrivateAttr(default=50)  # Max rows returned per query
+    _max_result_rows: int = PrivateAttr(default=200)  # Max rows returned per query
 
     def __init__(self, tool_config: Optional[dict] = None, tool_id: Optional[int] = None, token_required: bool = True, user_token: str = None, group_id: str = None, result_as_answer: bool = False):
         super().__init__(result_as_answer=result_as_answer)
@@ -86,7 +94,7 @@ class GenieTool(BaseTool):
 
             # Configure call limiter
             self._max_calls = tool_config.get("max_calls", 5)
-            self._max_result_rows = tool_config.get("max_result_rows", 50)
+            self._max_result_rows = tool_config.get("max_result_rows", 200)
             logger.info(f"Call limiter config: max_calls={self._max_calls}, max_result_rows={self._max_result_rows}")
 
         # Set tool ID if provided
@@ -514,7 +522,11 @@ class GenieTool(BaseTool):
                 response_parts.append("-" * 20)
 
                 if truncated:
-                    response_parts.append(f"Showing first {self._max_result_rows} of {total_rows} rows.")
+                    response_parts.append(
+                        f"Showing first {self._max_result_rows} of {total_rows} rows. "
+                        "Consider rephrasing your question to use aggregations "
+                        "(GROUP BY, SUM, COUNT, AVG, TOP N) to get a complete, summarized answer."
+                    )
 
         return "\n".join(response_parts) if response_parts else "No response content found"
 
@@ -542,13 +554,14 @@ To find your Genie space ID, go to your Databricks workspace and navigate to the
         
         # Handle empty inputs or 'None' as an input
         if not question or question.lower() == 'none':
-            return """To use the GenieTool, please provide a specific business question. 
-For example: 
+            return """To use the GenieTool, provide a specific, focused business question.
+Prefer aggregated queries over raw data dumps:
 - "What are the top 10 customers by revenue?"
-- "Show me sales data for the last quarter"
+- "What is the total spend by campaign type for Q4 2023?"
 - "What products have the highest profit margin?"
+- "Show the average conversion rate by month"
 
-This tool can extract information from databases and provide structured data in response to your questions."""
+Avoid broad questions like "show me all data" — use filters and aggregations to get actionable insights."""
 
         try:
             # Authentication is handled by centralized databricks_auth module

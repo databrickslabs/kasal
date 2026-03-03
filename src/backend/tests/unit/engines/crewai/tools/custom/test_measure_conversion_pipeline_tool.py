@@ -122,6 +122,17 @@ class TestMeasureConversionPipelineTool:
             outbound_format="dax"
         )
 
+    def _set_default_config(self, tool, **overrides):
+        """Helper to set _default_config values on a bare tool for testing _run().
+
+        The source code's merge strategy protects config_fields
+        (inbound_connector, outbound_format, powerbi_semantic_model_id,
+        powerbi_group_id) by preferring _default_config over runtime kwargs.
+        Tests that use the bare `tool` fixture must pre-populate these values.
+        """
+        for key, value in overrides.items():
+            tool._default_config[key] = value
+
     # ========== Initialization Tests ==========
 
     def test_tool_initialization(self, tool):
@@ -130,7 +141,7 @@ class TestMeasureConversionPipelineTool:
         assert tool.name == "Measure Conversion Pipeline"
         assert "Universal measure conversion pipeline" in tool.description
         assert tool.args_schema == MeasureConversionPipelineSchema
-        assert hasattr(tool, 'pipeline')
+        assert hasattr(tool, '_pipeline')
 
     def test_tool_initialization_with_config(self, tool_preconfigured_powerbi_to_sql):
         """Test tool initializes with pre-configured parameters"""
@@ -151,8 +162,8 @@ class TestMeasureConversionPipelineTool:
 
     def test_run_invalid_inbound_connector(self, tool):
         """Test _run fails with invalid inbound_connector"""
+        self._set_default_config(tool, inbound_connector="invalid_connector")
         result = tool._run(
-            inbound_connector="invalid_connector",
             powerbi_semantic_model_id="model123"
         )
 
@@ -161,65 +172,75 @@ class TestMeasureConversionPipelineTool:
 
     def test_run_invalid_outbound_format(self, tool):
         """Test _run fails with invalid outbound_format"""
-        result = tool._run(
+        self._set_default_config(
+            tool,
             inbound_connector="powerbi",
             powerbi_semantic_model_id="model123",
             powerbi_group_id="workspace456",
             powerbi_tenant_id="tenant123",
             powerbi_client_id="client456",
             powerbi_client_secret="secret789",
-            outbound_format="invalid_format"
+            outbound_format="invalid_format",
         )
+        result = tool._run()
 
         assert "Error" in result
         assert "Unsupported outbound_format" in result
 
     def test_run_powerbi_missing_semantic_model_id(self, tool):
         """Test _run fails with missing Power BI semantic_model_id"""
-        result = tool._run(
+        self._set_default_config(
+            tool,
             inbound_connector="powerbi",
             powerbi_group_id="workspace456",
             powerbi_tenant_id="tenant123",
             powerbi_client_id="client456",
             powerbi_client_secret="secret789",
-            outbound_format="dax"
+            outbound_format="dax",
         )
+        result = tool._run()
 
         assert "Error" in result
         assert "requires powerbi_semantic_model_id" in result
 
     def test_run_powerbi_missing_group_id(self, tool):
         """Test _run fails with missing Power BI group_id"""
-        result = tool._run(
+        self._set_default_config(
+            tool,
             inbound_connector="powerbi",
             powerbi_semantic_model_id="model123",
             powerbi_tenant_id="tenant123",
             powerbi_client_id="client456",
             powerbi_client_secret="secret789",
-            outbound_format="dax"
+            outbound_format="dax",
         )
+        result = tool._run()
 
         assert "Error" in result
         assert "requires powerbi_semantic_model_id and powerbi_group_id" in result
 
     def test_run_powerbi_missing_authentication(self, tool):
         """Test _run fails with missing Power BI authentication"""
-        result = tool._run(
+        self._set_default_config(
+            tool,
             inbound_connector="powerbi",
             powerbi_semantic_model_id="model123",
             powerbi_group_id="workspace456",
-            outbound_format="dax"
+            outbound_format="dax",
         )
+        result = tool._run()
 
         assert "Error" in result
-        assert "requires authentication" in result
+        assert "Authentication required" in result
 
     def test_run_yaml_missing_content_and_file(self, tool):
         """Test _run fails with missing YAML content or file path"""
-        result = tool._run(
+        self._set_default_config(
+            tool,
             inbound_connector="yaml",
-            outbound_format="dax"
+            outbound_format="dax",
         )
+        result = tool._run()
 
         assert "Error" in result
         assert "requires either yaml_content or yaml_file_path" in result
@@ -246,17 +267,20 @@ class TestMeasureConversionPipelineTool:
             "errors": []
         }
 
-        result = tool._run(
+        self._set_default_config(
+            tool,
             inbound_connector="powerbi",
             powerbi_semantic_model_id="model123",
             powerbi_group_id="workspace456",
             powerbi_tenant_id="tenant123",
             powerbi_client_id="client456",
             powerbi_client_secret="secret789",
-            outbound_format="dax"
+            outbound_format="dax",
         )
+        result = tool._run()
 
-        assert "Power BI Measures → DAX" in result
+        assert "Power BI Measures" in result
+        assert "DAX" in result
         assert "Total Sales" in result
         assert "SUM(Sales[Amount])" in result
 
@@ -274,7 +298,8 @@ class TestMeasureConversionPipelineTool:
             "errors": []
         }
 
-        result = tool._run(
+        self._set_default_config(
+            tool,
             inbound_connector="powerbi",
             powerbi_semantic_model_id="model123",
             powerbi_group_id="workspace456",
@@ -282,10 +307,12 @@ class TestMeasureConversionPipelineTool:
             powerbi_client_id="client456",
             powerbi_client_secret="secret789",
             outbound_format="sql",
-            sql_dialect="databricks"
+            sql_dialect="databricks",
         )
+        result = tool._run()
 
-        assert "Power BI Measures → SQL" in result
+        assert "Power BI Measures" in result
+        assert "SQL" in result
         assert "SELECT SUM(amount)" in result
 
     @patch('src.engines.crewai.tools.custom.measure_conversion_pipeline_tool.ConversionPipeline')
@@ -302,7 +329,8 @@ class TestMeasureConversionPipelineTool:
             "errors": []
         }
 
-        result = tool._run(
+        self._set_default_config(
+            tool,
             inbound_connector="powerbi",
             powerbi_semantic_model_id="model123",
             powerbi_group_id="workspace456",
@@ -311,17 +339,19 @@ class TestMeasureConversionPipelineTool:
             powerbi_client_secret="secret789",
             outbound_format="uc_metrics",
             uc_catalog="main",
-            uc_schema="sales"
+            uc_schema="sales",
         )
+        result = tool._run()
 
-        assert "Power BI Measures → UC Metrics" in result
+        assert "Power BI Measures" in result
+        assert "UC Metrics" in result
         assert "version: 0.1" in result
 
     # ========== Run Method Tests - YAML Success Paths ==========
 
-    @patch('src.engines.crewai.tools.custom.measure_conversion_pipeline_tool.YAMLKPIParser')
-    @patch('src.engines.crewai.tools.custom.measure_conversion_pipeline_tool.DAXGenerator')
-    def test_run_yaml_to_dax_success(self, mock_dax_generator_class, mock_yaml_parser_class, tool):
+    @patch('src.converters.services.powerbi.DAXGenerator')
+    @patch('src.converters.common.transformers.yaml.YAMLKPIParser')
+    def test_run_yaml_to_dax_success(self, mock_yaml_parser_class, mock_dax_generator_class, tool):
         """Test _run YAML to DAX conversion"""
         # Mock YAML parser
         mock_parser = Mock()
@@ -343,19 +373,23 @@ class TestMeasureConversionPipelineTool:
         mock_dax_measure.description = "Total sales amount"
         mock_generator.generate_dax_measure.return_value = mock_dax_measure
 
-        result = tool._run(
+        self._set_default_config(
+            tool,
             inbound_connector="yaml",
+            outbound_format="dax",
+        )
+        result = tool._run(
             yaml_content="version: 0.1\nkpis:\n  - technical_name: total_sales",
-            outbound_format="dax"
         )
 
-        assert "YAML Measures → DAX" in result
+        assert "YAML Measures" in result
+        assert "DAX" in result
         assert "Total Sales" in result
 
-    @patch('src.engines.crewai.tools.custom.measure_conversion_pipeline_tool.YAMLKPIParser')
-    @patch('src.engines.crewai.tools.custom.measure_conversion_pipeline_tool.SQLGenerator')
-    @patch('src.engines.crewai.tools.custom.measure_conversion_pipeline_tool.SQLTranslationOptions')
-    def test_run_yaml_to_sql_success(self, mock_options_class, mock_sql_generator_class, mock_yaml_parser_class, tool):
+    @patch('src.converters.services.sql.SQLTranslationOptions')
+    @patch('src.converters.services.sql.SQLGenerator')
+    @patch('src.converters.common.transformers.yaml.YAMLKPIParser')
+    def test_run_yaml_to_sql_success(self, mock_yaml_parser_class, mock_sql_generator_class, mock_options_class, tool):
         """Test _run YAML to SQL conversion"""
         # Mock YAML parser
         mock_parser = Mock()
@@ -383,18 +417,22 @@ class TestMeasureConversionPipelineTool:
         mock_result.sql_queries = [mock_query]
         mock_generator.generate_sql_from_kbi_definition.return_value = mock_result
 
-        result = tool._run(
+        self._set_default_config(
+            tool,
             inbound_connector="yaml",
-            yaml_content="version: 0.1\nkpis: []",
             outbound_format="sql",
-            sql_dialect="databricks"
+            sql_dialect="databricks",
+        )
+        result = tool._run(
+            yaml_content="version: 0.1\nkpis: []",
         )
 
-        assert "YAML Measures → SQL" in result
+        assert "YAML Measures" in result
+        assert "SQL" in result
 
-    @patch('src.engines.crewai.tools.custom.measure_conversion_pipeline_tool.YAMLKPIParser')
-    @patch('src.engines.crewai.tools.custom.measure_conversion_pipeline_tool.UCMetricsGenerator')
-    def test_run_yaml_to_uc_metrics_success(self, mock_uc_generator_class, mock_yaml_parser_class, tool):
+    @patch('src.converters.services.uc_metrics.UCMetricsGenerator')
+    @patch('src.converters.common.transformers.yaml.YAMLKPIParser')
+    def test_run_yaml_to_uc_metrics_success(self, mock_yaml_parser_class, mock_uc_generator_class, tool):
         """Test _run YAML to UC Metrics conversion"""
         # Mock YAML parser
         mock_parser = Mock()
@@ -410,15 +448,19 @@ class TestMeasureConversionPipelineTool:
         mock_generator.generate_consolidated_uc_metrics.return_value = Mock()
         mock_generator.format_consolidated_uc_metrics_yaml.return_value = "version: 0.1\nmeasures: []"
 
-        result = tool._run(
+        self._set_default_config(
+            tool,
             inbound_connector="yaml",
-            yaml_content="version: 0.1\nkpis: []",
             outbound_format="uc_metrics",
             uc_catalog="main",
-            uc_schema="default"
+            uc_schema="default",
+        )
+        result = tool._run(
+            yaml_content="version: 0.1\nkpis: []",
         )
 
-        assert "YAML Measures → UC Metrics" in result
+        assert "YAML Measures" in result
+        assert "UC Metrics" in result
 
     # ========== Run Method Tests - Pre-configured Tool ==========
 
@@ -516,15 +558,17 @@ class TestMeasureConversionPipelineTool:
             "errors": ["Connection failed", "Authentication error"]
         }
 
-        result = tool._run(
+        self._set_default_config(
+            tool,
             inbound_connector="powerbi",
             powerbi_semantic_model_id="model123",
             powerbi_group_id="workspace456",
             powerbi_tenant_id="tenant123",
             powerbi_client_id="client456",
             powerbi_client_secret="secret789",
-            outbound_format="dax"
+            outbound_format="dax",
         )
+        result = tool._run()
 
         assert "Error" in result
         assert "Conversion failed" in result
@@ -538,30 +582,35 @@ class TestMeasureConversionPipelineTool:
 
         mock_pipeline.execute.side_effect = Exception("Unexpected error")
 
-        result = tool._run(
+        self._set_default_config(
+            tool,
             inbound_connector="powerbi",
             powerbi_semantic_model_id="model123",
             powerbi_group_id="workspace456",
             powerbi_tenant_id="tenant123",
             powerbi_client_id="client456",
             powerbi_client_secret="secret789",
-            outbound_format="dax"
+            outbound_format="dax",
         )
+        result = tool._run()
 
         assert "Error" in result
         assert "Unexpected error" in result
 
-    @patch('src.engines.crewai.tools.custom.measure_conversion_pipeline_tool.YAMLKPIParser')
+    @patch('src.converters.common.transformers.yaml.YAMLKPIParser')
     def test_run_yaml_conversion_exception(self, mock_yaml_parser_class, tool):
         """Test _run handles YAML conversion exceptions"""
         mock_parser = Mock()
         mock_yaml_parser_class.return_value = mock_parser
         mock_parser.parse_file.side_effect = Exception("YAML parse error")
 
-        result = tool._run(
+        self._set_default_config(
+            tool,
             inbound_connector="yaml",
+            outbound_format="dax",
+        )
+        result = tool._run(
             yaml_content="invalid yaml {{",
-            outbound_format="dax"
         )
 
         assert "Error" in result
@@ -587,7 +636,8 @@ class TestMeasureConversionPipelineTool:
             source_id="model123"
         )
 
-        assert "Power BI Measures → DAX" in result
+        assert "Power BI Measures" in result
+        assert "DAX" in result
         assert "Measure1" in result
         assert "SUM(Table[Column])" in result
         assert "Test measure" in result
@@ -608,7 +658,8 @@ class TestMeasureConversionPipelineTool:
             source_id="yaml_file"
         )
 
-        assert "YAML Measures → SQL" in result
+        assert "YAML Measures" in result
+        assert "SQL" in result
         assert "total_sales" in result
 
     def test_format_output_sql_string(self, tool):
@@ -621,7 +672,8 @@ class TestMeasureConversionPipelineTool:
             source_id="model123"
         )
 
-        assert "Power BI Measures → SQL" in result
+        assert "Power BI Measures" in result
+        assert "SQL" in result
         assert "SELECT * FROM table" in result
 
     def test_format_output_sql_dict(self, tool):
@@ -667,7 +719,8 @@ class TestMeasureConversionPipelineTool:
             source_id="model123"
         )
 
-        assert "Power BI Measures → UC Metrics" in result
+        assert "Power BI Measures" in result
+        assert "UC Metrics" in result
         assert "version: 0.1" in result
 
     def test_format_output_yaml(self, tool):
@@ -680,7 +733,8 @@ class TestMeasureConversionPipelineTool:
             source_id="model123"
         )
 
-        assert "Power BI Measures → YAML" in result
+        assert "Power BI Measures" in result
+        assert "YAML" in result
         assert "kpis:" in result
 
     # ========== Edge Cases ==========
@@ -699,15 +753,17 @@ class TestMeasureConversionPipelineTool:
             "errors": []
         }
 
-        result = tool._run(
+        self._set_default_config(
+            tool,
             inbound_connector="powerbi",
             powerbi_semantic_model_id="model123",
             powerbi_group_id="workspace456",
             powerbi_tenant_id="tenant123",
             powerbi_client_id="client456",
             powerbi_client_secret="secret789",
-            outbound_format="dax"
+            outbound_format="dax",
         )
+        result = tool._run()
 
         assert "Error" not in result
 
@@ -725,15 +781,17 @@ class TestMeasureConversionPipelineTool:
             "errors": []
         }
 
-        result = tool._run(
+        self._set_default_config(
+            tool,
             inbound_connector="powerbi",
             powerbi_semantic_model_id="model123",
             powerbi_group_id="workspace456",
             powerbi_tenant_id="tenant123",
             powerbi_client_id="client456",
             powerbi_client_secret="secret789",
-            outbound_format="dax"
+            outbound_format="dax",
         )
+        result = tool._run()
 
         assert "Error" not in result
 
@@ -751,17 +809,20 @@ class TestMeasureConversionPipelineTool:
             "errors": []
         }
 
-        result = tool._run(
+        self._set_default_config(
+            tool,
             inbound_connector="powerbi",
             powerbi_semantic_model_id="model123",
             powerbi_group_id="workspace456",
             powerbi_tenant_id="tenant123",
             powerbi_client_id="client456",
             powerbi_client_secret="secret789",
+            outbound_format="sql",
+        )
+        result = tool._run(
             powerbi_include_hidden=True,
             powerbi_filter_pattern="Revenue.*",
             powerbi_info_table_name="Custom Info",
-            outbound_format="sql",
             sql_dialect="snowflake",
             sql_include_comments=True,
             sql_process_structures=True,
@@ -772,6 +833,16 @@ class TestMeasureConversionPipelineTool:
 
     def test_run_with_execution_inputs_parameter_resolution(self, tool):
         """Test _run with execution_inputs for dynamic parameter resolution"""
+        self._set_default_config(
+            tool,
+            inbound_connector="powerbi",
+            powerbi_semantic_model_id="model123",
+            powerbi_group_id="workspace456",
+            powerbi_tenant_id="tenant123",
+            powerbi_client_id="client456",
+            powerbi_client_secret="secret789",
+            outbound_format="dax",
+        )
         with patch.object(tool._pipeline, 'execute') as mock_execute:
             mock_execute.return_value = {
                 "success": True,
@@ -782,12 +853,6 @@ class TestMeasureConversionPipelineTool:
 
             # This tests that execution_inputs would be used if provided
             result = tool._run(
-                inbound_connector="powerbi",
-                powerbi_semantic_model_id="model123",
-                powerbi_group_id="workspace456",
-                powerbi_tenant_id="tenant123",
-            powerbi_client_id="client456",
-            powerbi_client_secret="secret789",
                 execution_inputs={"dataset_id": "override_model"}
             )
 

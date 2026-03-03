@@ -973,3 +973,98 @@ class TestErrorHandling:
         result = await repository.get_crew_checkpoints('job-123')
 
         assert result == []
+
+
+class TestDeleteOlderThan:
+    """Tests for delete_older_than method."""
+
+    @pytest.fixture
+    def mock_session(self):
+        """Create mock async session."""
+        session = MagicMock(spec=AsyncSession)
+        session.execute = AsyncMock()
+        session.flush = AsyncMock()
+        return session
+
+    @pytest.fixture
+    def repository(self, mock_session):
+        """Create repository with mock session."""
+        return ExecutionHistoryRepository(mock_session)
+
+    @pytest.mark.asyncio
+    async def test_delete_older_than_with_matching_records(self, repository, mock_session):
+        """Test deleting records older than cutoff date."""
+        cutoff = datetime(2025, 1, 1)
+
+        # Mock: select returns executions to delete
+        mock_fetch_result = MagicMock()
+        mock_fetch_result.fetchall.return_value = [
+            (1, 'job-1'),
+            (2, 'job-2'),
+        ]
+
+        # Mock: delete task_status returns rowcount
+        mock_task_status_result = MagicMock()
+        mock_task_status_result.rowcount = 3
+
+        # Mock: delete error_trace returns rowcount
+        mock_error_trace_result = MagicMock()
+        mock_error_trace_result.rowcount = 1
+
+        # Mock: delete executionhistory returns rowcount
+        mock_run_result = MagicMock()
+        mock_run_result.rowcount = 2
+
+        mock_session.execute = AsyncMock(side_effect=[
+            mock_fetch_result,        # select execution ids
+            mock_task_status_result,  # delete taskstatus
+            mock_error_trace_result,  # delete errortrace
+            mock_run_result,          # delete executionhistory
+        ])
+
+        result = await repository.delete_older_than(cutoff)
+
+        assert result == {
+            'executionhistory': 2,
+            'taskstatus': 3,
+            'errortrace': 1,
+        }
+        mock_session.flush.assert_called_once()
+        assert mock_session.execute.call_count == 4
+
+    @pytest.mark.asyncio
+    async def test_delete_older_than_no_matching_records(self, repository, mock_session):
+        """Test when no records match the cutoff date."""
+        cutoff = datetime(2020, 1, 1)
+
+        mock_fetch_result = MagicMock()
+        mock_fetch_result.fetchall.return_value = []
+
+        mock_session.execute = AsyncMock(return_value=mock_fetch_result)
+
+        result = await repository.delete_older_than(cutoff)
+
+        assert result == {
+            'executionhistory': 0,
+            'taskstatus': 0,
+            'errortrace': 0,
+        }
+        # Only the initial select should be called
+        mock_session.execute.assert_called_once()
+        mock_session.flush.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_delete_older_than_no_session_raises(self):
+        """Test that missing session raises RuntimeError."""
+        repo = ExecutionHistoryRepository(None)
+
+        with pytest.raises(RuntimeError, match="requires a session"):
+            await repo.delete_older_than(datetime(2025, 1, 1))
+
+    @pytest.mark.asyncio
+    async def test_delete_older_than_database_error_propagates(self, repository, mock_session):
+        """Test that database errors are propagated."""
+        mock_session.execute = AsyncMock(side_effect=Exception("DB connection lost"))
+
+        with pytest.raises(Exception, match="DB connection lost"):
+            await repository.delete_older_than(datetime(2025, 1, 1))

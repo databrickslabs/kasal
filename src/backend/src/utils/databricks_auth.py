@@ -365,9 +365,9 @@ class DatabricksAuth:
             # Try to load workspace host from database configuration
             try:
                 from src.services.databricks_service import DatabricksService
-                from src.db.session import request_scoped_session
+                from src.db.session import async_session_factory
 
-                async with request_scoped_session() as session:
+                async with async_session_factory() as session:
                     service = DatabricksService(session)
 
                     try:
@@ -457,7 +457,7 @@ class DatabricksAuth:
                 logger.info("Service principal token refreshed successfully")
                 return new_token
             else:
-                logger.error("Failed to refresh service principal token")
+                logger.debug("Failed to refresh service principal token")
                 return None
         except Exception as e:
             logger.error(f"Error refreshing service principal token: {e}")
@@ -525,8 +525,9 @@ class DatabricksAuth:
                     logger.info("Using cached service principal OAuth token")
                     return self._create_bearer_headers(self._service_token, mcp_server_url)
 
-            # No authentication method available
-            logger.error("No authentication method available (tried OBO, PAT, SPN)")
+            # No authentication method available — this is expected when
+            # Databricks auth has not been configured yet; not an error.
+            logger.debug("No authentication method available (tried OBO, PAT, SPN)")
             return None, "No Databricks authentication method available"
 
         except Exception as e:
@@ -579,11 +580,11 @@ class DatabricksAuth:
                     logger.info(f"Successfully obtained service principal OAuth token (expires in {self._service_token_expires_in}s)")
                     return auth_result.access_token
                 else:
-                    logger.error("No access token in authentication result")
+                    logger.debug("No access token in authentication result")
                     return None
 
             except Exception as sdk_error:
-                logger.error(f"SDK OAuth failed, trying manual approach: {sdk_error}")
+                logger.debug(f"SDK OAuth failed, trying manual approach: {sdk_error}")
 
                 # Manual OAuth client credentials flow as fallback
                 return await self._manual_oauth_flow()
@@ -966,11 +967,11 @@ async def get_auth_context(
         workspace_url = _databricks_auth._workspace_host
 
         # Unified authentication chain: OBO → PAT → SPN (applies to ALL services)
-        logger.info("[AUTH] Starting unified authentication chain: OBO → PAT → SPN")
+        logger.debug("[AUTH] Starting unified authentication chain: OBO → PAT → SPN")
 
         # Priority 1: Try OBO (On-Behalf-Of) if user token provided
         if user_token:
-            logger.info("[AUTH] Priority 1: Attempting OBO authentication with user token")
+            logger.debug("[AUTH] Priority 1: Attempting OBO authentication with user token")
             user_identity = None
             try:
                 with _clean_environment():
@@ -987,17 +988,17 @@ async def get_auth_context(
                 )
             except Exception as e:
                 logger.warning(f"[AUTH] Priority 1: ✗ OBO authentication failed: {e}")
-                logger.info("[AUTH] Falling back to PAT/SPN authentication")
+                logger.debug("[AUTH] Falling back to PAT/SPN authentication")
         else:
-            logger.info("[AUTH] Priority 1: No user token provided, skipping OBO")
+            logger.debug("[AUTH] Priority 1: No user token provided, skipping OBO")
 
         # Priority 2: Try PAT from ApiKeysService (per-request lookup with group_id)
         # SECURITY: PAT tokens must be loaded with group_id for multi-tenant isolation
-        logger.info("[AUTH] Priority 2: Attempting PAT authentication from API Keys Service")
+        logger.debug("[AUTH] Priority 2: Attempting PAT authentication from API Keys Service")
         pat_token = None
         try:
             from src.services.api_keys_service import ApiKeysService
-            from src.db.session import request_scoped_session
+            from src.db.session import async_session_factory
             from src.utils.user_context import UserContext
 
             # Get group_id for multi-tenant isolation
@@ -1007,29 +1008,27 @@ async def get_auth_context(
             if not effective_group_id:
                 try:
                     group_context = UserContext.get_group_context()
-                    logger.info(f"[AUTH PAT] Retrieved group_context: {group_context}")
+                    logger.debug(f"[AUTH PAT] Retrieved group_context: {group_context}")
                     if group_context and hasattr(group_context, 'primary_group_id'):
                         effective_group_id = group_context.primary_group_id
-                        logger.info(f"[AUTH PAT] ✓ Using group_id from UserContext: {effective_group_id}")
+                        logger.debug(f"[AUTH PAT] ✓ Using group_id from UserContext: {effective_group_id}")
                     else:
-                        logger.warning(f"[AUTH PAT] ✗ No group_context or primary_group_id. group_context={group_context}")
+                        logger.debug(f"[AUTH PAT] No group_context or primary_group_id. group_context={group_context}")
                 except Exception as e:
-                    logger.warning(f"[AUTH PAT] ✗ Could not get group_id from UserContext: {e}")
+                    logger.debug(f"[AUTH PAT] Could not get group_id from UserContext: {e}")
             else:
-                logger.info(f"[AUTH PAT] ✓ Using passed group_id parameter: {effective_group_id}")
+                logger.debug(f"[AUTH PAT] ✓ Using passed group_id parameter: {effective_group_id}")
 
             if effective_group_id:
-                logger.info(f"[AUTH PAT] Attempting to load PAT from database with group_id={effective_group_id}")
-                logger.info("[AUTH PAT] ABOUT TO CREATE async_session_factory() - if hang occurs, it's here")
-                async with request_scoped_session() as session:
-                    logger.info("[AUTH PAT] async_session_factory() created successfully")
+                logger.debug(f"[AUTH PAT] Attempting to load PAT from database with group_id={effective_group_id}")
+                async with async_session_factory() as session:
                     api_service = ApiKeysService(session, group_id=effective_group_id)
 
                     for key_name in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY"]:
                         try:
-                            logger.info(f"[AUTH PAT] Looking for key: {key_name}")
+                            logger.debug(f"[AUTH PAT] Looking for key: {key_name}")
                             api_key = await api_service.find_by_name(key_name)
-                            logger.info(f"[AUTH PAT] Key {key_name} found: {api_key is not None}")
+                            logger.debug(f"[AUTH PAT] Key {key_name} found: {api_key is not None}")
                             if api_key and api_key.encrypted_value:
                                 from src.utils.encryption_utils import EncryptionUtils
                                 pat_token = EncryptionUtils.decrypt_value(api_key.encrypted_value)
@@ -1039,9 +1038,9 @@ async def get_auth_context(
                             logger.warning(f"[AUTH PAT] Error loading {key_name}: {e}")
 
                 if not pat_token:
-                    logger.warning(f"[AUTH] Priority 2: ✗ No PAT found in database with group_id={effective_group_id}")
+                    logger.debug(f"[AUTH] Priority 2: No PAT found in database with group_id={effective_group_id}")
             else:
-                logger.warning("[AUTH] Priority 2: ✗ No group_id available for PAT lookup (neither passed nor from UserContext)")
+                logger.debug("[AUTH] Priority 2: No group_id available for PAT lookup (neither passed nor from UserContext)")
 
         except Exception as e:
             logger.error(f"[AUTH PAT] Error during PAT lookup: {e}")
@@ -1054,11 +1053,11 @@ async def get_auth_context(
                 user_identity=None
             )
         else:
-            logger.warning("[AUTH] Priority 2: ✗ No PAT token available")
+            logger.debug("[AUTH] Priority 2: No PAT token available")
 
         # Priority 3: Try Service Principal OAuth as last resort
         if _databricks_auth._client_id and _databricks_auth._client_secret:
-            logger.info("[AUTH] Priority 3: Attempting Service Principal OAuth authentication")
+            logger.debug("[AUTH] Priority 3: Attempting Service Principal OAuth authentication")
             if _databricks_auth._is_service_token_expired():
                 token = await _databricks_auth._refresh_service_token()
             else:
@@ -1073,16 +1072,15 @@ async def get_auth_context(
                     user_identity=None
                 )
             else:
-                logger.error("[AUTH] Priority 3: ✗ Service Principal authentication failed")
+                logger.debug("[AUTH] Priority 3: ✗ Service Principal authentication failed")
         else:
-            logger.info("[AUTH] Priority 3: Service Principal credentials not configured, skipping SPN")
+            logger.debug("[AUTH] Priority 3: Service Principal credentials not configured, skipping SPN")
 
-        # No authentication method available
-        logger.error("No authentication method available")
-        logger.error("Please configure at least one authentication method:")
-        logger.error("  1. OBO: User token from request headers (automatic when authenticated)")
-        logger.error("  2. PAT: Configure via API Keys Service (Configuration → API Keys)")
-        logger.error("  3. SPN: Configure via Databricks authentication settings")
+        # No authentication method available — this is normal when Databricks
+        # auth has not been configured.  Logged at DEBUG to avoid polluting
+        # production logs (MLflow status is polled every few seconds).
+        logger.debug("No authentication method available. "
+                      "Configure OBO, PAT, or SPN to enable Databricks features.")
         return None
 
     except Exception as e:
@@ -1112,7 +1110,10 @@ def is_scope_error(error: Exception) -> bool:
     ])
 
 
-async def get_workspace_client(user_token: Optional[str] = None) -> Optional[WorkspaceClient]:
+async def get_workspace_client(
+    user_token: Optional[str] = None,
+    group_id: Optional[str] = None,
+) -> Optional[WorkspaceClient]:
     """
     Get a Databricks WorkspaceClient with appropriate authentication.
 
@@ -1126,6 +1127,8 @@ async def get_workspace_client(user_token: Optional[str] = None) -> Optional[Wor
     Args:
         user_token: Optional user access token for OBO authentication.
                    If None, skips OBO and uses PAT/SPN (service-level auth).
+        group_id: Optional group_id for PAT lookup. Useful for background
+                 threads where UserContext is not available.
 
     Returns:
         Optional[WorkspaceClient]: Configured workspace client
@@ -1136,10 +1139,13 @@ async def get_workspace_client(user_token: Optional[str] = None) -> Optional[Wor
 
         # Service-level (no OBO, uses PAT/SPN)
         client = await get_workspace_client(user_token=None)
+
+        # Background thread with explicit group_id for PAT lookup
+        client = await get_workspace_client(user_token=None, group_id="my_group")
     """
     try:
         # Get authentication context using unified chain
-        auth = await get_auth_context(user_token=user_token)
+        auth = await get_auth_context(user_token=user_token, group_id=group_id)
         if not auth:
             logger.error("Failed to get authentication context")
             return None

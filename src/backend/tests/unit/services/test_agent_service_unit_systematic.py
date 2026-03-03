@@ -16,10 +16,10 @@ class FakeRepo:
         return self._get
     async def create(self, data: dict):
         self.created = data
-        return SimpleNamespace(id='a1', **data)
+        return SimpleNamespace(id='a1', tool_configs=None, **data)
     async def update(self, id, data: dict):
         self.updated = (id, data)
-        return SimpleNamespace(id=id, **data)
+        return SimpleNamespace(id=id, tool_configs=None, **data)
     async def delete(self, id):
         self.deleted.append(id)
         return True
@@ -64,7 +64,7 @@ async def test_get_with_group_check_blocks_other_group():
 @pytest.mark.asyncio
 async def test_get_with_group_check_allows_same_group():
     svc = Svc(SimpleNamespace(), repository_class=FakeRepo)
-    agent = SimpleNamespace(id='a1', group_id='g1')
+    agent = SimpleNamespace(id='a1', group_id='g1', tool_configs=None)
     svc.repository._get = agent
     gc = SimpleNamespace(group_ids=['g1'])
     assert await svc.get_with_group_check('a1', gc) == agent

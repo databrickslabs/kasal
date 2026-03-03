@@ -75,6 +75,28 @@ async def create_history(
 
 
 @router.get(
+    "/history/statistics",
+    response_model=ConversionStatistics,
+    summary="Get Conversion Statistics",
+    description="Get analytics on conversion success rate, execution time, and popular conversion paths",
+)
+async def get_statistics(
+    service: Annotated[ConverterService, Depends(get_converter_service)],
+    days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
+) -> ConversionStatistics:
+    """
+    Get conversion statistics for analytics.
+
+    Returns:
+    - Total conversions
+    - Success/failure counts and rates
+    - Average execution time
+    - Most popular conversion paths
+    """
+    return await service.get_statistics(days)
+
+
+@router.get(
     "/history/{history_id}",
     response_model=ConversionHistoryResponse,
     summary="Get Conversion History",
@@ -135,28 +157,6 @@ async def list_history(
         offset=offset,
     )
     return await service.list_history(filter_params)
-
-
-@router.get(
-    "/history/statistics",
-    response_model=ConversionStatistics,
-    summary="Get Conversion Statistics",
-    description="Get analytics on conversion success rate, execution time, and popular conversion paths",
-)
-async def get_statistics(
-    service: Annotated[ConverterService, Depends(get_converter_service)],
-    days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
-) -> ConversionStatistics:
-    """
-    Get conversion statistics for analytics.
-
-    Returns:
-    - Total conversions
-    - Success/failure counts and rates
-    - Average execution time
-    - Most popular conversion paths
-    """
-    return await service.get_statistics(days)
 
 
 # ===== CONVERSION JOB ENDPOINTS =====

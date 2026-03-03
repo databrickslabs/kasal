@@ -7,6 +7,8 @@ from src.api.memory_backend_router import (
     validate_memory_config,
     get_databricks_indexes,
     create_databricks_index,
+    get_lakebase_table_data,
+    get_lakebase_entity_data,
 )
 import importlib
 from src.schemas.memory_backend import MemoryBackendConfig, DatabricksMemoryConfig, MemoryBackendType
@@ -81,4 +83,106 @@ async def test_create_databricks_index_validations_and_success():
         svc.create_databricks_index = AsyncMock(return_value={"success": True})
         out = await create_databricks_index(request=req, req=None, group_context=ctx, service=svc)
         assert out["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_lakebase_table_data():
+    """Test the GET /lakebase/table-data endpoint."""
+    ctx = Ctx()
+    svc = AsyncMock()
+    svc.get_lakebase_table_data = AsyncMock(return_value={
+        "success": True,
+        "documents": [{"id": "d1", "text": "hello", "agent": "researcher"}],
+        "total": 1,
+    })
+
+    result = await get_lakebase_table_data(
+        group_context=ctx,
+        service=svc,
+        table_name="crew_short_term_memory",
+        limit=50,
+        instance_name=None,
+    )
+    assert result["success"] is True
+    assert result["total"] == 1
+    assert result["documents"][0]["id"] == "d1"
+    svc.get_lakebase_table_data.assert_awaited_once_with(
+        table_name="crew_short_term_memory",
+        limit=50,
+        instance_name=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_lakebase_table_data_with_instance():
+    """Test the GET /lakebase/table-data endpoint with instance name."""
+    ctx = Ctx()
+    svc = AsyncMock()
+    svc.get_lakebase_table_data = AsyncMock(return_value={
+        "success": True,
+        "documents": [],
+        "total": 0,
+    })
+
+    result = await get_lakebase_table_data(
+        group_context=ctx,
+        service=svc,
+        table_name="crew_long_term_memory",
+        limit=10,
+        instance_name="kasal-lakebase1",
+    )
+    assert result["success"] is True
+    svc.get_lakebase_table_data.assert_awaited_once_with(
+        table_name="crew_long_term_memory",
+        limit=10,
+        instance_name="kasal-lakebase1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_lakebase_entity_data():
+    """Test the GET /lakebase/entity-data endpoint."""
+    ctx = Ctx()
+    svc = AsyncMock()
+    svc.get_lakebase_entity_data = AsyncMock(return_value={
+        "entities": [{"id": "e1", "name": "Alice", "type": "person"}],
+        "relationships": [{"source": "e1", "target": "e2", "type": "knows"}],
+    })
+
+    result = await get_lakebase_entity_data(
+        group_context=ctx,
+        service=svc,
+        entity_table="crew_entity_memory",
+        limit=200,
+        instance_name=None,
+    )
+    assert len(result["entities"]) == 1
+    assert result["entities"][0]["name"] == "Alice"
+    assert len(result["relationships"]) == 1
+    svc.get_lakebase_entity_data.assert_awaited_once_with(
+        entity_table="crew_entity_memory",
+        limit=200,
+        instance_name=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_lakebase_entity_data_with_custom_params():
+    """Test the GET /lakebase/entity-data endpoint with custom parameters."""
+    ctx = Ctx()
+    svc = AsyncMock()
+    svc.get_lakebase_entity_data = AsyncMock(return_value={
+        "entities": [],
+        "relationships": [],
+    })
+
+    result = await get_lakebase_entity_data(
+        group_context=ctx,
+        service=svc,
+        entity_table="crew_entity_memory",
+        limit=50,
+        instance_name="kasal-lakebase1",
+    )
+    assert result["entities"] == []
+    assert result["relationships"] == []
 

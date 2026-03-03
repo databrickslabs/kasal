@@ -441,6 +441,141 @@ class TestCrewPreparation:
             assert mock_task2.context == [mock_task1]
     
     @pytest.mark.asyncio
+    async def test_create_tasks_context_refs_with_task_prefix(self, crew_preparation):
+        """Test that context refs with 'task_' prefix resolve to raw-ID keys."""
+        crew_preparation.agents = {"researcher": MagicMock(), "writer": MagicMock()}
+
+        # Frontend sends context as ["task_<uuid>"] but task_dict keys are raw UUIDs
+        crew_preparation.config["tasks"] = [
+            {
+                "id": "abc-123",
+                "name": "research_task",
+                "description": "Research AI trends",
+                "agent": "researcher",
+                "expected_output": "Research report"
+            },
+            {
+                "id": "def-456",
+                "name": "write_task",
+                "description": "Write blog post",
+                "agent": "writer",
+                "expected_output": "Blog post",
+                "context": ["task_abc-123"]  # Frontend-style prefixed reference
+            }
+        ]
+
+        mock_task1 = MagicMock()
+        mock_task1.async_execution = False
+        mock_task2 = MagicMock()
+        mock_task2.async_execution = False
+        mock_task2.context = None
+
+        with patch('src.engines.crewai.helpers.task_helpers.create_task', side_effect=[mock_task1, mock_task2]):
+            result = await crew_preparation._create_tasks()
+
+            assert result is True
+            assert mock_task2.context == [mock_task1]
+
+    @pytest.mark.asyncio
+    async def test_create_tasks_context_refs_task_prefix_unresolvable(self, crew_preparation):
+        """Test that context refs with 'task_' prefix still warn when stripped ID is missing."""
+        crew_preparation.agents = {"researcher": MagicMock(), "writer": MagicMock()}
+
+        crew_preparation.config["tasks"] = [
+            {
+                "id": "abc-123",
+                "name": "research_task",
+                "description": "Research AI trends",
+                "agent": "researcher",
+                "expected_output": "Research report"
+            },
+            {
+                "id": "def-456",
+                "name": "write_task",
+                "description": "Write blog post",
+                "agent": "writer",
+                "expected_output": "Blog post",
+                "context": ["task_nonexistent-id"]  # task_ prefix but ID doesn't exist
+            }
+        ]
+
+        mock_task1 = MagicMock()
+        mock_task1.async_execution = False
+        mock_task2 = MagicMock()
+        mock_task2.async_execution = False
+
+        with patch('src.engines.crewai.helpers.task_helpers.create_task', side_effect=[mock_task1, mock_task2]), \
+             patch('src.engines.crewai.crew_preparation.logger') as mock_logger:
+
+            result = await crew_preparation._create_tasks()
+
+            assert result is True
+            # Per-ref warning for the unresolvable prefixed reference
+            mock_logger.warning.assert_any_call(
+                "Could not resolve context reference 'task_nonexistent-id' for task def-456"
+            )
+            # Overall warning since no context tasks could be resolved
+            mock_logger.warning.assert_any_call(
+                "No context tasks could be resolved for task def-456"
+            )
+
+    @pytest.mark.asyncio
+    async def test_create_tasks_context_refs_mixed_resolution(self, crew_preparation):
+        """Test mixed context refs: one resolves via prefix stripping, one fails."""
+        crew_preparation.agents = {
+            "researcher": MagicMock(),
+            "analyst": MagicMock(),
+            "writer": MagicMock(),
+        }
+
+        crew_preparation.config["tasks"] = [
+            {
+                "id": "aaa-111",
+                "name": "research_task",
+                "description": "Research",
+                "agent": "researcher",
+                "expected_output": "Report"
+            },
+            {
+                "id": "bbb-222",
+                "name": "analysis_task",
+                "description": "Analyze",
+                "agent": "analyst",
+                "expected_output": "Analysis"
+            },
+            {
+                "id": "ccc-333",
+                "name": "write_task",
+                "description": "Write",
+                "agent": "writer",
+                "expected_output": "Document",
+                # One valid prefixed ref, one invalid prefixed ref
+                "context": ["task_aaa-111", "task_does-not-exist"]
+            }
+        ]
+
+        mock_task1 = MagicMock()
+        mock_task1.async_execution = False
+        mock_task2 = MagicMock()
+        mock_task2.async_execution = False
+        mock_task3 = MagicMock()
+        mock_task3.async_execution = False
+        mock_task3.context = None
+
+        with patch('src.engines.crewai.helpers.task_helpers.create_task', side_effect=[mock_task1, mock_task2, mock_task3]), \
+             patch('src.engines.crewai.crew_preparation.logger') as mock_logger:
+
+            result = await crew_preparation._create_tasks()
+
+            assert result is True
+            # The valid ref resolves; context should contain only mock_task1
+            assert mock_task3.context == [mock_task1]
+            # Warning logged for the unresolvable ref
+            mock_logger.warning.assert_any_call(
+                "Could not resolve context reference 'task_does-not-exist' for task ccc-333"
+            )
+
+    @pytest.mark.asyncio
     async def test_create_tasks_unresolvable_context_references(self, crew_preparation):
         """Test task creation when context references can't be resolved."""
         crew_preparation.agents = {"researcher": MagicMock(), "writer": MagicMock()}
@@ -997,6 +1132,159 @@ class TestCrewPreparation:
             assert 'manager_agent' in second_call_kwargs
             assert second_call_kwargs['manager_agent'] == mock_manager_agent
     
+class TestCreateAgentsMCPRequirements:
+    """Test suite for MCP server requirements resolution in _create_agents."""
+
+    @pytest.fixture
+    def sample_config(self):
+        """Sample crew configuration with a single agent."""
+        return {
+            "agents": [
+                {
+                    "id": "agent_agent-config-id-1234",
+                    "name": "researcher",
+                    "role": "Senior Research Analyst",
+                    "goal": "Research AI trends",
+                    "backstory": "Expert AI researcher",
+                    "tools": [],
+                    "verbose": True,
+                }
+            ],
+            "tasks": [
+                {
+                    "id": "task1",
+                    "name": "task1",
+                    "description": "Do research",
+                    "agent": "researcher",
+                    "expected_output": "Report",
+                }
+            ],
+            "crew": {"process": "sequential", "verbose": True, "memory": False, "planning": False, "reasoning": False},
+            "model": "gpt-4",
+        }
+
+    @pytest.fixture
+    def mock_tool_service(self):
+        tool_service = MagicMock()
+        tool_service.get_tool = AsyncMock()
+        return tool_service
+
+    @pytest.fixture
+    def mock_tool_factory(self):
+        tool_factory = MagicMock()
+        tool_factory.create_tool = AsyncMock()
+        return tool_factory
+
+    @pytest.fixture
+    def crew_prep(self, sample_config, mock_tool_service, mock_tool_factory):
+        return CrewPreparation(sample_config, mock_tool_service, mock_tool_factory)
+
+    # -- helpers used across all MCP tests --
+    def _common_patches(self, mcp_requirements, kasal_uuid=None):
+        """Return a combined context-manager that patches MCPIntegration, agent UUID lookup and create_agent."""
+        mock_agent = MagicMock()
+        return (
+            patch(
+                "src.engines.crewai.tools.mcp_integration.MCPIntegration.collect_agent_mcp_requirements",
+                new_callable=AsyncMock,
+                return_value=mcp_requirements,
+            ),
+            patch.object(
+                CrewPreparation,
+                "_lookup_kasal_agent_uuid_via_service",
+                new_callable=AsyncMock,
+                return_value=kasal_uuid,
+            ),
+            patch(
+                "src.engines.crewai.crew_preparation.create_agent",
+                new_callable=AsyncMock,
+                return_value=mock_agent,
+            ),
+        )
+
+    @pytest.mark.asyncio
+    async def test_mcp_found_via_agent_id_kasal_uuid(self, crew_prep):
+        """MCP requirements found via the Kasal UUID (agent_id) -- first lookup key."""
+        kasal_uuid = "kasal-uuid-aaaa-bbbb"
+        mcp_servers = [{"name": "server_a", "url": "https://example.com/a"}]
+        mcp_requirements = {kasal_uuid: mcp_servers}
+
+        p1, p2, p3 = self._common_patches(mcp_requirements, kasal_uuid=kasal_uuid)
+        with p1, p2, p3:
+            result = await crew_prep._create_agents()
+
+        assert result is True
+        agent_config = crew_prep.config["agents"][0]
+        assert agent_config["tool_configs"]["MCP_SERVERS"]["servers"] == mcp_servers
+
+    @pytest.mark.asyncio
+    async def test_mcp_found_via_config_agent_id_fallback(self, crew_prep):
+        """MCP requirements found via config_agent_id -- second lookup key."""
+        config_agent_id = "agent_agent-config-id-1234"
+        mcp_servers = [{"name": "server_b", "url": "https://example.com/b"}]
+        # Only keyed by config_agent_id, not kasal_uuid
+        mcp_requirements = {config_agent_id: mcp_servers}
+
+        # kasal_uuid resolves to something different so first .get() returns []
+        p1, p2, p3 = self._common_patches(mcp_requirements, kasal_uuid="different-uuid")
+        with p1, p2, p3:
+            result = await crew_prep._create_agents()
+
+        assert result is True
+        agent_config = crew_prep.config["agents"][0]
+        assert agent_config["tool_configs"]["MCP_SERVERS"]["servers"] == mcp_servers
+
+    @pytest.mark.asyncio
+    async def test_mcp_found_via_agent_name_fallback(self, crew_prep):
+        """MCP requirements found via agent_name -- third lookup key."""
+        mcp_servers = [{"name": "server_c", "url": "https://example.com/c"}]
+        # Only keyed by agent_name "researcher"
+        mcp_requirements = {"researcher": mcp_servers}
+
+        p1, p2, p3 = self._common_patches(mcp_requirements, kasal_uuid="different-uuid")
+        with p1, p2, p3:
+            result = await crew_prep._create_agents()
+
+        assert result is True
+        agent_config = crew_prep.config["agents"][0]
+        assert agent_config["tool_configs"]["MCP_SERVERS"]["servers"] == mcp_servers
+
+    @pytest.mark.asyncio
+    async def test_mcp_no_requirements_found(self, crew_prep):
+        """No MCP requirements match any key -- tool_configs should not have MCP_SERVERS."""
+        mcp_requirements = {"unrelated_agent": [{"name": "srv"}]}
+
+        p1, p2, p3 = self._common_patches(mcp_requirements, kasal_uuid="different-uuid")
+        with p1, p2, p3:
+            result = await crew_prep._create_agents()
+
+        assert result is True
+        agent_config = crew_prep.config["agents"][0]
+        # MCP_SERVERS should not be present
+        tool_configs = agent_config.get("tool_configs", {})
+        assert "MCP_SERVERS" not in tool_configs
+
+    @pytest.mark.asyncio
+    async def test_mcp_servers_stored_in_tool_configs(self, crew_prep):
+        """Verify MCP servers end up under agent_config['tool_configs']['MCP_SERVERS']."""
+        kasal_uuid = "kasal-uuid-1111"
+        mcp_servers = [
+            {"name": "s1", "url": "https://example.com/s1"},
+            {"name": "s2", "url": "https://example.com/s2"},
+        ]
+        mcp_requirements = {kasal_uuid: mcp_servers}
+
+        p1, p2, p3 = self._common_patches(mcp_requirements, kasal_uuid=kasal_uuid)
+        with p1, p2, p3:
+            result = await crew_prep._create_agents()
+
+        assert result is True
+        agent_config = crew_prep.config["agents"][0]
+        assert "tool_configs" in agent_config
+        assert "MCP_SERVERS" in agent_config["tool_configs"]
+        assert agent_config["tool_configs"]["MCP_SERVERS"] == {"servers": mcp_servers}
+
+
 class TestCrewPreparationHelperFunctions:
     """Test suite for helper functions in crew_preparation module."""
     

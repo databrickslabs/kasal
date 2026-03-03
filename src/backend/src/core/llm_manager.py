@@ -237,7 +237,7 @@ class LLMManager:
                 user_token = UserContext.get_user_token()
 
                 # Get authentication context (OBO → PAT → Service Principal)
-                auth = await get_auth_context(user_token=user_token)
+                auth = await get_auth_context(user_token=user_token, group_id=group_id)
                 if auth:
                     # Pass authentication directly to CrewAI LLM (thread-safe)
                     api_key = auth.token
@@ -257,9 +257,10 @@ class LLMManager:
 
             # Ensure the model string explicitly includes the provider for CrewAI compatibility
             # GPT-5 reasoning models need longer timeout (300s) — they can take 2-4 min on complex prompts
+            # Standard Databricks models: 240s (server-side limit is 297s)
             llm_params = {
                 "model": prefixed_model,
-                "timeout": 300 if is_gpt5 else 120,
+                "timeout": 300 if is_gpt5 else 297,
             }
 
             # GPT-5 reasoning models on Databricks reject stop, temperature, and other params.
@@ -294,8 +295,24 @@ class LLMManager:
                     logger.info(f"Setting max_tokens to {model_config_dict['max_output_tokens']} for model {prefixed_model}")
 
             logger.info(f"Creating CrewAI LLM with model: {prefixed_model}, has_api_key: {bool(api_key)}, api_base: {api_base}")
-            
-            # Use DatabricksRetryLLM for all Databricks models (GPT-OSS, Llama, Claude, etc.)
+
+            # gpt-5-3-codex ONLY supports the Responses API on Databricks.
+            # DatabricksCodexCompletion extends OpenAICompletion with:
+            #  - phase preservation (prevents early stopping / skipped tool calls)
+            #  - stop-word suppression (GPT-5 reasoning rejects 'stop')
+            #  - diagnostic logging for tool-calling debugging
+            if "gpt-5-3-codex" in model_name_value.lower():
+                from src.core.llm_handlers.databricks_codex_handler import DatabricksCodexCompletion
+                logger.info(f"Using DatabricksCodexCompletion for Responses API model: {model_name_value}")
+                return DatabricksCodexCompletion(
+                    model=model_name_value,
+                    api_key=api_key,
+                    base_url=api_base,
+                    timeout=300,
+                    max_tokens=llm_params.get("max_completion_tokens") or llm_params.get("max_tokens"),
+                )
+
+            # Use DatabricksRetryLLM for all other Databricks models (GPT-OSS, Llama, Claude, etc.)
             # Provides retry logic for empty responses, rate limits, and message sanitization.
             # GPT-OSS Harmony response format is handled by the monkey patch in DatabricksGPTOSSHandler.
             logger.info(f"Using DatabricksRetryLLM wrapper for Databricks model: {model_name_value}")
@@ -443,7 +460,8 @@ class LLMManager:
 
                     # Use unified authentication (OBO → OAuth → PAT)
                     embedding_logger.info("Attempting unified Databricks authentication for embeddings")
-                    auth = await get_auth_context(user_token=user_token)
+                    emb_group_id = LLMManager._get_group_id_from_context(required=False)
+                    auth = await get_auth_context(user_token=user_token, group_id=emb_group_id)
                     if auth:
                         embedding_logger.info(f"Using Databricks {auth.auth_method} authentication for embeddings")
                         # For OAuth/OBO, use headers approach

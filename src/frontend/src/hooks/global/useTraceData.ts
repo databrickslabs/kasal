@@ -466,10 +466,17 @@ export function useTraceData({
         return;
       }
 
-      const runData = await TraceService.getRunDetails(runId);
-      const traceId = (runData.job_id && runData.job_id.includes('-'))
-                      ? runData.job_id
-                      : runId;
+      // Try to get run details for the job_id, but don't block trace loading if it fails
+      let traceId = runId;
+      try {
+        const runData = await TraceService.getRunDetails(runId);
+        if (runData.job_id && runData.job_id.includes('-')) {
+          traceId = runData.job_id;
+        }
+      } catch {
+        // getRunDetails may fail with 404 due to session routing differences;
+        // fall back to using runId directly for trace fetch
+      }
 
       const traces = await TraceService.getTraces(traceId);
 

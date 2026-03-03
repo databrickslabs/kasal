@@ -69,13 +69,13 @@ class GenieService:
             )
             
             # Call repository with all parameters
+            # fetch_all is determined by the repository based on search_query/space_ids
             spaces_response = await self.repository.get_spaces(
                 search_query=request.search_query,
                 space_ids=request.space_ids,
                 enabled_only=request.enabled_only,
                 page_token=request.page_token,
                 page_size=request.page_size,
-                fetch_all=False  # Let pagination work normally
             )
             
             logger.info(
@@ -90,19 +90,19 @@ class GenieService:
             return GenieSpacesResponse(spaces=[])
     
     async def search_spaces(
-        self, 
+        self,
         query: Optional[str] = None,
-        limit: Optional[int] = None,
-        offset: Optional[int] = None
+        page_size: Optional[int] = None,
+        page_token: Optional[str] = None
     ) -> GenieSpacesResponse:
         """
         Search for Genie spaces by query.
-        
+
         Args:
             query: Search query string
-            limit: Maximum number of spaces to return
-            offset: Number of spaces to skip
-            
+            page_size: Number of items per page
+            page_token: Token for fetching next page
+
         Returns:
             GenieSpacesResponse with matching spaces
         """
@@ -110,8 +110,8 @@ class GenieService:
             logger.info(f"Searching spaces with query: {query}")
             request = GenieSpacesRequest(
                 search_query=query,
-                limit=limit,
-                offset=offset
+                **({"page_size": page_size} if page_size else {}),
+                **({"page_token": page_token} if page_token else {}),
             )
             return await self.get_spaces(request)
             

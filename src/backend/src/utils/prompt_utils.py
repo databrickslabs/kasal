@@ -77,6 +77,17 @@ def robust_json_parser(text):
             return json.loads(text)
         except json.JSONDecodeError:
             logger.info("Code block extraction didn't yield valid JSON, continuing...")
+
+    # Step 1b: Handle truncated code blocks (opening ``` but no closing ```)
+    truncated_block_pattern = re.compile(r'```(?:json)?\s*([\s\S]+)')
+    truncated_matches = truncated_block_pattern.search(text)
+    if truncated_matches:
+        try:
+            text = truncated_matches.group(1).strip()
+            logger.info("Extracted JSON from truncated code block (no closing ```)")
+            return json.loads(text)
+        except json.JSONDecodeError:
+            logger.info("Truncated code block extraction didn't yield valid JSON, continuing...")
     
     # Step 2: Try to extract JSON object or array from text with extra content
     json_pattern = re.compile(r'({[\s\S]*}|\[[\s\S]*\])')
@@ -178,7 +189,66 @@ def robust_json_parser(text):
         return json.loads(fixed_text)
     except json.JSONDecodeError:
         logger.info("Fixing quote escaping didn't yield valid JSON")
-    
+
+    # Step 9: Aggressive truncation recovery - close open strings and balance braces
+    try:
+        # Work from the original extracted text (before quote mangling)
+        truncated = text.strip()
+        # Remove trailing incomplete content: find the last complete key-value pair
+        # by looking for the last comma or opening brace that precedes valid content
+
+        # Check if we're inside an open string (odd number of unescaped quotes)
+        in_string = False
+        last_good_pos = 0
+        i = 0
+        while i < len(truncated):
+            ch = truncated[i]
+            if ch == '\\' and in_string:
+                i += 2  # skip escaped character
+                continue
+            if ch == '"':
+                in_string = not in_string
+                if not in_string:
+                    last_good_pos = i
+            elif not in_string and ch in ',}]':
+                last_good_pos = i
+            i += 1
+
+        if in_string:
+            # Close the open string, then truncate any incomplete key-value
+            truncated = truncated[:i] + '"'
+            logger.info("Closed open string in truncated JSON")
+
+        # Now balance braces/brackets
+        stack = []
+        in_str = False
+        j = 0
+        while j < len(truncated):
+            ch = truncated[j]
+            if ch == '\\' and in_str:
+                j += 2
+                continue
+            if ch == '"':
+                in_str = not in_str
+            elif not in_str:
+                if ch == '{':
+                    stack.append('}')
+                elif ch == '[':
+                    stack.append(']')
+                elif ch in ']}' and stack and stack[-1] == ch:
+                    stack.pop()
+            j += 1
+
+        if stack:
+            truncated += ''.join(reversed(stack))
+            logger.info(f"Balanced {len(stack)} unclosed braces/brackets in truncated JSON")
+
+        # Remove trailing commas before closing braces
+        truncated = re.sub(r',\s*([\]}])', r'\1', truncated)
+        return json.loads(truncated)
+    except (json.JSONDecodeError, Exception):
+        logger.info("Aggressive truncation recovery didn't yield valid JSON")
+
     # Log failure details for debugging
     logger.error(f"Failed to parse JSON after all recovery attempts: {original_text[:100]}...")
     raise ValueError("Could not parse response as JSON after multiple recovery attempts") 

@@ -74,11 +74,12 @@ import { ChatMessageItem } from './components/ChatMessageItem';
 import { GroupedTraceMessages } from './components/GroupedTraceMessages';
 import { KnowledgeFileUpload } from './KnowledgeFileUpload';
 import SlashCommandMenu from './components/SlashCommandMenu';
+import { HtmlPreviewDialog } from './components/HtmlPreviewDialog';
 
 const WorkflowChat: React.FC<WorkflowChatProps> = ({
   onNodesGenerated,
   onLoadingStateChange,
-  selectedModel = 'databricks-llama-4-maverick',
+  selectedModel = 'databricks-gpt-5-3-codex',
   selectedTools = [],
   isVisible = true,
   setSelectedModel,
@@ -2082,7 +2083,11 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                           if (displayName.includes('meta-llama-3-3-70b')) return 'Llama 3.3 70B';
                           if (displayName.includes('gpt-5-mini')) return 'GPT-5 Mini';
                           if (displayName.includes('gpt-5-nano')) return 'GPT-5 Nano';
+                          if (displayName.includes('gpt-5-3-codex')) return 'GPT-5.3 Codex';
                           if (displayName.includes('gpt-5-2') || displayName.includes('gpt-5.2')) return 'GPT-5.2';
+                          if (displayName.includes('gpt-5-1-codex-max')) return 'GPT-5.1 Codex Max';
+                          if (displayName.includes('gpt-5-1-codex-mini')) return 'GPT-5.1 Codex Mini';
+                          if (displayName.includes('gpt-5-1')) return 'GPT-5.1';
                           if (displayName.includes('gpt-5')) return 'GPT-5';
                           if (displayName.includes('gemini-2-5-pro')) return 'Gemini 2.5 Pro';
                           if (displayName.includes('gemini-2-5-flash')) return 'Gemini 2.5 Flash';
@@ -2159,7 +2164,11 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                                 if (displayName.includes('meta-llama-3-3-70b')) return 'Llama 3.3 70B';
                                 if (displayName.includes('gpt-5-mini')) return 'GPT-5 Mini';
                                 if (displayName.includes('gpt-5-nano')) return 'GPT-5 Nano';
+                                if (displayName.includes('gpt-5-3-codex')) return 'GPT-5.3 Codex';
                                 if (displayName.includes('gpt-5-2') || displayName.includes('gpt-5.2')) return 'GPT-5.2';
+                                if (displayName.includes('gpt-5-1-codex-max')) return 'GPT-5.1 Codex Max';
+                                if (displayName.includes('gpt-5-1-codex-mini')) return 'GPT-5.1 Codex Mini';
+                                if (displayName.includes('gpt-5-1')) return 'GPT-5.1';
                                 if (displayName.includes('gpt-5')) return 'GPT-5';
                                 if (displayName.includes('gemini-2-5-pro')) return 'Gemini 2.5 Pro';
                                 if (displayName.includes('gemini-2-5-flash')) return 'Gemini 2.5 Flash';
@@ -2223,6 +2232,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           />
         </Box>
       </Paper>
+      <HtmlPreviewDialog />
     </Box>
   );
 };

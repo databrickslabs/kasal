@@ -98,14 +98,23 @@ class TraceBroadcastService:
         """
         Query DB for currently running job IDs.
         Used when global SSE stream is connected but no per-job connections exist.
+
+        When Lakebase is active, execution_history lives there, so we use the
+        smart session (execute_db_operation_smart). Falls back to the provided
+        local session otherwise.
         """
         try:
-            query = (
-                select(ExecutionHistory.job_id)
-                .where(ExecutionHistory.status.in_(["RUNNING", "running"]))
-            )
-            result = await session.execute(query)
-            return {row[0] for row in result.fetchall() if row[0]}
+            from src.utils.asyncio_utils import execute_db_operation_smart
+
+            async def _query(s: AsyncSession) -> Set[str]:
+                query = (
+                    select(ExecutionHistory.job_id)
+                    .where(ExecutionHistory.status.in_(["RUNNING", "running"]))
+                )
+                result = await s.execute(query)
+                return {row[0] for row in result.fetchall() if row[0]}
+
+            return await execute_db_operation_smart(_query)
         except Exception as e:
             logger.error(f"[TraceBroadcastService] Error querying running jobs: {e}")
             return set()

@@ -28,7 +28,7 @@ const EnginesConfiguration: React.FC = () => {
     setCrewAIFlowEnabled
   } = useFlowConfigStore();
   const { inputMode, setInputMode } = useCrewExecutionStore();
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
 

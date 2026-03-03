@@ -302,3 +302,213 @@ class TestRunInThreadWithLoop:
             assert result == "result"
             # Verify the success log message was called (line 158)
             mock_logger.info.assert_called_with("Successfully closed the event loop created for this thread")
+
+
+# ---------------------------------------------------------------------------
+# execute_db_operation_smart — retry + raise logic
+# ---------------------------------------------------------------------------
+
+def _make_async_ctx(session):
+    """Create an async context manager that yields *session*."""
+    class _Ctx:
+        async def __aenter__(self):
+            return session
+        async def __aexit__(self, *args):
+            return False
+    return _Ctx()
+
+
+class TestExecuteDbOperationSmart:
+    """Test execute_db_operation_smart with retry and fallback behavior."""
+
+    @pytest.mark.asyncio
+    async def test_lakebase_disabled_uses_local_engine(self):
+        """When Lakebase is disabled, delegate to execute_db_operation_with_fresh_engine."""
+        expected = "local_result"
+
+        async def op(session):
+            return expected
+
+        with patch(
+            "src.db.database_router.is_lakebase_enabled",
+            new_callable=AsyncMock,
+            return_value=False,
+        ), patch(
+            "src.utils.asyncio_utils.execute_db_operation_with_fresh_engine",
+            new_callable=AsyncMock,
+            return_value=expected,
+        ) as mock_local:
+            from src.utils.asyncio_utils import execute_db_operation_smart
+
+            result = await execute_db_operation_smart(op)
+            assert result == expected
+            mock_local.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_lakebase_enabled_success_on_first_attempt(self):
+        """When Lakebase succeeds on first attempt, return result and record connection."""
+        expected = "lakebase_result"
+        lakebase_session = AsyncMock()
+
+        async def op(session):
+            return expected
+
+        lakebase_config = {"instance_name": "test-instance"}
+
+        with patch(
+            "src.db.database_router.is_lakebase_enabled",
+            new_callable=AsyncMock,
+            return_value=True,
+        ), patch(
+            "src.db.database_router.get_lakebase_config_from_db",
+            new_callable=AsyncMock,
+            return_value=lakebase_config,
+        ), patch(
+            "src.db.lakebase_session.get_lakebase_session",
+            return_value=_make_async_ctx(lakebase_session),
+        ), patch(
+            "src.utils.databricks_auth.get_auth_context",
+            new_callable=AsyncMock,
+            return_value=None,
+        ), patch(
+            "src.db.lakebase_state.record_successful_connection",
+        ) as mock_record:
+            from src.utils.asyncio_utils import execute_db_operation_smart
+
+            result = await execute_db_operation_smart(op)
+            assert result == expected
+            mock_record.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_lakebase_fails_all_retries_startup_falls_back(self):
+        """When all retries fail during startup (fallback allowed), fall back to local DB."""
+        expected = "local_fallback"
+
+        async def op(session):
+            return expected
+
+        lakebase_config = {"instance_name": "test-instance"}
+
+        class _FailingCtx:
+            async def __aenter__(self):
+                raise ConnectionError("unreachable")
+            async def __aexit__(self, *args):
+                return False
+
+        with patch(
+            "src.db.database_router.is_lakebase_enabled",
+            new_callable=AsyncMock,
+            return_value=True,
+        ), patch(
+            "src.db.database_router.get_lakebase_config_from_db",
+            new_callable=AsyncMock,
+            return_value=lakebase_config,
+        ), patch(
+            "src.db.lakebase_session.get_lakebase_session",
+            side_effect=lambda *a, **kw: _FailingCtx(),
+        ), patch(
+            "src.utils.databricks_auth.get_auth_context",
+            new_callable=AsyncMock,
+            return_value=None,
+        ), patch(
+            "src.db.lakebase_state.is_fallback_allowed",
+            return_value=True,
+        ), patch(
+            "asyncio.sleep",
+            new_callable=AsyncMock,
+        ), patch(
+            "src.utils.asyncio_utils.execute_db_operation_with_fresh_engine",
+            new_callable=AsyncMock,
+            return_value=expected,
+        ) as mock_local:
+            from src.utils.asyncio_utils import execute_db_operation_smart
+
+            result = await execute_db_operation_smart(op)
+            assert result == expected
+            mock_local.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_lakebase_fails_all_retries_runtime_raises(self):
+        """When all retries fail at runtime (fallback NOT allowed), raise RuntimeError."""
+        async def op(session):
+            return "should not reach"
+
+        lakebase_config = {"instance_name": "test-instance"}
+
+        class _FailingCtx:
+            async def __aenter__(self):
+                raise ConnectionError("unreachable")
+            async def __aexit__(self, *args):
+                return False
+
+        with patch(
+            "src.db.database_router.is_lakebase_enabled",
+            new_callable=AsyncMock,
+            return_value=True,
+        ), patch(
+            "src.db.database_router.get_lakebase_config_from_db",
+            new_callable=AsyncMock,
+            return_value=lakebase_config,
+        ), patch(
+            "src.db.lakebase_session.get_lakebase_session",
+            side_effect=lambda *a, **kw: _FailingCtx(),
+        ), patch(
+            "src.utils.databricks_auth.get_auth_context",
+            new_callable=AsyncMock,
+            return_value=None,
+        ), patch(
+            "src.db.lakebase_state.is_fallback_allowed",
+            return_value=False,
+        ), patch(
+            "asyncio.sleep",
+            new_callable=AsyncMock,
+        ):
+            from src.utils.asyncio_utils import execute_db_operation_smart
+
+            with pytest.raises(RuntimeError, match="unreachable"):
+                await execute_db_operation_smart(op)
+
+    @pytest.mark.asyncio
+    async def test_retry_backoff_delays(self):
+        """Verify retry loop uses correct exponential backoff delays."""
+        async def op(session):
+            return "should not reach"
+
+        lakebase_config = {"instance_name": "test-instance"}
+
+        class _FailingCtx:
+            async def __aenter__(self):
+                raise ConnectionError("unreachable")
+            async def __aexit__(self, *args):
+                return False
+
+        with patch(
+            "src.db.database_router.is_lakebase_enabled",
+            new_callable=AsyncMock,
+            return_value=True,
+        ), patch(
+            "src.db.database_router.get_lakebase_config_from_db",
+            new_callable=AsyncMock,
+            return_value=lakebase_config,
+        ), patch(
+            "src.db.lakebase_session.get_lakebase_session",
+            side_effect=lambda *a, **kw: _FailingCtx(),
+        ), patch(
+            "src.utils.databricks_auth.get_auth_context",
+            new_callable=AsyncMock,
+            return_value=None,
+        ), patch(
+            "src.db.lakebase_state.is_fallback_allowed",
+            return_value=False,
+        ), patch(
+            "asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as mock_sleep:
+            from src.utils.asyncio_utils import execute_db_operation_smart
+
+            with pytest.raises(RuntimeError):
+                await execute_db_operation_smart(op)
+
+            assert mock_sleep.await_count == 2
+            mock_sleep.assert_any_await(0.5)
+            mock_sleep.assert_any_await(1.0)

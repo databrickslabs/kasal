@@ -478,12 +478,14 @@ class TestPromptUtilsLoggingCoverage:
         """Test JSON with unbalanced brackets to trigger logging (lines 146-147)."""
         # JSON with more opening brackets than closing ones
         json_with_unbalanced_brackets = '{"array": ["item1", ["nested"'
-        
+
         with patch('src.utils.prompt_utils.logger') as mock_logger:
             try:
                 result = robust_json_parser(json_with_unbalanced_brackets)
-                # If successful, should log the bracket addition
-                mock_logger.info.assert_any_call("Added 2 closing brackets")
+                # The aggressive truncation recovery (Step 9) kicks in and logs
+                # "Balanced N unclosed braces/brackets in truncated JSON"
+                info_calls = [str(c) for c in mock_logger.info.call_args_list]
+                assert any("Balanced" in c and "unclosed braces/brackets" in c for c in info_calls)
             except ValueError:
                 # May not always be recoverable
                 pass
@@ -504,12 +506,14 @@ class TestPromptUtilsLoggingCoverage:
     def test_parse_json_ending_with_open_brace_logging(self):
         """Test JSON ending with open brace to trigger logging (lines 162-163)."""
         json_ending_with_brace = '{"valid": "data", "nested": {'
-        
+
         with patch('src.utils.prompt_utils.logger') as mock_logger:
             try:
                 result = robust_json_parser(json_ending_with_brace)
-                # Should log the object completion
-                mock_logger.info.assert_any_call("Completed truncated object")
+                # The aggressive truncation recovery (Step 9) kicks in and logs
+                # "Balanced N unclosed braces/brackets in truncated JSON"
+                info_calls = [str(c) for c in mock_logger.info.call_args_list]
+                assert any("Balanced" in c and "unclosed braces/brackets" in c for c in info_calls)
             except ValueError:
                 # May not always be recoverable
                 pass
@@ -517,12 +521,14 @@ class TestPromptUtilsLoggingCoverage:
     def test_parse_json_ending_with_open_bracket_logging(self):
         """Test JSON ending with open bracket to trigger logging (lines 165-166)."""
         json_ending_with_bracket = '{"valid": "data", "array": ['
-        
+
         with patch('src.utils.prompt_utils.logger') as mock_logger:
             try:
                 result = robust_json_parser(json_ending_with_bracket)
-                # Should log the array completion
-                mock_logger.info.assert_any_call("Completed truncated array")
+                # The aggressive truncation recovery (Step 9) kicks in and logs
+                # "Balanced N unclosed braces/brackets in truncated JSON"
+                info_calls = [str(c) for c in mock_logger.info.call_args_list]
+                assert any("Balanced" in c and "unclosed braces/brackets" in c for c in info_calls)
             except ValueError:
                 # May not always be recoverable
                 pass

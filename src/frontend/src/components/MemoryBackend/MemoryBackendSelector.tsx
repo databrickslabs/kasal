@@ -86,9 +86,9 @@ export const MemoryBackendSelector: React.FC<MemoryBackendSelectorProps> = ({
     }
 
     if (value.backend_type === MemoryBackendType.DATABRICKS) {
-      const isConfigured = value.databricks_config?.endpoint_name && 
+      const isConfigured = value.databricks_config?.endpoint_name &&
                           value.databricks_config?.short_term_index;
-      
+
       if (isConfigured) {
         return (
           <Chip
@@ -110,6 +110,30 @@ export const MemoryBackendSelector: React.FC<MemoryBackendSelectorProps> = ({
       }
     }
 
+    if (value.backend_type === MemoryBackendType.LAKEBASE) {
+      const isConfigured = value.lakebase_config?.tables_initialized;
+
+      if (isConfigured) {
+        return (
+          <Chip
+            icon={<CheckCircleIcon />}
+            label="Tables Ready"
+            color="success"
+            size="small"
+          />
+        );
+      } else {
+        return (
+          <Chip
+            icon={<WarningIcon />}
+            label="Tables Not Initialized"
+            color="warning"
+            size="small"
+          />
+        );
+      }
+    }
+
     return null;
   };
 
@@ -123,6 +147,11 @@ export const MemoryBackendSelector: React.FC<MemoryBackendSelectorProps> = ({
         parts.push(`Index: ${value.databricks_config.short_term_index}`);
       }
       return parts.join(' | ');
+    }
+    if (value.backend_type === MemoryBackendType.LAKEBASE && value.lakebase_config) {
+      const dim = value.lakebase_config.embedding_dimension || 1024;
+      const initialized = value.lakebase_config.tables_initialized ? 'Initialized' : 'Not initialized';
+      return `Dimension: ${dim} | Tables: ${initialized}`;
     }
     return '';
   };
@@ -138,6 +167,19 @@ export const MemoryBackendSelector: React.FC<MemoryBackendSelectorProps> = ({
               const newType = e.target.value as MemoryBackendType;
               if (newType === MemoryBackendType.DEFAULT) {
                 onChange({ ...DEFAULT_MEMORY_BACKEND_CONFIG, backend_type: newType });
+              } else if (newType === MemoryBackendType.LAKEBASE) {
+                onChange({
+                  ...DEFAULT_MEMORY_BACKEND_CONFIG,
+                  backend_type: newType,
+                  lakebase_config: {
+                    embedding_dimension: 1024,
+                    short_term_table: 'crew_short_term_memory',
+                    long_term_table: 'crew_long_term_memory',
+                    entity_table: 'crew_entity_memory',
+                    tables_initialized: false,
+                  },
+                });
+                handleOpenDialog();
               } else {
                 handleOpenDialog();
               }

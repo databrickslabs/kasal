@@ -2,7 +2,8 @@ import React from 'react';
 
 export function useExecutionHistoryResize(
   setExecutionHistoryHeight: (height: number) => void,
-  setHasManuallyResized: (resized: boolean) => void
+  setHasManuallyResized: (resized: boolean) => void,
+  maxHeightOverride?: number
 ): { handleHistoryResizeStart: (e: React.MouseEvent) => void } {
   const [isResizingHistory, setIsResizingHistory] = React.useState(false);
   const throttleRef = React.useRef<number>(0);
@@ -22,11 +23,11 @@ export function useExecutionHistoryResize(
 
       const newHeight = window.innerHeight - e.clientY;
       const minHeight = 100; // Minimum height for execution history
-      const maxHeight = Math.min(500, window.innerHeight * 0.5); // Max 50% of screen or 500px
+      const maxHeight = maxHeightOverride ?? Math.min(500, window.innerHeight * 0.5); // Max 50% of screen or 500px
 
       setExecutionHistoryHeight(Math.min(Math.max(newHeight, minHeight), maxHeight));
     },
-    [isResizingHistory, setExecutionHistoryHeight]
+    [isResizingHistory, setExecutionHistoryHeight, maxHeightOverride]
   );
 
   const handleHistoryResizeEnd = React.useCallback(() => {
