@@ -1,4 +1,5 @@
 import axios from 'axios';
+import toast from 'react-hot-toast';
 
 export const config = {
   apiUrl:
@@ -56,6 +57,14 @@ apiClient.interceptors.response.use(
         expectedNotFoundEndpoints.some(endpoint =>
           error.config?.url?.includes(endpoint)
         );
+
+      // Show a single deduplicated toast for Lakebase / database outages
+      if (error.response.status === 503) {
+        toast.error('Database connection issue — please try again shortly.', {
+          id: 'lakebase-503',
+          duration: 5000,
+        });
+      }
 
       // Don't log 404 errors for configuration endpoints or other expected cases
       if (!isExpected404 && error.response.status !== 404) {
