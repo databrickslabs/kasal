@@ -776,8 +776,8 @@ class TestGetSmartDbSessionLakebaseFallback:
     """Tests for get_smart_db_session when Lakebase connection fails BEFORE yield."""
 
     @pytest.mark.asyncio
-    async def test_falls_back_to_regular_db_on_connection_failure(self):
-        """When Lakebase connection fails before yield, fall back to regular DB."""
+    async def test_falls_back_to_regular_db_on_connection_failure_during_startup(self):
+        """When Lakebase fails before yield and fallback is allowed (startup), fall back to regular DB."""
         regular_session = AsyncMock()
 
         lakebase_config = {
@@ -797,6 +797,7 @@ class TestGetSmartDbSessionLakebaseFallback:
         mock_request_session.set.return_value = mock_token
 
         # get_lakebase_session raises an error (connection failure before yield)
+        # Must return a new _FailingCtx each time since the retry loop calls it 3 times
         class _FailingCtx:
             async def __aenter__(self):
                 raise ConnectionError("Lakebase unreachable")
@@ -821,7 +822,7 @@ class TestGetSmartDbSessionLakebaseFallback:
             ),
             patch(
                 "src.db.database_router.get_lakebase_session",
-                return_value=_FailingCtx(),
+                side_effect=lambda *a, **kw: _FailingCtx(),
             ),
             patch(
                 "src.utils.databricks_auth.get_auth_context",
@@ -830,6 +831,8 @@ class TestGetSmartDbSessionLakebaseFallback:
             ),
             patch("src.db.database_router.async_session_factory", mock_regular_factory),
             patch("src.db.database_router._request_session", mock_request_session),
+            patch("src.db.database_router.is_fallback_allowed", return_value=True),
+            patch("src.db.database_router.asyncio.sleep", new_callable=AsyncMock),
         ):
             from src.db.database_router import get_smart_db_session
 
@@ -847,8 +850,183 @@ class TestGetSmartDbSessionLakebaseFallback:
             regular_session.close.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_raises_lakebase_unavailable_when_fallback_disabled(self):
+        """When Lakebase fails and fallback is NOT allowed (runtime), raise LakebaseUnavailableError."""
+        from src.core.exceptions import LakebaseUnavailableError
+
+        lakebase_config = {
+            "enabled": True,
+            "endpoint": "https://example.com",
+            "migration_completed": True,
+            "instance_name": "test-instance",
+        }
+
+        mock_auth = MagicMock()
+        mock_auth.token = "fake-token"
+        mock_auth.user_identity = "user@example.com"
+        mock_auth.auth_method = "obo"
+
+        class _FailingCtx:
+            async def __aenter__(self):
+                raise ConnectionError("Lakebase unreachable")
+
+            async def __aexit__(self, *args):
+                return False
+
+        with (
+            patch(
+                "src.db.database_router.is_lakebase_enabled",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch(
+                "src.db.database_router.get_lakebase_config_from_db",
+                new_callable=AsyncMock,
+                return_value=lakebase_config,
+            ),
+            patch(
+                "src.db.database_router.get_lakebase_session",
+                side_effect=lambda *a, **kw: _FailingCtx(),
+            ),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=mock_auth,
+            ),
+            patch("src.db.database_router.is_fallback_allowed", return_value=False),
+            patch("src.db.database_router.asyncio.sleep", new_callable=AsyncMock),
+        ):
+            from src.db.database_router import get_smart_db_session
+
+            gen = get_smart_db_session()
+            with pytest.raises(LakebaseUnavailableError):
+                await gen.__anext__()
+
+    @pytest.mark.asyncio
+    async def test_retry_succeeds_on_second_attempt(self):
+        """When Lakebase fails once then succeeds, the second attempt works."""
+        lakebase_session = AsyncMock()
+
+        lakebase_config = {
+            "enabled": True,
+            "endpoint": "https://example.com",
+            "migration_completed": True,
+            "instance_name": "test-instance",
+        }
+
+        mock_auth = MagicMock()
+        mock_auth.token = "fake-token"
+        mock_auth.user_identity = "user@example.com"
+        mock_auth.auth_method = "obo"
+
+        mock_token = MagicMock(spec=Token)
+        mock_request_session = MagicMock()
+        mock_request_session.set.return_value = mock_token
+
+        call_count = 0
+
+        class _IntermittentCtx:
+            async def __aenter__(self):
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    raise ConnectionError("first attempt fails")
+                return lakebase_session
+
+            async def __aexit__(self, *args):
+                return False
+
+        with (
+            patch(
+                "src.db.database_router.is_lakebase_enabled",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch(
+                "src.db.database_router.get_lakebase_config_from_db",
+                new_callable=AsyncMock,
+                return_value=lakebase_config,
+            ),
+            patch(
+                "src.db.database_router.get_lakebase_session",
+                side_effect=lambda *a, **kw: _IntermittentCtx(),
+            ),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=mock_auth,
+            ),
+            patch("src.db.database_router._request_session", mock_request_session),
+            patch("src.db.database_router.record_successful_connection") as mock_record,
+            patch("src.db.database_router.asyncio.sleep", new_callable=AsyncMock),
+        ):
+            from src.db.database_router import get_smart_db_session
+
+            gen = get_smart_db_session()
+            session = await gen.__anext__()
+
+            assert session is lakebase_session
+            mock_record.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_retry_uses_exponential_backoff(self):
+        """Verify retry loop calls asyncio.sleep with exponential backoff delays."""
+        lakebase_config = {
+            "enabled": True,
+            "endpoint": "https://example.com",
+            "migration_completed": True,
+            "instance_name": "test-instance",
+        }
+
+        mock_auth = MagicMock()
+        mock_auth.token = "fake-token"
+        mock_auth.user_identity = "user@example.com"
+        mock_auth.auth_method = "obo"
+
+        class _FailingCtx:
+            async def __aenter__(self):
+                raise ConnectionError("Lakebase unreachable")
+
+            async def __aexit__(self, *args):
+                return False
+
+        with (
+            patch(
+                "src.db.database_router.is_lakebase_enabled",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch(
+                "src.db.database_router.get_lakebase_config_from_db",
+                new_callable=AsyncMock,
+                return_value=lakebase_config,
+            ),
+            patch(
+                "src.db.database_router.get_lakebase_session",
+                side_effect=lambda *a, **kw: _FailingCtx(),
+            ),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=mock_auth,
+            ),
+            patch("src.db.database_router.is_fallback_allowed", return_value=False),
+            patch("src.db.database_router.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+        ):
+            from src.db.database_router import get_smart_db_session
+
+            gen = get_smart_db_session()
+            with pytest.raises(Exception):
+                await gen.__anext__()
+
+            # Should have slept twice (before retry 2 and retry 3)
+            assert mock_sleep.await_count == 2
+            mock_sleep.assert_any_await(0.5)
+            mock_sleep.assert_any_await(1.0)
+
+    @pytest.mark.asyncio
     async def test_fallback_regular_db_rollbacks_on_handler_error(self):
-        """When Lakebase fails pre-yield and the handler errors on regular DB, rollback."""
+        """When Lakebase fails pre-yield (startup) and the handler errors on regular DB, rollback."""
         regular_session = AsyncMock()
 
         lakebase_config = {
@@ -886,7 +1064,7 @@ class TestGetSmartDbSessionLakebaseFallback:
             ),
             patch(
                 "src.db.database_router.get_lakebase_session",
-                return_value=_FailingCtx(),
+                side_effect=lambda *a, **kw: _FailingCtx(),
             ),
             patch(
                 "src.utils.databricks_auth.get_auth_context",
@@ -895,6 +1073,8 @@ class TestGetSmartDbSessionLakebaseFallback:
             ),
             patch("src.db.database_router.async_session_factory", mock_regular_factory),
             patch("src.db.database_router._request_session", mock_request_session),
+            patch("src.db.database_router.is_fallback_allowed", return_value=True),
+            patch("src.db.database_router.asyncio.sleep", new_callable=AsyncMock),
         ):
             from src.db.database_router import get_smart_db_session
 
