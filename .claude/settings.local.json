@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:docs.databricks.com)",
+      "mcp__chrome-devtools__navigate_page",
+      "mcp__chrome-devtools__take_snapshot",
+      "mcp__chrome-devtools__wait_for",
+      "mcp__chrome-devtools__click",
+      "mcp__chrome-devtools__take_screenshot",
+      "mcp__chrome-devtools__fill",
+      "WebFetch(domain:databricks.atlassian.net)",
+      "WebFetch(domain:databricks.freshservice.com)",
+      "WebFetch(domain:help.tableau.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:kylejmassey.com)",
+      "mcp__plugin_databricks-ai-dev-kit_databricks__get_lakebase_database"
+    ]
+  }
+}
