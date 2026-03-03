@@ -92,6 +92,7 @@ async def execute_db_operation_smart(operation: Callable[[AsyncSession], Corouti
         import os
         from src.db.database_router import get_lakebase_config_from_db
         from src.db.lakebase_session import get_lakebase_session
+        from src.db.lakebase_state import is_fallback_allowed, record_successful_connection
         from src.utils.databricks_auth import get_auth_context
 
         config = await get_lakebase_config_from_db()
@@ -109,13 +110,36 @@ async def execute_db_operation_smart(operation: Callable[[AsyncSession], Corouti
         except Exception:
             pass  # Will rely on other auth methods inside lakebase session
 
-        try:
-            async with get_lakebase_session(instance_name, user_token, user_email) as session:
-                result = await operation(session)
-                return result
-        except Exception as e:
-            logger.warning(f"Lakebase session failed, falling back to local DB: {e}")
-            # Fall through to local DB below
+        max_retries = 3
+        backoff_delays = [0.5, 1.0, 2.0]
+        last_error: Exception | None = None
+
+        for attempt in range(max_retries):
+            try:
+                async with get_lakebase_session(instance_name, user_token, user_email) as session:
+                    record_successful_connection()
+                    result = await operation(session)
+                    return result
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    delay = backoff_delays[attempt]
+                    logger.warning(
+                        f"Lakebase operation attempt {attempt + 1}/{max_retries} failed: {e}. "
+                        f"Retrying in {delay}s..."
+                    )
+                    await asyncio.sleep(delay)
+
+        # All retries exhausted
+        if is_fallback_allowed():
+            logger.warning(
+                f"Lakebase unavailable during startup after {max_retries} attempts, "
+                f"falling back to local DB: {last_error}"
+            )
+        else:
+            raise RuntimeError(
+                f"Lakebase database unreachable after {max_retries} retries: {last_error}"
+            )
 
     # Local DB fallback (or Lakebase not enabled)
     return await execute_db_operation_with_fresh_engine(operation)
