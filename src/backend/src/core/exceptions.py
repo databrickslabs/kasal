@@ -84,3 +84,10 @@ class UnprocessableEntityError(KasalError):
 
     status_code = 422
     detail = "Unprocessable entity"
+
+
+class LakebaseUnavailableError(KasalError):
+    """Lakebase database is unreachable after retries (503)."""
+
+    status_code = 503
+    detail = "Database connection unavailable"

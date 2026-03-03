@@ -1047,6 +1047,28 @@ class ProcessFlowExecutor:
         os.environ['KASAL_EXECUTION_ID'] = execution_id
         logger.info(f"[ProcessFlowExecutor] Set KASAL_EXECUTION_ID={execution_id} for subprocess inheritance")
 
+        # Propagate Lakebase config to subprocess so the OTel trace exporter
+        # writes traces to Lakebase instead of the local DB when Lakebase is active.
+        old_lakebase_active = os.environ.get("LAKEBASE_ACTIVE")
+        old_lakebase_instance = os.environ.get("LAKEBASE_INSTANCE_NAME")
+        try:
+            from src.db.database_router import is_lakebase_enabled, get_lakebase_config_from_db
+            lakebase_enabled = await is_lakebase_enabled()
+            if lakebase_enabled:
+                os.environ["LAKEBASE_ACTIVE"] = "true"
+                lakebase_config = await get_lakebase_config_from_db()
+                if lakebase_config:
+                    inst = lakebase_config.get("instance_name") or os.environ.get("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
+                    os.environ["LAKEBASE_INSTANCE_NAME"] = inst
+                logger.info(
+                    f"[ProcessFlowExecutor] Lakebase active — set LAKEBASE_ACTIVE=true, "
+                    f"LAKEBASE_INSTANCE_NAME={os.environ.get('LAKEBASE_INSTANCE_NAME')}"
+                )
+            else:
+                os.environ.pop("LAKEBASE_ACTIVE", None)
+        except Exception as e:
+            logger.debug(f"[ProcessFlowExecutor] Could not check Lakebase status: {e}")
+
         try:
             # Create and start the subprocess
             process = self._ctx.Process(
@@ -1067,6 +1089,13 @@ class ProcessFlowExecutor:
                 os.environ['KASAL_EXECUTION_ID'] = old_kasal_exec_id
             else:
                 os.environ.pop('KASAL_EXECUTION_ID', None)
+            # Restore Lakebase env vars
+            if old_lakebase_active is not None:
+                os.environ["LAKEBASE_ACTIVE"] = old_lakebase_active
+            else:
+                os.environ.pop("LAKEBASE_ACTIVE", None)
+            if old_lakebase_instance is not None:
+                os.environ["LAKEBASE_INSTANCE_NAME"] = old_lakebase_instance
 
         # Wait for result in background
         loop = asyncio.get_event_loop()

@@ -52,11 +52,15 @@ class DispatcherService:
     """Service for dispatching natural language requests to generation services."""
 
     # --- Confidence & scoring constants ---
-    SEMANTIC_CONFIDENCE_NORMALIZER = 5.0
+    SEMANTIC_CONFIDENCE_NORMALIZER = 10.0
     SEMANTIC_FALLBACK_MIN_CONFIDENCE = 0.3
-    SEMANTIC_OVERRIDE_THRESHOLD = 0.6
-    LLM_CONFIDENCE_WEAK_THRESHOLD = 0.7
-    DEFAULT_FALLBACK_CONFIDENCE = 0.3
+    SEMANTIC_OVERRIDE_THRESHOLD = 0.7
+    LLM_CONFIDENCE_WEAK_THRESHOLD = 0.85
+    DEFAULT_FALLBACK_CONFIDENCE = 0.5
+
+    # --- Crew-first scoring constants ---
+    CREW_BASE_SCORE = 6  # Crew is the default intent
+    MULTI_STEP_BONUS = 4  # Bonus when multi-step workflow detected
 
     # --- Retry / timeout constants ---
     LLM_MAX_RETRIES = 3
@@ -90,130 +94,52 @@ class DispatcherService:
     _concurrency_semaphore: Optional[asyncio.Semaphore] = None
     _max_concurrent_detections = 10
 
-    # Task-related action words that indicate the user wants to create a task
+    # General action verbs — used for multi-step and imperative detection.
+    # These boost the crew score (not task score). Kept to core verbs only;
+    # words that overlap with EXECUTE_KEYWORDS or CONFIGURE_KEYWORDS are
+    # excluded to avoid false signals.
     TASK_ACTION_WORDS = {
-        "find",
-        "search",
-        "locate",
-        "discover",
-        "identify",
-        "get",
-        "fetch",
-        "retrieve",
-        "analyze",
-        "examine",
-        "study",
-        "investigate",
-        "review",
-        "assess",
-        "evaluate",
-        "create",
-        "make",
-        "build",
-        "generate",
-        "produce",
-        "develop",
-        "construct",
-        "write",
-        "compose",
-        "draft",
-        "prepare",
-        "document",
-        "record",
-        "note",
-        "calculate",
-        "compute",
-        "determine",
-        "measure",
-        "count",
-        "sum",
-        "total",
-        "compare",
-        "contrast",
-        "match",
-        "relate",
-        "connect",
-        "link",
-        "associate",
-        "organize",
-        "sort",
-        "arrange",
-        "group",
-        "categorize",
-        "classify",
-        "order",
-        "summarize",
-        "abstract",
-        "condense",
-        "outline",
-        "highlight",
-        "extract",
-        "process",
-        "handle",
-        "manage",
-        "coordinate",
-        "execute",
-        "perform",
-        "run",
-        "check",
-        "verify",
-        "validate",
-        "confirm",
-        "test",
-        "inspect",
-        "audit",
-        "monitor",
-        "track",
-        "watch",
-        "observe",
-        "follow",
-        "supervise",
-        "oversee",
-        "update",
-        "modify",
-        "change",
-        "edit",
-        "revise",
-        "adjust",
-        "alter",
-        "send",
-        "deliver",
-        "transmit",
-        "forward",
-        "share",
-        "distribute",
-        "dispatch",
-        "collect",
-        "gather",
-        "compile",
-        "accumulate",
-        "assemble",
-        "combine",
-        "convert",
-        "transform",
-        "translate",
-        "adapt",
-        "format",
-        "parse",
-        "decode",
+        "find", "search", "locate", "discover", "identify",
+        "get", "fetch", "retrieve", "collect", "gather",
+        "analyze", "examine", "study", "investigate", "review",
+        "assess", "evaluate", "compare", "contrast",
+        "create", "make", "build", "generate", "produce", "develop",
+        "write", "compose", "draft", "prepare", "document",
+        "calculate", "compute", "determine", "measure",
+        "summarize", "condense", "extract", "compile",
+        "organize", "sort", "categorize", "classify",
+        "check", "verify", "validate", "test", "inspect", "audit",
+        "monitor", "track",
+        "send", "deliver", "share", "distribute",
+        "convert", "transform", "translate", "format", "parse",
     }
 
-    # Agent-related keywords
+    # Agent-related keywords — ONLY explicit agent entity words
+    # Role descriptors (expert, analyst, etc.) are NOT here; they indicate
+    # specialisation which is better served by crew generation.
     AGENT_KEYWORDS = {
         "agent",
         "assistant",
         "bot",
         "robot",
-        "ai",
-        "helper",
-        "specialist",
-        "expert",
-        "analyst",
-        "advisor",
-        "consultant",
-        "operator",
-        "worker",
+        "chatbot",
     }
+
+    # Patterns that indicate explicit single-agent creation intent
+    AGENT_CREATION_PATTERNS = [
+        r"\b(create|make|build|generate|develop)\b.*\b(an?\s+)?(agent|bot|assistant|chatbot)\b",
+        r"\b(i need|give me|set up)\b.*\b(an?\s+)?(agent|bot|assistant|chatbot)\b",
+    ]
+
+    # Multi-step workflow indicators — boost crew score
+    MULTI_STEP_PATTERNS = [
+        r"\bthen\b",                       # "research then write then present"
+        r",\s*[a-z]+\s+(and|then)\b",      # comma-separated action chain
+        r"\band\b.*\b(create|write|build|make|generate|analyze|review|produce|prepare)\b",
+        r"\bstep\s*\d+\b",                 # "step 1, step 2"
+        r"\bfirst\b.*\bthen\b",            # "first X then Y"
+        r"\b(after|before|once|finally)\b", # sequential indicators
+    ]
 
     # Crew-related keywords (includes plan/strategy terms since they're functionally the same)
     CREW_KEYWORDS = {
@@ -520,45 +446,114 @@ class DispatcherService:
 
                 import mlflow
 
-                # Enable OBO → PAT → SPN fallback chain for MLflow authentication
-                # This matches the pattern used by LLM authentication
+                # MLflow auth: use SPN credentials (DATABRICKS_CLIENT_ID /
+                # DATABRICKS_CLIENT_SECRET / DATABRICKS_HOST) injected by the
+                # Databricks Apps platform.  Extract a bearer token up-front
+                # so the MLflow exporter uses simple HOST + TOKEN auth.
+                #
+                # The platform also injects DATABRICKS_TOKEN (a PAT) which
+                # conflicts with SPN in the SDK ("more than one authorization
+                # method").  We strip PAT vars before the SDK call and
+                # restore them after.
                 try:
-                    from src.utils.databricks_auth import (
-                        get_auth_context,
-                        is_scope_error,
+                    host = os.environ.get("DATABRICKS_HOST", "")
+                    client_id = os.environ.get("DATABRICKS_CLIENT_ID", "")
+                    client_secret = os.environ.get("DATABRICKS_CLIENT_SECRET", "")
+
+                    # NOTE: Databricks Apps proxy redacts log lines containing
+                    # words like SECRET/TOKEN/BEARER.  Use neutral wording.
+                    logger.info(
+                        "[Dispatcher] MLflow auth env — "
+                        "host=%s, spn_id=%s, spn_cred=%s",
+                        "yes" if host else "no",
+                        "yes" if client_id else "no",
+                        "yes" if client_secret else "no",
                     )
 
-                    # Extract user_token from group_context if available
-                    user_token = (
-                        getattr(group_context, "access_token", None)
-                        if group_context
-                        else None
-                    )
-
-                    # Try with OBO first (if user_token available)
-                    auth = asyncio.run(get_auth_context(user_token=user_token))
-                    if auth:
-                        os.environ["DATABRICKS_HOST"] = auth.workspace_url
-                        os.environ["DATABRICKS_TOKEN"] = auth.token
-                        logger.info(
-                            f"[Dispatcher] MLflow configured with {auth.auth_method} authentication"
-                        )
-                    else:
+                    # SPN credentials are required — skip MLflow if absent
+                    if not (host and client_id and client_secret):
                         logger.warning(
-                            "[Dispatcher] No Databricks authentication available for MLflow"
+                            "[Dispatcher] SPN credentials required for MLflow — skipping"
                         )
-                        return
+                        return False
 
-                    # Ensure Databricks tracking
+                    auth_method = None
+                    workspace_url = host.rstrip("/") if host else ""
+
+                    # Extract credential via SDK
+                    logger.info("[Dispatcher] Attempting SPN credential extraction")
+                    try:
+                        from databricks.sdk import WorkspaceClient as _WC
+
+                        logger.info("[Dispatcher] SDK imported OK")
+
+                        # Temporarily strip PAT/API-KEY from env to prevent
+                        # SDK dual-auth conflict (oauth + pat)
+                        _pat_backup = {}
+                        for _k in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY"):
+                            if _k in os.environ:
+                                _pat_backup[_k] = os.environ.pop(_k)
+                        try:
+                            w = _WC(
+                                host=host,
+                                client_id=client_id,
+                                client_secret=client_secret,
+                            )
+                            headers = w.config.authenticate()
+                        finally:
+                            os.environ.update(_pat_backup)
+
+                        logger.info("[Dispatcher] authenticate() returned OK")
+                        auth_header = headers.get("Authorization", "")
+                        logger.info(
+                            "[Dispatcher] auth header length=%d, prefix=%s",
+                            len(auth_header),
+                            auth_header[:7] if auth_header else "(empty)",
+                        )
+                        if auth_header.startswith("Bearer "):
+                            extracted = auth_header[len("Bearer "):]
+                            os.environ["DATABRICKS_TOKEN"] = extracted
+                            if not workspace_url.startswith("http"):
+                                workspace_url = f"https://{workspace_url}"
+                            os.environ["DATABRICKS_HOST"] = workspace_url
+                            auth_method = "service_principal"
+                            logger.info(
+                                "[Dispatcher] SPN credential set (len=%d)",
+                                len(extracted),
+                            )
+
+                            # NOTE: Do NOT remove SPN vars here — this runs
+                            # in the main server process and must preserve
+                            # them for subsequent requests.
+                        else:
+                            logger.warning(
+                                "[Dispatcher] Unexpected auth header format"
+                            )
+                    except Exception as spn_err:
+                        logger.warning(
+                            "[Dispatcher] SPN extraction failed: %s: %s",
+                            type(spn_err).__name__, spn_err,
+                        )
+
+                    if not auth_method:
+                        logger.warning(
+                            "[Dispatcher] SPN credential extraction failed — MLflow cannot be configured"
+                        )
+                        return False
+
                     mlflow.set_tracking_uri("databricks")
 
                     # Get MLflow experiment name from Databricks config via service
                     exp_name = "/Shared/kasal-crew-execution-traces"  # Default fallback
                     try:
-                        databricks_service = DatabricksService(group_id=group_id)
-                        db_config = asyncio.run(
-                            databricks_service.get_databricks_config()
-                        )
+                        from src.db.session import async_session_factory
+
+                        async def _fetch_experiment_name():
+                            async with async_session_factory() as sess:
+                                svc = DatabricksService(sess, group_id=group_id)
+                                return await svc.get_databricks_config()
+
+                        db_config = asyncio.run(_fetch_experiment_name())
                         if db_config and db_config.mlflow_experiment_name:
                             # Ensure experiment name starts with /Shared/ for proper organization
                             if not db_config.mlflow_experiment_name.startswith("/"):
@@ -570,44 +565,10 @@ class DispatcherService:
                             f"[Dispatcher] Could not fetch MLflow experiment name from config: {config_err}, using default"
                         )
 
-                    # Try to set experiment - this may fail with scope error if using OBO
-                    try:
-                        exp = mlflow.set_experiment(exp_name)
-                        logger.info(
-                            f"[Dispatcher] MLflow experiment set successfully with {auth.auth_method}"
-                        )
-                    except Exception as mlflow_e:
-                        # Check if this is a scope error (OBO token lacks MLflow permissions)
-                        if is_scope_error(mlflow_e) and user_token:
-                            logger.warning(
-                                f"[Dispatcher] OBO token lacks MLflow scopes, falling back to PAT/SPN: {mlflow_e}"
-                            )
-                            # Retry with PAT/SPN fallback (no user_token)
-                            auth_fallback = asyncio.run(
-                                get_auth_context(user_token=None)
-                            )
-                            if auth_fallback:
-                                os.environ["DATABRICKS_HOST"] = (
-                                    auth_fallback.workspace_url
-                                )
-                                os.environ["DATABRICKS_TOKEN"] = auth_fallback.token
-                                logger.info(
-                                    f"[Dispatcher] MLflow reconfigured with {auth_fallback.auth_method} authentication"
-                                )
-                                # Retry experiment creation with fallback auth
-                                mlflow.set_tracking_uri("databricks")
-                                exp = mlflow.set_experiment(exp_name)
-                                logger.info(
-                                    f"[Dispatcher] MLflow experiment set successfully with {auth_fallback.auth_method} fallback"
-                                )
-                            else:
-                                logger.error(
-                                    "[Dispatcher] PAT/SPN fallback auth also failed"
-                                )
-                                raise
-                        else:
-                            # Not a scope error or already using PAT/SPN, re-raise
-                            raise
+                    exp = mlflow.set_experiment(exp_name)
+                    logger.info(
+                        f"[Dispatcher] MLflow experiment set successfully with {auth_method}"
+                    )
 
                 except Exception as auth_e:
                     logger.warning(
@@ -663,7 +624,10 @@ class DispatcherService:
                     )
 
             # Run setup off the event loop
-            await asyncio.to_thread(_setup_mlflow_sync)
+            setup_ok = await asyncio.to_thread(_setup_mlflow_sync)
+            if setup_ok is False:
+                logger.info("[Dispatcher] MLflow setup returned False — tracing disabled")
+                return False
             logger.info(
                 "[Dispatcher] MLflow tracing configured (experiment and autolog)"
             )
@@ -776,6 +740,9 @@ class DispatcherService:
         """
         Perform semantic analysis on the message to extract intent hints.
 
+        Uses a **crew-first** approach: generate_crew is the default intent
+        and other intents must earn their score through explicit signals.
+
         Args:
             message: User's natural language message
 
@@ -783,7 +750,8 @@ class DispatcherService:
             Dictionary containing semantic analysis results
         """
         # Normalize message for analysis
-        words = re.findall(r"\b\w+\b", message.lower())
+        msg_lower = message.lower()
+        words = re.findall(r"\b\w+\b", msg_lower)
         word_set = set(words)
 
         # Count different types of keywords
@@ -805,13 +773,6 @@ class DispatcherService:
         )
         has_greeting = False  # Removed conversation detection
 
-        # Detect command-like structures
-        command_patterns = [
-            r"^(find|get|create|make|build|search|analyze)",  # Starts with action
-            r"^(i need|i want|help me|can you)",  # Request patterns
-            r"^(an order|a task|a job)",  # Task-like prefixes
-        ]
-
         # Detect configuration patterns
         configure_patterns = [
             r"(configure|config|setup|set up)",  # Configuration words
@@ -820,26 +781,65 @@ class DispatcherService:
             r"(llm|model|tools|maxr).*?(setting|config)",  # Configuration contexts
         ]
 
-        has_command_structure = any(
-            re.search(pattern, message.lower()) for pattern in command_patterns
-        )
         has_configure_structure = any(
-            re.search(pattern, message.lower()) for pattern in configure_patterns
+            re.search(pattern, msg_lower) for pattern in configure_patterns
         )
 
-        # Calculate intent suggestions based on semantic analysis
-        # Check for complex multi-agent/multi-task workflows
-        has_complex_task = len(task_actions) > 1 or bool(
-            re.search(r"multiple|several|all|various|different", message.lower())
+        # Multi-step workflow detection — boosts crew
+        has_multi_step = any(
+            re.search(pattern, msg_lower) for pattern in self.MULTI_STEP_PATTERNS
         )
+        has_multiple_actions = len(task_actions) > 1
+        has_complex_task = has_multiple_actions or bool(
+            re.search(r"multiple|several|all|various|different", msg_lower)
+        )
+
+        # Explicit agent creation — requires a creation verb + agent entity word
+        has_explicit_agent = any(
+            re.search(pattern, msg_lower) for pattern in self.AGENT_CREATION_PATTERNS
+        )
+
+        # Explicit task creation — user literally says "task"
+        has_explicit_task = bool(
+            re.search(r"\b(create|make|add|generate)\b.*\btask\b", msg_lower)
+        )
+
+        # Single atomic action check — ONLY true when message is clearly
+        # one simple action with no workflow indicators
+        is_single_atomic = (
+            len(task_actions) <= 1
+            and not has_multi_step
+            and not has_multiple_actions
+            and not crew_keywords
+            and not has_explicit_agent
+        )
+
+        # ── Crew-first intent scoring ─────────────────────────────
+        # generate_crew starts with a base score; others must earn it.
+
+        crew_score = self.CREW_BASE_SCORE  # Default advantage
+        crew_score += len(crew_keywords) * 3
+        if has_multi_step or has_multiple_actions:
+            crew_score += self.MULTI_STEP_BONUS
+        if has_complex_task:
+            crew_score += 2
+
+        # generate_task only wins when clearly a single atomic action
+        task_score = 0
+        if has_explicit_task and not crew_keywords:
+            task_score = 15  # User literally said "create a task" — overrides crew
+        elif is_single_atomic and not has_question:
+            task_score = 5  # Simple single action, might be a task
+
+        # generate_agent only wins when user explicitly asks for one
+        agent_score = 0
+        if has_explicit_agent and not crew_keywords:
+            agent_score = 15  # User literally said "create an agent" — overrides crew
 
         intent_scores = {
-            "generate_task": len(task_actions) * 2
-            + (1 if has_imperative else 0)
-            + (1 if has_command_structure else 0),
-            "generate_agent": len(agent_keywords) * 3,
-            "generate_crew": len(crew_keywords) * 3
-            + (2 if has_complex_task and crew_keywords else 0),
+            "generate_crew": crew_score,
+            "generate_task": task_score,
+            "generate_agent": agent_score,
             "execute_crew": len(execute_keywords) * 4
             + (2 if execute_keywords.intersection({"execute", "ec"}) else 0),
             "configure_crew": len(configure_keywords) * 3
@@ -874,6 +874,14 @@ class DispatcherService:
         semantic_hints = []
         if task_actions:
             semantic_hints.append(f"Action words detected: {', '.join(task_actions)}")
+        if has_multi_step:
+            semantic_hints.append("Multi-step workflow detected")
+        if has_multiple_actions:
+            semantic_hints.append("Multiple action words detected")
+        if has_explicit_agent:
+            semantic_hints.append("Explicit agent creation detected")
+        if has_explicit_task:
+            semantic_hints.append("Explicit task creation detected")
         if execute_keywords:
             semantic_hints.append(
                 f"Execution words detected: {', '.join(execute_keywords)}"
@@ -886,19 +894,25 @@ class DispatcherService:
             semantic_hints.append(
                 f"Catalog keywords detected: {', '.join(catalog_keywords)}"
             )
-
-        if has_complex_task:
-            semantic_hints.append("Complex multi-step task detected")
-        if has_command_structure:
-            semantic_hints.append("Command-like structure detected")
         if has_configure_structure:
             semantic_hints.append("Configuration structure detected")
-        if has_imperative:
-            semantic_hints.append("Imperative form detected")
         if has_question:
             semantic_hints.append("Question form detected")
-        if has_greeting:
-            semantic_hints.append("Conversational greeting detected")
+
+        # Tie-breaking: prefer crew over task over agent
+        suggested_intent = "generate_crew"
+        max_score = max(intent_scores.values())
+        if max_score > 0:
+            # Among intents tied at max, prefer crew > execute > configure > task > agent
+            priority_order = [
+                "generate_crew", "execute_crew", "configure_crew",
+                "catalog_list", "catalog_load", "catalog_save", "catalog_schedule",
+                "generate_task", "generate_agent",
+            ]
+            for intent_name in priority_order:
+                if intent_scores.get(intent_name, 0) == max_score:
+                    suggested_intent = intent_name
+                    break
 
         return {
             "task_actions": list(task_actions),
@@ -910,16 +924,15 @@ class DispatcherService:
             "has_imperative": has_imperative,
             "has_question": has_question,
             "has_greeting": has_greeting,
-            "has_command_structure": has_command_structure,
+            "has_command_structure": False,  # Removed — no longer used
             "has_configure_structure": has_configure_structure,
             "has_complex_task": has_complex_task,
+            "has_multi_step": has_multi_step,
+            "has_explicit_agent": has_explicit_agent,
+            "has_explicit_task": has_explicit_task,
             "intent_scores": intent_scores,
             "semantic_hints": semantic_hints,
-            "suggested_intent": (
-                max(intent_scores, key=intent_scores.get)
-                if max(intent_scores.values()) > 0
-                else "unknown"
-            ),
+            "suggested_intent": suggested_intent,
         }
 
     @staticmethod
@@ -971,130 +984,88 @@ class DispatcherService:
         )
 
         if not system_prompt:
-            # Use a default prompt if template not found
-            system_prompt = """You are an intelligent intent detection system for a CrewAI workflow designer.
+            # Use a crew-first default prompt if template not found
+            system_prompt = """You are an intent detection system for a CrewAI workflow designer.
 
-Analyze the user's message and determine their intent from these categories:
+CRITICAL DEFAULT RULE: The default intent is ALWAYS "generate_crew" with confidence 0.95.
+A crew can contain a single agent with a single task, making it the safest and most flexible choice.
+Only use a different intent when there is EXPLICIT evidence for it.
 
-1. **generate_task**: User wants to create a single task or action. Look for:
-   - Action words: find, search, analyze, create, write, calculate, etc.
-   - Task descriptions: "find the best flight", "analyze this data", "write a report"
-   - Instructions that could be automated: "get information about X", "compare Y and Z"
-   - Casual requests that imply a task: "an order find...", "I need to...", "help me..."
-   - Commands or directives: "find me", "get the", "calculate", "determine"
+The ONLY cases where you should NOT return generate_crew:
 
-2. **generate_agent**: User wants to create a single agent with specific capabilities:
-   - Explicit mentions of "agent", "assistant", "bot"
-   - Role-based requests: "create a financial analyst", "I need a data scientist"
-   - Capability-focused: "something that can analyze data and write reports"
+1. **generate_agent**: User EXPLICITLY says "create an agent", "make me a bot", "build an assistant".
+   Must contain the word "agent", "bot", "assistant", or "chatbot" as the entity being created.
 
-3. **generate_crew**: User wants to create multiple agents and/or tasks working together:
-   - Multiple roles mentioned: "team of agents", "research and writing team"
-   - Complex workflows: "research then write then review"
-   - Collaborative language: "agents working together", "workflow with multiple steps"
-   - Planning language: "create a plan", "build a plan", "design a plan", "plan that", "plan to"
-   - Strategic terms: "roadmap", "blueprint", "framework", "architecture", "strategy"
-   - Complex multi-step operations: "get all news", "analyze multiple sources", "comprehensive collection"
+2. **generate_task**: User EXPLICITLY says "create a task" or "add a task". The word "task" must appear.
 
-4. **execute_crew**: User wants to execute/run an existing crew:
-   - Execution commands: "execute crew", "run crew", "start crew", "ec"
-   - Action words with crew context: "execute", "run", "start", "launch", "begin"
-   - Short commands: "ec" (shorthand for execute crew)
+3. **execute_crew**: User says "execute", "run", "start", "launch", or "ec".
 
-6. **configure_crew**: User wants to configure workflow settings (LLM, max RPM, tools):
-   - Configuration requests: "configure crew", "setup llm", "change model", "select tools"
-   - Settings modifications: "update max rpm", "set llm model", "modify tools"
-   - Preference adjustments: "choose different model", "adjust settings", "pick tools"
-   - Direct mentions: "llm", "maxr", "max rpm", "tools", "config", "settings"
+4. **configure_crew**: User wants to change LLM model, max RPM, tools, or settings.
 
-7. **catalog_list**: User wants to see available saved plans/crews:
-   - Browse requests: "show my plans", "list saved crews", "what plans do I have"
-   - Catalog browsing: "show catalog", "list available workflows"
+5. **catalog/flow operations**: list, load, save, schedule, or delete plans/flows/crews.
 
-8. **catalog_load**: User wants to load an existing plan onto the canvas:
-   - Load requests: "load the research plan", "open my marketing crew"
-   - Name references: includes the plan/crew name to load
-
-9. **catalog_save**: User wants to save the current canvas as a plan:
-   - Save requests: "save this plan", "save as my-research-crew"
-   - Optionally includes a name for the plan
-
-10. **catalog_schedule**: User wants to schedule a plan for automatic execution:
-    - Schedule requests: "schedule this plan", "set up recurring execution"
-
-11. **unknown**: Unclear or ambiguous messages that don't fit the above categories.
-
-**CRITICAL RULES**:
-1. Many task requests are phrased conversationally. Look for ACTION WORDS and GOALS rather than formal task language.
-2. If the message describes multiple agents or complex workflows, it's generate_crew.
+For ALL other messages return generate_crew with confidence 0.95.
 
 Return a JSON object with:
 {
     "intent": "generate_task" | "generate_agent" | "generate_crew" | "execute_crew" | "configure_crew" | "catalog_list" | "catalog_load" | "catalog_save" | "catalog_schedule" | "unknown",
     "confidence": 0.0-1.0,
     "extracted_info": {
-        "action_words": ["list", "of", "detected", "action", "words"],
-        "entities": ["extracted", "entities", "or", "objects"],
+        "action_words": ["detected", "action", "words"],
+        "entities": ["extracted", "entities"],
         "goal": "what the user wants to accomplish",
-        "config_type": "llm|maxr|tools|general" // Only for configure_crew intent
+        "config_type": "llm|maxr|tools|general"
     },
     "suggested_prompt": "Enhanced version optimized for the specific service",
-    "suggested_tools": ["ToolName1", "ToolName2"]  // Only from the available tools list, if provided
+    "suggested_tools": ["ToolName1", "ToolName2"]
 }
 
-Examples:
-- "Create an agent that can analyze data" -> generate_agent
-- "I need a task to summarize documents" -> generate_task
-- "an order find the best flight between zurich and montreal" -> generate_task
-- "find me the cheapest hotel in paris" -> generate_task
-- "get information about the weather tomorrow" -> generate_task
-- "analyze this sales data and create a report" -> generate_task
+Examples of generate_crew (the DEFAULT):
+- "get me the latest news from switzerland" -> generate_crew
+- "analyze market trends and create a report" -> generate_crew
+- "find the best flights and hotels" -> generate_crew
+- "gather news from cnn.com and create a dashboard" -> generate_crew
 - "Build a team of agents to handle customer support" -> generate_crew
-- "Create a research agent and a writer agent with tasks for each" -> generate_crew
-- "Create a plan for analyzing market data" -> generate_crew
-- "Build a strategy with multiple agents" -> generate_crew
-- "Design an approach using agents and tasks" -> generate_crew
-- "Create a plan that will get all the news from switzerland" -> generate_crew
-- "Plan to collect and analyze customer feedback" -> generate_crew- "execute crew" -> execute_crew
-- "run crew" -> execute_crew
+- "Create a plan for market analysis" -> generate_crew
+
+Examples of other intents (ONLY with explicit signals):
+- "Create an agent that can analyze data" -> generate_agent
+- "create a task to check server status" -> generate_task
+- "execute crew" -> execute_crew
 - "ec" -> execute_crew
-- "start crew" -> execute_crew
-- "launch crew" -> execute_crew
 - "configure crew" -> configure_crew
 - "setup llm" -> configure_crew
 - "change model" -> configure_crew
-- "select tools" -> configure_crew
-- "update max rpm" -> configure_crew
-- "adjust settings" -> configure_crew
 - "list my plans" -> catalog_list
-- "show saved crews" -> catalog_list
 - "load the research plan" -> catalog_load
 - "save this plan" -> catalog_save
 - "schedule this crew" -> catalog_schedule
 
 """
 
-        # Enhance the user message with semantic analysis
+        # Enhance the user message with factual observations only
+        # NOTE: We intentionally do NOT inject intent scores or suggested intent
+        # to avoid anchoring the LLM toward a biased classification.
+        observations = []
+        if semantic_analysis.get("has_multi_step"):
+            observations.append("Multi-step workflow indicators detected")
+        if semantic_analysis.get("has_explicit_agent"):
+            observations.append("Explicit agent creation pattern detected")
+        if semantic_analysis.get("has_explicit_task"):
+            observations.append("Explicit task creation pattern detected")
+        if semantic_analysis.get("execute_keywords"):
+            observations.append(f"Execution words: {', '.join(semantic_analysis['execute_keywords'])}")
+        if semantic_analysis.get("configure_keywords"):
+            observations.append(f"Configuration words: {', '.join(semantic_analysis['configure_keywords'])}")
+        if semantic_analysis.get("has_configure_structure"):
+            observations.append("Configuration structure detected")
+
         enhanced_user_message = f"""Message: {message}
 
-Semantic Analysis:
-- Detected action words: {', '.join(semantic_analysis['task_actions']) if semantic_analysis['task_actions'] else 'None'}
-- Agent keywords: {', '.join(semantic_analysis['agent_keywords']) if semantic_analysis['agent_keywords'] else 'None'}
-- Crew keywords: {', '.join(semantic_analysis['crew_keywords']) if semantic_analysis['crew_keywords'] else 'None'}
-- Execute keywords: {', '.join(semantic_analysis['execute_keywords']) if semantic_analysis['execute_keywords'] else 'None'}
-- Configure keywords: {', '.join(semantic_analysis['configure_keywords']) if semantic_analysis['configure_keywords'] else 'None'}
-- Catalog keywords: {', '.join(semantic_analysis['catalog_keywords']) if semantic_analysis['catalog_keywords'] else 'None'}
-- Has imperative form: {semantic_analysis['has_imperative']}
-- Has question form: {semantic_analysis['has_question']}
-- Has command structure: {semantic_analysis['has_command_structure']}
-- Has configure structure: {semantic_analysis['has_configure_structure']}
-- Has complex multi-step task: {semantic_analysis.get('has_complex_task', False)}
-- Semantic hints: {'; '.join(semantic_analysis['semantic_hints']) if semantic_analysis['semantic_hints'] else 'None'}
-- Intent scores: {semantic_analysis.get('intent_scores', {})}
-- Suggested intent from analysis: {semantic_analysis['suggested_intent']}
+Observations:
+{chr(10).join(f'- {obs}' for obs in observations) if observations else '- No special patterns detected (default: generate_crew)'}
 
-
-Please analyze this message and provide your intent classification, considering both the semantic analysis and the natural language content."""
+Please analyze this message and provide your intent classification."""
 
         # Append tool catalog so the LLM can suggest relevant tools
         if available_tools:
@@ -1111,15 +1082,19 @@ Please analyze this message and provide your intent classification, considering 
                 max(semantic_analysis["intent_scores"].values())
                 / self.SEMANTIC_CONFIDENCE_NORMALIZER
             )
+            # Default to crew when circuit breaker is open
+            suggested = semantic_analysis["suggested_intent"]
+            if suggested in ("generate_task", "generate_agent") and semantic_confidence < 0.8:
+                suggested = "generate_crew"
             return {
                 "intent": (
-                    semantic_analysis["suggested_intent"]
+                    suggested
                     if semantic_confidence > self.SEMANTIC_FALLBACK_MIN_CONFIDENCE
-                    else "unknown"
+                    else "generate_crew"
                 ),
-                "confidence": max(
+                "confidence": min(1.0, max(
                     self.DEFAULT_FALLBACK_CONFIDENCE, semantic_confidence
-                ),
+                )),
                 "extracted_info": {"semantic_analysis": semantic_analysis},
                 "suggested_prompt": message,
                 "source": "circuit_breaker_fallback",
@@ -1182,20 +1157,10 @@ Please analyze this message and provide your intent classification, considering 
                 logger.warning(
                     f"LLM returned empty response for intent detection with model {model}"
                 )
-                # Fall back to semantic analysis
-                semantic_confidence = (
-                    max(semantic_analysis["intent_scores"].values())
-                    / self.SEMANTIC_CONFIDENCE_NORMALIZER
-                )
+                # Fall back to crew as default
                 return {
-                    "intent": (
-                        semantic_analysis["suggested_intent"]
-                        if semantic_confidence > self.SEMANTIC_FALLBACK_MIN_CONFIDENCE
-                        else "unknown"
-                    ),
-                    "confidence": max(
-                        self.DEFAULT_FALLBACK_CONFIDENCE, semantic_confidence
-                    ),
+                    "intent": "generate_crew",
+                    "confidence": self.DEFAULT_FALLBACK_CONFIDENCE,
                     "extracted_info": {},
                     "source": "semantic_fallback",
                     "suggested_tools": [],
@@ -1240,21 +1205,31 @@ Please analyze this message and provide your intent classification, considering 
             # Enhance extracted_info with semantic analysis
             result["extracted_info"]["semantic_analysis"] = semantic_analysis
 
-            # If LLM result seems wrong and semantic analysis is confident, use semantic analysis
+            # Semantic override — only for non-crew intents.
+            # The semantic layer can override the LLM for execute, configure,
+            # and catalog intents, but it should NEVER downgrade crew to task
+            # or agent, since crew is the safe default.
             semantic_confidence = (
                 max(semantic_analysis["intent_scores"].values())
                 / self.SEMANTIC_CONFIDENCE_NORMALIZER
             )
+            semantic_suggested = semantic_analysis["suggested_intent"]
 
             if (
                 semantic_confidence > self.SEMANTIC_OVERRIDE_THRESHOLD
                 and result["confidence"] < self.LLM_CONFIDENCE_WEAK_THRESHOLD
+                # Only override if semantic suggests a non-generation intent
+                # (execute, configure, catalog) OR if LLM returned a weaker
+                # generation intent and semantic suggests crew
+                and semantic_suggested not in ("generate_task", "generate_agent")
             ):
                 logger.info(
-                    f"Using semantic analysis suggestion: {semantic_analysis['suggested_intent']} (confidence: {semantic_confidence:.2f}) over LLM result: {result['intent']} (confidence: {result['confidence']:.2f})"
+                    f"Using semantic analysis suggestion: {semantic_suggested} "
+                    f"(confidence: {semantic_confidence:.2f}) over LLM result: "
+                    f"{result['intent']} (confidence: {result['confidence']:.2f})"
                 )
-                result["intent"] = semantic_analysis["suggested_intent"]
-                result["confidence"] = max(result["confidence"], semantic_confidence)
+                result["intent"] = semantic_suggested
+                result["confidence"] = min(1.0, max(result["confidence"], semantic_confidence))
 
             result["source"] = "llm"
 
@@ -1266,20 +1241,31 @@ Please analyze this message and provide your intent classification, considering 
         except Exception as e:
             logger.error(f"Error detecting intent: {str(e)}")
             self._record_failure(model)
-            # Fall back to semantic analysis if LLM fails
+            # Fall back to semantic analysis if LLM fails.
+            # Default to generate_crew (the safe default) unless semantic
+            # analysis strongly suggests a specific non-crew intent.
             semantic_confidence = (
                 max(semantic_analysis["intent_scores"].values())
                 / self.SEMANTIC_CONFIDENCE_NORMALIZER
             )
+            semantic_suggested = semantic_analysis["suggested_intent"]
+
+            # Only use non-crew semantic suggestions if they're very confident
+            if (
+                semantic_suggested in ("generate_task", "generate_agent")
+                and semantic_confidence < 0.8
+            ):
+                semantic_suggested = "generate_crew"
+
             return {
                 "intent": (
-                    semantic_analysis["suggested_intent"]
+                    semantic_suggested
                     if semantic_confidence > self.SEMANTIC_FALLBACK_MIN_CONFIDENCE
-                    else "unknown"
+                    else "generate_crew"
                 ),
-                "confidence": max(
+                "confidence": min(1.0, max(
                     self.DEFAULT_FALLBACK_CONFIDENCE, semantic_confidence
-                ),
+                )),
                 "extracted_info": {"semantic_analysis": semantic_analysis},
                 "suggested_prompt": message,
                 "source": "semantic_fallback",
@@ -1367,7 +1353,7 @@ Please analyze this message and provide your intent classification, considering 
             # Create dispatcher response
             dispatcher_response = DispatcherResponse(
                 intent=IntentType(intent_result["intent"]),
-                confidence=intent_result["confidence"],
+                confidence=max(0.0, min(1.0, float(intent_result["confidence"]))),
                 extracted_info=intent_result["extracted_info"],
                 suggested_prompt=intent_result["suggested_prompt"],
                 source=intent_result.get("source"),
@@ -1419,13 +1405,15 @@ Please analyze this message and provide your intent classification, considering 
                     generation_id = str(_uuid.uuid4())
                     streaming_request = CrewStreamingRequest(
                         prompt=dispatcher_response.suggested_prompt or request.message,
+                        original_prompt=request.message,
                         model=request.model,
                         tools=effective_tools or [],
                     )
                     # Spawn progressive generation in background
                     asyncio.create_task(
                         self.crew_service.create_crew_progressive(
-                            streaming_request, group_context, generation_id
+                            streaming_request, group_context, generation_id,
+                            mlflow_enabled=mlflow_enabled,
                         )
                     )
                     generation_result = {

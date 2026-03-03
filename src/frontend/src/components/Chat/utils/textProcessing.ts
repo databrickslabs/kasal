@@ -23,6 +23,12 @@ export const stripAnsiEscapes = (text: string): string => {
 // URL detection regex pattern
 export const urlPattern = /(https?:\/\/[^\s]+)/g;
 
+// Check if text is a full HTML document
+export const isHtmlDocument = (text: string): boolean => {
+  const trimmed = text.trimStart().toLowerCase();
+  return trimmed.startsWith('<!doctype html') || trimmed.startsWith('<html');
+};
+
 // Check if text contains markdown patterns
 export const isMarkdown = (text: string): boolean => {
   const markdownPatterns = [

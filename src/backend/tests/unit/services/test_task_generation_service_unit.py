@@ -488,6 +488,43 @@ class TestGenerateTask:
 
         assert result.name == "Research Task"
 
+    # -- truncated code-block extraction (no closing ```) --
+
+    @pytest.mark.asyncio
+    async def test_json_in_truncated_code_block_extracted(self):
+        """When LLM returns a code block with no closing ```, the truncated pattern extracts JSON."""
+        svc = self._build_service()
+        request = TaskGenerationRequest(text="task")
+        # No closing ``` — simulates truncated LLM response
+        wrapped = '```json\n' + _valid_task_json() + '\n'
+
+        with patch("src.services.task_generation_service.TemplateService") as MockTS, \
+             patch("src.services.task_generation_service.LLMManager") as MockLLM:
+            MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
+            MockLLM.completion = AsyncMock(return_value=wrapped)
+
+            result = await svc.generate_task(request)
+
+        assert result.name == "Research Task"
+
+    @pytest.mark.asyncio
+    async def test_truncated_code_block_no_match_falls_through(self):
+        """When content has ``` but truncated pattern also fails, robust_json_parser handles it."""
+        svc = self._build_service()
+        request = TaskGenerationRequest(text="task")
+        # Content with ``` prefix but JSON is also truncated
+        wrapped = '```json\n{"name": "T", "description": "D", "expected_output": "E'
+
+        with patch("src.services.task_generation_service.TemplateService") as MockTS, \
+             patch("src.services.task_generation_service.LLMManager") as MockLLM:
+            MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
+            MockLLM.completion = AsyncMock(return_value=wrapped)
+
+            result = await svc.generate_task(request)
+
+        # robust_json_parser should recover the truncated JSON
+        assert result.name == "T"
+
     # -- trailing comma cleanup --
 
     @pytest.mark.asyncio

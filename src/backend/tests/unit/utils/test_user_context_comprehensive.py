@@ -397,8 +397,99 @@ class TestUserContextConstants:
     def test_logger_initialization(self):
         """Test logger is properly initialized"""
         from src.utils.user_context import logger
-        
+
         assert logger is not None
         assert hasattr(logger, 'info')
         assert hasattr(logger, 'error')
         assert hasattr(logger, 'warning')
+
+
+# ---------------------------------------------------------------------------
+# _get_user_group_memberships_with_roles — uses local DB, not Lakebase
+# ---------------------------------------------------------------------------
+
+class TestGroupMembershipsUsesLocalDb:
+    """Verify that group membership lookups always use the local session factory,
+    not the swapped Lakebase factory. This prevents the bug where group data
+    (which lives in SQLite) becomes unreachable after Lakebase activation."""
+
+    @pytest.mark.asyncio
+    async def test_memberships_with_roles_uses_local_session_factory(self):
+        """_get_user_group_memberships_with_roles should import _local_session_factory."""
+        mock_session = AsyncMock()
+        mock_user = Mock()
+        mock_user.id = "user-1"
+        mock_user.email = "test@example.com"
+        mock_user.is_system_admin = False
+
+        mock_user_service = Mock()
+        mock_user_service.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
+
+        mock_group_service = Mock()
+        mock_group_service.get_user_groups_with_roles = AsyncMock(return_value=[])
+
+        # _local_session_factory is used as async context manager
+        class _LocalCtx:
+            async def __aenter__(self):
+                return mock_session
+            async def __aexit__(self, *args):
+                return False
+
+        mock_local_factory = Mock(return_value=_LocalCtx())
+
+        with patch("src.db.session._local_session_factory", mock_local_factory), \
+             patch("src.services.user_service.UserService", return_value=mock_user_service), \
+             patch("src.services.group_service.GroupService", return_value=mock_group_service):
+            user, groups = await GroupContext._get_user_group_memberships_with_roles("test@example.com")
+
+        assert user is mock_user
+        # Verify the local factory was called (not async_session_factory)
+        mock_local_factory.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_memberships_uses_local_session_factory(self):
+        """_get_user_group_memberships should also use _local_session_factory."""
+        mock_session = AsyncMock()
+        mock_user = Mock()
+        mock_user.id = "user-1"
+
+        mock_user_service = Mock()
+        mock_user_service.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
+
+        mock_group = Mock()
+        mock_group.id = "group-1"
+        mock_group_service = Mock()
+        mock_group_service.get_user_group_memberships = AsyncMock(return_value=[mock_group])
+
+        class _LocalCtx:
+            async def __aenter__(self):
+                return mock_session
+            async def __aexit__(self, *args):
+                return False
+
+        mock_local_factory = Mock(return_value=_LocalCtx())
+
+        with patch("src.db.session._local_session_factory", mock_local_factory), \
+             patch("src.services.user_service.UserService", return_value=mock_user_service), \
+             patch("src.services.group_service.GroupService", return_value=mock_group_service):
+            result = await GroupContext._get_user_group_memberships("test@example.com")
+
+        assert result == ["group-1"]
+        mock_local_factory.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_memberships_exception_returns_empty(self):
+        """When _local_session_factory raises, return (None, []) gracefully."""
+        class _FailingCtx:
+            async def __aenter__(self):
+                raise ConnectionError("DB unavailable")
+            async def __aexit__(self, *args):
+                return False
+
+        mock_local_factory = Mock(return_value=_FailingCtx())
+
+        with patch("src.db.session._local_session_factory", mock_local_factory):
+            user, groups = await GroupContext._get_user_group_memberships_with_roles("test@example.com")
+
+        assert user is None
+        assert groups == []

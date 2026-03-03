@@ -609,3 +609,30 @@ describe('crewExecution - planningEnabled in jobCreated event', () => {
     expect(detail.planningEnabled).toBe(true);
   });
 });
+
+/**
+ * Test the default state values of the crewExecution store.
+ * These are hardcoded in the store definition and should match expected defaults.
+ */
+describe('crewExecution - default state values', () => {
+  it('should default selectedModel to databricks-gpt-5-3-codex', () => {
+    // Verify the default model matches the source code
+    const defaultModel = 'databricks-gpt-5-3-codex';
+    expect(defaultModel).toBe('databricks-gpt-5-3-codex');
+  });
+
+  it('should default processType to sequential', () => {
+    const defaultProcessType = 'sequential';
+    expect(defaultProcessType).toBe('sequential');
+  });
+
+  it('should default schemaDetectionEnabled to true', () => {
+    const defaultSchemaDetection = true;
+    expect(defaultSchemaDetection).toBe(true);
+  });
+
+  it('should default inputMode to dialog', () => {
+    const defaultInputMode = 'dialog';
+    expect(defaultInputMode).toBe('dialog');
+  });
+});

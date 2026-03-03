@@ -5,7 +5,7 @@ inline in process_crew_executor.py (~450 lines) into a single reusable function.
 Both crew and flow executors call ``configure_mlflow_in_subprocess()`` to get
 consistent MLflow tracing setup including:
 
-- Databricks authentication (PAT / SPN / default)
+- Databricks authentication (SPN-only)
 - Tracking URI and experiment configuration
 - Tracing destination and autolog enablement
 - Async logging configuration
@@ -97,9 +97,8 @@ async def configure_mlflow_in_subprocess(
             )
 
         # -------------------------------------------------------
-        # 3. Auth setup: PAT / SPN / default
+        # 3. Auth setup: SPN → PAT (NO OBO for MLflow)
         # -------------------------------------------------------
-        from src.utils.databricks_auth import get_auth_context
         from src.utils.user_context import UserContext
 
         # Set UserContext with group_context in subprocess (contextvars are process-local)
@@ -113,20 +112,99 @@ async def configure_mlflow_in_subprocess(
             except Exception as ctx_err:
                 alog.warning(f"[SUBPROCESS] Could not set UserContext: {ctx_err}")
 
-        # MLflow uses service-level auth (NO OBO) to avoid race conditions
-        auth = await get_auth_context(user_token=None)
-        if not auth:
-            alog.warning("[SUBPROCESS] No Databricks authentication available for MLflow")
+        # MLflow auth: use SPN credentials (DATABRICKS_CLIENT_ID /
+        # DATABRICKS_CLIENT_SECRET / DATABRICKS_HOST) injected by the
+        # Databricks Apps platform.  Extract a bearer token up-front
+        # so the MLflow exporter uses simple HOST + TOKEN auth.
+        #
+        # The platform also injects DATABRICKS_TOKEN (a PAT) which
+        # conflicts with SPN in the SDK ("more than one authorization
+        # method").  We strip PAT vars before the SDK call and
+        # restore them after.
+        #
+        # NOTE: Databricks Apps proxy redacts log lines containing words
+        # like SECRET/TOKEN/BEARER.  Use neutral wording in all logs.
+        host = os.environ.get("DATABRICKS_HOST", "")
+        client_id = os.environ.get("DATABRICKS_CLIENT_ID", "")
+        client_secret = os.environ.get("DATABRICKS_CLIENT_SECRET", "")
+
+        alog.info(
+            "[SUBPROCESS] MLflow auth env — host=%s, spn_id=%s, spn_cred=%s",
+            "yes" if host else "no",
+            "yes" if client_id else "no",
+            "yes" if client_secret else "no",
+        )
+
+        # SPN credentials are required — skip MLflow if absent
+        if not (host and client_id and client_secret):
+            alog.warning("[SUBPROCESS] SPN credentials required for MLflow — skipping")
             return MlflowSetupResult(
                 enabled=True,
                 tracing_ready=False,
-                error="no Databricks auth available",
+                error="SPN credentials required",
             )
 
-        os.environ["DATABRICKS_HOST"] = auth.workspace_url
-        os.environ["DATABRICKS_TOKEN"] = auth.token
-        auth_method = auth.auth_method
-        alog.info(f"[SUBPROCESS] MLflow configured with {auth_method} authentication")
+        auth_method: Optional[str] = None
+
+        # Extract credential via SDK
+        alog.info("[SUBPROCESS] Attempting SPN credential extraction")
+        try:
+            from databricks.sdk import WorkspaceClient as _WC
+
+            alog.info("[SUBPROCESS] SDK imported OK")
+
+            # Temporarily strip PAT/API-KEY from env to prevent
+            # SDK dual-auth conflict (oauth + pat)
+            _pat_backup = {}
+            for _k in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY"):
+                if _k in os.environ:
+                    _pat_backup[_k] = os.environ.pop(_k)
+            try:
+                w = _WC(host=host, client_id=client_id, client_secret=client_secret)
+                headers = w.config.authenticate()
+            finally:
+                os.environ.update(_pat_backup)
+
+            alog.info("[SUBPROCESS] authenticate() returned OK")
+            auth_header = headers.get("Authorization", "")
+            alog.info(
+                "[SUBPROCESS] auth header length=%d, prefix=%s",
+                len(auth_header),
+                auth_header[:7] if auth_header else "(empty)",
+            )
+            if auth_header.startswith("Bearer "):
+                extracted = auth_header[len("Bearer "):]
+                workspace_url = host.rstrip("/")
+                if not workspace_url.startswith("http"):
+                    workspace_url = f"https://{workspace_url}"
+                os.environ["DATABRICKS_HOST"] = workspace_url
+                os.environ["DATABRICKS_TOKEN"] = extracted
+                auth_method = "service_principal"
+                alog.info(
+                    "[SUBPROCESS] SPN credential set (len=%d)", len(extracted)
+                )
+
+                # Remove SPN vars — subprocess-only, so MLflow exporter
+                # only sees HOST + TOKEN
+                for _k in ("DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET"):
+                    os.environ.pop(_k, None)
+            else:
+                alog.warning("[SUBPROCESS] Unexpected auth header format")
+        except Exception as spn_err:
+            alog.warning(
+                "[SUBPROCESS] SPN extraction failed: %s: %s",
+                type(spn_err).__name__, spn_err,
+            )
+
+        if not auth_method:
+            alog.warning("[SUBPROCESS] SPN credential extraction failed — MLflow cannot be configured")
+            return MlflowSetupResult(
+                enabled=True,
+                tracing_ready=False,
+                error="SPN credential extraction failed",
+            )
+
+        alog.info("[SUBPROCESS] MLflow configured with %s authentication", auth_method)
 
         # -------------------------------------------------------
         # 4. Tracking URI

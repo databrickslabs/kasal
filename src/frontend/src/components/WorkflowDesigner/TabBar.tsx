@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Box,
   Tab,
@@ -31,8 +31,6 @@ import {
   FolderOpen as LoadCrewIcon,
   ArrowDropDown as ArrowDropDownIcon,
   Clear as ClearAllIcon,
-  Group as GroupIcon,
-  Assignment as AssignmentIcon,
   AccountTree as FlowIcon
 } from '@mui/icons-material';
 import { useTabManagerStore } from '../../store/tabManager';
@@ -43,10 +41,10 @@ interface TabBarProps {
   isRunning?: boolean;
   runningTabId?: string | null;
   onLoadCrew?: () => void;
-  onLoadAgents?: () => void;
-  onLoadTasks?: () => void;
   disabled?: boolean;
   hideTabsAndButtons?: boolean; // Hide tabs and add button, show only workspace selector
+  isMobile?: boolean;
+  maxTabs?: number;
 }
 
 const TabBar: React.FC<TabBarProps> = ({
@@ -54,10 +52,10 @@ const TabBar: React.FC<TabBarProps> = ({
   isRunning = false,
   runningTabId = null,
   onLoadCrew,
-  onLoadAgents,
-  onLoadTasks,
   disabled = false,
-  hideTabsAndButtons = false
+  hideTabsAndButtons = false,
+  isMobile = false,
+  maxTabs = 20
 }) => {
   const { isDarkMode } = useThemeManager();
   const {
@@ -75,7 +73,40 @@ const TabBar: React.FC<TabBarProps> = ({
   } = useTabManagerStore();
 
   // Get only tabs for the current workspace/group
-  const visibleTabs = getTabsForCurrentGroup();
+  const allGroupTabs = getTabsForCurrentGroup();
+  const visibleTabs = allGroupTabs.slice(0, maxTabs);
+  const hasHiddenTabs = allGroupTabs.length > maxTabs;
+
+  // Measure the tab bar container to compute dynamic tab widths
+  const tabBarRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  const measureContainer = useCallback(() => {
+    if (tabBarRef.current) {
+      setContainerWidth(tabBarRef.current.offsetWidth);
+    }
+  }, []);
+
+  useEffect(() => {
+    measureContainer();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measureContainer);
+    if (tabBarRef.current) {
+      observer.observe(tabBarRef.current);
+    }
+    return () => observer.disconnect();
+  }, [measureContainer]);
+
+  // Compute dynamic tab maxWidth: shrink when tabs fill 95% of available space
+  const ADD_BUTTON_WIDTH = 56; // "+" button + margin
+  const DEFAULT_TAB_MAX = isMobile ? 120 : 200;
+  const DEFAULT_TAB_MIN = 60;
+  const availableForTabs = Math.max(0, containerWidth - ADD_BUTTON_WIDTH);
+  const threshold = availableForTabs * 0.95;
+  const totalDefaultWidth = visibleTabs.length * DEFAULT_TAB_MAX;
+  const computedTabMaxWidth = totalDefaultWidth > threshold && visibleTabs.length > 0
+    ? Math.max(DEFAULT_TAB_MIN, Math.floor(threshold / visibleTabs.length))
+    : DEFAULT_TAB_MAX;
 
   // Listen for group/workspace changes
   useEffect(() => {
@@ -143,6 +174,9 @@ const TabBar: React.FC<TabBarProps> = ({
     if (disabled) {
       return; // Prevent creating new tabs when disabled
     }
+    if (allGroupTabs.length >= maxTabs) {
+      return; // Max tab limit reached
+    }
     createTab();
     handleNewTabMenuClose();
   };
@@ -152,18 +186,6 @@ const TabBar: React.FC<TabBarProps> = ({
       onLoadCrew();
     }
     handleNewTabMenuClose();
-  };
-
-  const handleLoadExistingAgents = () => {
-    if (onLoadAgents) {
-      onLoadAgents();
-    }
-  };
-
-  const handleLoadExistingTasks = () => {
-    if (onLoadTasks) {
-      onLoadTasks();
-    }
   };
 
   const handleCloseTab = (tabId: string, event: React.MouseEvent) => {
@@ -390,17 +412,17 @@ const TabBar: React.FC<TabBarProps> = ({
           backgroundColor: isDarkMode ? '#1a1a1a' : '#ffffff',
           display: 'flex',
           alignItems: 'center',
-          minHeight: '48px',
-          height: '48px',  // Fixed height to prevent shifts
+          minHeight: isMobile ? '40px' : '48px',
+          height: isMobile ? '40px' : '48px',  // Fixed height to prevent shifts
           paddingLeft: 1,
-          paddingRight: '60px', // Reserve space for the fixed GroupSelector in top-right
+          paddingRight: isMobile ? '16px' : '60px', // Reserve space for the fixed GroupSelector in top-right
           position: 'relative',
           zIndex: 1001, // Above the toolbar
           overflow: 'hidden'  // Prevent overflow from causing layout shifts
         }}
       >
         {!hideTabsAndButtons && (
-          <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
+          <Box ref={tabBarRef} sx={{ display: 'flex', alignItems: 'center', flex: 1, overflow: 'hidden' }}>
             <Tabs
               value={activeTabId || false}
               onChange={handleTabChange}
@@ -408,16 +430,18 @@ const TabBar: React.FC<TabBarProps> = ({
               scrollButtons="auto"
               sx={{
                 minWidth: 0, // Allow tabs to shrink
+                flex: 1,
                 opacity: disabled ? 0.6 : 1,
                 pointerEvents: disabled ? 'none' : 'auto',
                 '& .MuiTab-root': {
-                  minHeight: '40px',
+                  minHeight: isMobile ? '36px' : '40px',
                   textTransform: 'none',
-                  fontSize: '0.875rem',
+                  fontSize: isMobile ? '0.75rem' : '0.875rem',
                   fontWeight: 500,
-                  padding: '8px 12px',
-                  minWidth: 'auto',
-                  maxWidth: '200px',
+                  padding: isMobile ? '4px 8px' : '8px 12px',
+                  minWidth: `${DEFAULT_TAB_MIN}px`,
+                  maxWidth: `${computedTabMaxWidth}px`,
+                  transition: 'max-width 0.2s ease',
                   cursor: disabled ? 'not-allowed' : 'pointer',
                   '&.Mui-selected': {
                     color: isDarkMode ? '#90caf9' : '#1976d2',
@@ -437,8 +461,9 @@ const TabBar: React.FC<TabBarProps> = ({
                     <Box sx={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: 1,
-                      maxWidth: '180px'
+                      gap: isMobile ? 0.5 : 1,
+                      maxWidth: '100%',
+                      overflow: 'hidden',
                     }}>
                       <Typography
                         variant="body2"
@@ -473,7 +498,7 @@ const TabBar: React.FC<TabBarProps> = ({
                           </Tooltip>
                         )}
 
-                        {(runningTabId === tab.id && isRunning) || tab.executionStatus === 'running' ? (
+                        {!isMobile && ((runningTabId === tab.id && isRunning) || tab.executionStatus === 'running') ? (
                           <Chip
                             size="small"
                             label="Running"
@@ -486,7 +511,7 @@ const TabBar: React.FC<TabBarProps> = ({
                           />
                         ) : null}
 
-                        {tab.executionStatus === 'completed' && (
+                        {!isMobile && tab.executionStatus === 'completed' && (
                           <Tooltip title={tab.lastExecutionTime ? `Completed at ${new Date(tab.lastExecutionTime).toLocaleTimeString()}` : 'Completed'}>
                             <Chip
                               size="small"
@@ -502,7 +527,7 @@ const TabBar: React.FC<TabBarProps> = ({
                           </Tooltip>
                         )}
 
-                        {tab.executionStatus === 'failed' && (
+                        {!isMobile && tab.executionStatus === 'failed' && (
                           <Tooltip title={tab.lastExecutionTime ? `Failed at ${new Date(tab.lastExecutionTime).toLocaleTimeString()}` : 'Failed'}>
                             <Chip
                               size="small"
@@ -541,11 +566,30 @@ const TabBar: React.FC<TabBarProps> = ({
               ))}
             </Tabs>
 
-            <Tooltip title={disabled ? "Tab operations disabled during processing" : "New Tab Options"}>
+            {hasHiddenTabs && (
+              <Tooltip title={`${allGroupTabs.length - maxTabs} more tab(s) — increase max or close tabs`}>
+                <Chip
+                  label={`+${allGroupTabs.length - maxTabs}`}
+                  size="small"
+                  sx={{
+                    height: 20,
+                    fontSize: '0.7rem',
+                    ml: 0.5,
+                    backgroundColor: isDarkMode ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)',
+                  }}
+                />
+              </Tooltip>
+            )}
+
+            <Tooltip title={
+              disabled ? "Tab operations disabled during processing"
+                : allGroupTabs.length >= maxTabs ? `Max ${maxTabs} tabs reached`
+                : "New Tab Options"
+            }>
               <span>
                 <IconButton
                   onClick={handleNewTabMenuOpen}
-                  disabled={disabled}
+                  disabled={disabled || allGroupTabs.length >= maxTabs}
                   size="small"
                   sx={{
                     marginLeft: 1,
@@ -598,27 +642,9 @@ const TabBar: React.FC<TabBarProps> = ({
           <ListItemIcon>
             <LoadCrewIcon sx={{ fontSize: 18 }} />
           </ListItemIcon>
-          <ListItemText 
-            primary="Load Existing Plans"
+          <ListItemText
+            primary="Load from Catalog"
             secondary="Opens in a new tab"
-          />
-        </MenuItem>
-        <MenuItem onClick={() => { handleLoadExistingAgents(); handleNewTabMenuClose(); }}>
-          <ListItemIcon>
-            <GroupIcon sx={{ fontSize: 18 }} />
-          </ListItemIcon>
-          <ListItemText 
-            primary="Load Existing Agents"
-            secondary="Adds to current tab"
-          />
-        </MenuItem>
-        <MenuItem onClick={() => { handleLoadExistingTasks(); handleNewTabMenuClose(); }}>
-          <ListItemIcon>
-            <AssignmentIcon sx={{ fontSize: 18 }} />
-          </ListItemIcon>
-          <ListItemText 
-            primary="Load Existing Tasks"
-            secondary="Adds to current tab"
           />
         </MenuItem>
       </Menu>

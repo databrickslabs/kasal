@@ -63,6 +63,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
     knowledge_chunk_overlap: 200,
   });
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [tokenStatus, setTokenStatus] = useState<DatabricksTokenStatus | null>(null);
   const [notification, setNotification] = useState({
     open: false,
@@ -154,8 +155,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
       }
     };
 
-    loadConfig();
-    checkMemoryBackendConfig();
+    Promise.all([loadConfig(), checkMemoryBackendConfig()]).finally(() => setInitialLoading(false));
   }, []);
 
   const handleSaveConfig = async () => {
@@ -350,6 +350,17 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
     }
   };
 
+  if (initialLoading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 200 }}>
+        <CircularProgress />
+        <Typography variant="body2" sx={{ ml: 2 }}>
+          Loading Databricks configuration...
+        </Typography>
+      </Box>
+    );
+  }
+
   return (
     <Box>
       <Box sx={{
@@ -384,9 +395,19 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
 
         {/* MLflow Tracking Section */}
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Typography variant="subtitle2" color="text.secondary">
-            {t('configuration.databricks.mlflow.title', { defaultValue: 'MLflow Tracking' })}
-          </Typography>
+          <Box>
+            <Typography variant="subtitle2" color="text.secondary">
+              {t('configuration.databricks.mlflow.title', { defaultValue: 'MLflow Tracking' })}
+            </Typography>
+            <a
+              href="https://docs.databricks.com/aws/en/dev-tools/databricks-apps/mlflow"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontSize: '0.75em' }}
+            >
+              How to add MLflow experiment to your Databricks App
+            </a>
+          </Box>
           <FormControlLabel
             control={
               <Switch

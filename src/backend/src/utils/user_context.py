@@ -282,9 +282,13 @@ class GroupContext:
             # Import here to avoid circular imports
             from src.services.group_service import GroupService
             from src.services.user_service import UserService
-            from src.db.session import request_scoped_session
+            from src.db.session import _local_session_factory
 
-            async with request_scoped_session() as session:
+            # Always use the LOCAL database for user/group lookups.
+            # These config tables live in SQLite and are never migrated
+            # to Lakebase — using the swapped session factory would query
+            # Lakebase where the data doesn't exist.
+            async with _local_session_factory() as session:
                 # Get or create the user
                 user_service = UserService(session)
                 user = await user_service.get_or_create_user_by_email(email)
@@ -324,9 +328,13 @@ class GroupContext:
             # Import here to avoid circular imports
             from src.services.group_service import GroupService
             from src.services.user_service import UserService
-            from src.db.session import request_scoped_session
+            from src.db.session import _local_session_factory
 
-            async with request_scoped_session() as session:
+            # Always use the LOCAL database for user/group lookups.
+            # These config tables live in SQLite and are never migrated
+            # to Lakebase — using the swapped session factory would query
+            # Lakebase where the data doesn't exist.
+            async with _local_session_factory() as session:
                 # Get or create the user
                 logger.info(f"[USER CONTEXT DEBUG] Creating UserService and calling get_or_create_user_by_email for {email}")
                 user_service = UserService(session)
@@ -578,61 +586,84 @@ def extract_user_context_from_request(request: Request) -> Dict[str, Any]:
         return {}
 
 
+class UserContextMiddleware:
+    """Pure ASGI middleware to extract and set user/group context from HTTP headers.
+
+    Unlike BaseHTTPMiddleware, this does NOT buffer StreamingResponse bodies,
+    which is critical for SSE streams to work through HTTP/2 proxies
+    (e.g. Databricks Apps).  See: https://github.com/encode/starlette/issues/1012
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Build a lightweight Request from the ASGI scope for header extraction
+        request = Request(scope, receive)
+
+        try:
+            # Extract group context from X-Forwarded-Email if present
+            try:
+                group_context = await extract_group_context_from_request(request)
+                if group_context:
+                    UserContext.set_group_context(group_context)
+                    logger.debug(f"Group context middleware: Set group groups {group_context.group_ids}")
+            except Exception as group_error:
+                error_msg = str(group_error)
+                if "greenlet_spawn" in error_msg or "await_only" in error_msg:
+                    logger.warning(f"Async context not ready for group context extraction (likely startup): {group_error}")
+                else:
+                    logger.error(f"Error extracting group context: {group_error}")
+
+            # Always extract user context from request headers if present (for OBO authentication)
+            user_context = extract_user_context_from_request(request)
+
+            if user_context:
+                UserContext.set_user_context(user_context)
+
+                if 'access_token' in user_context:
+                    UserContext.set_user_token(user_context['access_token'])
+                    logger.debug("User context middleware: Set user token from X-Forwarded-Access-Token")
+
+            # Pass through to the next app — no buffering
+            await self.app(scope, receive, send)
+
+        except Exception as e:
+            logger.error(f"Error in user context middleware: {e}")
+            UserContext.clear_context()
+            await self.app(scope, receive, send)
+
+        finally:
+            UserContext.clear_context()
+
+
+# Keep the old function for backward compatibility (used in tests)
 async def user_context_middleware(request: Request, call_next):
-    """
-    Middleware to extract and set user and group context from HTTP headers.
-
-    This middleware extracts both user context and group context from Databricks Apps headers.
-    It works whether or not Databricks Apps is enabled, but provides richer context when it is.
-
-    Args:
-        request: FastAPI Request object
-        call_next: Next middleware/handler in the chain
-
-    Returns:
-        Response from the next handler
-    """
+    """Legacy BaseHTTPMiddleware-style dispatch function (kept for tests)."""
     try:
-        # Extract group context from X-Forwarded-Email if present
         try:
             group_context = await extract_group_context_from_request(request)
             if group_context:
                 UserContext.set_group_context(group_context)
-                logger.debug(f"Group context middleware: Set group groups {group_context.group_ids}")
-        except Exception as group_error:
-            # Handle greenlet_spawn errors during async context initialization
-            error_msg = str(group_error)
-            if "greenlet_spawn" in error_msg or "await_only" in error_msg:
-                logger.warning(f"Async context not ready for group context extraction (likely startup): {group_error}")
-            else:
-                logger.error(f"Error extracting group context: {group_error}")
-            # Continue without group context - it will be created on next request
+        except Exception:
+            pass
 
-        # Always extract user context from request headers if present (for OBO authentication)
         user_context = extract_user_context_from_request(request)
-
-        # Set context for this request
         if user_context:
             UserContext.set_user_context(user_context)
-
-            # Set user token separately for easy access
             if 'access_token' in user_context:
                 UserContext.set_user_token(user_context['access_token'])
-                logger.debug("User context middleware: Set user token from X-Forwarded-Access-Token")
 
-        # Process the request
         response = await call_next(request)
-
         return response
-
-    except Exception as e:
-        logger.error(f"Error in user context middleware: {e}")
-        # Clear context and continue
+    except Exception:
         UserContext.clear_context()
         return await call_next(request)
-
     finally:
-        # Clear context after request processing
         UserContext.clear_context()
 
 

@@ -11,6 +11,7 @@ from crewai import Agent
 from src.core.logger import LoggerManager
 from src.utils.user_context import GroupContext
 from src.engines.crewai.tools.tool_factory import ToolFactory
+from src.engines.crewai.flow.modules.task_config import _resolve_tool_override
 
 # Initialize logger
 logger = LoggerManager.get_instance().flow
@@ -75,19 +76,6 @@ class AgentConfig:
                 except Exception as init_error:
                     logger.warning(f"Error initializing ToolFactory: {init_error}")
             
-            # First check for tools directly on the agent_data object
-            if hasattr(agent_data, 'tools') and agent_data.tools:
-                agent_tools = AgentConfig._normalize_tools_list(agent_data.tools)
-                logger.info(f"Found tools on agent {agent_data.name}: {agent_tools}")
-
-                # Create tools from IDs
-                tools = await AgentConfig._create_tools_from_ids(agent_tools, tool_factory, f"agent {agent_data.name}")
-
-            # Check if we need to look for tools in flow nodes
-            if len(tools) == 0 and flow_data and hasattr(flow_data, 'nodes'):
-                logger.info(f"No tools found directly on agent, checking flow nodes for agent {agent_data.name}")
-                tools = await AgentConfig._get_tools_from_flow_nodes(agent_data, flow_data, tool_factory)
-
             # Use crew_tool_configs if provided, otherwise use agent_data.tool_configs
             effective_tool_configs = crew_tool_configs if crew_tool_configs is not None else (agent_data.tool_configs if hasattr(agent_data, 'tool_configs') else None)
 
@@ -95,6 +83,22 @@ class AgentConfig:
             logger.info(f"Agent {agent_data.name} - crew_tool_configs: {crew_tool_configs}")
             logger.info(f"Agent {agent_data.name} - agent_data.tool_configs: {agent_data.tool_configs if hasattr(agent_data, 'tool_configs') else 'N/A'}")
             logger.info(f"Agent {agent_data.name} - effective_tool_configs: {effective_tool_configs}")
+
+            # First check for tools directly on the agent_data object
+            if hasattr(agent_data, 'tools') and agent_data.tools:
+                agent_tools = AgentConfig._normalize_tools_list(agent_data.tools)
+                logger.info(f"Found tools on agent {agent_data.name}: {agent_tools}")
+
+                # Create tools from IDs, passing tool_configs for per-tool overrides
+                tools = await AgentConfig._create_tools_from_ids(
+                    agent_tools, tool_factory, f"agent {agent_data.name}",
+                    tool_configs=effective_tool_configs
+                )
+
+            # Check if we need to look for tools in flow nodes
+            if len(tools) == 0 and flow_data and hasattr(flow_data, 'nodes'):
+                logger.info(f"No tools found directly on agent, checking flow nodes for agent {agent_data.name}")
+                tools = await AgentConfig._get_tools_from_flow_nodes(agent_data, flow_data, tool_factory, tool_configs=effective_tool_configs)
 
             # Add MCP tools from tool_configs (similar to agent_helpers.py)
             if effective_tool_configs:
@@ -180,14 +184,17 @@ class AgentConfig:
         return agent_tools
     
     @staticmethod
-    async def _create_tools_from_ids(tool_ids, tool_factory, owner_desc):
+    async def _create_tools_from_ids(tool_ids, tool_factory, owner_desc, tool_configs=None):
         """Create tool instances from tool IDs using ToolFactory"""
         tools = []
-        
+        tool_configs = tool_configs or {}
+
         for tool_id in tool_ids:
             try:
+                # Resolve per-tool config override (e.g. GenieTool spaceId)
+                tool_override = _resolve_tool_override(tool_factory, tool_id, tool_configs)
                 # Try to create the tool using the factory
-                tool = tool_factory.create_tool(tool_id)
+                tool = tool_factory.create_tool(tool_id, tool_config_override=tool_override)
                 if tool:
                     tools.append(tool)
                     logger.info(f"Added tool with ID {tool_id} for {owner_desc}")
@@ -203,19 +210,19 @@ class AgentConfig:
         return tools
     
     @staticmethod
-    async def _get_tools_from_flow_nodes(agent_data, flow_data, tool_factory):
+    async def _get_tools_from_flow_nodes(agent_data, flow_data, tool_factory, tool_configs=None):
         """Extract tools from flow nodes for a specific agent"""
         tools = []
-        
+
         try:
             nodes = flow_data.nodes
             # Check if nodes is a string and try to parse it
             if isinstance(nodes, str):
                 nodes = json.loads(nodes)
-            
+
             # Get the agent ID to look for
             agent_id = str(getattr(agent_data, 'id', ''))
-            
+
             if agent_id:
                 # Find the agent node
                 agent_node_id = f"agent-{agent_id}"
@@ -223,13 +230,14 @@ class AgentConfig:
                     if node.get('id') == agent_node_id and 'data' in node:
                         node_data = node.get('data', {})
                         node_tools = node_data.get('tools', [])
-                        
+
                         if node_tools:
                             logger.info(f"Found tools in node data for agent {agent_id}: {node_tools}")
                             tools = await AgentConfig._create_tools_from_ids(
-                                node_tools, 
-                                tool_factory, 
-                                f"agent {agent_data.name} (from node)"
+                                node_tools,
+                                tool_factory,
+                                f"agent {agent_data.name} (from node)",
+                                tool_configs=tool_configs
                             )
                         break
         except Exception as e:

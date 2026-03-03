@@ -165,6 +165,9 @@ class OTelEventBridge:
         self._job_id = job_id
         self._group_context = group_context
         self._registered_count = 0
+        # Captured from CrewKickoffStartedEvent and stamped on all subsequent
+        # spans so that task-level traces carry the crew name for flow monitoring.
+        self._current_crew_name: Optional[str] = None
 
     def register(self, event_bus: Any) -> int:
         """Register span-creating handlers for all available CrewAI event types.
@@ -279,6 +282,12 @@ class OTelEventBridge:
             task_name = _get_task_name(event)
             tool_name = _get_tool_name(event)
             output = _get_output(event)
+
+            # Capture crew_name from crew lifecycle events so it can be
+            # propagated to task/agent spans that don't carry it themselves.
+            event_crew_name = getattr(event, "crew_name", None)
+            if event_crew_name:
+                self._current_crew_name = str(event_crew_name)
 
             with self._tracer.start_as_current_span(span_name) as span:
                 # Core attributes picked up by db_exporter extractors
@@ -423,7 +432,9 @@ class OTelEventBridge:
             span.set_attribute("kasal.extra.delegations", int(delegations))
 
         # ── Crew fields ──
-        crew_name = getattr(event, "crew_name", None)
+        # Use event.crew_name if present, otherwise fall back to the name
+        # captured from the last CrewKickoffStartedEvent in this bridge instance.
+        crew_name = getattr(event, "crew_name", None) or self._current_crew_name
         if crew_name:
             span.set_attribute("kasal.extra.crew_name", str(crew_name))
         inputs = getattr(event, "inputs", None)

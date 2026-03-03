@@ -223,6 +223,13 @@ class TaskGenerationService:
                 if matches:
                     content = matches.group(1).strip()
                     logger.info("Extracted JSON from code block")
+                else:
+                    # Handle truncated code blocks (opening ``` but no closing ```)
+                    truncated_pattern = re.compile(r'```(?:json)?\s*([\s\S]+)')
+                    truncated_matches = truncated_pattern.search(content)
+                    if truncated_matches:
+                        content = truncated_matches.group(1).strip()
+                        logger.info("Extracted JSON from truncated code block (no closing ```)")
                 
             # Try to clean up some common JSON formatting issues before parsing
             content = content.strip()

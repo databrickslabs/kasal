@@ -15,25 +15,15 @@ interface UseManagerNodeProps {
  * Hook to manage manager node creation/removal based on process type
  */
 export const useManagerNode = ({ nodes, edges, setNodes, setEdges }: UseManagerNodeProps) => {
-  console.log('[useManagerNode] 🚀 Hook called!');
-
   const { layoutOrientation } = useUILayoutStore();
   const { managerLLM, processType, managerNodeId, setManagerNodeId, isLoadingCrew } = useCrewExecutionStore();
 
   // Track previous layout orientation to detect changes
-  // Initialize with undefined so first change is detected
   const prevLayoutOrientationRef = useRef<'vertical' | 'horizontal' | undefined>(undefined);
 
-  console.log('[useManagerNode] 📊 Current state:', {
-    processType,
-    managerNodeId,
-    layoutOrientation,
-    prevLayoutOrientation: prevLayoutOrientationRef.current,
-    managerLLM,
-    nodesCount: nodes.length,
-    edgesCount: edges.length,
-    isLoadingCrew
-  });
+  // Track previous state to avoid unnecessary effect runs
+  const prevProcessTypeRef = useRef(processType);
+  const prevNodeCountRef = useRef(nodes.length);
 
   /**
    * Create manager node and connect it to all agents
@@ -42,16 +32,11 @@ export const useManagerNode = ({ nodes, edges, setNodes, setEdges }: UseManagerN
     // Check if manager already exists
     const existingManager = nodes.find(n => n.type === 'managerNode');
     if (existingManager) {
-      console.log('[useManagerNode] Manager node already exists');
       return;
     }
 
     // Get all agent nodes
     const agentNodes = nodes.filter(n => n.type === 'agentNode');
-
-    if (agentNodes.length === 0) {
-      console.log('[useManagerNode] No agents found, creating manager at default position');
-    }
 
     // Create layout manager to calculate position
     const layoutManager = new CanvasLayoutManager({ margin: 20, minNodeSpacing: 50 });
@@ -87,24 +72,13 @@ export const useManagerNode = ({ nodes, edges, setNodes, setEdges }: UseManagerN
         type: 'default',
         style: { stroke: '#2196f3', strokeWidth: 2 },
         animated: false,
-        label: '', // No label for manager-to-agent edges
+        label: '',
       };
     });
 
-    console.log('[useManagerNode] Creating manager node:', {
-      position,
-      agentCount: agentNodes.length,
-      edgeCount: newEdges.length,
-      layout: layoutOrientation
-    });
-
-    // Add manager node to the store
+    // Add manager node and edges
     setNodes([...nodes, managerNode]);
-
-    // Add edges to the store
     setEdges([...edges, ...newEdges]);
-
-    // Store manager node ID in Zustand
     setManagerNodeId(managerNode.id);
 
     // Trigger reorganization after a short delay
@@ -119,24 +93,15 @@ export const useManagerNode = ({ nodes, edges, setNodes, setEdges }: UseManagerN
    * Remove manager node and its connections
    */
   const removeManagerNode = useCallback(() => {
-    // Find and remove manager node
     const managerNode = nodes.find(n => n.type === 'managerNode');
     if (!managerNode) {
-      console.log('[useManagerNode] No manager node to remove');
       return;
     }
 
-    console.log('[useManagerNode] Removing manager node');
-
-    // Remove manager node from the store
     setNodes(nodes.filter(n => n.id !== managerNode.id));
-
-    // Remove all edges connected to manager from the store
     setEdges(edges.filter(e =>
       e.source !== managerNode.id && e.target !== managerNode.id
     ));
-
-    // Clear manager node ID from Zustand
     setManagerNodeId(null);
   }, [nodes, edges, setNodes, setEdges, setManagerNodeId]);
 
@@ -150,11 +115,8 @@ export const useManagerNode = ({ nodes, edges, setNodes, setEdges }: UseManagerN
     }
 
     const agentNodes = nodes.filter(n => n.type === 'agentNode');
-
-    // Remove old manager edges
     const nonManagerEdges = edges.filter(e => e.source !== managerNode.id);
 
-    // Create new edges from manager to all agents
     const newManagerEdges: Edge[] = agentNodes.map(agent => {
       const sourceHandle = layoutOrientation === 'vertical' ? 'bottom' : 'right';
       const targetHandle = layoutOrientation === 'vertical' ? 'top' : 'left';
@@ -168,16 +130,10 @@ export const useManagerNode = ({ nodes, edges, setNodes, setEdges }: UseManagerN
         type: 'default',
         style: { stroke: '#2196f3', strokeWidth: 2 },
         animated: false,
-        label: '', // No label for manager-to-agent edges
+        label: '',
       };
     });
 
-    console.log('[useManagerNode] Updating manager connections:', {
-      agentCount: agentNodes.length,
-      edgeCount: newManagerEdges.length
-    });
-
-    // Update edges in the store
     setEdges([...nonManagerEdges, ...newManagerEdges]);
   }, [nodes, edges, setEdges, layoutOrientation]);
 
@@ -185,47 +141,35 @@ export const useManagerNode = ({ nodes, edges, setNodes, setEdges }: UseManagerN
    * Listen for process type changes via Zustand
    */
   useEffect(() => {
+    // Skip if nothing relevant changed
     const managerExists = nodes.some(n => n.type === 'managerNode');
+    const processTypeChanged = prevProcessTypeRef.current !== processType;
+    const nodeCountChanged = prevNodeCountRef.current !== nodes.length;
 
-    console.log('[useManagerNode] Effect triggered:', {
-      processType,
-      managerNodeId,
-      managerExists,
-      isLoadingCrew,
-      shouldCreate: processType === 'hierarchical' && !managerExists && !isLoadingCrew,
-      shouldRemove: processType !== 'hierarchical' && managerExists && !isLoadingCrew
-    });
+    prevProcessTypeRef.current = processType;
+    prevNodeCountRef.current = nodes.length;
 
-    // Skip manager creation/removal while loading a crew
-    // This prevents race conditions where the manager is removed before processType is updated
+    // Only act when process type changes or node count changes
+    if (!processTypeChanged && !nodeCountChanged) {
+      return;
+    }
+
     if (isLoadingCrew) {
-      console.log('[useManagerNode] Skipping manager node changes - crew is loading');
       return;
     }
 
     if (processType === 'hierarchical') {
-      // Only create if manager doesn't actually exist in nodes
       if (!managerExists) {
-        console.log('[useManagerNode] Creating manager node...');
         createManagerNode();
-      } else {
-        console.log('[useManagerNode] Manager already exists, skipping creation');
-        // Ensure managerNodeId is set even if manager already exists
-        if (!managerNodeId) {
-          const existingManager = nodes.find(n => n.type === 'managerNode');
-          if (existingManager) {
-            console.log('[useManagerNode] Setting managerNodeId for existing manager:', existingManager.id);
-            setManagerNodeId(existingManager.id);
-          }
+      } else if (!managerNodeId) {
+        const existingManager = nodes.find(n => n.type === 'managerNode');
+        if (existingManager) {
+          setManagerNodeId(existingManager.id);
         }
       }
     } else {
-      // Remove manager if it exists
       if (managerExists) {
-        console.log('[useManagerNode] Removing manager node...');
         removeManagerNode();
-      } else {
-        console.log('[useManagerNode] No manager to remove');
       }
     }
   }, [processType, nodes, createManagerNode, removeManagerNode, isLoadingCrew, managerNodeId, setManagerNodeId]);
@@ -234,38 +178,21 @@ export const useManagerNode = ({ nodes, edges, setNodes, setEdges }: UseManagerN
    * Listen for layout orientation changes to update manager position and edge handles
    */
   useEffect(() => {
-    const managerNode = nodes.find((n: Node) => n.type === 'managerNode');
-
-    console.log('[useManagerNode] 🔄 Layout effect triggered:', {
-      prevLayout: prevLayoutOrientationRef.current,
-      currentLayout: layoutOrientation,
-      hasManager: !!managerNode,
-      processType,
-      managerNodeId,
-      willUpdate: prevLayoutOrientationRef.current !== layoutOrientation && !!managerNode && processType === 'hierarchical' && !!managerNodeId
-    });
-
     // Only update if layout orientation actually changed
     if (prevLayoutOrientationRef.current === layoutOrientation) {
-      console.log('[useManagerNode] ⏭️ Skipping - layout unchanged');
       return;
     }
 
+    const managerNode = nodes.find((n: Node) => n.type === 'managerNode');
+
     // Skip if no manager node exists yet
     if (!managerNode) {
-      console.log('[useManagerNode] ⏭️ Skipping - no manager node');
       prevLayoutOrientationRef.current = layoutOrientation;
       return;
     }
 
-    // Update if manager exists and we're in hierarchical mode (don't require managerNodeId)
+    // Update if manager exists and we're in hierarchical mode
     if (managerNode && processType === 'hierarchical') {
-      console.log('[useManagerNode] ✅ Layout orientation changed, updating manager position and connections:', {
-        from: prevLayoutOrientationRef.current,
-        to: layoutOrientation,
-        managerNodeId: managerNodeId || managerNode.id
-      });
-
       const agentNodes = nodes.filter(n => n.type === 'agentNode');
 
       // Recalculate manager position for new layout
@@ -273,25 +200,11 @@ export const useManagerNode = ({ nodes, edges, setNodes, setEdges }: UseManagerN
       const currentUIState = useUILayoutStore.getState().getUILayoutState();
       currentUIState.screenWidth = window.innerWidth;
       currentUIState.screenHeight = window.innerHeight;
-      // CRITICAL: Update the layout orientation in the UI state to the NEW orientation
       currentUIState.layoutOrientation = layoutOrientation;
-
-      console.log('[useManagerNode] Before updateUIState:', {
-        layoutOrientation,
-        currentUIStateOrientation: currentUIState.layoutOrientation,
-        agentPositions: agentNodes.map(a => ({ id: a.id.slice(-8), x: a.position.x, y: a.position.y }))
-      });
 
       layoutManager.updateUIState(currentUIState);
 
       const newPosition = layoutManager.getManagerNodePosition(nodes, 'crew');
-
-      console.log('[useManagerNode] Repositioning manager node:', {
-        oldPosition: managerNode.position,
-        newPosition,
-        layout: layoutOrientation,
-        expectedLayout: layoutOrientation === 'vertical' ? 'Manager Y < Agent Y' : 'Manager X < Agent X'
-      });
 
       // Update manager node position
       const updatedNodes = nodes.map(node =>
@@ -318,11 +231,10 @@ export const useManagerNode = ({ nodes, edges, setNodes, setEdges }: UseManagerN
           type: 'default',
           style: { stroke: '#2196f3', strokeWidth: 2 },
           animated: false,
-          label: '', // No label for manager-to-agent edges
+          label: '',
         };
       });
 
-      // Update edges in the store
       setEdges([...nonManagerEdges, ...newManagerEdges]);
 
       // Update the ref
@@ -363,4 +275,3 @@ export const useManagerNode = ({ nodes, edges, setNodes, setEdges }: UseManagerN
     updateManagerConnections,
   };
 };
-

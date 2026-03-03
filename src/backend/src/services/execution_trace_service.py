@@ -54,16 +54,23 @@ def _mask_trace_sensitive_data(trace: ExecutionTraceItem) -> ExecutionTraceItem:
 class ExecutionTraceService:
     """Service for accessing and managing execution traces."""
 
-    def __init__(self, session):
+    def __init__(self, session, auth_session=None):
         """
-        Initialize the service with session.
+        Initialize the service with session(s).
 
         Args:
-            session: Database session from FastAPI DI (from core.dependencies)
+            session: Database session for trace operations (local DB).
+            auth_session: Optional separate session for execution_history
+                authorization queries.  When Lakebase is active, execution
+                records live in Lakebase while traces live in local DB, so
+                two different sessions are needed.  Falls back to *session*
+                when not provided.
         """
         self.session = session
         self.repository = ExecutionTraceRepository(session)
-        self.execution_history_repository = ExecutionHistoryRepository(session)
+        self.execution_history_repository = ExecutionHistoryRepository(
+            auth_session if auth_session is not None else session
+        )
 
     async def get_traces_by_run_id(
         self,

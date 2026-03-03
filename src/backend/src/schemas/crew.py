@@ -294,6 +294,7 @@ class CrewCreationResponse(BaseModel):
 class CrewStreamingRequest(BaseModel):
     """Request schema for progressive/streaming crew generation."""
     prompt: str = Field(..., description="Natural language description of the crew setup")
+    original_prompt: Optional[str] = Field(None, description="Original user message before LLM rewrite, used for cap computation")
     model: Optional[str] = Field(None, description="LLM model to use for generation")
     tools: Optional[List[str]] = Field(default_factory=list, description="List of available tools for the crew")
 

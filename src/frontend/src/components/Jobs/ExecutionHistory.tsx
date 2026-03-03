@@ -48,6 +48,7 @@ import { AgentYaml, TaskYaml } from '../../types/crew';
 import { useTaskExecutionStore } from '../../store/taskExecutionStore';
 import { usePermissions } from '../../hooks/usePermissions';
 import ExecutionStatusBadge from '../ExecutionStatusBadge';
+import { useResponsiveLayout } from '../../hooks/workflow/useResponsiveLayout';
 
 export interface RunHistoryRef {
   refreshRuns: () => Promise<void>;
@@ -161,6 +162,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
   const { t } = useTranslation();
   const { showRunResult, selectedRun, isOpen, closeRunResult } = useRunResult();
   const { userRole } = usePermissions();
+  const { isMobile } = useResponsiveLayout();
   const {
     runs,
     searchQuery,
@@ -825,14 +827,14 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                       {renderSortIcon('status')}
                     </Box>
                   </TableCell>
-                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, textAlign: 'center' }}>
+                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, textAlign: 'center', display: isMobile ? 'none' : 'table-cell' }}>
                     Agents/Tasks
                   </TableCell>
-                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper }}>
+                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, display: isMobile ? 'none' : 'table-cell' }}>
                     Submitter
                   </TableCell>
                   <TableCell
-                    sx={{ py: 0.25, fontSize: '0.8125rem', cursor: 'pointer', backgroundColor: theme => theme.palette.background.paper }}
+                    sx={{ py: 0.25, fontSize: '0.8125rem', cursor: 'pointer', backgroundColor: theme => theme.palette.background.paper, display: isMobile ? 'none' : 'table-cell' }}
                     onClick={() => handleSort('created_at')}
                   >
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
@@ -840,16 +842,16 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                       {renderSortIcon('created_at')}
                     </Box>
                   </TableCell>
-                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper }}>
+                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, display: isMobile ? 'none' : 'table-cell' }}>
                     Duration
                   </TableCell>
                   <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, textAlign: 'center' }}>
                     Result
                   </TableCell>
-                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, textAlign: 'center' }}>
+                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, textAlign: 'center', display: isMobile ? 'none' : 'table-cell' }}>
                     Trace
                   </TableCell>
-                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, textAlign: 'center' }}>
+                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, textAlign: 'center', display: isMobile ? 'none' : 'table-cell' }}>
                     Schedule Execution
                   </TableCell>
                   <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', width: '120px', backgroundColor: theme => theme.palette.background.paper }}>
@@ -898,7 +900,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
               <TableBody>
                 {displayedRuns.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} align="center" sx={{ py: 1, fontSize: '0.8125rem' }}>
+                    <TableCell colSpan={isMobile ? 4 : 10} align="center" sx={{ py: 1, fontSize: '0.8125rem' }}>
                       {searchQuery ? t('runHistory.noSearchResults') : t('runHistory.noRuns')}
                     </TableCell>
                   </TableRow>
@@ -930,7 +932,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                           }}
                         />
                       </TableCell>
-                      <TableCell align="center">
+                      <TableCell align="center" sx={{ display: isMobile ? 'none' : 'table-cell' }}>
                         {(() => {
                           let agentCount = 0;
                           let taskCount = 0;
@@ -989,9 +991,9 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                           return <span style={{ color: '#999', fontSize: '0.75rem' }}>-</span>;
                         })()}
                       </TableCell>
-                      <TableCell>{run.group_email || '-'}</TableCell>
-                      <TableCell>{new Date(run.created_at).toLocaleString()}</TableCell>
-                      <TableCell>
+                      <TableCell sx={{ display: isMobile ? 'none' : 'table-cell' }}>{run.group_email || '-'}</TableCell>
+                      <TableCell sx={{ display: isMobile ? 'none' : 'table-cell' }}>{new Date(run.created_at).toLocaleString()}</TableCell>
+                      <TableCell sx={{ display: isMobile ? 'none' : 'table-cell' }}>
                         <DurationCell run={run} />
                       </TableCell>
                       <TableCell align="center">
@@ -1008,7 +1010,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                           </span>
                         </Tooltip>
                       </TableCell>
-                      <TableCell align="center">
+                      <TableCell align="center" sx={{ display: isMobile ? 'none' : 'table-cell' }}>
                         <Tooltip title={t('runHistory.actions.viewTrace')}>
                           <IconButton
                             size="small"
@@ -1019,7 +1021,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                           </IconButton>
                         </Tooltip>
                       </TableCell>
-                      <TableCell align="center">
+                      <TableCell align="center" sx={{ display: isMobile ? 'none' : 'table-cell' }}>
                         <Tooltip title={t('runHistory.actions.schedule')}>
                           <IconButton
                             size="small"

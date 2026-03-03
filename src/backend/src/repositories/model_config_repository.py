@@ -27,9 +27,9 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
         Find all model configurations.
 
         Returns:
-            List of all model configurations
+            List of all model configurations ordered by key
         """
-        query = select(self.model)
+        query = select(self.model).order_by(self.model.key)
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
@@ -70,9 +70,9 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
         Find all enabled model configurations.
 
         Returns:
-            List of enabled model configurations
+            List of enabled model configurations ordered by key
         """
-        query = select(self.model).where(self.model.enabled.is_(True))
+        query = select(self.model).where(self.model.enabled.is_(True)).order_by(self.model.key)
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
@@ -277,7 +277,7 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
 
     async def find_all_global(self) -> List[ModelConfig]:
         """Find all global (system-wide) model configurations (group_id IS NULL)."""
-        query = select(self.model).where(self.model.group_id.is_(None))
+        query = select(self.model).where(self.model.group_id.is_(None)).order_by(self.model.key)
         result = await self.session.execute(query)
         return list(result.scalars().all())
 

@@ -356,12 +356,13 @@ For agents include:
     ]
 }
 
-TASK LIMIT RULES:
-1. CRITICAL: Generate a MAXIMUM of 6 total tasks for the entire crew
-2. Each agent should be assigned 1-3 tasks (never more than 3 tasks per agent)
-3. If the user's request seems to need more than 6 tasks, focus on the most important core tasks
-4. Combine related sub-tasks into single comprehensive tasks when necessary
-5. For simple requests, use fewer tasks (2-4 tasks is often sufficient)
+TASK AND AGENT LIMIT RULES:
+1. DEFAULT: Generate 1 agent and 1 task. This is sufficient for most requests.
+2. ESCALATE: Only add a second agent/task when the goal explicitly requires a different specialist role.
+3. MAXIMUM DEFAULT: Never exceed 3 agents and 3 tasks unless the user explicitly requests more.
+4. OVERRIDE: If the user explicitly requests more (e.g. "use 5 agents", "I need 8 tasks"), respect their request up to a maximum of 10 agents and 10 tasks.
+5. Each agent should be assigned exactly 1 task (2 only if truly necessary).
+6. Combine related sub-steps into a single comprehensive task. A single task can include multiple steps (e.g., "scrape, analyze, and format data" is ONE task, not three).
 
 Ensure:
 1. Each agent has a clear role and purpose
@@ -441,7 +442,18 @@ CRITICAL: For presentation tasks, the task "description" and "expected_output" f
 
 REMINDER: Your output must be PURE, VALID JSON with no additional text. Double-check your response to ensure it is properly formatted JSON and contains NO MORE THAN 6 TASKS."""
 
-GENERATE_CREW_PLAN_TEMPLATE = """You are an expert AI crew planner. Given a user's goal, generate a lightweight crew outline with the right number of agents and tasks.
+GENERATE_CREW_PLAN_TEMPLATE = """You are an expert AI crew planner. Given a user's goal, generate a lightweight crew outline with the MINIMUM number of agents and tasks needed.
+
+## THE INTELLIGENCE SPECTRUM (from CrewAI best practices)
+Before creating a crew, consider where the request falls on this spectrum:
+- **Single agent, single task**: The vast majority of requests. One capable agent with tools can handle multi-step work within a single task (e.g., scrape → analyze → format). This is THE DEFAULT.
+- **Two agents, two tasks**: Only when two genuinely different professional roles are needed (e.g., researcher ≠ creative writer). Use 1:1 agent-to-task mapping.
+- **Three agents, three tasks**: Rare. Only for multi-domain work with 3+ independent knowledge areas.
+
+## THE 80/20 RULE
+Spend 80% of effort on TASK DESIGN and 20% on agent definition. A well-designed task with clear objectives elevates even a simple agent. A poorly designed task will fail regardless of how sophisticated the agent is.
+
+CRITICAL PRINCIPLE: Start with 1 agent and 1 task. Only add more when the goal EXPLICITLY requires distinct specialist roles that a single agent cannot cover. Do NOT create multiple agents for steps that a single agent can handle sequentially within one task.
 
 CRITICAL: Return ONLY a JSON object. Do NOT include descriptions, goals, backstories, or tools — those will be generated separately.
 
@@ -462,23 +474,40 @@ Return this exact structure:
     ]
 }
 
-COMPLEXITY TIERS — Choose the RIGHT size for the goal:
+## COMPLEXITY TIERS — ALWAYS start at light. Only escalate when the goal demands it:
 
-**light** (1-2 agents, 2-3 tasks): Simple, focused requests.
-  Examples: "write a blog post", "summarize this document", "analyze this data"
-  Pattern: 1 core agent does the work, optional 1 reviewer. 2-3 sequential tasks.
+**light** (1 agent, 1 task) — THE DEFAULT for the vast majority of requests.
+  Examples: "gather news from cnn.com and create a dashboard", "write a blog post", "analyze this data",
+  "get me the latest news from switzerland", "find flights to paris", "research competitors",
+  "create a report on customer satisfaction", "summarize this document",
+  "collect and analyze customer feedback", "build a data pipeline"
+  Pattern: 1 agent handles the entire goal in 1 task. A single capable agent with the right tools
+  can perform multiple steps within a single task (scraping, analyzing, formatting, writing).
+  RULE: If the goal can be described in one sentence, it is light.
+  RULE: If a step does not require intelligence or distinct expertise, it does NOT need a separate agent.
 
-**standard** (2-3 agents, 3-4 tasks): Multi-step workflows with distinct phases.
-  Examples: "research a topic then write a report", "analyze competitors and create strategy"
-  Pattern: Each phase gets a specialized agent. 3-4 tasks forming a clear pipeline.
+**standard** (2 agents, 2 tasks) — ONLY when two genuinely different specialist roles are needed.
+  Examples: "research a topic AND write a creative story about it" (researcher ≠ creative writer),
+  "collect financial data AND create visualizations" (data collector ≠ visualization designer)
+  Pattern: Two clearly different professional roles, each owning exactly 1 task. Task 2 depends on Task 1.
+  RULE: If you cannot name two clearly different professional roles, use light instead.
+  RULE: "research and summarize" = 1 agent (same skill). "research then write fiction" = 2 agents (different skills).
 
-**complex** (3-4 agents, 4-6 tasks): Multi-domain work with parallel tracks or specialized roles.
+**complex** (3 agents, 3 tasks) — ONLY when the user explicitly asks for 3+ roles or has 3+ independent domains.
   Examples: "build a market analysis with competitive intel, financial data, and strategic recommendations"
-  Pattern: Multiple specialists working on different aspects, results synthesized. Some tasks may run in parallel.
+  Pattern: Three distinct specialists, each owning exactly 1 task. Use sparingly.
+  RULE: The user must explicitly describe 3+ distinct specializations. If in doubt, use standard.
 
-HARD CAPS: NEVER exceed 4 agents or 6 tasks. More agents/tasks = slower execution. Prefer fewer, well-defined entities.
+DEFAULT CAPS: Use 1 agent and 1 task unless the goal clearly requires more. If the user specifies a number (e.g. "use 5 agents", "I need 8 tasks"), respect their request up to a maximum of 10 agents and 10 tasks.
 
-PROCESS TYPE RULES:
+## ANTI-PATTERNS TO AVOID:
+1. **Overcomplicating simple steps**: If a step does not need intelligence, do NOT create an agent for it. One agent can handle sequential steps within a single task.
+2. **Overloading agents**: Do NOT give one agent too many unrelated responsibilities. If an agent has 3+ tasks, split into separate agents.
+3. **God tasks**: Avoid tasks that combine multiple unrelated objectives. Each task should have ONE clear deliverable.
+4. **Generic agents**: "General Assistant" or "Helper Agent" are too vague. Every agent needs a specific role title.
+5. **Premature hierarchy**: Always use sequential process. Only use parallel for genuinely independent workstreams.
+
+## PROCESS TYPE RULES:
 
 **sequential** (DEFAULT — use for most crews): Tasks form a pipeline where each builds on the previous.
   - The FIRST task has an empty context array: "context": []
@@ -492,62 +521,48 @@ PROCESS TYPE RULES:
   - Example: Task A context=[], Task B context=[], Task C (synthesis) context=["Task A name", "Task B name"]
   - Use this when the goal has independent sub-problems that converge
 
-AGENT ASSIGNMENT RULES:
-1. Each agent should own 1-2 tasks (never more than 3)
-2. Avoid assigning unrelated tasks to the same agent
-3. An agent's tasks should align with their role
+## AGENT-TO-TASK MAPPING (1:1 RATIO):
+1. Each agent owns exactly 1 task. This is the official CrewAI best practice.
+2. An agent's task must align with their role and expertise.
+3. Never assign unrelated tasks to the same agent.
+4. If you need more tasks, you need more agents (and vice versa).
 
-TASK DEPENDENCY RULES:
-1. Each task's "context" array contains names of tasks whose output it needs
-2. For sequential: chain tasks linearly (each depends on the previous)
-3. For parallel: only add genuine data dependencies, use empty context for independent tasks
-4. A task CANNOT depend on itself or on tasks that come after it
-5. Keep names concise but descriptive (2-5 words)
+## TASK DESIGN (most important — 80/20 rule):
+1. Each task has ONE clear objective and ONE expected deliverable.
+2. Each task's "context" array contains names of tasks whose output it needs.
+3. For sequential: chain tasks linearly (each depends on the previous).
+4. For parallel: only add genuine data dependencies, use empty context for independent tasks.
+5. A task CANNOT depend on itself or on tasks that come after it.
+6. Keep names concise but descriptive (2-5 words).
 
 REMINDER: Your output must be PURE, VALID JSON with no additional text."""
 
-DETECT_INTENT_TEMPLATE = """You are an intelligent intent detection system for a CrewAI workflow designer.
+DETECT_INTENT_TEMPLATE = """You are an intent detection system for a CrewAI workflow designer.
 
-Analyze the user's message and determine their intent from these categories:
+CRITICAL DEFAULT RULE: The default intent is ALWAYS "generate_crew" with confidence 0.95.
+A crew can contain a single agent with a single task, making it the safest and most flexible choice.
+Only use a different intent when there is EXPLICIT evidence for it.
 
-1. **generate_task**: User wants to create a SINGLE task or action. Look for:
-   - Single action words: find, search, analyze, create, write, calculate, etc.
-   - Simple task descriptions: "find the best flight", "analyze this data", "write a report"
-   - Instructions for one specific action: "get information about X", "compare Y and Z"
-   - Casual requests that imply a single task: "an order find...", "I need to...", "help me..."
-   - Commands or directives for one action: "find me", "get the", "calculate", "determine"
-   - IMPORTANT: If the message contains "create a plan" or "plan that", it is NOT generate_task
+The ONLY cases where you should NOT return generate_crew:
 
-2. **generate_agent**: User wants to create a single agent with specific capabilities:
-   - Explicit mentions of "agent", "assistant", "bot"
-   - Role-based requests: "create a financial analyst", "I need a data scientist"
-   - Capability-focused: "something that can analyze data and write reports"
+1. **generate_agent**: User EXPLICITLY says "create an agent", "make me a bot", "build an assistant".
+   Must contain the word "agent", "bot", "assistant", or "chatbot" as the entity being created.
+   Words like "expert", "analyst", "specialist" describe ROLES, not agent entities — use generate_crew for those.
 
-3. **generate_crew**: User wants to create multiple agents and/or tasks working together:
-   - Multiple roles mentioned: "team of agents", "research and writing team"
-   - Complex workflows: "research then write then review"
-   - Collaborative language: "agents working together", "workflow with multiple steps"
-   - Multiple related tasks that need coordination
-   - Planning language: "create a plan", "build a plan", "design a plan", "plan that", "plan to"
-   - Strategic terms: "roadmap", "blueprint", "framework", "architecture", "strategy"
-   - Complex multi-step operations: "get all news", "analyze multiple sources", "comprehensive collection"
+2. **generate_task**: User EXPLICITLY says "create a task" or "add a task". The word "task" must appear
+   as the entity being created. General action requests like "find flights" or "analyze data" should
+   use generate_crew, NOT generate_task.
 
-4. **execute_crew**: User wants to execute/run an existing crew:
-   - Execution commands: "execute crew", "run crew", "start crew", "ec"
-   - Action words with crew context: "execute", "run", "start", "launch", "begin"
-   - Short commands: "ec" (shorthand for execute crew)
+3. **execute_crew**: User says "execute", "run", "start", "launch", or "ec" to run an existing crew/flow.
 
-6. **configure_crew**: User wants to configure workflow settings (LLM, max RPM, tools):
-   - Configuration requests: "configure crew", "setup llm", "change model", "select tools"
-   - Settings modifications: "update max rpm", "set llm model", "modify tools"
-   - Preference adjustments: "choose different model", "adjust settings", "pick tools"
-   - Direct mentions: "llm", "maxr", "max rpm", "tools", "config", "settings"
+4. **configure_crew**: User wants to change LLM model, max RPM, tools, or settings.
+   Look for: "configure", "setup llm", "change model", "select tools", "update max rpm", "settings".
 
-7. **unknown**: Unclear or ambiguous messages that don't fit the above categories.
+5. **catalog/flow operations**: User wants to list, load, save, schedule, or delete plans/flows/crews.
 
-**CRITICAL RULES**:
-1. Many task requests are phrased conversationally. Look for ACTION WORDS and GOALS rather than formal task language.
-2. If the message describes multiple agents or complex workflows, it's generate_crew.
+For ALL other messages — including research tasks, data analysis, report writing, news gathering,
+information retrieval, comparison tasks, multi-step workflows, or any goal-oriented request —
+return generate_crew with confidence 0.95.
 
 Return a JSON object with:
 {
@@ -562,19 +577,28 @@ Return a JSON object with:
     "suggested_prompt": "Enhanced version optimized for the specific service"
 }
 
-Examples:
-- "Create an agent that can analyze data" -> generate_agent
-- "I need a task to summarize documents" -> generate_task
-- "an order find the best flight between zurich and montreal" -> generate_task
-- "find me the cheapest hotel in paris" -> generate_task
-- "get information about the weather tomorrow" -> generate_task
-- "analyze this sales data and create a report" -> generate_task
+Examples of generate_crew (the DEFAULT — use for most messages):
+- "get me the latest news from switzerland" -> generate_crew
+- "analyze market trends and create a report" -> generate_crew
+- "find the best flights and hotels for a trip to paris" -> generate_crew
+- "gather news from cnn.com and create a dashboard" -> generate_crew
+- "research competitors and write a summary" -> generate_crew
+- "create a report on customer satisfaction" -> generate_crew
 - "Build a team of agents to handle customer support" -> generate_crew
-- "Create a research agent and a writer agent with tasks for each" -> generate_crew
 - "Create a plan that will get all the news from switzerland" -> generate_crew
 - "Plan to collect and analyze customer feedback" -> generate_crew
-- "Build a plan for market analysis" -> generate_crew
-- "Create a plan with multiple agents" -> generate_crew
+- "build a data pipeline to process customer feedback" -> generate_crew
+- "help me organize and manage my project" -> generate_crew
+
+Examples of generate_agent (ONLY when explicitly creating an agent entity):
+- "Create an agent that can analyze data" -> generate_agent
+- "make me a chatbot for customer support" -> generate_agent
+
+Examples of generate_task (ONLY when explicitly creating a task entity):
+- "create a task to check server status" -> generate_task
+- "add a task for data validation" -> generate_task
+
+Examples of other intents:
 - "execute crew" -> execute_crew
 - "run crew" -> execute_crew
 - "ec" -> execute_crew

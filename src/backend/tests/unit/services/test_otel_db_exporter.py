@@ -751,17 +751,15 @@ class TestExtractTraceMetadata:
 
 
 class TestKasalDBSpanExporterInit:
-    """Tests for KasalDBSpanExporter constructor with mocked dependencies."""
+    """Tests for KasalDBSpanExporter constructor with mocked dependencies.
+
+    The exporter now uses a SYNCHRONOUS SQLAlchemy engine + sessionmaker
+    (not async) to avoid MissingGreenlet errors in thread-pool workers.
+    """
 
     @patch("src.services.otel_tracing.db_exporter.ThreadPoolExecutor")
-    @patch(
-        "sqlalchemy.ext.asyncio.async_sessionmaker",
-        create=True,
-    )
-    @patch(
-        "sqlalchemy.ext.asyncio.create_async_engine",
-        create=True,
-    )
+    @patch("sqlalchemy.orm.sessionmaker", create=True)
+    @patch("sqlalchemy.create_engine", create=True)
     @patch("src.config.settings.settings")
     def test_init_sqlite_uri(
         self,
@@ -782,17 +780,12 @@ class TestKasalDBSpanExporterInit:
         mock_executor_cls.assert_called_once_with(max_workers=3)
         mock_create_engine.assert_called_once()
         call_kwargs = mock_create_engine.call_args
+        # Sync SQLite URI should have check_same_thread=False
         assert call_kwargs.kwargs["connect_args"]["check_same_thread"] is False
 
     @patch("src.services.otel_tracing.db_exporter.ThreadPoolExecutor")
-    @patch(
-        "sqlalchemy.ext.asyncio.async_sessionmaker",
-        create=True,
-    )
-    @patch(
-        "sqlalchemy.ext.asyncio.create_async_engine",
-        create=True,
-    )
+    @patch("sqlalchemy.orm.sessionmaker", create=True)
+    @patch("sqlalchemy.create_engine", create=True)
     @patch("src.config.settings.settings")
     def test_init_non_sqlite_uri(
         self,
@@ -813,17 +806,12 @@ class TestKasalDBSpanExporterInit:
         assert exporter._job_id == "job-2"
         assert exporter._group_context is not None
         call_kwargs = mock_create_engine.call_args
+        # Non-SQLite URI should have empty connect_args
         assert call_kwargs.kwargs["connect_args"] == {}
 
     @patch("src.services.otel_tracing.db_exporter.ThreadPoolExecutor")
-    @patch(
-        "sqlalchemy.ext.asyncio.async_sessionmaker",
-        create=True,
-    )
-    @patch(
-        "sqlalchemy.ext.asyncio.create_async_engine",
-        create=True,
-    )
+    @patch("sqlalchemy.orm.sessionmaker", create=True)
+    @patch("sqlalchemy.create_engine", create=True)
     @patch("src.config.settings.settings")
     def test_init_default_max_workers(
         self,
@@ -848,8 +836,8 @@ class TestKasalDBSpanExporterExport:
     def _make_exporter(self):
         """Create an exporter with all init dependencies mocked out."""
         with patch("src.services.otel_tracing.db_exporter.ThreadPoolExecutor") as mock_exec_cls, \
-             patch("sqlalchemy.ext.asyncio.async_sessionmaker", create=True), \
-             patch("sqlalchemy.ext.asyncio.create_async_engine", create=True), \
+             patch("sqlalchemy.orm.sessionmaker", create=True), \
+             patch("sqlalchemy.create_engine", create=True), \
              patch("src.config.settings.settings") as mock_settings:
             mock_settings.DATABASE_URI = "sqlite+aiosqlite:///:memory:"
             mock_executor = MagicMock()
@@ -936,8 +924,8 @@ class TestSpanToRecord:
 
     def _make_exporter(self, group_context=None):
         with patch("src.services.otel_tracing.db_exporter.ThreadPoolExecutor"), \
-             patch("sqlalchemy.ext.asyncio.async_sessionmaker", create=True), \
-             patch("sqlalchemy.ext.asyncio.create_async_engine", create=True), \
+             patch("sqlalchemy.orm.sessionmaker", create=True), \
+             patch("sqlalchemy.create_engine", create=True), \
              patch("src.config.settings.settings") as mock_settings:
             mock_settings.DATABASE_URI = "sqlite+aiosqlite:///:memory:"
             exporter = KasalDBSpanExporter(
@@ -1041,33 +1029,17 @@ class TestSpanToRecord:
 # ---------------------------------------------------------------------------
 
 
-def _run_coroutine_from_mock(coro):
-    """Helper that runs a coroutine synchronously via a new event loop.
-
-    Used to replace asyncio.run in tests that already have a running loop
-    (pytest-asyncio) or to simulate the real asyncio.run behavior in
-    synchronous test methods.
-    """
-    import asyncio
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
-
-
 class TestWriteBatch:
-    """Tests for the _write_batch method (async DB writes).
+    """Tests for the _write_batch method (sync DB writes).
 
-    _write_batch internally calls asyncio.run(_write_async()).
-    Since pytest may have its own event loop, we patch asyncio.run
-    to use a fresh event loop that actually executes the coroutine.
+    _write_batch uses a synchronous SQLAlchemy session to create
+    ExecutionTrace model instances directly.  No async service layer.
     """
 
     def _make_exporter(self):
         with patch("src.services.otel_tracing.db_exporter.ThreadPoolExecutor"), \
-             patch("sqlalchemy.ext.asyncio.async_sessionmaker", create=True), \
-             patch("sqlalchemy.ext.asyncio.create_async_engine", create=True), \
+             patch("sqlalchemy.orm.sessionmaker", create=True), \
+             patch("sqlalchemy.create_engine", create=True), \
              patch("src.config.settings.settings") as mock_settings:
             mock_settings.DATABASE_URI = "sqlite+aiosqlite:///:memory:"
             exporter = KasalDBSpanExporter(job_id="job-write")
@@ -1092,196 +1064,133 @@ class TestWriteBatch:
         defaults.update(overrides)
         return defaults
 
-    @patch("asyncio.run")
-    def test_successful_write_calls_asyncio_run(self, mock_asyncio_run):
-        """asyncio.run is called exactly once with the _write_async coroutine."""
+    def test_successful_write_calls_session_add_and_commit(self):
+        """session.add is called for each record and session.commit is called."""
         exporter = self._make_exporter()
-        records = [self._make_record()]
-        exporter._write_batch(records)
-        mock_asyncio_run.assert_called_once()
+        mock_session = MagicMock()
+        exporter._sync_session_factory = MagicMock(return_value=mock_session)
 
-    @patch("asyncio.run")
-    def test_asyncio_run_exception(self, mock_asyncio_run):
-        """asyncio.run raising an exception is caught and logged."""
-        mock_asyncio_run.side_effect = RuntimeError("event loop error")
-        exporter = self._make_exporter()
         records = [self._make_record()]
 
-        with patch("src.services.otel_tracing.db_exporter.logger") as mock_logger:
+        with patch("src.models.execution_trace.ExecutionTrace") as mock_trace_cls:
+            mock_trace_cls.return_value = MagicMock()
+            exporter._write_batch(records)
+
+        mock_session.add.assert_called_once()
+        mock_session.commit.assert_called_once()
+        mock_session.close.assert_called_once()
+
+    def test_session_exception_triggers_rollback(self):
+        """An exception during session.commit triggers rollback and error log."""
+        exporter = self._make_exporter()
+        mock_session = MagicMock()
+        mock_session.commit.side_effect = RuntimeError("commit failed")
+        exporter._sync_session_factory = MagicMock(return_value=mock_session)
+
+        records = [self._make_record()]
+
+        with patch("src.models.execution_trace.ExecutionTrace") as mock_trace_cls, \
+             patch("src.services.otel_tracing.db_exporter.logger") as mock_logger:
+            mock_trace_cls.return_value = MagicMock()
             exporter._write_batch(records)
             mock_logger.error.assert_called()
 
-    def test_write_async_successful_write(self):
-        """Successful create_trace leads to commit and info log."""
-        exporter = self._make_exporter()
-        mock_session = AsyncMock()
-        mock_svc = AsyncMock()
-        mock_svc.create_trace = AsyncMock()
+        mock_session.rollback.assert_called_once()
+        mock_session.close.assert_called_once()
 
-        mock_session_cm = AsyncMock()
-        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_cm.__aexit__ = AsyncMock(return_value=False)
-        exporter._thread_session_factory = MagicMock(return_value=mock_session_cm)
+    def test_write_successful_creates_execution_trace(self):
+        """Successful write creates ExecutionTrace model instances."""
+        exporter = self._make_exporter()
+        mock_session = MagicMock()
+        exporter._sync_session_factory = MagicMock(return_value=mock_session)
 
         records = [self._make_record()]
 
-        with patch(
-            "src.services.execution_trace_service.ExecutionTraceService",
-            return_value=mock_svc,
-        ), patch(
-            "asyncio.run", side_effect=_run_coroutine_from_mock,
-        ):
+        with patch("src.models.execution_trace.ExecutionTrace") as mock_trace_cls:
+            mock_trace_instance = MagicMock()
+            mock_trace_cls.return_value = mock_trace_instance
             exporter._write_batch(records)
 
-        mock_svc.create_trace.assert_called_once()
+        # Verify ExecutionTrace was instantiated with correct fields
+        mock_trace_cls.assert_called_once()
+        call_kwargs = mock_trace_cls.call_args.kwargs
+        assert call_kwargs["job_id"] == "job-write"
+        assert call_kwargs["event_source"] == "agent"
+        assert call_kwargs["event_context"] == "task"
+        assert call_kwargs["event_type"] == "task_started"
+        mock_session.add.assert_called_once_with(mock_trace_instance)
         mock_session.commit.assert_called_once()
 
-    def test_write_async_value_error(self):
-        """ValueError during create_trace logs warning but continues."""
+    def test_write_record_exception_logs_error_but_continues(self):
+        """Exception during individual record processing logs error and continues."""
         exporter = self._make_exporter()
-        mock_session = AsyncMock()
-        mock_svc = AsyncMock()
-        mock_svc.create_trace = AsyncMock(
-            side_effect=ValueError("job not found")
-        )
-
-        mock_session_cm = AsyncMock()
-        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_cm.__aexit__ = AsyncMock(return_value=False)
-        exporter._thread_session_factory = MagicMock(return_value=mock_session_cm)
+        mock_session = MagicMock()
+        exporter._sync_session_factory = MagicMock(return_value=mock_session)
 
         records = [self._make_record()]
 
-        with patch(
-            "src.services.execution_trace_service.ExecutionTraceService",
-            return_value=mock_svc,
-        ), patch(
-            "asyncio.run", side_effect=_run_coroutine_from_mock,
-        ), patch(
-            "src.services.otel_tracing.db_exporter.logger",
-        ) as mock_logger:
-            exporter._write_batch(records)
-            mock_logger.warning.assert_called()
-
-        # Should NOT commit since written == 0
-        mock_session.commit.assert_not_called()
-
-    def test_write_async_generic_exception(self):
-        """Generic exception during create_trace logs error but continues."""
-        exporter = self._make_exporter()
-        mock_session = AsyncMock()
-        mock_svc = AsyncMock()
-        mock_svc.create_trace = AsyncMock(
-            side_effect=RuntimeError("DB connection lost")
-        )
-
-        mock_session_cm = AsyncMock()
-        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_cm.__aexit__ = AsyncMock(return_value=False)
-        exporter._thread_session_factory = MagicMock(return_value=mock_session_cm)
-
-        records = [self._make_record()]
-
-        with patch(
-            "src.services.execution_trace_service.ExecutionTraceService",
-            return_value=mock_svc,
-        ), patch(
-            "asyncio.run", side_effect=_run_coroutine_from_mock,
-        ), patch(
-            "src.services.otel_tracing.db_exporter.logger",
-        ) as mock_logger:
+        with patch("src.models.execution_trace.ExecutionTrace") as mock_trace_cls, \
+             patch("src.services.otel_tracing.db_exporter.logger") as mock_logger:
+            mock_trace_cls.side_effect = RuntimeError("model creation failed")
             exporter._write_batch(records)
             mock_logger.error.assert_called()
 
+        # No records written, so commit is NOT called but warning IS logged
         mock_session.commit.assert_not_called()
+        mock_session.close.assert_called_once()
 
-    def test_write_async_empty_output(self):
+    def test_write_empty_output(self):
         """Record with empty output should produce cleaned == {}."""
         exporter = self._make_exporter()
-        mock_session = AsyncMock()
-        mock_svc = AsyncMock()
-        mock_svc.create_trace = AsyncMock()
-
-        mock_session_cm = AsyncMock()
-        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_cm.__aexit__ = AsyncMock(return_value=False)
-        exporter._thread_session_factory = MagicMock(return_value=mock_session_cm)
+        mock_session = MagicMock()
+        exporter._sync_session_factory = MagicMock(return_value=mock_session)
 
         records = [self._make_record(output={})]
 
-        with patch(
-            "src.services.execution_trace_service.ExecutionTraceService",
-            return_value=mock_svc,
-        ), patch(
-            "asyncio.run", side_effect=_run_coroutine_from_mock,
-        ):
+        with patch("src.models.execution_trace.ExecutionTrace") as mock_trace_cls:
+            mock_trace_cls.return_value = MagicMock()
             exporter._write_batch(records)
 
-        # Verify the create_trace was called with cleaned == {}
-        call_args = mock_svc.create_trace.call_args[0][0]
-        assert call_args["output"] == {}
+        call_kwargs = mock_trace_cls.call_args.kwargs
+        assert call_kwargs["output"] == {}
         mock_session.commit.assert_called_once()
 
-    def test_write_async_zero_written_warning(self):
+    def test_write_zero_written_warning(self):
         """When all records fail, warning is logged about 0 written."""
         exporter = self._make_exporter()
-        mock_session = AsyncMock()
-        mock_svc = AsyncMock()
-        mock_svc.create_trace = AsyncMock(
-            side_effect=ValueError("all fail")
-        )
-
-        mock_session_cm = AsyncMock()
-        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_cm.__aexit__ = AsyncMock(return_value=False)
-        exporter._thread_session_factory = MagicMock(return_value=mock_session_cm)
+        mock_session = MagicMock()
+        exporter._sync_session_factory = MagicMock(return_value=mock_session)
 
         records = [self._make_record(), self._make_record()]
 
-        with patch(
-            "src.services.execution_trace_service.ExecutionTraceService",
-            return_value=mock_svc,
-        ), patch(
-            "asyncio.run", side_effect=_run_coroutine_from_mock,
-        ), patch(
-            "src.services.otel_tracing.db_exporter.logger",
-        ) as mock_logger:
+        with patch("src.models.execution_trace.ExecutionTrace") as mock_trace_cls, \
+             patch("src.services.otel_tracing.db_exporter.logger") as mock_logger:
+            mock_trace_cls.side_effect = RuntimeError("all fail")
             exporter._write_batch(records)
-            # Check that warning about 0/2 was logged
             warning_calls = [
                 str(c) for c in mock_logger.warning.call_args_list
             ]
             assert any("0/2" in c for c in warning_calls)
 
-    def test_write_async_partial_success(self):
-        """First record succeeds, second fails with ValueError."""
+    def test_write_partial_success(self):
+        """First record succeeds, second fails."""
         exporter = self._make_exporter()
-        mock_session = AsyncMock()
-        mock_svc = AsyncMock()
-
-        call_count = 0
-
-        async def side_effect_fn(data):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 2:
-                raise ValueError("second record fails")
-
-        mock_svc.create_trace = AsyncMock(side_effect=side_effect_fn)
-
-        mock_session_cm = AsyncMock()
-        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_cm.__aexit__ = AsyncMock(return_value=False)
-        exporter._thread_session_factory = MagicMock(return_value=mock_session_cm)
+        mock_session = MagicMock()
+        exporter._sync_session_factory = MagicMock(return_value=mock_session)
 
         records = [self._make_record(), self._make_record()]
 
-        with patch(
-            "src.services.execution_trace_service.ExecutionTraceService",
-            return_value=mock_svc,
-        ), patch(
-            "asyncio.run", side_effect=_run_coroutine_from_mock,
-        ):
+        call_count = 0
+
+        def trace_side_effect(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise RuntimeError("second record fails")
+            return MagicMock()
+
+        with patch("src.models.execution_trace.ExecutionTrace") as mock_trace_cls:
+            mock_trace_cls.side_effect = trace_side_effect
             exporter._write_batch(records)
 
         # 1 written, so commit should be called
@@ -1290,91 +1199,60 @@ class TestWriteBatch:
     def test_write_batch_with_uuid_in_output(self):
         """UUIDEncoder should handle UUID objects in output dict."""
         exporter = self._make_exporter()
-        mock_session = AsyncMock()
-        mock_svc = AsyncMock()
-        mock_svc.create_trace = AsyncMock()
-
-        mock_session_cm = AsyncMock()
-        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_cm.__aexit__ = AsyncMock(return_value=False)
-        exporter._thread_session_factory = MagicMock(return_value=mock_session_cm)
+        mock_session = MagicMock()
+        exporter._sync_session_factory = MagicMock(return_value=mock_session)
 
         test_uuid = UUID("abcdef12-3456-7890-abcd-ef1234567890")
         records = [self._make_record(output={"content": "test", "id": test_uuid})]
 
-        with patch(
-            "src.services.execution_trace_service.ExecutionTraceService",
-            return_value=mock_svc,
-        ), patch(
-            "asyncio.run", side_effect=_run_coroutine_from_mock,
-        ):
+        with patch("src.models.execution_trace.ExecutionTrace") as mock_trace_cls:
+            mock_trace_cls.return_value = MagicMock()
             exporter._write_batch(records)
 
-        call_args = mock_svc.create_trace.call_args[0][0]
-        assert call_args["output"]["id"] == "abcdef12-3456-7890-abcd-ef1234567890"
+        call_kwargs = mock_trace_cls.call_args.kwargs
+        assert call_kwargs["output"]["id"] == "abcdef12-3456-7890-abcd-ef1234567890"
 
     def test_write_batch_record_fields_passed_correctly(self):
-        """Verify all record fields are correctly passed to create_trace."""
+        """Verify all record fields are correctly passed to ExecutionTrace."""
         exporter = self._make_exporter()
-        mock_session = AsyncMock()
-        mock_svc = AsyncMock()
-        mock_svc.create_trace = AsyncMock()
-
-        mock_session_cm = AsyncMock()
-        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_cm.__aexit__ = AsyncMock(return_value=False)
-        exporter._thread_session_factory = MagicMock(return_value=mock_session_cm)
+        mock_session = MagicMock()
+        exporter._sync_session_factory = MagicMock(return_value=mock_session)
 
         records = [self._make_record(
             group_id="grp-1",
             group_email="user@example.com",
         )]
 
-        with patch(
-            "src.services.execution_trace_service.ExecutionTraceService",
-            return_value=mock_svc,
-        ), patch(
-            "asyncio.run", side_effect=_run_coroutine_from_mock,
-        ):
+        with patch("src.models.execution_trace.ExecutionTrace") as mock_trace_cls:
+            mock_trace_cls.return_value = MagicMock()
             exporter._write_batch(records)
 
-        call_args = mock_svc.create_trace.call_args[0][0]
-        assert call_args["job_id"] == "job-write"
-        assert call_args["event_source"] == "agent"
-        assert call_args["event_context"] == "task"
-        assert call_args["event_type"] == "task_started"
-        assert call_args["trace_metadata"] == {}
-        assert call_args["span_id"] == "0000000000000001"
-        assert call_args["trace_id"] == "0000000000000002"
-        assert call_args["parent_span_id"] is None
-        assert call_args["span_name"] == "test.span"
-        assert call_args["status_code"] == "OK"
-        assert call_args["duration_ms"] == 100
-        assert call_args["group_id"] == "grp-1"
-        assert call_args["group_email"] == "user@example.com"
+        call_kwargs = mock_trace_cls.call_args.kwargs
+        assert call_kwargs["job_id"] == "job-write"
+        assert call_kwargs["event_source"] == "agent"
+        assert call_kwargs["event_context"] == "task"
+        assert call_kwargs["event_type"] == "task_started"
+        assert call_kwargs["trace_metadata"] == {}
+        assert call_kwargs["span_id"] == "0000000000000001"
+        assert call_kwargs["trace_id"] == "0000000000000002"
+        assert call_kwargs["parent_span_id"] is None
+        assert call_kwargs["span_name"] == "test.span"
+        assert call_kwargs["status_code"] == "OK"
+        assert call_kwargs["duration_ms"] == 100
+        assert call_kwargs["group_id"] == "grp-1"
+        assert call_kwargs["group_email"] == "user@example.com"
 
-    def test_write_async_written_logs_info(self):
+    def test_write_written_logs_info(self):
         """When at least one record is written, info log is emitted."""
         exporter = self._make_exporter()
-        mock_session = AsyncMock()
-        mock_svc = AsyncMock()
-        mock_svc.create_trace = AsyncMock()
-
-        mock_session_cm = AsyncMock()
-        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_cm.__aexit__ = AsyncMock(return_value=False)
-        exporter._thread_session_factory = MagicMock(return_value=mock_session_cm)
+        mock_session = MagicMock()
+        exporter._sync_session_factory = MagicMock(return_value=mock_session)
 
         records = [self._make_record(), self._make_record()]
 
-        with patch(
-            "src.services.execution_trace_service.ExecutionTraceService",
-            return_value=mock_svc,
-        ), patch(
-            "asyncio.run", side_effect=_run_coroutine_from_mock,
-        ), patch(
-            "src.services.otel_tracing.db_exporter.logger",
-        ) as mock_logger:
+        with patch("src.models.execution_trace.ExecutionTrace") as mock_trace_cls, \
+             patch("src.services.otel_tracing.db_exporter.logger") as mock_logger:
+            mock_trace_cls.return_value = MagicMock()
             exporter._write_batch(records)
             info_calls = [str(c) for c in mock_logger.info.call_args_list]
             assert any("2/2" in c for c in info_calls)
@@ -1390,8 +1268,8 @@ class TestShutdown:
 
     def _make_exporter(self):
         with patch("src.services.otel_tracing.db_exporter.ThreadPoolExecutor") as mock_exec_cls, \
-             patch("sqlalchemy.ext.asyncio.async_sessionmaker", create=True), \
-             patch("sqlalchemy.ext.asyncio.create_async_engine", create=True), \
+             patch("sqlalchemy.orm.sessionmaker", create=True), \
+             patch("sqlalchemy.create_engine", create=True), \
              patch("src.config.settings.settings") as mock_settings:
             mock_settings.DATABASE_URI = "sqlite+aiosqlite:///:memory:"
             exporter = KasalDBSpanExporter(job_id="job-shutdown")
@@ -1404,7 +1282,7 @@ class TestShutdown:
 
         exporter.shutdown()
 
-        mock_executor.shutdown.assert_called_once_with(wait=True)
+        mock_executor.shutdown.assert_called_once_with(wait=True, cancel_futures=False)
 
     def test_shutdown_logs_total_exported(self):
         exporter = self._make_exporter()
@@ -1415,6 +1293,71 @@ class TestShutdown:
             exporter.shutdown()
             info_calls = [str(c) for c in mock_logger.info.call_args_list]
             assert any("42" in c for c in info_calls)
+
+    def test_shutdown_waits_for_pending_writes(self):
+        """Verify shutdown uses wait=True, cancel_futures=False so pending
+        trace writes are not dropped."""
+        exporter = self._make_exporter()
+        mock_executor = MagicMock()
+        exporter._executor = mock_executor
+        mock_engine = MagicMock()
+        exporter._sync_engine = mock_engine
+
+        exporter.shutdown()
+
+        # The executor.shutdown is called inside the _do_shutdown thread
+        # with wait=True and cancel_futures=False
+        mock_executor.shutdown.assert_called_once_with(
+            wait=True, cancel_futures=False
+        )
+
+    def test_shutdown_timeout(self):
+        """Verify that the 10-second timeout mechanism works: if the thread
+        pool shutdown takes too long, the method logs a warning and returns
+        instead of blocking forever."""
+        exporter = self._make_exporter()
+        mock_engine = MagicMock()
+        exporter._sync_engine = mock_engine
+
+        # Make executor.shutdown block indefinitely so the timeout fires
+        import threading
+
+        block_event = threading.Event()
+
+        def blocking_shutdown(**kwargs):
+            # Block until the test signals us (never, in this case)
+            block_event.wait(timeout=30)
+
+        mock_executor = MagicMock()
+        mock_executor.shutdown.side_effect = blocking_shutdown
+        exporter._executor = mock_executor
+
+        with patch("src.services.otel_tracing.db_exporter.logger") as mock_logger:
+            # Use a very short timeout to avoid slowing down tests.
+            # We monkey-patch the timeout value inside the shutdown method
+            # by patching threading.Event.wait to simulate timeout expiry.
+            original_event_wait = threading.Event.wait
+
+            def fast_wait(self_event, timeout=None):
+                # The _do_shutdown thread's Event.set() call — let it pass
+                # The main thread's shutdown_done.wait(timeout=10.0) — return False (timed out)
+                # Distinguish: _do_shutdown sets the event; main thread waits on it.
+                # We intercept waits with timeout=10.0 (the main wait) and return False.
+                if timeout == 10.0:
+                    return False  # Simulate timeout
+                return original_event_wait(self_event, timeout=timeout)
+
+            with patch.object(threading.Event, "wait", fast_wait):
+                exporter.shutdown()
+
+            # Verify that the timeout warning was logged
+            warning_calls = [str(c) for c in mock_logger.warning.call_args_list]
+            assert any(
+                "timed out" in c.lower() for c in warning_calls
+            ), f"Expected timeout warning in: {warning_calls}"
+
+        # Unblock the thread so it doesn't leak
+        block_event.set()
 
 
 # ---------------------------------------------------------------------------
@@ -1427,8 +1370,8 @@ class TestForceFlush:
 
     def _make_exporter(self):
         with patch("src.services.otel_tracing.db_exporter.ThreadPoolExecutor"), \
-             patch("sqlalchemy.ext.asyncio.async_sessionmaker", create=True), \
-             patch("sqlalchemy.ext.asyncio.create_async_engine", create=True), \
+             patch("sqlalchemy.orm.sessionmaker", create=True), \
+             patch("sqlalchemy.create_engine", create=True), \
              patch("src.config.settings.settings") as mock_settings:
             mock_settings.DATABASE_URI = "sqlite+aiosqlite:///:memory:"
             exporter = KasalDBSpanExporter(job_id="job-flush")

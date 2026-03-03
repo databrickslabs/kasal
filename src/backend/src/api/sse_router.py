@@ -9,7 +9,7 @@ Provides SSE endpoints for:
 
 from typing import Optional
 
-from fastapi import APIRouter, Header, Query
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
 
 from src.core.dependencies import GroupContextDep
@@ -20,9 +20,37 @@ logger = LoggerManager.get_instance().system
 
 router = APIRouter(prefix="/sse", tags=["Server-Sent Events"])
 
+# HTTP/2-safe headers for SSE streaming responses.
+# IMPORTANT: Do NOT include "Connection: keep-alive" — it is a hop-by-hop
+# header forbidden in HTTP/2 (RFC 7540 §8.1.2.2). Sending it through an
+# HTTP/2 reverse proxy (e.g., Databricks Apps) causes
+# ERR_HTTP2_PROTOCOL_ERROR and kills the stream immediately.
+#
+# "Content-Encoding: none" is borrowed from Databricks AppKit — it tells
+# the HTTP/2 proxy NOT to buffer/compress the response, which is critical
+# for SSE to stream through without being held back.
+SSE_HEADERS = {
+    "Cache-Control": "no-cache, no-transform",
+    "Content-Encoding": "none",          # Prevent proxy buffering/compression
+    "X-Accel-Buffering": "no",           # Disable buffering in nginx / envoy
+    "X-Content-Type-Options": "nosniff",
+}
+
+
+def _parse_last_event_id(request: Request) -> Optional[int]:
+    """Extract Last-Event-ID from request headers (sent by EventSource on reconnect)."""
+    raw = request.headers.get("last-event-id")
+    if raw:
+        try:
+            return int(raw)
+        except (ValueError, TypeError):
+            pass
+    return None
+
 
 @router.get("/executions/{job_id}/stream")
 async def stream_execution_updates(
+    request: Request,
     job_id: str,
     group_context: GroupContextDep,
     timeout: int = Query(3600, ge=30, le=7200, description="Stream timeout in seconds"),
@@ -33,64 +61,32 @@ async def stream_execution_updates(
     """
     Stream real-time updates for a specific execution via Server-Sent Events.
 
-    This endpoint provides a continuous stream of events including:
-    - Execution status changes (queued, running, completed, failed)
-    - Execution traces
-    - HITL approval requests
-    - Error notifications
-
-    The connection will automatically close when:
-    - The execution completes (status = completed/failed/stopped)
-    - The timeout is reached
-    - The client disconnects
-
-    **Event Types:**
-    - `execution_update`: Status change event
-    - `trace`: New execution trace
-    - `hitl_request`: Human-in-the-loop approval needed
-    - `error`: Error occurred
-    - `connected`: Initial connection established
-
-    **Event Data Format:**
-    ```json
-    {
-        "job_id": "...",
-        "status": "running",
-        "updated_at": "2024-01-01T12:00:00",
-        ...
-    }
-    ```
-
-    Args:
-        job_id: The execution job ID to stream updates for
-        group_context: Group context for security filtering
-        timeout: Maximum time to keep stream alive (30-3600 seconds)
-        heartbeat: Interval for keepalive messages (10-120 seconds)
-
-    Returns:
-        StreamingResponse with text/event-stream content type
+    Supports automatic reconnection with event replay: when the connection
+    drops (common behind HTTP/2 proxies like Databricks Apps), the browser
+    reconnects with ``Last-Event-ID`` and the server replays missed events.
     """
-    # TODO: Add security check - verify job belongs to user's groups
-    # For now, we rely on group_context being passed through
+    last_event_id = _parse_last_event_id(request)
 
     logger.info(
-        f"SSE stream requested for job {job_id}, "
-        f"timeout={timeout}s, heartbeat={heartbeat}s"
+        f"[SSE_STREAM] per-job endpoint hit | job={job_id} | "
+        f"timeout={timeout}s | heartbeat={heartbeat}s | last_event_id={last_event_id}"
     )
 
     return StreamingResponse(
-        event_stream_generator(job_id, timeout=timeout, heartbeat_interval=heartbeat),
+        event_stream_generator(
+            job_id,
+            timeout=timeout,
+            heartbeat_interval=heartbeat,
+            last_event_id=last_event_id,
+        ),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Disable buffering in nginx
-        },
+        headers=SSE_HEADERS,
     )
 
 
 @router.get("/executions/stream-all")
 async def stream_all_executions(
+    request: Request,
     group_context: GroupContextDep,
     timeout: int = Query(3600, ge=30, le=7200),
     heartbeat: int = Query(15, ge=5, le=120),
@@ -98,45 +94,34 @@ async def stream_all_executions(
     """
     Stream updates for all executions in the user's groups.
 
-    This endpoint streams events for any execution that belongs to the
-    user's accessible groups. Useful for dashboard views that need to
-    monitor multiple executions simultaneously.
-
-    The stream includes the same event types as the single-job endpoint,
-    but with events from all jobs in the user's groups.
-
-    Args:
-        group_context: Group context for filtering
-        timeout: Maximum time to keep stream alive
-        heartbeat: Interval for keepalive messages
-
-    Returns:
-        StreamingResponse with text/event-stream content type
+    Supports automatic reconnection with event replay (see per-job endpoint).
     """
-    # For "stream all", we'll use a special job_id pattern
-    # This will be expanded in future to handle multiple job subscriptions
-    stream_id = f"all_groups_{'-'.join(sorted(group_context.group_ids))}"
+    last_event_id = _parse_last_event_id(request)
+    group_ids = group_context.group_ids or []
+    stream_id = f"all_groups_{'-'.join(sorted(group_ids))}"
 
     logger.info(
-        f"SSE stream-all requested for groups {group_context.group_ids}, "
-        f"timeout={timeout}s"
+        f"[SSE_STREAM] stream-all endpoint hit | groups={group_ids} | "
+        f"stream_id={stream_id} | timeout={timeout}s | heartbeat={heartbeat}s | "
+        f"last_event_id={last_event_id} | "
+        f"headers={dict(request.headers)}"
     )
 
     return StreamingResponse(
         event_stream_generator(
-            stream_id, timeout=timeout, heartbeat_interval=heartbeat
+            stream_id,
+            timeout=timeout,
+            heartbeat_interval=heartbeat,
+            last_event_id=last_event_id,
         ),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+        headers=SSE_HEADERS,
     )
 
 
 @router.get("/generations/{generation_id}/stream")
 async def stream_generation_updates(
+    request: Request,
     generation_id: str,
     group_context: GroupContextDep,
     timeout: int = Query(300, ge=30, le=600, description="Stream timeout in seconds"),
@@ -145,29 +130,24 @@ async def stream_generation_updates(
     """
     Stream real-time updates for a progressive crew generation via SSE.
 
-    Events:
-    - `plan_ready`: Crew outline with agent/task names
-    - `agent_detail`: Full agent details after generation + DB persist
-    - `task_detail`: Full task details after generation + DB persist
-    - `entity_error`: Error generating a specific entity
-    - `generation_complete`: All entities created
-    - `generation_failed`: Fatal error during generation
+    Supports automatic reconnection with event replay.
     """
+    last_event_id = _parse_last_event_id(request)
+
     logger.info(
-        f"SSE generation stream requested for {generation_id}, "
-        f"timeout={timeout}s, heartbeat={heartbeat}s"
+        f"[SSE_STREAM] generation endpoint hit | id={generation_id} | "
+        f"timeout={timeout}s | heartbeat={heartbeat}s | last_event_id={last_event_id}"
     )
 
     return StreamingResponse(
         event_stream_generator(
-            generation_id, timeout=timeout, heartbeat_interval=heartbeat
+            generation_id,
+            timeout=timeout,
+            heartbeat_interval=heartbeat,
+            last_event_id=last_event_id,
         ),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+        headers=SSE_HEADERS,
     )
 
 

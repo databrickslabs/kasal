@@ -9,6 +9,7 @@ from src.api.database_management_router import (
     import_database,
     list_backups,
     get_database_info,
+    run_housekeeping,
     debug_permissions,
     debug_headers,
     check_database_management_permission,
@@ -171,4 +172,53 @@ async def test_lakebase_endpoints_success_and_validations():
     svc.enable_lakebase = AsyncMock(return_value={"enabled": True})
     out10 = await enable_lakebase_without_migration({"instance_name": "x", "endpoint": "https://e"}, service=svc)
     assert out10["enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_housekeeping_success():
+    """Test housekeeping endpoint with valid cutoff date."""
+    svc = AsyncMock()
+    svc.run_housekeeping = AsyncMock(return_value={
+        "success": True,
+        "cutoff_date": "2025-01-01",
+        "deleted": {"executionhistory": 5, "taskstatus": 2, "errortrace": 1,
+                     "execution_trace": 10, "execution_logs": 20, "llmlog": 3},
+        "total_deleted": 41,
+    })
+
+    result = await run_housekeeping(
+        request={"cutoff_date": "2025-01-01"},
+        service=svc,
+    )
+
+    assert result["success"] is True
+    assert result["total_deleted"] == 41
+    svc.run_housekeeping.assert_awaited_once_with(cutoff_date="2025-01-01")
+
+
+@pytest.mark.asyncio
+async def test_housekeeping_missing_cutoff_date():
+    """Test housekeeping endpoint rejects missing cutoff_date."""
+    svc = AsyncMock()
+
+    with pytest.raises(BadRequestError):
+        await run_housekeeping(request={}, service=svc)
+
+    svc.run_housekeeping.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_housekeeping_service_failure():
+    """Test housekeeping endpoint raises KasalError on service failure."""
+    svc = AsyncMock()
+    svc.run_housekeeping = AsyncMock(return_value={
+        "success": False,
+        "error": "Something went wrong",
+    })
+
+    with pytest.raises(KasalError):
+        await run_housekeeping(
+            request={"cutoff_date": "2025-01-01"},
+            service=svc,
+        )
 

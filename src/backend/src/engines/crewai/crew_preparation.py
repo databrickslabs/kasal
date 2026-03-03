@@ -357,7 +357,15 @@ class CrewPreparation:
                     logger.info(f"[CrewPreparation] Agent {agent_name} has NO knowledge_sources")
 
                 # Add MCP requirements from assigned tasks to agent config
-                agent_mcp_servers = agent_mcp_requirements.get(agent_id, [])
+                # Try multiple keys: collect_agent_mcp_requirements() uses
+                # _resolve_agent_reference() which returns the config-level ID
+                # (e.g. "agent_agent-xxx"), but agent_id here may be the Kasal
+                # UUID resolved via _lookup_kasal_agent_uuid_via_service().
+                agent_mcp_servers = (
+                    agent_mcp_requirements.get(agent_id, [])
+                    or agent_mcp_requirements.get(config_agent_id, [])
+                    or agent_mcp_requirements.get(agent_name, [])
+                )
                 if agent_mcp_servers:
                     logger.info(f"Agent {agent_name} will have MCP servers from tasks: {agent_mcp_servers}")
                     if 'tool_configs' not in agent_config:
@@ -575,8 +583,17 @@ class CrewPreparation:
                     context_tasks = []
 
                     for ref in context_refs:
-                        if ref in task_dict:
-                            context_tasks.append(task_dict[ref])
+                        # Try direct lookup first
+                        resolved_task = task_dict.get(ref)
+                        if not resolved_task:
+                            # Frontend sends refs with "task_" prefix (e.g. "task_<uuid>")
+                            # but task_dict keys are raw IDs from task_config['id'].
+                            # Strip the prefix and retry.
+                            stripped = ref.replace("task_", "", 1) if ref.startswith("task_") else None
+                            if stripped:
+                                resolved_task = task_dict.get(stripped)
+                        if resolved_task:
+                            context_tasks.append(resolved_task)
                         else:
                             logger.warning(f"Could not resolve context reference '{ref}' for task {task_id}")
 
@@ -731,7 +748,7 @@ class CrewPreparation:
             if memory_enabled and memory_backend_config:
                 # Determine which embedder to use
                 backend_type = memory_backend_config.get('backend_type')
-                embedder_for_backends = custom_embedder if backend_type == 'databricks' else crew_kwargs.get('embedder')
+                embedder_for_backends = custom_embedder if backend_type in ('databricks', 'lakebase') else crew_kwargs.get('embedder')
                 logger.info(f"Creating memory backends with backend_type={backend_type}, using_custom_embedder={embedder_for_backends is not None}")
 
                 # Create memory backends

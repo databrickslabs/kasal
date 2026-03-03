@@ -322,7 +322,8 @@ class DatabricksRetryLLM(LLM):
 
     # Request timeout - prevents hanging on unresponsive endpoints
     # litellm default is 6000s (100 min) which is way too long
-    REQUEST_TIMEOUT = 120.0  # 2 minutes per request attempt
+    # Databricks server-side limit is 297s, so 240s gives headroom
+    REQUEST_TIMEOUT = 297.0  # Databricks server-side limit is 297s
 
     def __init__(self, **kwargs):
         """Initialize the Databricks Retry LLM wrapper."""
@@ -660,6 +661,7 @@ class DatabricksRetryLLM(LLM):
         Note: kwargs accepts additional parameters like response_model (CrewAI 1.9.x structured outputs)
         """
         crew_log = self._get_crew_logger()
+
         last_error = None
         is_rate_limit = False
         attempt = 0

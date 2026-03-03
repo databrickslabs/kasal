@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.base_repository import BaseRepository
 from src.core.base_service import BaseService
 from src.db.base import Base
-from src.db.session import get_db
+from src.db.session import get_db, get_local_db
 from src.db.database_router import get_smart_db_session
 from src.services.log_service import LLMLogService
 from src.repositories.log_repository import LLMLogRepository
@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 SessionDep = Annotated[AsyncSession, Depends(get_smart_db_session)]
 # Keep legacy session dependency for backward compatibility if needed
 LegacySessionDep = Annotated[AsyncSession, Depends(get_db)]
+# Always use the LOCAL database (SQLite/PG), bypassing Lakebase swap.
+# Used for bootstrap config tables like database_configs.
+LocalSessionDep = Annotated[AsyncSession, Depends(get_local_db)]
 
 
 
@@ -111,6 +114,12 @@ async def get_group_context(
             logger.error(f"Unauthorized group access attempt: {e}")
             from fastapi import HTTPException
             raise HTTPException(status_code=403, detail=str(e))
+        except Exception as e:
+            # Database or other unexpected errors during group resolution.
+            # Return empty GroupContext so the endpoint's own ForbiddenError
+            # check can cleanly return 403 instead of crashing with 500.
+            logger.error(f"Error resolving group context for {user_email}: {e}")
+            return GroupContext()
 
     # Fallback: No group context available
     logger.debug("No email header found, returning empty group context")

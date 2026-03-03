@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
 from src.config.settings import settings
-from src.core.dependencies import GroupContextDep, LegacySessionDep, SessionDep
+from src.core.dependencies import GroupContextDep, LocalSessionDep, SessionDep
 from src.core.exceptions import BadRequestError, ForbiddenError, KasalError
 from src.core.logger import LoggerManager
 from src.core.permissions import check_role_in_context
@@ -45,7 +45,7 @@ def get_database_management_service(
 
 
 def get_lakebase_service(
-    session: LegacySessionDep,  # Always use fallback DB for Lakebase config operations
+    session: LocalSessionDep,  # Always use LOCAL DB for Lakebase config operations
     raw_request: Request,
     group_context: GroupContextDep,
 ) -> LakebaseService:
@@ -225,6 +225,36 @@ async def list_backups(
         raise KasalError(result.get("error", "Failed to list backups"))
 
     return ListBackupsResponse(**result)
+
+
+@router.post("/housekeeping")
+async def run_housekeeping(
+    request: Dict[str, Any],
+    service: DatabaseManagementServiceDep,
+) -> Dict[str, Any]:
+    """
+    Run data housekeeping to delete old execution data.
+
+    Deletes execution history, traces, logs, and LLM logs older than the
+    specified cutoff date.
+
+    Args:
+        request: Request body with cutoff_date (ISO format, e.g. "2025-01-01")
+        service: Database management service (injected)
+
+    Returns:
+        Summary of deleted records per table
+    """
+    cutoff_date = request.get("cutoff_date")
+    if not cutoff_date:
+        raise BadRequestError("cutoff_date is required (ISO format, e.g. '2025-01-01')")
+
+    result = await service.run_housekeeping(cutoff_date=cutoff_date)
+
+    if not result.get("success"):
+        raise KasalError(result.get("error", "Housekeeping failed"))
+
+    return result
 
 
 @router.get("/info", response_model=DatabaseInfoResponse)
@@ -512,12 +542,27 @@ async def get_lakebase_config(service: LakebaseServiceDep) -> Dict[str, Any]:
     return await service.get_config()
 
 
+@router.get("/lakebase/instances")
+async def list_lakebase_instances(service: LakebaseServiceDep) -> list:
+    """
+    List all available Lakebase database instances.
+
+    Returns:
+        List of available instances with name, state, capacity, endpoint, node_count
+    """
+    return await service.list_instances()
+
+
 @router.post("/lakebase/config")
 async def save_lakebase_config(
     config: Dict[str, Any], service: LakebaseServiceDep
 ) -> Dict[str, Any]:
     """
     Save Lakebase configuration.
+
+    The database router checks is_lakebase_enabled() on every request,
+    so saving the config is sufficient — no session disposal needed here.
+    The enable path (POST /lakebase/enable) handles disposal separately.
 
     Args:
         config: Configuration dictionary
@@ -619,7 +664,6 @@ async def migrate_to_lakebase_stream(
         migration_succeeded = False
         try:
             # Extract user token for authentication
-            from src.db.session import async_session_factory
             from src.utils.databricks_auth import extract_user_token_from_request
 
             user_token = extract_user_token_from_request(raw_request)
@@ -641,11 +685,9 @@ async def migrate_to_lakebase_stream(
             if not endpoint:
                 yield f"data: {json.dumps({'type': 'progress', 'message': '🔍 Auto-detecting Lakebase endpoint...', 'step': 'detect_endpoint'})}\n\n"
                 try:
-                    from src.db.session import (
-                        async_session_factory as fallback_session_factory,
-                    )
+                    from src.db.session import _local_session_factory
 
-                    async with fallback_session_factory() as temp_session:
+                    async with _local_session_factory() as temp_session:
                         service_temp = LakebaseService(
                             session=temp_session,
                             user_token=user_token,
@@ -682,15 +724,13 @@ async def migrate_to_lakebase_stream(
                 if event.get("type") == "result" and event.get("success"):
                     migration_succeeded = True
 
-            # If migration succeeded, update config and dispose existing connections
+            # Update config based on migration outcome
+            from src.db.session import _local_session_factory
+
             if migration_succeeded:
                 # Update Lakebase configuration to mark migration as complete and enable it
                 try:
-                    from src.db.session import (
-                        async_session_factory as fallback_session_factory,
-                    )
-
-                    async with fallback_session_factory() as config_session:
+                    async with _local_session_factory() as config_session:
                         config_service = LakebaseService(
                             session=config_session,
                             user_token=user_token,
@@ -718,10 +758,39 @@ async def migrate_to_lakebase_stream(
                     "🔄 Disposed existing database connections to switch to Lakebase"
                 )
                 yield f"data: {json.dumps({'type': 'info', 'message': '🔄 Switched all connections to Lakebase'})}\n\n"
+            else:
+                # Migration failed — disable Lakebase so the app falls back to SQLite
+                try:
+                    async with _local_session_factory() as config_session:
+                        config_service = LakebaseService(
+                            session=config_session,
+                            user_token=user_token,
+                            user_email=user_email,
+                        )
+                        config = await config_service.get_config()
+                        config["enabled"] = False
+                        config["migration_completed"] = False
+                        config["migration_date"] = datetime.utcnow().isoformat()
+                        config["instance_name"] = instance_name
+                        config["endpoint"] = endpoint
+                        await config_service.save_config(config)
+                    yield f"data: {json.dumps({'type': 'warning', 'message': '⚠️ Migration failed — Lakebase disabled, using SQLite'})}\n\n"
+                except Exception as config_error:
+                    logger.error(
+                        f"Error reverting Lakebase config after failed migration: {config_error}"
+                    )
+                    yield f"data: {json.dumps({'type': 'warning', 'message': f'Failed to revert config: {config_error}'})}\n\n"
 
+        except (asyncio.CancelledError, GeneratorExit):
+            # Client disconnected — do not yield, just log and exit
+            logger.warning("Migration stream: client disconnected")
+            return
         except Exception as e:
             logger.error(f"Error in migration stream: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            try:
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            except (StopAsyncIteration, GeneratorExit, asyncio.CancelledError):
+                return
 
     return StreamingResponse(
         event_generator(),

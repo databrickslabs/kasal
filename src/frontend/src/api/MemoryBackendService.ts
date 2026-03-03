@@ -6,7 +6,7 @@
  */
 
 import { apiClient } from '../config/api/ApiConfig';
-import { MemoryBackendConfig, DatabricksMemoryConfig } from '../types/memoryBackend';
+import { MemoryBackendConfig, DatabricksMemoryConfig, LakebaseMemoryConfig } from '../types/memoryBackend';
 import { AxiosError } from 'axios';
 
 export interface DatabricksIndex {
@@ -350,4 +350,138 @@ export class MemoryBackendService {
       };
     }
   }
+
+  /**
+   * Test connection to Lakebase and verify pgvector availability
+   */
+  static async testLakebaseConnection(instanceName?: string): Promise<TestConnectionResult> {
+    try {
+      const response = await apiClient.post<TestConnectionResult>(
+        '/memory-backend/lakebase/test-connection',
+        instanceName ? { instance_name: instanceName } : {}
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Error testing Lakebase connection:', error);
+      const errorMessage = error instanceof AxiosError
+        ? error.response?.data?.detail
+        : error instanceof Error ? error.message : 'Failed to test connection';
+      return {
+        success: false,
+        message: errorMessage || 'Failed to test connection',
+        details: { error: errorMessage },
+      };
+    }
+  }
+
+  /**
+   * Initialize Lakebase pgvector memory tables
+   */
+  static async initializeLakebaseTables(
+    config?: Partial<LakebaseMemoryConfig>
+  ): Promise<{ success: boolean; message: string; tables?: Record<string, { success: boolean; table_name: string; message: string }> }> {
+    try {
+      const response = await apiClient.post<{ success: boolean; message: string; tables?: Record<string, { success: boolean; table_name: string; message: string }> }>(
+        '/memory-backend/lakebase/initialize-tables',
+        config || {}
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Error initializing Lakebase tables:', error);
+      const errorMessage = error instanceof AxiosError
+        ? error.response?.data?.detail
+        : 'Failed to initialize tables';
+      return {
+        success: false,
+        message: errorMessage || 'Failed to initialize tables',
+      };
+    }
+  }
+
+  /**
+   * Get Lakebase memory table statistics
+   */
+  static async getLakebaseTableStats(instanceName?: string): Promise<Record<string, { table_name: string; exists: boolean; row_count: number }>> {
+    try {
+      const params = instanceName ? { instance_name: instanceName } : {};
+      const response = await apiClient.get<Record<string, { table_name: string; exists: boolean; row_count: number }>>(
+        '/memory-backend/lakebase/table-stats',
+        { params }
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching Lakebase table stats:', error);
+      return {};
+    }
+  }
+
+  /**
+   * Get rows from a Lakebase memory table
+   */
+  static async getLakebaseTableData(
+    tableName: string,
+    limit = 50,
+    instanceName?: string
+  ): Promise<{ success: boolean; documents: LakebaseDocument[]; total?: number; message?: string }> {
+    try {
+      const params: Record<string, string | number> = { table_name: tableName, limit };
+      if (instanceName) params.instance_name = instanceName;
+      const response = await apiClient.get<{ success: boolean; documents: LakebaseDocument[]; total?: number; message?: string }>(
+        '/memory-backend/lakebase/table-data',
+        { params }
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching Lakebase table data:', error);
+      return { success: false, documents: [], message: 'Failed to fetch table data' };
+    }
+  }
+
+  /**
+   * Get entity data from Lakebase for graph visualization
+   */
+  static async getLakebaseEntityData(
+    entityTable = 'crew_entity_memory',
+    limit = 200,
+    instanceName?: string
+  ): Promise<{ entities: LakebaseEntity[]; relationships: LakebaseRelationship[] }> {
+    try {
+      const params: Record<string, string | number> = { entity_table: entityTable, limit };
+      if (instanceName) params.instance_name = instanceName;
+      const response = await apiClient.get<{ entities: LakebaseEntity[]; relationships: LakebaseRelationship[] }>(
+        '/memory-backend/lakebase/entity-data',
+        { params }
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching Lakebase entity data:', error);
+      return { entities: [], relationships: [] };
+    }
+  }
+}
+
+export interface LakebaseDocument {
+  id: string;
+  crew_id: string;
+  group_id: string;
+  session_id: string;
+  agent: string;
+  text: string;
+  metadata: Record<string, unknown>;
+  score: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface LakebaseEntity {
+  id: string;
+  name: string;
+  type: string;
+  attributes: Record<string, unknown>;
+}
+
+export interface LakebaseRelationship {
+  source: string;
+  target: string;
+  type: string;
 }

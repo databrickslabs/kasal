@@ -3,12 +3,14 @@
  */
 
 import { create } from 'zustand';
-import { 
-  MemoryBackendConfig, 
+import {
+  MemoryBackendConfig,
   MemoryBackendType,
   DatabricksMemoryConfig,
+  LakebaseMemoryConfig,
   DEFAULT_MEMORY_BACKEND_CONFIG,
-  DEFAULT_DATABRICKS_CONFIG 
+  DEFAULT_DATABRICKS_CONFIG,
+  DEFAULT_LAKEBASE_CONFIG,
 } from '../types/memoryBackend';
 import { 
   MemoryBackendService, 
@@ -41,6 +43,7 @@ interface MemoryBackendState {
   setConfig: (config: MemoryBackendConfig) => void;
   updateConfig: (updates: Partial<MemoryBackendConfig>) => void;
   updateDatabricksConfig: (updates: Partial<MemoryBackendConfig['databricks_config']>) => void;
+  updateLakebaseConfig: (updates: Partial<LakebaseMemoryConfig>) => void;
   
   // API actions
   validateConfig: () => Promise<boolean>;
@@ -87,6 +90,17 @@ export const useMemoryBackendStore = create<MemoryBackendState>((set, get) => ({
         ...(state.config.databricks_config || DEFAULT_DATABRICKS_CONFIG),
         ...updates,
       } as DatabricksMemoryConfig,
+    },
+    error: null,
+  })),
+
+  updateLakebaseConfig: (updates) => set((state) => ({
+    config: {
+      ...state.config,
+      lakebase_config: {
+        ...(state.config.lakebase_config || DEFAULT_LAKEBASE_CONFIG),
+        ...updates,
+      } as LakebaseMemoryConfig,
     },
     error: null,
   })),
@@ -253,3 +267,4 @@ export const useMemoryBackendStore = create<MemoryBackendState>((set, get) => ({
 export const useMemoryBackendConfig = () => useMemoryBackendStore((state) => state.config);
 export const useMemoryBackendType = () => useMemoryBackendStore((state) => state.config.backend_type);
 export const useDatabricksConfig = () => useMemoryBackendStore((state) => state.config.databricks_config);
+export const useLakebaseConfig = () => useMemoryBackendStore((state) => state.config.lakebase_config);

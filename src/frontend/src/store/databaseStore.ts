@@ -29,8 +29,10 @@ interface DatabaseInfo {
   tables?: Record<string, number>;
   total_tables?: number;
   error?: string;
+  lakebase_enabled?: boolean;
   lakebase_instance?: string;
   lakebase_endpoint?: string;
+  connection_error?: string;
 }
 
 interface DatabaseStore {
@@ -45,10 +47,6 @@ interface DatabaseStore {
   // Lakebase configuration
   lakebaseConfig: LakebaseConfig;
   setLakebaseConfig: (config: Partial<LakebaseConfig>) => void;
-
-  // Lakebase mode
-  lakebaseMode: 'create' | 'connect';
-  setLakebaseMode: (mode: 'create' | 'connect') => void;
 
   // Schema state
   schemaExists: boolean;
@@ -68,9 +66,6 @@ interface DatabaseStore {
 
   checkingInstance: boolean;
   setCheckingInstance: (checking: boolean) => void;
-
-  creatingInstance: boolean;
-  setCreatingInstance: (creating: boolean) => void;
 
   // UI states
   expandedSections: {
@@ -103,13 +98,11 @@ export const useDatabaseStore = create<DatabaseStore>((set) => ({
   databaseInfo: null,
   currentBackend: null,
   lakebaseConfig: defaultLakebaseConfig,
-  lakebaseMode: 'connect',
   schemaExists: false,
   showMigrationDialog: false,
-  migrationOption: 'use',
-  loading: false,
+  migrationOption: 'recreate',
+  loading: true,
   checkingInstance: false,
-  creatingInstance: false,
   expandedSections: {
     lakebaseConfig: false,
   },
@@ -126,8 +119,6 @@ export const useDatabaseStore = create<DatabaseStore>((set) => ({
       lakebaseConfig: { ...state.lakebaseConfig, ...config },
     })),
 
-  setLakebaseMode: (mode) => set({ lakebaseMode: mode }),
-
   setSchemaExists: (exists) => set({ schemaExists: exists }),
 
   setShowMigrationDialog: (show) => set({ showMigrationDialog: show }),
@@ -137,8 +128,6 @@ export const useDatabaseStore = create<DatabaseStore>((set) => ({
   setLoading: (loading) => set({ loading }),
 
   setCheckingInstance: (checking) => set({ checkingInstance: checking }),
-
-  setCreatingInstance: (creating) => set({ creatingInstance: creating }),
 
   setExpandedSection: (section, expanded) =>
     set((state) => ({
@@ -157,13 +146,11 @@ export const useDatabaseStore = create<DatabaseStore>((set) => ({
       databaseInfo: null,
       currentBackend: null,
       lakebaseConfig: defaultLakebaseConfig,
-      lakebaseMode: 'connect',
       schemaExists: false,
       showMigrationDialog: false,
-      migrationOption: 'use',
+      migrationOption: 'recreate',
       loading: false,
       checkingInstance: false,
-      creatingInstance: false,
       expandedSections: {
         lakebaseConfig: false,
       },

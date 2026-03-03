@@ -121,10 +121,13 @@ class TestAnalyzeMessageSemantics:
     def setup_method(self):
         self.svc = _build_service()
 
-    def test_empty_message_returns_unknown(self):
+    def test_empty_message_returns_crew_default(self):
         result = self.svc._analyze_message_semantics("")
-        assert result["suggested_intent"] == "unknown"
-        assert result["intent_scores"]["generate_task"] == 0
+        # Crew-first: generate_crew has base score, so it wins by default
+        assert result["suggested_intent"] == "generate_crew"
+        # Empty message has no task actions, but is_single_atomic is True
+        # so generate_task gets 5 (single atomic action score)
+        assert result["intent_scores"]["generate_task"] == 5
 
     def test_task_action_word_detected(self):
         result = self.svc._analyze_message_semantics("find the best flight to Paris")
@@ -134,7 +137,8 @@ class TestAnalyzeMessageSemantics:
     def test_imperative_form_detected(self):
         result = self.svc._analyze_message_semantics("search for news about AI")
         assert result["has_imperative"] is True
-        assert any("Imperative form" in h for h in result["semantic_hints"])
+        # Semantic hints now report "Action words detected" instead of "Imperative form"
+        assert any("Action words detected" in h for h in result["semantic_hints"])
 
     def test_agent_keywords_detected(self):
         result = self.svc._analyze_message_semantics(
@@ -182,17 +186,22 @@ class TestAnalyzeMessageSemantics:
         result = self.svc._analyze_message_semantics("what is the best approach")
         assert result["has_question"] is True
 
-    def test_command_structure_detected(self):
+    def test_command_structure_removed(self):
         result = self.svc._analyze_message_semantics("i need to find flight options")
-        assert result["has_command_structure"] is True
-        assert any("Command-like structure" in h for h in result["semantic_hints"])
+        # has_command_structure is now always False (removed in crew-first refactor)
+        assert result["has_command_structure"] is False
 
     def test_complex_task_multiple_actions(self):
         result = self.svc._analyze_message_semantics(
             "find and analyze all the news articles"
         )
         assert result["has_complex_task"] is True
-        assert any("Complex multi-step" in h for h in result["semantic_hints"])
+        # Semantic hints now report "Multiple action words detected" and/or
+        # "Multi-step workflow detected" instead of "Complex multi-step"
+        assert any(
+            "Multiple action words detected" in h or "Multi-step workflow detected" in h
+            for h in result["semantic_hints"]
+        )
 
     def test_complex_task_via_multiple_keyword(self):
         result = self.svc._analyze_message_semantics("gather multiple data sources")
@@ -204,9 +213,10 @@ class TestAnalyzeMessageSemantics:
         assert result["has_greeting"] is False
 
     def test_suggested_intent_picks_highest_score(self):
-        # "execute" alone should yield execute_crew as top score
+        # "execute" alone: execute_crew=6, generate_crew=6 (base).
+        # Tied scores break in priority order: crew > execute, so crew wins.
         result = self.svc._analyze_message_semantics("execute")
-        assert result["suggested_intent"] == "execute_crew"
+        assert result["suggested_intent"] == "generate_crew"
 
     def test_mixed_keywords_highest_wins(self):
         result = self.svc._analyze_message_semantics(
@@ -239,14 +249,20 @@ class TestAnalyzeMessageSemantics:
         assert result["has_configure_structure"] is True
 
     def test_action_starts_with_pattern(self):
-        """Messages starting with 'get' should match command pattern."""
+        """Messages starting with 'get' no longer set has_command_structure (removed)."""
         result = self.svc._analyze_message_semantics("get the latest data")
-        assert result["has_command_structure"] is True
+        # has_command_structure is now always False (removed in crew-first refactor)
+        assert result["has_command_structure"] is False
+        # 'get' is still detected as a task action word
+        assert "get" in result["task_actions"]
 
     def test_can_you_request_pattern(self):
-        """'can you' pattern should match command structure."""
+        """'can you' pattern no longer sets has_command_structure (removed)."""
         result = self.svc._analyze_message_semantics("can you find the best hotel")
-        assert result["has_command_structure"] is True
+        # has_command_structure is now always False (removed in crew-first refactor)
+        assert result["has_command_structure"] is False
+        # 'find' is still detected as a task action word
+        assert "find" in result["task_actions"]
 
     def test_all_various_keywords_detected(self):
         """Several keyword in words triggers 'several' in message."""
@@ -415,6 +431,217 @@ class TestMaybeEnableMlflowTracing:
 
 
 # ===================================================================
+# Tests for _setup_mlflow_sync (SPN auth paths inside _maybe_enable_mlflow_tracing)
+# ===================================================================
+
+
+class TestSetupMlflowSyncAuth:
+    """Test SPN credential extraction inside _setup_mlflow_sync.
+
+    Auth policy: use SPN env vars (DATABRICKS_HOST + CLIENT_ID + CLIENT_SECRET)
+    injected by the Databricks Apps platform.  Strip PAT before SDK call to
+    avoid dual-auth conflict.  Do NOT remove SPN vars from the main process.
+
+    We capture the inner closure via asyncio.to_thread mock, then invoke it
+    within the test's patched environment.
+    """
+
+    @pytest.mark.asyncio
+    async def test_spn_env_extracts_token(self):
+        """When SPN env vars are set, bearer token is extracted and DATABRICKS_TOKEN is set."""
+        import os
+
+        svc = _build_service()
+        gc = _make_group_context()
+
+        spn_env = {
+            "DATABRICKS_CLIENT_ID": "test-cid",
+            "DATABRICKS_CLIENT_SECRET": "test-secret",
+            "DATABRICKS_HOST": "https://example.com",
+        }
+
+        mock_wc_instance = MagicMock()
+        mock_wc_instance.config.authenticate.return_value = {
+            "Authorization": "Bearer spn-token-123",
+        }
+        mock_wc_cls = MagicMock(return_value=mock_wc_instance)
+
+        mock_mlflow = MagicMock()
+        mock_mlflow.set_experiment.return_value = SimpleNamespace(experiment_id="exp-1")
+
+        captured_fn = None
+
+        async def _fake_to_thread(fn, *_a, **_kw):
+            nonlocal captured_fn
+            captured_fn = fn
+
+        with patch("src.services.dispatcher_service.MLflowService") as MockMlf:
+            inst = MockMlf.return_value
+            inst.is_enabled = AsyncMock(return_value=True)
+            with patch("asyncio.to_thread", side_effect=_fake_to_thread):
+                result = await svc._maybe_enable_mlflow_tracing(gc)
+
+        assert result is True
+        assert captured_fn is not None
+
+        with (
+            patch.dict(os.environ, spn_env, clear=False),
+            patch.dict("sys.modules", {
+                "mlflow": mock_mlflow,
+                "mlflow.tracing.destination": MagicMock(),
+                "databricks.sdk": MagicMock(WorkspaceClient=mock_wc_cls),
+            }),
+        ):
+            captured_fn()
+            assert os.environ.get("DATABRICKS_TOKEN") == "spn-token-123"
+            # SPN vars must NOT be removed from main process
+            assert os.environ.get("DATABRICKS_CLIENT_ID") == "test-cid"
+            assert os.environ.get("DATABRICKS_CLIENT_SECRET") == "test-secret"
+            mock_mlflow.set_tracking_uri.assert_called_with("databricks")
+
+    @pytest.mark.asyncio
+    async def test_no_spn_env_returns_false(self):
+        """When SPN env vars are missing, _setup_mlflow_sync returns False (skip MLflow)."""
+        import os
+
+        svc = _build_service()
+        gc = _make_group_context()
+
+        mock_mlflow = MagicMock()
+
+        captured_fn = None
+
+        async def _fake_to_thread(fn, *_a, **_kw):
+            nonlocal captured_fn
+            captured_fn = fn
+
+        with patch("src.services.dispatcher_service.MLflowService") as MockMlf:
+            inst = MockMlf.return_value
+            inst.is_enabled = AsyncMock(return_value=True)
+            with patch("asyncio.to_thread", side_effect=_fake_to_thread):
+                result = await svc._maybe_enable_mlflow_tracing(gc)
+
+        assert result is True
+        assert captured_fn is not None
+
+        clean_env = {k: v for k, v in os.environ.items()
+                     if k not in ("DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET",
+                                  "DATABRICKS_HOST", "DATABRICKS_TOKEN")}
+
+        with (
+            patch.dict(os.environ, clean_env, clear=True),
+            patch.dict("sys.modules", {"mlflow": mock_mlflow}),
+        ):
+            ret = captured_fn()
+            assert ret is False
+
+        mock_mlflow.set_tracking_uri.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_spn_extraction_failure_returns_false(self):
+        """When SPN extraction fails, _setup_mlflow_sync returns False."""
+        import os
+
+        svc = _build_service()
+        gc = _make_group_context()
+
+        spn_env = {
+            "DATABRICKS_CLIENT_ID": "test-cid",
+            "DATABRICKS_CLIENT_SECRET": "test-secret",
+            "DATABRICKS_HOST": "https://example.com",
+        }
+
+        mock_wc_cls = MagicMock(side_effect=RuntimeError("SDK error"))
+        mock_mlflow = MagicMock()
+
+        captured_fn = None
+
+        async def _fake_to_thread(fn, *_a, **_kw):
+            nonlocal captured_fn
+            captured_fn = fn
+
+        with patch("src.services.dispatcher_service.MLflowService") as MockMlf:
+            inst = MockMlf.return_value
+            inst.is_enabled = AsyncMock(return_value=True)
+            with patch("asyncio.to_thread", side_effect=_fake_to_thread):
+                result = await svc._maybe_enable_mlflow_tracing(gc)
+
+        assert result is True
+        assert captured_fn is not None
+
+        with (
+            patch.dict(os.environ, spn_env, clear=False),
+            patch.dict("sys.modules", {
+                "mlflow": mock_mlflow,
+                "databricks.sdk": MagicMock(WorkspaceClient=mock_wc_cls),
+            }),
+        ):
+            ret = captured_fn()
+            assert ret is False
+
+        mock_mlflow.set_tracking_uri.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_strips_pat_during_sdk_call(self):
+        """PAT env vars are temporarily stripped during WorkspaceClient construction."""
+        import os
+
+        svc = _build_service()
+        gc = _make_group_context()
+
+        spn_env = {
+            "DATABRICKS_CLIENT_ID": "test-cid",
+            "DATABRICKS_CLIENT_SECRET": "test-secret",
+            "DATABRICKS_HOST": "https://example.com",
+            "DATABRICKS_TOKEN": "old-pat-token",
+        }
+
+        captured_env_during_call = {}
+
+        def _capturing_wc(*args, **kwargs):
+            captured_env_during_call["DATABRICKS_TOKEN"] = os.environ.get("DATABRICKS_TOKEN")
+            mock_inst = MagicMock()
+            mock_inst.config.authenticate.return_value = {
+                "Authorization": "Bearer spn-extracted-tok",
+            }
+            return mock_inst
+
+        mock_wc_cls = MagicMock(side_effect=_capturing_wc)
+
+        mock_mlflow = MagicMock()
+        mock_mlflow.set_experiment.return_value = SimpleNamespace(experiment_id="exp-1")
+
+        captured_fn = None
+
+        async def _fake_to_thread(fn, *_a, **_kw):
+            nonlocal captured_fn
+            captured_fn = fn
+
+        with patch("src.services.dispatcher_service.MLflowService") as MockMlf:
+            inst = MockMlf.return_value
+            inst.is_enabled = AsyncMock(return_value=True)
+            with patch("asyncio.to_thread", side_effect=_fake_to_thread):
+                result = await svc._maybe_enable_mlflow_tracing(gc)
+
+        assert result is True
+        assert captured_fn is not None
+
+        with (
+            patch.dict(os.environ, spn_env, clear=False),
+            patch.dict("sys.modules", {
+                "mlflow": mock_mlflow,
+                "mlflow.tracing.destination": MagicMock(),
+                "databricks.sdk": MagicMock(WorkspaceClient=mock_wc_cls),
+            }),
+        ):
+            captured_fn()
+            # PAT should have been stripped during SDK call
+            assert captured_env_during_call["DATABRICKS_TOKEN"] is None
+            # After extraction, new token should be set
+            assert os.environ.get("DATABRICKS_TOKEN") == "spn-extracted-tok"
+
+
+# ===================================================================
 # Tests for detect_intent
 # ===================================================================
 
@@ -528,13 +755,14 @@ class TestDetectIntent:
         ):
             result = await svc.detect_intent("execute the crew", "m")
 
-        # "execute" yields execute_crew via semantic fallback
-        assert result["intent"] == "execute_crew"
+        # In crew-first mode, "crew" is a crew keyword so crew_score > execute_score.
+        # Semantic fallback returns generate_crew as the default.
+        assert result["intent"] == "generate_crew"
         assert result["suggested_prompt"] == "execute the crew"
 
     @pytest.mark.asyncio
     async def test_exception_fallback_low_semantic_confidence(self):
-        """When exception and semantic confidence is low, intent should be unknown."""
+        """When exception, crew-first still returns generate_crew as default."""
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
@@ -545,12 +773,13 @@ class TestDetectIntent:
         ):
             result = await svc.detect_intent("xyz", "m")
 
-        assert result["intent"] == "unknown"
-        assert result["confidence"] == 0.3  # max(0.3, 0/5.0)
+        # Crew-first: generate_crew has base score of 6 -> confidence 0.6 > 0.3 threshold
+        assert result["intent"] == "generate_crew"
+        assert result["confidence"] == 0.6  # max(0.5, 6/10.0)
 
     @pytest.mark.asyncio
-    async def test_empty_response_low_semantic_falls_back_unknown(self):
-        """Empty LLM response + low semantic confidence -> unknown intent."""
+    async def test_empty_response_falls_back_to_crew(self):
+        """Empty LLM response -> falls back to generate_crew (crew-first default)."""
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
@@ -564,7 +793,8 @@ class TestDetectIntent:
             result = await svc.detect_intent("xyz abc", "m")
 
         assert result["source"] == "semantic_fallback"
-        assert result["intent"] == "unknown"
+        # Crew-first: empty response falls back to generate_crew
+        assert result["intent"] == "generate_crew"
 
     @pytest.mark.asyncio
     async def test_missing_intent_filled_from_semantic(self):
@@ -686,7 +916,9 @@ class TestDetectIntent:
 
     @pytest.mark.asyncio
     async def test_semantic_override_when_confident(self):
-        """When semantic analysis has high confidence and LLM has low, semantic wins."""
+        """When semantic analysis has high confidence and LLM has low, semantic wins.
+        But in crew-first mode, the semantic override only applies to non-generation
+        intents and crew. 'ec' ties crew (6) with execute (6) -> crew wins priority."""
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
@@ -702,8 +934,11 @@ class TestDetectIntent:
         ):
             result = await svc.detect_intent("ec", "m")
 
-        # "ec" is an execute keyword with high semantic score
-        assert result["intent"] == "execute_crew"
+        # "ec" yields crew=6, execute=6. Crew wins in priority tiebreak.
+        # But semantic_confidence=0.6 < 0.7 override threshold so LLM stays.
+        # LLM said "unknown" with confidence 0.3.
+        # Since override threshold (0.7) is not met, result keeps LLM intent.
+        assert result["intent"] == "unknown"
 
     @pytest.mark.asyncio
     async def test_semantic_does_not_override_when_llm_confident(self):
@@ -1590,7 +1825,8 @@ class TestEdgeCases:
     def test_semantic_analysis_no_words(self):
         svc = _build_service()
         result = svc._analyze_message_semantics("!!! ???")
-        assert result["suggested_intent"] == "unknown"
+        # Crew-first: generate_crew has base score of 6 even with no words
+        assert result["suggested_intent"] == "generate_crew"
 
     @pytest.mark.asyncio
     async def test_dispatch_request_with_empty_tools(self):

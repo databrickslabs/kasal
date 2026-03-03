@@ -1,4 +1,3 @@
-import logging
 from typing import Optional, Dict, Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,8 +38,6 @@ class MLflowService:
         self.exec_repo = ExecutionHistoryRepository(session)
         # SECURITY: Pass group_id for multi-tenant isolation
         self.model_config_service = ModelConfigService(session, group_id=group_id)
-        # Optional per-request user token for OBO; set via router when available
-        self._user_token: Optional[str] = None
 
     async def is_enabled(self) -> bool:
         return await self.repo.is_enabled(group_id=self.group_id)
@@ -57,25 +54,62 @@ class MLflowService:
         ok = await self.repo.set_evaluation_enabled(enabled=enabled, group_id=self.group_id)
         return ok
 
-    # Optional OBO token setter (router can inject per-request user token)
-    def set_user_token(self, token: Optional[str]) -> None:
-        try:
-            self._user_token = token if (isinstance(token, str) and token.strip()) else None
-        except Exception:
-            self._user_token = None
-
     async def _setup_mlflow_auth(self) -> Optional[Any]:
         """
-        Setup MLflow authentication using unified auth chain (OBO → PAT → SPN).
+        Setup MLflow authentication using SPN → PAT priority (matching Lakebase pattern).
+
+        MLflow runs as a service-level operation (experiment tracking, tracing,
+        evaluation) and does not need OBO tokens.  OBO tokens frequently lack
+        MLflow scopes, causing unnecessary fallback retries.
+
+        Authentication priority:
+          1. SPN (Service Principal) — via DATABRICKS_CLIENT_ID + SECRET + HOST env vars
+          2. PAT (Personal Access Token) — via get_auth_context(user_token=None)
 
         Returns:
             AuthContext if authentication was successful, None otherwise
         """
-        from src.utils.databricks_auth import get_auth_context
+        import os
 
         try:
-            # Use unified auth chain: OBO (if user_token set) → PAT → SPN
-            auth = await get_auth_context(user_token=self._user_token)
+            # 1. Try SPN first via environment variables (preferred for deployed apps)
+            client_id = os.environ.get("DATABRICKS_CLIENT_ID")
+            client_secret = os.environ.get("DATABRICKS_CLIENT_SECRET")
+            host = os.environ.get("DATABRICKS_HOST")
+
+            if client_id and client_secret and host:
+                from src.utils.databricks_auth import AuthContext
+                try:
+                    from databricks.sdk import WorkspaceClient
+                    w = WorkspaceClient(
+                        host=host,
+                        client_id=client_id,
+                        client_secret=client_secret,
+                    )
+                    token = w.config.authenticate()
+                    # authenticate() returns a callable that adds headers
+                    import requests as _req
+                    dummy = _req.Request("GET", host)
+                    token(dummy)
+                    bearer = dummy.headers.get("Authorization", "")
+                    if bearer.startswith("Bearer "):
+                        spn_token = bearer[len("Bearer "):]
+                        workspace_url = host.rstrip("/")
+                        if not workspace_url.startswith("http"):
+                            workspace_url = f"https://{workspace_url}"
+                        auth = AuthContext(
+                            token=spn_token,
+                            workspace_url=workspace_url,
+                            auth_method="service_principal",
+                        )
+                        logger.info("[MLflowService] MLflow authentication configured using service_principal")
+                        return auth
+                except Exception as spn_err:
+                    logger.warning(f"[MLflowService] SPN auth failed, falling back to PAT: {spn_err}")
+
+            # 2. Fall back to PAT via unified auth chain (skips OBO)
+            from src.utils.databricks_auth import get_auth_context
+            auth = await get_auth_context(user_token=None)
 
             if not auth or not auth.workspace_url:
                 logger.error("[MLflowService] No authentication available for MLflow")
@@ -185,7 +219,7 @@ class MLflowService:
         auth = None
 
         try:
-            auth = await get_auth_context(user_token=self._user_token)
+            auth = await get_auth_context(user_token=None)
             if auth and auth.workspace_url:
                 workspace_url = auth.workspace_url.rstrip("/")
                 logger.info(f"[MLflowService] Using workspace URL from {auth.auth_method} auth: {workspace_url}")

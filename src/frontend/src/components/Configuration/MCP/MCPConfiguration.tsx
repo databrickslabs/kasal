@@ -490,12 +490,14 @@ const MCPConfiguration: React.FC = () => {
     open: false,
     severity: 'success' as 'success' | 'error',
   });
-  const [_loading, set_Loading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const _userRole = usePermissionStore(state => state.userRole);
 
 
   const loadMcpServers = async () => {
-    set_Loading(true);
+    setLoading(true);
+    setLoadError(null);
     try {
       const mcpService = MCPService.getInstance();
       const response = await mcpService.getMcpServers();
@@ -519,13 +521,15 @@ const MCPConfiguration: React.FC = () => {
 
     } catch (error) {
       console.error('Error loading MCP servers:', error);
+      const message = error instanceof Error ? error.message : 'Failed to load MCP servers';
+      setLoadError(message);
       setNotification({
         open: true,
-        message: error instanceof Error ? error.message : 'Failed to load MCP servers',
+        message,
         severity: 'error',
       });
     } finally {
-      set_Loading(false);
+      setLoading(false);
     }
   };
 
@@ -714,6 +718,30 @@ const MCPConfiguration: React.FC = () => {
   };
 
 
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 200 }}>
+        <CircularProgress />
+        <Typography variant="body2" sx={{ ml: 2 }}>
+          Loading MCP configuration...
+        </Typography>
+      </Box>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <Box sx={{ minHeight: 200 }}>
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {loadError}
+        </Alert>
+        <Button variant="outlined" onClick={loadMcpServers}>
+          Retry
+        </Button>
+      </Box>
+    );
+  }
+
   return (
     <Box>
       <Box sx={{
@@ -727,7 +755,6 @@ const MCPConfiguration: React.FC = () => {
           <Typography variant="h6">
             {t('configuration.mcp.title', { defaultValue: 'MCP Server Configuration' })}
           </Typography>
-          {_loading && <CircularProgress size={20} sx={{ ml: 2 }} />}
         </Box>
         <FormControlLabel
           control={

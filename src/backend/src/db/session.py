@@ -334,12 +334,54 @@ if str(settings.DATABASE_URI).startswith('sqlite'):
 
 # Create session factories for both engines (avoid recreating on each request)
 # Main session factory (uses default engine based on USE_NULLPOOL setting)
-async_session_factory = async_sessionmaker(
+_local_session_factory = async_sessionmaker(
     engine,
     expire_on_commit=False,
     autoflush=False,  # Disable autoflush to prevent SQLite locking issues
     autocommit=False,  # Explicit transaction control
 )
+
+
+class _SwappableSessionFactory:
+    """Wrapper around async_sessionmaker that can be hot-swapped to Lakebase.
+
+    Every module that does ``from src.db.session import async_session_factory``
+    receives a reference to the **same** mutable instance.  Calling
+    ``async_session_factory.activate_lakebase(lakebase_sessionmaker)`` replaces
+    the underlying factory so that *all* existing callers automatically start
+    producing Lakebase sessions — zero call-site changes required.
+    """
+
+    def __init__(self, default_factory):
+        self._factory = default_factory
+        self._is_lakebase = False
+
+    # --- async_sessionmaker-compatible interface ---
+
+    def __call__(self):
+        """Return a new AsyncSession (same as async_sessionmaker.__call__)."""
+        return self._factory()
+
+    # --- hot-swap API ---
+
+    def activate_lakebase(self, lakebase_factory):
+        """Replace the underlying factory with a Lakebase-backed one."""
+        self._factory = lakebase_factory
+        self._is_lakebase = True
+        logger.info("[SESSION FACTORY] Swapped to Lakebase engine")
+
+    def deactivate_lakebase(self):
+        """Revert to the local (SQLite / PG) factory."""
+        self._factory = _local_session_factory
+        self._is_lakebase = False
+        logger.info("[SESSION FACTORY] Reverted to local engine")
+
+    @property
+    def is_lakebase(self) -> bool:
+        return self._is_lakebase
+
+
+async_session_factory = _SwappableSessionFactory(_local_session_factory)
 
 # ContextVar holding the current request-scoped session (set by DI providers)
 _request_session: ContextVar[Optional[AsyncSession]] = ContextVar(
@@ -737,6 +779,26 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
                 continue
             raise
 
+async def get_local_db() -> AsyncGenerator[AsyncSession, None]:
+    """Yield a session connected to the LOCAL database (SQLite/PG),
+    bypassing the Lakebase swap.  Used for bootstrap config tables
+    like database_configs that are never migrated to Lakebase."""
+    async with _local_session_factory() as session:
+        token = _request_session.set(session)
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            try:
+                _request_session.reset(token)
+            except ValueError:
+                pass
+            await session.close()
+
+
 # get_sync_db removed - use get_db() instead
 # All database operations must be async
 
@@ -746,6 +808,9 @@ async def dispose_engines() -> None:
     Dispose all async engines/pools while the FastAPI event loop is still alive.
     This prevents asyncpg from attempting to close connections on a different
     loop during interpreter shutdown ("Future attached to a different loop").
+
+    Also disposes the global Lakebase session factory to ensure a clean
+    switch between database backends (SQLite/PG <-> Lakebase).
     """
     try:
         engines = []
@@ -778,5 +843,13 @@ async def dispose_engines() -> None:
                 await eng.dispose()
             except Exception as e:
                 logger.warning(f"Error disposing engine {eng}: {e}")
+
+        # Also dispose the Lakebase factory to force fresh connections
+        # on the next request after a backend switch
+        try:
+            from src.db.lakebase_session import dispose_lakebase_factory
+            await dispose_lakebase_factory()
+        except Exception as e:
+            logger.warning(f"Error disposing Lakebase factory: {e}")
     except Exception as outer_e:
         logger.warning(f"dispose_engines encountered an error: {outer_e}")
