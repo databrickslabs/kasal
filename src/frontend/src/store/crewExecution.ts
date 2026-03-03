@@ -435,7 +435,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       const jobCreatedEvent = new CustomEvent('jobCreated', {
         detail: {
           jobId: response.execution_id || response.job_id,
-          jobName: `Crew Execution (${new Date().toLocaleTimeString()})`,
+          jobName: response.run_name || `Crew Execution (${new Date().toLocaleTimeString()})`,
           status: 'running',
           groupId: localStorage.getItem('selectedGroupId'), // Include the group ID for security filtering
           planningEnabled
@@ -573,7 +573,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       const jobCreatedEvent = new CustomEvent('jobCreated', {
         detail: {
           jobId: response.execution_id || response.job_id,
-          jobName: `Flow Execution (${new Date().toLocaleTimeString()})`,
+          jobName: response.run_name || `Flow Execution (${new Date().toLocaleTimeString()})`,
           status: 'running',
           groupId: localStorage.getItem('selectedGroupId'), // Include the group ID for security filtering
           isFlow: true, // Flag to indicate this is a flow execution
@@ -750,7 +750,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       const jobCreatedEvent = new CustomEvent('jobCreated', {
         detail: {
           jobId: response.execution_id || response.job_id,
-          jobName: `${tabName || 'Unnamed Tab'} (${new Date().toLocaleTimeString()})`,
+          jobName: response.run_name || `${tabName || 'Unnamed Tab'} (${new Date().toLocaleTimeString()})`,
           status: 'running',
           groupId: localStorage.getItem('selectedGroupId'), // Include the group ID for security filtering
           planningEnabled
@@ -1000,7 +1000,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       window.dispatchEvent(new CustomEvent('jobCreated', {
         detail: {
           jobId: response.execution_id || response.job_id,
-          jobName: `Crew Generation (${new Date().toLocaleTimeString()})`,
+          jobName: response.run_name || `Crew Generation (${new Date().toLocaleTimeString()})`,
           status: 'running',
           groupId: localStorage.getItem('selectedGroupId'), // Include the group ID for security filtering
           planningEnabled
