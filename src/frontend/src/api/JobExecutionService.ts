@@ -37,6 +37,7 @@ export interface JobResponse {
   job_id: string;
   execution_id?: string;
   status: string;
+  run_name?: string;
   created_at: string;
   result: JobResult;
   error: string | null;
