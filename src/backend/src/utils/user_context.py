@@ -282,9 +282,13 @@ class GroupContext:
             # Import here to avoid circular imports
             from src.services.group_service import GroupService
             from src.services.user_service import UserService
-            from src.db.session import request_scoped_session
+            from src.db.session import _local_session_factory
 
-            async with request_scoped_session() as session:
+            # Always use the LOCAL database for user/group lookups.
+            # These config tables live in SQLite and are never migrated
+            # to Lakebase — using the swapped session factory would query
+            # Lakebase where the data doesn't exist.
+            async with _local_session_factory() as session:
                 # Get or create the user
                 user_service = UserService(session)
                 user = await user_service.get_or_create_user_by_email(email)
@@ -324,9 +328,13 @@ class GroupContext:
             # Import here to avoid circular imports
             from src.services.group_service import GroupService
             from src.services.user_service import UserService
-            from src.db.session import request_scoped_session
+            from src.db.session import _local_session_factory
 
-            async with request_scoped_session() as session:
+            # Always use the LOCAL database for user/group lookups.
+            # These config tables live in SQLite and are never migrated
+            # to Lakebase — using the swapped session factory would query
+            # Lakebase where the data doesn't exist.
+            async with _local_session_factory() as session:
                 # Get or create the user
                 logger.info(f"[USER CONTEXT DEBUG] Creating UserService and calling get_or_create_user_by_email for {email}")
                 user_service = UserService(session)

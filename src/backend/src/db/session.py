@@ -779,6 +779,26 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
                 continue
             raise
 
+async def get_local_db() -> AsyncGenerator[AsyncSession, None]:
+    """Yield a session connected to the LOCAL database (SQLite/PG),
+    bypassing the Lakebase swap.  Used for bootstrap config tables
+    like database_configs that are never migrated to Lakebase."""
+    async with _local_session_factory() as session:
+        token = _request_session.set(session)
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            try:
+                _request_session.reset(token)
+            except ValueError:
+                pass
+            await session.close()
+
+
 # get_sync_db removed - use get_db() instead
 # All database operations must be async
 
