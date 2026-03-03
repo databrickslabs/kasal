@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Query, status
 
 from src.core.exceptions import NotFoundError
 
-from src.core.dependencies import GroupContextDep, LegacySessionDep, SessionDep
+from src.core.dependencies import GroupContextDep, LocalSessionDep, SessionDep
 from src.core.logger import LoggerManager
 from src.schemas.execution_trace import (
     DeleteTraceResponse,
@@ -30,16 +30,17 @@ router = APIRouter(prefix="/traces", tags=["Execution Traces"])
 
 # Dependency to get ExecutionTraceService
 def get_execution_trace_service(
-    session: LegacySessionDep,
+    session: LocalSessionDep,
     auth_session: SessionDep,
 ) -> ExecutionTraceService:
     """
     Dependency provider for ExecutionTraceService.
 
     Two sessions are injected:
-    - session (LegacySessionDep / local DB): used for trace CRUD, because
+    - session (LocalSessionDep / local DB): used for trace CRUD, because
       the subprocess OTel exporter writes traces to local DB (it cannot
-      authenticate to Lakebase).
+      authenticate to Lakebase).  Uses get_local_db() which always returns
+      the local SQLite/PG session, even when Lakebase is active.
     - auth_session (SessionDep / smart): used for execution_history
       authorization queries.  When Lakebase is active the execution record
       lives there, so the auth check must go through the smart session.

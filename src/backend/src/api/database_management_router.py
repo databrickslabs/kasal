@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
 from src.config.settings import settings
-from src.core.dependencies import GroupContextDep, LegacySessionDep, SessionDep
+from src.core.dependencies import GroupContextDep, LocalSessionDep, SessionDep
 from src.core.exceptions import BadRequestError, ForbiddenError, KasalError
 from src.core.logger import LoggerManager
 from src.core.permissions import check_role_in_context
@@ -45,7 +45,7 @@ def get_database_management_service(
 
 
 def get_lakebase_service(
-    session: LegacySessionDep,  # Always use fallback DB for Lakebase config operations
+    session: LocalSessionDep,  # Always use LOCAL DB for Lakebase config operations
     raw_request: Request,
     group_context: GroupContextDep,
 ) -> LakebaseService:
@@ -664,7 +664,6 @@ async def migrate_to_lakebase_stream(
         migration_succeeded = False
         try:
             # Extract user token for authentication
-            from src.db.session import async_session_factory
             from src.utils.databricks_auth import extract_user_token_from_request
 
             user_token = extract_user_token_from_request(raw_request)
@@ -686,11 +685,9 @@ async def migrate_to_lakebase_stream(
             if not endpoint:
                 yield f"data: {json.dumps({'type': 'progress', 'message': '🔍 Auto-detecting Lakebase endpoint...', 'step': 'detect_endpoint'})}\n\n"
                 try:
-                    from src.db.session import (
-                        async_session_factory as fallback_session_factory,
-                    )
+                    from src.db.session import _local_session_factory
 
-                    async with fallback_session_factory() as temp_session:
+                    async with _local_session_factory() as temp_session:
                         service_temp = LakebaseService(
                             session=temp_session,
                             user_token=user_token,
@@ -728,14 +725,12 @@ async def migrate_to_lakebase_stream(
                     migration_succeeded = True
 
             # Update config based on migration outcome
-            from src.db.session import (
-                async_session_factory as fallback_session_factory,
-            )
+            from src.db.session import _local_session_factory
 
             if migration_succeeded:
                 # Update Lakebase configuration to mark migration as complete and enable it
                 try:
-                    async with fallback_session_factory() as config_session:
+                    async with _local_session_factory() as config_session:
                         config_service = LakebaseService(
                             session=config_session,
                             user_token=user_token,
@@ -766,7 +761,7 @@ async def migrate_to_lakebase_stream(
             else:
                 # Migration failed — disable Lakebase so the app falls back to SQLite
                 try:
-                    async with fallback_session_factory() as config_session:
+                    async with _local_session_factory() as config_session:
                         config_service = LakebaseService(
                             session=config_session,
                             user_token=user_token,
