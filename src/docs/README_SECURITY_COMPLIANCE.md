@@ -350,12 +350,69 @@ WARNING [SECURITY] Lethal trifecta detected [crew with 2 task(s)]:
 
 ## Gaps and Future Work
 
+The current implementation is fully compliant with the Warnecke reference document. The items below are enhancements that go beyond its requirements, categorised by implementation effort.
+
+### Compliance gaps (against reference document)
+
 | Gap | Severity | Notes |
 |-----|----------|-------|
 | Prompt Guard 2 fine-tuned model | Low | Doc prefers specialized model for internal apps. Kasal uses foundational model (explicitly permitted fallback). Future: allow `"llm_model": "prompt-guard-2"` as an option. |
 | CSP nonce-based script policy | Low | Current CSP uses `unsafe-inline` required by MUI. Nonce injection requires SSR or middleware coordination. |
 | CSP `frame-ancestors` | Low | Intentionally omitted — Kasal may run inside Databricks workspace iframe. Restrict once deployment topology is confirmed. |
 | Heuristic detector is log-only | Informational | Doc suggests optionally prompting for user confirmation on detection. Could be added as an opt-in "block on high severity" mode. |
+
+---
+
+### Easy wins (hours of work, low risk)
+
+**Area 2 — Unicode normalisation pre-pass**
+Adversaries can bypass regex patterns using lookalike Unicode characters (e.g. Cyrillic `і` instead of Latin `i` in "ignore"). A single `unicodedata.normalize('NFKC', text)` call before the regex scan eliminates this class of evasion with zero performance cost.
+
+**Area 2 — Context-gated severity**
+The heuristic detector's severity should be weighted against the crew's trifecta risk profile. A HIGH regex hit on a crew that has no sensitive tools or external communication is much lower risk than the same hit on a trifecta crew. Concretely: pass the trifecta result into the injection scan and escalate only when both signals are present simultaneously.
+
+**Area 7 — `frame-ancestors` via environment variable**
+Rather than hardcoding or omitting `frame-ancestors`, read it from an environment variable at startup:
+```python
+# In SecurityHeadersMiddleware
+frame_ancestors = os.environ.get("ALLOWED_FRAME_ANCESTORS", "'self'")
+# CSP: frame-ancestors {frame_ancestors}
+```
+Set `ALLOWED_FRAME_ANCESTORS=https://*.azuredatabricks.net https://*.gcp.databricks.com` in `app.yaml` at deploy time. Zero code complexity, fully environment-aware.
+
+Alternatively, read `DATABRICKS_HOST` (set automatically by the Databricks Apps runtime) and construct the directive dynamically — no deploy-time config needed at all.
+
+**Area 3 & 4 — Heuristic-gated LLM guardrail activation**
+Currently the LLM guardrail fires on every task execution (when configured). The cheapest improvement: only invoke it when Area 2 fires at MEDIUM/HIGH severity, or when a trifecta is detected on the crew. For clean inputs the LLM call cost drops to zero. The guardrail becomes a second-tier filter rather than an always-on per-task tax.
+
+---
+
+### Medium effort (days of work)
+
+**Area 3 & 4 — Sampling mode for high-throughput crews**
+Add a `"sample_rate": 0.1` option to the guardrail config. The guardrail runs on a random sample of task executions rather than every one. Provides statistical injection coverage at a fraction of the cost — appropriate for bulk or latency-sensitive crews.
+
+**Area 3 & 4 — Smaller dedicated model for guardrailing**
+The guardrail task is a single binary token output (SAFE/INJECTION or PASS/FAIL). A 7B/8B instruction-tuned model, or a fine-tuned classifier head, would be 10–50× cheaper and faster than a full Sonnet call with essentially equivalent accuracy for this narrow task. Could be offered as a model option alongside the foundational model.
+
+**Area 2 — Embeddings-based false-positive filter**
+A small sentence-transformer or bag-of-bigrams classifier trained on injection examples vs. benign security text would eliminate most false positives that trip up the current regex patterns (e.g. a user genuinely writing about security topics). Runs in milliseconds, zero inference cost, ships as a small pickled model file.
+
+---
+
+### Significant architectural work (not recommended now)
+
+**Area 7 — Emotion nonce injection (removes `unsafe-inline`)**
+MUI v5 uses `@emotion` for CSS-in-JS. `@emotion/cache` accepts a `nonce` option. The full solution: FastAPI generates a per-request nonce → injects it into `Content-Security-Policy: style-src 'nonce-{value}'` → injects the same nonce into the initial HTML `<meta>` tag → the React app reads the nonce to configure the emotion cache. This removes `unsafe-inline` entirely. Main cost: coordinating server-side nonce generation through the HTML template and React bootstrap sequence.
+
+**Area 1 — Two-pass isolation**
+The first LLM pass extracts typed/structured data from raw external content (output: strict JSON schema). The second pass operates only on the structured output, never touching raw strings again. Injected instructions in raw content cannot propagate through a strict schema boundary. Requires redesigning task I/O contracts and is a meaningful architectural change.
+
+**Area 1 — Output format contracts (Pydantic schema enforcement)**
+If every task output must match a declared Pydantic model, injected prose instructions rendered as free text can't alter the schema-validated result — they'd just fail validation. Requires crew designers to declare output schemas per task, which changes the current open-ended output model.
+
+**Area 1 — Canary tokens**
+Embed a secret token in the system prompt that the LLM must echo at a fixed position in structured output. Absent or displaced token = output was likely diverted by injection. Zero extra LLM cost once the pattern is established, but requires structured output contracts (see above) to be meaningful.
 
 ---
 
