@@ -473,6 +473,68 @@ app.add_middleware(UserContextMiddleware)
 
 
 # ---------------------------------------------------------------------------
+# Pure ASGI security headers middleware (NOT BaseHTTPMiddleware) to avoid
+# buffering StreamingResponse bodies — critical for SSE compatibility.
+# See: https://github.com/encode/starlette/issues/1012
+# ---------------------------------------------------------------------------
+
+
+class SecurityHeadersMiddleware:
+    """Pure ASGI middleware to add HTTP security headers to all responses.
+
+    Adds Content-Security-Policy, X-Content-Type-Options, X-Frame-Options,
+    and Referrer-Policy headers as recommended by the Databricks AI Security
+    team (Security advice for LLM usage in Databricks Apps, Feb 2026).
+
+    CSP design notes:
+    - unsafe-inline required for MUI (Material-UI) inline styles
+    - connect-src includes ws:/wss: for SSE streams and WebSocket connections
+    - frame-src 'self' allows the HTML-preview srcdoc iframe
+    - frame-ancestors omitted intentionally: Databricks Apps embeds Kasal
+      inside the workspace UI iframe; setting frame-ancestors 'none' or
+      'self' would break that embedding. Restrict once deployment context
+      is confirmed.
+    """
+
+    _CSP = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob:; "
+        "connect-src 'self' ws: wss:; "
+        "frame-src 'self';"
+    )
+
+    _SECURITY_HEADERS = [
+        (b"content-security-policy", _CSP.encode()),
+        (b"x-content-type-options", b"nosniff"),
+        # SAMEORIGIN (not DENY) — Databricks workspace may embed Kasal in an iframe
+        (b"x-frame-options", b"SAMEORIGIN"),
+        (b"referrer-policy", b"strict-origin-when-cross-origin"),
+    ]
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_security_headers(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers.extend(self._SECURITY_HEADERS)
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_security_headers)
+
+
+app.add_middleware(SecurityHeadersMiddleware)
+
+
+# ---------------------------------------------------------------------------
 # Global exception handlers
 # ---------------------------------------------------------------------------
 from src.core.exceptions import KasalError  # noqa: E402

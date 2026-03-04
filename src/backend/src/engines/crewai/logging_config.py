@@ -562,6 +562,8 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
         'src.services.databricks_knowledge_service',  # Add knowledge service logger for search debugging
         'src.engines.crewai.tools.custom.powerbi_analysis_tool',  # Add PowerBI tool logger
         'src.engines.crewai.tools.custom.databricks_jobs_tool',  # Add Databricks jobs tool logger
+        'src.engines.crewai.security.tool_capability_manifest',  # Trifecta detection warnings
+        'src.engines.crewai.security.prompt_injection_detector',  # Injection detection warnings
         '__main__'  # For any direct logging in subprocess
     ]:
         module_logger = get_logger(logger_name)

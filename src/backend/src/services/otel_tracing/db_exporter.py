@@ -344,7 +344,7 @@ class KasalDBSpanExporter(SpanExporter):
         if sync_uri.startswith("sqlite+aiosqlite"):
             sync_uri = sync_uri.replace("sqlite+aiosqlite", "sqlite", 1)
         elif sync_uri.startswith("postgresql+asyncpg"):
-            sync_uri = sync_uri.replace("postgresql+asyncpg", "postgresql+psycopg2", 1)
+            sync_uri = sync_uri.replace("postgresql+asyncpg", "postgresql+pg8000", 1)
 
         connect_args = {}
         if sync_uri.startswith("sqlite"):

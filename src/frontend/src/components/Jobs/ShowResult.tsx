@@ -29,6 +29,9 @@ import HtmlIcon from '@mui/icons-material/Html';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
+import rehypeSanitize from 'rehype-sanitize';
+import { sanitizeUrl } from '../Chat/components/MessageRenderer';
 import { ShowResultProps } from '../../types/common';
 import { ResultValue } from '../../types/result';
 import { generateRunPDF } from '../../utils/pdfGenerator';
@@ -540,15 +543,23 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
         </script>
       `;
 
-      // Insert initialization script at the very beginning of the document
-      // This ensures it runs before any library scripts
+      // SECURITY: Inject a Content-Security-Policy meta tag into the srcdoc HTML.
+      // connect-src 'none' blocks all outbound network requests from within the
+      // preview (prevents data exfiltration via fetch/XHR even when allow-scripts
+      // is present). img-src allows only data:/blob: URIs (base64 images) while
+      // blocking external image URLs (the primary markdown injection exfil vector).
+      const cspMeta = `<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval'; img-src data: blob:; connect-src 'none';">`;
+
+      // Insert CSP meta tag and initialization script at the very beginning of the
+      // document. This ensures both run before any library scripts.
+      const headInjection = cspMeta + initScript;
       if (processedHtml.includes('<head>')) {
-        processedHtml = processedHtml.replace('<head>', '<head>' + initScript);
+        processedHtml = processedHtml.replace('<head>', '<head>' + headInjection);
       } else if (processedHtml.includes('<html>')) {
-        processedHtml = processedHtml.replace('<html>', '<html><head>' + initScript + '</head>');
+        processedHtml = processedHtml.replace('<html>', '<html><head>' + headInjection + '</head>');
       } else {
-        // If no head or html tag, prepend the script
-        processedHtml = initScript + processedHtml;
+        // If no head or html tag, prepend both
+        processedHtml = headInjection + processedHtml;
       }
 
       // Use srcdoc for better security and compatibility
@@ -611,7 +622,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
               // Ignore focus errors in strict sandbox contexts
             }
           }}
-          sandbox="allow-scripts allow-forms allow-modals allow-popups allow-presentation allow-pointer-lock allow-downloads"
+          sandbox="allow-scripts allow-modals allow-presentation allow-pointer-lock"
           allow="accelerometer; camera; encrypted-media; fullscreen; gyroscope; magnetometer; microphone; midi; payment; usb; xr-spatial-tracking"
           style={{
             width: '100%',
@@ -748,31 +759,38 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
                 <ReactMarkdown
                   className="markdown-body"
                   remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[rehypeRaw, rehypeSanitize]}
+                  disallowedElements={['img', 'script', 'iframe']}
+                  urlTransform={sanitizeUrl}
                   components={{
-                    a: ({node, children, href, ...props}) => (
-                      <a
-                        href={href}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                          color: theme.palette.primary.main,
-                          textDecoration: 'none',
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.textDecoration = 'underline';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.textDecoration = 'none';
-                        }}
-                        {...props}
-                      >
-                        {children}
-                        <OpenInNewIcon sx={{ fontSize: 16 }} />
-                      </a>
-                    ),
+                    a: ({node, children, href, ...props}) => {
+                      const safeHref = sanitizeUrl(href);
+                      if (!safeHref) return <span>{children}</span>;
+                      return (
+                        <a
+                          href={safeHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            color: theme.palette.primary.main,
+                            textDecoration: 'none',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.textDecoration = 'underline';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.textDecoration = 'none';
+                          }}
+                          {...props}
+                        >
+                          {children}
+                          <OpenInNewIcon sx={{ fontSize: 16 }} />
+                        </a>
+                      );
+                    },
                   }}
                 >
                   {value}
@@ -823,6 +841,9 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
           <ReactMarkdown
             className="markdown-body"
             remarkPlugins={[remarkGfm]}
+            rehypePlugins={[rehypeRaw, rehypeSanitize]}
+            disallowedElements={['img', 'script', 'iframe']}
+            urlTransform={sanitizeUrl}
           >
             {content}
           </ReactMarkdown>
@@ -975,31 +996,38 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
             <ReactMarkdown
               className="markdown-body"
               remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeRaw, rehypeSanitize]}
+              disallowedElements={['img', 'script', 'iframe']}
+              urlTransform={sanitizeUrl}
               components={{
-                a: ({node, children, href, ...props}) => (
-                  <a
-                    href={href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      color: theme.palette.primary.main,
-                      textDecoration: 'none',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.textDecoration = 'underline';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.textDecoration = 'none';
-                    }}
-                    {...props}
-                  >
-                    {children}
-                    <OpenInNewIcon sx={{ fontSize: 16 }} />
-                  </a>
-                ),
+                a: ({node, children, href, ...props}) => {
+                  const safeHref = sanitizeUrl(href);
+                  if (!safeHref) return <span>{children}</span>;
+                  return (
+                    <a
+                      href={safeHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        color: theme.palette.primary.main,
+                        textDecoration: 'none',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.textDecoration = 'underline';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.textDecoration = 'none';
+                      }}
+                      {...props}
+                    >
+                      {children}
+                      <OpenInNewIcon sx={{ fontSize: 16 }} />
+                    </a>
+                  );
+                },
               }}
             >
               {value}

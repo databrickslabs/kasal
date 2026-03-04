@@ -860,6 +860,25 @@ class CrewPreparation:
                 logger.error("Failed to create crew")
                 return False
 
+            # SECURITY: Detect lethal-trifecta tool combination (log-only, non-blocking)
+            try:
+                from src.engines.crewai.security.tool_capability_manifest import (
+                    assess_trifecta as _assess_trifecta,
+                    log_trifecta_warning as _log_trifecta_warning,
+                )
+                _tool_names = list({
+                    t.name
+                    for task in self.crew.tasks for t in (task.tools or [])
+                } | {
+                    t.name
+                    for agent in self.crew.agents for t in (agent.tools or [])
+                })
+                logger.info("[SECURITY] Trifecta tool names collected: %s", _tool_names)
+                _trifecta = _assess_trifecta(_tool_names)
+                _log_trifecta_warning(_trifecta, context=f"crew with {len(self.crew.tasks)} task(s)")
+            except Exception as _sec_err:
+                logger.debug("[SECURITY] Trifecta check skipped: %s", _sec_err)
+
             # 16. Set crew references and attach trace context
             memory_service.set_crew_reference_on_memory(self.crew)
             memory_service.attach_memory_trace_context(self.crew, memory_backend_config, crew_kwargs)
