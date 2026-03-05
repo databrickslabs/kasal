@@ -13,6 +13,7 @@ from src.core.exceptions import (
     ForbiddenError,
     KasalError,
     LakebaseUnavailableError,
+    MCPConnectionError,
     NotFoundError,
 )
 
@@ -192,11 +193,66 @@ class TestLakebaseUnavailableError:
 
 
 # ---------------------------------------------------------------------------
+# MCPConnectionError
+# ---------------------------------------------------------------------------
+class TestMCPConnectionError:
+    def test_default_status_code(self):
+        exc = MCPConnectionError(server_name="test", server_url="https://example.com")
+        assert exc.status_code == 502
+
+    def test_default_detail(self):
+        exc = MCPConnectionError(server_name="test", server_url="https://example.com")
+        assert "test" in exc.detail
+
+    def test_custom_detail(self):
+        exc = MCPConnectionError(
+            server_name="test",
+            server_url="https://example.com",
+            detail="custom failure message",
+        )
+        assert exc.detail == "custom failure message"
+
+    def test_server_name_stored(self):
+        exc = MCPConnectionError(server_name="my-server", server_url="https://example.com")
+        assert exc.server_name == "my-server"
+
+    def test_server_url_stored(self):
+        exc = MCPConnectionError(server_name="test", server_url="https://example.com")
+        assert exc.server_url == "https://example.com"
+
+    def test_cause_stored(self):
+        root = ValueError("root")
+        exc = MCPConnectionError(
+            server_name="test", server_url="https://example.com", cause=root
+        )
+        assert exc.cause is root
+
+    def test_cause_none_default(self):
+        exc = MCPConnectionError(server_name="test", server_url="https://example.com")
+        assert exc.cause is None
+
+    def test_inherits_kasal_error(self):
+        assert issubclass(MCPConnectionError, KasalError)
+
+    def test_caught_as_kasal_error(self):
+        with pytest.raises(KasalError):
+            raise MCPConnectionError(server_name="test", server_url="https://example.com")
+
+    def test_str_returns_detail(self):
+        exc = MCPConnectionError(
+            server_name="test",
+            server_url="https://example.com",
+            detail="explicit detail",
+        )
+        assert str(exc) == "explicit detail"
+
+
+# ---------------------------------------------------------------------------
 # Cross-cutting: hierarchy / polymorphism
 # ---------------------------------------------------------------------------
 class TestExceptionHierarchy:
     def test_all_subclasses_are_kasal_error(self):
-        for cls in (NotFoundError, ConflictError, ForbiddenError, BadRequestError, LakebaseUnavailableError):
+        for cls in (NotFoundError, ConflictError, ForbiddenError, BadRequestError, LakebaseUnavailableError, MCPConnectionError):
             assert issubclass(cls, KasalError)
             assert issubclass(cls, Exception)
 
@@ -211,6 +267,8 @@ class TestExceptionHierarchy:
         }
         for cls, expected_code in codes.items():
             assert cls().status_code == expected_code
+        # MCPConnectionError requires positional args, so check separately
+        assert MCPConnectionError(server_name="x", server_url="y").status_code == 502
 
     def test_custom_status_code_override_on_subclass(self):
         exc = NotFoundError(status_code=410)

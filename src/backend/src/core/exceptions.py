@@ -91,3 +91,24 @@ class LakebaseUnavailableError(KasalError):
 
     status_code = 503
     detail = "Database connection unavailable"
+
+
+class MCPConnectionError(KasalError):
+    """MCP server connection failed (e.g. 403 Forbidden, timeout)."""
+
+    status_code = 502
+    detail = "MCP server connection failed"
+
+    def __init__(
+        self,
+        server_name: str,
+        server_url: str,
+        detail: str | None = None,
+        cause: Exception | None = None,
+    ):
+        self.server_name = server_name
+        self.server_url = server_url
+        self.cause = cause
+        if detail is None:
+            detail = f"MCP server '{server_name}' connection failed"
+        super().__init__(detail=detail)

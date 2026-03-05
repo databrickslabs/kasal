@@ -475,9 +475,13 @@ def run_crew_in_process(
             import warnings
 
             from src.engines.crewai.crew_preparation import CrewPreparation
+            from src.engines.crewai.tools.mcp_integration import MCPIntegration
             from src.engines.crewai.tools.tool_factory import ToolFactory
             from src.services.api_keys_service import ApiKeysService
             from src.services.tool_service import ToolService
+
+            # Reset MCP warnings at the start of each execution
+            MCPIntegration.reset_warnings()
 
             warnings.filterwarnings("ignore")
 
@@ -682,7 +686,7 @@ def run_crew_in_process(
                     )
                     if user_token:
                         async_logger.info(
-                            f"[SUBPROCESS] Found user_token in crew_config for OBO authentication: {user_token[:10]}..."
+                            f"[SUBPROCESS] Found user_token in crew_config for OBO authentication (length={len(user_token)})"
                         )
                     else:
                         async_logger.warning(
@@ -1422,11 +1426,23 @@ def run_crew_in_process(
                 "Crew execution completed but result could not be serialized"
             )
 
+        # Collect MCP warnings to surface in the execution trace/UI
+        mcp_warnings = []
+        try:
+            from src.engines.crewai.tools.mcp_integration import MCPIntegration
+            mcp_warnings = MCPIntegration.get_warnings()
+            if mcp_warnings:
+                crew_logger = logging.getLogger("crew")
+                crew_logger.warning(f"[MCP_WARNINGS] {'; '.join(mcp_warnings)}")
+        except Exception:
+            pass
+
         return {
             "status": "COMPLETED",
             "execution_id": execution_id,
             "result": processed_result,  # Safely processed result
             "process_id": os.getpid(),
+            "warnings": mcp_warnings,
         }
 
     except Exception as e:

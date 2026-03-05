@@ -22,7 +22,7 @@ class MCPServer(Base):
     server_url = Column(String, nullable=False)
     encrypted_api_key = Column(String, nullable=True)  # Encrypted API key
     server_type = Column(String, default="sse")  # "sse" or "streamable"
-    auth_type = Column(String, default="api_key")  # "api_key" or "databricks_obo"
+    auth_type = Column(String, default="api_key")  # "api_key" or "databricks_spn"
     enabled = Column(Boolean, default=False)
     global_enabled = Column(Boolean, default=False)  # Enable across all agents/tasks
     # NEW: Workspace scoping (nullable for base entries)

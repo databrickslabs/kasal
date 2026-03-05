@@ -560,34 +560,36 @@ class DatabricksAuth:
                 return None
 
             # Use Databricks SDK for OAuth token
+            # SDK's Config.authenticate() returns a callable that produces a headers dict
+            # e.g. {"Authorization": "Bearer <token>"}
             try:
-                # Create config with client credentials
-                config = Config(
-                    client_id=self._client_id,
-                    client_secret=self._client_secret,
-                    host=self._workspace_host
-                )
+                # Temporarily strip PAT/API-KEY from env to prevent
+                # SDK dual-auth conflict (oauth + pat)
+                with _clean_environment():
+                    w = WorkspaceClient(
+                        host=self._workspace_host,
+                        client_id=self._client_id,
+                        client_secret=self._client_secret,
+                    )
+                    headers = w.config.authenticate()
 
-                # Get access token through OAuth flow
-                auth_result = config.authenticate()
-                if hasattr(auth_result, 'access_token'):
+                auth_header = headers.get("Authorization", "") if isinstance(headers, dict) else ""
+                if auth_header.startswith("Bearer "):
+                    token = auth_header[len("Bearer "):]
                     import time
-                    self._service_token = auth_result.access_token
+                    self._service_token = token
                     self._service_token_fetched_at = time.time()
-                    # Try to get expires_in from response, default to 3600 (1 hour)
-                    if hasattr(auth_result, 'expires_in'):
-                        self._service_token_expires_in = auth_result.expires_in
-                    logger.info(f"Successfully obtained service principal OAuth token (expires in {self._service_token_expires_in}s)")
-                    return auth_result.access_token
+                    logger.info("Successfully obtained service principal OAuth token via SDK")
+                    return token
                 else:
-                    logger.debug("No access token in authentication result")
-                    return None
+                    logger.debug(f"Unexpected auth header format from SDK: {auth_header[:20] if auth_header else '(empty)'}")
+                    # Fall through to manual flow
 
             except Exception as sdk_error:
                 logger.debug(f"SDK OAuth failed, trying manual approach: {sdk_error}")
 
-                # Manual OAuth client credentials flow as fallback
-                return await self._manual_oauth_flow()
+            # Manual OAuth client credentials flow as fallback
+            return await self._manual_oauth_flow()
 
         except Exception as e:
             logger.error(f"Error getting service principal token: {e}")
@@ -1044,6 +1046,19 @@ async def get_auth_context(
 
         except Exception as e:
             logger.error(f"[AUTH PAT] Error during PAT lookup: {e}")
+
+        # Priority 2b: Check environment variable as PAT fallback
+        # In subprocess contexts, MLflow setup converts SPN creds into a
+        # DATABRICKS_TOKEN env var.  This is a valid PAT-equivalent token.
+        if not pat_token:
+            for env_key in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY"):
+                env_val = os.environ.get(env_key)
+                if env_val:
+                    pat_token = env_val
+                    logger.info(f"[AUTH] Priority 2b: ✓ PAT loaded from environment variable ({env_key})")
+                    break
+            if not pat_token:
+                logger.debug("[AUTH] Priority 2b: No PAT found in environment variables")
 
         if pat_token:
             return AuthContext(

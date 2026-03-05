@@ -55,10 +55,18 @@ class DatabricksCodexCompletion(OpenAICompletion):
         # so the model sees its own prior output with phase metadata intact.
         self._last_output_items: list[dict[str, Any]] = []
 
-        # Track whether the model has already called a tool in this
-        # conversation.  Once it has, we switch tool_choice to "auto"
-        # so the model can generate a final text answer.
-        self._has_called_tool: bool = False
+        # Track how many tool calls the model has made.  We keep
+        # tool_choice='required' until the model has made enough
+        # invocations, then switch to 'auto' so it can produce a
+        # final text answer.
+        #
+        # The minimum is computed dynamically from the number of
+        # available tools (see _prepare_responses_params) so the
+        # model explores a meaningful fraction before it is allowed
+        # to stop.  This prevents gpt-5.3-codex from making a
+        # single tool call and immediately jumping to final_answer.
+        self._tool_call_count: int = 0
+        self._min_required_tool_calls: int | None = None  # computed on first call
 
     # ------------------------------------------------------------------
     # Capability overrides
@@ -139,20 +147,42 @@ class DatabricksCodexCompletion(OpenAICompletion):
 
         # Force tool_choice when tools are present.
         # gpt-5.3-codex tends to skip tool calls and go straight to
-        # final_answer phase.  On the FIRST call we use "required" to
-        # force at least one tool invocation.  After the model has
-        # already called a tool, we switch to "auto" so it can generate
-        # a final text answer.
+        # final_answer phase.  We keep "required" until the model has
+        # made enough tool calls to explore the available tools, then
+        # switch to "auto" so it can generate a final text answer.
+        #
+        # The minimum is derived from the tool count:
+        #   - At least 1 call per 4 tools (ensures broad exploration)
+        #   - Minimum floor of 2 (always try more than one tool)
+        #   - Capped at 10 to avoid excessive forced iterations
+        # Examples:  4 tools → min 2,  8 tools → min 2,
+        #           12 tools → min 3, 19 tools → min 5, 40 → min 10
         if params.get("tools"):
-            if self._has_called_tool:
+            tool_count = len(params["tools"])
+            if self._min_required_tool_calls is None:
+                self._min_required_tool_calls = max(2, min(10, tool_count // 4 + 1))
+                logger.info(
+                    "[DatabricksCodex] Computed min_required_tool_calls=%d "
+                    "from %d available tools",
+                    self._min_required_tool_calls,
+                    tool_count,
+                )
+
+            if self._tool_call_count >= self._min_required_tool_calls:
                 params["tool_choice"] = "auto"
                 logger.info(
-                    "[DatabricksCodex] Set tool_choice='auto' (tool already called)"
+                    "[DatabricksCodex] Set tool_choice='auto' "
+                    "(tool_call_count=%d >= min=%d)",
+                    self._tool_call_count,
+                    self._min_required_tool_calls,
                 )
             else:
                 params["tool_choice"] = "required"
                 logger.info(
-                    "[DatabricksCodex] Set tool_choice='required' to force tool invocation"
+                    "[DatabricksCodex] Set tool_choice='required' "
+                    "(tool_call_count=%d < min=%d)",
+                    self._tool_call_count,
+                    self._min_required_tool_calls,
                 )
 
         self._log_request_params(params)
@@ -209,9 +239,16 @@ class DatabricksCodexCompletion(OpenAICompletion):
 
             function_calls = self._extract_function_calls_from_response(response)
             if function_calls and not available_functions:
-                # Track that the model has called a tool so subsequent
-                # requests use tool_choice="auto" instead of "required".
-                self._has_called_tool = True
+                # Increment tool-call counter; once it reaches the
+                # minimum threshold, subsequent requests switch to
+                # tool_choice="auto".
+                self._tool_call_count += len(function_calls)
+                logger.info(
+                    "[DatabricksCodex] Tool call count now %d "
+                    "(+%d this turn)",
+                    self._tool_call_count,
+                    len(function_calls),
+                )
 
                 # Wrap in OpenAI Chat Completions format so CrewAI's
                 # _is_tool_call_list() recognises them (it checks for
