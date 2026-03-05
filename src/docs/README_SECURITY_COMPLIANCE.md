@@ -400,6 +400,33 @@ A small sentence-transformer or bag-of-bigrams classifier trained on injection e
 
 ---
 
+### If code generation is added (web research → executable Python / DBX pipelines / GitHub-based generation)
+
+Code generation introduces a qualitatively different risk profile compared to text-output crews. The existing guardrails provide a foundation but are insufficient on their own.
+
+**High priority — required before shipping code generation:**
+
+**Code-safety guardrail (`"code_safety_check"`)**
+The current `LLMInjectionGuardrail` classifies text output as SAFE/INJECTION. It was not designed to evaluate Python code. A dedicated `CodeSafetyGuardrail` would statically analyse generated code for dangerous patterns before it is handed off for execution or deployment: outbound network calls (`requests`, `urllib`, `http.client`), subprocess/shell execution (`subprocess`, `os.system`, `eval`, `exec`), credential exfiltration to disk or logs, and suspicious import patterns. New guardrail type string: `"code_safety_check"`. Should be a **hard gate** (not fail-open) when `allow_code_execution` is enabled on the agent.
+
+**`allow_code_execution` policy enforcement**
+CrewAI's `allow_code_execution: true` runs a Python subprocess on agent-generated code with no sandbox — the agent's permissions are the process's permissions. This must either be disabled by default (rejected in `agent_helpers.py` or `crew_preparation.py` with a clear error), or gated behind the `code_safety_check` guardrail as a blocking (not fail-open) check before execution proceeds.
+
+**GitHub / code tools in the trifecta manifest**
+Any new tools for GitHub repo ingestion or code execution must be added to `tool_capability_manifest.py` with the correct capability flags:
+- `GitHubSearchTool` / `GitHubRepoTool` → `INGESTS_UNTRUSTED | COMMUNICATES_EXTERNALLY`
+- `CodeExecutionTool` → `COMMUNICATES_EXTERNALLY` (+ a new `EXECUTES_CODE` flag, see below)
+
+**Medium priority:**
+
+**Extend heuristic detector to tool outputs**
+The current `PromptInjectionDetector` (Area 2) scans only user-provided *inputs* before `kickoff()`. For code generation crews, injection payloads are more likely to arrive via tool *outputs* — GitHub README files, web scrape results, code comments, CI config files. The detector should optionally run on tool outputs as well (post-execution scan), particularly when the crew includes web research or GitHub ingestion tools.
+
+**`EXECUTES_CODE` capability flag in the trifecta manifest**
+The existing three trifecta dimensions (reads sensitive / ingests untrusted / communicates externally) do not capture local code execution as a distinct risk. A fourth flag `EXECUTES_CODE` on tools like `CodeExecutionTool` or agents with `allow_code_execution: true` would allow the trifecta check to emit a more specific warning: a crew that ingests untrusted GitHub content AND executes code is a direct code injection vector, independent of whether it also communicates externally.
+
+---
+
 ### Significant architectural work (not recommended now)
 
 **Area 7 — Emotion nonce injection (removes `unsafe-inline`)**
