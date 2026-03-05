@@ -510,6 +510,13 @@ def run_flow_in_process(
                         f"[FLOW_SUBPROCESS] Could not add MLflow exporter to OTel pipeline: {mlflow_otel_err}"
                     )
 
+            # Reset MCP warnings at the start of each flow execution
+            try:
+                from src.engines.crewai.tools.mcp_integration import MCPIntegration
+                MCPIntegration.reset_warnings()
+            except Exception:
+                pass
+
             # Now run the actual flow execution
             try:
                 from src.db.session import safe_async_session
@@ -700,11 +707,22 @@ def run_flow_in_process(
                 }
                 async_logger.info(f"[FLOW_SUBPROCESS] Returning FAILED status due to flow error: {flow_error}")
             else:
+                # Collect MCP warnings to surface in the execution trace/UI
+                mcp_warnings = []
+                try:
+                    from src.engines.crewai.tools.mcp_integration import MCPIntegration
+                    mcp_warnings = MCPIntegration.get_warnings()
+                    if mcp_warnings:
+                        async_logger.warning(f"[FLOW_SUBPROCESS] [MCP_WARNINGS] {'; '.join(mcp_warnings)}")
+                except Exception:
+                    pass
+
                 return_dict = {
                     "status": "COMPLETED",
                     "execution_id": execution_id,
                     "result": processed_result,
-                    "process_id": os.getpid()
+                    "process_id": os.getpid(),
+                    "warnings": mcp_warnings,
                 }
             # Include flow_uuid if available (from @persist)
             if isinstance(result, dict) and result.get("flow_uuid"):

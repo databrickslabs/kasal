@@ -47,7 +47,7 @@ const mockServers = [
     server_url: 'http://localhost:5001/mcp',
     api_key: 'test-key-2',
     server_type: 'sse',
-    auth_type: 'databricks_obo',
+    auth_type: 'databricks_spn',
     timeout_seconds: 45,
     max_retries: 5,
     rate_limit: 100,

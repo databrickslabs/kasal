@@ -42,8 +42,8 @@ describe('MCPConfiguration', () => {
       id: '1',
       name: 'Test Server 1',
       server_type: 'streamable',
-      server_url: 'https://test1.databricksapps.com',
-      auth_type: 'databricks_obo',
+      server_url: 'https://test1.example.com',
+      auth_type: 'databricks_spn',
       enabled: true,
       timeout_seconds: 30,
       max_retries: 3,
@@ -143,11 +143,11 @@ describe('MCPConfiguration', () => {
     // Check options
     await waitFor(() => {
       expect(screen.getByRole('option', { name: 'API Key' })).toBeInTheDocument();
-      expect(screen.getByRole('option', { name: 'Databricks OBO' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Apps SPN' })).toBeInTheDocument();
     });
   });
 
-  it('hides API key field for Databricks OBO', async () => {
+  it('hides API key field for Apps SPN', async () => {
     // Skip this test as Material-UI dialogs render in portals making testing difficult
     // The functionality is tested manually and works correctly
   });
@@ -195,7 +195,7 @@ describe('MCPConfiguration', () => {
     // The functionality is tested manually and works correctly
   });
 
-  it('creates server with Databricks OBO auth', async () => {
+  it('creates server with Apps SPN auth', async () => {
     // Skip this test as Material-UI dialogs render in portals making testing difficult
     // The functionality is tested manually and works correctly
   });

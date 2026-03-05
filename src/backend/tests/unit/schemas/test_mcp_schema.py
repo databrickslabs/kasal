@@ -125,18 +125,26 @@ class TestMCPServerCreate:
         assert create_server.server_type == "sse"  # Default
         assert create_server.api_key == "secret-api-key"
 
-    def test_mcp_server_create_missing_api_key(self):
-        """Test MCPServerCreate validation with missing api_key."""
+    def test_mcp_server_create_missing_api_key_defaults_to_empty(self):
+        """Test MCPServerCreate defaults api_key to empty string (for SPN auth)."""
         data = {
             "name": "create-server",
             "server_url": "https://create.example.com"
         }
-        with pytest.raises(ValidationError) as exc_info:
-            MCPServerCreate(**data)
-        
-        errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
-        assert "api_key" in missing_fields
+        server = MCPServerCreate(**data)
+        assert server.api_key == ""
+        assert server.name == "create-server"
+
+    def test_mcp_server_create_spn_auth_no_api_key(self):
+        """Test MCPServerCreate with databricks_spn auth type and no API key."""
+        data = {
+            "name": "spn-server",
+            "server_url": "https://spn.example.com",
+            "auth_type": "databricks_spn",
+        }
+        server = MCPServerCreate(**data)
+        assert server.auth_type == "databricks_spn"
+        assert server.api_key == ""
 
     def test_mcp_server_create_with_custom_values(self):
         """Test MCPServerCreate with custom values."""

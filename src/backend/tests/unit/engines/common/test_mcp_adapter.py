@@ -6,7 +6,8 @@ import pytest
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
 from typing import Dict, Any, List
 
-from src.engines.common.mcp_adapter import MCPAdapter, MCPTool
+from src.core.exceptions import MCPConnectionError
+from src.engines.common.mcp_adapter import MCPAdapter, MCPTool, _extract_error_summary, _is_http_auth_error, _log_exception_group
 
 
 class TestMCPAdapter:
@@ -42,13 +43,14 @@ class TestMCPAdapter:
     def test_adapter_initialization(self, server_params):
         """Test MCPAdapter initialization."""
         adapter = MCPAdapter(server_params)
-        
+
         assert adapter.server_url == server_params['url']
         assert adapter.timeout_seconds == server_params['timeout_seconds']
         assert adapter.max_retries == server_params['max_retries']
         assert adapter.rate_limit == server_params['rate_limit']
         assert adapter._tools == []
         assert adapter._initialized is False
+        assert adapter.initialization_error is None
     
     @pytest.mark.asyncio
     async def test_initialize_success(self, server_params):
@@ -73,29 +75,35 @@ class TestMCPAdapter:
     
     @pytest.mark.asyncio
     async def test_initialize_no_auth_headers(self, server_params):
-        """Test initialization when authentication fails."""
+        """Test initialization when authentication fails sets MCPConnectionError."""
         adapter = MCPAdapter(server_params)
-        
+
         with patch.object(adapter, '_get_authentication_headers', new_callable=AsyncMock) as mock_auth:
             mock_auth.return_value = None
-            
+
             await adapter.initialize()
-            
+
             assert adapter._initialized is True
             assert adapter._tools == []
+            assert adapter.initialization_error is not None
+            assert isinstance(adapter.initialization_error, MCPConnectionError)
+            assert "authentication headers" in adapter.initialization_error.detail
     
     @pytest.mark.asyncio
     async def test_initialize_exception(self, server_params):
-        """Test initialization handles exceptions gracefully."""
+        """Test initialization handles exceptions gracefully and sets MCPConnectionError."""
         adapter = MCPAdapter(server_params)
-        
+
         with patch.object(adapter, '_get_authentication_headers', new_callable=AsyncMock) as mock_auth:
             mock_auth.side_effect = Exception("Auth failed")
-            
+
             await adapter.initialize()
-            
+
             assert adapter._initialized is True
             assert adapter._tools == []
+            assert adapter.initialization_error is not None
+            assert isinstance(adapter.initialization_error, MCPConnectionError)
+            assert "Auth failed" in adapter.initialization_error.detail
     
     @pytest.mark.asyncio
     async def test_discover_tools_with_mcp_client(self, server_params):
@@ -138,64 +146,150 @@ class TestMCPAdapter:
     
     @pytest.mark.asyncio
     async def test_discover_tools_no_tools_found(self, server_params):
-        """Test tool discovery when no tools are found."""
+        """Test tool discovery when no tools are found on either transport."""
         adapter = MCPAdapter(server_params)
         headers = {'Authorization': 'Bearer token'}
-        
+
         mock_tools_result = Mock()
         mock_tools_result.tools = None
-        
+
         mock_session = AsyncMock()
         mock_session.initialize = AsyncMock()
         mock_session.list_tools = AsyncMock(return_value=mock_tools_result)
-        
+
         with patch('mcp.client.streamable_http.streamablehttp_client') as mock_connect:
-            with patch('mcp.ClientSession') as mock_client_session:
-                mock_connect.return_value.__aenter__.return_value = (Mock(), Mock(), None)
-                mock_client_session.return_value.__aenter__.return_value = mock_session
-                
-                tools = await adapter._discover_tools_with_mcp_client(headers)
-                
-                assert tools == []
-    
+            with patch('mcp.client.sse.sse_client') as mock_sse:
+                with patch('mcp.ClientSession') as mock_client_session:
+                    mock_connect.return_value.__aenter__.return_value = (Mock(), Mock(), None)
+                    mock_sse.return_value.__aenter__.return_value = (Mock(), Mock())
+                    mock_client_session.return_value.__aenter__.return_value = mock_session
+
+                    tools = await adapter._discover_tools_with_mcp_client(headers)
+
+                    assert tools == []
+
     @pytest.mark.asyncio
     async def test_discover_tools_exception(self, server_params):
-        """Test tool discovery handles exceptions."""
+        """Test tool discovery handles exceptions on both transports and sets MCPConnectionError."""
         adapter = MCPAdapter(server_params)
         headers = {'Authorization': 'Bearer token'}
-        
+
         with patch('mcp.client.streamable_http.streamablehttp_client') as mock_connect:
-            mock_connect.side_effect = Exception("Connection failed")
-            
-            tools = await adapter._discover_tools_with_mcp_client(headers)
-            
-            assert tools == []
+            with patch('mcp.client.sse.sse_client') as mock_sse:
+                mock_connect.side_effect = Exception("Connection failed")
+                mock_sse.side_effect = Exception("SSE also failed")
+
+                tools = await adapter._discover_tools_with_mcp_client(headers)
+
+                assert tools == []
+                assert adapter.initialization_error is not None
+                assert isinstance(adapter.initialization_error, MCPConnectionError)
+                assert "SSE also failed" in adapter.initialization_error.detail
+
+    @pytest.mark.asyncio
+    async def test_discover_tools_403_error(self, server_params):
+        """Test that 403 Forbidden errors are captured as MCPConnectionError with HTTP status."""
+        adapter = MCPAdapter(server_params)
+        headers = {'Authorization': 'Bearer token'}
+
+        # Simulate httpx.HTTPStatusError with 403
+        mock_response = Mock()
+        mock_response.status_code = 403
+        http_error = Exception("Client error '403 Forbidden'")
+        http_error.response = mock_response
+
+        with patch('mcp.client.streamable_http.streamablehttp_client') as mock_connect:
+            with patch('mcp.client.sse.sse_client') as mock_sse:
+                mock_connect.side_effect = http_error
+                mock_sse.side_effect = http_error
+
+                tools = await adapter._discover_tools_with_mcp_client(headers)
+
+                assert tools == []
+                assert adapter.initialization_error is not None
+                assert isinstance(adapter.initialization_error, MCPConnectionError)
+                assert "403" in adapter.initialization_error.detail
+
+    @pytest.mark.asyncio
+    async def test_discover_tools_sse_fallback(self, server_params):
+        """Test SSE fallback when streamable HTTP fails."""
+        adapter = MCPAdapter(server_params)
+        headers = {'Authorization': 'Bearer token'}
+
+        mock_tool = Mock()
+        mock_tool.name = 'sse_tool'
+        mock_tool.description = 'SSE discovered tool'
+        mock_tool.inputSchema = {'type': 'object'}
+
+        mock_tools_result = Mock()
+        mock_tools_result.tools = [mock_tool]
+
+        mock_session = AsyncMock()
+        mock_session.initialize = AsyncMock()
+        mock_session.list_tools = AsyncMock(return_value=mock_tools_result)
+
+        with patch('mcp.client.streamable_http.streamablehttp_client') as mock_connect:
+            with patch('mcp.client.sse.sse_client') as mock_sse:
+                with patch('mcp.ClientSession') as mock_client_session:
+                    # Streamable HTTP fails
+                    mock_connect.side_effect = Exception("Streamable HTTP failed")
+                    # SSE succeeds
+                    mock_sse.return_value.__aenter__.return_value = (Mock(), Mock())
+                    mock_client_session.return_value.__aenter__.return_value = mock_session
+
+                    tools = await adapter._discover_tools_with_mcp_client(headers)
+
+                    assert len(tools) == 1
+                    assert tools[0]['name'] == 'sse_tool'
+                    assert adapter._transport == "sse"
     
     @pytest.mark.asyncio
     async def test_execute_tool(self, server_params):
-        """Test tool execution."""
+        """Test tool execution via streamable HTTP (default transport)."""
         adapter = MCPAdapter(server_params)
-        adapter._auth_headers = {'Authorization': 'Bearer token'}
-        adapter._session_id = 'test-session'
-        
+
         tool_name = 'test_tool'
         parameters = {'input': 'test'}
-        
+
         # Mock the result
         mock_result = Mock()
         mock_result.content = [Mock(text='Tool executed successfully')]
-        
+
         mock_session = AsyncMock()
         mock_session.initialize = AsyncMock()
         mock_session.call_tool = AsyncMock(return_value=mock_result)
-        
+
         with patch('mcp.client.streamable_http.streamablehttp_client') as mock_connect:
             with patch('mcp.ClientSession') as mock_client_session:
                 mock_connect.return_value.__aenter__.return_value = (Mock(), Mock(), None)
                 mock_client_session.return_value.__aenter__.return_value = mock_session
-                
+
                 result = await adapter.execute_tool(tool_name, parameters)
-                
+
+                assert result == mock_result
+                mock_session.call_tool.assert_called_once_with(tool_name, parameters)
+
+    @pytest.mark.asyncio
+    async def test_execute_tool_sse_transport(self, server_params):
+        """Test tool execution via SSE transport."""
+        adapter = MCPAdapter(server_params)
+        adapter._transport = "sse"
+
+        tool_name = 'test_tool'
+        parameters = {'input': 'test'}
+
+        mock_result = Mock()
+        mock_session = AsyncMock()
+        mock_session.initialize = AsyncMock()
+        mock_session.call_tool = AsyncMock(return_value=mock_result)
+
+        with patch('mcp.client.sse.sse_client') as mock_sse:
+            with patch('mcp.ClientSession') as mock_client_session:
+                mock_sse.return_value.__aenter__.return_value = (Mock(), Mock())
+                mock_client_session.return_value.__aenter__.return_value = mock_session
+
+                result = await adapter.execute_tool(tool_name, parameters)
+
                 assert result == mock_result
                 mock_session.call_tool.assert_called_once_with(tool_name, parameters)
     
@@ -820,3 +914,564 @@ class TestAdapterEdgeCases:
             # Should not raise
             await adapter.stop()
             mock_logger.error.assert_called_once()
+
+
+class TestExtractErrorSummary:
+    """Test suite for the _extract_error_summary standalone function."""
+
+    def test_regular_exception_returns_str(self):
+        """Regular exception returns str(exc)."""
+        from src.engines.common.mcp_adapter import _extract_error_summary
+
+        exc = Exception("something went wrong")
+        result = _extract_error_summary(exc)
+        assert result == "something went wrong"
+
+    def test_exception_with_response_status_code(self):
+        """Exception with .response.status_code returns 'HTTP {code} - {exc}' with body."""
+        from src.engines.common.mcp_adapter import _extract_error_summary
+
+        exc = Exception("Forbidden")
+        mock_response = Mock()
+        mock_response.status_code = 403
+        mock_response.text = "Access denied"
+        exc.response = mock_response
+
+        result = _extract_error_summary(exc)
+        assert "HTTP 403" in result
+        assert "Forbidden" in result
+        assert "Access denied" in result
+
+    def test_exception_with_status_attribute(self):
+        """Exception with .status attribute returns 'HTTP {status} - {exc}'."""
+        from src.engines.common.mcp_adapter import _extract_error_summary
+
+        exc = Exception("Unauthorized")
+        exc.status = 401
+
+        result = _extract_error_summary(exc)
+        assert result == "HTTP 401 - Unauthorized"
+
+    def test_exception_group_recurses_and_joins(self):
+        """ExceptionGroup (has .exceptions list) recurses and joins with '; '."""
+        from src.engines.common.mcp_adapter import _extract_error_summary
+
+        sub1 = Exception("error one")
+        sub2 = Exception("error two")
+        group = Exception("group")
+        group.exceptions = [sub1, sub2]
+
+        result = _extract_error_summary(group)
+        assert result == "error one; error two"
+
+    def test_response_with_empty_body(self):
+        """Response with empty body does not append body text."""
+        from src.engines.common.mcp_adapter import _extract_error_summary
+
+        exc = Exception("Server Error")
+        mock_response = Mock()
+        mock_response.status_code = 500
+        mock_response.text = ""
+        exc.response = mock_response
+
+        result = _extract_error_summary(exc)
+        assert "HTTP 500" in result
+        assert "Server Error" in result
+        assert "body:" not in result
+
+
+class TestIsHttpAuthError:
+    """Test suite for the _is_http_auth_error standalone function."""
+
+    def test_response_status_code_403(self):
+        """Returns True for exc with .response.status_code == 403."""
+        from src.engines.common.mcp_adapter import _is_http_auth_error
+
+        exc = Exception("Forbidden")
+        mock_response = Mock()
+        mock_response.status_code = 403
+        exc.response = mock_response
+
+        assert _is_http_auth_error(exc) is True
+
+    def test_response_status_code_401(self):
+        """Returns True for exc with .response.status_code == 401."""
+        from src.engines.common.mcp_adapter import _is_http_auth_error
+
+        exc = Exception("Unauthorized")
+        mock_response = Mock()
+        mock_response.status_code = 401
+        exc.response = mock_response
+
+        assert _is_http_auth_error(exc) is True
+
+    def test_response_status_code_500_returns_false(self):
+        """Returns False for .response.status_code == 500."""
+        from src.engines.common.mcp_adapter import _is_http_auth_error
+
+        exc = Exception("Server Error")
+        mock_response = Mock()
+        mock_response.status_code = 500
+        exc.response = mock_response
+
+        assert _is_http_auth_error(exc) is False
+
+    def test_status_attribute_403(self):
+        """Returns True for exc with .status == 403."""
+        from src.engines.common.mcp_adapter import _is_http_auth_error
+
+        exc = Exception("Forbidden")
+        # Ensure no .response attribute so .status branch is reached
+        exc.status = 403
+
+        # Remove response attribute if Mock adds it
+        if hasattr(exc, 'response'):
+            delattr(exc, 'response')
+
+        assert _is_http_auth_error(exc) is True
+
+    def test_string_contains_403(self):
+        """Returns True when '403' in str(exc)."""
+        from src.engines.common.mcp_adapter import _is_http_auth_error
+
+        exc = Exception("Client error 403 Forbidden")
+        assert _is_http_auth_error(exc) is True
+
+    def test_string_contains_401(self):
+        """Returns True when '401' in str(exc)."""
+        from src.engines.common.mcp_adapter import _is_http_auth_error
+
+        exc = Exception("Client error 401 Unauthorized")
+        assert _is_http_auth_error(exc) is True
+
+    def test_non_auth_error_returns_false(self):
+        """Returns False for non-auth errors."""
+        from src.engines.common.mcp_adapter import _is_http_auth_error
+
+        exc = Exception("Connection timed out")
+        assert _is_http_auth_error(exc) is False
+
+    def test_exception_group_with_auth_sub_exception(self):
+        """Recurses into ExceptionGroup with one auth sub-exception."""
+        from src.engines.common.mcp_adapter import _is_http_auth_error
+
+        sub_auth = Exception("Forbidden")
+        mock_response = Mock()
+        mock_response.status_code = 403
+        sub_auth.response = mock_response
+
+        sub_other = Exception("timeout")
+
+        group = Exception("group")
+        group.exceptions = [sub_other, sub_auth]
+
+        assert _is_http_auth_error(group) is True
+
+    def test_exception_group_with_no_auth_sub_exceptions(self):
+        """Returns False for ExceptionGroup with no auth sub-exceptions."""
+        from src.engines.common.mcp_adapter import _is_http_auth_error
+
+        sub1 = Exception("Connection reset")
+        sub2 = Exception("DNS resolution failed")
+
+        group = Exception("group")
+        group.exceptions = [sub1, sub2]
+
+        assert _is_http_auth_error(group) is False
+
+
+class TestLogExceptionGroup:
+    """Test suite for the _log_exception_group standalone function."""
+
+    def test_logs_error_for_regular_exception(self):
+        """Logs error for regular exception."""
+        from src.engines.common.mcp_adapter import _log_exception_group
+
+        exc = Exception("something broke")
+
+        with patch('src.engines.common.mcp_adapter.logger') as mock_logger:
+            _log_exception_group(exc, "test context")
+
+            # Should log the main error message
+            mock_logger.error.assert_any_call("test context: something broke")
+
+    def test_logs_sub_exceptions_for_exception_group(self):
+        """Logs sub-exceptions for ExceptionGroup."""
+        from src.engines.common.mcp_adapter import _log_exception_group
+
+        sub1 = Exception("sub error 1")
+        sub2 = Exception("sub error 2")
+        group = Exception("group error")
+        group.exceptions = [sub1, sub2]
+
+        with patch('src.engines.common.mcp_adapter.logger') as mock_logger:
+            _log_exception_group(group, "ctx")
+
+            # Check that sub-exceptions are logged
+            error_calls = [str(call) for call in mock_logger.error.call_args_list]
+            # Should contain sub-exception log lines
+            assert any("sub-exception [0]" in call for call in error_calls)
+            assert any("sub-exception [1]" in call for call in error_calls)
+
+    def test_logs_response_body_for_sub_exception_with_response(self):
+        """Logs response body for sub-exception with .response."""
+        from src.engines.common.mcp_adapter import _log_exception_group
+
+        sub = Exception("HTTP error")
+        mock_response = Mock()
+        mock_response.text = "Detailed error body"
+        sub.response = mock_response
+        sub.__traceback__ = None
+
+        group = Exception("group")
+        group.exceptions = [sub]
+
+        with patch('src.engines.common.mcp_adapter.logger') as mock_logger:
+            _log_exception_group(group, "ctx")
+
+            error_calls = [str(call) for call in mock_logger.error.call_args_list]
+            assert any("response body" in call for call in error_calls)
+            assert any("Detailed error body" in call for call in error_calls)
+
+
+class TestSPNFallbackHeaders:
+    """Test suite for MCPAdapter._get_spn_fallback_headers async method."""
+
+    @pytest.fixture
+    def adapter_with_group(self) -> MCPAdapter:
+        """Create an MCPAdapter with group_id in server_params."""
+        return MCPAdapter({
+            'url': 'https://test.mcp.server/api/mcp/',
+            'headers': {'Authorization': 'Bearer test-token'},
+            'group_id': 'test-group-123',
+        })
+
+    @pytest.mark.asyncio
+    async def test_returns_headers_when_valid_context(self, adapter_with_group):
+        """Returns headers when get_auth_context returns valid context."""
+        mock_auth_context = Mock()
+        mock_auth_context.token = "spn-token-value"
+        mock_auth_context.auth_method = "service_principal"
+
+        with patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+            mock_get_auth.return_value = mock_auth_context
+
+            result = await adapter_with_group._get_spn_fallback_headers()
+
+            assert result == {"Authorization": "Bearer spn-token-value"}
+            mock_get_auth.assert_called_once_with(user_token=None, group_id='test-group-123')
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_context_is_none(self, adapter_with_group):
+        """Returns None when get_auth_context returns None."""
+        with patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+            mock_get_auth.return_value = None
+
+            result = await adapter_with_group._get_spn_fallback_headers()
+
+            assert result is None
+            mock_get_auth.assert_called_once_with(user_token=None, group_id='test-group-123')
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_context_raises_exception(self, adapter_with_group):
+        """Returns None when get_auth_context raises exception."""
+        with patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+            mock_get_auth.side_effect = RuntimeError("auth service unavailable")
+
+            result = await adapter_with_group._get_spn_fallback_headers()
+
+            assert result is None
+
+
+class TestSPNFallbackDiscovery:
+    """Test SPN fallback during tool discovery when OBO is rejected."""
+
+    @pytest.fixture
+    def databricks_spn_params(self):
+        return {
+            'url': 'https://example.com/api/2.0/mcp/external/test',
+            'timeout_seconds': 30,
+            'max_retries': 3,
+            'rate_limit': 60,
+            'headers': {'Authorization': 'Bearer obo-token'},
+            'auth_type': 'databricks_spn',
+        }
+
+    def _make_403_error(self):
+        """Create a mock 403 HTTP error wrapped in ExceptionGroup."""
+        exc = Exception("Client error '403 Forbidden'")
+        resp = Mock()
+        resp.status_code = 403
+        exc.response = resp
+        return exc
+
+    @pytest.mark.asyncio
+    async def test_spn_fallback_streamable_http_success(self, databricks_spn_params):
+        """OBO rejected → SPN fallback succeeds via streamable HTTP → headers saved."""
+        adapter = MCPAdapter(databricks_spn_params)
+        obo_error = self._make_403_error()
+        spn_tools = [{'name': 'tool1', 'description': 'desc', 'mcp_tool': Mock(), 'input_schema': {}}]
+
+        with patch.object(adapter, '_discover_via_streamable_http', new_callable=AsyncMock) as mock_sh, \
+             patch.object(adapter, '_discover_via_sse', new_callable=AsyncMock) as mock_sse, \
+             patch.object(adapter, '_get_spn_fallback_headers', new_callable=AsyncMock) as mock_spn:
+            # First streamable HTTP fails with 403
+            mock_sh.side_effect = [obo_error, spn_tools]
+            # SSE also fails with 403
+            mock_sse.side_effect = obo_error
+            mock_spn.return_value = {"Authorization": "Bearer spn-token-abc"}
+
+            result = await adapter._discover_tools_with_mcp_client(
+                {"Authorization": "Bearer obo-token"}
+            )
+
+        assert len(result) == 1
+        assert adapter._spn_fallback_headers == {"Authorization": "Bearer spn-token-abc"}
+        assert adapter._transport == "streamable_http"
+
+    @pytest.mark.asyncio
+    async def test_spn_fallback_sse_success(self, databricks_spn_params):
+        """OBO rejected → SPN streamable fails → SPN SSE succeeds → headers saved."""
+        adapter = MCPAdapter(databricks_spn_params)
+        obo_error = self._make_403_error()
+        spn_tools = [{'name': 'tool1', 'description': 'desc', 'mcp_tool': Mock(), 'input_schema': {}}]
+
+        with patch.object(adapter, '_discover_via_streamable_http', new_callable=AsyncMock) as mock_sh, \
+             patch.object(adapter, '_discover_via_sse', new_callable=AsyncMock) as mock_sse, \
+             patch.object(adapter, '_get_spn_fallback_headers', new_callable=AsyncMock) as mock_spn:
+            mock_sh.side_effect = [obo_error, Exception("SPN streamable also fails")]
+            mock_sse.side_effect = [obo_error, spn_tools]
+            mock_spn.return_value = {"Authorization": "Bearer spn-token-xyz"}
+
+            result = await adapter._discover_tools_with_mcp_client(
+                {"Authorization": "Bearer obo-token"}
+            )
+
+        assert len(result) == 1
+        assert adapter._spn_fallback_headers == {"Authorization": "Bearer spn-token-xyz"}
+        assert adapter._transport == "sse"
+
+    @pytest.mark.asyncio
+    async def test_spn_fallback_no_credentials(self, databricks_spn_params):
+        """OBO rejected → no SPN credentials available → returns empty, logs warning."""
+        adapter = MCPAdapter(databricks_spn_params)
+        obo_error = self._make_403_error()
+
+        with patch.object(adapter, '_discover_via_streamable_http', new_callable=AsyncMock) as mock_sh, \
+             patch.object(adapter, '_discover_via_sse', new_callable=AsyncMock) as mock_sse, \
+             patch.object(adapter, '_get_spn_fallback_headers', new_callable=AsyncMock) as mock_spn:
+            mock_sh.side_effect = obo_error
+            mock_sse.side_effect = obo_error
+            mock_spn.return_value = None
+
+            result = await adapter._discover_tools_with_mcp_client(
+                {"Authorization": "Bearer obo-token"}
+            )
+
+        assert result == []
+        assert adapter._spn_fallback_headers is None
+        assert adapter.initialization_error is not None
+
+    @pytest.mark.asyncio
+    async def test_spn_fallback_not_triggered_for_non_databricks_auth(self):
+        """Non-Databricks auth type should NOT trigger SPN fallback."""
+        params = {
+            'url': 'https://example.com/mcp',
+            'timeout_seconds': 30,
+            'max_retries': 3,
+            'rate_limit': 60,
+            'headers': {'Authorization': 'Bearer api-key'},
+            'auth_type': 'api_key',
+        }
+        adapter = MCPAdapter(params)
+        error_403 = self._make_403_error()
+
+        with patch.object(adapter, '_discover_via_streamable_http', new_callable=AsyncMock) as mock_sh, \
+             patch.object(adapter, '_discover_via_sse', new_callable=AsyncMock) as mock_sse, \
+             patch.object(adapter, '_get_spn_fallback_headers', new_callable=AsyncMock) as mock_spn:
+            mock_sh.side_effect = error_403
+            mock_sse.side_effect = error_403
+
+            result = await adapter._discover_tools_with_mcp_client(
+                {"Authorization": "Bearer api-key"}
+            )
+
+        mock_spn.assert_not_called()
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_spn_fallback_both_transports_fail(self, databricks_spn_params):
+        """OBO rejected → SPN obtained but both transports fail → returns empty."""
+        adapter = MCPAdapter(databricks_spn_params)
+        obo_error = self._make_403_error()
+        spn_error = Exception("SPN also rejected")
+
+        with patch.object(adapter, '_discover_via_streamable_http', new_callable=AsyncMock) as mock_sh, \
+             patch.object(adapter, '_discover_via_sse', new_callable=AsyncMock) as mock_sse, \
+             patch.object(adapter, '_get_spn_fallback_headers', new_callable=AsyncMock) as mock_spn:
+            mock_sh.side_effect = [obo_error, spn_error]
+            mock_sse.side_effect = [obo_error, spn_error]
+            mock_spn.return_value = {"Authorization": "Bearer spn-tok"}
+
+            result = await adapter._discover_tools_with_mcp_client(
+                {"Authorization": "Bearer obo-token"}
+            )
+
+        assert result == []
+        assert adapter._spn_fallback_headers is None
+
+    @pytest.mark.asyncio
+    async def test_spn_fallback_triggered_for_databricks_obo_auth(self):
+        """auth_type=databricks_obo should also trigger SPN fallback."""
+        params = {
+            'url': 'https://example.com/api/2.0/mcp/external/test',
+            'timeout_seconds': 30,
+            'max_retries': 3,
+            'rate_limit': 60,
+            'headers': {'Authorization': 'Bearer obo-tok'},
+            'auth_type': 'databricks_obo',
+        }
+        adapter = MCPAdapter(params)
+        obo_error = self._make_403_error()
+        spn_tools = [{'name': 't1', 'description': 'd', 'mcp_tool': Mock(), 'input_schema': {}}]
+
+        with patch.object(adapter, '_discover_via_streamable_http', new_callable=AsyncMock) as mock_sh, \
+             patch.object(adapter, '_discover_via_sse', new_callable=AsyncMock) as mock_sse, \
+             patch.object(adapter, '_get_spn_fallback_headers', new_callable=AsyncMock) as mock_spn:
+            mock_sh.side_effect = [obo_error, spn_tools]
+            mock_sse.side_effect = obo_error
+            mock_spn.return_value = {"Authorization": "Bearer spn-fallback"}
+
+            result = await adapter._discover_tools_with_mcp_client(
+                {"Authorization": "Bearer obo-tok"}
+            )
+
+        assert len(result) == 1
+        mock_spn.assert_called_once()
+
+
+class TestSPNHeadersReuse:
+    """Test that SPN fallback headers are reused for tool execution."""
+
+    @pytest.mark.asyncio
+    async def test_get_auth_headers_uses_spn_fallback(self):
+        """_get_authentication_headers should return SPN headers when set."""
+        params = {
+            'url': 'https://example.com/api/2.0/mcp/external/test',
+            'headers': {'Authorization': 'Bearer obo-token'},
+            'auth_type': 'databricks_spn',
+        }
+        adapter = MCPAdapter(params)
+        adapter._spn_fallback_headers = {"Authorization": "Bearer spn-saved"}
+
+        headers = await adapter._get_authentication_headers()
+
+        assert headers == {"Authorization": "Bearer spn-saved"}
+
+    @pytest.mark.asyncio
+    async def test_get_auth_headers_ignores_obo_when_spn_set(self):
+        """When SPN fallback is set, original OBO headers should be bypassed."""
+        params = {
+            'url': 'https://example.com/mcp',
+            'headers': {'Authorization': 'Bearer obo-token'},
+            'auth_type': 'databricks_spn',
+        }
+        adapter = MCPAdapter(params)
+        adapter._spn_fallback_headers = {"Authorization": "Bearer spn-token"}
+
+        headers = await adapter._get_authentication_headers()
+
+        assert headers["Authorization"] == "Bearer spn-token"
+        assert headers["Authorization"] != "Bearer obo-token"
+
+    @pytest.mark.asyncio
+    async def test_get_auth_headers_falls_through_when_no_spn(self):
+        """When _spn_fallback_headers is None, use provided headers as before."""
+        params = {
+            'url': 'https://example.com/mcp',
+            'headers': {'Authorization': 'Bearer normal-token'},
+            'auth_type': 'api_key',
+        }
+        adapter = MCPAdapter(params)
+        assert adapter._spn_fallback_headers is None
+
+        headers = await adapter._get_authentication_headers()
+
+        assert headers["Authorization"] == "Bearer normal-token"
+
+    @pytest.mark.asyncio
+    async def test_execute_tool_uses_spn_headers(self):
+        """execute_tool should use SPN headers for actual tool calls."""
+        params = {
+            'url': 'https://example.com/api/2.0/mcp/external/test',
+            'headers': {'Authorization': 'Bearer obo-token'},
+            'auth_type': 'databricks_spn',
+            'timeout_seconds': 30,
+            'max_retries': 1,
+            'rate_limit': 60,
+        }
+        adapter = MCPAdapter(params)
+        adapter._transport = "streamable_http"
+        adapter._spn_fallback_headers = {"Authorization": "Bearer spn-exec"}
+
+        mock_result = Mock()
+        with patch.object(adapter, '_execute_with_transport', new_callable=AsyncMock, return_value=mock_result) as mock_exec:
+            result = await adapter.execute_tool("test_tool", {"query": "test"})
+
+        # Verify the clean_headers passed to _execute_with_transport use SPN token
+        call_args = mock_exec.call_args
+        clean_headers = call_args[0][2]  # third positional arg
+        assert clean_headers["Authorization"] == "Bearer spn-exec"
+
+
+class TestExtractErrorSummaryEdgeCases:
+    """Additional edge cases for _extract_error_summary."""
+
+    def test_response_text_raises_exception(self):
+        """Should handle exception when accessing response.text."""
+        exc = Exception("HTTP error")
+        resp = Mock()
+        resp.status_code = 500
+        # Make .text raise an exception
+        type(resp).text = property(lambda self: (_ for _ in ()).throw(RuntimeError("decode error")))
+        exc.response = resp
+        result = _extract_error_summary(exc)
+        assert "HTTP 500" in result
+
+
+class TestLogExceptionGroupEdgeCases:
+    """Additional edge cases for _log_exception_group."""
+
+    def test_sub_exception_response_text_raises(self):
+        """Should handle exception when accessing sub_exc.response.text."""
+        sub_exc = Exception("sub error")
+        resp = Mock()
+        type(resp).text = property(lambda self: (_ for _ in ()).throw(RuntimeError("decode")))
+        sub_exc.response = resp
+        group = type('EG', (Exception,), {'exceptions': [sub_exc]})("group")
+        # Should not raise
+        _log_exception_group(group, "test context")
+
+    def test_sub_exception_with_traceback(self):
+        """Should log sub-exception traceback when __traceback__ is set."""
+        try:
+            raise ValueError("inner error")
+        except ValueError as e:
+            sub_exc = e  # has __traceback__ set
+        group = type('EG', (Exception,), {'exceptions': [sub_exc]})("group")
+        _log_exception_group(group, "test context")  # Should not raise
+
+
+class TestAdapterInitSpnFallbackHeaders:
+    """Test _spn_fallback_headers initialization."""
+
+    def test_spn_fallback_headers_initialized_to_none(self):
+        params = {'url': 'https://example.com/mcp'}
+        adapter = MCPAdapter(params)
+        assert adapter._spn_fallback_headers is None
+
+    def test_url_strip(self):
+        """URL should be stripped of whitespace."""
+        params = {'url': '  https://example.com/mcp  '}
+        adapter = MCPAdapter(params)
+        assert adapter.server_url == 'https://example.com/mcp'

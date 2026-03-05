@@ -642,9 +642,16 @@ async def run_crew_in_process(
         # Check the result status
         if result.get('status') == 'COMPLETED':
             final_status = ExecutionStatus.COMPLETED.value
-            final_message = "CrewAI execution completed successfully"
             final_result = result.get('result')
-            logger.info(f"Process execution completed for {execution_id}")
+
+            # Surface MCP warnings in the execution message so they appear in the UI
+            warnings = result.get('warnings', [])
+            if warnings:
+                final_message = "CrewAI execution completed with warnings: " + "; ".join(warnings)
+                logger.warning(f"Process execution completed with MCP warnings for {execution_id}: {warnings}")
+            else:
+                final_message = "CrewAI execution completed successfully"
+                logger.info(f"Process execution completed for {execution_id}")
         elif result.get('status') == 'STOPPED':
             final_status = ExecutionStatus.STOPPED.value
             final_message = "CrewAI execution was stopped by user"
