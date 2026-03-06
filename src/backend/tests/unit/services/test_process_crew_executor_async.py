@@ -589,15 +589,94 @@ class TestProcessLogQueue:
     @pytest.mark.asyncio
     async def test_process_log_queue_method_exists(self, executor):
         """Test that _process_log_queue method exists and is callable."""
-        # Verify the method exists
         assert hasattr(executor, '_process_log_queue')
         assert callable(executor._process_log_queue)
 
-        # Verify the method signature accepts expected params
         import inspect
         sig = inspect.signature(executor._process_log_queue)
         params = list(sig.parameters.keys())
         assert 'log_queue' in params or len(params) >= 3
+
+    @pytest.mark.asyncio
+    async def test_process_log_queue_writes_via_smart_session(self, executor):
+        """Test that _process_log_queue writes logs via get_smart_db_session."""
+        from io import StringIO
+
+        eid = "crew_log_12345678"
+        content = "2024 " + eid[:8] + " some crew log line\nother\n"
+        mock_session = AsyncMock()
+        mock_repo = MagicMock()
+        mock_repo.create_log = AsyncMock(return_value=MagicMock(id=1))
+
+        async def _fake_smart_session():
+            yield mock_session
+
+        gc = MagicMock()
+        gc.primary_group_id = "grp-1"
+        gc.group_email = "u@example.com"
+
+        with patch.dict(os.environ, {"LOG_DIR": "/tmp/crew_logs"}):
+            with patch("os.path.exists", return_value=True):
+                with patch("os.path.join", return_value="/tmp/crew_logs/crew.log"):
+                    with patch("builtins.open", MagicMock(return_value=StringIO(content))):
+                        with patch("src.db.database_router.get_smart_db_session", _fake_smart_session):
+                            with patch("src.repositories.execution_logs_repository.ExecutionLogsRepository", return_value=mock_repo):
+                                await executor._process_log_queue(MagicMock(), eid, gc)
+
+        # Header + 1 matching line = 2 create_log calls
+        assert mock_repo.create_log.await_count == 2
+        mock_session.commit.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_process_log_queue_no_crew_log(self, executor):
+        """Test that _process_log_queue handles missing crew.log gracefully."""
+        with patch.dict(os.environ, {"LOG_DIR": "/tmp/nope"}):
+            with patch("os.path.exists", return_value=False):
+                await executor._process_log_queue(MagicMock(), "test-exec-12345678", None)
+
+    @pytest.mark.asyncio
+    async def test_process_log_queue_db_error(self, executor):
+        """Test that _process_log_queue handles DB errors gracefully."""
+        from io import StringIO
+
+        eid = "dberr_log_12345678"
+        content = eid[:8] + " log line\n"
+
+        async def _broken_session():
+            raise RuntimeError("db down")
+            yield  # noqa
+
+        with patch.dict(os.environ, {"LOG_DIR": "/tmp/l"}):
+            with patch("os.path.exists", return_value=True):
+                with patch("os.path.join", return_value="/tmp/l/crew.log"):
+                    with patch("builtins.open", MagicMock(return_value=StringIO(content))):
+                        with patch("src.db.database_router.get_smart_db_session", _broken_session):
+                            # Should not raise
+                            await executor._process_log_queue(MagicMock(), eid, None)
+
+    @pytest.mark.asyncio
+    async def test_process_log_queue_no_matching_logs(self, executor):
+        """Test _process_log_queue when no log lines match the execution ID."""
+        from io import StringIO
+
+        mock_session = AsyncMock()
+        mock_repo = MagicMock()
+        mock_repo.create_log = AsyncMock(return_value=MagicMock(id=1))
+
+        async def _fake_smart_session():
+            yield mock_session
+
+        with patch.dict(os.environ, {"LOG_DIR": "/tmp/l"}):
+            with patch("os.path.exists", return_value=True):
+                with patch("os.path.join", return_value="/tmp/l/crew.log"):
+                    with patch("builtins.open", MagicMock(return_value=StringIO("unrelated line\n"))):
+                        with patch("src.db.database_router.get_smart_db_session", _fake_smart_session):
+                            with patch("src.repositories.execution_logs_repository.ExecutionLogsRepository", return_value=mock_repo):
+                                await executor._process_log_queue(MagicMock(), "nomatch_12345678", None)
+
+        # Only the header log should be written
+        assert mock_repo.create_log.await_count == 1
+        mock_session.commit.assert_awaited()
 
 
 class TestRunCrewWrapper:

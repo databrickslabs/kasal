@@ -2219,8 +2219,6 @@ class ProcessCrewExecutor:
             import os
             from datetime import datetime, timezone
 
-            from sqlalchemy import text
-
             # Get the crew.log path
             log_dir = os.environ.get("LOG_DIR")
             if not log_dir:
@@ -2290,27 +2288,25 @@ class ProcessCrewExecutor:
                     f"Found {len(logs_to_write)-1} logs for execution {exec_id_short} in crew.log"
                 )
 
-            # Use the application's existing engine from session.py.
-            # This runs in the main process (after process.join), so the app
-            # engine is available and already connected to the correct database.
-            # Previously, a one-off engine was created from individual settings
-            # fields (POSTGRES_SERVER, POSTGRES_PORT, etc.) which default to
-            # localhost — breaking in Databricks Apps where DATABASE_URI is set
-            # as a single env var pointing to the managed PostgreSQL instance.
-            from src.db.session import engine as app_engine
+            # Route through get_smart_db_session so logs land in
+            # Lakebase when enabled (same path as API endpoints).
+            from src.db.database_router import get_smart_db_session
+            from src.repositories.execution_logs_repository import ExecutionLogsRepository
 
             logger.info(
-                f"[ProcessCrewExecutor] [DEBUG] Using application engine for database connection"
+                f"[ProcessCrewExecutor] Writing {len(logs_to_write)} logs via smart DB session"
             )
-            async with app_engine.begin() as conn:
+            async for session in get_smart_db_session():
+                repo = ExecutionLogsRepository(session)
                 for log_data in logs_to_write:
-                    await conn.execute(
-                        text("""
-                        INSERT INTO execution_logs (execution_id, content, timestamp, group_id, group_email)
-                        VALUES (:execution_id, :content, :timestamp, :group_id, :group_email)
-                    """),
-                        log_data,
+                    await repo.create_log(
+                        execution_id=log_data["execution_id"],
+                        content=log_data["content"],
+                        timestamp=log_data["timestamp"],
+                        group_id=log_data.get("group_id"),
+                        group_email=log_data.get("group_email"),
                     )
+                await session.commit()
 
             logger.info(
                 f"[ProcessCrewExecutor] Successfully wrote {len(logs_to_write)} logs to execution_logs table"
