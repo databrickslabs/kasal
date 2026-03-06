@@ -522,6 +522,9 @@ class TestLogsWriterLoop:
         mock_repo = MagicMock()
         mock_repo.create_log = AsyncMock(side_effect=RuntimeError("db error"))
 
+        async def _fake_smart_session():
+            yield mock_session
+
         with (
             patch(
                 "src.services.execution_logs_service.get_job_output_queue",
@@ -532,15 +535,17 @@ class TestLogsWriterLoop:
                 return_value=mock_repo,
             ),
             patch(
-                _SESSION_FACTORY_PATCH,
-                _make_session_factory_mock(mock_session),
+                "src.db.database_router.get_smart_db_session",
+                _fake_smart_session,
             ),
             patch(_SLEEP_PATCH, new_callable=AsyncMock),
         ):
             # Should NOT raise
             await logs_writer_loop(shutdown)
 
-        mock_session.rollback.assert_awaited()
+        # With batch processing, individual create_log errors are caught
+        # and the session is committed (with whatever succeeded).
+        mock_session.commit.assert_awaited()
 
     @pytest.mark.asyncio
     async def test_handles_cancellation(self):
@@ -1173,21 +1178,21 @@ class TestEdgeCases:
                 new_callable=AsyncMock,
             ) as mock_sleep,
         ):
-            # Let it run enough iterations to get some empty_count increments
             iter_count = 0
 
             async def original_sleep(t):
                 nonlocal iter_count
                 iter_count += 1
-                if iter_count >= 5:
+                # Run enough iterations to hit empty_count % 100 == 0 (line 252)
+                if iter_count >= 105:
                     shutdown.set()
 
             mock_sleep.side_effect = original_sleep
 
             await logs_writer_loop(shutdown)
 
-        # Just verify it didn't crash -- the empty_count logging path was exercised
-        assert empty_call_count > 0
+        # Must have iterated enough to trigger the % 100 logging branch
+        assert empty_call_count >= 100
 
     @pytest.mark.asyncio
     async def test_count_logs_returns_zero(self):
@@ -1235,3 +1240,106 @@ class TestEdgeCases:
         # Should return empty because primary_group_id is None
         assert result == []
         mock_repo.get_logs_by_execution_id.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_batch_session_error_covers_outer_except(self):
+        """When get_smart_db_session itself raises, the outer except (lines 290-292) is hit."""
+        shutdown = asyncio.Event()
+
+        log_data = {"job_id": "job-sess", "content": "data", "timestamp": datetime.now()}
+        call_count = 0
+
+        def queue_side_effect(block, timeout):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return log_data
+            shutdown.set()
+            raise Empty()
+
+        mock_queue = MagicMock()
+        mock_queue.qsize.return_value = 1
+        mock_queue.get.side_effect = queue_side_effect
+
+        async def _broken_smart_session():
+            raise RuntimeError("connection refused")
+            yield  # noqa: make it an async generator
+
+        with (
+            patch(
+                "src.services.execution_logs_service.get_job_output_queue",
+                return_value=mock_queue,
+            ),
+            patch(
+                "src.db.database_router.get_smart_db_session",
+                _broken_smart_session,
+            ),
+            patch(_SLEEP_PATCH, new_callable=AsyncMock),
+        ):
+            await logs_writer_loop(shutdown)
+
+        # The loop should have survived the session error
+        mock_queue.task_done.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_cancelled_error_is_caught(self):
+        """CancelledError raised inside the loop hits the except handler (line 311)."""
+        shutdown = asyncio.Event()
+
+        mock_queue = MagicMock()
+        mock_queue.qsize.return_value = 0
+        mock_queue.get.side_effect = Empty()
+
+        call_count = 0
+
+        async def _sleep_then_cancel(t):
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 2:
+                raise asyncio.CancelledError()
+
+        with (
+            patch(
+                "src.services.execution_logs_service.get_job_output_queue",
+                return_value=mock_queue,
+            ),
+            patch(_SLEEP_PATCH, new_callable=AsyncMock) as mock_sleep,
+        ):
+            mock_sleep.side_effect = _sleep_then_cancel
+            # CancelledError is caught internally; the function should return normally
+            await logs_writer_loop(shutdown)
+
+    @pytest.mark.asyncio
+    async def test_stop_logs_writer_queue_full(self):
+        """When put_nowait raises Full, the warning is logged (line 362)."""
+        import src.services.execution_logs_service as mod
+
+        # Create a non-done task
+        never_done = asyncio.Future()
+
+        async def _block():
+            await never_done
+
+        task = asyncio.create_task(_block())
+        mod._logs_writer_task = task
+
+        full_queue = MagicMock()
+        full_queue.put_nowait.side_effect = Full("full")
+
+        try:
+            with patch(
+                "src.services.execution_logs_service.get_job_output_queue",
+                return_value=full_queue,
+            ):
+                result = await stop_logs_writer(timeout=0.05)
+
+            assert result is True
+            full_queue.put_nowait.assert_called_once_with(None)
+        finally:
+            mod._logs_writer_task = None
+            never_done.cancel()
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
