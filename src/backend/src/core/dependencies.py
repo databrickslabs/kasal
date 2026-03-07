@@ -106,7 +106,7 @@ async def get_group_context(
             if not hasattr(request.state, '_group_context_cache'):
                 request.state._group_context_cache = {}
             request.state._group_context_cache[cache_key] = group_context
-            logger.info(f"[CACHE SET] Cached GroupContext for {user_email}")
+            logger.debug(f"[CACHE SET] Cached GroupContext for {user_email}")
 
             return group_context
         except ValueError as e:
