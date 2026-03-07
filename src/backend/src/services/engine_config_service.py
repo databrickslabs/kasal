@@ -248,6 +248,33 @@ class EngineConfigService:
             logger.error(f"Error setting OTel App Telemetry status: {str(e)}")
             raise
 
+    async def get_otel_app_telemetry_log_level(self) -> str:
+        """Get the OTel App Telemetry log level (system-level).
+
+        Returns:
+            Log level string (defaults to "INFO" on error)
+        """
+        try:
+            return await self.repository.get_otel_app_telemetry_log_level()
+        except Exception as e:
+            logger.error(f"Error getting OTel App Telemetry log level: {str(e)}")
+            return "INFO"
+
+    async def set_otel_app_telemetry_log_level(self, log_level: str) -> bool:
+        """Set the OTel App Telemetry log level (system-level).
+
+        Args:
+            log_level: One of DEBUG, INFO, WARNING, ERROR
+
+        Returns:
+            True if successful
+        """
+        try:
+            return await self.repository.set_otel_app_telemetry_log_level(log_level)
+        except Exception as e:
+            logger.error(f"Error setting OTel App Telemetry log level: {str(e)}")
+            raise
+
     async def delete_engine_config(self, engine_name: str) -> bool:
         """
         Delete an engine configuration.

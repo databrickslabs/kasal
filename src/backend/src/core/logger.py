@@ -192,7 +192,7 @@ class LoggerManager:
                 loggers.append(logger)
         return loggers
 
-    def enable_otel_app_telemetry(self, enabled: bool = True) -> None:
+    def enable_otel_app_telemetry(self, enabled: bool = True, log_level: str = "INFO") -> None:
         """Enable or disable Databricks App Telemetry via OpenTelemetry (Preview).
 
         Called from the application lifespan after DB init, reading the
@@ -210,6 +210,7 @@ class LoggerManager:
 
         Args:
             enabled: Whether OTel App Telemetry is enabled in DB config.
+            log_level: Minimum log level for OTel export (DEBUG, INFO, WARNING, ERROR).
         """
         if not enabled:
             if self._otel_logger_provider is not None:
@@ -263,8 +264,9 @@ class LoggerManager:
             provider = LoggerProvider(resource=resource)
             provider.add_log_record_processor(BatchLogRecordProcessor(exporter))
 
+            otel_level = getattr(logging, log_level.upper(), logging.INFO)
             otel_handler = LoggingHandler(
-                level=logging.INFO,
+                level=otel_level,
                 logger_provider=provider,
             )
 
@@ -281,7 +283,8 @@ class LoggerManager:
             if self._system_logger:
                 self._system_logger.info(
                     f"Databricks App Telemetry (OTel) configured: "
-                    f"endpoint={endpoint}, protocol={protocol}, service={service_name}"
+                    f"endpoint={endpoint}, protocol={protocol}, service={service_name}, "
+                    f"log_level={log_level.upper()}"
                 )
 
         except ImportError as e:
@@ -296,6 +299,19 @@ class LoggerManager:
                 self._system_logger.error(
                     f"Failed to configure Databricks App Telemetry: {e}"
                 )
+
+    def set_otel_log_level(self, log_level: str) -> None:
+        """Change the OTel handler log level at runtime.
+
+        Args:
+            log_level: One of DEBUG, INFO, WARNING, ERROR.
+        """
+        if self._otel_handler is None:
+            return
+        level = getattr(logging, log_level.upper(), logging.INFO)
+        self._otel_handler.setLevel(level)
+        if self._system_logger:
+            self._system_logger.info(f"OTel App Telemetry log level changed to {log_level.upper()}")
 
     def shutdown_otel_app_telemetry(self) -> None:
         """Shutdown the OTel App Telemetry provider, flushing pending logs."""

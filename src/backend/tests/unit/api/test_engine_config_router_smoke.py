@@ -116,8 +116,10 @@ async def test_otel_app_telemetry_get_as_admin():
     group_ctx = Ctx(is_system_admin=True)
     svc = AsyncMock()
     svc.get_otel_app_telemetry_enabled = AsyncMock(return_value=True)
+    svc.get_otel_app_telemetry_log_level = AsyncMock(return_value="WARNING")
     resp = await get_otel_app_telemetry_enabled(service=svc, group_context=group_ctx)
     assert resp['otel_app_telemetry_enabled'] is True
+    assert resp['otel_app_telemetry_log_level'] == "WARNING"
 
 
 @pytest.mark.asyncio
@@ -130,7 +132,7 @@ async def test_otel_app_telemetry_get_forbidden():
 
 
 @pytest.mark.asyncio
-async def test_otel_app_telemetry_set_as_admin():
+async def test_otel_app_telemetry_set_enabled_as_admin():
     group_ctx = Ctx(is_system_admin=True)
     svc = AsyncMock()
     svc.set_otel_app_telemetry_enabled = AsyncMock(return_value=True)
@@ -143,6 +145,22 @@ async def test_otel_app_telemetry_set_as_admin():
     assert out['success'] is True
     assert out['otel_app_telemetry_enabled'] is True
     mock_instance.enable_otel_app_telemetry.assert_called_once_with(enabled=True)
+
+
+@pytest.mark.asyncio
+async def test_otel_app_telemetry_set_log_level_as_admin():
+    group_ctx = Ctx(is_system_admin=True)
+    svc = AsyncMock()
+    svc.set_otel_app_telemetry_log_level = AsyncMock(return_value=True)
+    with patch('src.core.logger.LoggerManager') as mock_lm:
+        mock_instance = MagicMock()
+        mock_lm.get_instance.return_value = mock_instance
+        out = await set_otel_app_telemetry_enabled(
+            OtelAppTelemetryConfigUpdate(log_level="WARNING"), service=svc, group_context=group_ctx
+        )
+    assert out['success'] is True
+    assert out['otel_app_telemetry_log_level'] == "WARNING"
+    mock_instance.set_otel_log_level.assert_called_once_with("WARNING")
 
 
 @pytest.mark.asyncio

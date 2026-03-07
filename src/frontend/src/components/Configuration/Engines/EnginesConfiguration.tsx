@@ -12,7 +12,10 @@ import {
   RadioGroup,
   Radio,
   FormControl,
-  FormLabel
+  FormLabel,
+  Select,
+  MenuItem,
+  InputLabel,
 } from '@mui/material';
 import EngineeringIcon from '@mui/icons-material/Engineering';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
@@ -32,6 +35,7 @@ const EnginesConfiguration: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [otelEnabled, setOtelEnabled] = useState(false);
+  const [otelLogLevel, setOtelLogLevel] = useState('INFO');
   const [otelSyncing, setOtelSyncing] = useState(false);
 
   // Load initial state from backend
@@ -41,10 +45,11 @@ const EnginesConfiguration: React.FC = () => {
         setLoading(true);
         const [flowResp, otelResp] = await Promise.all([
           EngineConfigService.getCrewAIFlowEnabled(),
-          EngineConfigService.getOtelAppTelemetryEnabled().catch(() => ({ otel_app_telemetry_enabled: false })),
+          EngineConfigService.getOtelAppTelemetryConfig().catch(() => ({ otel_app_telemetry_enabled: false, otel_app_telemetry_log_level: 'INFO' })),
         ]);
         setCrewAIFlowEnabled(flowResp.flow_enabled);
         setOtelEnabled(otelResp.otel_app_telemetry_enabled);
+        setOtelLogLevel(otelResp.otel_app_telemetry_log_level || 'INFO');
       } catch (err) {
         console.error('Failed to load engine configuration:', err);
         setError('Failed to load configuration from server');
@@ -83,11 +88,26 @@ const EnginesConfiguration: React.FC = () => {
     try {
       setOtelSyncing(true);
       setError(null);
-      await EngineConfigService.setOtelAppTelemetryEnabled(newValue);
+      await EngineConfigService.setOtelAppTelemetryConfig({ enabled: newValue });
       setOtelEnabled(newValue);
     } catch (err) {
       console.error('Failed to update OTel App Telemetry:', err);
       setError('Failed to save OTel App Telemetry configuration');
+    } finally {
+      setOtelSyncing(false);
+    }
+  };
+
+  const handleOtelLogLevelChange = async (event: { target: { value: string } }) => {
+    const newLevel = event.target.value;
+    try {
+      setOtelSyncing(true);
+      setError(null);
+      await EngineConfigService.setOtelAppTelemetryConfig({ log_level: newLevel });
+      setOtelLogLevel(newLevel);
+    } catch (err) {
+      console.error('Failed to update OTel log level:', err);
+      setError('Failed to save OTel log level configuration');
     } finally {
       setOtelSyncing(false);
     }
@@ -299,11 +319,31 @@ const EnginesConfiguration: React.FC = () => {
           </Box>
 
           {otelEnabled && (
-            <Alert severity="info" sx={{ mt: 1 }}>
-              Structured log records (with severity, trace context, and resource attributes) will be
-              exported via OTLP to the telemetry destination configured in Databricks App settings.
-              Logs are written to the <code>otel_logs</code> table in the configured Unity Catalog schema.
-            </Alert>
+            <>
+              <FormControl size="small" sx={{ mt: 1, minWidth: 180 }}>
+                <InputLabel id="otel-log-level-label">Log Level</InputLabel>
+                <Select
+                  labelId="otel-log-level-label"
+                  value={otelLogLevel}
+                  label="Log Level"
+                  onChange={handleOtelLogLevelChange}
+                  disabled={otelSyncing}
+                >
+                  <MenuItem value="DEBUG">DEBUG</MenuItem>
+                  <MenuItem value="INFO">INFO</MenuItem>
+                  <MenuItem value="WARNING">WARNING</MenuItem>
+                  <MenuItem value="ERROR">ERROR</MenuItem>
+                </Select>
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
+                  Minimum severity of log records exported via OTel
+                </Typography>
+              </FormControl>
+              <Alert severity="info" sx={{ mt: 1 }}>
+                Structured log records (with severity, trace context, and resource attributes) will be
+                exported via OTLP to the telemetry destination configured in Databricks App settings.
+                Logs are written to the <code>otel_logs</code> table in the configured Unity Catalog schema.
+              </Alert>
+            </>
           )}
         </Stack>
       </Paper>
