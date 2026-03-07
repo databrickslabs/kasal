@@ -93,6 +93,75 @@ class TestOtelAppTelemetry:
                             )
 
     @patch.dict(os.environ, {
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4314",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+        "DATABRICKS_APP_NAME": "kasal",
+    })
+    def test_otel_insecure_blocked_in_databricks_app(self):
+        """insecure channel must be False when running inside a Databricks App, even with http:// endpoint."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mock_exporter_cls = MagicMock()
+            mock_provider = MagicMock()
+            mock_handler = MagicMock(spec=logging.Handler)
+            mock_handler.level = logging.INFO
+
+            with patch(
+                "opentelemetry.sdk._logs.LoggerProvider",
+                return_value=mock_provider,
+            ), patch(
+                "opentelemetry.sdk._logs.LoggingHandler",
+                return_value=mock_handler,
+            ), patch(
+                "opentelemetry.exporter.otlp.proto.grpc._log_exporter.OTLPLogExporter",
+                mock_exporter_cls,
+            ), patch(
+                "opentelemetry.sdk._logs.export.BatchLogRecordProcessor",
+            ):
+                manager = LoggerManager.get_instance(temp_dir)
+                manager.enable_otel_app_telemetry(enabled=True)
+
+                mock_exporter_cls.assert_called_once()
+                _, kwargs = mock_exporter_cls.call_args
+                assert kwargs.get("insecure") is False, (
+                    "insecure must be False inside Databricks Apps"
+                )
+
+    @patch.dict(os.environ, {
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4314",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+    })
+    def test_otel_insecure_allowed_locally(self):
+        """insecure channel should be True for http:// endpoints in local development."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Ensure DATABRICKS_APP_NAME is not set
+            os.environ.pop("DATABRICKS_APP_NAME", None)
+            mock_exporter_cls = MagicMock()
+            mock_provider = MagicMock()
+            mock_handler = MagicMock(spec=logging.Handler)
+            mock_handler.level = logging.INFO
+
+            with patch(
+                "opentelemetry.sdk._logs.LoggerProvider",
+                return_value=mock_provider,
+            ), patch(
+                "opentelemetry.sdk._logs.LoggingHandler",
+                return_value=mock_handler,
+            ), patch(
+                "opentelemetry.exporter.otlp.proto.grpc._log_exporter.OTLPLogExporter",
+                mock_exporter_cls,
+            ), patch(
+                "opentelemetry.sdk._logs.export.BatchLogRecordProcessor",
+            ):
+                manager = LoggerManager.get_instance(temp_dir)
+                manager.enable_otel_app_telemetry(enabled=True)
+
+                mock_exporter_cls.assert_called_once()
+                _, kwargs = mock_exporter_cls.call_args
+                assert kwargs.get("insecure") is True, (
+                    "insecure should be True for http:// in local dev"
+                )
+
+    @patch.dict(os.environ, {
         "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4318",
         "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
         "OTEL_SERVICE_NAME": "test-app",
