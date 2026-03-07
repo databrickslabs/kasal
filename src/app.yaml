@@ -1,4 +1,6 @@
 command: ['python', 'entrypoint.py']
+# To enable OTel auto-instrumentation for custom traces/metrics (requires UI telemetry enabled):
+# command: ['opentelemetry-instrument', 'python', 'entrypoint.py']
 environment_vars:
   PYTHONPATH: './backend:${PYTHONPATH}'
   PYTHONUNBUFFERED: '1'
@@ -12,6 +14,13 @@ environment_vars:
   KASAL_LOG_CONSOLE: 'true'         # Enable console output
   KASAL_LOG_FILE: 'true'            # Enable file logging
 
+  # Databricks App Telemetry (Preview)
+  # Structured OTel log export is controlled via the Databricks Configuration UI
+  # (otel_app_telemetry_enabled toggle). It also requires telemetry to be enabled
+  # in the Databricks App settings UI (which injects OTEL_EXPORTER_OTLP_ENDPOINT).
+
+  # Required for custom traces when using opentelemetry-instrument command:
+  # OTEL_TRACES_SAMPLER: 'always_on'
+
 apt_packages:
   - libpq-dev
-

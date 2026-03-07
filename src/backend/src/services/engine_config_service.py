@@ -221,6 +221,33 @@ class EngineConfigService:
             logger.error(f"Error setting CrewAI flow enabled status: {str(e)}")
             raise
 
+    async def get_otel_app_telemetry_enabled(self) -> bool:
+        """Get the OTel App Telemetry enabled status (system-level).
+
+        Returns:
+            True if enabled (defaults to False if not found or on error)
+        """
+        try:
+            return await self.repository.get_otel_app_telemetry_enabled()
+        except Exception as e:
+            logger.error(f"Error getting OTel App Telemetry status: {str(e)}")
+            return False
+
+    async def set_otel_app_telemetry_enabled(self, enabled: bool) -> bool:
+        """Set the OTel App Telemetry enabled status (system-level).
+
+        Args:
+            enabled: Whether OTel App Telemetry should be enabled
+
+        Returns:
+            True if successful
+        """
+        try:
+            return await self.repository.set_otel_app_telemetry_enabled(enabled)
+        except Exception as e:
+            logger.error(f"Error setting OTel App Telemetry status: {str(e)}")
+            raise
+
     async def delete_engine_config(self, engine_name: str) -> bool:
         """
         Delete an engine configuration.

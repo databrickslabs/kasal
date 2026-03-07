@@ -16,6 +16,7 @@ class FakeRepo:
         self.toggle_enabled_calls = []
         self.update_config_value_calls = []
         self.crewai_flow_enabled = True  # Default to enabled
+        self.otel_app_telemetry_enabled = False  # Default to disabled
     async def find_all(self):
         return []
     async def find_enabled_configs(self):
@@ -45,6 +46,11 @@ class FakeRepo:
         return self.crewai_flow_enabled
     async def set_crewai_flow_enabled(self, enabled):
         self.crewai_flow_enabled = enabled
+        return True
+    async def get_otel_app_telemetry_enabled(self):
+        return self.otel_app_telemetry_enabled
+    async def set_otel_app_telemetry_enabled(self, enabled):
+        self.otel_app_telemetry_enabled = enabled
         return True
 
 
@@ -169,6 +175,33 @@ async def test_delete_engine_config_success():
     ok = await svc.delete_engine_config('test')
     assert ok is True
     assert 1 in svc.repository.deleted
+
+
+@pytest.mark.asyncio
+async def test_get_otel_app_telemetry_enabled():
+    svc = Svc(SimpleNamespace())
+    svc.repository = FakeRepo(None)
+    svc.repository.otel_app_telemetry_enabled = True
+    out = await svc.get_otel_app_telemetry_enabled()
+    assert out is True
+
+
+@pytest.mark.asyncio
+async def test_set_otel_app_telemetry_enabled():
+    svc = Svc(SimpleNamespace())
+    svc.repository = FakeRepo(None)
+    ok = await svc.set_otel_app_telemetry_enabled(True)
+    assert ok is True
+    assert svc.repository.otel_app_telemetry_enabled is True
+
+
+@pytest.mark.asyncio
+async def test_get_otel_app_telemetry_enabled_error_returns_false():
+    svc = Svc(SimpleNamespace())
+    svc.repository = FakeRepo(None)
+    svc.repository.get_otel_app_telemetry_enabled = AsyncMock(side_effect=Exception("DB error"))
+    out = await svc.get_otel_app_telemetry_enabled()
+    assert out is False
 
 
 # Removed failing tests with incorrect method assumptions

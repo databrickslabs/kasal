@@ -169,6 +169,50 @@ class EngineConfigRepository(BaseRepository[EngineConfig]):
             return True  # Default to enabled if not configured
         return config.config_value.lower() == "true"
     
+    async def get_otel_app_telemetry_enabled(self) -> bool:
+        """Get the OTel App Telemetry enabled status (system-level).
+
+        Returns:
+            True if enabled, False otherwise (defaults to False).
+        """
+        config = await self.find_by_engine_and_key("kasal", "otel_app_telemetry_enabled")
+        if not config:
+            return False
+        return config.config_value.lower() == "true"
+
+    async def set_otel_app_telemetry_enabled(self, enabled: bool) -> bool:
+        """Set the OTel App Telemetry enabled status (system-level).
+
+        Args:
+            enabled: Whether OTel App Telemetry should be enabled
+
+        Returns:
+            True if successful
+        """
+        config_value = "true" if enabled else "false"
+
+        success = await self.update_config_value("kasal", "otel_app_telemetry_enabled", config_value)
+
+        if not success:
+            try:
+                new_config_data = {
+                    "engine_name": "kasal",
+                    "engine_type": "system",
+                    "config_key": "otel_app_telemetry_enabled",
+                    "config_value": config_value,
+                    "enabled": True,
+                    "description": "Controls OTel App Telemetry structured log export (Preview)"
+                }
+                await self.create(new_config_data)
+                return True
+            except Exception as e:
+                import logging
+                logging.error(f"Error creating OTel App Telemetry config: {str(e)}")
+                await self.session.rollback()
+                raise
+
+        return success
+
     async def set_crewai_flow_enabled(self, enabled: bool) -> bool:
         """
         Set the CrewAI flow enabled status.
