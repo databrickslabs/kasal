@@ -164,6 +164,34 @@ async def test_otel_app_telemetry_set_log_level_as_admin():
 
 
 @pytest.mark.asyncio
+async def test_otel_app_telemetry_set_enabled_failure():
+    from src.core.exceptions import KasalError
+    group_ctx = Ctx(is_system_admin=True)
+    svc = AsyncMock()
+    svc.set_otel_app_telemetry_enabled = AsyncMock(return_value=False)
+    with patch('src.core.logger.LoggerManager') as mock_lm:
+        mock_lm.get_instance.return_value = MagicMock()
+        with pytest.raises(KasalError):
+            await set_otel_app_telemetry_enabled(
+                OtelAppTelemetryConfigUpdate(enabled=True), service=svc, group_context=group_ctx
+            )
+
+
+@pytest.mark.asyncio
+async def test_otel_app_telemetry_set_log_level_failure():
+    from src.core.exceptions import KasalError
+    group_ctx = Ctx(is_system_admin=True)
+    svc = AsyncMock()
+    svc.set_otel_app_telemetry_log_level = AsyncMock(return_value=False)
+    with patch('src.core.logger.LoggerManager') as mock_lm:
+        mock_lm.get_instance.return_value = MagicMock()
+        with pytest.raises(KasalError):
+            await set_otel_app_telemetry_enabled(
+                OtelAppTelemetryConfigUpdate(log_level="ERROR"), service=svc, group_context=group_ctx
+            )
+
+
+@pytest.mark.asyncio
 async def test_otel_app_telemetry_set_forbidden():
     from src.core.exceptions import ForbiddenError
     group_ctx = Ctx(is_system_admin=False)
