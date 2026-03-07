@@ -138,7 +138,7 @@ class UserService:
         Returns:
             User: The existing or newly created user
         """
-        logger.info(f"get_or_create_user_by_email called for email: {email}")
+        logger.debug(f"get_or_create_user_by_email called for email: {email}")
 
         # Use try-catch to handle race conditions where user might be created between check and create
         try:
@@ -239,7 +239,7 @@ class UserService:
             user: The user to potentially grant admin privileges to
             is_new_user: Whether this user was just created (vs existing user login)
         """
-        logger.info(f"_handle_first_user_admin_setup called for user {user.email}, is_new_user={is_new_user}")
+        logger.debug(f"_handle_first_user_admin_setup called for user {user.email}, is_new_user={is_new_user}")
         try:
             # If this is an existing user, check if they already have admin privileges
             if not is_new_user:

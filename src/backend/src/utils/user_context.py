@@ -141,7 +141,7 @@ class GroupContext:
                 # User is NOT in any groups - use individual groups
                 # Create a unique group ID based on the user's email (sanitized)
                 individual_group_id = cls.generate_individual_group_id(email)
-                logger.info(f"User {email} not in any groups, using individual group: {individual_group_id}")
+                logger.debug(f"User {email} not in any groups, using individual group: {individual_group_id}")
                 user_group_ids = [individual_group_id]
                 user_role = None  # No role for individual workspace
                 highest_role = None  # No highest role when not in any groups
@@ -336,11 +336,11 @@ class GroupContext:
             # Lakebase where the data doesn't exist.
             async with _local_session_factory() as session:
                 # Get or create the user
-                logger.info(f"[USER CONTEXT DEBUG] Creating UserService and calling get_or_create_user_by_email for {email}")
+                logger.debug(f"[USER CONTEXT] Creating UserService and calling get_or_create_user_by_email for {email}")
                 user_service = UserService(session)
                 # Don't update last_login to prevent locking
                 user = await user_service.get_or_create_user_by_email(email, update_login=False)
-                logger.info(f"[USER CONTEXT DEBUG] get_or_create_user_by_email returned user: {user.email if user else 'None'}, is_system_admin: {user.is_system_admin if user else 'N/A'}")
+                logger.debug(f"[USER CONTEXT] get_or_create_user_by_email returned user: {user.email if user else 'None'}, is_system_admin: {user.is_system_admin if user else 'N/A'}")
 
                 if not user:
                     logger.error(f"Failed to get or create user for email: {email}")
@@ -352,7 +352,7 @@ class GroupContext:
 
                 # Single commit at the end for all changes
                 await session.commit()
-                logger.info(f"[USER CONTEXT DEBUG] Session committed for user {user.email}")
+                logger.debug(f"[USER CONTEXT] Session committed for user {user.email}")
 
                 return user, groups_with_roles
 
