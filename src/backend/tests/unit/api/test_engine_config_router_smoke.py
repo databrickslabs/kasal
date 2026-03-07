@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.core.exceptions import NotFoundError
 
@@ -12,8 +12,10 @@ from src.api.engine_config_router import (
     update_config_value,
     get_crewai_flow_enabled,
     set_crewai_flow_enabled,
+    get_otel_app_telemetry_enabled,
+    set_otel_app_telemetry_enabled,
 )
-from src.schemas.engine_config import EngineConfigCreate, EngineConfigToggleUpdate, EngineConfigValueUpdate, CrewAIFlowConfigUpdate
+from src.schemas.engine_config import EngineConfigCreate, EngineConfigToggleUpdate, EngineConfigValueUpdate, CrewAIFlowConfigUpdate, OtelAppTelemetryConfigUpdate
 
 
 class Ctx:
@@ -107,4 +109,49 @@ async def test_crewai_toggles():
     svc.set_crewai_flow_enabled = AsyncMock(return_value=True)
     out = await set_crewai_flow_enabled(CrewAIFlowConfigUpdate(flow_enabled=False), service=svc, group_context=group_ctx)
     assert out['success'] is True
+
+
+@pytest.mark.asyncio
+async def test_otel_app_telemetry_get_as_admin():
+    group_ctx = Ctx(is_system_admin=True)
+    svc = AsyncMock()
+    svc.get_otel_app_telemetry_enabled = AsyncMock(return_value=True)
+    resp = await get_otel_app_telemetry_enabled(service=svc, group_context=group_ctx)
+    assert resp['otel_app_telemetry_enabled'] is True
+
+
+@pytest.mark.asyncio
+async def test_otel_app_telemetry_get_forbidden():
+    from src.core.exceptions import ForbiddenError
+    group_ctx = Ctx(is_system_admin=False)
+    svc = AsyncMock()
+    with pytest.raises(ForbiddenError):
+        await get_otel_app_telemetry_enabled(service=svc, group_context=group_ctx)
+
+
+@pytest.mark.asyncio
+async def test_otel_app_telemetry_set_as_admin():
+    group_ctx = Ctx(is_system_admin=True)
+    svc = AsyncMock()
+    svc.set_otel_app_telemetry_enabled = AsyncMock(return_value=True)
+    with patch('src.core.logger.LoggerManager') as mock_lm:
+        mock_instance = MagicMock()
+        mock_lm.get_instance.return_value = mock_instance
+        out = await set_otel_app_telemetry_enabled(
+            OtelAppTelemetryConfigUpdate(enabled=True), service=svc, group_context=group_ctx
+        )
+    assert out['success'] is True
+    assert out['otel_app_telemetry_enabled'] is True
+    mock_instance.enable_otel_app_telemetry.assert_called_once_with(enabled=True)
+
+
+@pytest.mark.asyncio
+async def test_otel_app_telemetry_set_forbidden():
+    from src.core.exceptions import ForbiddenError
+    group_ctx = Ctx(is_system_admin=False)
+    svc = AsyncMock()
+    with pytest.raises(ForbiddenError):
+        await set_otel_app_telemetry_enabled(
+            OtelAppTelemetryConfigUpdate(enabled=False), service=svc, group_context=group_ctx
+        )
 

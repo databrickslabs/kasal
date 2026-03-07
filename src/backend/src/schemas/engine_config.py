@@ -53,3 +53,8 @@ class EngineConfigListResponse(BaseModel):
 class CrewAIFlowConfigUpdate(BaseModel):
     """Schema for updating CrewAI flow configuration."""
     flow_enabled: bool = Field(..., description="Whether flow feature is enabled")
+
+
+class OtelAppTelemetryConfigUpdate(BaseModel):
+    """Schema for updating OTel App Telemetry configuration."""
+    enabled: bool = Field(..., description="Whether OTel App Telemetry is enabled")
