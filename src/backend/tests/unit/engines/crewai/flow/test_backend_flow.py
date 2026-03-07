@@ -823,6 +823,26 @@ class TestBackendFlow:
             )
 
     @pytest.mark.asyncio
+    async def test_kickoff_clears_request_session_contextvar(self):
+        """Test that _request_session ContextVar is cleared before kickoff_async."""
+        flow = BackendFlow(job_id="test-job")
+        flow._flow_data = {"nodes": [{"id": "node1"}]}
+
+        mock_crewai_flow = self.create_mock_crewai_flow(
+            kickoff_async_result={"output": "test"},
+            start_method_names=['starting_point_node1']
+        )
+
+        with patch('src.db.session._request_session') as mock_ctx_var:
+            with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
+                mock_flow_method.return_value = mock_crewai_flow
+
+                result = await flow.kickoff()
+
+                assert result["success"] is True
+                mock_ctx_var.set.assert_called_with(None)
+
+    @pytest.mark.asyncio
     async def test_configure_task_no_optional_params(self):
         """Test _configure_task method without optional parameters."""
         flow = BackendFlow()

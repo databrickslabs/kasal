@@ -31,13 +31,36 @@ from src.repositories.crew_repository import CrewRepository
 from src.repositories.execution_history_repository import ExecutionHistoryRepository
 from src.repositories.execution_trace_repository import ExecutionTraceRepository
 from src.core.logger import LoggerManager
-from src.db.session import async_session_factory
+from src.db.database_router import get_smart_db_session
 from src.services.api_keys_service import ApiKeysService
 from src.engines.crewai.flow.backend_flow import BackendFlow
 from src.engines.crewai.flow.exceptions import FlowPausedForApprovalException
 
 # Initialize flow-specific logger
 logger = LoggerManager.get_instance().flow
+
+
+@asynccontextmanager
+async def _smart_db_session():
+    """Wrap get_smart_db_session as an async context manager for 'async with' usage.
+
+    get_smart_db_session is an async generator (for FastAPI DI). This wrapper
+    lets flow_runner_service use it with 'async with' while preserving proper
+    commit-on-success / rollback-on-error semantics.
+    """
+    gen = get_smart_db_session().__aiter__()
+    session = await gen.__anext__()
+    try:
+        yield session
+    except BaseException:
+        await gen.aclose()
+        raise
+    else:
+        try:
+            await gen.__anext__()
+        except StopAsyncIteration:
+            pass
+
 
 class FlowRunnerService:
     """Service for running Flow executions"""
@@ -99,21 +122,15 @@ class FlowRunnerService:
     @staticmethod
     @asynccontextmanager
     async def _safe_session():
-        """Create a session with safe cleanup that suppresses stale-connection errors.
+        """Create a smart-routed session with safe cleanup.
 
-        After long-running operations (like CrewAI kickoff), SQLite+aiosqlite sessions
-        can lose their greenlet context, causing MissingGreenlet errors during cleanup.
-        This context manager suppresses those cleanup errors to prevent them from
-        corrupting successful execution results (overwriting COMPLETED with FAILED).
+        Routes through get_smart_db_session (Lakebase when enabled, local DB otherwise).
+        After long-running operations (like CrewAI kickoff), sessions can lose their
+        greenlet context, causing MissingGreenlet errors during cleanup.
+        This context manager suppresses those cleanup errors.
         """
-        session = async_session_factory()
-        try:
+        async with _smart_db_session() as session:
             yield session
-        finally:
-            try:
-                await session.close()
-            except Exception as close_err:
-                logger.debug(f"Session cleanup error suppressed (expected after long execution): {close_err}")
 
     async def create_flow_execution(self, flow_id: Union[uuid.UUID, str], job_id: str, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
@@ -496,7 +513,7 @@ class FlowRunnerService:
                     # The original session may have a stale/dead SQLite connection after
                     # the long-running kickoff() (minutes to hours). This prevents
                     # "(sqlite3.OperationalError) no active connection" errors.
-                    async with async_session_factory() as post_session:
+                    async with _smart_db_session() as post_session:
                         post_flow_service = FlowExecutionService(post_session)
 
                         # Update the execution with the result
@@ -563,7 +580,7 @@ class FlowRunnerService:
                     logger.info(f"   Crew sequence: {pause_exc.crew_sequence}")
 
                     # Fresh session for HITL status update
-                    async with async_session_factory() as hitl_session:
+                    async with _smart_db_session() as hitl_session:
                         hitl_flow_service = FlowExecutionService(hitl_session)
 
                         # Update execution status to WAITING_FOR_APPROVAL
@@ -612,7 +629,7 @@ class FlowRunnerService:
                 except Exception as kickoff_error:
                     logger.error(f"Error during backend_flow.kickoff() for dynamic flow {execution_id}: {kickoff_error}", exc_info=True)
                     # Fresh session for error status update
-                    async with async_session_factory() as err_session:
+                    async with _smart_db_session() as err_session:
                         err_flow_service = FlowExecutionService(err_session)
                         await err_flow_service.update_execution_status(
                             execution_id=execution_id,
@@ -630,7 +647,7 @@ class FlowRunnerService:
                 logger.error(f"Error running dynamic flow execution {execution_id}: {e}", exc_info=True)
                 try:
                     # Fresh session for outer error status update
-                    async with async_session_factory() as outer_err_session:
+                    async with _smart_db_session() as outer_err_session:
                         outer_err_service = FlowExecutionService(outer_err_session)
                         await outer_err_service.update_execution_status(
                             execution_id=execution_id,
@@ -931,7 +948,7 @@ class FlowRunnerService:
                     # The original session may have a stale/dead SQLite connection after
                     # the long-running kickoff() (minutes to hours). This prevents
                     # "(sqlite3.OperationalError) no active connection" errors.
-                    async with async_session_factory() as post_session:
+                    async with _smart_db_session() as post_session:
                         post_flow_service = FlowExecutionService(post_session)
 
                         # Update the execution with the result
@@ -997,7 +1014,7 @@ class FlowRunnerService:
                     logger.info(f"   Crew sequence: {pause_exc.crew_sequence}")
 
                     # Fresh session for HITL status update
-                    async with async_session_factory() as hitl_session:
+                    async with _smart_db_session() as hitl_session:
                         hitl_flow_service = FlowExecutionService(hitl_session)
 
                         # Update execution status to WAITING_FOR_APPROVAL
@@ -1045,7 +1062,7 @@ class FlowRunnerService:
                 except Exception as kickoff_error:
                     logger.error(f"Error executing flow {flow_id}: {kickoff_error}", exc_info=True)
                     # Fresh session for error status update
-                    async with async_session_factory() as err_session:
+                    async with _smart_db_session() as err_session:
                         err_flow_service = FlowExecutionService(err_session)
                         await err_flow_service.update_execution_status(
                             execution_id=execution_id,
@@ -1063,7 +1080,7 @@ class FlowRunnerService:
                 logger.error(f"Error in flow execution {execution_id}: {e}", exc_info=True)
                 try:
                     # Fresh session for outer error status update
-                    async with async_session_factory() as outer_err_session:
+                    async with _smart_db_session() as outer_err_session:
                         outer_err_service = FlowExecutionService(outer_err_session)
                         await outer_err_service.update_execution_status(
                             execution_id=execution_id,

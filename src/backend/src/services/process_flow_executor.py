@@ -307,6 +307,18 @@ def run_flow_in_process(
         async def run_async_flow():
             """Execute the flow in an async context with TraceManager in same event loop"""
 
+            # Activate Lakebase on async_session_factory so ALL callers
+            # (FlowRunnerService, tools, etc.) automatically use Lakebase.
+            try:
+                from src.db.database_router import activate_lakebase_in_subprocess
+                lb_ok = await activate_lakebase_in_subprocess()
+                if lb_ok:
+                    async_logger.info("[FLOW_SUBPROCESS] Lakebase activated on async_session_factory")
+                else:
+                    async_logger.debug("[FLOW_SUBPROCESS] Lakebase not enabled, using local DB")
+            except Exception as lb_err:
+                async_logger.warning(f"[FLOW_SUBPROCESS] Lakebase activation error (non-fatal): {lb_err}")
+
             # Initialize TraceManager and event listeners FIRST (in same loop as execution)
             # This is CRITICAL - TraceManager must be started in the same loop that will call stop_writer()
             try:
@@ -448,11 +460,11 @@ def run_flow_in_process(
             # Configure MLflow in subprocess (same as crew executor)
             mlflow_result = None
             try:
-                from src.db.session import async_session_factory
+                from src.db.database_router import get_smart_db_session
                 from src.services.databricks_service import DatabricksService
 
                 db_config = None
-                async with async_session_factory() as _db_session:
+                async for _db_session in get_smart_db_session():
                     databricks_service = DatabricksService(
                         _db_session, group_id=group_id
                     )
@@ -519,10 +531,10 @@ def run_flow_in_process(
 
             # Now run the actual flow execution
             try:
-                from src.db.session import safe_async_session
+                from src.db.database_router import get_smart_db_session
                 from src.engines.crewai.flow.flow_runner_service import FlowRunnerService
 
-                async with safe_async_session() as session:
+                async for session in get_smart_db_session():
                     flow_runner = FlowRunnerService(session)
 
                     # Extract flow parameters from config
