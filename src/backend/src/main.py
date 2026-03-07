@@ -248,7 +248,8 @@ async def lifespan(app: FastAPI):
                 from src.repositories.engine_config_repository import EngineConfigRepository
                 repo = EngineConfigRepository(session)
                 if await repo.get_otel_app_telemetry_enabled():
-                    logger_manager.enable_otel_app_telemetry(enabled=True)
+                    log_level = await repo.get_otel_app_telemetry_log_level()
+                    logger_manager.enable_otel_app_telemetry(enabled=True, log_level=log_level)
         except Exception as e:
             system_logger.warning(f"OTel App Telemetry activation skipped: {e}")
 

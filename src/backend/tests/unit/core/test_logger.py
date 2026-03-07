@@ -162,6 +162,68 @@ class TestOtelAppTelemetry:
                 )
 
     @patch.dict(os.environ, {
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4314",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+    })
+    def test_otel_custom_log_level(self):
+        """Should apply custom log level to OTel handler."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mock_handler_cls = MagicMock()
+            mock_handler = MagicMock(spec=logging.Handler)
+            mock_handler.level = logging.WARNING
+            mock_handler_cls.return_value = mock_handler
+
+            with patch(
+                "opentelemetry.sdk._logs.LoggerProvider",
+            ), patch(
+                "opentelemetry.sdk._logs.LoggingHandler",
+                mock_handler_cls,
+            ), patch(
+                "opentelemetry.exporter.otlp.proto.grpc._log_exporter.OTLPLogExporter",
+            ), patch(
+                "opentelemetry.sdk._logs.export.BatchLogRecordProcessor",
+            ):
+                manager = LoggerManager.get_instance(temp_dir)
+                manager.enable_otel_app_telemetry(enabled=True, log_level="WARNING")
+
+                mock_handler_cls.assert_called_once()
+                _, kwargs = mock_handler_cls.call_args
+                assert kwargs.get("level") == logging.WARNING
+
+    @patch.dict(os.environ, {
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4314",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+    })
+    def test_set_otel_log_level_runtime(self):
+        """set_otel_log_level should change the handler level at runtime."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mock_handler = MagicMock(spec=logging.Handler)
+            mock_handler.level = logging.INFO
+
+            with patch(
+                "opentelemetry.sdk._logs.LoggerProvider",
+            ), patch(
+                "opentelemetry.sdk._logs.LoggingHandler",
+                return_value=mock_handler,
+            ), patch(
+                "opentelemetry.exporter.otlp.proto.grpc._log_exporter.OTLPLogExporter",
+            ), patch(
+                "opentelemetry.sdk._logs.export.BatchLogRecordProcessor",
+            ):
+                manager = LoggerManager.get_instance(temp_dir)
+                manager.enable_otel_app_telemetry(enabled=True)
+
+                manager.set_otel_log_level("ERROR")
+                mock_handler.setLevel.assert_called_once_with(logging.ERROR)
+
+    def test_set_otel_log_level_noop_when_inactive(self):
+        """set_otel_log_level should be a no-op when OTel is not active."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = LoggerManager.get_instance(temp_dir)
+            assert manager._otel_handler is None
+            manager.set_otel_log_level("DEBUG")  # should not raise
+
+    @patch.dict(os.environ, {
         "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4318",
         "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
         "OTEL_SERVICE_NAME": "test-app",

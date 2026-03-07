@@ -82,22 +82,36 @@ export class EngineConfigService {
   }
 
   /**
-   * Get OTel App Telemetry enabled status (system-level)
+   * Get OTel App Telemetry configuration (system-level)
    */
-  static async getOtelAppTelemetryEnabled(): Promise<{ otel_app_telemetry_enabled: boolean }> {
-    const response = await apiClient.get<{ otel_app_telemetry_enabled: boolean }>(`${this.baseUrl}/kasal/otel-app-telemetry`);
+  static async getOtelAppTelemetryConfig(): Promise<{ otel_app_telemetry_enabled: boolean; otel_app_telemetry_log_level: string }> {
+    const response = await apiClient.get<{ otel_app_telemetry_enabled: boolean; otel_app_telemetry_log_level: string }>(`${this.baseUrl}/kasal/otel-app-telemetry`);
     return response.data;
   }
 
   /**
-   * Set OTel App Telemetry enabled status (system-level)
+   * @deprecated Use getOtelAppTelemetryConfig instead
    */
-  static async setOtelAppTelemetryEnabled(enabled: boolean): Promise<{ success: boolean; otel_app_telemetry_enabled: boolean }> {
-    const response = await apiClient.patch<{ success: boolean; otel_app_telemetry_enabled: boolean }>(
+  static async getOtelAppTelemetryEnabled(): Promise<{ otel_app_telemetry_enabled: boolean; otel_app_telemetry_log_level: string }> {
+    return this.getOtelAppTelemetryConfig();
+  }
+
+  /**
+   * Update OTel App Telemetry configuration (system-level)
+   */
+  static async setOtelAppTelemetryConfig(params: { enabled?: boolean; log_level?: string }): Promise<{ success: boolean; otel_app_telemetry_enabled?: boolean; otel_app_telemetry_log_level?: string }> {
+    const response = await apiClient.patch<{ success: boolean; otel_app_telemetry_enabled?: boolean; otel_app_telemetry_log_level?: string }>(
       `${this.baseUrl}/kasal/otel-app-telemetry`,
-      { enabled }
+      params
     );
     return response.data;
+  }
+
+  /**
+   * @deprecated Use setOtelAppTelemetryConfig instead
+   */
+  static async setOtelAppTelemetryEnabled(enabled: boolean): Promise<{ success: boolean; otel_app_telemetry_enabled?: boolean }> {
+    return this.setOtelAppTelemetryConfig({ enabled });
   }
 
   /**
