@@ -5,13 +5,12 @@ This module handles the high-level business logic for the three-tier MCP configu
 It provides clean interfaces for crew preparation, agent helpers, and task helpers while
 centralizing all MCP-related configuration logic.
 
-Three-Tier MCP System:
-1. Global MCP Servers - Available to all agents/tasks (highest coverage)
-2. Agent-Level MCP Servers - Specific to individual agents  
-3. Task-Level MCP Servers - Most specific (highest priority)
+Two-Tier MCP System:
+1. Agent-Level MCP Servers - Configured via tool_configs on agents
+2. Task-Level MCP Servers - Configured via tool_configs on tasks
 
-Priority Order: Task-level > Agent-level > Global
-Effective servers = Global ∪ Agent-specific ∪ Task-specific (deduplicated)
+MCP servers are only loaded when explicitly configured on agents or tasks.
+No global/automatic loading occurs.
 """
 
 import logging
@@ -202,10 +201,14 @@ class MCPIntegration:
             )
             
             logger.info(f"Creating MCP tools for agent {agent_key} with explicit servers: {explicit_servers}")
-            
-            # Resolve effective servers (global + explicit)
+
+            if not explicit_servers:
+                logger.info(f"No MCP servers configured for agent {agent_key}, skipping MCP tool creation")
+                return []
+
+            # Resolve effective servers (only explicitly configured ones)
             effective_servers = await MCPIntegration.resolve_effective_mcp_servers(
-                explicit_servers, mcp_service, include_global=True, group_id=(config.get('group_id') if isinstance(config, dict) else None)
+                explicit_servers, mcp_service, include_global=False, group_id=(config.get('group_id') if isinstance(config, dict) else None)
             )
 
             if not effective_servers:
@@ -261,10 +264,14 @@ class MCPIntegration:
             )
             
             logger.info(f"Creating MCP tools for task {task_key} with explicit servers: {explicit_servers}")
-            
-            # For tasks, we include both global and explicit servers
+
+            if not explicit_servers:
+                logger.info(f"No MCP servers configured for task {task_key}, skipping MCP tool creation")
+                return []
+
+            # Resolve effective servers (only explicitly configured ones)
             effective_servers = await MCPIntegration.resolve_effective_mcp_servers(
-                explicit_servers, mcp_service, include_global=True, group_id=(config.get('group_id') if isinstance(config, dict) else None)
+                explicit_servers, mcp_service, include_global=False, group_id=(config.get('group_id') if isinstance(config, dict) else None)
             )
 
             if not effective_servers:
