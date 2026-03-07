@@ -253,8 +253,12 @@ class LoggerManager:
 
             # Use dedicated logs endpoint if set, otherwise share the main endpoint
             logs_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", endpoint)
-            # For local/non-TLS endpoints, use insecure channel
-            use_insecure = logs_endpoint.startswith("http://") if logs_endpoint else False
+            # Only allow insecure (non-TLS) channels for local development;
+            # deployed Databricks Apps always use TLS-secured sidecar endpoints.
+            is_local = not os.environ.get("DATABRICKS_APP_NAME")
+            use_insecure = (
+                is_local and logs_endpoint.startswith("http://")
+            ) if logs_endpoint else False
             exporter = OTLPLogExporter(endpoint=logs_endpoint, insecure=use_insecure)  # type: ignore[call-arg]
             provider = LoggerProvider(resource=resource)
             provider.add_log_record_processor(BatchLogRecordProcessor(exporter))
