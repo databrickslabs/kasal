@@ -42,8 +42,7 @@ if (
 # Set debug flag for seeders
 os.environ["SEED_DEBUG"] = "True"
 
-# Disable CrewAI telemetry
-os.environ["OTEL_SDK_DISABLED"] = "true"
+# Disable CrewAI telemetry (do NOT set OTEL_SDK_DISABLED as it disables all OTel including App Telemetry logs)
 os.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
 
 # Prevent MLflow from creating local mlruns directories
@@ -242,6 +241,17 @@ async def lifespan(app: FastAPI):
     else:
         system_logger.warning("Skipping seeding as database is not initialized.")
 
+    # ── Activate OTel App Telemetry if enabled in EngineConfig (system-level) ──
+    if db_initialized:
+        try:
+            async with async_session_factory() as session:
+                from src.repositories.engine_config_repository import EngineConfigRepository
+                repo = EngineConfigRepository(session)
+                if await repo.get_otel_app_telemetry_enabled():
+                    logger_manager.enable_otel_app_telemetry(enabled=True)
+        except Exception as e:
+            system_logger.warning(f"OTel App Telemetry activation skipped: {e}")
+
     # ── Activate Lakebase session factory if Lakebase is the configured DB ──
     # This swaps the global async_session_factory so that ALL existing callers
     # (background tasks, services, UnitOfWork) automatically use Lakebase.
@@ -400,6 +410,12 @@ async def lifespan(app: FastAPI):
                 system_logger.info("Scheduler shut down successfully.")
             except Exception as e:
                 system_logger.error(f"Error during scheduler shutdown: {e}")
+
+        # Shutdown OTel App Telemetry provider (flush pending logs)
+        try:
+            logger_manager.shutdown_otel_app_telemetry()
+        except Exception as e:
+            system_logger.warning(f"Error during OTel App Telemetry shutdown: {e}")
 
         # Dispose database engines before event loop shuts down to prevent asyncpg loop mismatch
         try:

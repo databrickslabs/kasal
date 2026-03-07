@@ -9,10 +9,283 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import patch, MagicMock
 from logging.handlers import RotatingFileHandler
 
 from src.core.logger import LoggerManager
+
+
+class TestOtelAppTelemetry:
+    """Test cases for Databricks App Telemetry (OTel) integration.
+
+    Telemetry is enabled via EngineConfig DB setting (otel_app_telemetry_enabled)
+    and requires OTEL_EXPORTER_OTLP_ENDPOINT to be present (auto-injected by Databricks
+    when telemetry infrastructure is enabled via the App settings UI).
+    """
+
+    def setup_method(self):
+        """Reset singleton before each test."""
+        LoggerManager._instance = None
+        LoggerManager._initialized = False
+
+    def test_otel_not_activated_during_init(self):
+        """OTel should NOT be activated during initialize() — requires explicit enable call."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.dict(os.environ, {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4314"}, clear=False):
+                manager = LoggerManager.get_instance(temp_dir)
+                assert manager._otel_logger_provider is None
+                assert manager._otel_handler is None
+
+    def test_otel_inactive_when_enabled_false(self):
+        """Should not activate when enabled=False even if endpoint is present."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.dict(os.environ, {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4314"}, clear=False):
+                manager = LoggerManager.get_instance(temp_dir)
+                manager.enable_otel_app_telemetry(enabled=False)
+                assert manager._otel_logger_provider is None
+
+    def test_otel_inactive_when_no_endpoint(self):
+        """Should not activate when endpoint is absent even if enabled=True."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("OTEL_EXPORTER_OTLP_ENDPOINT", None)
+                manager = LoggerManager.get_instance(temp_dir)
+                manager.enable_otel_app_telemetry(enabled=True)
+                assert manager._otel_logger_provider is None
+
+    @patch.dict(os.environ, {
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4314",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+        "OTEL_SERVICE_NAME": "test-app",
+    })
+    def test_otel_activates_with_enabled_true_and_endpoint(self):
+        """Should configure OTel with gRPC exporter when enabled=True and endpoint present."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mock_provider = MagicMock()
+            mock_handler = MagicMock(spec=logging.Handler)
+            mock_handler.level = logging.INFO
+            mock_exporter = MagicMock()
+            mock_processor = MagicMock()
+
+            with patch(
+                "opentelemetry.sdk._logs.LoggerProvider",
+                return_value=mock_provider,
+            ):
+                with patch(
+                    "opentelemetry.sdk._logs.LoggingHandler",
+                    return_value=mock_handler,
+                ):
+                    with patch(
+                        "opentelemetry.exporter.otlp.proto.grpc._log_exporter.OTLPLogExporter",
+                        return_value=mock_exporter,
+                    ):
+                        with patch(
+                            "opentelemetry.sdk._logs.export.BatchLogRecordProcessor",
+                            return_value=mock_processor,
+                        ):
+                            manager = LoggerManager.get_instance(temp_dir)
+                            manager.enable_otel_app_telemetry(enabled=True)
+
+                            assert manager._otel_logger_provider is mock_provider
+                            assert manager._otel_handler is mock_handler
+                            mock_provider.add_log_record_processor.assert_called_once_with(
+                                mock_processor
+                            )
+
+    @patch.dict(os.environ, {
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4318",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
+        "OTEL_SERVICE_NAME": "test-app",
+    })
+    def test_otel_http_protocol(self):
+        """Should configure OTel with HTTP exporter when protocol is not grpc."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mock_provider = MagicMock()
+            mock_handler = MagicMock(spec=logging.Handler)
+            mock_handler.level = logging.INFO
+            mock_exporter = MagicMock()
+            mock_processor = MagicMock()
+
+            with patch(
+                "opentelemetry.sdk._logs.LoggerProvider",
+                return_value=mock_provider,
+            ):
+                with patch(
+                    "opentelemetry.sdk._logs.LoggingHandler",
+                    return_value=mock_handler,
+                ):
+                    with patch(
+                        "opentelemetry.exporter.otlp.proto.http._log_exporter.OTLPLogExporter",
+                        return_value=mock_exporter,
+                    ):
+                        with patch(
+                            "opentelemetry.sdk._logs.export.BatchLogRecordProcessor",
+                            return_value=mock_processor,
+                        ):
+                            manager = LoggerManager.get_instance(temp_dir)
+                            manager.enable_otel_app_telemetry(enabled=True)
+
+                            assert manager._otel_logger_provider is mock_provider
+                            assert manager._otel_handler is mock_handler
+
+    @patch.dict(os.environ, {
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4314",
+    })
+    def test_otel_import_error_handled_gracefully(self):
+        """Should handle missing OTel packages gracefully."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = LoggerManager.get_instance(temp_dir)
+            with patch.dict("sys.modules", {"opentelemetry.sdk._logs": None}):
+                manager.enable_otel_app_telemetry(enabled=True)
+                assert manager._otel_logger_provider is None
+
+    @patch.dict(os.environ, {
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4314",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+    })
+    def test_otel_handler_attached_to_domain_loggers(self):
+        """Should attach OTel handler to all domain loggers."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mock_provider = MagicMock()
+            mock_handler = MagicMock(spec=logging.Handler)
+            mock_handler.level = logging.INFO
+
+            with patch(
+                "opentelemetry.sdk._logs.LoggerProvider",
+                return_value=mock_provider,
+            ):
+                with patch(
+                    "opentelemetry.sdk._logs.LoggingHandler",
+                    return_value=mock_handler,
+                ):
+                    with patch(
+                        "opentelemetry.exporter.otlp.proto.grpc._log_exporter.OTLPLogExporter",
+                    ):
+                        with patch(
+                            "opentelemetry.sdk._logs.export.BatchLogRecordProcessor",
+                        ):
+                            manager = LoggerManager.get_instance(temp_dir)
+                            manager.enable_otel_app_telemetry(enabled=True)
+
+                            crew_handlers = manager.crew.handlers
+                            assert mock_handler in crew_handlers
+                            system_handlers = manager.system.handlers
+                            assert mock_handler in system_handlers
+
+    @patch.dict(os.environ, {
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4314",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+    })
+    def test_otel_idempotent_when_already_active(self):
+        """Calling enable_otel_app_telemetry twice should not create duplicate providers."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mock_provider = MagicMock()
+            mock_handler = MagicMock(spec=logging.Handler)
+            mock_handler.level = logging.INFO
+
+            with patch(
+                "opentelemetry.sdk._logs.LoggerProvider",
+                return_value=mock_provider,
+            ) as provider_cls:
+                with patch(
+                    "opentelemetry.sdk._logs.LoggingHandler",
+                    return_value=mock_handler,
+                ):
+                    with patch(
+                        "opentelemetry.exporter.otlp.proto.grpc._log_exporter.OTLPLogExporter",
+                    ):
+                        with patch(
+                            "opentelemetry.sdk._logs.export.BatchLogRecordProcessor",
+                        ):
+                            manager = LoggerManager.get_instance(temp_dir)
+                            manager.enable_otel_app_telemetry(enabled=True)
+                            manager.enable_otel_app_telemetry(enabled=True)
+
+                            # Provider should only be created once
+                            provider_cls.assert_called_once()
+
+    @patch.dict(os.environ, {
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4314",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+    })
+    def test_otel_disable_shuts_down_active_provider(self):
+        """Calling enable_otel_app_telemetry(enabled=False) should shut down an active provider."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mock_provider = MagicMock()
+            mock_handler = MagicMock(spec=logging.Handler)
+            mock_handler.level = logging.INFO
+
+            with patch(
+                "opentelemetry.sdk._logs.LoggerProvider",
+                return_value=mock_provider,
+            ):
+                with patch(
+                    "opentelemetry.sdk._logs.LoggingHandler",
+                    return_value=mock_handler,
+                ):
+                    with patch(
+                        "opentelemetry.exporter.otlp.proto.grpc._log_exporter.OTLPLogExporter",
+                    ):
+                        with patch(
+                            "opentelemetry.sdk._logs.export.BatchLogRecordProcessor",
+                        ):
+                            manager = LoggerManager.get_instance(temp_dir)
+                            manager.enable_otel_app_telemetry(enabled=True)
+                            assert manager._otel_logger_provider is not None
+
+                            manager.enable_otel_app_telemetry(enabled=False)
+                            mock_provider.shutdown.assert_called_once()
+                            assert manager._otel_logger_provider is None
+
+    def test_shutdown_otel_app_telemetry(self):
+        """Should shutdown OTel provider and clear references."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = LoggerManager.get_instance(temp_dir)
+
+            # Simulate an active provider
+            mock_provider = MagicMock()
+            mock_handler = MagicMock()
+            manager._otel_logger_provider = mock_provider
+            manager._otel_handler = mock_handler
+
+            manager.shutdown_otel_app_telemetry()
+
+            mock_provider.shutdown.assert_called_once()
+            assert manager._otel_logger_provider is None
+            assert manager._otel_handler is None
+
+    def test_shutdown_otel_app_telemetry_noop_when_not_configured(self):
+        """Shutdown should be a no-op when OTel was never configured."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = LoggerManager.get_instance(temp_dir)
+            # Should not raise
+            manager.shutdown_otel_app_telemetry()
+            assert manager._otel_logger_provider is None
+
+    def test_shutdown_otel_handles_exception(self):
+        """Shutdown should handle provider exceptions gracefully."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = LoggerManager.get_instance(temp_dir)
+
+            mock_provider = MagicMock()
+            mock_provider.shutdown.side_effect = RuntimeError("shutdown error")
+            manager._otel_logger_provider = mock_provider
+            manager._otel_handler = MagicMock()
+
+            # Should not raise
+            manager.shutdown_otel_app_telemetry()
+            assert manager._otel_logger_provider is None
+            assert manager._otel_handler is None
+
+    def test_get_all_domain_loggers(self):
+        """Should return all initialized domain loggers."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = LoggerManager.get_instance(temp_dir)
+            domain_loggers = manager._get_all_domain_loggers()
+            # Should have all 15 domain loggers
+            assert len(domain_loggers) == 15
+            for lg in domain_loggers:
+                assert isinstance(lg, logging.Logger)
 
 
 class TestLoggerManager:

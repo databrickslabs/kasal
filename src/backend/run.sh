@@ -242,8 +242,7 @@ if [ -z "$KASAL_LOG_THIRD_PARTY" ]; then
     export KASAL_LOG_THIRD_PARTY=WARNING
 fi
 
-# Disable CrewAI telemetry
-export OTEL_SDK_DISABLED=true
+# Disable CrewAI telemetry (do NOT set OTEL_SDK_DISABLED as it disables all OTel including App Telemetry)
 export CREWAI_DISABLE_TELEMETRY=true
 
 # Legacy support - map old LOG_LEVEL to new system
