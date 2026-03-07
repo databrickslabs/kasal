@@ -471,6 +471,18 @@ def run_crew_in_process(
             # Import within async context
             import os  # Import os first
 
+            # Activate Lakebase on async_session_factory so ALL callers
+            # (tools, memory, etc.) automatically use Lakebase.
+            try:
+                from src.db.database_router import activate_lakebase_in_subprocess
+                lb_ok = await activate_lakebase_in_subprocess()
+                if lb_ok:
+                    subprocess_logger.info("[SUBPROCESS] Lakebase activated on async_session_factory")
+                else:
+                    subprocess_logger.debug("[SUBPROCESS] Lakebase not enabled, using local DB")
+            except Exception as lb_err:
+                subprocess_logger.warning(f"[SUBPROCESS] Lakebase activation error (non-fatal): {lb_err}")
+
             # Suppress any stdout/stderr from CrewAI
             import warnings
 
@@ -549,10 +561,10 @@ def run_crew_in_process(
             # Always load Databricks config for the current group to determine MLflow status
             db_config = None
             try:
-                from src.db.session import async_session_factory
+                from src.db.database_router import get_smart_db_session
                 from src.services.databricks_service import DatabricksService
 
-                async with async_session_factory() as session:
+                async for session in get_smart_db_session():
                     current_group_id = (
                         getattr(group_context, "primary_group_id", None)
                         if group_context
@@ -623,9 +635,9 @@ def run_crew_in_process(
                 async_logger=async_logger,
             )
             # Create services using session factory
-            from src.db.session import safe_async_session
+            from src.db.database_router import get_smart_db_session
 
-            async with safe_async_session() as session:
+            async for session in get_smart_db_session():
                 # Extract group_id first for service initialization
                 group_id = None
                 try:

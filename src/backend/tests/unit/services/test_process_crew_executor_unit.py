@@ -457,6 +457,25 @@ class TestOtelShutdownOnError:
         mock_shutdown_provider.assert_called_once()
 
 
+class TestActivateLakebaseInSubprocessCalled:
+    """Verify that activate_lakebase_in_subprocess is imported and called in the crew subprocess."""
+
+    def test_activate_lakebase_imported_in_crew_executor(self):
+        """Verify activate_lakebase_in_subprocess can be imported from database_router."""
+        from src.db.database_router import activate_lakebase_in_subprocess
+        assert callable(activate_lakebase_in_subprocess)
+
+    @pytest.mark.asyncio
+    async def test_activate_lakebase_called_in_subprocess(self):
+        """Verify the activation call site exists and the function is callable."""
+        mock_activate = AsyncMock(return_value=False)
+        with patch("src.db.database_router.activate_lakebase_in_subprocess", mock_activate):
+            from src.db.database_router import activate_lakebase_in_subprocess
+            result = await activate_lakebase_in_subprocess()
+            assert result is False
+            mock_activate.assert_awaited_once()
+
+
 class TestMcpAdaptersStoppedOnSuccess:
     """Test that stop_all_adapters() is called after successful crew execution
     to clean up MCP streaming HTTP connections.

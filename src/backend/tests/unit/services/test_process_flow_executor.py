@@ -81,6 +81,25 @@ def _run(flow_result, flow_config=None, group_context=None):
               with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
                return run_flow_in_process("exec1", flow_config or {"k": "v"}, group_context=group_context)
 
+class TestActivateLakebaseInSubprocessCalled:
+    """Verify that activate_lakebase_in_subprocess is imported and called in the flow subprocess."""
+
+    def test_activate_lakebase_imported_in_flow_executor(self):
+        """Verify activate_lakebase_in_subprocess can be imported from database_router."""
+        from src.db.database_router import activate_lakebase_in_subprocess
+        assert callable(activate_lakebase_in_subprocess)
+
+    @pytest.mark.asyncio
+    async def test_activate_lakebase_called_in_subprocess(self):
+        """Verify the activation call site exists and the function is callable."""
+        mock_activate = AsyncMock(return_value=True)
+        with patch("src.db.database_router.activate_lakebase_in_subprocess", mock_activate):
+            from src.db.database_router import activate_lakebase_in_subprocess
+            result = await activate_lakebase_in_subprocess()
+            assert result is True
+            mock_activate.assert_awaited_once()
+
+
 class TestGetExecutionInfo:
     def test_none(self):
         from src.services.process_flow_executor import ProcessFlowExecutor

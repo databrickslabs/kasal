@@ -50,8 +50,8 @@ def _make_group_context(
 
 # Patch target for the local import of ExecutionHistoryRepository
 _HIST_REPO_PATCH = "src.repositories.execution_history_repository.ExecutionHistoryRepository"
-# Patch target for the local import of async_session_factory
-_SESSION_FACTORY_PATCH = "src.db.session.async_session_factory"
+# Patch target for get_smart_db_session used by logs_writer_loop
+_SESSION_FACTORY_PATCH = "src.db.database_router.get_smart_db_session"
 # Patch target for asyncio.sleep inside the service module
 _SLEEP_PATCH = "src.services.execution_logs_service.asyncio.sleep"
 
@@ -382,12 +382,12 @@ class TestDeleteLogs:
 
 
 def _make_session_factory_mock(mock_session):
-    """Create an async context manager mock that yields mock_session."""
-    mock_session_cm = AsyncMock()
-    mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
-    mock_session_cm.__aexit__ = AsyncMock(return_value=False)
-    factory = MagicMock(return_value=mock_session_cm)
-    return factory
+    """Create an async generator mock that yields mock_session (matches get_smart_db_session)."""
+
+    async def _fake_smart_session():
+        yield mock_session
+
+    return _fake_smart_session
 
 
 class TestLogsWriterLoop:
@@ -810,18 +810,17 @@ class TestLogsWriterLoop:
         mock_queue.qsize.return_value = 1
         mock_queue.get.side_effect = side_effect
 
-        # Make async_session_factory return a context manager that raises
-        mock_session_cm = MagicMock()
-        mock_session_cm.__aenter__ = AsyncMock(side_effect=RuntimeError("session error"))
-        mock_session_cm.__aexit__ = AsyncMock(return_value=False)
-        factory = MagicMock(return_value=mock_session_cm)
+        # Make get_smart_db_session raise before yielding
+        async def _broken_session():
+            raise RuntimeError("session error")
+            yield  # noqa: make it an async generator
 
         with (
             patch(
                 "src.services.execution_logs_service.get_job_output_queue",
                 return_value=mock_queue,
             ),
-            patch(_SESSION_FACTORY_PATCH, factory),
+            patch(_SESSION_FACTORY_PATCH, _broken_session),
             patch(_SLEEP_PATCH, new_callable=AsyncMock),
         ):
             # Should not raise
