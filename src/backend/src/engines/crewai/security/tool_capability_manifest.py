@@ -27,15 +27,17 @@ logger = logging.getLogger(__name__)
 class ToolCapability(Flag):
     """Capability flags classifying what a tool can do."""
     NONE = 0
-    READS_SENSITIVE_DATA = auto()       # reads internal/confidential data
-    INGESTS_UNTRUSTED_CONTENT = auto()  # fetches external, attacker-reachable content
-    EXTERNAL_COMMUNICATION = auto()     # makes outbound network requests
+    READS_SENSITIVE_DATA = auto()           # reads internal/confidential data
+    INGESTS_UNTRUSTED_CONTENT = auto()      # fetches external, attacker-reachable content
+    EXTERNAL_COMMUNICATION = auto()         # makes outbound network requests
+    PERFORMS_DESTRUCTIVE_OPERATIONS = auto()  # triggers irreversible actions (delete, run, deploy)
 
 
 # Shorthand aliases for readability in the registry
 _S = ToolCapability.READS_SENSITIVE_DATA
 _U = ToolCapability.INGESTS_UNTRUSTED_CONTENT
 _E = ToolCapability.EXTERNAL_COMMUNICATION
+_D = ToolCapability.PERFORMS_DESTRUCTIVE_OPERATIONS
 
 # Registry — keys match BOTH class names and runtime t.name values
 # (CrewAI tool objects expose a snake_case .name that differs from the class name)
@@ -43,8 +45,8 @@ TOOL_CAPABILITIES: Dict[str, ToolCapability] = {
     # Databricks / internal data tools
     "GenieTool":                                      _S | _E,
     "genie_tool":                                     _S | _E,  # runtime name
-    "DatabricksJobsTool":                             _S | _E,
-    "databricks_jobs_tool":                           _S | _E,  # runtime name
+    "DatabricksJobsTool":                             _S | _E | _D,   # can trigger job runs
+    "databricks_jobs_tool":                           _S | _E | _D,   # runtime name
     "DatabricksKnowledgeSearchTool":                  _S | _E,
     "databricks_knowledge_search_tool":               _S | _E,  # runtime name
     "AgentBricksTool":                                _E,
@@ -161,3 +163,43 @@ def log_trifecta_warning(assessment: TrifectaAssessment, context: str = "") -> N
             assessment.ingests_untrusted,
             assessment.communicates_externally,
         )
+
+
+def assess_destructive_risk(tool_names: Iterable[str]) -> List[str]:
+    """
+    Return the subset of *tool_names* that carry the PERFORMS_DESTRUCTIVE_OPERATIONS flag.
+
+    Args:
+        tool_names: Iterable of tool name strings.
+
+    Returns:
+        List of tool names classified as destructive (may be empty).
+    """
+    return [
+        name for name in tool_names
+        if TOOL_CAPABILITIES.get(name, ToolCapability.NONE)
+        & ToolCapability.PERFORMS_DESTRUCTIVE_OPERATIONS
+    ]
+
+
+def log_destructive_warning(destructive_tools: List[str], context: str = "") -> None:
+    """
+    Log a warning when destructive tools are present in a crew, recommending
+    that operators enable human_input=True on the relevant tasks.
+
+    This is log-only — it never blocks execution.
+
+    Args:
+        destructive_tools: Output from assess_destructive_risk().
+        context:           Optional description for the log line.
+    """
+    if not destructive_tools:
+        return
+    ctx = f" [{context}]" if context else ""
+    logger.warning(
+        "[SECURITY] Destructive tools detected%s: %s. "
+        "Consider enabling human_input=True on tasks that use these tools "
+        "to prevent unintended irreversible actions.",
+        ctx,
+        destructive_tools,
+    )

@@ -67,13 +67,16 @@ class PromptInjectionDetector:
     ])
 
     _MEDIUM: _PatternList = _compile([
-        (r'\bact\s+as\s+(an?\s+)?\S',
+        # "act as" — require injection-like continuation (unrestricted, jailbroken, evil, etc.)
+        # Avoids false positives like "act as an API server" or "act as a summariser"
+        (r'\bact\s+as\s+(an?\s+)?(unrestricted|unfiltered|jailbroken|evil|malicious|different|new)\b',
          "act_as"),
         (r'\bpretend\s+(to\s+be|you\s+are)\b',
          "pretend"),
-        (r'\byou\s+are\s+now\b',
+        # "you are now" — require role/identity words after, not arbitrary sentences
+        (r'\byou\s+are\s+now\s+(a\s+|an\s+|the\s+|my\s+|DAN|in\s+)',
          "role_override_now"),
-        (r'\bdo\s+not\s+(follow|obey|comply\s+with)\b',
+        (r'\bdo\s+not\s+(follow|obey|comply\s+with)\s+(your|the|these|any|previous|prior)\b',
          "do_not_follow"),
         (r'\boutput\s+the\s+following\b',
          "output_following"),
