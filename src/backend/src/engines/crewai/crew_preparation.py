@@ -876,6 +876,14 @@ class CrewPreparation:
                 logger.info("[SECURITY] Trifecta tool names collected: %s", _tool_names)
                 _trifecta = _assess_trifecta(_tool_names)
                 _log_trifecta_warning(_trifecta, context=f"crew with {len(self.crew.tasks)} task(s)")
+
+                # SECURITY: Detect destructive tools — recommend human_input (log-only)
+                from src.engines.crewai.security.tool_capability_manifest import (
+                    assess_destructive_risk as _assess_destructive,
+                    log_destructive_warning as _log_destructive,
+                )
+                _destructive = _assess_destructive(_tool_names)
+                _log_destructive(_destructive, context=f"crew with {len(self.crew.tasks)} task(s)")
             except Exception as _sec_err:
                 logger.debug("[SECURITY] Trifecta check skipped: %s", _sec_err)
 

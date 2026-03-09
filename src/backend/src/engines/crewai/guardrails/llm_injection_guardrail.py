@@ -11,9 +11,11 @@ Config:
 Activation: add the config dict to a task's 'guardrail' field.
 The guardrail is opt-in and adds one LLM call per task execution.
 On LLM failure the guardrail fails-open (passes the output through).
+Results are cached by content hash to avoid redundant LLM calls on retries.
 """
 
-import logging
+import hashlib
+from collections import OrderedDict
 from typing import Any, Dict
 
 from src.engines.crewai.guardrails.base_guardrail import BaseGuardrail
@@ -29,6 +31,9 @@ _CLASSIFIER_SYSTEM = (
     "Respond with exactly one word: SAFE or INJECTION."
 )
 
+# Default max cache entries (per guardrail instance)
+_DEFAULT_CACHE_SIZE = 128
+
 
 def _extract_text(output: Any) -> str:
     """Extract plain text from various output formats CrewAI may pass."""
@@ -43,6 +48,11 @@ def _extract_text(output: Any) -> str:
     return str(output)
 
 
+def _content_hash(text: str) -> str:
+    """Return a short SHA-256 hex digest of *text* for cache keying."""
+    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:16]
+
+
 class LLMInjectionGuardrail(BaseGuardrail):
     """
     Opt-in guardrail that uses an LLM to classify task output for injection signs.
@@ -52,6 +62,9 @@ class LLMInjectionGuardrail(BaseGuardrail):
     The LLM is asked to respond with SAFE or INJECTION.  Any verdict other than
     INJECTION is treated as safe.  If the LLM call fails the guardrail fails-open
     (returns valid=True) so it never blocks legitimate executions due to API issues.
+
+    Results are cached by content hash (LRU, max 128 entries by default) so that
+    identical outputs encountered during retries skip the LLM call entirely.
     """
 
     def __init__(self, config: Dict[str, Any]) -> None:
@@ -63,23 +76,35 @@ class LLMInjectionGuardrail(BaseGuardrail):
             model = f"databricks/{model}"
         self._llm = LLM(model=model, temperature=0.0, max_tokens=8)
         self._model_name = model
+        self._cache: OrderedDict[str, Dict[str, Any]] = OrderedDict()
+        self._cache_max = int(config.get("cache_size", _DEFAULT_CACHE_SIZE))
 
     def validate(self, output: Any) -> Dict[str, Any]:
         text = _extract_text(output)
         if not text:
             return {"valid": True, "feedback": ""}
 
+        # Check cache first
+        truncated = text[:3000]
+        cache_key = _content_hash(truncated)
+        if cache_key in self._cache:
+            self._cache.move_to_end(cache_key)
+            logger.debug(
+                "[SECURITY] LLMInjectionGuardrail: cache hit (key=%s)", cache_key
+            )
+            return self._cache[cache_key]
+
         try:
             verdict = self._llm.call([
                 {"role": "system", "content": _CLASSIFIER_SYSTEM},
-                {"role": "user", "content": text[:3000]},  # cap to avoid token overflow
+                {"role": "user", "content": truncated},
             ])
             if isinstance(verdict, str) and verdict.strip().upper() == "INJECTION":
                 logger.warning(
                     "[SECURITY] LLMInjectionGuardrail: INJECTION verdict for output (model=%s)",
                     self._model_name,
                 )
-                return {
+                result = {
                     "valid": False,
                     "feedback": (
                         "LLM classifier detected prompt injection signs in the task output. "
@@ -87,11 +112,18 @@ class LLMInjectionGuardrail(BaseGuardrail):
                         "or task inputs. Please review the inputs and retry."
                     ),
                 }
-            logger.info(
-                "[SECURITY] LLMInjectionGuardrail: SAFE verdict for output (model=%s)",
-                self._model_name,
-            )
-            return {"valid": True, "feedback": ""}
+            else:
+                logger.info(
+                    "[SECURITY] LLMInjectionGuardrail: SAFE verdict for output (model=%s)",
+                    self._model_name,
+                )
+                result = {"valid": True, "feedback": ""}
+
+            # Store in cache (LRU eviction)
+            self._cache[cache_key] = result
+            if len(self._cache) > self._cache_max:
+                self._cache.popitem(last=False)
+            return result
 
         except Exception as exc:
             logger.warning(

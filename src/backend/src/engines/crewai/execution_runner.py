@@ -349,17 +349,10 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
                         logger.info("No user inputs found after filtering system inputs")
 
                 # SECURITY: Scan user inputs for prompt injection patterns (log-only, non-blocking)
-                from src.engines.crewai.security.prompt_injection_detector import PromptInjectionDetector as _PIDetector
-                _pi_detector = _PIDetector()
+                from src.engines.crewai.security.scanner_pipeline import security_scanner
                 for _input_key, _input_val in user_inputs.items():
                     if isinstance(_input_val, str):
-                        _pi_result = _pi_detector.detect(_input_val)
-                        if _pi_result.detected:
-                            logger.warning(
-                                "[SECURITY] Prompt injection pattern detected in user input '%s' "
-                                "for execution %s: patterns=%s severity=%s",
-                                _input_key, execution_id, _pi_result.patterns_matched, _pi_result.severity,
-                            )
+                        security_scanner.scan(_input_val, context=f"user_input:{_input_key}:{execution_id}")
 
                 # Call crew start callback
                 crew_callbacks['on_start']()
@@ -616,19 +609,10 @@ async def run_crew_in_process(
 
         # SECURITY: Scan user inputs for prompt injection patterns (log-only, non-blocking)
         try:
-            from src.engines.crewai.security.prompt_injection_detector import PromptInjectionDetector as _PIDetector
-            from src.core.logger import get_logger as _get_logger
-            _sec_logger = _get_logger('system')
-            _pi_detector = _PIDetector()
+            from src.engines.crewai.security.scanner_pipeline import security_scanner
             for _input_key, _input_val in user_inputs.items():
                 if isinstance(_input_val, str):
-                    _pi_result = _pi_detector.detect(_input_val)
-                    if _pi_result.detected:
-                        _sec_logger.warning(
-                            "[SECURITY] Prompt injection pattern detected in user input '%s' "
-                            "for execution %s: patterns=%s severity=%s",
-                            _input_key, execution_id, _pi_result.patterns_matched, _pi_result.severity,
-                        )
+                    security_scanner.scan(_input_val, context=f"user_input:{_input_key}:{execution_id}")
         except Exception as _pi_err:
             logger.warning("[SECURITY] Prompt injection scan failed: %s", _pi_err)
 
