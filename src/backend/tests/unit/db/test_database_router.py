@@ -1580,6 +1580,52 @@ class TestGetLakebaseConfigFromDbEmptyValue:
 
 
 # ---------------------------------------------------------------------------
+# activate_lakebase_in_subprocess
+# ---------------------------------------------------------------------------
+
+class TestActivateLakebaseInSubprocess:
+    """Tests for activate_lakebase_in_subprocess."""
+
+    @pytest.mark.asyncio
+    async def test_activate_lakebase_in_subprocess_disabled(self):
+        """Returns False when Lakebase is not enabled."""
+        with patch("src.db.database_router.is_lakebase_enabled", AsyncMock(return_value=False)):
+            from src.db.database_router import activate_lakebase_in_subprocess
+            result = await activate_lakebase_in_subprocess()
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_activate_lakebase_in_subprocess_success(self):
+        """Returns True when Lakebase is enabled and activation succeeds."""
+        mock_lb_factory = MagicMock()
+        mock_lb_factory.create_engine = AsyncMock()
+        mock_lb_factory._session_factory = MagicMock()
+
+        with patch("src.db.database_router.is_lakebase_enabled", AsyncMock(return_value=True)), \
+             patch("src.db.database_router.get_lakebase_config_from_db", AsyncMock(return_value={"instance_name": "test-instance"})), \
+             patch("src.db.lakebase_session.LakebaseSessionFactory", return_value=mock_lb_factory) as mock_cls, \
+             patch("src.db.database_router.async_session_factory") as mock_asf, \
+             patch("src.db.lakebase_state.mark_lakebase_activated"):
+            from src.db.database_router import activate_lakebase_in_subprocess
+            result = await activate_lakebase_in_subprocess()
+
+        assert result is True
+        mock_cls.assert_called_once_with("test-instance")
+        mock_lb_factory.create_engine.assert_awaited_once()
+        mock_asf.activate_lakebase.assert_called_once_with(mock_lb_factory._session_factory)
+
+    @pytest.mark.asyncio
+    async def test_activate_lakebase_in_subprocess_error(self):
+        """Returns False when an exception occurs during activation."""
+        with patch("src.db.database_router.is_lakebase_enabled", AsyncMock(return_value=True)), \
+             patch("src.db.database_router.get_lakebase_config_from_db", AsyncMock(side_effect=Exception("boom"))):
+            from src.db.database_router import activate_lakebase_in_subprocess
+            result = await activate_lakebase_in_subprocess()
+
+        assert result is False
+
+
+# ---------------------------------------------------------------------------
 # Module-level imports and exports
 # ---------------------------------------------------------------------------
 

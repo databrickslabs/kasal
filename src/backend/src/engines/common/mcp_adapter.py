@@ -8,10 +8,64 @@ MCP client library with Databricks OAuth authentication.
 import asyncio
 import logging
 import time
+import traceback
 from collections import deque
 from typing import Dict, Optional, Any, List
 
+from src.core.exceptions import MCPConnectionError
+
 logger = logging.getLogger(__name__)
+
+
+def _extract_error_summary(exc: Exception) -> str:
+    """Extract a concise error summary from an exception, unwrapping ExceptionGroups."""
+    # ExceptionGroup: recurse into sub-exceptions
+    if hasattr(exc, 'exceptions'):
+        parts = [_extract_error_summary(sub) for sub in exc.exceptions]
+        return "; ".join(parts)
+    # HTTP status from httpx / aiohttp / requests — include response body
+    if hasattr(exc, 'response') and hasattr(exc.response, 'status_code'):
+        body = ""
+        try:
+            body = exc.response.text[:500] if exc.response.text else ""
+        except Exception:
+            pass
+        return f"HTTP {exc.response.status_code} - {exc}" + (f" | body: {body}" if body else "")
+    if hasattr(exc, 'status'):
+        return f"HTTP {exc.status} - {exc}"
+    return str(exc)
+
+
+def _is_http_auth_error(exc: Exception) -> bool:
+    """Check if an exception (or any sub-exception in an ExceptionGroup) is a 401/403 HTTP error."""
+    if hasattr(exc, 'exceptions'):
+        return any(_is_http_auth_error(sub) for sub in exc.exceptions)
+    if hasattr(exc, 'response') and hasattr(exc.response, 'status_code'):
+        return exc.response.status_code in (401, 403)
+    if hasattr(exc, 'status'):
+        return exc.status in (401, 403)
+    error_str = str(exc)
+    return '403' in error_str or '401' in error_str
+
+
+def _log_exception_group(exc: Exception, context: str) -> None:
+    """Log ExceptionGroup sub-exceptions for visibility."""
+    logger.error(f"{context}: {exc}")
+    logger.error(f"{context} traceback:\n{traceback.format_exc()}")
+    # Python 3.11+ ExceptionGroup / BaseExceptionGroup
+    if hasattr(exc, 'exceptions'):
+        for i, sub_exc in enumerate(exc.exceptions):
+            logger.error(f"{context} sub-exception [{i}]: {type(sub_exc).__name__}: {sub_exc}")
+            # Log HTTP response body for 4xx/5xx errors
+            if hasattr(sub_exc, 'response'):
+                try:
+                    body = sub_exc.response.text[:500] if sub_exc.response.text else "(empty)"
+                    logger.error(f"{context} sub-exception [{i}] response body: {body}")
+                except Exception:
+                    pass
+            if hasattr(sub_exc, '__traceback__'):
+                tb = ''.join(traceback.format_exception(type(sub_exc), sub_exc, sub_exc.__traceback__))
+                logger.error(f"{context} sub-exception [{i}] traceback:\n{tb}")
 
 
 class MCPAdapter:
@@ -29,7 +83,7 @@ class MCPAdapter:
             server_params: Server configuration parameters
         """
         self.server_params = server_params
-        self.server_url = server_params.get('url', '')
+        self.server_url = server_params.get('url', '').strip()
         self.timeout_seconds = server_params.get('timeout_seconds', 30)
         self.max_retries = server_params.get('max_retries', 3)
         self.rate_limit = server_params.get('rate_limit', 60)
@@ -38,86 +92,174 @@ class MCPAdapter:
         self._tool_schemas = {}  # Store schemas for parameter type conversion
         self._initialized = False
         self._call_timestamps: deque = deque()
+        self._transport: str = "streamable_http"  # Track which transport works
+        self.initialization_error: Optional[MCPConnectionError] = None  # Structured error for UI
+        self._spn_fallback_headers: Optional[Dict[str, str]] = None  # SPN headers that worked during discovery
         
     async def initialize(self):
         """Initialize the adapter and discover tools using the working MCP client approach."""
         try:
             logger.info(f"Initializing MCPAdapter for {self.server_url}")
-            
+
             # Get authentication headers using our mechanism
             headers = await self._get_authentication_headers()
             if not headers:
-                logger.error("Failed to get authentication headers")
+                self.initialization_error = MCPConnectionError(
+                    server_name=self.server_url,
+                    server_url=self.server_url,
+                    detail=f"MCP server '{self.server_url}': failed to get authentication headers",
+                )
+                logger.error(self.initialization_error.detail)
                 self._tools = []
                 self._initialized = True
                 return
-                
+
             logger.info("Successfully obtained authentication headers")
-            
+
             # Use the working MCP client approach
             tools_list = await self._discover_tools_with_mcp_client(headers)
             self._tools = tools_list
-                        
+
             self._initialized = True
             logger.info(f"MCPAdapter initialized with {len(self._tools)} tools")
-            
+
         except Exception as e:
+            summary = _extract_error_summary(e)
+            self.initialization_error = MCPConnectionError(
+                server_name=self.server_url,
+                server_url=self.server_url,
+                detail=f"MCP server '{self.server_url}': {summary}",
+                cause=e,
+            )
             logger.error(f"Error initializing MCPAdapter: {e}")
             self._tools = []
             self._initialized = True
             
     async def _discover_tools_with_mcp_client(self, headers: Dict[str, str]) -> List[Dict[str, Any]]:
-        """Discover tools using the working MCP client approach."""
+        """Discover tools using the MCP client with streamable HTTP → SSE fallback."""
+        clean_headers = {"Authorization": headers["Authorization"]}
+        last_error: Optional[Exception] = None
+
+        # Log auth type for debugging (no token content)
+        auth_value = headers.get("Authorization", "")
+        if auth_value.startswith("Bearer "):
+            logger.info(f"MCP discovery using Bearer token (length={len(auth_value) - 7})")
+        else:
+            logger.warning(f"MCP discovery using non-Bearer auth type")
+
+        # Try streamable HTTP first
         try:
-            # Import MCP client dependencies
-            from mcp.client.streamable_http import streamablehttp_client as connect
-            from mcp import ClientSession
-            
-            tools_list = []
-            
-            # Use only the Authorization header (this is what works)
-            clean_headers = {"Authorization": headers["Authorization"]}
-            
-            # Connect using MCP streamable HTTP client (the working approach)
-            async with connect(self.server_url, headers=clean_headers, timeout=self.timeout_seconds) as (read_stream, write_stream, _):
-                logger.info("Connected to MCP streamable endpoint for tool discovery")
-                
-                # Create a session using the client streams
-                async with ClientSession(read_stream, write_stream) as session:
-                    logger.info("Created MCP client session")
-                    
-                    # Initialize the connection
-                    await session.initialize()
-                    logger.info("MCP session initialized")
-                    
-                    # List available tools
-                    tools_result = await session.list_tools()
-                    logger.info(f"Retrieved tools from MCP server")
-                    
-                    if hasattr(tools_result, 'tools') and tools_result.tools:
-                        logger.info(f"Found {len(tools_result.tools)} tools")
-                        
-                        # Convert MCP tools to our format
-                        for mcp_tool in tools_result.tools:
-                            tool_wrapper = {
-                                "name": mcp_tool.name,
-                                "description": mcp_tool.description,
-                                "mcp_tool": mcp_tool,
-                                "input_schema": mcp_tool.inputSchema,
-                                "adapter": self  # Store adapter reference for tool execution
-                            }
-                            tools_list.append(tool_wrapper)
-                            # Store schema for parameter type conversion
-                            self._tool_schemas[mcp_tool.name] = mcp_tool.inputSchema
-                            logger.debug(f"Added tool: {mcp_tool.name}")
-                    else:
-                        logger.warning("No tools found in MCP server response")
-                        
-            return tools_list
-            
+            tools = await self._discover_via_streamable_http(clean_headers)
+            if tools:
+                self._transport = "streamable_http"
+                return tools
         except Exception as e:
-            logger.error(f"Error discovering tools with MCP client: {e}")
-            return []
+            last_error = e
+            _log_exception_group(e, "Streamable HTTP discovery failed")
+            logger.info("Falling back to SSE transport for tool discovery")
+
+        # Fallback: try SSE transport
+        try:
+            tools = await self._discover_via_sse(clean_headers)
+            if tools:
+                self._transport = "sse"
+                return tools
+        except Exception as e:
+            last_error = e
+            _log_exception_group(e, "SSE discovery also failed")
+
+        # If auth error (401/403) and using Databricks auth, retry with SPN fallback
+        # This handles both databricks_obo (legacy) and databricks_spn (unified auth chain
+        # where OBO was tried first but rejected by the MCP server)
+        if last_error and _is_http_auth_error(last_error) and self.server_params.get('auth_type') in ('databricks_obo', 'databricks_spn'):
+            logger.warning(f"OBO authentication rejected by MCP server (403/401). Attempting SPN fallback...")
+            spn_headers = await self._get_spn_fallback_headers()
+            if spn_headers:
+                spn_clean = {"Authorization": spn_headers["Authorization"]}
+                auth_value = spn_clean.get("Authorization", "")
+                if auth_value.startswith("Bearer "):
+                    logger.info(f"MCP SPN fallback using Bearer token (length={len(auth_value) - 7})")
+
+                try:
+                    tools = await self._discover_via_streamable_http(spn_clean)
+                    if tools:
+                        self._transport = "streamable_http"
+                        self._spn_fallback_headers = spn_clean
+                        logger.info(f"SPN fallback succeeded via streamable HTTP: {len(tools)} tools. Headers saved for tool execution.")
+                        return tools
+                except Exception as e:
+                    _log_exception_group(e, "SPN fallback streamable HTTP failed")
+
+                try:
+                    tools = await self._discover_via_sse(spn_clean)
+                    if tools:
+                        self._transport = "sse"
+                        self._spn_fallback_headers = spn_clean
+                        logger.info(f"SPN fallback succeeded via SSE: {len(tools)} tools. Headers saved for tool execution.")
+                        return tools
+                except Exception as e:
+                    last_error = e
+                    _log_exception_group(e, "SPN fallback SSE also failed")
+            else:
+                logger.warning("No SPN credentials available for fallback")
+
+        # All transports failed — capture error details for UI
+        summary = _extract_error_summary(last_error) if last_error else "unknown error"
+        self.initialization_error = MCPConnectionError(
+            server_name=self.server_url,
+            server_url=self.server_url,
+            detail=f"MCP server '{self.server_url}': {summary}",
+            cause=last_error,
+        )
+        logger.error(f"All MCP transports failed for {self.server_url}: {summary}")
+        return []
+
+    async def _discover_via_streamable_http(self, clean_headers: Dict[str, str]) -> List[Dict[str, Any]]:
+        """Discover tools using streamable HTTP transport."""
+        from mcp.client.streamable_http import streamablehttp_client as connect
+
+        async with connect(self.server_url, headers=clean_headers, timeout=self.timeout_seconds) as (read_stream, write_stream, _):
+            logger.info("Connected to MCP streamable HTTP endpoint for tool discovery")
+            return await self._list_tools_from_session(read_stream, write_stream)
+
+    async def _discover_via_sse(self, clean_headers: Dict[str, str]) -> List[Dict[str, Any]]:
+        """Discover tools using SSE transport (fallback)."""
+        from mcp.client.sse import sse_client
+
+        async with sse_client(self.server_url, headers=clean_headers, timeout=self.timeout_seconds) as (read_stream, write_stream):
+            logger.info("Connected to MCP SSE endpoint for tool discovery")
+            return await self._list_tools_from_session(read_stream, write_stream)
+
+    async def _list_tools_from_session(self, read_stream, write_stream) -> List[Dict[str, Any]]:
+        """List tools from an established MCP session."""
+        from mcp import ClientSession
+
+        tools_list: List[Dict[str, Any]] = []
+        async with ClientSession(read_stream, write_stream) as session:
+            logger.info("Created MCP client session")
+            await session.initialize()
+            logger.info("MCP session initialized")
+
+            tools_result = await session.list_tools()
+            logger.info("Retrieved tools from MCP server")
+
+            if hasattr(tools_result, 'tools') and tools_result.tools:
+                logger.info(f"Found {len(tools_result.tools)} tools")
+                for mcp_tool in tools_result.tools:
+                    tool_wrapper = {
+                        "name": mcp_tool.name,
+                        "description": mcp_tool.description,
+                        "mcp_tool": mcp_tool,
+                        "input_schema": mcp_tool.inputSchema,
+                        "adapter": self,
+                    }
+                    tools_list.append(tool_wrapper)
+                    self._tool_schemas[mcp_tool.name] = mcp_tool.inputSchema
+                    logger.debug(f"Added tool: {mcp_tool.name}")
+            else:
+                logger.warning("No tools found in MCP server response")
+
+        return tools_list
 
     def _convert_parameters(self, tool_name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -242,6 +384,7 @@ class MCPAdapter:
         """Execute a tool by creating a new MCP session (stateless approach).
 
         Includes rate limiting and retry with exponential backoff for transient errors.
+        Uses the same transport (streamable HTTP or SSE) that succeeded during discovery.
         """
         # Rate limiting: enforce max calls per 60-second window
         await self._wait_for_rate_limit()
@@ -254,32 +397,16 @@ class MCPAdapter:
         if not headers:
             raise ValueError("No authentication headers available")
 
-        # Import MCP client dependencies
-        from mcp.client.streamable_http import streamablehttp_client as connect
-        from mcp import ClientSession
-
-        # Use only the Authorization header
         clean_headers = {"Authorization": headers["Authorization"]}
 
         last_error: Optional[Exception] = None
         for attempt in range(self.max_retries):
             try:
-                # Connect using MCP streamable HTTP client
-                async with connect(self.server_url, headers=clean_headers, timeout=self.timeout_seconds) as (read_stream, write_stream, _):
-                    logger.debug(f"Connected to MCP for tool execution: {tool_name}")
-
-                    # Create a session using the client streams
-                    async with ClientSession(read_stream, write_stream) as session:
-                        # Initialize the connection
-                        await session.initialize()
-
-                        # Execute the tool with converted parameters
-                        logger.info(f"Executing MCP tool: {tool_name} with parameters: {converted_params}")
-                        result = await session.call_tool(tool_name, converted_params)
-                        logger.info(f"Tool {tool_name} executed successfully")
-                        # Record successful call for rate limiting
-                        self._call_timestamps.append(time.monotonic())
-                        return result
+                result = await self._execute_with_transport(
+                    tool_name, converted_params, clean_headers
+                )
+                self._call_timestamps.append(time.monotonic())
+                return result
 
             except (ConnectionError, OSError, asyncio.TimeoutError) as e:
                 last_error = e
@@ -296,11 +423,35 @@ class MCPAdapter:
                         f"MCP tool {tool_name} failed after {self.max_retries} attempts: {e}"
                     )
             except Exception as e:
-                # Non-transient errors (tool logic errors, auth errors) - don't retry
-                logger.error(f"Error executing MCP tool {tool_name}: {e}")
+                _log_exception_group(e, f"Error executing MCP tool {tool_name}")
                 raise
 
         raise last_error  # type: ignore[misc]
+
+    async def _execute_with_transport(
+        self, tool_name: str, params: Dict[str, Any], clean_headers: Dict[str, str]
+    ) -> Any:
+        """Execute a tool using the transport that succeeded during discovery."""
+        from mcp import ClientSession
+
+        if self._transport == "sse":
+            from mcp.client.sse import sse_client
+            async with sse_client(self.server_url, headers=clean_headers, timeout=self.timeout_seconds) as (read_stream, write_stream):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    logger.info(f"Executing MCP tool (SSE): {tool_name} with parameters: {params}")
+                    result = await session.call_tool(tool_name, params)
+                    logger.info(f"Tool {tool_name} executed successfully (SSE)")
+                    return result
+        else:
+            from mcp.client.streamable_http import streamablehttp_client as connect
+            async with connect(self.server_url, headers=clean_headers, timeout=self.timeout_seconds) as (read_stream, write_stream, _):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    logger.info(f"Executing MCP tool (streamable HTTP): {tool_name} with parameters: {params}")
+                    result = await session.call_tool(tool_name, params)
+                    logger.info(f"Tool {tool_name} executed successfully (streamable HTTP)")
+                    return result
             
 
     async def _wait_for_rate_limit(self) -> None:
@@ -329,13 +480,38 @@ class MCPAdapter:
                 while self._call_timestamps and (now - self._call_timestamps[0]) > window:
                     self._call_timestamps.popleft()
 
+    async def _get_spn_fallback_headers(self) -> Optional[Dict[str, str]]:
+        """Get SPN (Service Principal) authentication headers as fallback when OBO fails."""
+        try:
+            from src.utils.databricks_auth import get_auth_context
+            # Call get_auth_context WITHOUT user_token so it skips OBO and tries PAT → SPN
+            group_id = self.server_params.get('group_id')
+            auth_context = await get_auth_context(user_token=None, group_id=group_id)
+            if auth_context and auth_context.token:
+                logger.info(f"SPN/PAT fallback obtained token via auth method: {auth_context.auth_method}")
+                return {"Authorization": f"Bearer {auth_context.token}"}
+            else:
+                logger.warning("SPN/PAT fallback: no auth context available")
+                return None
+        except Exception as e:
+            logger.error(f"Error getting SPN fallback headers: {e}")
+            return None
+
     async def _get_authentication_headers(self) -> Optional[Dict[str, str]]:
         """Get authentication headers using our fallback mechanism."""
         try:
+            # If SPN fallback headers were obtained during discovery (OBO was rejected),
+            # use them directly — the OBO token is known to be rejected by this server.
+            if self._spn_fallback_headers:
+                logger.info("Using SPN fallback headers (OBO was rejected during discovery)")
+                return self._spn_fallback_headers
+
             # First try using provided headers
             provided_headers = self.server_params.get('headers', {})
             if provided_headers and 'Authorization' in provided_headers:
-                logger.info("Using provided authentication headers")
+                auth_type = self.server_params.get('auth_type', 'unknown')
+                has_obo = bool(self.server_params.get('user_token'))
+                logger.info(f"Using provided authentication headers (auth_type={auth_type}, has_obo_token={has_obo})")
                 return provided_headers
                 
             # If no provided headers, try to get them using our auth mechanism

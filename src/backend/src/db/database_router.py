@@ -109,6 +109,45 @@ async def is_lakebase_enabled() -> bool:
     return False
 
 
+async def activate_lakebase_in_subprocess() -> bool:
+    """Activate Lakebase on async_session_factory inside a spawned subprocess.
+
+    On macOS ``multiprocessing.spawn`` creates a fresh interpreter where the
+    global ``async_session_factory`` has NOT been hot-swapped.  This helper
+    mirrors the activation logic from ``main.py`` so that **all** existing
+    callers of ``async_session_factory()`` (FlowRunnerService, tools, etc.)
+    automatically produce Lakebase sessions.
+
+    Returns True if Lakebase was activated, False otherwise.
+    """
+    try:
+        if not await is_lakebase_enabled():
+            return False
+
+        config = await get_lakebase_config_from_db()
+        instance_name = (
+            (config or {}).get("instance_name")
+            or os.environ.get("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
+        )
+
+        from src.db.lakebase_session import LakebaseSessionFactory
+
+        lb_factory = LakebaseSessionFactory(instance_name)
+        await lb_factory.create_engine()
+        async_session_factory.activate_lakebase(lb_factory._session_factory)
+
+        from src.db.lakebase_state import mark_lakebase_activated
+        mark_lakebase_activated()
+
+        logger.info(
+            f"[SUBPROCESS] Activated Lakebase session factory (instance: {instance_name})"
+        )
+        return True
+    except Exception as e:
+        logger.warning(f"[SUBPROCESS] Lakebase activation skipped: {e}")
+        return False
+
+
 async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
     """
     Database router that automatically selects between regular DB and Lakebase.

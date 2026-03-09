@@ -581,6 +581,23 @@ class BackendFlow:
             # Do NOT call start methods directly - this bypasses the event system!
             logger.info("Calling flow.kickoff_async() to execute the flow with proper event handling")
 
+            # CRITICAL: Clear the request-scoped session ContextVar before concurrent
+            # execution.  CrewAI's kickoff_async() runs all @start() methods via
+            # asyncio.gather(), meaning multiple starting-point coroutines execute
+            # concurrently.  If they inherit the parent's _request_session, every call
+            # to request_scoped_session() returns the SAME AsyncSession — which is NOT
+            # safe for concurrent coroutine use with PostgreSQL (Lakebase).
+            # By clearing the ContextVar, each @start()/@listen() method that needs
+            # DB access will create its own independent session via
+            # request_scoped_session() → async_session_factory() (already swapped to
+            # Lakebase by activate_lakebase_in_subprocess()).
+            try:
+                from src.db.session import _request_session
+                _request_session.set(None)
+                logger.info("Cleared _request_session ContextVar before concurrent kickoff")
+            except Exception as ctx_err:
+                logger.warning(f"Could not clear _request_session ContextVar: {ctx_err}")
+
             try:
                 # CRITICAL: Pass resume_from_flow_uuid as 'id' in inputs for checkpoint resume
                 # CrewAI's @persist decorator loads state from persistence when 'id' is in inputs

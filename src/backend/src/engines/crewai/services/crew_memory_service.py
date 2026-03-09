@@ -478,6 +478,23 @@ class CrewMemoryService:
             from crewai.memory import EntityMemory, LongTermMemory, ShortTermMemory
             from crewai.memory.storage.rag_storage import RAGStorage
 
+            # Handle DEFAULT backend without any usable embedder
+            # When no custom Databricks embedder AND no OpenAI/other embedder is configured,
+            # CrewAI's default memory would fall back to OpenAI embeddings with a dummy key,
+            # causing 401 errors. Disable memory entirely in this case.
+            if (
+                memory_config.backend_type == MemoryBackendType.DEFAULT
+                and not custom_embedder
+                and not crew_kwargs.get("embedder")
+            ):
+                logger.warning(
+                    "DEFAULT memory backend selected but no embedder available "
+                    "(Databricks embedder failed and no OpenAI key configured). "
+                    "Disabling memory to prevent OpenAI fallback errors."
+                )
+                crew_kwargs["memory"] = False
+                return crew_kwargs
+
             # Handle DEFAULT backend with custom embedder
             if (
                 memory_config.backend_type == MemoryBackendType.DEFAULT

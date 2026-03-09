@@ -307,6 +307,18 @@ def run_flow_in_process(
         async def run_async_flow():
             """Execute the flow in an async context with TraceManager in same event loop"""
 
+            # Activate Lakebase on async_session_factory so ALL callers
+            # (FlowRunnerService, tools, etc.) automatically use Lakebase.
+            try:
+                from src.db.database_router import activate_lakebase_in_subprocess
+                lb_ok = await activate_lakebase_in_subprocess()
+                if lb_ok:
+                    async_logger.info("[FLOW_SUBPROCESS] Lakebase activated on async_session_factory")
+                else:
+                    async_logger.debug("[FLOW_SUBPROCESS] Lakebase not enabled, using local DB")
+            except Exception as lb_err:
+                async_logger.warning(f"[FLOW_SUBPROCESS] Lakebase activation error (non-fatal): {lb_err}")
+
             # Initialize TraceManager and event listeners FIRST (in same loop as execution)
             # This is CRITICAL - TraceManager must be started in the same loop that will call stop_writer()
             try:
@@ -448,11 +460,11 @@ def run_flow_in_process(
             # Configure MLflow in subprocess (same as crew executor)
             mlflow_result = None
             try:
-                from src.db.session import async_session_factory
+                from src.db.database_router import get_smart_db_session
                 from src.services.databricks_service import DatabricksService
 
                 db_config = None
-                async with async_session_factory() as _db_session:
+                async for _db_session in get_smart_db_session():
                     databricks_service = DatabricksService(
                         _db_session, group_id=group_id
                     )
@@ -510,12 +522,19 @@ def run_flow_in_process(
                         f"[FLOW_SUBPROCESS] Could not add MLflow exporter to OTel pipeline: {mlflow_otel_err}"
                     )
 
+            # Reset MCP warnings at the start of each flow execution
+            try:
+                from src.engines.crewai.tools.mcp_integration import MCPIntegration
+                MCPIntegration.reset_warnings()
+            except Exception:
+                pass
+
             # Now run the actual flow execution
             try:
-                from src.db.session import safe_async_session
+                from src.db.database_router import get_smart_db_session
                 from src.engines.crewai.flow.flow_runner_service import FlowRunnerService
 
-                async with safe_async_session() as session:
+                async for session in get_smart_db_session():
                     flow_runner = FlowRunnerService(session)
 
                     # Extract flow parameters from config
@@ -700,11 +719,22 @@ def run_flow_in_process(
                 }
                 async_logger.info(f"[FLOW_SUBPROCESS] Returning FAILED status due to flow error: {flow_error}")
             else:
+                # Collect MCP warnings to surface in the execution trace/UI
+                mcp_warnings = []
+                try:
+                    from src.engines.crewai.tools.mcp_integration import MCPIntegration
+                    mcp_warnings = MCPIntegration.get_warnings()
+                    if mcp_warnings:
+                        async_logger.warning(f"[FLOW_SUBPROCESS] [MCP_WARNINGS] {'; '.join(mcp_warnings)}")
+                except Exception:
+                    pass
+
                 return_dict = {
                     "status": "COMPLETED",
                     "execution_id": execution_id,
                     "result": processed_result,
-                    "process_id": os.getpid()
+                    "process_id": os.getpid(),
+                    "warnings": mcp_warnings,
                 }
             # Include flow_uuid if available (from @persist)
             if isinstance(result, dict) and result.get("flow_uuid"):
@@ -1409,8 +1439,6 @@ class ProcessFlowExecutor:
         try:
             import os
             from datetime import datetime
-            from sqlalchemy import text
-
             # Get the flow.log path
             log_dir = os.environ.get('LOG_DIR')
             if not log_dir:
@@ -1456,21 +1484,25 @@ class ProcessFlowExecutor:
             else:
                 logger.info(f"Found {len(logs_to_write)-1} logs for execution {exec_id_short} in flow.log")
 
-            # Use the application's existing engine from session.py.
-            # This runs in the main process (after process.join), so the app
-            # engine is available and already connected to the correct database.
-            # Previously, separate engines were created from individual settings
-            # fields which could conflict with the existing engine (especially
-            # for SQLite where a second connection causes "no active connection").
-            from src.db.session import engine as app_engine
+            # Route through get_smart_db_session so logs land in
+            # Lakebase when enabled (same path as API endpoints).
+            from src.db.database_router import get_smart_db_session
+            from src.repositories.execution_logs_repository import ExecutionLogsRepository
 
-            logger.info(f"[ProcessFlowExecutor] [DEBUG] Using application engine for database connection")
-            async with app_engine.begin() as conn:
+            logger.info(
+                f"[ProcessFlowExecutor] Writing {len(logs_to_write)} logs via smart DB session"
+            )
+            async for session in get_smart_db_session():
+                repo = ExecutionLogsRepository(session)
                 for log_data in logs_to_write:
-                    await conn.execute(text("""
-                        INSERT INTO execution_logs (execution_id, content, timestamp, group_id, group_email)
-                        VALUES (:execution_id, :content, :timestamp, :group_id, :group_email)
-                    """), log_data)
+                    await repo.create_log(
+                        execution_id=log_data["execution_id"],
+                        content=log_data["content"],
+                        timestamp=log_data["timestamp"],
+                        group_id=log_data.get("group_id"),
+                        group_email=log_data.get("group_email"),
+                    )
+                await session.commit()
 
             logger.info(f"[ProcessFlowExecutor] Successfully wrote {len(logs_to_write)} logs to execution_logs table")
 

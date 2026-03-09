@@ -1,8 +1,8 @@
 """
 Unit tests for _process_log_queue method in ProcessCrewExecutor and ProcessFlowExecutor.
 
-Tests the changes that replaced manual DB URL construction with using the app engine
-from src.db.session for writing execution logs to the database.
+Tests the changes that route execution logs through get_smart_db_session
+and ExecutionLogsRepository for writing execution logs to the database.
 """
 import asyncio
 import os
@@ -12,7 +12,6 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, Mock, patch, mock_open
 
 import pytest
-from sqlalchemy import text
 
 from src.services.process_crew_executor import ProcessCrewExecutor
 from src.services.process_flow_executor import ProcessFlowExecutor
@@ -56,19 +55,14 @@ def flow_log_content():
 """
 
 
-@pytest.fixture
-def mock_app_engine():
-    """Create a mock application engine with async context manager."""
-    mock_engine = MagicMock()
-    mock_conn = AsyncMock()
+def _make_smart_db_mock(mock_repo):
+    """Create a mock for get_smart_db_session that yields a session + repo."""
+    mock_session = AsyncMock()
 
-    # Setup async context manager for engine.begin()
-    mock_context_manager = MagicMock()
-    mock_context_manager.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_context_manager.__aexit__ = AsyncMock(return_value=None)
-    mock_engine.begin.return_value = mock_context_manager
+    async def fake_smart_db():
+        yield mock_session
 
-    return mock_engine, mock_conn
+    return fake_smart_db, mock_session
 
 
 class TestProcessCrewExecutorLogQueue:
@@ -76,63 +70,63 @@ class TestProcessCrewExecutorLogQueue:
 
     @pytest.mark.asyncio
     async def test_process_log_queue_uses_app_engine(
-        self, temp_log_dir, crew_log_content, mock_group_context, mock_app_engine
+        self, temp_log_dir, crew_log_content, mock_group_context
     ):
-        """Test that _process_log_queue uses the application engine for DB writes."""
-        # Create crew.log file
+        """Test that _process_log_queue uses smart DB session for writes."""
         crew_log_path = Path(temp_log_dir) / "crew.log"
         crew_log_path.write_text(crew_log_content)
 
-        mock_engine, mock_conn = mock_app_engine
+        mock_repo = MagicMock()
+        mock_repo.create_log = AsyncMock()
+        mock_session = AsyncMock()
+
+        async def fake_smart_db():
+            yield mock_session
+
         execution_id = "12345678-1234-1234-1234-123456789012"
 
         with patch.dict(os.environ, {"LOG_DIR": temp_log_dir}):
-            # Patch the import at the point where it's used
-            with patch('src.db.session.engine', mock_engine):
+            with patch('src.db.database_router.get_smart_db_session', fake_smart_db), \
+                 patch('src.repositories.execution_logs_repository.ExecutionLogsRepository', return_value=mock_repo):
                 executor = ProcessCrewExecutor()
-
-                # Call the method
                 await executor._process_log_queue(
                     log_queue=None,
                     execution_id=execution_id,
                     group_context=mock_group_context
                 )
 
-        # Verify engine.begin() was called
-        mock_engine.begin.assert_called_once()
+        # Verify create_log was called (header + matching logs)
+        assert mock_repo.create_log.call_count >= 2
+        # Verify session.commit was called
+        mock_session.commit.assert_called_once()
 
-        # Verify execute was called multiple times (header + matching logs)
-        assert mock_conn.execute.call_count >= 2  # At least header + 1 log
-
-        # Verify SQL query structure
-        first_call = mock_conn.execute.call_args_list[0]
-        assert "INSERT INTO execution_logs" in first_call[0][0].text
-        assert ":execution_id" in first_call[0][0].text
-        assert ":content" in first_call[0][0].text
-        assert ":timestamp" in first_call[0][0].text
-        assert ":group_id" in first_call[0][0].text
-        assert ":group_email" in first_call[0][0].text
-
-        # Verify log data structure
-        first_log_data = first_call[0][1]
-        assert first_log_data["execution_id"] == execution_id
-        assert "[EXECUTION_START]" in first_log_data["content"]
-        assert first_log_data["group_id"] == "test-group-123"
-        assert first_log_data["group_email"] == "test@example.com"
+        # Verify header log
+        first_call = mock_repo.create_log.call_args_list[0]
+        assert first_call.kwargs["execution_id"] == execution_id
+        assert "[EXECUTION_START]" in first_call.kwargs["content"]
+        assert first_call.kwargs["group_id"] == "test-group-123"
+        assert first_call.kwargs["group_email"] == "test@example.com"
 
     @pytest.mark.asyncio
     async def test_process_log_queue_filters_by_execution_id(
-        self, temp_log_dir, crew_log_content, mock_app_engine
+        self, temp_log_dir, crew_log_content
     ):
         """Test that only logs matching the execution ID are written."""
         crew_log_path = Path(temp_log_dir) / "crew.log"
         crew_log_path.write_text(crew_log_content)
 
-        mock_engine, mock_conn = mock_app_engine
+        mock_repo = MagicMock()
+        mock_repo.create_log = AsyncMock()
+        mock_session = AsyncMock()
+
+        async def fake_smart_db():
+            yield mock_session
+
         execution_id = "12345678-1234-1234-1234-123456789012"
 
         with patch.dict(os.environ, {"LOG_DIR": temp_log_dir}):
-            with patch('src.db.session.engine', mock_engine):
+            with patch('src.db.database_router.get_smart_db_session', fake_smart_db), \
+                 patch('src.repositories.execution_logs_repository.ExecutionLogsRepository', return_value=mock_repo):
                 executor = ProcessCrewExecutor()
                 await executor._process_log_queue(
                     log_queue=None,
@@ -141,47 +135,51 @@ class TestProcessCrewExecutorLogQueue:
                 )
 
         # Should have header + 4 matching logs (lines with 12345678)
-        # 87654321 line should be filtered out
-        assert mock_conn.execute.call_count == 5  # 1 header + 4 matching logs
+        assert mock_repo.create_log.call_count == 5
 
         # Verify no logs contain the filtered execution ID
-        for call in mock_conn.execute.call_args_list[1:]:  # Skip header
-            log_data = call[0][1]
-            content = log_data["content"]
+        for call in mock_repo.create_log.call_args_list[1:]:
+            content = call.kwargs["content"]
             assert "87654321" not in content
             assert "12345678" in content
 
     @pytest.mark.asyncio
-    async def test_process_log_queue_missing_log_file(self, temp_log_dir, mock_app_engine):
+    async def test_process_log_queue_missing_log_file(self, temp_log_dir):
         """Test handling when crew.log file does not exist."""
-        mock_engine, mock_conn = mock_app_engine
+        mock_repo = MagicMock()
+        mock_repo.create_log = AsyncMock()
+
         execution_id = "12345678-1234-1234-1234-123456789012"
 
         with patch.dict(os.environ, {"LOG_DIR": temp_log_dir}):
-            with patch('src.db.session.engine', mock_engine):
-                executor = ProcessCrewExecutor()
-                # Should not raise, just return early
-                await executor._process_log_queue(
-                    log_queue=None,
-                    execution_id=execution_id,
-                    group_context=None
-                )
+            executor = ProcessCrewExecutor()
+            await executor._process_log_queue(
+                log_queue=None,
+                execution_id=execution_id,
+                group_context=None
+            )
 
-        # Engine should not be called if file doesn't exist
-        mock_engine.begin.assert_not_called()
-        mock_conn.execute.assert_not_called()
+        # Repository should not be called if file doesn't exist
+        mock_repo.create_log.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_process_log_queue_empty_log_file(self, temp_log_dir, mock_app_engine):
+    async def test_process_log_queue_empty_log_file(self, temp_log_dir):
         """Test handling when crew.log file is empty."""
         crew_log_path = Path(temp_log_dir) / "crew.log"
-        crew_log_path.write_text("")  # Empty file
+        crew_log_path.write_text("")
 
-        mock_engine, mock_conn = mock_app_engine
+        mock_repo = MagicMock()
+        mock_repo.create_log = AsyncMock()
+        mock_session = AsyncMock()
+
+        async def fake_smart_db():
+            yield mock_session
+
         execution_id = "12345678-1234-1234-1234-123456789012"
 
         with patch.dict(os.environ, {"LOG_DIR": temp_log_dir}):
-            with patch('src.db.session.engine', mock_engine):
+            with patch('src.db.database_router.get_smart_db_session', fake_smart_db), \
+                 patch('src.repositories.execution_logs_repository.ExecutionLogsRepository', return_value=mock_repo):
                 executor = ProcessCrewExecutor()
                 await executor._process_log_queue(
                     log_queue=None,
@@ -190,92 +188,92 @@ class TestProcessCrewExecutorLogQueue:
                 )
 
         # Should still write header log even with empty file
-        mock_engine.begin.assert_called_once()
-        assert mock_conn.execute.call_count == 1  # Only header log
+        assert mock_repo.create_log.call_count == 1
 
     @pytest.mark.asyncio
     async def test_process_log_queue_engine_connection_failure(
         self, temp_log_dir, crew_log_content
     ):
-        """Test error handling when engine connection fails."""
+        """Test error handling when DB session fails."""
         crew_log_path = Path(temp_log_dir) / "crew.log"
         crew_log_path.write_text(crew_log_content)
 
-        # Create mock engine that fails on connection
-        mock_engine = MagicMock()
-        mock_engine.begin.side_effect = Exception("Database connection failed")
+        async def failing_smart_db():
+            raise Exception("Database connection failed")
+            yield  # pragma: no cover
 
         execution_id = "12345678-1234-1234-1234-123456789012"
 
         with patch.dict(os.environ, {"LOG_DIR": temp_log_dir}):
-            with patch('src.db.session.engine', mock_engine):
+            with patch('src.db.database_router.get_smart_db_session', failing_smart_db):
                 executor = ProcessCrewExecutor()
-                # Should not raise, just log error (non-critical operation)
+                # Should not raise, just log error
                 await executor._process_log_queue(
                     log_queue=None,
                     execution_id=execution_id,
                     group_context=None
                 )
 
-        # Verify it attempted to connect
-        mock_engine.begin.assert_called_once()
 
 class TestProcessFlowExecutorLogQueue:
     """Test ProcessFlowExecutor._process_log_queue method."""
 
     @pytest.mark.asyncio
     async def test_process_log_queue_uses_app_engine(
-        self, temp_log_dir, flow_log_content, mock_group_context, mock_app_engine
+        self, temp_log_dir, flow_log_content, mock_group_context
     ):
-        """Test that _process_log_queue uses the application engine for DB writes."""
-        # Create flow.log file
+        """Test that _process_log_queue uses smart DB session for writes."""
         flow_log_path = Path(temp_log_dir) / "flow.log"
         flow_log_path.write_text(flow_log_content)
 
-        mock_engine, mock_conn = mock_app_engine
+        mock_repo = MagicMock()
+        mock_repo.create_log = AsyncMock()
+        mock_session = AsyncMock()
+
+        async def fake_smart_db():
+            yield mock_session
+
         execution_id = "abcd1234-1234-1234-1234-123456789012"
 
         with patch.dict(os.environ, {"LOG_DIR": temp_log_dir}):
-            with patch('src.db.session.engine', mock_engine):
+            with patch('src.db.database_router.get_smart_db_session', fake_smart_db), \
+                 patch('src.repositories.execution_logs_repository.ExecutionLogsRepository', return_value=mock_repo):
                 executor = ProcessFlowExecutor()
-
                 await executor._process_log_queue(
                     log_queue=None,
                     execution_id=execution_id,
                     group_context=mock_group_context
                 )
 
-        # Verify engine.begin() was called
-        mock_engine.begin.assert_called_once()
+        assert mock_repo.create_log.call_count >= 2
+        mock_session.commit.assert_called_once()
 
-        # Verify execute was called multiple times (header + matching logs)
-        assert mock_conn.execute.call_count >= 2
-
-        # Verify SQL query structure
-        first_call = mock_conn.execute.call_args_list[0]
-        assert "INSERT INTO execution_logs" in first_call[0][0].text
-        assert ":execution_id" in first_call[0][0].text
-
-        # Verify log data
-        first_log_data = first_call[0][1]
-        assert first_log_data["execution_id"] == execution_id
-        assert "[EXECUTION_START]" in first_log_data["content"]
-        assert first_log_data["group_id"] == "test-group-123"
-        assert first_log_data["group_email"] == "test@example.com"
+        first_call = mock_repo.create_log.call_args_list[0]
+        assert first_call.kwargs["execution_id"] == execution_id
+        assert "[EXECUTION_START]" in first_call.kwargs["content"]
+        assert first_call.kwargs["group_id"] == "test-group-123"
+        assert first_call.kwargs["group_email"] == "test@example.com"
 
     @pytest.mark.asyncio
     async def test_process_log_queue_filters_by_execution_id(
-        self, temp_log_dir, flow_log_content, mock_app_engine
+        self, temp_log_dir, flow_log_content
     ):
         """Test that only logs matching the execution ID are written."""
         flow_log_path = Path(temp_log_dir) / "flow.log"
         flow_log_path.write_text(flow_log_content)
 
-        mock_engine, mock_conn = mock_app_engine
+        mock_repo = MagicMock()
+        mock_repo.create_log = AsyncMock()
+        mock_session = AsyncMock()
+
+        async def fake_smart_db():
+            yield mock_session
+
         execution_id = "abcd1234-1234-1234-1234-123456789012"
 
         with patch.dict(os.environ, {"LOG_DIR": temp_log_dir}):
-            with patch('src.db.session.engine', mock_engine):
+            with patch('src.db.database_router.get_smart_db_session', fake_smart_db), \
+                 patch('src.repositories.execution_logs_repository.ExecutionLogsRepository', return_value=mock_repo):
                 executor = ProcessFlowExecutor()
                 await executor._process_log_queue(
                     log_queue=None,
@@ -283,46 +281,49 @@ class TestProcessFlowExecutorLogQueue:
                     group_context=None
                 )
 
-        # Should have header + 4 matching logs (lines with abcd1234)
-        assert mock_conn.execute.call_count == 5
+        assert mock_repo.create_log.call_count == 5
 
-        # Verify no logs contain the filtered execution ID
-        for call in mock_conn.execute.call_args_list[1:]:
-            log_data = call[0][1]
-            content = log_data["content"]
+        for call in mock_repo.create_log.call_args_list[1:]:
+            content = call.kwargs["content"]
             assert "efgh5678" not in content
             assert "abcd1234" in content
 
     @pytest.mark.asyncio
-    async def test_process_log_queue_missing_log_file(self, temp_log_dir, mock_app_engine):
+    async def test_process_log_queue_missing_log_file(self, temp_log_dir):
         """Test handling when flow.log file does not exist."""
-        mock_engine, mock_conn = mock_app_engine
+        mock_repo = MagicMock()
+        mock_repo.create_log = AsyncMock()
+
         execution_id = "abcd1234-1234-1234-1234-123456789012"
 
         with patch.dict(os.environ, {"LOG_DIR": temp_log_dir}):
-            with patch('src.db.session.engine', mock_engine):
-                executor = ProcessFlowExecutor()
-                await executor._process_log_queue(
-                    log_queue=None,
-                    execution_id=execution_id,
-                    group_context=None
-                )
+            executor = ProcessFlowExecutor()
+            await executor._process_log_queue(
+                log_queue=None,
+                execution_id=execution_id,
+                group_context=None
+            )
 
-        # Engine should not be called if file doesn't exist
-        mock_engine.begin.assert_not_called()
-        mock_conn.execute.assert_not_called()
+        mock_repo.create_log.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_process_log_queue_empty_log_file(self, temp_log_dir, mock_app_engine):
+    async def test_process_log_queue_empty_log_file(self, temp_log_dir):
         """Test handling when flow.log file is empty."""
         flow_log_path = Path(temp_log_dir) / "flow.log"
         flow_log_path.write_text("")
 
-        mock_engine, mock_conn = mock_app_engine
+        mock_repo = MagicMock()
+        mock_repo.create_log = AsyncMock()
+        mock_session = AsyncMock()
+
+        async def fake_smart_db():
+            yield mock_session
+
         execution_id = "abcd1234-1234-1234-1234-123456789012"
 
         with patch.dict(os.environ, {"LOG_DIR": temp_log_dir}):
-            with patch('src.db.session.engine', mock_engine):
+            with patch('src.db.database_router.get_smart_db_session', fake_smart_db), \
+                 patch('src.repositories.execution_logs_repository.ExecutionLogsRepository', return_value=mock_repo):
                 executor = ProcessFlowExecutor()
                 await executor._process_log_queue(
                     log_queue=None,
@@ -330,61 +331,61 @@ class TestProcessFlowExecutorLogQueue:
                     group_context=None
                 )
 
-        # Should still write header log
-        mock_engine.begin.assert_called_once()
-        assert mock_conn.execute.call_count == 1
+        assert mock_repo.create_log.call_count == 1
 
     @pytest.mark.asyncio
     async def test_process_log_queue_engine_connection_failure(
         self, temp_log_dir, flow_log_content
     ):
-        """Test error handling when engine connection fails."""
+        """Test error handling when DB session fails."""
         flow_log_path = Path(temp_log_dir) / "flow.log"
         flow_log_path.write_text(flow_log_content)
 
-        mock_engine = MagicMock()
-        mock_engine.begin.side_effect = Exception("Database connection failed")
+        async def failing_smart_db():
+            raise Exception("Database connection failed")
+            yield  # pragma: no cover
 
         execution_id = "abcd1234-1234-1234-1234-123456789012"
 
         with patch.dict(os.environ, {"LOG_DIR": temp_log_dir}):
-            with patch('src.db.session.engine', mock_engine):
+            with patch('src.db.database_router.get_smart_db_session', failing_smart_db):
                 executor = ProcessFlowExecutor()
-                # Should not raise, just log warning (non-critical operation)
                 await executor._process_log_queue(
                     log_queue=None,
                     execution_id=execution_id,
                     group_context=None
                 )
 
-        # Verify it attempted to connect
-        mock_engine.begin.assert_called_once()
-
     @pytest.mark.asyncio
     async def test_process_log_queue_null_group_context(
-        self, temp_log_dir, flow_log_content, mock_app_engine
+        self, temp_log_dir, flow_log_content
     ):
         """Test that null group context is handled correctly."""
         flow_log_path = Path(temp_log_dir) / "flow.log"
         flow_log_path.write_text(flow_log_content)
 
-        mock_engine, mock_conn = mock_app_engine
+        mock_repo = MagicMock()
+        mock_repo.create_log = AsyncMock()
+        mock_session = AsyncMock()
+
+        async def fake_smart_db():
+            yield mock_session
+
         execution_id = "abcd1234-1234-1234-1234-123456789012"
 
         with patch.dict(os.environ, {"LOG_DIR": temp_log_dir}):
-            with patch('src.db.session.engine', mock_engine):
+            with patch('src.db.database_router.get_smart_db_session', fake_smart_db), \
+                 patch('src.repositories.execution_logs_repository.ExecutionLogsRepository', return_value=mock_repo):
                 executor = ProcessFlowExecutor()
                 await executor._process_log_queue(
                     log_queue=None,
                     execution_id=execution_id,
-                    group_context=None  # Explicitly None
+                    group_context=None
                 )
 
-        # Verify logs were written with None for group fields
-        first_call = mock_conn.execute.call_args_list[0]
-        log_data = first_call[0][1]
-        assert log_data["group_id"] is None
-        assert log_data["group_email"] is None
+        first_call = mock_repo.create_log.call_args_list[0]
+        assert first_call.kwargs["group_id"] is None
+        assert first_call.kwargs["group_email"] is None
 
 
 class TestBothExecutorsIntegration:
@@ -394,34 +395,32 @@ class TestBothExecutorsIntegration:
     async def test_both_executors_use_same_engine_pattern(
         self, temp_log_dir, crew_log_content, flow_log_content
     ):
-        """Verify both executors use the same engine import pattern."""
-        # Create both log files
+        """Verify both executors use the same smart DB session pattern."""
         crew_log_path = Path(temp_log_dir) / "crew.log"
         crew_log_path.write_text(crew_log_content)
         flow_log_path = Path(temp_log_dir) / "flow.log"
         flow_log_path.write_text(flow_log_content)
 
-        # Create separate mocks for each executor
-        crew_engine = MagicMock()
-        crew_conn = AsyncMock()
-        crew_context = MagicMock()
-        crew_context.__aenter__ = AsyncMock(return_value=crew_conn)
-        crew_context.__aexit__ = AsyncMock(return_value=None)
-        crew_engine.begin.return_value = crew_context
+        crew_repo = MagicMock()
+        crew_repo.create_log = AsyncMock()
+        crew_session = AsyncMock()
 
-        flow_engine = MagicMock()
-        flow_conn = AsyncMock()
-        flow_context = MagicMock()
-        flow_context.__aenter__ = AsyncMock(return_value=flow_conn)
-        flow_context.__aexit__ = AsyncMock(return_value=None)
-        flow_engine.begin.return_value = flow_context
+        async def crew_smart_db():
+            yield crew_session
+
+        flow_repo = MagicMock()
+        flow_repo.create_log = AsyncMock()
+        flow_session = AsyncMock()
+
+        async def flow_smart_db():
+            yield flow_session
 
         crew_execution_id = "12345678-1234-1234-1234-123456789012"
         flow_execution_id = "abcd1234-1234-1234-1234-123456789012"
 
         with patch.dict(os.environ, {"LOG_DIR": temp_log_dir}):
-            # Test crew executor
-            with patch('src.db.session.engine', crew_engine):
+            with patch('src.db.database_router.get_smart_db_session', crew_smart_db), \
+                 patch('src.repositories.execution_logs_repository.ExecutionLogsRepository', return_value=crew_repo):
                 crew_executor = ProcessCrewExecutor()
                 await crew_executor._process_log_queue(
                     log_queue=None,
@@ -429,10 +428,8 @@ class TestBothExecutorsIntegration:
                     group_context=None
                 )
 
-            crew_call_count = crew_conn.execute.call_count
-
-            # Test flow executor
-            with patch('src.db.session.engine', flow_engine):
+            with patch('src.db.database_router.get_smart_db_session', flow_smart_db), \
+                 patch('src.repositories.execution_logs_repository.ExecutionLogsRepository', return_value=flow_repo):
                 flow_executor = ProcessFlowExecutor()
                 await flow_executor._process_log_queue(
                     log_queue=None,
@@ -440,16 +437,10 @@ class TestBothExecutorsIntegration:
                     group_context=None
                 )
 
-            flow_call_count = flow_conn.execute.call_count
+        # Both should have committed
+        crew_session.commit.assert_called_once()
+        flow_session.commit.assert_called_once()
 
-            # Both should have called engine.begin()
-            crew_engine.begin.assert_called_once()
-            flow_engine.begin.assert_called_once()
-
-            # Both should have written header + matching logs
-            assert crew_call_count >= 2
-            assert flow_call_count >= 2
-
-            # Both should have same number of logs (5 each: 1 header + 4 matching)
-            assert crew_call_count == 5
-            assert flow_call_count == 5
+        # Both should have same number of logs (5 each: 1 header + 4 matching)
+        assert crew_repo.create_log.call_count == 5
+        assert flow_repo.create_log.call_count == 5

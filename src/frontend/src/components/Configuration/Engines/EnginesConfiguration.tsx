@@ -31,14 +31,20 @@ const EnginesConfiguration: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [otelEnabled, setOtelEnabled] = useState(false);
+  const [otelSyncing, setOtelSyncing] = useState(false);
 
   // Load initial state from backend
   useEffect(() => {
     const loadConfig = async () => {
       try {
         setLoading(true);
-        const flowResp = await EngineConfigService.getCrewAIFlowEnabled();
+        const [flowResp, otelResp] = await Promise.all([
+          EngineConfigService.getCrewAIFlowEnabled(),
+          EngineConfigService.getOtelAppTelemetryEnabled().catch(() => ({ otel_app_telemetry_enabled: false })),
+        ]);
         setCrewAIFlowEnabled(flowResp.flow_enabled);
+        setOtelEnabled(otelResp.otel_app_telemetry_enabled);
       } catch (err) {
         console.error('Failed to load engine configuration:', err);
         setError('Failed to load configuration from server');
@@ -69,6 +75,21 @@ const EnginesConfiguration: React.FC = () => {
       event.target.checked = !newValue;
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleOtelToggle = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = event.target.checked;
+    try {
+      setOtelSyncing(true);
+      setError(null);
+      await EngineConfigService.setOtelAppTelemetryEnabled(newValue);
+      setOtelEnabled(newValue);
+    } catch (err) {
+      console.error('Failed to update OTel App Telemetry:', err);
+      setError('Failed to save OTel App Telemetry configuration');
+    } finally {
+      setOtelSyncing(false);
     }
   };
 
@@ -229,6 +250,61 @@ const EnginesConfiguration: React.FC = () => {
               ? 'When variables are detected in your workflow, a dialog will appear to collect all values at once.'
               : 'When variables are detected, the chat will guide you through providing values one by one.'}
           </Alert>
+        </Stack>
+      </Paper>
+
+      {/* App Telemetry (OpenTelemetry) Section */}
+      <Paper sx={{ p: 2, mt: 3 }} elevation={1}>
+        <Box sx={{
+          display: 'flex',
+          alignItems: 'center',
+          mb: 2
+        }}>
+          <EngineeringIcon sx={{ mr: 1, color: 'primary.main', fontSize: '1.1rem' }} />
+          <Typography variant="subtitle1" fontWeight="medium">
+            App Telemetry (Preview)
+          </Typography>
+        </Box>
+
+        <Divider sx={{ mb: 2 }} />
+
+        <Stack spacing={2}>
+          <Box>
+            <FormControlLabel
+              control={
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Switch
+                    checked={otelEnabled}
+                    onChange={handleOtelToggle}
+                    color="primary"
+                    disabled={otelSyncing}
+                  />
+                  {otelSyncing && (
+                    <CircularProgress size={16} sx={{ ml: 1 }} />
+                  )}
+                </Box>
+              }
+              label={
+                <Box>
+                  <Typography variant="body2" fontWeight="medium">
+                    Enable Structured OTel Log Export
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Send structured OpenTelemetry logs to Unity Catalog tables for monitoring and analysis.
+                    Requires App Telemetry to be enabled in the Databricks App settings.
+                  </Typography>
+                </Box>
+              }
+            />
+          </Box>
+
+          {otelEnabled && (
+            <Alert severity="info" sx={{ mt: 1 }}>
+              Structured log records (with severity, trace context, and resource attributes) will be
+              exported via OTLP to the telemetry destination configured in Databricks App settings.
+              Logs are written to the <code>otel_logs</code> table in the configured Unity Catalog schema.
+            </Alert>
+          )}
         </Stack>
       </Paper>
     </Box>

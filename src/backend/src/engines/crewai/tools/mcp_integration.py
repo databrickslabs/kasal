@@ -5,18 +5,18 @@ This module handles the high-level business logic for the three-tier MCP configu
 It provides clean interfaces for crew preparation, agent helpers, and task helpers while
 centralizing all MCP-related configuration logic.
 
-Three-Tier MCP System:
-1. Global MCP Servers - Available to all agents/tasks (highest coverage)
-2. Agent-Level MCP Servers - Specific to individual agents  
-3. Task-Level MCP Servers - Most specific (highest priority)
+Two-Tier MCP System:
+1. Agent-Level MCP Servers - Configured via tool_configs on agents
+2. Task-Level MCP Servers - Configured via tool_configs on tasks
 
-Priority Order: Task-level > Agent-level > Global
-Effective servers = Global ∪ Agent-specific ∪ Task-specific (deduplicated)
+MCP servers are only loaded when explicitly configured on agents or tasks.
+No global/automatic loading occurs.
 """
 
 import logging
 import os
 from typing import List, Dict, Any, Optional, Set
+from src.core.exceptions import MCPConnectionError
 from src.core.logger import LoggerManager
 from src.engines.crewai.tools.mcp_handler import create_crewai_tool_from_mcp
 
@@ -32,13 +32,35 @@ else:
 class MCPIntegration:
     """
     High-level MCP integration for the three-tier configuration system.
-    
+
     This class handles:
     - Resolving effective MCP servers based on priority rules
     - Creating MCP tools for agents and tasks
     - Managing global vs explicit server configurations
     - Providing clean interfaces for crew components
+
+    Class-level warnings list collects MCP connection errors so they can
+    be surfaced in the execution trace/UI rather than silently swallowed.
     """
+
+    # Collect warnings during MCP tool creation for UI visibility
+    _warnings: List[str] = []
+
+    @classmethod
+    def reset_warnings(cls) -> None:
+        """Reset the warnings list (call at the start of each execution)."""
+        cls._warnings = []
+
+    @classmethod
+    def get_warnings(cls) -> List[str]:
+        """Get collected MCP warnings."""
+        return list(cls._warnings)
+
+    @classmethod
+    def add_warning(cls, warning: str) -> None:
+        """Add a warning message."""
+        cls._warnings.append(warning)
+        logger.warning(f"[MCP WARNING] {warning}")
     
     @staticmethod
     async def resolve_effective_mcp_servers(
@@ -48,37 +70,39 @@ class MCPIntegration:
         group_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
-        Resolve effective MCP servers combining global and explicit selections.
-        
+        Resolve effective MCP servers: all enabled servers + any explicitly selected ones.
+
+        All enabled servers are automatically available to all agents/tasks.
+        Explicit selections add servers that may not be enabled globally.
+
         Args:
             explicit_servers: List of explicitly selected server names
             mcp_service: MCPService instance for fetching server details
-            include_global: Whether to include globally enabled servers
-            
+            include_global: Whether to include all enabled servers (kept for API compat)
+            group_id: Optional group_id for workspace scoping
+
         Returns:
             List of effective MCP server configurations (deduplicated)
         """
         try:
-            effective_servers: List[Dict[str, Any]] = []
             by_name: Dict[str, Dict[str, Any]] = {}
 
-            # 1. Add global servers first (if enabled)
+            # 1. Add all enabled servers (they are all available to all agents/tasks)
             if include_global:
-                global_response = await mcp_service.get_global_servers()
-                for server in global_response.servers:
+                enabled_response = await mcp_service.get_enabled_servers()
+                for server in enabled_response.servers:
                     payload = server.model_dump()
                     name = payload.get('name')
                     if name is None:
                         continue
-                    # Insert if not present
                     if name not in by_name:
                         by_name[name] = payload
                     else:
-                        # Prefer group-scoped over base if we already have it
+                        # Prefer group-scoped over base
                         existing = by_name[name]
                         if (existing.get('group_id') is None) and (payload.get('group_id') == group_id):
                             by_name[name] = payload
-                logger.info(f"Added {len(global_response.servers)} global MCP servers")
+                logger.info(f"Added {len(enabled_response.servers)} enabled MCP servers")
 
             # 2. Add explicit servers (group-aware, deduplicated)
             if explicit_servers:
@@ -91,7 +115,6 @@ class MCPIntegration:
                     if name not in by_name:
                         by_name[name] = payload
                     else:
-                        # Prefer group-scoped over base
                         existing = by_name[name]
                         if (existing.get('group_id') is None) and (payload.get('group_id') == group_id):
                             by_name[name] = payload
@@ -178,36 +201,44 @@ class MCPIntegration:
             )
             
             logger.info(f"Creating MCP tools for agent {agent_key} with explicit servers: {explicit_servers}")
-            
-            # Resolve effective servers (global + explicit)
+
+            if not explicit_servers:
+                logger.info(f"No MCP servers configured for agent {agent_key}, skipping MCP tool creation")
+                return []
+
+            # Resolve effective servers (only explicitly configured ones)
             effective_servers = await MCPIntegration.resolve_effective_mcp_servers(
-                explicit_servers, mcp_service, include_global=True, group_id=(config.get('group_id') if isinstance(config, dict) else None)
+                explicit_servers, mcp_service, include_global=False, group_id=(config.get('group_id') if isinstance(config, dict) else None)
             )
 
             if not effective_servers:
                 logger.info(f"No effective MCP servers for agent {agent_key}")
                 return []
-            
+
+            # Extract user_token from config for OBO authentication
+            user_token = config.get('user_token') if isinstance(config, dict) else None
+
             # Create tools for each effective server
             mcp_tools = []
             for server in effective_servers:
                 try:
+                    group_id = config.get('group_id') if isinstance(config, dict) else None
                     server_tools = await MCPIntegration._create_tools_for_server(
-                        server, agent_key, mcp_service
+                        server, agent_key, mcp_service, user_token=user_token, group_id=group_id
                     )
                     mcp_tools.extend(server_tools)
-                    
+
                 except Exception as e:
                     logger.error(f"Error creating tools for server {server.get('name', 'unknown')}: {str(e)}")
                     continue
-            
+
             logger.info(f"Created {len(mcp_tools)} MCP tools for agent {agent_key}")
             return mcp_tools
-            
+
         except Exception as e:
             logger.error(f"Error creating MCP tools for agent {agent_key}: {str(e)}")
             return []
-    
+
     @staticmethod
     async def create_mcp_tools_for_task(
         task_config: Dict[str, Any],
@@ -233,22 +264,30 @@ class MCPIntegration:
             )
             
             logger.info(f"Creating MCP tools for task {task_key} with explicit servers: {explicit_servers}")
-            
-            # For tasks, we include both global and explicit servers
+
+            if not explicit_servers:
+                logger.info(f"No MCP servers configured for task {task_key}, skipping MCP tool creation")
+                return []
+
+            # Resolve effective servers (only explicitly configured ones)
             effective_servers = await MCPIntegration.resolve_effective_mcp_servers(
-                explicit_servers, mcp_service, include_global=True, group_id=(config.get('group_id') if isinstance(config, dict) else None)
+                explicit_servers, mcp_service, include_global=False, group_id=(config.get('group_id') if isinstance(config, dict) else None)
             )
 
             if not effective_servers:
                 logger.info(f"No effective MCP servers for task {task_key}")
                 return []
-            
+
+            # Extract user_token from config for OBO authentication
+            user_token = config.get('user_token') if isinstance(config, dict) else None
+
             # Create tools for each effective server
             mcp_tools = []
             for server in effective_servers:
                 try:
+                    group_id = config.get('group_id') if isinstance(config, dict) else None
                     server_tools = await MCPIntegration._create_tools_for_server(
-                        server, f"task_{task_key}", mcp_service
+                        server, f"task_{task_key}", mcp_service, user_token=user_token, group_id=group_id
                     )
                     mcp_tools.extend(server_tools)
                     
@@ -287,8 +326,8 @@ class MCPIntegration:
             else:
                 return []
             
-            # Ensure we return a list of strings
-            return [str(server) for server in servers if server]
+            # Ensure we return a list of strings, stripping whitespace
+            return [str(server).strip() for server in servers if server]
             
         except Exception as e:
             logger.error(f"Error extracting MCP servers from config: {str(e)}")
@@ -325,27 +364,31 @@ class MCPIntegration:
     
     @staticmethod
     async def _create_tools_for_server(
-        server: Dict[str, Any], 
+        server: Dict[str, Any],
         context_key: str,
-        mcp_service
+        mcp_service,
+        user_token: Optional[str] = None,
+        group_id: Optional[str] = None
     ) -> List[Any]:
         """
         Create tools for a specific MCP server.
-        
+
         Args:
             server: MCP server configuration
             context_key: Context identifier for logging (agent/task key)
             mcp_service: MCPService instance
-            
+            user_token: Optional user access token for OBO authentication
+            group_id: Optional group_id for PAT/SPN fallback authentication
+
         Returns:
             List of CrewAI-compatible tools
         """
         tools = []
         server_name = server.get('name', 'unknown')
-        
+
         try:
             logger.info(f"Creating tools for MCP server '{server_name}' (context: {context_key})")
-            
+
             # Create server connection parameters
             server_params = {
                 "url": server.get('server_url'),
@@ -353,24 +396,41 @@ class MCPIntegration:
                 "max_retries": server.get('max_retries', 3),
                 "rate_limit": server.get('rate_limit', 60),
                 "auth_type": server.get('auth_type', 'api_key'),
+                "user_token": user_token,
+                "group_id": group_id,
                 "headers": {}
             }
-            
-            # Add authentication headers if needed
-            if server.get('auth_type') == 'api_key' and server.get('api_key'):
-                server_params["headers"]["Authorization"] = f"Bearer {server['api_key']}"
-            elif server.get('auth_type') == 'databricks_obo':
-                # Handle Databricks OBO authentication
-                from src.utils.databricks_auth import get_mcp_auth_headers
-                oauth_headers, error = await get_mcp_auth_headers(
-                    server.get('server_url'),
-                    api_key=server.get('api_key')
-                )
-                if oauth_headers:
-                    server_params["headers"].update(oauth_headers)
-                elif error:
-                    logger.error(f"Authentication error for server {server_name}: {error}")
+
+            # Detect Databricks-hosted MCP URLs (external MCP proxy)
+            # These always require Databricks auth, regardless of auth_type setting
+            server_url = server.get('server_url', '')
+            is_databricks_mcp = '/api/2.0/mcp/' in server_url
+
+            # Add authentication headers
+            auth_type = server.get('auth_type', 'api_key')
+
+            if is_databricks_mcp or auth_type in ('databricks_spn', 'databricks_obo'):
+                # Databricks MCP proxy endpoints require Databricks auth (OBO → PAT → SPN)
+                from src.utils.databricks_auth import get_auth_context
+                auth_context = await get_auth_context(user_token=user_token, group_id=group_id)
+                if auth_context and auth_context.token:
+                    server_params["headers"]["Authorization"] = f"Bearer {auth_context.token}"
+                    # Override auth_type so the adapter knows SPN fallback is available
+                    server_params["auth_type"] = "databricks_spn"
+                    logger.info(f"MCP server '{server_name}': Using {auth_context.auth_method} authentication (databricks MCP)")
+                else:
+                    mcp_err = MCPConnectionError(
+                        server_name=server_name,
+                        server_url=server_url,
+                        detail=f"MCP server '{server_name}': No authentication available (tried OBO, PAT, SPN). On deployed apps, check DATABRICKS_CLIENT_ID/SECRET env vars.",
+                    )
+                    logger.error(mcp_err.detail)
+                    MCPIntegration.add_warning(mcp_err.detail)
                     return []
+            elif auth_type == 'api_key' and server.get('api_key'):
+                # Non-Databricks MCP servers with their own API key
+                server_params["headers"]["Authorization"] = f"Bearer {server['api_key']}"
+                logger.info(f"MCP server '{server_name}': Using api_key authentication")
             
             # Get or create MCP adapter
             from src.engines.crewai.tools.mcp_handler import get_or_create_mcp_adapter
@@ -379,8 +439,15 @@ class MCPIntegration:
             
             if not mcp_adapter or not hasattr(mcp_adapter, 'tools'):
                 logger.warning(f"No tools available from MCP server '{server_name}'")
+                MCPIntegration.add_warning(f"MCP server '{server_name}': adapter not available")
                 return []
-            
+
+            # Check for initialization errors on the adapter (MCPConnectionError)
+            if hasattr(mcp_adapter, 'initialization_error') and mcp_adapter.initialization_error:
+                err = mcp_adapter.initialization_error
+                detail = err.detail if isinstance(err, MCPConnectionError) else str(err)
+                MCPIntegration.add_warning(detail)
+
             # Get tools from the adapter
             server_tools = mcp_adapter.tools
             logger.info(f"Got {len(server_tools)} tools from MCP server '{server_name}'")
@@ -393,12 +460,12 @@ class MCPIntegration:
                     # Add server name prefix to tool name for identification
                     tool_name = tool.get('name', 'unknown') if isinstance(tool, dict) else getattr(tool, 'name', 'unknown')
                     if not tool_name.startswith(f"{server_name}_"):
-                        prefixed_name = f"{server_name}_{tool_name}"
+                        tool_name = f"{server_name}_{tool_name}"
                         if hasattr(wrapped_tool, 'name'):
-                            wrapped_tool.name = prefixed_name
-                    
+                            wrapped_tool.name = tool_name
+
                     tools.append(wrapped_tool)
-                    logger.debug(f"Created tool '{prefixed_name}' from server '{server_name}'")
+                    logger.debug(f"Created tool '{tool_name}' from server '{server_name}'")
                     
                 except Exception as e:
                     logger.error(f"Error wrapping tool from server '{server_name}': {str(e)}")
@@ -408,9 +475,16 @@ class MCPIntegration:
             return tools
             
         except Exception as e:
+            mcp_err = MCPConnectionError(
+                server_name=server_name,
+                server_url=server.get('server_url', ''),
+                detail=f"MCP server '{server_name}': {str(e)}",
+                cause=e,
+            )
             logger.error(f"Error creating tools for server '{server_name}': {str(e)}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
+            MCPIntegration.add_warning(mcp_err.detail)
             return []
     
     @staticmethod

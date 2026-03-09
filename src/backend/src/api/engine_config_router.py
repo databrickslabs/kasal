@@ -16,6 +16,7 @@ from src.schemas.engine_config import (
     EngineConfigToggleUpdate,
     EngineConfigUpdate,
     EngineConfigValueUpdate,
+    OtelAppTelemetryConfigUpdate,
 )
 from src.services.engine_config_service import EngineConfigService
 
@@ -408,6 +409,49 @@ async def set_crewai_flow_enabled(
 
     logger.info(f"CrewAI flow enabled status updated to: {config_data.flow_enabled}")
     return {"success": True, "flow_enabled": config_data.flow_enabled}
+
+
+@router.get("/kasal/otel-app-telemetry")
+async def get_otel_app_telemetry_enabled(
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+):
+    """Get the OTel App Telemetry enabled status (system-level, Preview).
+
+    Only system administrators can access this configuration.
+    """
+    if not is_system_admin(group_context):
+        raise ForbiddenError("Only system administrators can access OTel App Telemetry configuration")
+
+    enabled = await service.get_otel_app_telemetry_enabled()
+    return {"otel_app_telemetry_enabled": enabled}
+
+
+@router.patch("/kasal/otel-app-telemetry")
+async def set_otel_app_telemetry_enabled(
+    config_data: OtelAppTelemetryConfigUpdate,
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+):
+    """Set the OTel App Telemetry enabled status (system-level, Preview).
+
+    Only system administrators can manage this configuration.
+    When enabled, structured OpenTelemetry logs are exported to Unity Catalog
+    tables via the Databricks App Telemetry sidecar.
+    """
+    if not is_system_admin(group_context):
+        raise ForbiddenError("Only system administrators can manage OTel App Telemetry configuration")
+
+    success = await service.set_otel_app_telemetry_enabled(config_data.enabled)
+    if not success:
+        raise KasalError("Failed to update OTel App Telemetry configuration")
+
+    # Apply the change to the running logger
+    from src.core.logger import LoggerManager
+    logger_manager = LoggerManager.get_instance()
+    logger_manager.enable_otel_app_telemetry(enabled=config_data.enabled)
+
+    return {"success": True, "otel_app_telemetry_enabled": config_data.enabled}
 
 
 @router.delete("/engine/{engine_name}", status_code=status.HTTP_204_NO_CONTENT)

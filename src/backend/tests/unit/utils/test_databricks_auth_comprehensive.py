@@ -391,47 +391,73 @@ class TestGetServicePrincipalToken:
         assert await _make_auth(client_id=None, client_secret=None)._get_service_principal_token() is None
 
     @pytest.mark.asyncio
-    async def test_sdk_with_access_token_and_expires(self):
-        auth = _make_auth(client_id="c", client_secret="s", workspace_host="https://h.com")
-        mock_result = MagicMock()
-        mock_result.access_token = "sdk_tok"
-        mock_result.expires_in = 7200
-        mock_config = MagicMock()
-        mock_config.authenticate.return_value = mock_result
-        with patch("src.utils.databricks_auth.Config", return_value=mock_config):
-            assert await auth._get_service_principal_token() == "sdk_tok"
-        assert auth._service_token_expires_in == 7200
+    async def test_sdk_returns_bearer_token(self):
+        """SDK returns headers dict with valid Bearer token."""
+        auth = _make_auth(client_id="c", client_secret="s", workspace_host="https://example.com")
+
+        mock_client = MagicMock()
+        mock_client.config.authenticate.return_value = {"Authorization": "Bearer sdk_token_value"}
+
+        with patch("src.utils.databricks_auth.WorkspaceClient", return_value=mock_client):
+            result = await auth._get_service_principal_token()
+
+        assert result == "sdk_token_value"
+        assert auth._service_token == "sdk_token_value"
+        assert auth._service_token_fetched_at is not None
 
     @pytest.mark.asyncio
-    async def test_sdk_no_expires_in(self):
-        auth = _make_auth(client_id="c", client_secret="s", workspace_host="https://h.com")
-        mock_result = MagicMock(spec=["access_token"])
-        mock_result.access_token = "tok"
-        mock_config = MagicMock()
-        mock_config.authenticate.return_value = mock_result
-        with patch("src.utils.databricks_auth.Config", return_value=mock_config):
-            assert await auth._get_service_principal_token() == "tok"
+    async def test_sdk_unexpected_header_format(self):
+        """SDK returns non-Bearer header -> falls through to manual flow."""
+        auth = _make_auth(client_id="c", client_secret="s", workspace_host="https://example.com")
+
+        mock_client = MagicMock()
+        mock_client.config.authenticate.return_value = {"Authorization": "Basic xyz123"}
+
+        with patch("src.utils.databricks_auth.WorkspaceClient", return_value=mock_client), \
+             patch.object(auth, "_manual_oauth_flow", new_callable=AsyncMock, return_value="manual_tok"):
+            result = await auth._get_service_principal_token()
+
+        assert result == "manual_tok"
 
     @pytest.mark.asyncio
-    async def test_sdk_no_access_token(self):
-        auth = _make_auth(client_id="c", client_secret="s", workspace_host="https://h.com")
-        mock_result = MagicMock(spec=[])
-        mock_config = MagicMock()
-        mock_config.authenticate.return_value = mock_result
-        with patch("src.utils.databricks_auth.Config", return_value=mock_config):
-            assert await auth._get_service_principal_token() is None
+    async def test_sdk_empty_authorization_header(self):
+        """SDK returns empty Authorization header -> falls through to manual flow."""
+        auth = _make_auth(client_id="c", client_secret="s", workspace_host="https://example.com")
+
+        mock_client = MagicMock()
+        mock_client.config.authenticate.return_value = {"Authorization": ""}
+
+        with patch("src.utils.databricks_auth.WorkspaceClient", return_value=mock_client), \
+             patch.object(auth, "_manual_oauth_flow", new_callable=AsyncMock, return_value="fallback"):
+            result = await auth._get_service_principal_token()
+
+        assert result == "fallback"
+
+    @pytest.mark.asyncio
+    async def test_sdk_returns_non_dict(self):
+        """SDK returns non-dict (callable) -> falls through to manual flow."""
+        auth = _make_auth(client_id="c", client_secret="s", workspace_host="https://example.com")
+
+        mock_client = MagicMock()
+        mock_client.config.authenticate.return_value = lambda: {"Authorization": "Bearer x"}
+
+        with patch("src.utils.databricks_auth.WorkspaceClient", return_value=mock_client), \
+             patch.object(auth, "_manual_oauth_flow", new_callable=AsyncMock, return_value="manual_result"):
+            result = await auth._get_service_principal_token()
+
+        assert result == "manual_result"
 
     @pytest.mark.asyncio
     async def test_sdk_fails_manual_fallback(self):
         auth = _make_auth(client_id="c", client_secret="s", workspace_host="https://h.com")
-        with patch("src.utils.databricks_auth.Config", side_effect=Exception("sdk fail")), \
+        with patch("src.utils.databricks_auth.WorkspaceClient", side_effect=Exception("sdk fail")), \
              patch.object(auth, "_manual_oauth_flow", new_callable=AsyncMock, return_value="manual"):
             assert await auth._get_service_principal_token() == "manual"
 
     @pytest.mark.asyncio
     async def test_outer_exception(self):
         auth = _make_auth(client_id="c", client_secret="s", workspace_host="https://h.com")
-        with patch("src.utils.databricks_auth.Config", side_effect=Exception("sdk")), \
+        with patch("src.utils.databricks_auth.WorkspaceClient", side_effect=Exception("sdk")), \
              patch.object(auth, "_manual_oauth_flow", new_callable=AsyncMock, side_effect=Exception("manual")):
             assert await auth._get_service_principal_token() is None
 
@@ -914,6 +940,142 @@ class TestGetAuthContext:
     async def test_outer_exception(self):
         with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, side_effect=Exception("total")):
             assert await get_auth_context() is None
+
+    @pytest.mark.asyncio
+    async def test_priority_2b_databricks_token_from_env(self):
+        """Priority 2b: DATABRICKS_TOKEN env var used when DB PAT not found."""
+        s = self._save()
+        _databricks_auth._workspace_host = "https://example.com"
+        _databricks_auth._client_id = None
+        _databricks_auth._client_secret = None
+        try:
+            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
+                 patch("src.db.session.async_session_factory") as mock_sf, \
+                 patch("src.utils.user_context.UserContext") as mock_uc, \
+                 patch.dict(os.environ, {"DATABRICKS_TOKEN": "env_pat_token"}, clear=False):
+                mock_session = AsyncMock()
+                mock_sf.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+                mock_sf.return_value.__aexit__ = AsyncMock(return_value=False)
+                mock_svc = AsyncMock()
+                mock_svc.find_by_name = AsyncMock(return_value=None)
+                with patch("src.services.api_keys_service.ApiKeysService", return_value=mock_svc):
+                    mock_uc.get_group_context.return_value = MagicMock(group_id="g1")
+                    result = await get_auth_context()
+            assert result is not None
+            assert result.token == "env_pat_token"
+            assert result.auth_method == "pat"
+        finally:
+            self._restore(s)
+
+    @pytest.mark.asyncio
+    async def test_priority_2b_databricks_api_key_from_env(self):
+        """Priority 2b: DATABRICKS_API_KEY used when DATABRICKS_TOKEN not set."""
+        s = self._save()
+        _databricks_auth._workspace_host = "https://example.com"
+        _databricks_auth._client_id = None
+        _databricks_auth._client_secret = None
+        try:
+            env = {"DATABRICKS_API_KEY": "api_key_tok"}
+            # Ensure DATABRICKS_TOKEN is NOT set
+            env_clean = {k: v for k, v in os.environ.items() if k != "DATABRICKS_TOKEN"}
+            env_clean.update(env)
+            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
+                 patch("src.db.session.async_session_factory") as mock_sf, \
+                 patch("src.utils.user_context.UserContext") as mock_uc, \
+                 patch.dict(os.environ, env_clean, clear=True):
+                mock_session = AsyncMock()
+                mock_sf.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+                mock_sf.return_value.__aexit__ = AsyncMock(return_value=False)
+                mock_svc = AsyncMock()
+                mock_svc.find_by_name = AsyncMock(return_value=None)
+                with patch("src.services.api_keys_service.ApiKeysService", return_value=mock_svc):
+                    mock_uc.get_group_context.return_value = MagicMock(group_id="g1")
+                    result = await get_auth_context()
+            assert result is not None
+            assert result.token == "api_key_tok"
+            assert result.auth_method == "pat"
+        finally:
+            self._restore(s)
+
+    @pytest.mark.asyncio
+    async def test_priority_2b_databricks_token_preferred_over_api_key(self):
+        """Priority 2b: DATABRICKS_TOKEN takes precedence over DATABRICKS_API_KEY."""
+        s = self._save()
+        _databricks_auth._workspace_host = "https://example.com"
+        _databricks_auth._client_id = None
+        _databricks_auth._client_secret = None
+        try:
+            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
+                 patch("src.db.session.async_session_factory") as mock_sf, \
+                 patch("src.utils.user_context.UserContext") as mock_uc, \
+                 patch.dict(os.environ, {"DATABRICKS_TOKEN": "tok_val", "DATABRICKS_API_KEY": "key_val"}, clear=False):
+                mock_session = AsyncMock()
+                mock_sf.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+                mock_sf.return_value.__aexit__ = AsyncMock(return_value=False)
+                mock_svc = AsyncMock()
+                mock_svc.find_by_name = AsyncMock(return_value=None)
+                with patch("src.services.api_keys_service.ApiKeysService", return_value=mock_svc):
+                    mock_uc.get_group_context.return_value = MagicMock(group_id="g1")
+                    result = await get_auth_context()
+            assert result.token == "tok_val"
+        finally:
+            self._restore(s)
+
+    @pytest.mark.asyncio
+    async def test_priority_2b_no_env_vars_falls_to_spn(self):
+        """Priority 2b: No env vars -> continues to Priority 3 SPN."""
+        s = self._save()
+        _databricks_auth._workspace_host = "https://example.com"
+        _databricks_auth._client_id = "c"
+        _databricks_auth._client_secret = "s"
+        _databricks_auth._service_token = "spn_tok"
+        _databricks_auth._service_token_fetched_at = None
+        try:
+            env_clean = {k: v for k, v in os.environ.items()
+                         if k not in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY")}
+            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
+                 patch("src.db.session.async_session_factory") as mock_sf, \
+                 patch("src.utils.user_context.UserContext") as mock_uc, \
+                 patch.dict(os.environ, env_clean, clear=True), \
+                 patch.object(_databricks_auth, "_is_service_token_expired", return_value=False):
+                mock_session = AsyncMock()
+                mock_sf.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+                mock_sf.return_value.__aexit__ = AsyncMock(return_value=False)
+                mock_svc = AsyncMock()
+                mock_svc.find_by_name = AsyncMock(return_value=None)
+                with patch("src.services.api_keys_service.ApiKeysService", return_value=mock_svc):
+                    mock_uc.get_group_context.return_value = MagicMock(group_id="g1")
+                    result = await get_auth_context()
+            assert result is not None
+            assert result.auth_method == "service_principal"
+            assert result.token == "spn_tok"
+        finally:
+            self._restore(s)
+
+    @pytest.mark.asyncio
+    async def test_priority_2b_empty_env_var_skipped(self):
+        """Priority 2b: Empty env var string is treated as not set."""
+        s = self._save()
+        _databricks_auth._workspace_host = "https://example.com"
+        _databricks_auth._client_id = None
+        _databricks_auth._client_secret = None
+        try:
+            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
+                 patch("src.db.session.async_session_factory") as mock_sf, \
+                 patch("src.utils.user_context.UserContext") as mock_uc, \
+                 patch.dict(os.environ, {"DATABRICKS_TOKEN": "", "DATABRICKS_API_KEY": ""}, clear=False):
+                mock_session = AsyncMock()
+                mock_sf.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+                mock_sf.return_value.__aexit__ = AsyncMock(return_value=False)
+                mock_svc = AsyncMock()
+                mock_svc.find_by_name = AsyncMock(return_value=None)
+                with patch("src.services.api_keys_service.ApiKeysService", return_value=mock_svc):
+                    mock_uc.get_group_context.return_value = MagicMock(group_id="g1")
+                    result = await get_auth_context()
+            # Empty strings are falsy, so no PAT -> no SPN creds -> None
+            assert result is None
+        finally:
+            self._restore(s)
 
 
 # ── get_workspace_client ───────────────────────────────

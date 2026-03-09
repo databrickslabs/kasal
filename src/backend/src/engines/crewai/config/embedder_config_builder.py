@@ -223,13 +223,15 @@ class EmbedderConfigBuilder:
             return crew_kwargs, None, None
 
     async def _get_databricks_endpoint(self) -> Optional[str]:
-        """Get Databricks endpoint from unified auth or database"""
+        """Get Databricks endpoint from unified auth, database, or environment"""
+        import os
+
         databricks_endpoint = ''
 
-        # Try unified auth first
+        # Try unified auth first (pass user_token for OBO auth)
         try:
             from src.utils.databricks_auth import get_auth_context
-            auth = await get_auth_context()
+            auth = await get_auth_context(user_token=self.user_token)
             if auth and auth.workspace_url:
                 databricks_endpoint = auth.workspace_url
                 logger.info(f"Using workspace URL from unified {auth.auth_method} auth for embeddings: {databricks_endpoint}")
@@ -253,6 +255,17 @@ class EmbedderConfigBuilder:
                             logger.info(f"Using Databricks workspace URL from database: {databricks_endpoint}")
             except Exception as e:
                 logger.warning(f"Could not get Databricks workspace URL from database: {e}")
+
+        # Fallback: check DATABRICKS_HOST environment variable directly
+        # This is set by Databricks Apps runtime and may not have https:// prefix
+        if not databricks_endpoint:
+            host = os.environ.get('DATABRICKS_HOST')
+            if host:
+                host = host.rstrip('/')
+                if not host.startswith('https://'):
+                    host = f"https://{host}"
+                databricks_endpoint = host
+                logger.info(f"Using workspace URL from DATABRICKS_HOST env var for embeddings: {databricks_endpoint}")
 
         return databricks_endpoint
 

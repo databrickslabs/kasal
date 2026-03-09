@@ -44,11 +44,6 @@ class TestEnvironmentSetup:
         import src.main  # noqa: F401 - trigger module-level code
         assert os.environ.get("SEED_DEBUG") == "True"
 
-    def test_otel_sdk_disabled(self):
-        """Test that OTEL_SDK_DISABLED is set to disable telemetry."""
-        import src.main  # noqa: F401
-        assert os.environ.get("OTEL_SDK_DISABLED") == "true"
-
     def test_crewai_telemetry_disabled(self):
         """Test that CrewAI telemetry is disabled."""
         import src.main  # noqa: F401

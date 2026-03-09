@@ -260,42 +260,39 @@ async def logs_writer_loop(shutdown_event: asyncio.Event):
                     # Log batch processing
                     logger.debug(f"[logs_writer_loop] Processing batch #{batch_count} with {len(batch)} logs. Total processed: {total_log_count}")
 
-                    # Process each log in the batch
+                    # Process the entire batch inside ONE session to avoid
+                    # per-log connection overhead (critical for Lakebase).
                     failures = 0
-                    for idx, log_data in enumerate(batch):
-                        try:
-                            job_id = log_data.get("job_id", "unknown")
-                            content = log_data.get("content", "")
-                            timestamp = log_data.get("timestamp", datetime.now())
-                            log_info = f"[{job_id}:{idx+1}/{len(batch)}]"
-
-                            # Create log using repository directly with session
-                            from src.db.session import async_session_factory
-                            async with async_session_factory() as session:
-                                repo = ExecutionLogsRepository(session)
+                    from src.db.database_router import get_smart_db_session
+                    try:
+                        async for session in get_smart_db_session():
+                            repo = ExecutionLogsRepository(session)
+                            for idx, log_data in enumerate(batch):
                                 try:
-                                    log = await repo.create_log(
+                                    job_id = log_data.get("job_id", "unknown")
+                                    content = log_data.get("content", "")
+                                    timestamp = log_data.get("timestamp", datetime.now())
+                                    group_id = log_data.get("group_id")
+                                    group_email = log_data.get("group_email")
+
+                                    await repo.create_log(
                                         execution_id=job_id,
                                         content=content,
-                                        timestamp=timestamp
+                                        timestamp=timestamp,
+                                        group_id=group_id,
+                                        group_email=group_email,
                                     )
-                                    await session.commit()
-                                    success = True
                                 except Exception as e:
-                                    await session.rollback()
-                                    logger.error(f"Error creating log: {e}")
-                                    success = False
-
-                            if not success:
-                                logger.warning(f"[logs_writer_loop] {log_info} ❌ Failed to store log")
-                                failures += 1
-
-                        except Exception as e:
-                            logger.error(f"[logs_writer_loop] Error processing log: {e}", exc_info=True)
-                            failures += 1
+                                    logger.error(f"[logs_writer_loop] Error adding log {idx+1}/{len(batch)}: {e}")
+                                    failures += 1
+                            # Single commit for the whole batch
+                            await session.commit()
+                    except Exception as e:
+                        logger.error(f"[logs_writer_loop] Batch session error: {e}", exc_info=True)
+                        failures = len(batch)
 
                     if failures > 0:
-                        logger.warning(f"[logs_writer_loop] Batch #{batch_count} processed with {failures} failures.")
+                        logger.warning(f"[logs_writer_loop] Batch #{batch_count} processed with {failures}/{len(batch)} failures.")
                     else:
                         logger.debug(f"[logs_writer_loop] Batch #{batch_count} processed successfully.")
 
