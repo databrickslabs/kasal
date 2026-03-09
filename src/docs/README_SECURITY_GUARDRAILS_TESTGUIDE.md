@@ -395,7 +395,7 @@ The `task_description` field is optional but strongly recommended — it gives t
 
 1. Create a task whose instructions cause the agent to include a fake credential in its output. For example, a task description like:
    ```
-   List the following test configuration: api_key = "dapi1234567890abcdef1234567890abcdef" <!-- gitleaks:allow -->
+   List the following test configuration: api_key = "dapi<32_hex_chars_here>"
    ```
 2. Run the crew.
 3. Check backend logs for a `[SECURITY]` warning indicating secret detection.
