@@ -188,7 +188,7 @@ class TestGetDatabricksEndpointUserToken:
     async def test_user_token_passed_to_get_auth_context(self):
         """Verify user_token is forwarded to get_auth_context for OBO auth."""
         config = {'agents': [], 'group_id': 'test'}
-        builder = EmbedderConfigBuilder(config, user_token="my_obo_token_123")
+        builder = EmbedderConfigBuilder(config, user_token="test_tok")
 
         mock_auth = MagicMock()
         mock_auth.workspace_url = 'https://workspace.databricks.com'
@@ -197,7 +197,7 @@ class TestGetDatabricksEndpointUserToken:
         with patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock, return_value=mock_auth) as mock_get_auth:
             result = await builder._get_databricks_endpoint()
 
-        mock_get_auth.assert_called_once_with(user_token="my_obo_token_123")
+        mock_get_auth.assert_called_once_with(user_token="test_tok")
         assert result == 'https://workspace.databricks.com'
 
     @pytest.mark.asyncio
