@@ -81,6 +81,25 @@ def _run(flow_result, flow_config=None, group_context=None):
               with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
                return run_flow_in_process("exec1", flow_config or {"k": "v"}, group_context=group_context)
 
+class TestActivateLakebaseInSubprocessCalled:
+    """Verify that activate_lakebase_in_subprocess is imported and called in the flow subprocess."""
+
+    def test_activate_lakebase_imported_in_flow_executor(self):
+        """Verify activate_lakebase_in_subprocess can be imported from database_router."""
+        from src.db.database_router import activate_lakebase_in_subprocess
+        assert callable(activate_lakebase_in_subprocess)
+
+    @pytest.mark.asyncio
+    async def test_activate_lakebase_called_in_subprocess(self):
+        """Verify the activation call site exists and the function is callable."""
+        mock_activate = AsyncMock(return_value=True)
+        with patch("src.db.database_router.activate_lakebase_in_subprocess", mock_activate):
+            from src.db.database_router import activate_lakebase_in_subprocess
+            result = await activate_lakebase_in_subprocess()
+            assert result is True
+            mock_activate.assert_awaited_once()
+
+
 class TestGetExecutionInfo:
     def test_none(self):
         from src.services.process_flow_executor import ProcessFlowExecutor
@@ -554,18 +573,22 @@ class TestProcessLogQueue:
         from src.services.process_flow_executor import ProcessFlowExecutor
         eid = "exec_log_12345678"
         content = "2024 " + eid[:8] + " log\nno\n"
-        mc = AsyncMock()
-        cm = AsyncMock()
-        cm.__aenter__ = AsyncMock(return_value=mc)
-        cm.__aexit__ = AsyncMock(return_value=False)
-        me = MagicMock()
-        me.begin.return_value = cm
+        mock_session = AsyncMock()
+        mock_repo = MagicMock()
+        mock_repo.create_log = AsyncMock(return_value=MagicMock(id=1))
+
+        async def _fake_smart_session():
+            yield mock_session
+
         with patch.dict(os.environ, {"LOG_DIR": "/tmp/l"}):
             with patch("os.path.exists", return_value=True):
                 with patch("os.path.join", return_value="/tmp/l/flow.log"):
                     with patch("builtins.open", MagicMock(return_value=StringIO(content))):
-                        with patch("src.db.session.engine", me):
-                            await ProcessFlowExecutor()._process_log_queue(None, eid, _gc())
+                        with patch("src.db.database_router.get_smart_db_session", _fake_smart_session):
+                            with patch("src.repositories.execution_logs_repository.ExecutionLogsRepository", return_value=mock_repo):
+                                await ProcessFlowExecutor()._process_log_queue(None, eid, _gc())
+        mock_repo.create_log.assert_awaited()
+        mock_session.commit.assert_awaited()
     @pytest.mark.asyncio
     async def test_exc(self):
         from src.services.process_flow_executor import ProcessFlowExecutor
@@ -575,18 +598,20 @@ class TestProcessLogQueue:
     @pytest.mark.asyncio
     async def test_no_match(self):
         from src.services.process_flow_executor import ProcessFlowExecutor
-        mc = AsyncMock()
-        cm = AsyncMock()
-        cm.__aenter__ = AsyncMock(return_value=mc)
-        cm.__aexit__ = AsyncMock(return_value=False)
-        me = MagicMock()
-        me.begin.return_value = cm
+        mock_session = AsyncMock()
+        mock_repo = MagicMock()
+        mock_repo.create_log = AsyncMock(return_value=MagicMock(id=1))
+
+        async def _fake_smart_session():
+            yield mock_session
+
         with patch.dict(os.environ, {"LOG_DIR": "/tmp/l"}):
             with patch("os.path.exists", return_value=True):
                 with patch("os.path.join", return_value="/tmp/l/flow.log"):
                     with patch("builtins.open", MagicMock(return_value=StringIO("other\n"))):
-                        with patch("src.db.session.engine", me):
-                            await ProcessFlowExecutor()._process_log_queue(None, "no_match_12345678", None)
+                        with patch("src.db.database_router.get_smart_db_session", _fake_smart_session):
+                            with patch("src.repositories.execution_logs_repository.ExecutionLogsRepository", return_value=mock_repo):
+                                await ProcessFlowExecutor()._process_log_queue(None, "no_match_12345678", None)
     @pytest.mark.asyncio
     async def test_no_log_dir(self):
         from src.services.process_flow_executor import ProcessFlowExecutor

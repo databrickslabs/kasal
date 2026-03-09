@@ -143,8 +143,13 @@ async def run_flow_in_process(
             final_message = None
         elif result.get('status') == 'COMPLETED':
             final_status = ExecutionStatus.COMPLETED.value
-            final_message = "Flow execution completed successfully"
             final_result = result.get('result')
+            warnings = result.get('warnings', [])
+            if warnings:
+                final_message = "Flow execution completed with warnings: " + "; ".join(warnings)
+                logger.warning(f"Flow execution completed with MCP warnings for {execution_id}: {warnings}")
+            else:
+                final_message = "Flow execution completed successfully"
             logger.info(f"Flow execution COMPLETED for {execution_id}")
         else:
             # Before setting FAILED, check if the execution was stopped

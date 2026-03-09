@@ -290,14 +290,15 @@ async def create_task(
     # without adding the tool name to the tools array. In that case, use the
     # tool_configs keys as the tools to resolve so they actually get instantiated.
     task_tool_configs_map = task_config.get('tool_configs', {})
-    if not tools_to_resolve and task_tool_configs_map and tool_factory:
-        auto_tool_names = list(task_tool_configs_map.keys())
+    # Exclude MCP_SERVERS — it's handled by the MCP integration above, not the tool factory
+    auto_tool_names = [k for k in task_tool_configs_map.keys() if k and k != "MCP_SERVERS"]
+    if not tools_to_resolve and auto_tool_names and tool_factory:
         logger.info(
             f"Task {task_key}: tools array is empty but tool_configs has keys "
             f"{auto_tool_names} - auto-resolving tools from tool_configs"
         )
         for tool_name in auto_tool_names:
-            if not tool_name:
+            if not tool_name or tool_name == "MCP_SERVERS":
                 continue
             try:
                 tool_config = {}

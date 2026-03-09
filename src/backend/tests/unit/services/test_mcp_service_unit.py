@@ -252,20 +252,25 @@ async def test_sse_connection_failure():
     assert "refused" in res.message.lower()
 
 
-# --- Streamable: OBO auth branch ---
+# --- Streamable: SPN auth branch ---
+
+def _mock_auth_context(token="spn-token", auth_method="service_principal"):
+    """Create a mock AuthContext for SPN/PAT tests."""
+    return SimpleNamespace(token=token, auth_method=auth_method)
+
 
 @pytest.mark.asyncio
-async def test_streamable_connection_obo_auth_success():
+async def test_streamable_connection_spn_auth_success():
     svc = MCPService(session=SimpleNamespace())
     req = MCPTestConnectionRequest(
         server_url="https://example.com/mcp", api_key="", server_type="streamable",
-        auth_type="databricks_obo"
+        auth_type="databricks_spn"
     )
 
     mock_session = _mock_mcp_session(tool_count=2)
 
-    with patch("src.utils.databricks_auth.get_mcp_auth_headers", new_callable=AsyncMock) as mock_obo:
-        mock_obo.return_value = ({"Authorization": "Bearer obo-token"}, None)
+    with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock) as mock_auth:
+        mock_auth.return_value = _mock_auth_context()
         with patch("mcp.client.streamable_http.streamablehttp_client") as mock_connect:
             with patch("mcp.ClientSession") as mock_cs:
                 mock_connect.return_value.__aenter__.return_value = (Mock(), Mock(), None)
@@ -277,38 +282,38 @@ async def test_streamable_connection_obo_auth_success():
 
 
 @pytest.mark.asyncio
-async def test_streamable_connection_obo_auth_fails():
+async def test_streamable_connection_spn_auth_fails():
     svc = MCPService(session=SimpleNamespace())
     req = MCPTestConnectionRequest(
         server_url="https://example.com/mcp", api_key="", server_type="streamable",
-        auth_type="databricks_obo"
+        auth_type="databricks_spn"
     )
 
     mock_session = _mock_mcp_session(tool_count=0)
 
-    with patch("src.utils.databricks_auth.get_mcp_auth_headers", new_callable=AsyncMock) as mock_obo:
-        mock_obo.return_value = (None, "OBO failed")
+    with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock) as mock_auth:
+        mock_auth.return_value = None
         with patch("mcp.client.streamable_http.streamablehttp_client") as mock_connect:
             with patch("mcp.ClientSession") as mock_cs:
                 mock_connect.return_value.__aenter__.return_value = (Mock(), Mock(), None)
                 mock_cs.return_value.__aenter__.return_value = mock_session
                 res = await svc._test_streamable_connection(req)
 
-    assert res.success is True  # Still connects, just no OBO headers
+    assert res.success is True  # Still connects, just no auth headers
 
 
 @pytest.mark.asyncio
-async def test_streamable_connection_obo_auth_exception():
+async def test_streamable_connection_spn_auth_exception():
     svc = MCPService(session=SimpleNamespace())
     req = MCPTestConnectionRequest(
         server_url="https://example.com/mcp", api_key="", server_type="streamable",
-        auth_type="databricks_obo"
+        auth_type="databricks_spn"
     )
 
     mock_session = _mock_mcp_session(tool_count=1)
 
-    with patch("src.utils.databricks_auth.get_mcp_auth_headers", new_callable=AsyncMock) as mock_obo:
-        mock_obo.side_effect = RuntimeError("import error")
+    with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock) as mock_auth:
+        mock_auth.side_effect = RuntimeError("import error")
         with patch("mcp.client.streamable_http.streamablehttp_client") as mock_connect:
             with patch("mcp.ClientSession") as mock_cs:
                 mock_connect.return_value.__aenter__.return_value = (Mock(), Mock(), None)
@@ -351,20 +356,20 @@ async def test_streamable_connection_generic_error():
     assert "some weird MCP error" in res.message
 
 
-# --- SSE: OBO auth branch ---
+# --- SSE: SPN auth branch ---
 
 @pytest.mark.asyncio
-async def test_sse_connection_obo_auth_success():
+async def test_sse_connection_spn_auth_success():
     svc = MCPService(session=SimpleNamespace())
     req = MCPTestConnectionRequest(
         server_url="https://example.com/sse", api_key="", server_type="sse",
-        auth_type="databricks_obo"
+        auth_type="databricks_spn"
     )
 
     mock_session = _mock_mcp_session(tool_count=4)
 
-    with patch("src.utils.databricks_auth.get_mcp_auth_headers", new_callable=AsyncMock) as mock_obo:
-        mock_obo.return_value = ({"Authorization": "Bearer obo-tok"}, None)
+    with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock) as mock_auth:
+        mock_auth.return_value = _mock_auth_context()
         with patch("mcp.client.sse.sse_client") as mock_connect:
             with patch("mcp.ClientSession") as mock_cs:
                 mock_connect.return_value.__aenter__.return_value = (Mock(), Mock())
@@ -376,17 +381,17 @@ async def test_sse_connection_obo_auth_success():
 
 
 @pytest.mark.asyncio
-async def test_sse_connection_obo_auth_fails():
+async def test_sse_connection_spn_auth_fails():
     svc = MCPService(session=SimpleNamespace())
     req = MCPTestConnectionRequest(
         server_url="https://example.com/sse", api_key="", server_type="sse",
-        auth_type="databricks_obo"
+        auth_type="databricks_spn"
     )
 
     mock_session = _mock_mcp_session(tool_count=0)
 
-    with patch("src.utils.databricks_auth.get_mcp_auth_headers", new_callable=AsyncMock) as mock_obo:
-        mock_obo.return_value = (None, "OBO failed")
+    with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock) as mock_auth:
+        mock_auth.return_value = None
         with patch("mcp.client.sse.sse_client") as mock_connect:
             with patch("mcp.ClientSession") as mock_cs:
                 mock_connect.return_value.__aenter__.return_value = (Mock(), Mock())
@@ -397,17 +402,17 @@ async def test_sse_connection_obo_auth_fails():
 
 
 @pytest.mark.asyncio
-async def test_sse_connection_obo_auth_exception():
+async def test_sse_connection_spn_auth_exception():
     svc = MCPService(session=SimpleNamespace())
     req = MCPTestConnectionRequest(
         server_url="https://example.com/sse", api_key="", server_type="sse",
-        auth_type="databricks_obo"
+        auth_type="databricks_spn"
     )
 
     mock_session = _mock_mcp_session(tool_count=1)
 
-    with patch("src.utils.databricks_auth.get_mcp_auth_headers", new_callable=AsyncMock) as mock_obo:
-        mock_obo.side_effect = RuntimeError("import error")
+    with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock) as mock_auth:
+        mock_auth.side_effect = RuntimeError("import error")
         with patch("mcp.client.sse.sse_client") as mock_connect:
             with patch("mcp.ClientSession") as mock_cs:
                 mock_connect.return_value.__aenter__.return_value = (Mock(), Mock())
@@ -463,4 +468,102 @@ async def test_sse_connection_generic_error():
 
     assert res.success is False
     assert "unexpected MCP error" in res.message
+
+
+# --- SSE: databricks_obo auth type (tuple check coverage) ---
+
+@pytest.mark.asyncio
+async def test_sse_connection_obo_auth_success():
+    """Test that auth_type 'databricks_obo' triggers get_auth_context (tuple check)."""
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/sse", api_key="", server_type="sse",
+        auth_type="databricks_obo"
+    )
+
+    mock_session = _mock_mcp_session(tool_count=3)
+
+    with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock) as mock_auth:
+        mock_auth.return_value = _mock_auth_context(token="obo-token", auth_method="on_behalf_of")
+        with patch("mcp.client.sse.sse_client") as mock_connect:
+            with patch("mcp.ClientSession") as mock_cs:
+                mock_connect.return_value.__aenter__.return_value = (Mock(), Mock())
+                mock_cs.return_value.__aenter__.return_value = mock_session
+                res = await svc._test_sse_connection(req)
+
+    assert res.success is True
+    assert "3 tools" in res.message
+    mock_auth.assert_awaited_once_with(user_token=None)
+
+
+@pytest.mark.asyncio
+async def test_sse_connection_auth_context_returns_none():
+    """Test the else branch where get_auth_context returns None (no auth available)."""
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/sse", api_key="", server_type="sse",
+        auth_type="databricks_obo"
+    )
+
+    mock_session = _mock_mcp_session(tool_count=1)
+
+    with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock) as mock_auth:
+        mock_auth.return_value = None
+        with patch("mcp.client.sse.sse_client") as mock_connect:
+            with patch("mcp.ClientSession") as mock_cs:
+                mock_connect.return_value.__aenter__.return_value = (Mock(), Mock())
+                mock_cs.return_value.__aenter__.return_value = mock_session
+                res = await svc._test_sse_connection(req)
+
+    assert res.success is True
+    mock_auth.assert_awaited_once_with(user_token=None)
+
+
+# --- Streamable: databricks_obo auth type (tuple check coverage) ---
+
+@pytest.mark.asyncio
+async def test_streamable_connection_obo_auth_success():
+    """Test that auth_type 'databricks_obo' triggers get_auth_context (tuple check)."""
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/mcp", api_key="", server_type="streamable",
+        auth_type="databricks_obo"
+    )
+
+    mock_session = _mock_mcp_session(tool_count=4)
+
+    with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock) as mock_auth:
+        mock_auth.return_value = _mock_auth_context(token="obo-token", auth_method="on_behalf_of")
+        with patch("mcp.client.streamable_http.streamablehttp_client") as mock_connect:
+            with patch("mcp.ClientSession") as mock_cs:
+                mock_connect.return_value.__aenter__.return_value = (Mock(), Mock(), None)
+                mock_cs.return_value.__aenter__.return_value = mock_session
+                res = await svc._test_streamable_connection(req)
+
+    assert res.success is True
+    assert "4 tools" in res.message
+    mock_auth.assert_awaited_once_with(user_token=None)
+
+
+@pytest.mark.asyncio
+async def test_streamable_connection_auth_context_returns_none():
+    """Test the else branch where get_auth_context returns None (no auth available)."""
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/mcp", api_key="", server_type="streamable",
+        auth_type="databricks_obo"
+    )
+
+    mock_session = _mock_mcp_session(tool_count=1)
+
+    with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock) as mock_auth:
+        mock_auth.return_value = None
+        with patch("mcp.client.streamable_http.streamablehttp_client") as mock_connect:
+            with patch("mcp.ClientSession") as mock_cs:
+                mock_connect.return_value.__aenter__.return_value = (Mock(), Mock(), None)
+                mock_cs.return_value.__aenter__.return_value = mock_session
+                res = await svc._test_streamable_connection(req)
+
+    assert res.success is True
+    mock_auth.assert_awaited_once_with(user_token=None)
 

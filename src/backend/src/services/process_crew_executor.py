@@ -471,13 +471,29 @@ def run_crew_in_process(
             # Import within async context
             import os  # Import os first
 
+            # Activate Lakebase on async_session_factory so ALL callers
+            # (tools, memory, etc.) automatically use Lakebase.
+            try:
+                from src.db.database_router import activate_lakebase_in_subprocess
+                lb_ok = await activate_lakebase_in_subprocess()
+                if lb_ok:
+                    subprocess_logger.info("[SUBPROCESS] Lakebase activated on async_session_factory")
+                else:
+                    subprocess_logger.debug("[SUBPROCESS] Lakebase not enabled, using local DB")
+            except Exception as lb_err:
+                subprocess_logger.warning(f"[SUBPROCESS] Lakebase activation error (non-fatal): {lb_err}")
+
             # Suppress any stdout/stderr from CrewAI
             import warnings
 
             from src.engines.crewai.crew_preparation import CrewPreparation
+            from src.engines.crewai.tools.mcp_integration import MCPIntegration
             from src.engines.crewai.tools.tool_factory import ToolFactory
             from src.services.api_keys_service import ApiKeysService
             from src.services.tool_service import ToolService
+
+            # Reset MCP warnings at the start of each execution
+            MCPIntegration.reset_warnings()
 
             warnings.filterwarnings("ignore")
 
@@ -545,10 +561,10 @@ def run_crew_in_process(
             # Always load Databricks config for the current group to determine MLflow status
             db_config = None
             try:
-                from src.db.session import async_session_factory
+                from src.db.database_router import get_smart_db_session
                 from src.services.databricks_service import DatabricksService
 
-                async with async_session_factory() as session:
+                async for session in get_smart_db_session():
                     current_group_id = (
                         getattr(group_context, "primary_group_id", None)
                         if group_context
@@ -619,9 +635,9 @@ def run_crew_in_process(
                 async_logger=async_logger,
             )
             # Create services using session factory
-            from src.db.session import safe_async_session
+            from src.db.database_router import get_smart_db_session
 
-            async with safe_async_session() as session:
+            async for session in get_smart_db_session():
                 # Extract group_id first for service initialization
                 group_id = None
                 try:
@@ -682,7 +698,7 @@ def run_crew_in_process(
                     )
                     if user_token:
                         async_logger.info(
-                            f"[SUBPROCESS] Found user_token in crew_config for OBO authentication: {user_token[:10]}..."
+                            f"[SUBPROCESS] Found user_token in crew_config for OBO authentication (length={len(user_token)})"
                         )
                     else:
                         async_logger.warning(
@@ -1431,11 +1447,23 @@ def run_crew_in_process(
                 "Crew execution completed but result could not be serialized"
             )
 
+        # Collect MCP warnings to surface in the execution trace/UI
+        mcp_warnings = []
+        try:
+            from src.engines.crewai.tools.mcp_integration import MCPIntegration
+            mcp_warnings = MCPIntegration.get_warnings()
+            if mcp_warnings:
+                crew_logger = logging.getLogger("crew")
+                crew_logger.warning(f"[MCP_WARNINGS] {'; '.join(mcp_warnings)}")
+        except Exception:
+            pass
+
         return {
             "status": "COMPLETED",
             "execution_id": execution_id,
             "result": processed_result,  # Safely processed result
             "process_id": os.getpid(),
+            "warnings": mcp_warnings,
         }
 
     except Exception as e:
@@ -2212,8 +2240,6 @@ class ProcessCrewExecutor:
             import os
             from datetime import datetime, timezone
 
-            from sqlalchemy import text
-
             # Get the crew.log path
             log_dir = os.environ.get("LOG_DIR")
             if not log_dir:
@@ -2283,27 +2309,25 @@ class ProcessCrewExecutor:
                     f"Found {len(logs_to_write)-1} logs for execution {exec_id_short} in crew.log"
                 )
 
-            # Use the application's existing engine from session.py.
-            # This runs in the main process (after process.join), so the app
-            # engine is available and already connected to the correct database.
-            # Previously, a one-off engine was created from individual settings
-            # fields (POSTGRES_SERVER, POSTGRES_PORT, etc.) which default to
-            # localhost — breaking in Databricks Apps where DATABASE_URI is set
-            # as a single env var pointing to the managed PostgreSQL instance.
-            from src.db.session import engine as app_engine
+            # Route through get_smart_db_session so logs land in
+            # Lakebase when enabled (same path as API endpoints).
+            from src.db.database_router import get_smart_db_session
+            from src.repositories.execution_logs_repository import ExecutionLogsRepository
 
             logger.info(
-                f"[ProcessCrewExecutor] [DEBUG] Using application engine for database connection"
+                f"[ProcessCrewExecutor] Writing {len(logs_to_write)} logs via smart DB session"
             )
-            async with app_engine.begin() as conn:
+            async for session in get_smart_db_session():
+                repo = ExecutionLogsRepository(session)
                 for log_data in logs_to_write:
-                    await conn.execute(
-                        text("""
-                        INSERT INTO execution_logs (execution_id, content, timestamp, group_id, group_email)
-                        VALUES (:execution_id, :content, :timestamp, :group_id, :group_email)
-                    """),
-                        log_data,
+                    await repo.create_log(
+                        execution_id=log_data["execution_id"],
+                        content=log_data["content"],
+                        timestamp=log_data["timestamp"],
+                        group_id=log_data.get("group_id"),
+                        group_email=log_data.get("group_email"),
                     )
+                await session.commit()
 
             logger.info(
                 f"[ProcessCrewExecutor] Successfully wrote {len(logs_to_write)} logs to execution_logs table"

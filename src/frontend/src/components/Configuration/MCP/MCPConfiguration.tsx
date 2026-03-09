@@ -47,7 +47,7 @@ export interface MCPServerConfig {
   server_url: string;
   api_key: string;
   server_type: string;  // "sse" or "streamable"
-  auth_type?: string;  // "api_key" or "databricks_obo"
+  auth_type?: string;  // "api_key" or "databricks_spn"
   timeout_seconds: number;
   max_retries: number;
   rate_limit: number;
@@ -119,13 +119,6 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
     setEditedServer(server);
     // Store the original API key for comparison
     if (server) {
-      console.log('Edit Dialog Debug - Loading server:', {
-        serverId: server.id,
-        serverName: server.name,
-        apiKey: server.api_key,
-        apiKeyLength: server.api_key?.length || 0,
-        isNew
-      });
       setOriginalApiKey(server.api_key || '');
     }
     // Reset connection test result when dialog opens/closes or server changes
@@ -169,21 +162,10 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
       // For existing servers, only include API key if it has been changed
       const serverToSave = { ...editedServer };
 
-      console.log('Save Debug:', {
-        isNew,
-        currentApiKey: editedServer.api_key,
-        originalApiKey,
-        areEqual: editedServer.api_key === originalApiKey,
-        apiKeyChanged: !isNew && editedServer.api_key !== originalApiKey
-      });
-
       if (!isNew && editedServer.api_key === originalApiKey) {
         // API key hasn't changed, remove it from the update payload
-        console.log('Removing API key from update payload - unchanged');
         const { api_key, ...serverWithoutApiKey } = serverToSave;
         Object.assign(serverToSave, serverWithoutApiKey);
-      } else if (!isNew) {
-        console.log('Including API key in update payload - changed');
       }
 
       onSave(serverToSave);
@@ -309,14 +291,14 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
                   onChange={handleSelectChange('auth_type')}
                 >
                   <MenuItem value="api_key">API Key</MenuItem>
-                  <MenuItem value="databricks_obo">Databricks OBO</MenuItem>
+                  <MenuItem value="databricks_spn">Apps SPN</MenuItem>
                 </Select>
               </FormControl>
             </Grid>
           )}
 
-          {editedServer.server_type === 'streamable' && editedServer.auth_type !== 'databricks_obo' && (
-            <Grid item xs={12} md={editedServer.auth_type === 'databricks_obo' ? 12 : 6}>
+          {editedServer.server_type === 'streamable' && editedServer.auth_type !== 'databricks_spn' && (
+            <Grid item xs={12} md={6}>
               <TextField
                 label={t('configuration.mcp.apiKey', { defaultValue: 'API Key' })}
                 value={editedServer.api_key}
@@ -452,7 +434,7 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
             testingConnection ||
             !editedServer.server_url?.trim() ||
             (editedServer.server_type === 'streamable' &&
-             editedServer.auth_type !== 'databricks_obo' &&
+             editedServer.auth_type !== 'databricks_spn' &&
              !editedServer.api_key?.trim())
           }
           startIcon={testingConnection ? <CircularProgress size={16} /> : <CloudIcon />}
@@ -508,17 +490,6 @@ const MCPConfiguration: React.FC = () => {
         servers: response.servers || []
       }));
 
-      // Try to load global settings as well
-      try {
-        const globalSettings = await mcpService.getGlobalSettings();
-        setMcpConfig(prevConfig => ({
-          ...prevConfig,
-          global_enabled: globalSettings.global_enabled
-        }));
-      } catch (error) {
-        console.warn('Could not load global MCP settings:', error);
-      }
-
     } catch (error) {
       console.error('Error loading MCP servers:', error);
       const message = error instanceof Error ? error.message : 'Failed to load MCP servers';
@@ -536,31 +507,6 @@ const MCPConfiguration: React.FC = () => {
   useEffect(() => {
     loadMcpServers();
   }, []);
-
-  const handleGlobalToggle = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const checked = event.target.checked;
-    setMcpConfig(prev => ({
-      ...prev,
-      global_enabled: checked
-    }));
-
-    try {
-      const mcpService = MCPService.getInstance();
-      await mcpService.updateGlobalSettings({ global_enabled: checked });
-    } catch (error) {
-      console.error('Error updating global MCP settings:', error);
-      // Revert UI state if API call fails
-      setMcpConfig(prev => ({
-        ...prev,
-        global_enabled: !checked
-      }));
-      setNotification({
-        open: true,
-        message: error instanceof Error ? error.message : 'Failed to update global MCP settings',
-        severity: 'error',
-      });
-    }
-  };
 
   const _handleEnableForWorkspace = async (server: MCPServerConfig) => {
     try {
@@ -597,44 +543,11 @@ const MCPConfiguration: React.FC = () => {
     }
   };
 
-  const handleServerGlobalToggle = (serverId: string) => async (
-    _event: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    try {
-      const mcpService = MCPService.getInstance();
-      await mcpService.toggleMcpServerGlobalEnabled(serverId);
-
-      // Reload servers to get updated state
-      await loadMcpServers();
-
-      setNotification({
-        open: true,
-        message: 'MCP server global setting updated successfully',
-        severity: 'success',
-      });
-
-    } catch (error) {
-      console.error(`Error toggling MCP server global setting ${serverId}:`, error);
-      setNotification({
-        open: true,
-        message: error instanceof Error ? error.message : 'Failed to toggle server global setting',
-        severity: 'error',
-      });
-    }
-  };
-
   const handleEditServer = async (server: MCPServerConfig) => {
     try {
       // Fetch full server details with decrypted API key
       const mcpService = MCPService.getInstance();
       const fullServer = await mcpService.getMcpServer(server.id);
-
-      console.log('Edit server - fetched full details:', {
-        serverId: server.id,
-        listApiKey: server.api_key,
-        fullApiKey: fullServer?.api_key,
-        fullApiKeyLength: fullServer?.api_key?.length || 0
-      });
 
       if (fullServer) {
         setCurrentServer(fullServer);
@@ -756,28 +669,7 @@ const MCPConfiguration: React.FC = () => {
             {t('configuration.mcp.title', { defaultValue: 'MCP Server Configuration' })}
           </Typography>
         </Box>
-        <FormControlLabel
-          control={
-            <Switch
-              checked={mcpConfig.global_enabled}
-              onChange={handleGlobalToggle}
-              color="primary"
-            />
-          }
-          label={t('configuration.mcp.globalEnable', { defaultValue: 'Enable MCP Servers' })}
-        />
       </Box>
-
-      {mcpConfig.global_enabled && (
-        <Alert severity="info" sx={{ mb: 3 }}>
-          <Typography variant="body2">
-            <strong>Three-Tier MCP Configuration:</strong><br />
-            • <strong>Global servers</strong> (marked with GLOBAL chip) are available to all agents and tasks<br />
-            • <strong>Agent-level servers</strong> can be selected in Agent Forms for specific agents<br />
-            • <strong>Task-level servers</strong> can be selected in Task Forms for specific tasks (highest priority)
-          </Typography>
-        </Alert>
-      )}
 
       <Paper
         variant="outlined"
@@ -844,14 +736,6 @@ const MCPConfiguration: React.FC = () => {
                           variant="outlined"
                           sx={{ ml: 1.5, fontSize: '0.7rem', height: 20 }}
                         />
-                        {server.global_enabled && (
-                          <Chip
-                            label="GLOBAL"
-                            size="small"
-                            color="primary"
-                            sx={{ ml: 1, fontSize: '0.7rem', height: 20 }}
-                          />
-                        )}
                       </Box>
                       <Typography variant="body2" color="text.secondary">
                         {server.server_url}
@@ -859,35 +743,18 @@ const MCPConfiguration: React.FC = () => {
                     </Box>
 
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', mr: 1 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mr: 1 }}>
                         <FormControlLabel
                           control={
                             <Switch
                               size="small"
                               checked={server.enabled}
                               onChange={handleServerToggle(server.id)}
-                              disabled={!mcpConfig.global_enabled}
                             />
                           }
                           label={
                             <Typography variant="caption" sx={{ fontSize: '0.75rem' }}>
                               {server.enabled ? t('common.enabled', { defaultValue: 'Enabled' }) : t('common.disabled', { defaultValue: 'Disabled' })}
-                            </Typography>
-                          }
-                        />
-                        <FormControlLabel
-                          control={
-                            <Switch
-                              size="small"
-                              checked={server.global_enabled || false}
-                              onChange={handleServerGlobalToggle(server.id)}
-                              disabled={!mcpConfig.global_enabled || !server.enabled}
-                              color="primary"
-                            />
-                          }
-                          label={
-                            <Typography variant="caption" sx={{ fontSize: '0.75rem' }}>
-                              {server.global_enabled ? t('configuration.mcp.globalEnabled', { defaultValue: 'Global' }) : t('configuration.mcp.globalDisabled', { defaultValue: 'Not Global' })}
                             </Typography>
                           }
                         />

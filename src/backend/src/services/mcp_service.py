@@ -544,20 +544,24 @@ class MCPService:
         if test_data.api_key:
             headers["Authorization"] = f"Bearer {test_data.api_key}"
             logger.debug("Added API key authentication to headers")
-        elif test_data.auth_type == "databricks_obo":
+        elif test_data.auth_type in ("databricks_obo", "databricks_spn"):
             try:
-                from src.utils.databricks_auth import get_mcp_auth_headers
-                obo_headers, error = await get_mcp_auth_headers(
-                    test_data.server_url,
-                    include_sse_headers=True
-                )
-                if obo_headers:
-                    headers = obo_headers
-                    logger.debug("Using Databricks OBO authentication")
+                from src.utils.databricks_auth import get_auth_context
+                # For SPN, skip OBO (user_token=None); for OBO, would pass user_token
+                auth_context = await get_auth_context(user_token=None)
+                if auth_context and auth_context.token:
+                    headers = {
+                        "Authorization": f"Bearer {auth_context.token}",
+                        "Content-Type": "application/json",
+                        "Accept": "text/event-stream",
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                    }
+                    logger.debug(f"Using {auth_context.auth_method} authentication for MCP test")
                 else:
-                    logger.warning(f"Databricks OBO auth failed: {error}")
+                    logger.warning("No Databricks auth context available for MCP test")
             except Exception as e:
-                logger.warning(f"Failed to get Databricks OBO headers: {e}")
+                logger.warning(f"Failed to get Databricks auth headers: {e}")
 
         try:
             from mcp.client.sse import sse_client
@@ -625,20 +629,17 @@ class MCPService:
         if test_data.api_key:
             headers["Authorization"] = f"Bearer {test_data.api_key}"
             logger.debug("Added API key authentication to headers")
-        elif test_data.auth_type == "databricks_obo":
+        elif test_data.auth_type in ("databricks_obo", "databricks_spn"):
             try:
-                from src.utils.databricks_auth import get_mcp_auth_headers
-                obo_headers, error = await get_mcp_auth_headers(
-                    test_data.server_url,
-                    include_sse_headers=False
-                )
-                if obo_headers:
-                    headers = obo_headers
-                    logger.debug("Using Databricks OBO authentication")
+                from src.utils.databricks_auth import get_auth_context
+                auth_context = await get_auth_context(user_token=None)
+                if auth_context and auth_context.token:
+                    headers = {"Authorization": f"Bearer {auth_context.token}"}
+                    logger.debug(f"Using {auth_context.auth_method} authentication for MCP streamable test")
                 else:
-                    logger.warning(f"Databricks OBO auth failed: {error}")
+                    logger.warning("No Databricks auth context available for MCP streamable test")
             except Exception as e:
-                logger.warning(f"Failed to get Databricks OBO headers: {e}")
+                logger.warning(f"Failed to get Databricks auth headers: {e}")
 
         try:
             from mcp.client.streamable_http import streamablehttp_client

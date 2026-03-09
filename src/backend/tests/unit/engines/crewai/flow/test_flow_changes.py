@@ -398,7 +398,7 @@ class TestFlowRunnerServiceFreshSession:
         mock_factory = make_async_session_factory(mock_initial_session, mock_post_session)
 
         # BackendFlow is re-imported inside method — patch at source module
-        with patch('src.engines.crewai.flow.flow_runner_service.async_session_factory', mock_factory), \
+        with patch('src.engines.crewai.flow.flow_runner_service._smart_db_session', mock_factory), \
              patch('src.engines.crewai.flow.flow_runner_service.FlowExecutionService', side_effect=track_fes), \
              patch('src.engines.crewai.flow.flow_runner_service.ApiKeysService') as mock_api_keys, \
              patch('src.engines.crewai.flow.backend_flow.BackendFlow') as mock_backend_flow_class:
@@ -457,7 +457,7 @@ class TestFlowRunnerServiceFreshSession:
             session_tracker.append(sess)
             return mock_svc
 
-        with patch('src.engines.crewai.flow.flow_runner_service.async_session_factory', mock_factory), \
+        with patch('src.engines.crewai.flow.flow_runner_service._smart_db_session', mock_factory), \
              patch('src.engines.crewai.flow.flow_runner_service.FlowExecutionService', side_effect=track_fes), \
              patch('src.engines.crewai.flow.flow_runner_service.ApiKeysService') as mock_api_keys, \
              patch('src.engines.crewai.flow.backend_flow.BackendFlow') as mock_backend_flow_class:
@@ -511,7 +511,7 @@ class TestFlowRunnerServiceFreshSession:
             session_tracker.append(sess)
             return mock_svc
 
-        with patch('src.engines.crewai.flow.flow_runner_service.async_session_factory', mock_factory), \
+        with patch('src.engines.crewai.flow.flow_runner_service._smart_db_session', mock_factory), \
              patch('src.engines.crewai.flow.flow_runner_service.FlowExecutionService', side_effect=track_fes), \
              patch('src.engines.crewai.flow.flow_runner_service.ApiKeysService') as mock_api_keys, \
              patch('src.engines.crewai.flow.backend_flow.BackendFlow') as mock_backend_flow_class:

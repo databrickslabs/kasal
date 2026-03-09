@@ -377,7 +377,7 @@ class TestRunDynamicFlow:
     @pytest.mark.asyncio
     async def test_run_dynamic_flow_success(self, mock_session):
         """Test successful dynamic flow execution."""
-        with patch('src.engines.crewai.flow.flow_runner_service.async_session_factory') as mock_factory:
+        with patch('src.engines.crewai.flow.flow_runner_service._smart_db_session') as mock_factory:
             mock_new_session = MagicMock()
             mock_context = MagicMock()
             mock_context.__aenter__ = AsyncMock(return_value=mock_new_session)
@@ -414,7 +414,7 @@ class TestRunDynamicFlow:
     @pytest.mark.asyncio
     async def test_run_dynamic_flow_kickoff_error(self, mock_session):
         """Test handling of kickoff error."""
-        with patch('src.engines.crewai.flow.flow_runner_service.async_session_factory') as mock_factory:
+        with patch('src.engines.crewai.flow.flow_runner_service._smart_db_session') as mock_factory:
             mock_new_session = MagicMock()
             mock_context = MagicMock()
             mock_context.__aenter__ = AsyncMock(return_value=mock_new_session)
@@ -449,7 +449,7 @@ class TestRunDynamicFlow:
     @pytest.mark.asyncio
     async def test_run_dynamic_flow_with_flow_uuid(self, mock_session):
         """Test dynamic flow execution returns flow_uuid for checkpointing."""
-        with patch('src.engines.crewai.flow.flow_runner_service.async_session_factory') as mock_factory:
+        with patch('src.engines.crewai.flow.flow_runner_service._smart_db_session') as mock_factory:
             mock_new_session = MagicMock()
             mock_context = MagicMock()
             mock_context.__aenter__ = AsyncMock(return_value=mock_new_session)
@@ -612,7 +612,7 @@ class TestRunFlowExecution:
         """Test successful flow execution."""
         flow_id = uuid.uuid4()
 
-        with patch('src.engines.crewai.flow.flow_runner_service.async_session_factory') as mock_factory:
+        with patch('src.engines.crewai.flow.flow_runner_service._smart_db_session') as mock_factory:
             mock_new_session = MagicMock()
             mock_context = MagicMock()
             mock_context.__aenter__ = AsyncMock(return_value=mock_new_session)
@@ -656,7 +656,7 @@ class TestRunFlowExecution:
     @pytest.mark.asyncio
     async def test_run_flow_execution_invalid_uuid(self, mock_session):
         """Test handling of invalid UUID string."""
-        with patch('src.engines.crewai.flow.flow_runner_service.async_session_factory') as mock_factory:
+        with patch('src.engines.crewai.flow.flow_runner_service._smart_db_session') as mock_factory:
             mock_new_session = MagicMock()
             mock_context = MagicMock()
             mock_context.__aenter__ = AsyncMock(return_value=mock_new_session)
@@ -680,7 +680,7 @@ class TestRunFlowExecution:
         """Test that starting points are built when missing."""
         flow_id = uuid.uuid4()
 
-        with patch('src.engines.crewai.flow.flow_runner_service.async_session_factory') as mock_factory:
+        with patch('src.engines.crewai.flow.flow_runner_service._smart_db_session') as mock_factory:
             mock_new_session = MagicMock()
             mock_context = MagicMock()
             mock_context.__aenter__ = AsyncMock(return_value=mock_new_session)
@@ -919,6 +919,56 @@ class TestFlowRunnerServiceConstants:
         # Check module has the expected structure
         assert hasattr(flow_runner_service, 'FlowRunnerService')
         assert hasattr(flow_runner_service, 'logger')
+
+
+class TestSmartDbSession:
+    """Tests for _smart_db_session async context manager wrapper."""
+
+    @pytest.mark.asyncio
+    async def test_smart_db_session_yields_session(self):
+        """Test that _smart_db_session yields a session and cleans up."""
+        mock_session = MagicMock(spec=AsyncSession)
+
+        async def fake_get_smart():
+            yield mock_session
+
+        with patch('src.engines.crewai.flow.flow_runner_service.get_smart_db_session', fake_get_smart):
+            from src.engines.crewai.flow.flow_runner_service import _smart_db_session
+            async with _smart_db_session() as session:
+                assert session is mock_session
+
+    @pytest.mark.asyncio
+    async def test_smart_db_session_propagates_exception(self):
+        """Test that exceptions inside _smart_db_session propagate correctly."""
+        mock_session = MagicMock(spec=AsyncSession)
+
+        async def fake_get_smart():
+            yield mock_session
+
+        with patch('src.engines.crewai.flow.flow_runner_service.get_smart_db_session', fake_get_smart):
+            from src.engines.crewai.flow.flow_runner_service import _smart_db_session
+            with pytest.raises(ValueError, match="test error"):
+                async with _smart_db_session() as session:
+                    raise ValueError("test error")
+
+    @pytest.mark.asyncio
+    async def test_safe_session_uses_smart_db(self):
+        """Test that _safe_session delegates to _smart_db_session."""
+        mock_session = MagicMock(spec=AsyncSession)
+
+        async def fake_get_smart():
+            yield mock_session
+
+        with patch('src.engines.crewai.flow.flow_runner_service.get_smart_db_session', fake_get_smart):
+            with patch('src.engines.crewai.flow.flow_runner_service.FlowExecutionService'):
+                with patch('src.engines.crewai.flow.flow_runner_service.FlowRepository'):
+                    with patch('src.engines.crewai.flow.flow_runner_service.TaskRepository'):
+                        with patch('src.engines.crewai.flow.flow_runner_service.AgentRepository'):
+                            with patch('src.engines.crewai.flow.flow_runner_service.ToolRepository'):
+                                with patch('src.engines.crewai.flow.flow_runner_service.CrewRepository'):
+                                    service = FlowRunnerService(MagicMock())
+                                    async with service._safe_session() as session:
+                                        assert session is mock_session
 
 
 class TestFlowRunnerServiceMethodSignatures:

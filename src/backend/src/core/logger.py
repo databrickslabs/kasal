@@ -13,6 +13,7 @@ import logging
 import os
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Optional
 
 class LoggerManager:
     """Manages domain-specific loggers with file and console output."""
@@ -43,6 +44,8 @@ class LoggerManager:
             self._knowledge_source_logger = None
             self._database_logger = None
             self._log_dir = None
+            self._otel_logger_provider = None
+            self._otel_handler = None
             self._initialized = True
     
     @classmethod
@@ -164,9 +167,152 @@ class LoggerManager:
         # Configure uvicorn access logging after all loggers are initialized
         self._configure_uvicorn_logging()
 
+        # Re-attach OTel handler if it was previously active (survives --reload)
+        if self._otel_handler is not None:
+            for domain_logger in self._get_all_domain_loggers():
+                domain_logger.addHandler(self._otel_handler)
+            logging.getLogger().addHandler(self._otel_handler)
+
         # Log initialization success
         self._system_logger.info(f"Logging system initialized. Log directory: {self._log_dir}")
     
+    def _get_all_domain_loggers(self) -> list:
+        """Return all initialized domain loggers."""
+        loggers = []
+        for attr in [
+            '_crew_logger', '_flow_logger', '_system_logger', '_llm_logger',
+            '_scheduler_logger', '_api_logger', '_access_logger',
+            '_guardrails_logger', '_databricks_vector_search_logger',
+            '_databricks_short_term_logger', '_databricks_long_term_logger',
+            '_databricks_entity_logger', '_documentation_embedding_logger',
+            '_knowledge_source_logger', '_database_logger',
+        ]:
+            logger = getattr(self, attr, None)
+            if logger is not None:
+                loggers.append(logger)
+        return loggers
+
+    def enable_otel_app_telemetry(self, enabled: bool = True) -> None:
+        """Enable or disable Databricks App Telemetry via OpenTelemetry (Preview).
+
+        Called from the application lifespan after DB init, reading the
+        ``otel_app_telemetry_enabled`` flag from EngineConfig.
+
+        Prerequisites (both must be true for activation):
+        1. ``enabled`` is True (persisted in DatabricksConfig DB)
+        2. ``OTEL_EXPORTER_OTLP_ENDPOINT`` env var is present (auto-injected by
+           Databricks when telemetry infrastructure is enabled via the App settings UI)
+
+        The Fluent Bit sidecar already captures system logs (raw text from stdout)
+        into otel_logs automatically. This handler adds structured OTel log records
+        with severity, trace context, and resource attributes — providing richer
+        observability data alongside the sidecar's raw captures.
+
+        Args:
+            enabled: Whether OTel App Telemetry is enabled in DB config.
+        """
+        if not enabled:
+            if self._otel_logger_provider is not None:
+                self.shutdown_otel_app_telemetry()
+            return
+
+        # Already active — nothing to do
+        if self._otel_logger_provider is not None:
+            return
+
+        endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+        if not endpoint:
+            if self._system_logger:
+                self._system_logger.info(
+                    "OTel App Telemetry enabled in config but OTEL_EXPORTER_OTLP_ENDPOINT "
+                    "not set — telemetry infrastructure not active in this environment"
+                )
+            return
+
+        # Ensure OTEL_SDK_DISABLED is not set — it causes the SDK to silently no-op
+        os.environ.pop("OTEL_SDK_DISABLED", None)
+
+        try:
+            from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+            from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+            from opentelemetry.sdk.resources import Resource
+
+            protocol = os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc").lower()
+
+            if protocol == "grpc":
+                from opentelemetry.exporter.otlp.proto.grpc._log_exporter import (
+                    OTLPLogExporter,
+                )
+            else:
+                from opentelemetry.exporter.otlp.proto.http._log_exporter import (
+                    OTLPLogExporter,
+                )
+
+            service_name = os.environ.get("OTEL_SERVICE_NAME", "kasal")
+            resource = Resource.create({"service.name": service_name})
+
+            # Use dedicated logs endpoint if set, otherwise share the main endpoint
+            logs_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", endpoint)
+            # Only allow insecure (non-TLS) channels for local development;
+            # deployed Databricks Apps always use TLS-secured sidecar endpoints.
+            is_local = not os.environ.get("DATABRICKS_APP_NAME")
+            use_insecure = (
+                is_local and logs_endpoint.startswith("http://")
+            ) if logs_endpoint else False
+            exporter = OTLPLogExporter(endpoint=logs_endpoint, insecure=use_insecure)  # type: ignore[call-arg]
+            provider = LoggerProvider(resource=resource)
+            provider.add_log_record_processor(BatchLogRecordProcessor(exporter))
+
+            otel_handler = LoggingHandler(
+                level=logging.INFO,
+                logger_provider=provider,
+            )
+
+            self._otel_logger_provider = provider
+            self._otel_handler = otel_handler
+
+            # Attach to all domain loggers (they have propagate=False so root won't reach them)
+            for domain_logger in self._get_all_domain_loggers():
+                domain_logger.addHandler(otel_handler)
+
+            # Also attach to root logger for any non-domain logs
+            logging.getLogger().addHandler(otel_handler)
+
+            if self._system_logger:
+                self._system_logger.info(
+                    f"Databricks App Telemetry (OTel) configured: "
+                    f"endpoint={endpoint}, protocol={protocol}, service={service_name}"
+                )
+
+        except ImportError as e:
+            if self._system_logger:
+                self._system_logger.warning(
+                    f"Databricks App Telemetry: required packages not installed: {e}. "
+                    "Install: opentelemetry-exporter-otlp-proto-grpc (for gRPC) or "
+                    "opentelemetry-exporter-otlp-proto-http (for HTTP)."
+                )
+        except Exception as e:
+            if self._system_logger:
+                self._system_logger.error(
+                    f"Failed to configure Databricks App Telemetry: {e}"
+                )
+
+    def shutdown_otel_app_telemetry(self) -> None:
+        """Shutdown the OTel App Telemetry provider, flushing pending logs."""
+        if self._otel_logger_provider is not None:
+            try:
+                self._otel_logger_provider.shutdown()
+                if self._system_logger:
+                    self._system_logger.info("Databricks App Telemetry (OTel) shutdown complete")
+            except Exception as e:
+                if self._system_logger:
+                    self._system_logger.warning(
+                        f"Error during OTel App Telemetry shutdown: {e}"
+                    )
+            finally:
+                self._otel_logger_provider = None
+                self._otel_handler = None
+
     def _get_logger_level(self, name: str) -> int:
         """Get the log level for a logger based on environment variables.
 
