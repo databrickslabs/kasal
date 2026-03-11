@@ -7,7 +7,8 @@ Extracts and caches semantic model metadata from Power BI:
 3. Extracts model context (measures, relationships, tables, columns) via 3-tier fallback
 4. Enriches with column metadata and sample values
 5. Extracts default filters from report (if report_id provided)
-6. Saves to cache for same-day reuse
+6. Extracts slicer visuals from report (if report_id provided)
+7. Saves to cache for same-day reuse
 
 Output is JSON consumable by the DAX tool (PowerBISemanticModelDaxTool).
 
@@ -293,8 +294,10 @@ class PowerBISemanticModelFetcherTool(BaseTool):
             "tables": [],
             "columns": [],
             "sample_data": {},
+            "slicers": [],
         }
         default_filters = {}
+        slicers: List[Dict[str, Any]] = []
         cache_hit = False
 
         try:
@@ -328,12 +331,15 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 }
                 if report_id and "default_filters" in cached_metadata:
                     default_filters = cached_metadata["default_filters"] or {}
+                if "slicers" in cached_metadata:
+                    slicers = cached_metadata["slicers"] or []
                 logger.info(
                     f"[CACHE HIT] dataset {dataset_id}: "
                     f"{len(model_context['measures'])} measures, "
                     f"{len(cached_tables)} tables, "
                     f"{len(cached_columns)} columns, "
-                    f"{len(cached_sample_data)} sample_data entries"
+                    f"{len(cached_sample_data)} sample_data entries, "
+                    f"{len(slicers)} slicers"
                 )
                 # Re-fetch sample data ONCE if cache has empty sample_data but tables have columns
                 if not cached_sample_data and model_context.get("columns"):
@@ -357,6 +363,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                                     },
                                     sample_data=model_context["sample_data"],
                                     default_filters=default_filters if report_id else None,
+                                    slicers=slicers if report_id else None,
                                 )
                                 await cache_service.save_metadata(
                                     group_id=group_id,
@@ -370,6 +377,42 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                             logger.warning(f"[CACHE FIX] Failed to update cache with sample data: {e}")
                     except Exception as e:
                         logger.warning(f"[CACHE FIX] Could not fetch sample data: {e}")
+                # Re-fetch slicers ONCE if cache has no slicers but report_id is present
+                if report_id and "slicers" not in cached_metadata:
+                    try:
+                        logger.info("[CACHE FIX] Slicers missing from cache — fetching once")
+                        report_parts = await self._extract_report_definition_parts(
+                            workspace_id, report_id, access_token
+                        )
+                        slicers = self._extract_slicers_from_report(report_parts)
+                        logger.info(f"[CACHE FIX] Fetched {len(slicers)} slicers — persisting to cache")
+                        # Persist updated cache so next run skips re-fetch
+                        try:
+                            async with async_session_factory() as session:
+                                cache_service = PowerBISemanticModelCacheService(session)
+                                updated_metadata = cache_service.build_metadata_dict(
+                                    measures=model_context.get("measures", []),
+                                    relationships=model_context.get("relationships", []),
+                                    schema={
+                                        "tables": model_context.get("tables", []),
+                                        "columns": model_context.get("columns", []),
+                                    },
+                                    sample_data=model_context.get("sample_data", {}),
+                                    default_filters=default_filters if report_id else None,
+                                    slicers=slicers,
+                                )
+                                await cache_service.save_metadata(
+                                    group_id=group_id,
+                                    dataset_id=dataset_id,
+                                    workspace_id=workspace_id,
+                                    metadata=updated_metadata,
+                                    report_id=report_id,
+                                )
+                                logger.info("[CACHE UPDATED] Slicers now persisted — next run will be instant")
+                        except Exception as e:
+                            logger.warning(f"[CACHE FIX] Failed to update cache with slicers: {e}")
+                    except Exception as e:
+                        logger.warning(f"[CACHE FIX] Could not fetch slicers: {e}")
             else:
                 logger.info(f"[CACHE MISS] Fetching fresh metadata for dataset {dataset_id}")
         except Exception as e:
@@ -383,7 +426,8 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 )
                 logger.info(
                     f"[FetcherTool] Extracted: {len(model_context['measures'])} measures, "
-                    f"{len(model_context['relationships'])} relationships"
+                    f"{len(model_context['relationships'])} relationships, "
+                    f"{len(slicers)} slicers"
                 )
 
                 # Step 2b: Enrich
@@ -394,14 +438,19 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 except Exception as e:
                     logger.warning(f"[FetcherTool] Enrichment failed (continuing): {e}")
 
-                # Step 2c: Extract default filters
+                # Step 2c: Extract default filters and slicers from report definition
                 if report_id:
                     try:
-                        default_filters = await self._extract_default_filters(
+                        report_parts = await self._extract_report_definition_parts(
                             workspace_id, report_id, access_token
                         )
+                        default_filters = await self._extract_default_filters(
+                            workspace_id, report_id, access_token,
+                            report_parts=report_parts,
+                        )
+                        slicers = self._extract_slicers_from_report(report_parts)
                     except Exception as e:
-                        logger.warning(f"[FetcherTool] Filter extraction failed: {e}")
+                        logger.warning(f"[FetcherTool] Report extraction failed: {e}")
 
                 # Step 2d: Save to cache
                 try:
@@ -416,6 +465,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                             },
                             sample_data=model_context.get("sample_data", {}),
                             default_filters=default_filters if report_id else None,
+                            slicers=slicers if report_id else None,
                         )
                         await cache_service.save_metadata(
                             group_id=group_id,
@@ -432,6 +482,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 logger.error(f"[FetcherTool] Model extraction error: {e}")
                 return json.dumps({"error": f"Model extraction error: {str(e)}"})
 
+        # Log full model context details
+        self._log_model_context_details(model_context, default_filters, slicers)
+
         # Build output
         output = {
             "workspace_id": workspace_id,
@@ -444,17 +497,63 @@ class PowerBISemanticModelFetcherTool(BaseTool):
             "columns": model_context.get("columns", []),
             "sample_data": model_context.get("sample_data", {}),
             "default_filters": default_filters,
+            "slicers": slicers,
             "summary": {
                 "measure_count": len(model_context.get("measures", [])),
                 "table_count": len(model_context.get("tables", [])),
                 "relationship_count": len(model_context.get("relationships", [])),
                 "filter_count": len(default_filters),
+                "slicer_count": len(slicers),
             },
         }
 
         if output_format == "markdown":
             return self._format_as_markdown(output)
         return json.dumps(output, indent=2, default=str)
+
+    def _log_model_context_details(
+        self,
+        model_context: Dict[str, Any],
+        default_filters: Dict[str, Any],
+        slicers: List[Dict[str, Any]],
+    ) -> None:
+        """Log every item in the model context line-by-line for crew.log diagnostics."""
+        tag = "[Model Context]"
+
+        # Measures
+        for m in model_context.get("measures", []):
+            expr = (m.get("expression") or "")[:120]
+            logger.info(f"{tag} MEASURE: {m.get('table', '')}.{m['name']} = {expr}")
+
+        # Relationships
+        for r in model_context.get("relationships", []):
+            logger.info(
+                f"{tag} RELATIONSHIP: {r.get('fromTable', '')}.{r.get('fromColumn', '')} "
+                f"→ {r.get('toTable', '')}.{r.get('toColumn', '')} "
+                f"({r.get('crossFilteringBehavior', '')})"
+            )
+
+        # Tables + columns
+        for t in model_context.get("tables", []):
+            cols = t.get("columns", [])
+            logger.info(f"{tag} TABLE: {t['name']} ({len(cols)} columns): {cols}")
+
+        # Sample data
+        for table_col, values in model_context.get("sample_data", {}).items():
+            preview = str(values)[:200]
+            logger.info(f"{tag} SAMPLE: {table_col} → {preview}")
+
+        # Default filters
+        for name, desc in default_filters.items():
+            logger.info(f"{tag} FILTER: {name} → {desc}")
+
+        # Slicers
+        for s in slicers:
+            logger.info(
+                f"{tag} SLICER: {s.get('title', '')} "
+                f"(Page: {s.get('page_name', '')}) → "
+                f"{s.get('table', '')}[{s.get('column', '')}]"
+            )
 
     def _format_as_markdown(self, output: Dict[str, Any]) -> str:
         """Format fetcher output as markdown."""
@@ -468,7 +567,8 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         lines.append(f"- **Measures**: {summary['measure_count']}")
         lines.append(f"- **Tables**: {summary['table_count']}")
         lines.append(f"- **Relationships**: {summary['relationship_count']}")
-        lines.append(f"- **Default Filters**: {summary['filter_count']}\n")
+        lines.append(f"- **Default Filters**: {summary['filter_count']}")
+        lines.append(f"- **Slicers**: {summary.get('slicer_count', 0)}\n")
 
         measures = output.get("measures", [])
         if measures:
@@ -492,6 +592,17 @@ class PowerBISemanticModelFetcherTool(BaseTool):
             lines.append("## Default Filters\n")
             for name, desc in filters.items():
                 lines.append(f"- **{name}**: {desc}")
+            lines.append("")
+
+        slicer_list = output.get("slicers", [])
+        if slicer_list:
+            lines.append("## Slicers\n")
+            for s in slicer_list:
+                title = s.get("title", s.get("visual_type", "Slicer"))
+                page = s.get("page_name", "Unknown")
+                table = s.get("table", "")
+                column = s.get("column", "")
+                lines.append(f"- **{title}** (Page: {page}): `{table}[{column}]`")
             lines.append("")
 
         return "\n".join(lines)
@@ -1029,44 +1140,391 @@ class PowerBISemanticModelFetcherTool(BaseTool):
     # Filter Extraction
     # =====================================================================
 
-    async def _extract_default_filters(
+    async def _extract_report_definition_parts(
         self, workspace_id: str, report_id: str, access_token: str
+    ) -> List[Dict[str, Any]]:
+        """Fetch report definition parts from Fabric API.
+
+        Returns the raw list of report definition parts (base64-encoded payloads).
+        Handles both synchronous (200) and asynchronous (202) API responses.
+        """
+        logger.info(f"[Report Definition] Fetching report definition for report {report_id}")
+
+        url = f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}/reports/{report_id}/getDefinition"
+        headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, headers=headers, json={}, timeout=60.0)
+
+            if response.status_code == 202:
+                location = response.headers.get("Location")
+                if location:
+                    for _ in range(10):
+                        await asyncio.sleep(2)
+                        poll_response = await client.get(location, headers=headers)
+                        poll_data = poll_response.json()
+                        if poll_data.get("status") == "Succeeded":
+                            result_url = location + "/result"
+                            result_response = await client.get(result_url, headers=headers)
+                            result_response.raise_for_status()
+                            parts = result_response.json().get("definition", {}).get("parts", [])
+                            logger.info(f"[Report Definition] Got {len(parts)} parts (async)")
+                            return parts
+                        elif poll_data.get("status") == "Failed":
+                            logger.warning("[Report Definition] Async definition request failed")
+                            return []
+            elif response.status_code == 200:
+                parts = response.json().get("definition", {}).get("parts", [])
+                logger.info(f"[Report Definition] Got {len(parts)} parts (sync)")
+                return parts
+
+        return []
+
+    async def _extract_default_filters(
+        self, workspace_id: str, report_id: str, access_token: str,
+        report_parts: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
-        """Extract default filters from Power BI report definition via Fabric API."""
+        """Extract default filters from Power BI report definition via Fabric API.
+
+        Args:
+            workspace_id: Power BI workspace ID
+            report_id: Power BI report ID
+            access_token: OAuth access token
+            report_parts: Pre-fetched report definition parts (avoids duplicate API call)
+        """
         logger.info(f"[Filter Extraction] Extracting filters from report {report_id}")
-        filters: Dict[str, Any] = {}
 
         try:
-            url = f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}/reports/{report_id}/getDefinition"
-            headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
-
-            async with httpx.AsyncClient() as client:
-                response = await client.post(url, headers=headers, json={}, timeout=60.0)
-
-                if response.status_code == 202:
-                    location = response.headers.get("Location")
-                    if location:
-                        for _ in range(10):
-                            await asyncio.sleep(2)
-                            poll_response = await client.get(location, headers=headers)
-                            poll_data = poll_response.json()
-                            if poll_data.get("status") == "Succeeded":
-                                result_url = location + "/result"
-                                result_response = await client.get(result_url, headers=headers)
-                                result_response.raise_for_status()
-                                report_parts = result_response.json().get("definition", {}).get("parts", [])
-                                filters = self._parse_tmdl_for_filters(report_parts)
-                                break
-                            elif poll_data.get("status") == "Failed":
-                                break
-                elif response.status_code == 200:
-                    report_parts = response.json().get("definition", {}).get("parts", [])
-                    filters = self._parse_tmdl_for_filters(report_parts)
-
+            if report_parts is None:
+                report_parts = await self._extract_report_definition_parts(
+                    workspace_id, report_id, access_token
+                )
+            return self._parse_tmdl_for_filters(report_parts)
         except Exception as e:
             logger.warning(f"[Filter Extraction] Error: {e}")
+            return {}
 
-        return filters
+    # =====================================================================
+    # Slicer Extraction
+    # =====================================================================
+
+    def _extract_slicers_from_report(self, report_parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Extract slicer visuals from Power BI report definition (PBIR format).
+
+        Supports two PBIR formats:
+        1. Separate files: definition/pages/{pageId}/visuals/{visualId}/visual.json
+        2. Embedded in report.json: visuals inside each page's configuration
+        """
+        slicers: List[Dict[str, Any]] = []
+        SLICER_TYPES = {
+            "slicer", "listSlicer", "dateSlicer", "relativeDateSlicer",
+            "advancedSlicerVisual", "chicletSlicer", "timeline",
+        }
+
+
+        # Step 1: Build page_id → page_name map from page.json files
+        page_names: Dict[str, str] = {}
+        for part in report_parts:
+            path = part.get("path", "")
+            path_lower = path.lower()
+            if "/pages/" in path_lower and path_lower.endswith("/page.json"):
+                try:
+                    payload = part.get("payload", "")
+                    content = base64.b64decode(payload).decode("utf-8")
+                    page_data = json.loads(content)
+                    path_parts = path.split("/")
+                    page_id = None
+                    for key in ("pages", "Pages"):
+                        if key in path_parts:
+                            idx = path_parts.index(key) + 1
+                            page_id = path_parts[idx] if idx < len(path_parts) else None
+                            break
+                    if not page_id and len(path_parts) >= 2:
+                        page_id = path_parts[-2]
+                    if page_id:
+                        display_name = page_data.get("displayName", page_data.get("name", page_id))
+                        page_names[page_id] = display_name
+                except Exception as e:
+                    logger.debug(f"[Slicer Extraction] Error parsing page.json at {path}: {e}")
+
+        # Step 2: Parse visual.json files (Method 1 — separate files)
+        for part in report_parts:
+            path = part.get("path", "")
+            path_lower = path.lower()
+            if "/visuals/" in path_lower and path_lower.endswith("/visual.json"):
+                try:
+                    payload = part.get("payload", "")
+                    content = base64.b64decode(payload).decode("utf-8")
+                    visual_data = json.loads(content)
+
+                    visual_type = visual_data.get("visual", {}).get("visualType", "")
+                    if visual_type.lower() not in {s.lower() for s in SLICER_TYPES}:
+                        continue
+
+                    # Extract page_id and visual_id from path
+                    path_parts = path.split("/")
+                    page_id = None
+                    visual_id = None
+                    for key in ("pages", "Pages"):
+                        if key in path_parts:
+                            idx = path_parts.index(key) + 1
+                            page_id = path_parts[idx] if idx < len(path_parts) else None
+                            break
+                    for key in ("visuals", "Visuals"):
+                        if key in path_parts:
+                            idx = path_parts.index(key) + 1
+                            visual_id = path_parts[idx] if idx < len(path_parts) else None
+                            break
+                    if not visual_id and len(path_parts) >= 2:
+                        visual_id = path_parts[-2]
+
+                    # Extract title
+                    title = visual_data.get("visual", {}).get("title", "")
+                    if not title:
+                        vcobjects = visual_data.get("visual", {}).get("vcObjects", {})
+                        title_obj = vcobjects.get("title", [{}])
+                        if title_obj and isinstance(title_obj, list) and len(title_obj) > 0:
+                            title = title_obj[0].get("properties", {}).get("text", {}).get("expr", {}).get("Literal", {}).get("Value", "")
+                            if isinstance(title, str):
+                                title = title.strip("'\"")
+
+                    # Extract table/column binding from queryDefinition
+                    table, column = self._extract_slicer_binding(visual_data.get("visual", {}))
+
+                    slicer = {
+                        "page_id": page_id,
+                        "page_name": page_names.get(page_id, "Unknown") if page_id else "Unknown",
+                        "visual_id": visual_id,
+                        "visual_type": visual_type,
+                        "title": title or visual_type,
+                        "table": table,
+                        "column": column,
+                    }
+                    slicers.append(slicer)
+                    logger.info(f"[Slicer Extraction] Found slicer: {slicer['title']} → {table}[{column}]")
+
+                except Exception as e:
+                    logger.debug(f"[Slicer Extraction] Error parsing visual.json at {path}: {e}")
+
+        # Step 3: Fallback — parse from report.json embedded format (Method 2)
+        if not slicers:
+            slicers = self._extract_slicers_from_embedded_report(report_parts, SLICER_TYPES)
+
+        logger.info(f"[Slicer Extraction] Total slicers found: {len(slicers)}")
+        return slicers
+
+    def _extract_slicers_from_embedded_report(
+        self, report_parts: List[Dict[str, Any]], slicer_types: set
+    ) -> List[Dict[str, Any]]:
+        """Extract slicers from report.json embedded format (older PBIR)."""
+        slicers: List[Dict[str, Any]] = []
+
+        for part in report_parts:
+            path = part.get("path", "")
+            if not (path.lower() == "report.json" or path.lower().endswith("/report.json")):
+                continue
+
+            try:
+                payload = part.get("payload", "")
+                content = base64.b64decode(payload).decode("utf-8")
+                report_data = json.loads(content)
+
+                # Find pages array
+                pages_data = (
+                    report_data.get("pages")
+                    or report_data.get("sections")
+                    or report_data.get("reportPages")
+                )
+                if not pages_data or not isinstance(pages_data, list):
+                    continue
+
+                for page_data in pages_data:
+                    if not isinstance(page_data, dict):
+                        continue
+                    page_name = page_data.get("displayName", page_data.get("name", "Unknown"))
+                    page_id = page_data.get("name") or page_data.get("id")
+
+                    # Find visuals within the page
+                    visuals_data = page_data.get("visualContainers") or page_data.get("visuals")
+                    if not visuals_data or not isinstance(visuals_data, list):
+                        continue
+
+                    for vis_idx, vis_data in enumerate(visuals_data):
+                        if not isinstance(vis_data, dict):
+                            continue
+
+                        # Parse config (may be a JSON string)
+                        parsed_config = {}
+                        visual_type = ""
+                        if "config" in vis_data:
+                            config_val = vis_data["config"]
+                            if isinstance(config_val, str):
+                                try:
+                                    parsed_config = json.loads(config_val)
+                                except json.JSONDecodeError:
+                                    continue
+                            elif isinstance(config_val, dict):
+                                parsed_config = config_val
+                            visual_type = parsed_config.get("singleVisual", {}).get("visualType", "")
+                        elif "visualType" in vis_data:
+                            visual_type = vis_data.get("visualType", "")
+                            parsed_config = vis_data
+                        elif "visual" in vis_data and isinstance(vis_data["visual"], dict):
+                            visual_type = vis_data["visual"].get("visualType", "")
+                            parsed_config = vis_data
+
+                        if visual_type.lower() not in {s.lower() for s in slicer_types}:
+                            continue
+
+                        visual_id = vis_data.get("name") or vis_data.get("id") or f"visual_{vis_idx}"
+
+                        # Extract title from config
+                        title = ""
+                        sv = parsed_config.get("singleVisual", {})
+                        vcobjects = sv.get("vcObjects", {})
+                        title_obj = vcobjects.get("title", [{}])
+                        if title_obj and isinstance(title_obj, list) and len(title_obj) > 0:
+                            title = title_obj[0].get("properties", {}).get("text", {}).get("expr", {}).get("Literal", {}).get("Value", "")
+                            if isinstance(title, str):
+                                title = title.strip("'\"")
+
+                        # Extract table/column binding
+                        table, column = self._extract_slicer_binding_embedded(parsed_config)
+
+                        slicer = {
+                            "page_id": page_id,
+                            "page_name": page_name,
+                            "visual_id": visual_id,
+                            "visual_type": visual_type,
+                            "title": title or visual_type,
+                            "table": table,
+                            "column": column,
+                        }
+                        slicers.append(slicer)
+                        logger.info(f"[Slicer Extraction] Found embedded slicer: {slicer['title']} → {table}[{column}]")
+
+            except Exception as e:
+                logger.debug(f"[Slicer Extraction] Error parsing report.json: {e}")
+
+        return slicers
+
+    def _extract_slicer_binding(self, visual: Dict[str, Any]) -> tuple:
+        """Extract table and column from a PBIR separate-file visual's queryDefinition.
+
+        Returns:
+            (table_name, column_name) tuple
+        """
+        table = ""
+        column = ""
+        try:
+            query_def = visual.get("queryDefinition", {})
+            # Try "from" → entities
+            from_items = query_def.get("from", [])
+            entity_map: Dict[str, str] = {}
+            for item in from_items:
+                alias = item.get("name", "")
+                entity = item.get("entity", "")
+                if alias and entity:
+                    entity_map[alias] = entity
+
+            # Try "select" → column property
+            select_items = query_def.get("select", [])
+            for sel in select_items:
+                col_ref = sel.get("column", sel.get("Column", {}))
+                if col_ref:
+                    expr = col_ref.get("expression", col_ref.get("Expression", {}))
+                    source_ref = expr.get("sourceRef", expr.get("SourceRef", {}))
+                    alias = source_ref.get("source", source_ref.get("Source", ""))
+                    prop = col_ref.get("property", col_ref.get("Property", ""))
+                    if alias and prop:
+                        table = entity_map.get(alias, alias)
+                        column = prop
+                        return (table, column)
+
+            # Fallback: dataTransforms.selects
+            data_transforms = visual.get("dataTransforms", {})
+            selects = data_transforms.get("selects", [])
+            for sel in selects:
+                query_ref = sel.get("queryRef", "")
+                if "." in query_ref:
+                    parts = query_ref.split(".", 1)
+                    alias = parts[0]
+                    column = parts[1]
+                    table = entity_map.get(alias, alias)
+                    return (table, column)
+                display_name = sel.get("displayName", "")
+                if display_name:
+                    column = display_name
+                    # Try to find table from entity_map
+                    if entity_map:
+                        table = next(iter(entity_map.values()), "")
+                    return (table, column)
+
+        except Exception as e:
+            logger.debug(f"[Slicer Extraction] Error extracting binding: {e}")
+
+        return (table, column)
+
+    def _extract_slicer_binding_embedded(self, parsed_config: Dict[str, Any]) -> tuple:
+        """Extract table and column from an embedded-format visual's prototypeQuery.
+
+        Returns:
+            (table_name, column_name) tuple
+        """
+        table = ""
+        column = ""
+        try:
+            sv = parsed_config.get("singleVisual", {})
+
+            # Try prototypeQuery
+            proto_query = sv.get("prototypeQuery", {})
+            from_items = proto_query.get("From", [])
+            entity_map: Dict[str, str] = {}
+            for item in from_items:
+                alias = item.get("Name", "")
+                entity = item.get("Entity", "")
+                if alias and entity:
+                    entity_map[alias] = entity
+
+            select_items = proto_query.get("Select", [])
+            for sel in select_items:
+                col_ref = sel.get("Column", {})
+                if col_ref:
+                    expr = col_ref.get("Expression", {})
+                    source_ref = expr.get("SourceRef", {})
+                    alias = source_ref.get("Source", "")
+                    prop = col_ref.get("Property", "")
+                    if alias and prop:
+                        table = entity_map.get(alias, alias)
+                        column = prop
+                        return (table, column)
+
+            # Fallback: dataTransforms
+            data_transforms = sv.get("dataTransforms", parsed_config.get("dataTransforms", {}))
+            selects = data_transforms.get("selects", [])
+            for sel in selects:
+                query_ref = sel.get("queryRef", "")
+                if "." in query_ref:
+                    parts = query_ref.split(".", 1)
+                    alias = parts[0]
+                    column = parts[1]
+                    table = entity_map.get(alias, alias)
+                    return (table, column)
+                display_name = sel.get("displayName", "")
+                if display_name:
+                    column = display_name
+                    if entity_map:
+                        table = next(iter(entity_map.values()), "")
+                    return (table, column)
+
+        except Exception as e:
+            logger.debug(f"[Slicer Extraction] Error extracting embedded binding: {e}")
+
+        return (table, column)
+
+    # =====================================================================
+    # Filter Parsing
+    # =====================================================================
 
     def _parse_tmdl_for_filters(self, tmdl_parts: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Parse report definition (PBIR format) to extract filters."""

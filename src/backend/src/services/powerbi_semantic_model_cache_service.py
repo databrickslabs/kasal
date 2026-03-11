@@ -115,7 +115,8 @@ class PowerBISemanticModelCacheService:
         relationships: list,
         schema: Dict[str, Any],
         sample_data: Dict[str, Any],
-        default_filters: Optional[Dict[str, Any]] = None
+        default_filters: Optional[Dict[str, Any]] = None,
+        slicers: Optional[list] = None
     ) -> Dict[str, Any]:
         """
         Build metadata dictionary for caching.
@@ -126,6 +127,7 @@ class PowerBISemanticModelCacheService:
             schema: Schema information (tables, columns)
             sample_data: Sample data values
             default_filters: Optional default filters from report
+            slicers: Optional list of slicer definitions from report
 
         Returns:
             Metadata dictionary ready for caching
@@ -139,5 +141,8 @@ class PowerBISemanticModelCacheService:
 
         if default_filters:
             metadata["default_filters"] = default_filters
+
+        if slicers:
+            metadata["slicers"] = slicers
 
         return metadata
