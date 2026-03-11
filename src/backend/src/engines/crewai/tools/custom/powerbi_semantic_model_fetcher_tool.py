@@ -385,7 +385,15 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                             workspace_id, report_id, access_token
                         )
                         slicers = self._extract_slicers_from_report(report_parts)
-                        logger.info(f"[CACHE FIX] Fetched {len(slicers)} slicers — persisting to cache")
+                        logger.info(f"[CACHE FIX] Fetched {len(slicers)} slicers — fetching distinct values")
+                        # Fetch distinct values for slicer columns
+                        if slicers:
+                            try:
+                                await self._fetch_slicer_distinct_values(
+                                    workspace_id, dataset_id, access_token, slicers, model_context
+                                )
+                            except Exception as e:
+                                logger.warning(f"[CACHE FIX] Slicer distinct values failed: {e}")
                         # Persist updated cache so next run skips re-fetch
                         try:
                             async with async_session_factory() as session:
@@ -413,6 +421,43 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                             logger.warning(f"[CACHE FIX] Failed to update cache with slicers: {e}")
                     except Exception as e:
                         logger.warning(f"[CACHE FIX] Could not fetch slicers: {e}")
+                # Backfill slicer distinct values if slicers exist but sample_data lacks them
+                if slicers and not any(
+                    v.get("type") == "slicer_values"
+                    for v in model_context.get("sample_data", {}).values()
+                ):
+                    try:
+                        logger.info("[CACHE FIX] Slicer distinct values missing — fetching once")
+                        await self._fetch_slicer_distinct_values(
+                            workspace_id, dataset_id, access_token, slicers, model_context
+                        )
+                        # Re-persist cache with updated sample_data
+                        try:
+                            async with async_session_factory() as session:
+                                cache_service = PowerBISemanticModelCacheService(session)
+                                updated_metadata = cache_service.build_metadata_dict(
+                                    measures=model_context.get("measures", []),
+                                    relationships=model_context.get("relationships", []),
+                                    schema={
+                                        "tables": model_context.get("tables", []),
+                                        "columns": model_context.get("columns", []),
+                                    },
+                                    sample_data=model_context.get("sample_data", {}),
+                                    default_filters=default_filters if report_id else None,
+                                    slicers=slicers,
+                                )
+                                await cache_service.save_metadata(
+                                    group_id=group_id,
+                                    dataset_id=dataset_id,
+                                    workspace_id=workspace_id,
+                                    metadata=updated_metadata,
+                                    report_id=report_id,
+                                )
+                                logger.info("[CACHE UPDATED] Slicer distinct values now persisted")
+                        except Exception as e:
+                            logger.warning(f"[CACHE FIX] Failed to update cache with slicer values: {e}")
+                    except Exception as e:
+                        logger.warning(f"[CACHE FIX] Could not fetch slicer distinct values: {e}")
             else:
                 logger.info(f"[CACHE MISS] Fetching fresh metadata for dataset {dataset_id}")
         except Exception as e:
@@ -451,6 +496,15 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                         slicers = self._extract_slicers_from_report(report_parts)
                     except Exception as e:
                         logger.warning(f"[FetcherTool] Report extraction failed: {e}")
+
+                # Step 2c.2: Fetch distinct values for slicer columns
+                if slicers:
+                    try:
+                        await self._fetch_slicer_distinct_values(
+                            workspace_id, dataset_id, access_token, slicers, model_context
+                        )
+                    except Exception as e:
+                        logger.warning(f"[FetcherTool] Slicer distinct values failed: {e}")
 
                 # Step 2d: Save to cache
                 try:
@@ -1102,6 +1156,56 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                     continue
         logger.info(f"[Sample Values] Fetched {len(sample_values)} column sample value sets")
         return sample_values
+
+    async def _fetch_slicer_distinct_values(
+        self, workspace_id: str, dataset_id: str, access_token: str,
+        slicers: List[Dict[str, Any]], model_context: Dict[str, Any]
+    ) -> None:
+        """Fetch ALL distinct values for slicer columns and replace sample_data entries.
+
+        Slicers need the full list of filterable values, not just a TOPN sample.
+        Mutates model_context["sample_data"] in place.
+        """
+        sample_data = model_context.setdefault("sample_data", {})
+
+        # Deduplicate slicer columns (same table+column can appear on multiple pages)
+        seen: set = set()
+        unique_slicer_cols: List[tuple] = []
+        for s in slicers:
+            table = s.get("table", "")
+            column = s.get("column", "")
+            if not table or not column:
+                continue
+            key = (table, column)
+            if key not in seen:
+                seen.add(key)
+                unique_slicer_cols.append(key)
+
+        logger.info(f"[Slicer Values] Fetching distinct values for {len(unique_slicer_cols)} slicer columns")
+
+        for table, column in unique_slicer_cols:
+            try:
+                dax_query = f"EVALUATE DISTINCT('{table}'[{column}])"
+                result = await self._execute_dax_query(workspace_id, dataset_id, access_token, dax_query)
+                if result.get("success") and result.get("data"):
+                    values = [list(row.values())[0] for row in result["data"]]
+                    sample_key = f"{table}[{column}]"
+                    old_count = len(sample_data.get(sample_key, {}).get("sample_values", []))
+                    sample_data[sample_key] = {
+                        "type": "slicer_values",
+                        "sample_values": values,
+                    }
+                    logger.info(
+                        f"[Slicer Values] {sample_key}: {len(values)} distinct values "
+                        f"(replaced {old_count} sample values)"
+                    )
+                elif result.get("error"):
+                    logger.warning(f"[Slicer Values] DAX error for '{table}'[{column}]: {result['error']}")
+            except Exception as e:
+                logger.warning(f"[Slicer Values] Exception for '{table}'[{column}]: {e}")
+                continue
+
+        logger.info(f"[Slicer Values] Done — {len(unique_slicer_cols)} slicer columns processed")
 
     async def _execute_dax_query(
         self, workspace_id: str, dataset_id: str, access_token: str, dax_query: str
