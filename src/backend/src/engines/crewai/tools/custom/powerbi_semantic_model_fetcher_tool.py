@@ -308,9 +308,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 )
             if cached_metadata:
                 cache_hit = True
-                logger.info(f"[CACHE HIT] Using cached metadata for dataset {dataset_id}")
                 cached_tables = cached_metadata.get("schema", {}).get("tables", [])
                 cached_columns = cached_metadata.get("schema", {}).get("columns", [])
+                cached_sample_data = cached_metadata.get("sample_data", {})
                 # Rebuild top-level columns from per-table columns if cache has stale empty list
                 if not cached_columns and cached_tables:
                     for table in cached_tables:
@@ -324,46 +324,52 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                     "relationships": cached_metadata.get("relationships", []),
                     "tables": cached_tables,
                     "columns": cached_columns,
-                    "sample_data": cached_metadata.get("sample_data", {}),
+                    "sample_data": cached_sample_data,
                 }
                 if report_id and "default_filters" in cached_metadata:
                     default_filters = cached_metadata["default_filters"] or {}
-                # Re-fetch sample data if cache has empty sample_data but tables have columns
-                if not model_context.get("sample_data") and model_context.get("columns"):
+                logger.info(
+                    f"[CACHE HIT] dataset {dataset_id}: "
+                    f"{len(model_context['measures'])} measures, "
+                    f"{len(cached_tables)} tables, "
+                    f"{len(cached_columns)} columns, "
+                    f"{len(cached_sample_data)} sample_data entries"
+                )
+                # Re-fetch sample data ONCE if cache has empty sample_data but tables have columns
+                if not cached_sample_data and model_context.get("columns"):
                     try:
-                        logger.info("[CACHE FIX] Re-fetching sample data for cached metadata with empty sample_data")
+                        logger.info("[CACHE FIX] Sample data missing from cache — fetching once")
                         sample_values = await self._fetch_sample_column_values(
                             workspace_id, dataset_id, access_token, model_context, config
                         )
-                        if sample_values:
-                            model_context["sample_data"] = sample_values
-                            logger.info(f"[CACHE FIX] Fetched sample values for {len(sample_values)} columns")
-                            # Update cache with sample data
-                            try:
-                                async with async_session_factory() as session:
-                                    cache_service = PowerBISemanticModelCacheService(session)
-                                    cache_metadata = cache_service.build_metadata_dict(
-                                        measures=model_context.get("measures", []),
-                                        relationships=model_context.get("relationships", []),
-                                        schema={
-                                            "tables": model_context.get("tables", []),
-                                            "columns": model_context.get("columns", []),
-                                        },
-                                        sample_data=sample_values,
-                                        default_filters=default_filters if report_id else None,
-                                    )
-                                    await cache_service.save_metadata(
-                                        group_id=group_id,
-                                        dataset_id=dataset_id,
-                                        workspace_id=workspace_id,
-                                        metadata=cache_metadata,
-                                        report_id=report_id,
-                                    )
-                                    logger.info("[CACHE FIX] Updated cache with sample data")
-                            except Exception as e:
-                                logger.warning(f"[CACHE FIX] Failed to update cache: {e}")
+                        model_context["sample_data"] = sample_values or {}
+                        logger.info(f"[CACHE FIX] Fetched {len(sample_values)} sample value sets — persisting to cache")
+                        # Persist updated cache so next run skips re-fetch
+                        try:
+                            async with async_session_factory() as session:
+                                cache_service = PowerBISemanticModelCacheService(session)
+                                updated_metadata = cache_service.build_metadata_dict(
+                                    measures=model_context.get("measures", []),
+                                    relationships=model_context.get("relationships", []),
+                                    schema={
+                                        "tables": model_context.get("tables", []),
+                                        "columns": model_context.get("columns", []),
+                                    },
+                                    sample_data=model_context["sample_data"],
+                                    default_filters=default_filters if report_id else None,
+                                )
+                                await cache_service.save_metadata(
+                                    group_id=group_id,
+                                    dataset_id=dataset_id,
+                                    workspace_id=workspace_id,
+                                    metadata=updated_metadata,
+                                    report_id=report_id,
+                                )
+                                logger.info("[CACHE UPDATED] Sample data now persisted — next run will be instant")
+                        except Exception as e:
+                            logger.warning(f"[CACHE FIX] Failed to update cache with sample data: {e}")
                     except Exception as e:
-                        logger.warning(f"[CACHE FIX] Could not re-fetch sample data: {e}")
+                        logger.warning(f"[CACHE FIX] Could not fetch sample data: {e}")
             else:
                 logger.info(f"[CACHE MISS] Fetching fresh metadata for dataset {dataset_id}")
         except Exception as e:
