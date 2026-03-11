@@ -458,6 +458,49 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                             logger.warning(f"[CACHE FIX] Failed to update cache with slicer values: {e}")
                     except Exception as e:
                         logger.warning(f"[CACHE FIX] Could not fetch slicer distinct values: {e}")
+                # Re-validate filters: skip parameters + check datatypes (one-time backfill)
+                if report_id and default_filters and "_filters_validated" not in cached_metadata:
+                    try:
+                        logger.info("[CACHE FIX] Re-validating filters (parameter exclusion + datatype check)")
+                        report_parts = await self._extract_report_definition_parts(
+                            workspace_id, report_id, access_token
+                        )
+                        old_count = len(default_filters)
+                        default_filters = self._parse_tmdl_for_filters(
+                            report_parts, model_context=model_context
+                        )
+                        logger.info(
+                            f"[CACHE FIX] Filters re-validated: {old_count} → {len(default_filters)} "
+                            f"(removed {old_count - len(default_filters)} parameter filters)"
+                        )
+                        # Re-persist with validated filters + marker
+                        try:
+                            async with async_session_factory() as session:
+                                cache_service = PowerBISemanticModelCacheService(session)
+                                updated_metadata = cache_service.build_metadata_dict(
+                                    measures=model_context.get("measures", []),
+                                    relationships=model_context.get("relationships", []),
+                                    schema={
+                                        "tables": model_context.get("tables", []),
+                                        "columns": model_context.get("columns", []),
+                                    },
+                                    sample_data=model_context.get("sample_data", {}),
+                                    default_filters=default_filters,
+                                    slicers=slicers if slicers else None,
+                                )
+                                updated_metadata["_filters_validated"] = True
+                                await cache_service.save_metadata(
+                                    group_id=group_id,
+                                    dataset_id=dataset_id,
+                                    workspace_id=workspace_id,
+                                    metadata=updated_metadata,
+                                    report_id=report_id,
+                                )
+                                logger.info("[CACHE UPDATED] Validated filters now persisted")
+                        except Exception as e:
+                            logger.warning(f"[CACHE FIX] Failed to update cache with validated filters: {e}")
+                    except Exception as e:
+                        logger.warning(f"[CACHE FIX] Could not re-validate filters: {e}")
             else:
                 logger.info(f"[CACHE MISS] Fetching fresh metadata for dataset {dataset_id}")
         except Exception as e:
@@ -492,6 +535,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                         default_filters = await self._extract_default_filters(
                             workspace_id, report_id, access_token,
                             report_parts=report_parts,
+                            model_context=model_context,
                         )
                         slicers = self._extract_slicers_from_report(report_parts)
                     except Exception as e:
@@ -536,6 +580,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 logger.error(f"[FetcherTool] Model extraction error: {e}")
                 return json.dumps({"error": f"Model extraction error: {str(e)}"})
 
+        # Merge slicer default selections into default_filters
+        self._merge_slicer_defaults_into_filters(slicers, default_filters)
+
         # Log full model context details
         self._log_model_context_details(model_context, default_filters, slicers)
 
@@ -564,6 +611,33 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         if output_format == "markdown":
             return self._format_as_markdown(output)
         return json.dumps(output, indent=2, default=str)
+
+    def _merge_slicer_defaults_into_filters(
+        self,
+        slicers: List[Dict[str, Any]],
+        default_filters: Dict[str, Any],
+    ) -> None:
+        """Merge slicer default selections into default_filters.
+
+        If a slicer has a default_value (user input baked into the report),
+        add it to default_filters so downstream tools know about it.
+        Only adds if not already present in default_filters.
+        """
+        for s in slicers:
+            default_value = s.get("default_value", "")
+            if not default_value:
+                continue
+            table = s.get("table", "")
+            column = s.get("column", "")
+            if not table or not column:
+                continue
+            filter_key = f"{table}[{column}]"
+            if filter_key not in default_filters:
+                default_filters[filter_key] = default_value
+                logger.info(
+                    f"[Filter Merge] Added slicer default: "
+                    f"{filter_key} → {default_value}"
+                )
 
     def _log_model_context_details(
         self,
@@ -1286,7 +1360,8 @@ class PowerBISemanticModelFetcherTool(BaseTool):
 
     async def _extract_default_filters(
         self, workspace_id: str, report_id: str, access_token: str,
-        report_parts: Optional[List[Dict[str, Any]]] = None
+        report_parts: Optional[List[Dict[str, Any]]] = None,
+        model_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Extract default filters from Power BI report definition via Fabric API.
 
@@ -1295,6 +1370,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
             report_id: Power BI report ID
             access_token: OAuth access token
             report_parts: Pre-fetched report definition parts (avoids duplicate API call)
+            model_context: Model context with column_types for datatype validation
         """
         logger.info(f"[Filter Extraction] Extracting filters from report {report_id}")
 
@@ -1303,7 +1379,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 report_parts = await self._extract_report_definition_parts(
                     workspace_id, report_id, access_token
                 )
-            return self._parse_tmdl_for_filters(report_parts)
+            return self._parse_tmdl_for_filters(report_parts, model_context=model_context)
         except Exception as e:
             logger.warning(f"[Filter Extraction] Error: {e}")
             return {}
@@ -1395,6 +1471,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                     # Extract table/column binding from queryDefinition
                     table, column = self._extract_slicer_binding(visual_data.get("visual", {}))
 
+                    # Extract active slicer selection
+                    default_value = self._extract_slicer_selection(visual_data, visual_data.get("visual", {}))
+
                     slicer = {
                         "page_id": page_id,
                         "page_name": page_names.get(page_id, "Unknown") if page_id else "Unknown",
@@ -1403,9 +1482,11 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                         "title": title or visual_type,
                         "table": table,
                         "column": column,
+                        "default_value": default_value,
                     }
                     slicers.append(slicer)
-                    logger.info(f"[Slicer Extraction] Found slicer: {slicer['title']} → {table}[{column}]")
+                    dv_str = f" [default: {default_value}]" if default_value else ""
+                    logger.info(f"[Slicer Extraction] Found slicer: {slicer['title']} → {table}[{column}]{dv_str}")
 
                 except Exception as e:
                     logger.debug(f"[Slicer Extraction] Error parsing visual.json at {path}: {e}")
@@ -1495,6 +1576,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                         # Extract table/column binding
                         table, column = self._extract_slicer_binding_embedded(parsed_config)
 
+                        # Extract active slicer selection from visual-level filters
+                        default_value = self._extract_slicer_selection(vis_data, parsed_config)
+
                         slicer = {
                             "page_id": page_id,
                             "page_name": page_name,
@@ -1503,14 +1587,56 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                             "title": title or visual_type,
                             "table": table,
                             "column": column,
+                            "default_value": default_value,
                         }
                         slicers.append(slicer)
-                        logger.info(f"[Slicer Extraction] Found embedded slicer: {slicer['title']} → {table}[{column}]")
+                        dv_str = f" [default: {default_value}]" if default_value else ""
+                        logger.info(f"[Slicer Extraction] Found embedded slicer: {slicer['title']} → {table}[{column}]{dv_str}")
 
             except Exception as e:
                 logger.debug(f"[Slicer Extraction] Error parsing report.json: {e}")
 
         return slicers
+
+    def _extract_slicer_selection(
+        self, vis_data: Dict[str, Any], parsed_config: Dict[str, Any]
+    ) -> str:
+        """Extract active/default selection from a slicer visual.
+
+        Checks the visual's filters array for any pre-set values.
+        Returns a human-readable description of the selection, or empty string.
+        """
+        try:
+            # Visual-level filters can be in vis_data["filters"] (JSON string or list)
+            filters_raw = vis_data.get("filters") or parsed_config.get("filters")
+            if not filters_raw:
+                return ""
+
+            if isinstance(filters_raw, str):
+                try:
+                    filters_list = json.loads(filters_raw)
+                except json.JSONDecodeError:
+                    return ""
+            elif isinstance(filters_list := filters_raw, list):
+                pass
+            else:
+                return ""
+
+            for f in filters_list:
+                if not isinstance(f, dict):
+                    continue
+                filter_obj = f.get("filter", {})
+                where = filter_obj.get("Where", [])
+                if not where:
+                    continue
+                condition = where[0].get("Condition", {})
+                desc = self._parse_filter_condition(condition)
+                if desc and desc not in ("has filter", "has complex filter"):
+                    return desc
+        except Exception as e:
+            logger.debug(f"[Slicer Extraction] Error extracting selection: {e}")
+
+        return ""
 
     def _extract_slicer_binding(self, visual: Dict[str, Any]) -> tuple:
         """Extract table and column from a PBIR separate-file visual's queryDefinition.
@@ -1630,9 +1756,65 @@ class PowerBISemanticModelFetcherTool(BaseTool):
     # Filter Parsing
     # =====================================================================
 
-    def _parse_tmdl_for_filters(self, tmdl_parts: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Parse report definition (PBIR format) to extract filters."""
+    # Common Power BI parameter table name patterns
+    _PARAMETER_TABLE_PATTERNS = (
+        "parameter", "__parameter", "param_", "_param",
+        "daterange", "date range", "what-if",
+    )
+
+    def _is_parameter_table(self, table_name: str) -> bool:
+        """Check if a table name looks like a Power BI parameter table."""
+        lower = table_name.lower().strip()
+        for pattern in self._PARAMETER_TABLE_PATTERNS:
+            if pattern in lower:
+                return True
+        return False
+
+    def _is_parameter_filter(self, filter_def: Dict[str, Any]) -> str:
+        """Check if a filter definition is a parameter (dynamic/what-if).
+
+        Returns:
+            Empty string if not a parameter, otherwise the reason why it was identified as one.
+        """
+        # Method 1: Check if expression uses HierarchyLevel (parameter pattern)
+        expression = filter_def.get("expression", {})
+        if "HierarchyLevel" in expression:
+            return "HierarchyLevel expression"
+
+        # Method 2: Check table name against known parameter patterns
+        column_expr = expression.get("Column", {})
+        expr = column_expr.get("Expression", {})
+        source_ref = expr.get("SourceRef", {})
+        table = source_ref.get("Entity", "")
+        if table and self._is_parameter_table(table):
+            return f"table name matches parameter pattern ('{table}')"
+
+        # Method 3: Check filter "type" field
+        filter_type = filter_def.get("type", "")
+        if filter_type in ("RelativeDate", "RelativeTime", "TopN"):
+            return f"filter type is '{filter_type}'"
+
+        return ""
+
+    def _parse_tmdl_for_filters(
+        self, tmdl_parts: List[Dict[str, Any]],
+        model_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Parse report definition (PBIR format) to extract filters.
+
+        Skips parameter/dynamic filters and validates filter value datatypes
+        against column metadata when model_context is available.
+        """
         filters: Dict[str, Any] = {}
+
+        # Build column type lookup: "TableName[Column]" → data_type
+        column_type_map: Dict[str, str] = {}
+        if model_context:
+            for table in model_context.get("tables", []):
+                table_name = table.get("name", "")
+                for col_name, dtype in table.get("column_types", {}).items():
+                    column_type_map[f"{table_name}[{col_name}]"] = str(dtype)
+
         try:
             for part in tmdl_parts:
                 payload = part.get("payload", "")
@@ -1648,14 +1830,87 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                             else:
                                 filter_definitions = filters_str
                             for filter_def in filter_definitions:
+                                # Skip parameter / dynamic filters
+                                param_reason = self._is_parameter_filter(filter_def)
+                                if param_reason:
+                                    expression = filter_def.get("expression", {})
+                                    col = expression.get("Column", {})
+                                    entity = col.get("Expression", {}).get("SourceRef", {}).get("Entity", "")
+                                    prop = col.get("Property", "")
+                                    logger.info(
+                                        f"[Filter Extraction] Skipping parameter filter: "
+                                        f"{entity}[{prop}] — reason: {param_reason}"
+                                    )
+                                    continue
+
                                 filter_name, filter_description = self._extract_filter_from_definition(filter_def)
                                 if filter_name and filter_description:
+                                    # Validate datatype if column metadata available
+                                    if column_type_map and filter_name in column_type_map:
+                                        filter_description = self._validate_filter_datatype(
+                                            filter_name, filter_description,
+                                            column_type_map[filter_name],
+                                        )
                                     filters[filter_name] = filter_description
+                                else:
+                                    # Log unparseable filters for debugging
+                                    expr_keys = list(filter_def.get("expression", {}).keys())
+                                    logger.info(
+                                        f"[Filter Extraction] Could not parse filter "
+                                        f"(expression keys: {expr_keys}): "
+                                        f"{json.dumps(filter_def, default=str)[:300]}"
+                                    )
                     except json.JSONDecodeError as e:
                         logger.warning(f"[Filter Extraction] Failed to parse JSON: {e}")
         except Exception as e:
             logger.warning(f"[Filter Extraction] Error parsing report: {e}")
         return filters
+
+    # Power BI DataType enum → human-readable name
+    _PBI_DTYPE_MAP = {
+        "1": "whole_number", "2": "decimal", "3": "currency",
+        "4": "date", "5": "boolean", "6": "string", "7": "binary",
+        "8": "datetime", "9": "time", "10": "duration",
+    }
+
+    def _validate_filter_datatype(
+        self, filter_name: str, filter_description: str, column_dtype: str
+    ) -> str:
+        """Validate filter values against the column's actual datatype.
+
+        If a mismatch is detected, append a warning to the description.
+        """
+        dtype_name = self._PBI_DTYPE_MAP.get(column_dtype, column_dtype)
+        numeric_types = {"1", "2", "3"}  # whole_number, decimal, currency
+        date_types = {"4", "8", "9"}     # date, datetime, time
+        string_type = "6"
+
+        # Extract literal values from filter description for validation
+        # Check for quoted string values in a numeric/date column
+        has_quoted = "'" in filter_description and filter_description not in ("has filter", "has complex filter")
+        is_numeric_col = column_dtype in numeric_types
+        is_date_col = column_dtype in date_types
+        is_string_col = column_dtype == string_type
+
+        mismatch = False
+        if is_numeric_col and has_quoted:
+            # Filter has string-quoted values but column is numeric
+            mismatch = True
+        elif is_date_col and has_quoted and not re.search(r"\d{4}-\d{2}-\d{2}", filter_description):
+            # Date column but filter values don't look like dates
+            mismatch = True
+        elif is_string_col and re.match(r"^[><=!]+ \d+\.?\d*$", filter_description):
+            # String column but filter uses numeric comparison
+            mismatch = True
+
+        if mismatch:
+            logger.warning(
+                f"[Filter Validation] DATATYPE MISMATCH: {filter_name} "
+                f"(column type: {dtype_name}) has filter: {filter_description}"
+            )
+            return f"{filter_description} ⚠️ DATATYPE MISMATCH (column is {dtype_name})"
+
+        return filter_description
 
     def _extract_filter_from_definition(self, filter_def: Dict[str, Any]) -> tuple:
         """Extract filter name and description from Power BI filter definition."""
