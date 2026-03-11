@@ -118,6 +118,20 @@ except ImportError as e:
     PowerBIReportReferencesTool = None
     logging.warning(f"Could not import PowerBIReportReferencesTool: {e}")
 
+# Power BI Semantic Model Fetcher Tool
+try:
+    from .custom.powerbi_semantic_model_fetcher_tool import PowerBISemanticModelFetcherTool
+except ImportError as e:
+    PowerBISemanticModelFetcherTool = None
+    logging.warning(f"Could not import PowerBISemanticModelFetcherTool: {e}")
+
+# Power BI Semantic Model DAX Generator Tool
+try:
+    from .custom.powerbi_semantic_model_dax_tool import PowerBISemanticModelDaxTool
+except ImportError as e:
+    PowerBISemanticModelDaxTool = None
+    logging.warning(f"Could not import PowerBISemanticModelDaxTool: {e}")
+
 # Setup logger
 logger = logging.getLogger(__name__)
 
@@ -178,6 +192,10 @@ class ToolFactory:
             self._tool_implementations["Power BI Field Parameters & Calculation Groups Tool"] = PowerBIFieldParametersCalculationGroupsTool
         if PowerBIReportReferencesTool is not None:
             self._tool_implementations["Power BI Report References Tool"] = PowerBIReportReferencesTool
+        if PowerBISemanticModelFetcherTool is not None:
+            self._tool_implementations["Power BI Semantic Model Fetcher"] = PowerBISemanticModelFetcherTool
+        if PowerBISemanticModelDaxTool is not None:
+            self._tool_implementations["Power BI Semantic Model DAX Generator"] = PowerBISemanticModelDaxTool
 
         # Initialize _initialized flag
         self._initialized = False
