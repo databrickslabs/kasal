@@ -260,7 +260,7 @@ def get_tool_configs():
             "group_by": "page"  # Group results by: "page", "measure", or "table"
         },   # Power BI Report References Tool
         "79": {
-            "result_as_answer": False,
+            "result_as_answer": True,
             "tenant_id": "",
             "client_id": "",
             "client_secret": "",

@@ -1727,8 +1727,8 @@ class ToolFactory:
             else:
                 # Check if the config has any data
                 if tool_config and isinstance(tool_config, dict):
-                    # Add result_as_answer to tool configuration
-                    tool_config['result_as_answer'] = result_as_answer
+                    # Prefer result_as_answer from DB/merged config over the parameter default
+                    tool_config['result_as_answer'] = result_as_answer or tool_config.get('result_as_answer', False)
 
                     # Create the tool with the config as kwargs
                     logger.info(f"Creating {tool_name} with config parameters: {tool_config}")
