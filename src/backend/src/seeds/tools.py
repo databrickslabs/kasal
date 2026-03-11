@@ -32,6 +32,8 @@ tools_data = [
     (76, "Power BI Hierarchies Tool", "Extracts hierarchies from Microsoft Fabric semantic models using the Fabric API getDefinition endpoint (TMDL format). Parses TMDL to extract hierarchy definitions and generates Unity Catalog dimension views with hierarchy_path columns plus metadata table DDL. IMPORTANT: Requires a Service Principal with SemanticModel.ReadWrite.All permissions and works with Fabric workspaces only (not legacy Power BI Service). Perfect for migrating Power BI hierarchies to Databricks as dimension views, documenting drill-down structures, or generating DDL for dimension tables.", "transform"),
     (77, "Power BI Field Parameters & Calculation Groups Tool", "Extracts Field Parameters and Calculation Groups from Microsoft Fabric semantic models using the Fabric API getDefinition endpoint (TMDL format). Field Parameters allow users to dynamically switch between measures in reports using NAMEOF() DAX functions. Calculation Groups provide reusable time intelligence calculations (YTD, PY, YoY%, MTD) using SELECTEDMEASURE() patterns. Generates Unity Catalog metadata tables with parameter/calculation item details and SQL patterns for implementing equivalent logic. IMPORTANT: Requires a Service Principal with SemanticModel.ReadWrite.All permissions and works with Fabric workspaces only (not legacy Power BI Service). Perfect for documenting Power BI dynamic measure switching, migrating time intelligence patterns to Databricks, or generating SQL equivalents for calculation group logic.", "transform"),
     (78, "Power BI Report References Tool", "Extracts visual-to-measure and visual-to-table references from Microsoft Fabric reports using the Fabric Report Definition API (PBIR format). Shows which measures, tables, and fields are used in each report page and visual. Output formats include markdown (grouped by page, measure, or table), JSON, and matrix view. IMPORTANT: Requires a Service Principal with Report.ReadWrite.All permissions and works only with Fabric reports in PBIR format. Perfect for understanding report dependencies, impact analysis for measure/table changes, identifying unused measures, and documenting report-to-semantic-model relationships.", "transform"),
+    (79, "Power BI Semantic Model Fetcher", "Extracts and caches semantic model metadata (measures, tables, relationships, columns, sample data, default filters) from Power BI. Uses 3-tier fallback: Fabric TMDL API, Admin Scanner API, or DAX-based extraction. Output is JSON that can be fed directly into the 'Power BI Semantic Model DAX Generator' tool for multi-step workflows. Caches metadata for same-day reuse. Requires Service Principal with SemanticModel.ReadWrite.All permission or user OAuth token.", "database"),
+    (80, "Power BI Semantic Model DAX Generator", "Generates and executes DAX queries from natural language questions using LLM with self-correction retry loop (up to N retries). Accepts model context JSON from the 'Power BI Semantic Model Fetcher' tool output, or reads from cache as fallback. Features business term mappings, field synonyms, active filter auto-application, and optional visual reference lookup. Requires Service Principal or user OAuth token for DAX execution, plus Databricks LLM endpoint for DAX generation.", "database"),
 ]
 
 def get_tool_configs():
@@ -256,7 +258,32 @@ def get_tool_configs():
             "output_format": "markdown",  # Output format: "markdown", "json", or "matrix"
             "include_visual_details": True,
             "group_by": "page"  # Group results by: "page", "measure", or "table"
-        }   # Power BI Report References Tool
+        },   # Power BI Report References Tool
+        "79": {
+            "result_as_answer": False,
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
+            "workspace_id": "",
+            "semantic_model_id": "",  # Alias for dataset_id
+            "auth_method": None,
+            "username": "",
+            "password": "",
+            "output_format": "json",
+        },  # Power BI Semantic Model Fetcher
+        "80": {
+            "result_as_answer": False,
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
+            "workspace_id": "",
+            "semantic_model_id": "",  # Alias for dataset_id
+            "auth_method": None,
+            "username": "",
+            "password": "",
+            "llm_model": "databricks-claude-sonnet-4",
+            "max_dax_retries": 5,
+        }   # Power BI Semantic Model DAX Generator
     }
 
 async def seed_async():
@@ -274,7 +301,7 @@ async def seed_async():
     tools_error = 0
 
     # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77]
+    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80]
 
     for tool_id, title, description, icon in tools_data:
         try:
@@ -337,7 +364,7 @@ def seed_sync():
     tools_error = 0
 
     # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77]
+    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80]
 
     for tool_id, title, description, icon in tools_data:
         try:
