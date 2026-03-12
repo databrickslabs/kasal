@@ -402,10 +402,55 @@ class PowerBISemanticModelDaxTool(BaseTool):
 
         # Merge default filters from context into active_filters
         default_filters = model_context.get("default_filters") if isinstance(model_context.get("default_filters"), dict) else {}
-        if default_filters:
-            existing = config.get("active_filters", {}) or {}
+
+        # Normalize active_filters: UI may send list format
+        # [{"table": "T", "column": "C", "value": "V"}] → {"T[C]": "V"}
+        existing = config.get("active_filters") or {}
+        if isinstance(existing, list):
+            normalized = {}
+            for f in existing:
+                if isinstance(f, dict) and "table" in f and "column" in f:
+                    key = f"{f['table']}[{f['column']}]"
+                    normalized[key] = f.get("value", "NOT NULL")
+            logger.info(f"[DaxTool] Normalized {len(existing)} list-format active_filters → {normalized}")
+            existing = normalized
+        elif not isinstance(existing, dict):
+            existing = {}
+
+        if default_filters or existing:
             config["active_filters"] = {**default_filters, **existing}
-            logger.info(f"[DaxTool] Merged {len(default_filters)} default filters into active_filters")
+            logger.info(f"[DaxTool] Merged filters: {len(default_filters)} default + {len(existing)} active = {len(config['active_filters'])} total")
+
+        # Ensure all filter tables are present in model_context
+        # UI active_filters may reference tables not in the reduced cache.
+        # Pull missing tables from the full cache so schema validation passes.
+        all_filters = config.get("active_filters", {})
+        if all_filters and model_context:
+            existing_tables = {t["name"] for t in model_context.get("tables", [])}
+            missing_tables = set()
+            for filter_key in all_filters:
+                filter_table = filter_key.split("[")[0] if "[" in filter_key else ""
+                if filter_table and filter_table not in existing_tables:
+                    missing_tables.add(filter_table)
+
+            if missing_tables:
+                logger.info(f"[DaxTool] Filter tables missing from model context: {missing_tables}. Fetching from full cache...")
+                try:
+                    full_cache = await self._fetch_full_cache_tables(config, missing_tables)
+                    if full_cache:
+                        for table_data in full_cache.get("tables", []):
+                            model_context["tables"].append(table_data)
+                            existing_tables.add(table_data["name"])
+                        for rel in full_cache.get("relationships", []):
+                            model_context.setdefault("relationships", []).append(rel)
+                        for k, v in full_cache.get("sample_data", {}).items():
+                            model_context.setdefault("sample_data", {})[k] = v
+                        logger.info(
+                            f"[DaxTool] Added {len(full_cache['tables'])} tables from full cache: "
+                            f"{[t['name'] for t in full_cache['tables']]}"
+                        )
+                except Exception as e:
+                    logger.warning(f"[DaxTool] Failed to fetch missing filter tables from full cache: {e}")
 
         # Step 3: Generate + Execute DAX with retry
         # Strategy: attempt 1 = LLM, attempt 2 = LLM self-correction,
@@ -648,6 +693,48 @@ class PowerBISemanticModelDaxTool(BaseTool):
             logger.warning(f"[DaxTool] _resolve_model_context: Full cache lookup exception: {e}")
 
         return None
+
+    async def _fetch_full_cache_tables(
+        self, config: Dict[str, Any], needed_tables: set
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch specific tables from the full (non-reduced) cache.
+
+        Used when active_filters reference tables not in the reduced context.
+        Returns dict with 'tables', 'relationships', 'sample_data' for the
+        requested tables only.
+        """
+        group_id = config.get("group_id", "default")
+        dataset_id = config.get("dataset_id")
+        workspace_id = config.get("workspace_id")
+        if not dataset_id or not workspace_id:
+            return None
+
+        async with async_session_factory() as session:
+            cache_service = PowerBISemanticModelCacheService(session)
+            cached = await cache_service.get_cached_metadata(
+                group_id=group_id, dataset_id=dataset_id,
+                workspace_id=workspace_id, any_report_id=True,
+            )
+        if not cached:
+            return None
+
+        all_tables = cached.get("schema", {}).get("tables", [])
+        all_relationships = cached.get("relationships", [])
+        all_sample_data = cached.get("sample_data", {})
+
+        found_tables = [t for t in all_tables if t.get("name") in needed_tables]
+        found_names = {t["name"] for t in found_tables}
+        found_rels = [
+            r for r in all_relationships
+            if r.get("from_table") in found_names or r.get("to_table") in found_names
+        ]
+        found_samples = {}
+        for k, v in all_sample_data.items():
+            table_name = k.split("[")[0] if "[" in k else k
+            if table_name in found_names:
+                found_samples[k] = v
+
+        return {"tables": found_tables, "relationships": found_rels, "sample_data": found_samples}
 
     @staticmethod
     def _parse_context_dict(parsed: Dict[str, Any]) -> Dict[str, Any]:
