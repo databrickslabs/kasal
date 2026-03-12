@@ -455,61 +455,6 @@ export const PowerBIMetadataReducerConfigSelector: React.FC<PowerBIMetadataReduc
             </Accordion>
           )}
 
-          {/* Context Enrichment */}
-          <Accordion>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-              <Typography variant="subtitle2">Context Enrichment (Optional)</Typography>
-            </AccordionSummary>
-            <AccordionDetails>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <Alert severity="info" variant="outlined" sx={{ py: 0.5 }}>
-                  <Typography variant="caption">
-                    Add business terminology and synonyms to improve matching accuracy.
-                    These are also passed through to the DAX Generator tool.
-                  </Typography>
-                </Alert>
-                <TextField
-                  label="Business Term Mappings"
-                  value={value.business_mappings || ''}
-                  onChange={(e) => handleFieldChange('business_mappings', e.target.value)}
-                  disabled={disabled}
-                  fullWidth
-                  multiline
-                  rows={3}
-                  placeholder={`{\n  "CGR": "'Table'[Column] = 'Complete CGR'"\n}`}
-                  helperText='JSON: {"natural term": "DAX filter expression"}'
-                  size="small"
-                  sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
-                />
-                <TextField
-                  label="Field Synonyms"
-                  value={value.field_synonyms || ''}
-                  onChange={(e) => handleFieldChange('field_synonyms', e.target.value)}
-                  disabled={disabled}
-                  fullWidth
-                  multiline
-                  rows={3}
-                  placeholder={`{\n  "revenue": ["sales", "turnover", "income"]\n}`}
-                  helperText='JSON: {"field_name": ["synonym1", "synonym2"]}'
-                  size="small"
-                  sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
-                />
-                <TextField
-                  label="Active Filters"
-                  value={value.active_filters || ''}
-                  onChange={(e) => handleFieldChange('active_filters', e.target.value)}
-                  disabled={disabled}
-                  fullWidth
-                  multiline
-                  rows={2}
-                  placeholder='{"Geography.Country": "Austria", "Date.Year": 2024}'
-                  helperText="JSON: filters to validate and normalize against sample data"
-                  size="small"
-                  sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
-                />
-              </Box>
-            </AccordionDetails>
-          </Accordion>
         </>
       )}
 
