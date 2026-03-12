@@ -537,6 +537,7 @@ class PowerBIMetadataReducerTool(BaseTool):
         dataset_id = config.get("dataset_id")
         workspace_id = config.get("workspace_id")
         group_id = config.get("group_id", "default")
+        cache_saved = False
         if dataset_id and workspace_id:
             try:
                 async with async_session_factory() as session:
@@ -548,6 +549,7 @@ class PowerBIMetadataReducerTool(BaseTool):
                         metadata=reduced_output,
                         report_id="reduced",
                     )
+                cache_saved = True
                 logger.info(
                     f"[MetadataReducer] ✓ Saved reduced context to cache "
                     f"(report_id='reduced', group={group_id}, dataset={dataset_id})"
@@ -555,7 +557,31 @@ class PowerBIMetadataReducerTool(BaseTool):
             except Exception as e:
                 logger.warning(f"[MetadataReducer] ✗ Failed to save reduced context to cache: {e}")
 
-        return json.dumps(reduced_output)
+        if cache_saved:
+            # Return a compact summary instead of the full JSON.
+            # The full reduced context is already saved to cache (above).
+            # The DAX tool reads from the reduced cache (report_id='reduced')
+            # via _resolve_model_context Priority 2 — so the agent does NOT
+            # need to pass 25K+ chars of JSON through the LLM. This avoids
+            # a ~90s LLM processing delay between Reducer → DAX tool.
+            summary = {
+                "status": "success",
+                "reduction_summary": reduced_output["reduction_summary"],
+                "default_filters_count": len(normalized_filters),
+                "cache_saved": True,
+                "message": (
+                    f"Reduced model context saved to cache. "
+                    f"{original_table_count}→{kept_table_count} tables ({reduction_pct}% reduction), "
+                    f"{original_measure_count}→{kept_measure_count} measures. "
+                    f"The DAX Generator tool will automatically load this from cache."
+                ),
+            }
+            return json.dumps(summary)
+        else:
+            # Cache save failed — fall back to returning full JSON so the
+            # agent can still pass it to the DAX tool via model_context_json.
+            logger.warning("[MetadataReducer] Cache save failed — returning full JSON as fallback")
+            return json.dumps(reduced_output)
 
     # ─── Step 1: Parse Model Context ────────────────────────────────────
 
