@@ -54,6 +54,7 @@ import { PowerBIFieldParametersConfigSelector, PowerBIFieldParametersConfig } fr
 import { PowerBIReportReferencesConfigSelector, PowerBIReportReferencesConfig } from '../Common/PowerBIReportReferencesConfigSelector';
 import { PowerBIFetcherConfigSelector, PowerBIFetcherConfig } from '../Common/PowerBIFetcherConfigSelector';
 import { PowerBIDaxConfigSelector, PowerBIDaxConfig } from '../Common/PowerBIDaxConfigSelector';
+import { PowerBIMetadataReducerConfigSelector, PowerBIMetadataReducerConfig } from '../Common/PowerBIMetadataReducerConfigSelector';
 import { PerplexityConfig, SerperConfig } from '../../types/config';
 import { type LLMGuardrailConfig } from '../../types/task';
 import { ModelService } from '../../api/ModelService';
@@ -147,6 +148,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const [powerBIReportReferencesConfig, setPowerBIReportReferencesConfig] = useState<PowerBIReportReferencesConfig>({});
   const [powerBIFetcherConfig, setPowerBIFetcherConfig] = useState<PowerBIFetcherConfig>({});
   const [powerBIDaxConfig, setPowerBIDaxConfig] = useState<PowerBIDaxConfig>({});
+  const [powerBIReducerConfig, setPowerBIReducerConfig] = useState<PowerBIMetadataReducerConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
   const [showBestPractices, setShowBestPractices] = useState(false);
@@ -252,6 +254,11 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       // Check for Power BI Semantic Model DAX Generator config
       if (initialData.tool_configs['Power BI Semantic Model DAX Generator']) {
         setPowerBIDaxConfig(initialData.tool_configs['Power BI Semantic Model DAX Generator'] as PowerBIDaxConfig);
+      }
+
+      // Check for Power BI Metadata Reducer config
+      if (initialData.tool_configs['Power BI Metadata Reducer']) {
+        setPowerBIReducerConfig(initialData.tool_configs['Power BI Metadata Reducer'] as PowerBIMetadataReducerConfig);
       }
 
       // Check for MCP_SERVERS config
@@ -745,6 +752,30 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           return tool?.title === 'Power BI Semantic Model DAX Generator';
         })) {
           delete updatedToolConfigs['Power BI Semantic Model DAX Generator'];
+        }
+
+        // Handle Power BI Metadata Reducer config
+        if (powerBIReducerConfig && Object.keys(powerBIReducerConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Metadata Reducer';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            'Power BI Metadata Reducer': powerBIReducerConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Metadata Reducer';
+        })) {
+          delete updatedToolConfigs['Power BI Metadata Reducer'];
         }
 
         // Handle Power BI Comprehensive Analysis Tool config
@@ -1704,6 +1735,39 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                       setToolConfigs(prev => ({
                         ...prev,
                         'Power BI Semantic Model DAX Generator': config
+                      }));
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+
+            {/* Power BI Metadata Reducer Configuration - Show only when tool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'Power BI Metadata Reducer';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  Power BI Metadata Reducer Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(156, 39, 176, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(156, 39, 176, 0.2)'
+                }}>
+                  <PowerBIMetadataReducerConfigSelector
+                    value={powerBIReducerConfig}
+                    onChange={(config) => {
+                      setPowerBIReducerConfig(config);
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'Power BI Metadata Reducer': config
                       }));
                     }}
                   />
