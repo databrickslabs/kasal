@@ -392,7 +392,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
         n_rels = len(model_context.get("relationships", []))
         n_slicers = len(model_context.get("slicers", []))
         n_samples = len(model_context.get("sample_data", {}))
-        context_source = "REDUCED" if config.get("model_context_json") else "FULL_CACHE"
+        context_source = model_context.get("_source", "AGENT_JSON" if config.get("model_context_json") else "CACHE")
         logger.info(
             f"[DaxTool] Step 2/4: ✓ Model context resolved (SOURCE={context_source}) — "
             f"tables={n_tables}, measures={n_measures}, relationships={n_rels}, "
@@ -620,13 +620,22 @@ class PowerBISemanticModelDaxTool(BaseTool):
             logger.info(f"[DaxTool] _resolve_model_context: Trying model_context_json ({len(str(model_context_json))} chars)")
             try:
                 parsed = json.loads(model_context_json) if isinstance(model_context_json, str) else model_context_json
-                result = self._parse_context_dict(parsed)
-                logger.info(
-                    f"[DaxTool] _resolve_model_context: ✓ SOURCE=AGENT_JSON (model_context_json) — "
-                    f"tables={len(result['tables'])}, measures={len(result['measures'])}, "
-                    f"relationships={len(result['relationships'])}, slicers={len(result['slicers'])}"
-                )
-                return result
+                # Skip if this is a Reducer summary (no tables) — fall through to cache
+                if not parsed.get("tables") and not parsed.get("schema", {}).get("tables"):
+                    logger.info(
+                        f"[DaxTool] _resolve_model_context: model_context_json has no tables "
+                        f"(likely Reducer summary), falling through to cache. "
+                        f"Keys: {list(parsed.keys())}"
+                    )
+                else:
+                    result = self._parse_context_dict(parsed)
+                    result["_source"] = "AGENT_JSON"
+                    logger.info(
+                        f"[DaxTool] _resolve_model_context: ✓ SOURCE=AGENT_JSON (model_context_json) — "
+                        f"tables={len(result['tables'])}, measures={len(result['measures'])}, "
+                        f"relationships={len(result['relationships'])}, slicers={len(result['slicers'])}"
+                    )
+                    return result
             except (json.JSONDecodeError, TypeError) as e:
                 logger.warning(f"[DaxTool] _resolve_model_context: ✗ Failed to parse model_context_json: {e}")
         else:
@@ -647,6 +656,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
             if reduced:
                 # Reduced output has tables/measures at top level (not nested under schema)
                 result = self._parse_context_dict(reduced)
+                result["_source"] = "REDUCED_CACHE"
                 logger.info(
                     f"[DaxTool] _resolve_model_context: ✓ SOURCE=REDUCED_CACHE (report_id='reduced') — "
                     f"tables={len(result['tables'])}, measures={len(result['measures'])}, "
@@ -678,6 +688,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
                     "sample_data": cached.get("sample_data", {}),
                     "default_filters": cached.get("default_filters", {}),
                     "slicers": cached.get("slicers", []),
+                    "_source": "FULL_CACHE",
                 }
                 logger.info(
                     f"[DaxTool] _resolve_model_context: ✓ SOURCE=FULL_CACHE (NOT reduced!) — "
