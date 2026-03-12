@@ -62,10 +62,12 @@ class PowerBISemanticModelDaxSchema(BaseModel):
         description="The business question to answer using Power BI data."
     )
 
-    # ===== MODEL CONTEXT (from Fetcher tool output) =====
+    # ===== MODEL CONTEXT (from Reducer or Fetcher output) =====
     model_context_json: Optional[str] = Field(
         None,
-        description="[Context] JSON string from the Fetcher tool output. If provided, skips cache lookup."
+        description="[CRITICAL — REQUIRED] The JSON output from the previous task (Metadata Reducer or Fetcher). "
+                    "You MUST pass the full JSON output from the previous task here. "
+                    "If not provided, falls back to cached full metadata which may be too large."
     )
 
     # ===== POWER BI CONFIGURATION =====
@@ -104,6 +106,16 @@ class PowerBISemanticModelDaxSchema(BaseModel):
     conversation_history: Optional[List[Dict[str, str]]] = Field(
         None, description="[Context] Previous Q&A for context."
     )
+    context_knowledge: Optional[str] = Field(
+        None,
+        description="[Context] Business context or domain knowledge to guide DAX generation. "
+                    "E.g., 'Complete CGR means the customer completed the full CGR process'."
+    )
+    reference_dax: Optional[str] = Field(
+        None,
+        description="[Context] Reference working DAX queries as examples. "
+                    "Provide one or more EVALUATE statements that work against this model."
+    )
 
     # ===== SERVICE PRINCIPAL AUTHENTICATION =====
     tenant_id: Optional[str] = Field(None, description="[Auth] Azure AD tenant ID.")
@@ -141,10 +153,9 @@ class PowerBISemanticModelDaxTool(BaseTool):
     name: str = "Power BI Semantic Model DAX Generator"
     description: str = (
         "Generates and executes DAX queries from natural language questions using LLM. "
-        "Accepts model context JSON from the 'Power BI Semantic Model Fetcher' tool output, "
-        "or reads from cache as fallback. Features self-correction retry loop (up to N retries) "
-        "and optional visual reference lookup. "
-        "IMPORTANT: Extract the user's business question from the task description and pass it as 'user_question'. "
+        "CRITICAL: You MUST pass the full JSON output from the previous task as 'model_context_json'. "
+        "This is the reduced/enriched metadata from the Fetcher or Reducer — copy the entire JSON string. "
+        "If model_context_json is not provided, falls back to cached full metadata (not reduced). "
         "Connection credentials are pre-configured — do not provide them unless overriding."
     )
     args_schema: Type[BaseModel] = PowerBISemanticModelDaxSchema
@@ -183,6 +194,8 @@ class PowerBISemanticModelDaxTool(BaseTool):
             "session_id": kwargs.get("session_id"),
             "visible_tables": kwargs.get("visible_tables", []),
             "conversation_history": kwargs.get("conversation_history", []),
+            "context_knowledge": kwargs.get("context_knowledge", ""),
+            "reference_dax": kwargs.get("reference_dax", ""),
         }
 
         tool_kwargs = {k: v for k, v in kwargs.items() if k not in default_config}
@@ -211,6 +224,17 @@ class PowerBISemanticModelDaxTool(BaseTool):
         """Execute the DAX generation pipeline."""
         try:
             logger.info(f"[DaxTool] Instance {self._instance_id} - _run() called")
+
+            # Log what the agent actually passed — critical for debugging context flow
+            kwarg_keys = list(kwargs.keys())
+            has_mcj = "model_context_json" in kwargs and kwargs["model_context_json"] is not None
+            mcj_len = len(str(kwargs.get("model_context_json", ""))) if has_mcj else 0
+            logger.info(
+                f"[DaxTool] ═══ Agent kwargs ═══ "
+                f"keys={kwarg_keys} | model_context_json={'YES (' + str(mcj_len) + ' chars)' if has_mcj else 'NOT PROVIDED'}"
+            )
+            if has_mcj:
+                logger.info(f"[DaxTool] model_context_json preview: {str(kwargs['model_context_json'])[:300]}...")
 
             # Filter out placeholder values
             filtered_kwargs = {}
@@ -248,7 +272,8 @@ class PowerBISemanticModelDaxTool(BaseTool):
 
             # Context enrichment
             context_keys = ["business_mappings", "field_synonyms", "active_filters",
-                            "session_id", "visible_tables", "conversation_history"]
+                            "session_id", "visible_tables", "conversation_history",
+                            "context_knowledge", "reference_dax"]
             for key in context_keys:
                 kwarg_val = filtered_kwargs.get(key)
                 default_val = self._default_config.get(key)
@@ -289,7 +314,23 @@ class PowerBISemanticModelDaxTool(BaseTool):
             has_sa = all([merged_config.get("tenant_id"), merged_config.get("client_id"),
                           merged_config.get("username"), merged_config.get("password")])
             has_oauth = bool(merged_config.get("access_token"))
+
+            auth_method = "SP" if has_sp else "SA" if has_sa else "OAuth" if has_oauth else "NONE"
+            has_model_ctx = merged_config.get("model_context_json") is not None
+            ctx_len = len(str(merged_config.get("model_context_json", ""))) if has_model_ctx else 0
+            logger.info(
+                f"[DaxTool] ═══ Config summary ═══ "
+                f"auth={auth_method} | question='{(merged_config.get('user_question') or '')[:80]}' | "
+                f"model_context_json={'yes (' + str(ctx_len) + ' chars)' if has_model_ctx else 'no'} | "
+                f"workspace={merged_config.get('workspace_id', '')[:12]}... | "
+                f"dataset={merged_config.get('dataset_id', '')[:12]}... | "
+                f"llm={merged_config.get('llm_model')} | "
+                f"context_knowledge={'yes' if merged_config.get('context_knowledge') else 'no'} | "
+                f"reference_dax={'yes' if merged_config.get('reference_dax') else 'no'}"
+            )
+
             if not has_sp and not has_sa and not has_oauth:
+                logger.warning("[DaxTool] ✗ No authentication credentials found")
                 return (
                     "Error: Authentication required.\n"
                     "Provide one of:\n"
@@ -298,11 +339,13 @@ class PowerBISemanticModelDaxTool(BaseTool):
                     "- User OAuth: access_token"
                 )
 
+            logger.info(f"[DaxTool] ═══ Starting pipeline (auth={auth_method}) ═══")
             result = _run_async_in_sync_context(self._execute_dax_pipeline(merged_config))
+            logger.info(f"[DaxTool] ═══ Pipeline complete (output={len(result)} chars) ═══")
             return result
 
         except Exception as e:
-            logger.error(f"[DaxTool] Error: {str(e)}", exc_info=True)
+            logger.error(f"[DaxTool] ✗ Pipeline exception: {str(e)}", exc_info=True)
             return f"Error: {str(e)}"
 
     async def _execute_dax_pipeline(self, config: Dict[str, Any]) -> str:
@@ -324,20 +367,37 @@ class PowerBISemanticModelDaxTool(BaseTool):
         }
 
         # Step 1: Get access token
+        logger.info("[DaxTool] Step 1/4: Acquiring access token...")
         try:
             access_token = await self._get_access_token(config)
+            logger.info(f"[DaxTool] Step 1/4: ✓ Access token acquired (length={len(access_token)})")
         except Exception as e:
+            logger.error(f"[DaxTool] Step 1/4: ✗ Authentication failed: {e}")
             results["errors"].append(f"Authentication error: {str(e)}")
             return self._format_output(results, output_format)
 
         # Step 2: Resolve model context
+        logger.info("[DaxTool] Step 2/4: Resolving model context...")
         model_context = await self._resolve_model_context(config)
         if model_context is None:
+            logger.error("[DaxTool] Step 2/4: ✗ No model context — neither model_context_json nor cache hit")
             results["errors"].append(
                 "No model context available. Run the 'Power BI Semantic Model Fetcher' tool first, "
                 "or provide model_context_json."
             )
             return self._format_output(results, output_format)
+
+        n_tables = len(model_context.get("tables", []))
+        n_measures = len(model_context.get("measures", []))
+        n_rels = len(model_context.get("relationships", []))
+        n_slicers = len(model_context.get("slicers", []))
+        n_samples = len(model_context.get("sample_data", {}))
+        context_source = "REDUCED" if config.get("model_context_json") else "FULL_CACHE"
+        logger.info(
+            f"[DaxTool] Step 2/4: ✓ Model context resolved (SOURCE={context_source}) — "
+            f"tables={n_tables}, measures={n_measures}, relationships={n_rels}, "
+            f"slicers={n_slicers}, sample_data_keys={n_samples}"
+        )
         results["model_context"] = model_context
 
         # Merge default filters from context into active_filters
@@ -345,62 +405,130 @@ class PowerBISemanticModelDaxTool(BaseTool):
         if default_filters:
             existing = config.get("active_filters", {}) or {}
             config["active_filters"] = {**default_filters, **existing}
+            logger.info(f"[DaxTool] Merged {len(default_filters)} default filters into active_filters")
 
         # Step 3: Generate + Execute DAX with retry
+        # Strategy: attempt 1 = LLM, attempt 2 = LLM self-correction,
+        # attempt 3 = deterministic fallback (no LLM), then 2 more LLM retries
         max_retries = config.get("max_dax_retries", 5)
         dax_attempts: List[Dict[str, Any]] = []
 
+        # Initialize prompt tracker — will be set by _generate_dax_with_llm / _generate_dax_with_self_correction
+        self._last_llm_prompt = None
+
         if model_context.get("measures") or model_context.get("tables"):
+            logger.info(f"[DaxTool] Step 3/4: DAX generation + execution (max_retries={max_retries})")
+            # Count consecutive LLM failures to trigger deterministic fallback
+            consecutive_llm_failures = 0
+
             for attempt in range(max_retries):
                 try:
-                    if attempt == 0:
+                    generated_dax = None
+
+                    # After 2 consecutive LLM failures, try deterministic approach
+                    if consecutive_llm_failures >= 2 and attempt >= 2:
+                        logger.info(f"[DaxTool] Step 3/4: Attempt {attempt + 1}/{max_retries} — DETERMINISTIC fallback (LLM failed {consecutive_llm_failures}x)")
+                        generated_dax = self._generate_deterministic_dax(user_question, model_context)
+                        consecutive_llm_failures = 0  # Reset so next attempt tries LLM again
+                    elif attempt == 0:
+                        logger.info(f"[DaxTool] Step 3/4: Attempt {attempt + 1}/{max_retries} — generating DAX via LLM...")
                         generated_dax = await self._generate_dax_with_llm(user_question, model_context, config)
                     else:
-                        logger.info(f"[DAX] Retry attempt {attempt + 1}/{max_retries}")
+                        logger.info(f"[DaxTool] Step 3/4: Attempt {attempt + 1}/{max_retries} — self-correction retry...")
                         generated_dax = await self._generate_dax_with_self_correction(
                             user_question, model_context, config, dax_attempts
                         )
 
                     results["generated_dax"] = generated_dax
+                    # Capture the full LLM prompt used for this attempt
+                    if self._last_llm_prompt:
+                        results["llm_prompt"] = self._last_llm_prompt
 
                     if generated_dax:
-                        execution_result = await self._execute_dax_query(
-                            workspace_id, dataset_id, access_token, generated_dax
-                        )
+                        logger.info(f"[DaxTool] Step 3/4: Generated DAX ({len(generated_dax)} chars): {generated_dax[:200]}...")
+
+                        # Pre-execution validation: check all table references exist in schema
+                        validation_error = self._validate_dax_references(generated_dax, model_context)
+                        if validation_error:
+                            logger.warning(f"[DaxTool] Step 3/4: ✗ DAX VALIDATION FAILED attempt {attempt + 1} — {validation_error}")
+                            execution_result = {"success": False, "error": validation_error, "row_count": 0}
+                            consecutive_llm_failures += 1
+                        else:
+                            logger.info("[DaxTool] Step 3/4: Executing DAX against Power BI API...")
+                            execution_result = await self._execute_dax_query(
+                                workspace_id, dataset_id, access_token, generated_dax
+                            )
                         if not isinstance(execution_result, dict):
                             execution_result = {"success": False, "error": f"Invalid result type: {type(execution_result).__name__}", "row_count": 0}
 
-                        dax_attempts.append({
-                            "attempt": attempt + 1,
-                            "dax": generated_dax,
-                            "success": execution_result.get("success", False),
-                            "error": execution_result.get("error"),
-                            "row_count": execution_result.get("row_count", 0),
-                        })
-
                         if execution_result.get("success", False):
+                            # Post-execution: check if DAX actually addresses the user question
+                            completeness_error = self._validate_dax_completeness(
+                                generated_dax, user_question, model_context
+                            )
+                            if completeness_error and attempt < max_retries - 1:
+                                logger.warning(
+                                    f"[DaxTool] Step 3/4: ✗ DAX executed but is INCOMPLETE on attempt {attempt + 1} — {completeness_error}"
+                                )
+                                dax_attempts.append({
+                                    "attempt": attempt + 1,
+                                    "dax": generated_dax,
+                                    "success": False,
+                                    "error": completeness_error,
+                                    "row_count": execution_result.get("row_count", 0),
+                                })
+                                consecutive_llm_failures += 1
+                                continue
+                            # DAX is complete and valid
+                            dax_attempts.append({
+                                "attempt": attempt + 1,
+                                "dax": generated_dax,
+                                "success": True,
+                                "error": None,
+                                "row_count": execution_result.get("row_count", 0),
+                            })
                             results["dax_execution"] = execution_result
-                            logger.info(f"DAX success on attempt {attempt + 1}: rows={execution_result.get('row_count', 0)}")
+                            logger.info(f"[DaxTool] Step 3/4: ✓ DAX SUCCESS on attempt {attempt + 1} — rows={execution_result.get('row_count', 0)}")
                             break
                         else:
+                            dax_attempts.append({
+                                "attempt": attempt + 1,
+                                "dax": generated_dax,
+                                "success": False,
+                                "error": execution_result.get("error"),
+                                "row_count": execution_result.get("row_count", 0),
+                            })
                             results["dax_execution"] = execution_result
+                            logger.warning(f"[DaxTool] Step 3/4: ✗ DAX FAILED attempt {attempt + 1} — {execution_result.get('error', 'unknown')[:200]}")
+                            consecutive_llm_failures += 1
                             if attempt == max_retries - 1:
                                 results["errors"].append(f"DAX failed after {max_retries} attempts: {execution_result.get('error')}")
                     else:
+                        logger.warning(f"[DaxTool] Step 3/4: ✗ LLM returned empty/garbage DAX on attempt {attempt + 1}")
+                        dax_attempts.append({
+                            "attempt": attempt + 1, "dax": "(empty)",
+                            "success": False, "error": "LLM returned empty or invalid response", "row_count": 0,
+                        })
+                        consecutive_llm_failures += 1
                         if attempt == max_retries - 1:
                             results["errors"].append("Failed to generate valid DAX query")
 
                 except Exception as e:
+                    logger.error(f"[DaxTool] Step 3/4: ✗ Exception on attempt {attempt + 1}: {e}", exc_info=True)
                     dax_attempts.append({
                         "attempt": attempt + 1, "dax": results.get("generated_dax"),
                         "success": False, "error": str(e), "row_count": 0,
                     })
+                    consecutive_llm_failures += 1
                     if attempt == max_retries - 1:
                         results["errors"].append(f"DAX error after {max_retries} attempts: {str(e)}")
+        else:
+            logger.warning("[DaxTool] Step 3/4: SKIPPED — no measures and no tables in model context")
 
         results["dax_attempts"] = dax_attempts
 
         # Step 4: Visual references
+        logger.info(f"[DaxTool] Step 4/4: Visual references (include={config.get('include_visual_references', True)})")
         if config.get("include_visual_references", True) and model_context.get("measures"):
             try:
                 used_measures = self._extract_measures_from_dax(
@@ -408,62 +536,138 @@ class PowerBISemanticModelDaxTool(BaseTool):
                     [m["name"] for m in model_context["measures"]],
                 )
                 if used_measures:
+                    logger.info(f"[DaxTool] Step 4/4: Looking up visual refs for measures: {used_measures}")
                     visual_refs = await self._find_visual_references(
                         workspace_id, dataset_id, access_token, used_measures
                     )
                     results["visual_references"] = visual_refs
+                    logger.info(f"[DaxTool] Step 4/4: ✓ Found {len(visual_refs)} visual references")
+                else:
+                    logger.info("[DaxTool] Step 4/4: No measures found in generated DAX, skipping visual refs")
             except Exception as e:
+                logger.warning(f"[DaxTool] Step 4/4: ✗ Visual reference error: {e}")
                 results["errors"].append(f"Visual reference error: {str(e)}")
 
+        n_errors = len(results.get("errors", []))
+        n_attempts = len(dax_attempts)
+        success = results.get("dax_execution", {}).get("success", False)
+        logger.info(
+            f"[DaxTool] ═══ Pipeline result: success={success}, attempts={n_attempts}, "
+            f"errors={n_errors}, rows={results.get('dax_execution', {}).get('row_count', 0)} ═══"
+        )
         return self._format_output(results, output_format)
 
     async def _resolve_model_context(self, config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Resolve model context from JSON input or cache."""
-        # Priority 1: model_context_json provided directly
-        model_context_json = config.get("model_context_json")
-        if model_context_json:
-            try:
-                parsed = json.loads(model_context_json) if isinstance(model_context_json, str) else model_context_json
-                logger.info(f"[DaxTool] Using model context from input JSON ({len(parsed.get('measures', []))} measures)")
-                return {
-                    "measures": parsed.get("measures", []),
-                    "relationships": parsed.get("relationships", []),
-                    "tables": parsed.get("tables", []),
-                    "columns": parsed.get("columns", []),
-                    "sample_data": parsed.get("sample_data", {}),
-                    "default_filters": parsed.get("default_filters", {}),
-                }
-            except (json.JSONDecodeError, TypeError) as e:
-                logger.warning(f"[DaxTool] Failed to parse model_context_json: {e}")
+        """Resolve model context with 3-tier priority.
 
-        # Priority 2: Cache fallback
+        Priority 1: model_context_json (agent passes reduced JSON directly)
+        Priority 2: Reduced cache (Reducer saved with report_id='reduced')
+        Priority 3: Full cache (Fetcher's original full metadata)
+        """
         dataset_id = config.get("dataset_id")
         workspace_id = config.get("workspace_id")
         report_id = config.get("report_id")
         group_id = config.get("group_id", "default")
 
-        if dataset_id and workspace_id:
+        # ── Priority 1: model_context_json provided directly ──
+        model_context_json = config.get("model_context_json")
+        if model_context_json:
+            logger.info(f"[DaxTool] _resolve_model_context: Trying model_context_json ({len(str(model_context_json))} chars)")
             try:
-                async with async_session_factory() as session:
-                    cache_service = PowerBISemanticModelCacheService(session)
-                    cached = await cache_service.get_cached_metadata(
-                        group_id=group_id, dataset_id=dataset_id,
-                        workspace_id=workspace_id, report_id=report_id,
-                    )
-                if cached:
-                    logger.info(f"[DaxTool] Using cached model context for dataset {dataset_id}")
-                    return {
-                        "measures": cached.get("measures", []),
-                        "relationships": cached.get("relationships", []),
-                        "tables": cached.get("schema", {}).get("tables", []),
-                        "columns": cached.get("schema", {}).get("columns", []),
-                        "sample_data": cached.get("sample_data", {}),
-                        "default_filters": cached.get("default_filters", {}),
-                    }
-            except Exception as e:
-                logger.warning(f"[DaxTool] Cache lookup failed: {e}")
+                parsed = json.loads(model_context_json) if isinstance(model_context_json, str) else model_context_json
+                result = self._parse_context_dict(parsed)
+                logger.info(
+                    f"[DaxTool] _resolve_model_context: ✓ SOURCE=AGENT_JSON (model_context_json) — "
+                    f"tables={len(result['tables'])}, measures={len(result['measures'])}, "
+                    f"relationships={len(result['relationships'])}, slicers={len(result['slicers'])}"
+                )
+                return result
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"[DaxTool] _resolve_model_context: ✗ Failed to parse model_context_json: {e}")
+        else:
+            logger.info("[DaxTool] _resolve_model_context: No model_context_json from agent, trying reduced cache...")
+
+        if not dataset_id or not workspace_id:
+            logger.warning(f"[DaxTool] _resolve_model_context: ✗ Cannot do cache lookup — dataset_id={dataset_id}, workspace_id={workspace_id}")
+            return None
+
+        # ── Priority 2: Reduced cache (saved by Metadata Reducer with report_id='reduced') ──
+        try:
+            async with async_session_factory() as session:
+                cache_service = PowerBISemanticModelCacheService(session)
+                reduced = await cache_service.get_cached_metadata(
+                    group_id=group_id, dataset_id=dataset_id,
+                    workspace_id=workspace_id, report_id="reduced",
+                )
+            if reduced:
+                # Reduced output has tables/measures at top level (not nested under schema)
+                result = self._parse_context_dict(reduced)
+                logger.info(
+                    f"[DaxTool] _resolve_model_context: ✓ SOURCE=REDUCED_CACHE (report_id='reduced') — "
+                    f"tables={len(result['tables'])}, measures={len(result['measures'])}, "
+                    f"relationships={len(result['relationships'])}, slicers={len(result['slicers'])}"
+                )
+                return result
+            else:
+                logger.info("[DaxTool] _resolve_model_context: No reduced cache found, trying full cache...")
+        except Exception as e:
+            logger.warning(f"[DaxTool] _resolve_model_context: Reduced cache lookup failed: {e}")
+
+        # ── Priority 3: Full cache (Fetcher's original metadata) ──
+        use_any_report = not report_id
+        logger.info(f"[DaxTool] _resolve_model_context: Full cache lookup — group={group_id}, dataset={dataset_id}, workspace={workspace_id[:12]}..., report_id={report_id or 'ANY'}")
+        try:
+            async with async_session_factory() as session:
+                cache_service = PowerBISemanticModelCacheService(session)
+                cached = await cache_service.get_cached_metadata(
+                    group_id=group_id, dataset_id=dataset_id,
+                    workspace_id=workspace_id, report_id=report_id,
+                    any_report_id=use_any_report,
+                )
+            if cached:
+                result = {
+                    "measures": cached.get("measures", []),
+                    "relationships": cached.get("relationships", []),
+                    "tables": cached.get("schema", {}).get("tables", []),
+                    "columns": cached.get("schema", {}).get("columns", []),
+                    "sample_data": cached.get("sample_data", {}),
+                    "default_filters": cached.get("default_filters", {}),
+                    "slicers": cached.get("slicers", []),
+                }
+                logger.info(
+                    f"[DaxTool] _resolve_model_context: ✓ SOURCE=FULL_CACHE (NOT reduced!) — "
+                    f"tables={len(result['tables'])}, measures={len(result['measures'])}"
+                )
+                logger.warning(
+                    "[DaxTool] ⚠ Using FULL cache. Reducer either didn't run or didn't save reduced cache."
+                )
+                return result
+            else:
+                logger.warning("[DaxTool] _resolve_model_context: ✗ No cache found at all")
+        except Exception as e:
+            logger.warning(f"[DaxTool] _resolve_model_context: Full cache lookup exception: {e}")
 
         return None
+
+    @staticmethod
+    def _parse_context_dict(parsed: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize a context dict — handles both Reducer format (top-level)
+        and Fetcher cache format (nested under 'schema')."""
+        tables = parsed.get("tables", [])
+        columns = parsed.get("columns", [])
+        # Fetcher cache nests under 'schema'
+        if not tables and "schema" in parsed:
+            tables = parsed["schema"].get("tables", [])
+            columns = parsed["schema"].get("columns", [])
+        return {
+            "measures": parsed.get("measures", []),
+            "relationships": parsed.get("relationships", []),
+            "tables": tables,
+            "columns": columns,
+            "sample_data": parsed.get("sample_data", {}),
+            "default_filters": parsed.get("default_filters", {}),
+            "slicers": parsed.get("slicers", []),
+        }
 
     # =====================================================================
     # Authentication
@@ -479,126 +683,200 @@ class PowerBISemanticModelDaxTool(BaseTool):
     # =====================================================================
 
     def _build_enriched_semantic_context(self, model_context: Dict[str, Any], config: Dict[str, Any]) -> str:
-        """Build enriched semantic context for LLM prompt (Copilot-style)."""
-        sections = []
-        sections.append("## SEMANTIC MODEL SCHEMA\n")
+        """Build enriched semantic context for LLM prompt.
 
+        Designed for strictness: starts with an explicit ALLOWED TABLES whitelist,
+        then schema, relationships, sample data. Keeps instructions minimal so the
+        LLM cannot hallucinate tables not in the reduced context.
+        """
+        sections = []
         tables = model_context.get("tables", [])
         measures = model_context.get("measures", [])
-        visible_tables = config.get("visible_tables", [])
-
-        # Tables with measures are critical
-        tables_with_measures = set()
-        for measure in measures[:20]:
-            table_name = measure.get("table")
-            if table_name:
-                tables_with_measures.add(table_name)
-
-        tables_to_show = []
-        tables_seen = set()
-
-        for table in tables:
-            if table["name"] in tables_with_measures:
-                tables_to_show.append(table)
-                tables_seen.add(table["name"])
-        if visible_tables:
-            for table in tables:
-                if table["name"] in visible_tables and table["name"] not in tables_seen:
-                    tables_to_show.append(table)
-                    tables_seen.add(table["name"])
-        remaining_slots = 15 - len(tables_to_show)
-        for table in tables:
-            if table["name"] not in tables_seen and remaining_slots > 0:
-                tables_to_show.append(table)
-                tables_seen.add(table["name"])
-                remaining_slots -= 1
-
-        for table in tables_to_show:
-            table_name = table["name"]
-            sections.append(f"### Table: **{table_name}**")
-            columns = table.get("columns", [])
-            if columns:
-                column_types = table.get("column_types", {})
-                column_list = []
-                for col in columns[:15]:
-                    col_type = column_types.get(col, "")
-                    column_list.append(f"{col} ({col_type})" if col_type else col)
-                sections.append(f"**Columns**: {', '.join(column_list)}")
-            column_descriptions = table.get("column_descriptions", {})
-            if column_descriptions:
-                sections.append("**Column Descriptions**:")
-                for col, desc in list(column_descriptions.items())[:5]:
-                    sections.append(f"  - {col}: {desc}")
-            sections.append("")
-
-        if measures:
-            sections.append("### Available Measures")
-            for measure in measures[:20]:
-                sections.append(f"- **{measure['name']}** (Table: {measure.get('table', '')})")
-                sections.append(f"  Expression: `{measure.get('expression', '')[:100]}...`")
-            sections.append("")
-
         relationships = model_context.get("relationships", [])
+
+        # Collect all table names — this is the hard whitelist
+        tables_seen = set()
+        for table in tables:
+            tables_seen.add(table["name"])
+
+        # ── HARD WHITELIST — must come first ──
+        table_list = ", ".join(sorted(tables_seen))
+        sections.append(f"ALLOWED TABLES (use ONLY these): {table_list}")
+        sections.append("ANY table not in this list will cause an error.\n")
+
+        # ── Schema ──
+        for table in tables:
+            table_name = table["name"]
+            columns = table.get("columns", [])
+            column_types = table.get("column_types", {})
+            col_parts = []
+            for col in columns:
+                col_type = column_types.get(col, "")
+                col_parts.append(f"{col} ({col_type})" if col_type else col)
+            sections.append(f"TABLE {table_name}: {', '.join(col_parts)}")
+
+        sections.append("")
+
+        # ── Measures ──
+        if measures:
+            for measure in measures:
+                expr = measure.get("expression", "")[:120]
+                sections.append(f"MEASURE [{measure['name']}] on {measure.get('table', '?')}: {expr}")
+            sections.append("")
+
+        # ── Relationships ──
         if relationships:
             relevant = [r for r in relationships if r['from_table'] in tables_seen or r['to_table'] in tables_seen]
             if relevant:
-                sections.append("### Table Relationships")
+                sections.append("RELATIONSHIPS:")
                 for rel in relevant:
-                    sections.append(f"- {rel['from_table']}[{rel['from_column']}] -> {rel['to_table']}[{rel['to_column']}]")
+                    sections.append(f"  {rel['from_table']}[{rel['from_column']}] -> {rel['to_table']}[{rel['to_column']}]")
                 sections.append("")
 
-        # Business terminology
-        business_mappings = config.get("business_mappings", {})
-        field_synonyms = config.get("field_synonyms", {})
-        if business_mappings or field_synonyms:
-            sections.append("## BUSINESS TERMINOLOGY\n")
-            if business_mappings:
-                sections.append("### Business Term Mappings")
-                for term, expression in business_mappings.items():
-                    sections.append(f'- **"{term}"** -> `{expression}`')
-                sections.append("")
-            if field_synonyms:
-                sections.append("### Field Synonyms")
-                for field, synonyms in field_synonyms.items():
-                    sections.append(f"- **{field}**: {', '.join(synonyms)}")
-                sections.append("")
-
-        # Sample data
+        # ── Sample data (ALL from reduced context — critical for filter matching) ──
         sample_values = model_context.get("sample_data", {}) or model_context.get("sample_values", {})
         if sample_values:
-            sections.append("## SAMPLE DATA VALUES\n")
-            for column, value_info in list(sample_values.items())[:10]:
-                if value_info.get("type") == "categorical":
+            sections.append("SAMPLE VALUES:")
+            for column, value_info in sample_values.items():
+                if value_info.get("type") in ("categorical", "slicer_values"):
                     values = value_info.get("sample_values", [])
-                    sections.append(f"- **{column}**: {', '.join([str(v) for v in values[:5]])}")
+                    # Show up to 15 values per column (enough for filter matching)
+                    sections.append(f"  {column}: {', '.join([str(v) for v in values[:15]])}")
             sections.append("")
 
-        # Active filters
+        # ── Active filters (only for tables in the model) ──
         active_filters = config.get("active_filters", {})
         if active_filters:
-            sections.append("## CURRENT VIEW STATE (AUTO-APPLY FILTERS)\n")
-            sections.append("**IMPORTANT**: These filters are CURRENTLY ACTIVE and should be applied:\n")
+            relevant_filters = {}
+            skipped_filters = []
             for filter_name, filter_value in active_filters.items():
-                if isinstance(filter_value, list):
-                    quoted = ', '.join([f"'{v}'" for v in filter_value])
-                    sections.append(f"- **{filter_name}** IN ({quoted})")
-                else:
-                    sections.append(f"- **{filter_name}** = {filter_value}")
+                filter_table = filter_name.split("[")[0] if "[" in filter_name else None
+                if filter_table and filter_table not in tables_seen:
+                    skipped_filters.append(filter_name)
+                    continue
+                relevant_filters[filter_name] = filter_value
+
+            if skipped_filters:
+                logger.info(
+                    f"[DaxTool] Skipped {len(skipped_filters)} active filters "
+                    f"referencing tables not in model context: {skipped_filters}"
+                )
+
+            if relevant_filters:
+                sections.append("ACTIVE FILTERS (must apply):")
+                for filter_name, filter_value in relevant_filters.items():
+                    if isinstance(filter_value, list):
+                        quoted = ', '.join([f'"{v}"' for v in filter_value])
+                        sections.append(f"  {filter_name} IN ({quoted})")
+                    elif isinstance(filter_value, str):
+                        val = filter_value.strip()
+                        if val.upper() == "NOT NULL":
+                            sections.append(f"  {filter_name} is not blank")
+                        elif val.upper().startswith("NOT STARTS WITH"):
+                            prefix = val[len("NOT STARTS WITH"):].strip().strip("'\"")
+                            sections.append(f'  {filter_name} does NOT start with "{prefix}"')
+                        elif val.upper().startswith("STARTS WITH"):
+                            prefix = val[len("STARTS WITH"):].strip().strip("'\"")
+                            sections.append(f'  {filter_name} starts with "{prefix}"')
+                        else:
+                            sections.append(f'  {filter_name} = "{val}"')
+                    else:
+                        sections.append(f"  {filter_name} = {filter_value}")
+                sections.append("")
+
+        # ── Business terminology ──
+        business_mappings = config.get("business_mappings", {})
+        if business_mappings:
+            sections.append("BUSINESS TERMS:")
+            for term, expression in business_mappings.items():
+                sections.append(f'  "{term}" -> {expression}')
             sections.append("")
 
-        # Conversation history
+        field_synonyms = config.get("field_synonyms", {})
+        if field_synonyms:
+            for field, synonyms in field_synonyms.items():
+                sections.append(f"SYNONYM {field}: {', '.join(synonyms)}")
+            sections.append("")
+
+        # ── Context knowledge ──
+        context_knowledge = config.get("context_knowledge", "")
+        if context_knowledge:
+            sections.append(f"BUSINESS CONTEXT: {context_knowledge}")
+            sections.append("")
+
+        # ── Reference DAX ──
+        reference_dax = config.get("reference_dax", "")
+        if reference_dax:
+            sections.append(f"REFERENCE DAX:\n{reference_dax}")
+            sections.append("")
+
+        # ── Conversation history ──
         conversation_history = config.get("conversation_history", [])
         if conversation_history:
-            sections.append("## RECENT CONVERSATION HISTORY\n")
+            sections.append("RECENT HISTORY:")
             for i, turn in enumerate(conversation_history[-3:], 1):
-                sections.append(f"**Q{i}**: {turn.get('question', '')}")
-                if turn.get('filters_used'):
-                    sections.append(f"  Filters used: {turn['filters_used']}")
+                sections.append(f"  Q{i}: {turn.get('question', '')}")
                 if turn.get('answer'):
-                    sections.append(f"  Answer: {turn['answer']}")
+                    sections.append(f"  A{i}: {turn['answer']}")
             sections.append("")
 
-        return "\n".join(sections)
+        result = "\n".join(sections)
+        logger.info(
+            f"[DaxTool] _build_enriched_semantic_context: {len(result)} chars — "
+            f"tables={len(tables)}, measures={len(measures)}, "
+            f"has_filters={bool(active_filters)}, "
+            f"has_context_knowledge={bool(config.get('context_knowledge'))}, "
+            f"has_reference_dax={bool(config.get('reference_dax'))}"
+        )
+        return result
+
+    def _build_example_dax(self, model_context: Dict[str, Any]) -> str:
+        """Build a concrete example DAX query from the actual model tables/measures.
+
+        This gives the LLM a working pattern using REAL table/column names so it
+        doesn't need to guess or hallucinate.
+        """
+        tables = model_context.get("tables", [])
+        measures = model_context.get("measures", [])
+        relationships = model_context.get("relationships", [])
+
+        if not measures or not tables:
+            return ""
+
+        measure = measures[0]
+        measure_table = measure.get("table", "")
+
+        # Find a dimension table connected to the measure's fact table via relationship
+        dim_table = None
+        dim_col = None
+        for rel in relationships:
+            if rel["from_table"] == measure_table and rel["to_table"] != measure_table:
+                # Find the dim table object to get a non-key column
+                for t in tables:
+                    if t["name"] == rel["to_table"]:
+                        non_key_cols = [c for c in t.get("columns", []) if c != rel["to_column"]]
+                        if non_key_cols:
+                            dim_table = t["name"]
+                            dim_col = non_key_cols[0]
+                            break
+                if dim_table:
+                    break
+
+        if dim_table and dim_col:
+            return (
+                f"EVALUATE\n"
+                f"SUMMARIZECOLUMNS(\n"
+                f'    TREATAS({{"SomeValue"}}, {dim_table}[{dim_col}]),\n'
+                f'    "Result", [{measure["name"]}]\n'
+                f")"
+            )
+        else:
+            return (
+                f"EVALUATE\n"
+                f"SUMMARIZECOLUMNS(\n"
+                f'    "Result", [{measure["name"]}]\n'
+                f")"
+            )
 
     async def _generate_dax_with_llm(
         self, user_question: str, model_context: Dict[str, Any], config: Dict[str, Any]
@@ -609,7 +887,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
         llm_model = config.get("llm_model", "databricks-claude-sonnet-4")
 
         if not llm_workspace_url or not llm_token:
-            return self._generate_simple_dax(user_question, model_context)
+            return self._generate_deterministic_dax(user_question, model_context)
 
         measures = model_context.get("measures", [])
         if not measures:
@@ -617,90 +895,95 @@ class PowerBISemanticModelDaxTool(BaseTool):
             return None
 
         enriched_context = self._build_enriched_semantic_context(model_context, config)
+        example_dax = self._build_example_dax(model_context)
 
-        prompt = f"""{enriched_context}
+        has_filters = "ACTIVE FILTERS" in enriched_context
 
-## USER QUESTION
-{user_question}
+        # Build a short, strict prompt — no verbose markdown, no flowery instructions
+        system_prompt = f"""{enriched_context}
+RULES:
+1. ONLY use tables from ALLOWED TABLES list. Any other table = error.
+2. ONLY use columns listed under each TABLE. Any other column = error.
+3. ONLY use measures listed under MEASURE. Do not invent measure names.
+4. Use EVALUATE + SUMMARIZECOLUMNS for all queries.
+5. For cross-table filters use TREATAS: TREATAS({{"value"}}, table[column])
+6. Filters go BEFORE measure expressions in SUMMARIZECOLUMNS.
+7. NEVER use CALCULATETABLE with empty first argument.
+8. Use LEFT() instead of STARTSWITH().
+{"9. Apply the ACTIVE FILTERS listed above." if has_filters else "9. No active filters — only filter if the question asks for it."}
 
-## DAX GENERATION INSTRUCTIONS
+EXAMPLE using this model:
+{example_dax}
 
-### Context Understanding
-1. **Interpret natural language**: Use business term mappings and synonyms
-2. **Apply implicit filters**: Auto-apply filters from "CURRENT VIEW STATE"
-3. **Use conversation history**: Consider previous questions for context
-4. **Leverage sample values**: Use sample data to understand value formats
+OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text, no explanation, no markdown."""
 
-### Query Generation Rules
-1. **ONLY use measure names from "Available Measures"** - DO NOT invent names
-2. **ONLY use table/column names from "SEMANTIC MODEL SCHEMA"** - DO NOT guess
-3. **Use exact syntax**: Measure references must match exactly
-4. **Apply active filters**: Include filters from "CURRENT VIEW STATE" automatically
-5. **Natural language translation**: Use "Business Term Mappings" to convert phrases
+        user_prompt = user_question
 
-### DAX Syntax Requirements
+        # Store full prompt for output/logging
+        prompt = f"[SYSTEM]\n{system_prompt}\n\n[USER]\n{user_prompt}"
+        self._last_llm_prompt = prompt
 
-#### Basic Structure
-- Use `EVALUATE` with `SUMMARIZECOLUMNS`, `ADDCOLUMNS`, or other table functions
-- **Filter order**: In SUMMARIZECOLUMNS, filters MUST come BEFORE measure name/expression pairs
-- Return ONLY the DAX query - no explanations, no markdown code blocks
-
-#### String Prefix Filtering (CRITICAL)
-**NEVER use STARTSWITH()** - not supported by Power BI API.
-Use LEFT() instead: `LEFT(Column, 1) = "7"`
-
-#### Multi-Table Filtering (CRITICAL)
-**NEVER use ALL() with columns from different tables**
-Use TREATAS or CALCULATETABLE instead.
-
-#### IN Operator for Multiple Values
-Use curly braces: `Column IN {{"Value1", "Value2"}}`
-
-## YOUR GENERATED DAX QUERY
-
-**CRITICAL**: Return ONLY the DAX query. NO explanations. Start with EVALUATE.
-"""
-
-        logger.info(f"[DAX Generation] Enriched context size: {len(enriched_context)} chars")
+        logger.info(f"[DaxTool] ═══ LLM PROMPT (system={len(system_prompt)} chars, user={len(user_prompt)} chars) ═══")
+        logger.info(f"[DaxTool] PROMPT START ═══\n{prompt}\n═══ PROMPT END")
 
         self._emit_llm_trace(event_context="DAX Generation - Prompt", prompt=prompt, model=llm_model, operation="generate_dax")
 
         url = f"{llm_workspace_url.rstrip('/')}/serving-endpoints/{llm_model}/invocations"
         headers = {"Authorization": f"Bearer {llm_token}", "Content-Type": "application/json"}
-        payload = {"messages": [{"role": "user", "content": prompt}], "max_tokens": 1000, "temperature": 0.1}
+
+        # Try system+user first; fall back to single user message if endpoint rejects system role
+        payloads = [
+            {
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "max_tokens": 1000,
+                "temperature": 0,
+            },
+            {
+                "messages": [
+                    {"role": "user", "content": f"{system_prompt}\n\nQUESTION: {user_prompt}"},
+                ],
+                "max_tokens": 1000,
+                "temperature": 0,
+            },
+        ]
 
         async with httpx.AsyncClient(timeout=60.0) as client:
-            try:
-                response = await client.post(url, headers=headers, json=payload)
-                response.raise_for_status()
-                result = response.json()
-                content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            for i, payload in enumerate(payloads):
+                try:
+                    response = await client.post(url, headers=headers, json=payload)
+                    response.raise_for_status()
+                    result = response.json()
+                    content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
 
-                self._emit_llm_trace(
-                    event_context="DAX Generation - Response", prompt=prompt,
-                    response=content, model=llm_model, operation="generate_dax"
-                )
+                    if i > 0:
+                        logger.info(f"[DaxTool] system role not supported — fell back to single user message")
 
-                dax = self._extract_dax_from_llm_response(content)
+                    logger.info(f"[DaxTool] RAW LLM RESPONSE ({len(content)} chars): {content[:500]}")
 
-                # Validate measures
-                available_measure_names = [m["name"] for m in measures]
-                all_references = re.findall(r'\[([^\]]+)\]', dax)
-                potential_measures = []
-                for ref in all_references:
-                    is_table_column = any(f"{t['name']}[{ref}]" in dax for t in model_context.get("tables", []))
-                    if not is_table_column:
-                        potential_measures.append(ref)
-                hallucinated = [m for m in potential_measures if m not in available_measure_names]
-                if hallucinated:
-                    logger.warning(f"[DAX Generation] Possible hallucinated measures: {hallucinated}")
+                    self._emit_llm_trace(
+                        event_context="DAX Generation - Response", prompt=prompt,
+                        response=content, model=llm_model, operation="generate_dax"
+                    )
 
-                dax = self._auto_wrap_with_report_filters(dax, config)
-                return dax
+                    dax = self._extract_dax_from_llm_response(content)
+                    if not dax:
+                        logger.warning(f"[DaxTool] LLM returned no extractable DAX, trying deterministic fallback")
+                        return self._generate_deterministic_dax(user_question, model_context)
+                    dax = self._auto_wrap_with_report_filters(dax, config)
+                    return dax
 
-            except Exception as e:
-                logger.error(f"LLM DAX generation error: {e}")
-                return self._generate_simple_dax(user_question, model_context)
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 400 and i == 0:
+                        logger.warning(f"[DaxTool] system+user payload got 400, retrying with single user message...")
+                        continue
+                    logger.error(f"LLM DAX generation error: {e}")
+                    return self._generate_deterministic_dax(user_question, model_context)
+                except Exception as e:
+                    logger.error(f"LLM DAX generation error: {e}")
+                    return self._generate_deterministic_dax(user_question, model_context)
 
     async def _generate_dax_with_self_correction(
         self, user_question: str, model_context: Dict[str, Any],
@@ -714,63 +997,108 @@ Use curly braces: `Column IN {{"Value1", "Value2"}}`
         if not llm_workspace_url or not llm_token:
             return None
 
-        attempts_text = "\n\n".join([
-            f"### Attempt {att['attempt']}\n"
-            f"**DAX Query:**\n```dax\n{att['dax']}\n```\n"
-            f"**Result:** {'SUCCESS' if att['success'] else 'FAILED'}\n"
-            f"**Error:** {att['error']}" if not att['success'] else ""
-            for att in previous_attempts
-        ])
+        # Build compact error summary from previous attempts
+        attempts_parts = []
+        for att in previous_attempts:
+            error_msg = str(att.get('error', ''))[:200] if not att['success'] else ""
+            part = f"Attempt {att['attempt']}: {att['dax']}"
+            if error_msg:
+                part += f"\nERROR: {error_msg}"
+            attempts_parts.append(part)
+        attempts_text = "\n".join(attempts_parts)
 
         enriched_context = self._build_enriched_semantic_context(model_context, config)
+        example_dax = self._build_example_dax(model_context)
 
-        prompt = f"""{enriched_context}
+        system_prompt = f"""{enriched_context}
+RULES:
+1. ONLY use tables from ALLOWED TABLES list. Any other table = error.
+2. Use EVALUATE + SUMMARIZECOLUMNS. Use TREATAS for cross-table filters.
+3. NEVER leave CALCULATETABLE first argument empty.
+4. Use LEFT() instead of STARTSWITH().
 
-## SELF-CORRECTION MODE
-Previous attempt(s) failed. Analyze the errors and generate a CORRECTED query.
+EXAMPLE using this model:
+{example_dax}
 
-## USER QUESTION
-{user_question}
+OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text."""
 
-## PREVIOUS FAILED ATTEMPTS
+        user_prompt = f"""SELF-CORRECTION: Previous attempts failed. Generate a DIFFERENT query.
+
+Question: {user_question}
+
+Failed attempts:
 {attempts_text}
 
-## ERROR ANALYSIS & CORRECTION INSTRUCTIONS
+Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the DAX."""
 
-1. **"Table/Column doesn't exist"**: Check spelling against schema, use exact names
-2. **"All column arguments must be from the same table"**: Use TREATAS() instead of ALL() across tables
-3. **"Syntax error"**: Check SUMMARIZECOLUMNS filter order (filters BEFORE measures)
-4. **"Failed to resolve name 'STARTSWITH'"**: Use LEFT() instead
-5. **"Type mismatch"**: Check sample values for correct types
+        # Store full prompt for output/logging
+        prompt = f"[SYSTEM]\n{system_prompt}\n\n[USER]\n{user_prompt}"
+        self._last_llm_prompt = prompt
 
-**DO NOT repeat the same query** — try a different approach.
-
-## YOUR CORRECTED DAX QUERY
-"""
+        logger.info(f"[DaxTool] ═══ SELF-CORRECTION PROMPT (system={len(system_prompt)} chars, user={len(user_prompt)} chars) ═══")
+        logger.info(f"[DaxTool] PROMPT START ═══\n{prompt}\n═══ PROMPT END")
 
         url = f"{llm_workspace_url.rstrip('/')}/serving-endpoints/{llm_model}/invocations"
         headers = {"Authorization": f"Bearer {llm_token}", "Content-Type": "application/json"}
-        payload = {"messages": [{"role": "user", "content": prompt}], "max_tokens": 1000, "temperature": 0.1}
+
+        # Try system+user first; fall back to single user message if endpoint rejects system role
+        payloads = [
+            {
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "max_tokens": 1000,
+                "temperature": 0,
+            },
+            {
+                "messages": [
+                    {"role": "user", "content": f"{system_prompt}\n\n{user_prompt}"},
+                ],
+                "max_tokens": 1000,
+                "temperature": 0,
+            },
+        ]
 
         async with httpx.AsyncClient(timeout=60.0) as client:
-            try:
-                response = await client.post(url, headers=headers, json=payload)
-                response.raise_for_status()
-                result = response.json()
-                content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-                dax = self._extract_dax_from_llm_response(content)
-                return dax
-            except Exception as e:
-                logger.error(f"LLM self-correction error: {e}")
-                return None
+            for i, payload in enumerate(payloads):
+                try:
+                    response = await client.post(url, headers=headers, json=payload)
+                    response.raise_for_status()
+                    result = response.json()
+                    content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    if i > 0:
+                        logger.info(f"[DaxTool] self-correction: system role not supported — fell back to single user message")
+                    logger.info(f"[DaxTool] RAW SELF-CORRECTION RESPONSE ({len(content)} chars): {content[:500]}")
+                    dax = self._extract_dax_from_llm_response(content)
+                    if dax:
+                        return dax
+                    # Empty extraction — LLM returned garbage, return None to trigger retry
+                    logger.warning(f"[DaxTool] Self-correction returned no extractable DAX")
+                    return None
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 400 and i == 0:
+                        logger.warning(f"[DaxTool] self-correction: system+user payload got 400, retrying with single user message...")
+                        continue
+                    logger.error(f"LLM self-correction error: {e}")
+                    return None
+                except Exception as e:
+                    logger.error(f"LLM self-correction error: {e}")
+                    return None
 
-    def _generate_simple_dax(self, user_question: str, model_context: Dict[str, Any]) -> Optional[str]:
-        """Generate a simple DAX query without LLM."""
+    def _generate_deterministic_dax(self, user_question: str, model_context: Dict[str, Any]) -> Optional[str]:
+        """Build DAX deterministically by matching question terms to sample data.
+
+        This is the fallback when the LLM keeps hallucinating. It parses the user
+        question, finds matching values in sample_data, and builds TREATAS filters.
+        """
         measures = model_context.get("measures", [])
         if not measures:
             return None
 
         question_lower = user_question.lower()
+
+        # Pick best measure
         best_measure = None
         for measure in measures:
             if any(word in question_lower for word in measure["name"].lower().split()):
@@ -779,10 +1107,209 @@ Previous attempt(s) failed. Analyze the errors and generate a CORRECTED query.
         if not best_measure:
             best_measure = measures[0]
 
-        return f'EVALUATE\nSUMMARIZECOLUMNS(\n    "Result", [{best_measure["name"]}]\n)'
+        # Build value → column mapping from sample_data
+        sample_data = model_context.get("sample_data", {})
+        value_to_col: Dict[str, str] = {}  # "italy" → "dim_country[Region]"
+        for col_ref, value_info in sample_data.items():
+            for val in value_info.get("sample_values", []):
+                val_lower = str(val).lower()
+                if len(val_lower) > 1:
+                    value_to_col[val_lower] = col_ref
+
+        # Also build column name → table[column] mapping for direct column matches
+        col_to_ref: Dict[str, str] = {}
+        for table in model_context.get("tables", []):
+            for col in table.get("columns", []):
+                col_to_ref[col.lower()] = f"{table['name']}[{col}]"
+
+        # Find filters from question
+        treatas_parts = []
+        filter_parts = []
+        matched_values = set()
+
+        # Match sample data values against question
+        for val_lower, col_ref in sorted(value_to_col.items(), key=lambda x: -len(x[0])):
+            if val_lower in question_lower and val_lower not in matched_values:
+                # Find original case value
+                original_val = val_lower
+                for v_info in sample_data.get(col_ref, {}).get("sample_values", []):
+                    if str(v_info).lower() == val_lower:
+                        original_val = str(v_info)
+                        break
+                treatas_parts.append(f'    TREATAS({{"{original_val}"}}, {col_ref})')
+                matched_values.add(val_lower)
+
+        # Check for numeric patterns like "Week 3", "Month 5"
+        number_patterns = re.findall(r'(?:week|month|year|quarter)\s+(\d+)', question_lower)
+        if number_patterns:
+            for num in number_patterns:
+                # Find a column that matches this concept
+                for col_lower, col_ref in col_to_ref.items():
+                    if col_lower in ("week", "month", "year", "quarter") and col_lower in question_lower:
+                        treatas_parts.append(f'    TREATAS({{{num}}}, {col_ref})')
+                        break
+
+        # Check for direct column value matches (e.g., "description" = "Complete CGR")
+        for table in model_context.get("tables", []):
+            for col in table.get("columns", []):
+                col_lower = col.lower()
+                if col_lower in question_lower and len(col_lower) > 3:
+                    # Look for a quoted or named value after the column mention
+                    col_ref = f"{table['name']}[{col}]"
+                    # Check if any sample value for this column appears in the question
+                    for sv_col_ref, sv_info in sample_data.items():
+                        if sv_col_ref == col_ref:
+                            for sv in sv_info.get("sample_values", []):
+                                sv_lower = str(sv).lower()
+                                if sv_lower in question_lower and sv_lower not in matched_values and len(sv_lower) > 2:
+                                    filter_parts.append(
+                                        f'    FILTER(VALUES({col_ref}), {col_ref} = "{sv}")'
+                                    )
+                                    matched_values.add(sv_lower)
+
+        # Assemble DAX
+        parts = treatas_parts + filter_parts
+        if parts:
+            filters_str = ",\n".join(parts)
+            dax = (
+                f"EVALUATE\n"
+                f"SUMMARIZECOLUMNS(\n"
+                f"{filters_str},\n"
+                f'    "Result", [{best_measure["name"]}]\n'
+                f")"
+            )
+        else:
+            dax = f'EVALUATE\nSUMMARIZECOLUMNS(\n    "Result", [{best_measure["name"]}]\n)'
+
+        logger.info(f"[DaxTool] Deterministic DAX fallback ({len(parts)} filters): {dax}")
+        return dax
+
+    @staticmethod
+    def _validate_dax_references(dax: str, model_context: Dict[str, Any]) -> Optional[str]:
+        """Validate that all table references in DAX exist in the model schema.
+
+        Returns an error string if invalid references found, None if valid.
+        """
+        # Build set of known table names from model context
+        known_tables = set()
+        for table in model_context.get("tables", []):
+            known_tables.add(table["name"])
+
+        # Extract all table[column] references from DAX
+        refs = re.findall(r'(\w+)\[([^\]]+)\]', dax)
+        unknown_tables = set()
+        for table_name, _ in refs:
+            # Skip DAX functions that use bracket syntax (VALUES, FILTER, etc.)
+            if table_name.upper() in (
+                "EVALUATE", "SUMMARIZECOLUMNS", "CALCULATETABLE", "CALCULATE",
+                "FILTER", "VALUES", "ALL", "ALLEXCEPT", "TREATAS", "ADDCOLUMNS",
+                "SELECTCOLUMNS", "TOPN", "RELATED", "RELATEDTABLE", "REMOVEFILTERS",
+                "KEEPFILTERS", "USERELATIONSHIP", "CROSSFILTER", "DISTINCT",
+                "DATATABLE", "ROW", "UNION", "INTERSECT", "EXCEPT", "GENERATE",
+                "GENERATESERIES", "NATURALINNERJOIN", "NATURALLEFTOUTERJOIN",
+            ):
+                continue
+            if table_name not in known_tables:
+                unknown_tables.add(table_name)
+
+        if unknown_tables:
+            known_list = ", ".join(sorted(known_tables))
+            unknown_list = ", ".join(sorted(unknown_tables))
+            return (
+                f"SCHEMA VALIDATION ERROR: DAX references tables not in the model schema. "
+                f"Unknown tables: [{unknown_list}]. "
+                f"Available tables: [{known_list}]. "
+                f"ONLY use tables from the SEMANTIC MODEL SCHEMA section."
+            )
+
+        # Check for empty CALCULATETABLE first argument
+        if re.search(r'CALCULATETABLE\s*\(\s*,', dax, re.IGNORECASE):
+            return (
+                "SYNTAX VALIDATION ERROR: CALCULATETABLE has an empty first argument. "
+                "CALCULATETABLE requires a table expression as its first argument, e.g. "
+                "CALCULATETABLE(SUMMARIZECOLUMNS(...), filter1, filter2)."
+            )
+
+        return None
+
+    @staticmethod
+    def _validate_dax_completeness(
+        dax: str, user_question: str, model_context: Dict[str, Any]
+    ) -> Optional[str]:
+        """Check if the generated DAX actually addresses the user question.
+
+        Extracts key filter terms from the question and checks if the DAX
+        contains any filter expressions. Returns error string if the DAX
+        appears to be missing filters that the question requires.
+        """
+        dax_upper = dax.upper()
+        question_lower = user_question.lower()
+
+        # Build a map of sample values → their column references
+        # e.g., "italy" → "dim_country[BU]" or "dim_country[Region]"
+        value_to_columns: Dict[str, List[str]] = {}
+        sample_data = model_context.get("sample_data", {})
+        for col_ref, value_info in sample_data.items():
+            for val in value_info.get("sample_values", []):
+                val_lower = str(val).lower()
+                if val_lower not in value_to_columns:
+                    value_to_columns[val_lower] = []
+                value_to_columns[val_lower].append(col_ref)
+
+        # Also check column values from tables for common filter patterns
+        for table in model_context.get("tables", []):
+            for col in table.get("columns", []):
+                col_lower = col.lower()
+                # If the question mentions a column name, DAX should reference it
+                if col_lower in question_lower and len(col_lower) > 3:
+                    col_ref = f"{table['name']}[{col}]"
+                    if col_ref not in value_to_columns.get(col_lower, []):
+                        if col_lower not in value_to_columns:
+                            value_to_columns[col_lower] = []
+                        value_to_columns[col_lower].append(col_ref)
+
+        # Find question terms that match sample data values
+        missing_filters = []
+        for val_lower, col_refs in value_to_columns.items():
+            if val_lower in question_lower and len(val_lower) > 1:
+                # Check if DAX references any of the associated columns
+                found_in_dax = False
+                for col_ref in col_refs:
+                    # Check for table[column] pattern in DAX
+                    table_name = col_ref.split("[")[0]
+                    if table_name.upper() in dax_upper:
+                        found_in_dax = True
+                        break
+                if not found_in_dax:
+                    missing_filters.append(f'"{val_lower}" (from {col_refs[0]})')
+
+        # Check for numeric filters (e.g., "Week 3" → dim_weeks[Week])
+        number_patterns = re.findall(r'(?:week|month|year|quarter)\s+(\d+)', question_lower)
+        if number_patterns:
+            has_any_filter = any(kw in dax_upper for kw in [
+                "TREATAS", "FILTER", "CALCULATETABLE", "WHERE",
+            ])
+            if not has_any_filter:
+                missing_filters.append("numeric filter (e.g., Week number)")
+
+        if len(missing_filters) >= 2:
+            return (
+                f"COMPLETENESS ERROR: The DAX query executed successfully but appears to be "
+                f"missing filters that the user question requires. The question mentions "
+                f"{', '.join(missing_filters[:5])} but the DAX has no corresponding "
+                f"FILTER, TREATAS, or WHERE expressions. Re-generate with proper filters "
+                f"using TREATAS for cross-table filtering."
+            )
+
+        return None
 
     def _extract_dax_from_llm_response(self, content: str) -> str:
-        """Extract clean DAX query from LLM response."""
+        """Extract clean DAX query from LLM response.
+
+        Returns empty string if no valid DAX found (must contain EVALUATE + parens).
+        """
+        logger.info(f"[DaxTool] Raw LLM response ({len(content)} chars): {content[:300]}...")
+
         content = re.sub(r'```dax\s*', '', content)
         content = re.sub(r'```\s*', '', content)
 
@@ -799,7 +1326,7 @@ Previous attempt(s) failed. Analyze the errors and generate a CORRECTED query.
         for line in lines:
             paren_depth += line.count('(') - line.count(')')
             clean_lines.append(line)
-            if paren_depth == 0 and clean_lines:
+            if paren_depth == 0 and len(clean_lines) > 1:
                 break
 
         dax_query = '\n'.join(clean_lines).strip()
@@ -809,6 +1336,11 @@ Previous attempt(s) failed. Analyze the errors and generate a CORRECTED query.
             after_paren = dax_query[last_paren + 1:].strip()
             if after_paren and (after_paren.startswith('**') or after_paren.startswith('#') or after_paren.startswith('-')):
                 dax_query = dax_query[:last_paren + 1]
+
+        # Reject garbage responses — valid DAX must have EVALUATE + at least one function call
+        if len(dax_query) < 30 or '(' not in dax_query:
+            logger.warning(f"[DaxTool] Extracted DAX too short or missing parens ({len(dax_query)} chars): {dax_query}")
+            return ""
 
         return dax_query.strip()
 
@@ -1316,6 +1848,14 @@ Previous attempt(s) failed. Analyze the errors and generate a CORRECTED query.
         output.append(f"- **Measures**: {len(ctx.get('measures', []))}")
         output.append(f"- **Tables**: {len(ctx.get('tables', []))}")
         output.append(f"- **Relationships**: {len(ctx.get('relationships', []))}\n")
+
+        if results.get("llm_prompt"):
+            output.append("## Full LLM Prompt Used for DAX Generation\n")
+            output.append("<details>\n<summary>Click to expand full prompt sent to LLM</summary>\n")
+            output.append("```")
+            output.append(results["llm_prompt"])
+            output.append("```\n")
+            output.append("</details>\n")
 
         if results.get("generated_dax"):
             output.append("## Generated DAX Query\n")
