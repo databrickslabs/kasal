@@ -48,14 +48,16 @@ class PowerBISemanticModelCacheRepository:
         today = date.today()
 
         if any_report_id:
-            # Match any report_id — used by tools that don't care about
-            # which report the cache was created for (e.g., Metadata Reducer)
+            # Match any report_id except 'reduced' — used by tools that need
+            # the full model cache (e.g., Metadata Reducer). The 'reduced'
+            # report_id is a synthetic entry created by the Reducer itself.
             query = select(PowerBISemanticModelCache).where(
                 and_(
                     PowerBISemanticModelCache.group_id == group_id,
                     PowerBISemanticModelCache.dataset_id == dataset_id,
                     PowerBISemanticModelCache.workspace_id == workspace_id,
-                    PowerBISemanticModelCache.cached_date == today
+                    PowerBISemanticModelCache.cached_date == today,
+                    PowerBISemanticModelCache.report_id != "reduced",
                 )
             )
         elif report_id:
@@ -80,7 +82,7 @@ class PowerBISemanticModelCacheRepository:
             )
 
         result = await self.session.execute(query)
-        return result.scalar_one_or_none()
+        return result.scalars().first()
 
     async def create_cache(
         self,

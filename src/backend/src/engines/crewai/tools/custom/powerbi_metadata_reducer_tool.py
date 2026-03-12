@@ -361,24 +361,83 @@ class PowerBIMetadataReducerTool(BaseTool):
             f"added {len(added_dep_tables)} dep tables: {added_dep_tables}"
         )
 
-        # Step 4b: Include tables referenced by default_filters
-        # Default filters (report-level filters) reference dimension tables that
-        # the LLM/fuzzy selection may not have picked. These filters are crucial
-        # for correct DAX generation, so we MUST include their tables.
+        # Step 4b: MANDATORY — include all default_filter tables in reduced output
+        # Default filters are report-level filters that MUST ALWAYS be applied.
+        # They are excluded from fuzzy/LLM selection — they are unconditionally
+        # included regardless of relevance scoring.
+        # Strategy:
+        #   1. If filter table exists in full model → ALWAYS include that table
+        #   2. If filter table is phantom → remap column to an actual table
+        #   3. If column not found anywhere → drop the filter
         default_filters = model_context.get("default_filters", {})
         if default_filters:
             all_table_names = {t["name"] for t in tables}
+
+            # Build column→table lookup with normalized names for fuzzy matching
+            # Normalization: lowercase, replace spaces/hyphens with underscores
+            col_to_tables: Dict[str, List[tuple]] = {}  # normalized_col → [(original_col, table_name)]
+            for t in tables:
+                for col in t.get("columns", []):
+                    normalized = col.lower().replace(" ", "_").replace("-", "_")
+                    col_to_tables.setdefault(normalized, []).append((col, t["name"]))
+
+            remapped_filters: Dict[str, Any] = {}
             filter_tables_added = []
-            for filter_key in default_filters:
-                # Keys use "table_name[column_name]" format
+            remapped_keys = []
+            dropped_keys = []
+
+            for filter_key, filter_value in default_filters.items():
                 filter_table = filter_key.split("[")[0] if "[" in filter_key else ""
-                if filter_table and filter_table in all_table_names and filter_table not in selected_table_names:
-                    selected_table_names.append(filter_table)
-                    filter_tables_added.append(filter_table)
+                filter_col = filter_key.split("[")[1].rstrip("]") if "[" in filter_key else ""
+
+                if filter_table in all_table_names:
+                    # Case 1: Table exists in the full model — include it
+                    if filter_table not in selected_table_names:
+                        selected_table_names.append(filter_table)
+                        filter_tables_added.append(filter_table)
+                    remapped_filters[filter_key] = filter_value
+                elif filter_col:
+                    # Case 2: Phantom table — try to remap column to an actual table
+                    normalized_col = filter_col.lower().replace(" ", "_").replace("-", "_")
+                    candidates = col_to_tables.get(normalized_col, [])
+
+                    # Prefer tables already in the selected set
+                    kept_candidates = [(c, t) for c, t in candidates if t in selected_table_names]
+                    if kept_candidates:
+                        actual_col, actual_table = kept_candidates[0]
+                        new_key = f"{actual_table}[{actual_col}]"
+                        remapped_filters[new_key] = filter_value
+                        remapped_keys.append(f"{filter_key} → {new_key}")
+                    elif candidates:
+                        actual_col, actual_table = candidates[0]
+                        if actual_table not in selected_table_names:
+                            selected_table_names.append(actual_table)
+                            filter_tables_added.append(actual_table)
+                        new_key = f"{actual_table}[{actual_col}]"
+                        remapped_filters[new_key] = filter_value
+                        remapped_keys.append(f"{filter_key} → {new_key}")
+                    else:
+                        # Case 3: Column not found in any table — drop
+                        dropped_keys.append(filter_key)
+                else:
+                    remapped_filters[filter_key] = filter_value
+
+            model_context["default_filters"] = remapped_filters
+
             if filter_tables_added:
                 logger.info(
                     f"[MetadataReducer] Step 4b: Added {len(filter_tables_added)} tables "
-                    f"from default_filters: {filter_tables_added}"
+                    f"for default_filters: {filter_tables_added}"
+                )
+            if remapped_keys:
+                logger.info(
+                    f"[MetadataReducer] Step 4b: Remapped {len(remapped_keys)} filters: "
+                    f"{remapped_keys}"
+                )
+            if dropped_keys:
+                logger.warning(
+                    f"[MetadataReducer] Step 4b: Dropped {len(dropped_keys)} filters "
+                    f"(column not found in any table): {dropped_keys}"
                 )
 
         # Step 5: Filter reduction
