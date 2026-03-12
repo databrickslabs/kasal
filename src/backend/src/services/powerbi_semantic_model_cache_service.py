@@ -29,7 +29,8 @@ class PowerBISemanticModelCacheService:
         group_id: str,
         dataset_id: str,
         workspace_id: str,
-        report_id: Optional[str] = None
+        report_id: Optional[str] = None,
+        any_report_id: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """
         Get cached metadata for today if available.
@@ -39,6 +40,7 @@ class PowerBISemanticModelCacheService:
             dataset_id: Power BI dataset/semantic model ID
             workspace_id: Power BI workspace ID
             report_id: Optional report ID
+            any_report_id: If True, match any report_id (ignore report_id filter)
 
         Returns:
             Cached metadata dictionary if found, None otherwise
@@ -47,7 +49,8 @@ class PowerBISemanticModelCacheService:
             group_id=group_id,
             dataset_id=dataset_id,
             workspace_id=workspace_id,
-            report_id=report_id
+            report_id=report_id,
+            any_report_id=any_report_id,
         )
 
         if cache and cache.is_valid_for_today():
