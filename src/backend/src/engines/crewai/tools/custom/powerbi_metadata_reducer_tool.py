@@ -361,6 +361,26 @@ class PowerBIMetadataReducerTool(BaseTool):
             f"added {len(added_dep_tables)} dep tables: {added_dep_tables}"
         )
 
+        # Step 4b: Include tables referenced by default_filters
+        # Default filters (report-level filters) reference dimension tables that
+        # the LLM/fuzzy selection may not have picked. These filters are crucial
+        # for correct DAX generation, so we MUST include their tables.
+        default_filters = model_context.get("default_filters", {})
+        if default_filters:
+            all_table_names = {t["name"] for t in tables}
+            filter_tables_added = []
+            for filter_key in default_filters:
+                # Keys use "table_name[column_name]" format
+                filter_table = filter_key.split("[")[0] if "[" in filter_key else ""
+                if filter_table and filter_table in all_table_names and filter_table not in selected_table_names:
+                    selected_table_names.append(filter_table)
+                    filter_tables_added.append(filter_table)
+            if filter_tables_added:
+                logger.info(
+                    f"[MetadataReducer] Step 4b: Added {len(filter_tables_added)} tables "
+                    f"from default_filters: {filter_tables_added}"
+                )
+
         # Step 5: Filter reduction
         t5 = time.time()
         kept_table_names_set = set(selected_table_names)
@@ -452,6 +472,29 @@ class PowerBIMetadataReducerTool(BaseTool):
             f"{original_measure_count}→{kept_measure_count} measures, "
             f"kept: {selected_table_names}"
         )
+
+        # Save reduced output to cache so the DAX tool can pick it up
+        # without relying on the agent to pass model_context_json.
+        dataset_id = config.get("dataset_id")
+        workspace_id = config.get("workspace_id")
+        group_id = config.get("group_id", "default")
+        if dataset_id and workspace_id:
+            try:
+                async with async_session_factory() as session:
+                    cache_service = PowerBISemanticModelCacheService(session)
+                    await cache_service.save_metadata(
+                        group_id=group_id,
+                        dataset_id=dataset_id,
+                        workspace_id=workspace_id,
+                        metadata=reduced_output,
+                        report_id="reduced",
+                    )
+                logger.info(
+                    f"[MetadataReducer] ✓ Saved reduced context to cache "
+                    f"(report_id='reduced', group={group_id}, dataset={dataset_id})"
+                )
+            except Exception as e:
+                logger.warning(f"[MetadataReducer] ✗ Failed to save reduced context to cache: {e}")
 
         return json.dumps(reduced_output)
 

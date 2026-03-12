@@ -274,16 +274,19 @@ def get_tool_configs():
         },  # Power BI Semantic Model Fetcher
         "80": {
             "result_as_answer": False,
-            "tenant_id": "",
-            "client_id": "",
-            "client_secret": "",
             "workspace_id": "",
             "semantic_model_id": "",  # Alias for dataset_id
             "auth_method": None,
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
             "username": "",
             "password": "",
             "llm_model": "databricks-claude-sonnet-4",
             "max_dax_retries": 5,
+            "user_question": "",
+            "context_knowledge": "",
+            "reference_dax": "",
         },  # Power BI Semantic Model DAX Generator
         "81": {
             "result_as_answer": True,

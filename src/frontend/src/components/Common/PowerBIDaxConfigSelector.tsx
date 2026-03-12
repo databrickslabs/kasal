@@ -2,7 +2,7 @@
  * Power BI Semantic Model DAX Generator Configuration Selector Component
  *
  * Provides configuration UI for the Power BI Semantic Model DAX Generator Tool.
- * Generates context-aware DAX queries using LLM with semantic model metadata.
+ * Model IDs + Auth (for DAX execution) + LLM config + Context Enrichment.
  */
 
 import React from 'react';
@@ -33,7 +33,6 @@ import SecurityIcon from '@mui/icons-material/Security';
 import PersonIcon from '@mui/icons-material/Person';
 import { usePowerBIOAuth } from '../../hooks/usePowerBIOAuth';
 
-// Reuse auth method type
 export type PowerBIAuthMethod = 'service_principal' | 'service_account' | 'user_oauth';
 
 export interface PowerBIDaxConfig {
@@ -41,6 +40,9 @@ export interface PowerBIDaxConfig {
   workspace_id?: string;
   dataset_id?: string;
   report_id?: string;
+  // User question for DAX generation
+  user_question?: string;
+  // Auth for DAX execution
   auth_method?: PowerBIAuthMethod;
   tenant_id?: string;
   client_id?: string;
@@ -57,6 +59,8 @@ export interface PowerBIDaxConfig {
   business_mappings?: string;
   field_synonyms?: string;
   active_filters?: string;
+  context_knowledge?: string;
+  reference_dax?: string;
   visible_tables?: string;
   // Options
   include_visual_references?: boolean;
@@ -216,9 +220,9 @@ export const PowerBIDaxConfigSelector: React.FC<PowerBIDaxConfigSelectorProps> =
             <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
               Optional:{' '}
               <Chip label="report_id" size="small" variant="outlined" sx={{ ml: 0.5 }} />
-              <Chip label="business_mappings" size="small" variant="outlined" sx={{ ml: 0.5 }} />
-              <Chip label="field_synonyms" size="small" variant="outlined" sx={{ ml: 0.5 }} />
-              <Chip label="active_filters" size="small" variant="outlined" sx={{ ml: 0.5 }} />
+              <Chip label="user_question" size="small" variant="outlined" sx={{ ml: 0.5 }} />
+              <Chip label="context_knowledge" size="small" variant="outlined" sx={{ ml: 0.5 }} />
+              <Chip label="reference_dax" size="small" variant="outlined" sx={{ ml: 0.5 }} />
             </Typography>
           </Box>
 
@@ -229,7 +233,7 @@ export const PowerBIDaxConfigSelector: React.FC<PowerBIDaxConfigSelectorProps> =
             <Box sx={{ mt: 0.5 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
                 <Chip label="access_token" size="small" color="success" />
-                <Typography variant="caption">← User OAuth (recommended for user context)</Typography>
+                <Typography variant="caption">User OAuth (recommended for user context)</Typography>
               </Box>
               <Typography variant="caption" color="text.secondary" sx={{ pl: 1, display: 'block', mb: 0.5 }}>
                 <em>or</em>
@@ -238,26 +242,19 @@ export const PowerBIDaxConfigSelector: React.FC<PowerBIDaxConfigSelectorProps> =
                 <Chip label="tenant_id" size="small" variant="outlined" />
                 <Chip label="client_id" size="small" variant="outlined" />
                 <Chip label="client_secret" size="small" variant="outlined" />
-                <Typography variant="caption">← Service Principal</Typography>
+                <Typography variant="caption">Service Principal</Typography>
               </Box>
             </Box>
           </Box>
-
-          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-            <strong>Example with OAuth:</strong>{' '}
-            <code style={{ fontSize: '0.7rem' }}>
-              {`{ "workspace_id": "...", "dataset_id": "...", "access_token": "eyJ..." }`}
-            </code>
-          </Typography>
         </Alert>
       )}
 
-      {/* Static Mode: Full Configuration Forms */}
+      {/* Static Mode: Configuration Forms */}
       {mode === 'static' && (
         <>
-          {/* Power BI Configuration */}
+          {/* Power BI Model Identification */}
           <Typography variant="subtitle2" color="primary" sx={{ fontWeight: 600 }}>
-            Power BI Workspace Configuration
+            Power BI Semantic Model
           </Typography>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <TextField
@@ -277,7 +274,7 @@ export const PowerBIDaxConfigSelector: React.FC<PowerBIDaxConfigSelectorProps> =
               disabled={disabled}
               required
               fullWidth
-              helperText="Semantic model/dataset ID to generate DAX queries for"
+              helperText="Semantic model/dataset ID — used for cache lookup and DAX execution"
               size="small"
             />
             <TextField
@@ -293,7 +290,25 @@ export const PowerBIDaxConfigSelector: React.FC<PowerBIDaxConfigSelectorProps> =
 
           <Divider sx={{ my: 1 }}>
             <Typography variant="caption" color="text.secondary">
-              Authentication Method
+              User Question
+            </Typography>
+          </Divider>
+
+          <TextField
+            label="User Question"
+            value={value.user_question || ''}
+            onChange={(e) => handleFieldChange('user_question', e.target.value)}
+            disabled={disabled}
+            fullWidth
+            multiline
+            minRows={2}
+            helperText="The business question to answer (e.g., 'Show total customers by country for week 1')"
+            size="small"
+          />
+
+          <Divider sx={{ my: 1 }}>
+            <Typography variant="caption" color="text.secondary">
+              Authentication (DAX Execution)
             </Typography>
           </Divider>
 
@@ -332,108 +347,102 @@ export const PowerBIDaxConfigSelector: React.FC<PowerBIDaxConfigSelectorProps> =
             </ToggleButton>
           </ToggleButtonGroup>
 
-          {/* Service Principal Authentication Fields */}
+          {/* Service Principal Fields */}
           {authMethod === 'service_principal' && (
-            <>
-              <Alert severity="warning" variant="outlined" sx={{ mb: 1 }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Alert severity="info" variant="outlined" sx={{ py: 0.5 }}>
                 <Typography variant="caption">
-                  <strong>Important:</strong> The Service Principal must be a <strong>member of the workspace</strong> with at least read permissions.
+                  The Service Principal must be a <strong>member of the workspace</strong> with at least read permissions.
                 </Typography>
               </Alert>
-
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <TextField
-                  label="Tenant ID"
-                  value={value.tenant_id || ''}
-                  onChange={(e) => handleFieldChange('tenant_id', e.target.value)}
-                  disabled={disabled}
-                  required
-                  fullWidth
-                  helperText="Azure AD tenant ID"
-                  size="small"
-                />
-                <TextField
-                  label="Client ID"
-                  value={value.client_id || ''}
-                  onChange={(e) => handleFieldChange('client_id', e.target.value)}
-                  disabled={disabled}
-                  required
-                  fullWidth
-                  helperText="Application/Client ID (must be workspace member)"
-                  size="small"
-                />
-                <TextField
-                  label="Client Secret"
-                  value={value.client_secret || ''}
-                  onChange={(e) => handleFieldChange('client_secret', e.target.value)}
-                  disabled={disabled}
-                  required
-                  type="password"
-                  fullWidth
-                  helperText="Client secret for service principal"
-                  size="small"
-                />
-              </Box>
-            </>
+              <TextField
+                label="Tenant ID"
+                value={value.tenant_id || ''}
+                onChange={(e) => handleFieldChange('tenant_id', e.target.value)}
+                disabled={disabled}
+                required
+                fullWidth
+                helperText="Azure AD tenant ID"
+                size="small"
+              />
+              <TextField
+                label="Client ID"
+                value={value.client_id || ''}
+                onChange={(e) => handleFieldChange('client_id', e.target.value)}
+                disabled={disabled}
+                required
+                fullWidth
+                helperText="Application/Client ID (must be workspace member)"
+                size="small"
+              />
+              <TextField
+                label="Client Secret"
+                value={value.client_secret || ''}
+                onChange={(e) => handleFieldChange('client_secret', e.target.value)}
+                disabled={disabled}
+                required
+                type="password"
+                fullWidth
+                helperText="Client secret for service principal"
+                size="small"
+              />
+            </Box>
           )}
 
-          {/* Service Account Authentication Fields */}
+          {/* Service Account Fields */}
           {authMethod === 'service_account' && (
-            <>
-              <Alert severity="info" variant="outlined" sx={{ mb: 1 }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Alert severity="warning" variant="outlined" sx={{ py: 0.5 }}>
                 <Typography variant="caption">
-                  <strong>Service Account:</strong> Use a user account (username + password) instead of Service Principal.
+                  Use service account when Service Principal lacks permissions.
                   Requires an Azure AD app with delegated permissions.
                 </Typography>
               </Alert>
-
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <TextField
-                  label="Tenant ID"
-                  value={value.tenant_id || ''}
-                  onChange={(e) => handleFieldChange('tenant_id', e.target.value)}
-                  disabled={disabled}
-                  required
-                  fullWidth
-                  helperText="Azure AD tenant ID"
-                  size="small"
-                />
-                <TextField
-                  label="Client ID"
-                  value={value.client_id || ''}
-                  onChange={(e) => handleFieldChange('client_id', e.target.value)}
-                  disabled={disabled}
-                  required
-                  fullWidth
-                  helperText="Azure AD application Client ID (with delegated permissions)"
-                  size="small"
-                />
-                <TextField
-                  label="Username (UPN)"
-                  value={value.username || ''}
-                  onChange={(e) => handleFieldChange('username', e.target.value)}
-                  disabled={disabled}
-                  required
-                  fullWidth
-                  helperText="Service account email/UPN (e.g., user@domain.com)"
-                  size="small"
-                />
-                <TextField
-                  label="Password"
-                  value={value.password || ''}
-                  onChange={(e) => handleFieldChange('password', e.target.value)}
-                  disabled={disabled}
-                  required
-                  type="password"
-                  fullWidth
-                  helperText="Service account password"
-                  size="small"
-                />
-              </Box>
-            </>
+              <TextField
+                label="Tenant ID"
+                value={value.tenant_id || ''}
+                onChange={(e) => handleFieldChange('tenant_id', e.target.value)}
+                disabled={disabled}
+                required
+                fullWidth
+                helperText="Azure AD tenant ID"
+                size="small"
+              />
+              <TextField
+                label="Client ID"
+                value={value.client_id || ''}
+                onChange={(e) => handleFieldChange('client_id', e.target.value)}
+                disabled={disabled}
+                required
+                fullWidth
+                helperText="Azure AD application Client ID (with delegated permissions)"
+                size="small"
+              />
+              <TextField
+                label="Username (UPN)"
+                value={value.username || ''}
+                onChange={(e) => handleFieldChange('username', e.target.value)}
+                disabled={disabled}
+                required
+                fullWidth
+                helperText="Service account email/UPN (e.g., user@domain.com)"
+                size="small"
+              />
+              <TextField
+                label="Password"
+                value={value.password || ''}
+                onChange={(e) => handleFieldChange('password', e.target.value)}
+                disabled={disabled}
+                required
+                type="password"
+                fullWidth
+                helperText="Service account password"
+                size="small"
+              />
+            </Box>
           )}
 
-          {/* User OAuth Authentication */}
+          {/* User OAuth Fields */}
           {authMethod === 'user_oauth' && (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               <Alert severity="info" variant="outlined">
@@ -446,7 +455,7 @@ export const PowerBIDaxConfigSelector: React.FC<PowerBIDaxConfigSelectorProps> =
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    Microsoft's API docs (Try It)
+                    Microsoft&apos;s API docs (Try It)
                   </a>
                   {' '}and paste it below.
                 </Typography>
@@ -562,6 +571,28 @@ export const PowerBIDaxConfigSelector: React.FC<PowerBIDaxConfigSelectorProps> =
         <AccordionDetails>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <TextField
+              label="Context Knowledge"
+              value={value.context_knowledge || ''}
+              onChange={(e) => handleFieldChange('context_knowledge', e.target.value)}
+              disabled={disabled}
+              fullWidth
+              multiline
+              minRows={3}
+              helperText="Business context or domain knowledge to guide DAX generation"
+              size="small"
+            />
+            <TextField
+              label="Reference DAX Queries"
+              value={value.reference_dax || ''}
+              onChange={(e) => handleFieldChange('reference_dax', e.target.value)}
+              disabled={disabled}
+              fullWidth
+              multiline
+              minRows={4}
+              helperText="Working DAX examples as reference patterns (EVALUATE statements)"
+              size="small"
+            />
+            <TextField
               label="Business Mappings"
               value={value.business_mappings || ''}
               onChange={(e) => handleFieldChange('business_mappings', e.target.value)}
@@ -660,14 +691,14 @@ export const PowerBIDaxConfigSelector: React.FC<PowerBIDaxConfigSelectorProps> =
           What this tool does:
         </Typography>
         <Typography variant="caption">
-          Generates context-aware DAX queries using an LLM, grounded in the actual semantic model schema.
-          Fetches model metadata via the Power BI Execute Queries API, then constructs prompts with
-          table/column/measure context for accurate DAX generation.
+          Generates context-aware DAX queries using an LLM, grounded in the semantic model schema.
+          Reads model metadata from cache (populated by the Fetcher tool) or accepts reduced context
+          from the pipeline. Executes generated DAX against the Power BI API.
         </Typography>
         <Box component="ul" sx={{ pl: 2, mt: 0.5, mb: 0, fontSize: '0.75rem' }}>
-          <li>Auto-fetches semantic model schema for context</li>
+          <li>Uses cached or pipeline-provided semantic model schema</li>
+          <li>Supports business context knowledge and reference DAX examples</li>
           <li>Supports business term mappings and field synonyms</li>
-          <li>Includes active filter and visible table context</li>
           <li>Validates and retries DAX queries against the model</li>
         </Box>
       </Alert>
