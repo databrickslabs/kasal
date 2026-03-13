@@ -299,6 +299,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         default_filters = {}
         slicers: List[Dict[str, Any]] = []
         cache_hit = False
+        cache_saved = False  # Tracks whether full metadata is available in cache
 
         try:
             async with async_session_factory() as session:
@@ -311,6 +312,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 )
             if cached_metadata:
                 cache_hit = True
+                cache_saved = True  # Data is already in cache
                 cached_tables = cached_metadata.get("schema", {}).get("tables", [])
                 cached_columns = cached_metadata.get("schema", {}).get("columns", [])
                 cached_sample_data = cached_metadata.get("sample_data", {})
@@ -572,6 +574,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                             metadata=cache_metadata,
                             report_id=report_id,
                         )
+                        cache_saved = True
                         logger.info(f"[CACHE SAVED] Metadata cached for dataset {dataset_id}")
                 except Exception as e:
                     logger.warning(f"[Cache] Failed to save: {e}")
@@ -586,7 +589,51 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         # Log full model context details
         self._log_model_context_details(model_context, default_filters, slicers)
 
-        # Build output
+        # Build summary counts
+        measure_count = len(model_context.get("measures", []))
+        table_count = len(model_context.get("tables", []))
+        relationship_count = len(model_context.get("relationships", []))
+        filter_count = len(default_filters)
+        slicer_count = len(slicers)
+
+        # ── Return compact summary when data is safely in cache ──
+        # This prevents CrewAI from passing the full (potentially 100K+ char)
+        # JSON through the agent LLM, which can exceed context window limits
+        # on large semantic models. Downstream tools (Reducer, DAX) read
+        # directly from cache using dataset_id + workspace_id.
+        if cache_saved:
+            compact = {
+                "status": "success",
+                "workspace_id": workspace_id,
+                "dataset_id": dataset_id,
+                "report_id": report_id,
+                "cache_hit": cache_hit,
+                "cache_saved": True,
+                "summary": {
+                    "measure_count": measure_count,
+                    "table_count": table_count,
+                    "relationship_count": relationship_count,
+                    "filter_count": filter_count,
+                    "slicer_count": slicer_count,
+                },
+                "message": (
+                    f"Successfully fetched semantic model metadata and saved to cache. "
+                    f"{measure_count} measures, {table_count} tables, "
+                    f"{relationship_count} relationships, {filter_count} filters, "
+                    f"{slicer_count} slicers. "
+                    f"Downstream tools will load the full metadata from cache automatically."
+                ),
+            }
+            logger.info(
+                f"[FetcherTool] Returning compact summary ({len(json.dumps(compact))} chars) "
+                f"instead of full JSON — data is in cache"
+            )
+            return json.dumps(compact)
+
+        # Fallback: return full JSON if cache save failed
+        logger.warning(
+            "[FetcherTool] Cache not available — returning full JSON as fallback"
+        )
         output = {
             "workspace_id": workspace_id,
             "dataset_id": dataset_id,
@@ -600,11 +647,11 @@ class PowerBISemanticModelFetcherTool(BaseTool):
             "default_filters": default_filters,
             "slicers": slicers,
             "summary": {
-                "measure_count": len(model_context.get("measures", [])),
-                "table_count": len(model_context.get("tables", [])),
-                "relationship_count": len(model_context.get("relationships", [])),
-                "filter_count": len(default_filters),
-                "slicer_count": len(slicers),
+                "measure_count": measure_count,
+                "table_count": table_count,
+                "relationship_count": relationship_count,
+                "filter_count": filter_count,
+                "slicer_count": slicer_count,
             },
         }
 
