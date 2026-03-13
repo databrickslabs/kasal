@@ -99,7 +99,6 @@ export const PowerBIFetcherConfigSelector: React.FC<PowerBIFetcherConfigSelector
         updatedConfig.password = undefined;
       } else if (newMethod === 'service_account') {
         updatedConfig.access_token = undefined;
-        updatedConfig.client_secret = undefined;
       }
 
       onChange(updatedConfig);
@@ -411,6 +410,16 @@ export const PowerBIFetcherConfigSelector: React.FC<PowerBIFetcherConfigSelector
                   type="password"
                   fullWidth
                   helperText="Service account password"
+                  size="small"
+                />
+                <TextField
+                  label="Client Secret (Optional — SP Fallback)"
+                  value={value.client_secret || ''}
+                  onChange={(e) => handleFieldChange('client_secret', e.target.value)}
+                  disabled={disabled}
+                  type="password"
+                  fullWidth
+                  helperText="Optional: If provided, missing metadata (measures, filters, slicers) will be supplemented via Service Principal"
                   size="small"
                 />
               </Box>
