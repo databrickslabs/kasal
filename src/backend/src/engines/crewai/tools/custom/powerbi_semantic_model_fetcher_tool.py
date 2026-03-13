@@ -836,6 +836,60 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         model_context["measures"] = measures
         model_context["tables"] = tables
 
+        # ── SP fallback: if SA extraction is incomplete and client_secret is available ──
+        has_client_secret = bool(config.get("client_secret"))
+        sa_measures = model_context["measures"]
+        sa_tables = model_context["tables"]
+        needs_sp_fallback = has_client_secret and (not sa_measures or not sa_tables)
+
+        if needs_sp_fallback:
+            logger.info(
+                f"[FetcherTool] SA extraction incomplete "
+                f"(measures={len(sa_measures)}, tables={len(sa_tables)}) — "
+                f"attempting SP fallback with client_secret"
+            )
+            try:
+                # Build SP config for a separate token
+                sp_config = {
+                    "tenant_id": config.get("tenant_id"),
+                    "client_id": config.get("client_id"),
+                    "client_secret": config.get("client_secret"),
+                    "auth_method": "service_principal",
+                }
+                sp_access_token = await self._get_access_token(sp_config)
+
+                # Get Fabric token for TMDL
+                sp_fabric_token = sp_access_token
+                try:
+                    sp_fabric_token = await self._get_fabric_token(sp_config)
+                except Exception as e:
+                    logger.warning(f"[SP Fallback] Fabric token failed: {e}")
+
+                # Try TMDL → Admin Scanner → DAX with SP credentials
+                sp_tmdl_parts = await self._fetch_tmdl_via_fabric(workspace_id, dataset_id, sp_fabric_token)
+                if sp_tmdl_parts is not None:
+                    sp_measures, sp_tables = self._parse_tmdl_for_measures_and_tables(sp_tmdl_parts, config)
+                    logger.info(f"[SP Fallback] Fabric TMDL: {len(sp_measures)} measures, {len(sp_tables)} tables")
+                else:
+                    sp_measures, sp_tables = await self._fetch_model_via_admin_scanner(
+                        workspace_id, dataset_id, sp_access_token, config
+                    )
+                    if not sp_measures and not sp_tables:
+                        sp_measures, sp_tables = await self._fetch_model_via_powerbi_dax(
+                            workspace_id, dataset_id, sp_access_token, config
+                        )
+
+                # Fill gaps: only replace empty categories
+                if not sa_measures and sp_measures:
+                    model_context["measures"] = sp_measures
+                    logger.info(f"[SP Fallback] Filled {len(sp_measures)} measures from SP")
+                if not sa_tables and sp_tables:
+                    model_context["tables"] = sp_tables
+                    logger.info(f"[SP Fallback] Filled {len(sp_tables)} tables from SP")
+
+            except Exception as e:
+                logger.warning(f"[SP Fallback] SP extraction failed (continuing with SA data): {e}")
+
         # Fetch relationships via DAX
         relationships = await self._fetch_relationships(workspace_id, dataset_id, access_token, config)
         model_context["relationships"] = relationships
