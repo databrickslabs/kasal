@@ -66,6 +66,8 @@ export interface PowerBIMetadataReducerConfig {
   llm_workspace_url?: string;
   llm_token?: string;
   llm_model?: string;
+  llm_temperature?: number;
+  llm_confidence_threshold?: number;
 
   // Context enrichment
   business_mappings?: string;
@@ -346,6 +348,35 @@ export const PowerBIMetadataReducerConfigSelector: React.FC<PowerBIMetadataReduc
                     </Box>
                   )}
 
+                  {/* LLM Confidence Threshold — for combined strategy */}
+                  {strategy === 'combined' && (
+                    <Box>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+                        <Typography variant="body2">LLM Confidence Threshold</Typography>
+                        <Typography variant="body2" color="primary" sx={{ fontWeight: 600 }}>
+                          {((value.llm_confidence_threshold ?? 0) * 100).toFixed(0)}%
+                        </Typography>
+                      </Box>
+                      <Slider
+                        value={value.llm_confidence_threshold ?? 0}
+                        onChange={(_e, val) => handleFieldChange('llm_confidence_threshold', val as number)}
+                        min={0}
+                        max={0.95}
+                        step={0.05}
+                        disabled={disabled}
+                        marks={[
+                          { value: 0, label: '0%' },
+                          { value: 0.5, label: '50%' },
+                          { value: 0.95, label: '95%' },
+                        ]}
+                        size="small"
+                      />
+                      <Typography variant="caption" color="text.secondary">
+                        Minimum confidence score for LLM-selected items. 0% = keep all, higher = stricter.
+                      </Typography>
+                    </Box>
+                  )}
+
                   <Divider />
 
                   {/* Max Tables / Measures */}
@@ -378,32 +409,74 @@ export const PowerBIMetadataReducerConfigSelector: React.FC<PowerBIMetadataReduc
             </Accordion>
           )}
 
-          {/* Max Tables / Measures for LLM-only (no fuzzy accordion) */}
+          {/* Max Tables / Measures + LLM Confidence for LLM-only (no fuzzy accordion) */}
           {strategy === 'llm' && (
-            <Box sx={{ display: 'flex', gap: 2, mt: 1 }}>
-              <TextField
-                label="Max Tables"
-                type="number"
-                value={value.max_tables ?? 15}
-                onChange={(e) => handleFieldChange('max_tables', parseInt(e.target.value) || 15)}
-                disabled={disabled}
-                fullWidth
-                inputProps={{ min: 1, max: 50 }}
-                helperText="Maximum tables in reduced output"
-                size="small"
-              />
-              <TextField
-                label="Max Measures"
-                type="number"
-                value={value.max_measures ?? 30}
-                onChange={(e) => handleFieldChange('max_measures', parseInt(e.target.value) || 30)}
-                disabled={disabled}
-                fullWidth
-                inputProps={{ min: 1, max: 100 }}
-                helperText="Maximum measures in reduced output"
-                size="small"
-              />
-            </Box>
+            <Accordion sx={{ mt: 1 }}>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <TuneIcon sx={{ fontSize: 18 }} />
+                  <Typography variant="subtitle2">Thresholds &amp; Limits</Typography>
+                </Box>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, px: 1 }}>
+                  {/* LLM Confidence Threshold */}
+                  <Box>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+                      <Typography variant="body2">LLM Confidence Threshold</Typography>
+                      <Typography variant="body2" color="primary" sx={{ fontWeight: 600 }}>
+                        {((value.llm_confidence_threshold ?? 0) * 100).toFixed(0)}%
+                      </Typography>
+                    </Box>
+                    <Slider
+                      value={value.llm_confidence_threshold ?? 0}
+                      onChange={(_e, val) => handleFieldChange('llm_confidence_threshold', val as number)}
+                      min={0}
+                      max={0.95}
+                      step={0.05}
+                      disabled={disabled}
+                      marks={[
+                        { value: 0, label: '0%' },
+                        { value: 0.5, label: '50%' },
+                        { value: 0.95, label: '95%' },
+                      ]}
+                      size="small"
+                    />
+                    <Typography variant="caption" color="text.secondary">
+                      Minimum confidence score for LLM-selected items. 0% = keep all, higher = stricter.
+                    </Typography>
+                  </Box>
+
+                  <Divider />
+
+                  {/* Max Tables / Measures */}
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <TextField
+                      label="Max Tables"
+                      type="number"
+                      value={value.max_tables ?? 15}
+                      onChange={(e) => handleFieldChange('max_tables', parseInt(e.target.value) || 15)}
+                      disabled={disabled}
+                      fullWidth
+                      inputProps={{ min: 1, max: 50 }}
+                      helperText="Maximum tables in reduced output"
+                      size="small"
+                    />
+                    <TextField
+                      label="Max Measures"
+                      type="number"
+                      value={value.max_measures ?? 30}
+                      onChange={(e) => handleFieldChange('max_measures', parseInt(e.target.value) || 30)}
+                      disabled={disabled}
+                      fullWidth
+                      inputProps={{ min: 1, max: 100 }}
+                      helperText="Maximum measures in reduced output"
+                      size="small"
+                    />
+                  </Box>
+                </Box>
+              </AccordionDetails>
+            </Accordion>
           )}
 
           {/* LLM Configuration — shown for llm and combined strategies */}
