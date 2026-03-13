@@ -619,7 +619,19 @@ class PowerBIMetadataReducerTool(BaseTool):
                 parsed = raw
             else:
                 return {"error": f"model_context_json has unexpected type: {type(raw).__name__}"}
-            return parsed
+
+            # Detect Fetcher compact summary (no tables/measures = just a summary,
+            # not real model data). Fall through to cache lookup instead.
+            has_tables = bool(parsed.get("tables") or parsed.get("schema", {}).get("tables"))
+            has_measures = bool(parsed.get("measures"))
+            if not has_tables and not has_measures:
+                logger.info(
+                    f"[MetadataReducer] model_context_json has no tables/measures "
+                    f"(likely Fetcher compact summary), falling through to cache. "
+                    f"Keys: {list(parsed.keys())}"
+                )
+            else:
+                return parsed
 
         # Priority 2: Cache fallback using dataset_id + workspace_id
         dataset_id = config.get("dataset_id")
