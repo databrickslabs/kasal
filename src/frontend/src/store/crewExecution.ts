@@ -885,12 +885,24 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           data.label
         ];
 
+        // Also collect string values from tool_configs (e.g. {user_question} in Reducer config)
+        const toolConfigs = (data.tool_configs || (data.task as Record<string, unknown>)?.tool_configs) as Record<string, Record<string, unknown>> | undefined;
+        if (toolConfigs && typeof toolConfigs === 'object') {
+          Object.values(toolConfigs).forEach(toolCfg => {
+            if (toolCfg && typeof toolCfg === 'object') {
+              Object.values(toolCfg).forEach(val => {
+                if (val && typeof val === 'string') {
+                  fieldsToCheck.push(val);
+                }
+              });
+            }
+          });
+        }
+
         console.log('[CrewExecution] Checking node:', node.id, 'type:', node.type);
-        console.log('[CrewExecution] Node data:', data);
 
         const hasVar = fieldsToCheck.some(field => {
           if (field && typeof field === 'string') {
-            console.log('[CrewExecution] Checking field:', field);
             // Reset regex lastIndex to ensure proper matching
             variablePattern.lastIndex = 0;
             const matches = variablePattern.test(field);
