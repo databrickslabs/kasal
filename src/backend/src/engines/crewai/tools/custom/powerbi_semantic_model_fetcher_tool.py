@@ -543,6 +543,46 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                     except Exception as e:
                         logger.warning(f"[FetcherTool] Report extraction failed: {e}")
 
+                    # SP fallback for filters/slicers if SA extraction returned empty
+                    sp_fallback_secret = config.get("client_secret")
+                    if sp_fallback_secret and not default_filters and not slicers:
+                        logger.info(
+                            "[SP Fallback] Filters and slicers empty — "
+                            "retrying report extraction with SP credentials"
+                        )
+                        try:
+                            sp_config = {
+                                "tenant_id": config.get("tenant_id"),
+                                "client_id": config.get("client_id"),
+                                "client_secret": sp_fallback_secret,
+                                "auth_method": "service_principal",
+                            }
+                            sp_token = await self._get_access_token(sp_config)
+                            sp_fabric_token = sp_token
+                            try:
+                                sp_fabric_token = await self._get_fabric_token(sp_config)
+                            except Exception as e:
+                                logger.warning(f"[SP Fallback] Fabric token for report failed: {e}")
+
+                            sp_report_parts = await self._extract_report_definition_parts(
+                                workspace_id, report_id, sp_fabric_token
+                            )
+                            if sp_report_parts:
+                                sp_filters = await self._extract_default_filters(
+                                    workspace_id, report_id, sp_token,
+                                    report_parts=sp_report_parts,
+                                    model_context=model_context,
+                                )
+                                sp_slicers = self._extract_slicers_from_report(sp_report_parts)
+                                if sp_filters:
+                                    default_filters = sp_filters
+                                    logger.info(f"[SP Fallback] Filled {len(sp_filters)} filters from SP")
+                                if sp_slicers:
+                                    slicers = sp_slicers
+                                    logger.info(f"[SP Fallback] Filled {len(sp_slicers)} slicers from SP")
+                        except Exception as e:
+                            logger.warning(f"[SP Fallback] Report extraction with SP failed: {e}")
+
                 # Step 2c.2: Fetch distinct values for slicer columns
                 if slicers:
                     try:
