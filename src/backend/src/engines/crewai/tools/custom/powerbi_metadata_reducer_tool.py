@@ -329,6 +329,12 @@ class PowerBIMetadataReducerTool(BaseTool):
                 "error": f"Unknown strategy '{strategy}'. Use: fuzzy, llm, combined, or passthrough."
             })
 
+        # Normalize measure names: LLM returns "[table] name" format but
+        # the dependency resolver indexes by bare "name". Strip the prefix.
+        selected_measure_names = [
+            re.sub(r"^\[.*?\]\s*", "", name) for name in selected_measure_names
+        ]
+
         # Enforce max limits
         max_tables = config.get("max_tables", 15)
         max_measures = config.get("max_measures", 30)
@@ -759,18 +765,22 @@ Measures marked with ⭐ are likely relevant.
 4. Include fact tables that contain the relevant measures
 5. Do NOT include tables/measures unrelated to the question
 6. Prefer tables marked ⭐ but use your judgment
+7. Rate each selected item with a confidence score (0.0-1.0) indicating how relevant it is
 
 ## RESPONSE FORMAT
 Return ONLY valid JSON (no markdown, no explanation):
-{{"tables": ["Table1", "Table2"], "measures": ["Measure1", "Measure2"], "reasoning": "Brief explanation"}}
+{{"tables": [{{"name": "Table1", "confidence": 0.9}}, {{"name": "Table2", "confidence": 0.7}}], "measures": [{{"name": "Measure1", "confidence": 0.95}}, {{"name": "Measure2", "confidence": 0.6}}], "reasoning": "Brief explanation"}}
 """
+
+        llm_temperature = config.get("llm_temperature", 0.1)
+        llm_confidence_threshold = config.get("llm_confidence_threshold", 0.0)
 
         url = f"{llm_workspace_url.rstrip('/')}/serving-endpoints/{llm_model}/invocations"
         headers = {"Authorization": f"Bearer {llm_token}", "Content-Type": "application/json"}
         payload = {
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": 2000,
-            "temperature": 0.1,
+            "temperature": llm_temperature,
         }
 
         logger.info(
@@ -795,6 +805,8 @@ Return ONLY valid JSON (no markdown, no explanation):
 
                 parsed = self._extract_json_from_response(content)
                 if parsed and "tables" in parsed:
+                    # Normalize: handle both plain strings and {name, confidence} objects
+                    parsed = self._normalize_llm_selection(parsed, llm_confidence_threshold)
                     return parsed
 
                 logger.warning(
@@ -839,3 +851,41 @@ Return ONLY valid JSON (no markdown, no explanation):
                 pass
 
         return None
+
+    @staticmethod
+    def _normalize_llm_selection(
+        parsed: Dict[str, Any], confidence_threshold: float
+    ) -> Dict[str, Any]:
+        """Normalize LLM selection: handle both plain strings and {name, confidence} objects.
+
+        Supports two response formats:
+          - Old: {"tables": ["A", "B"], "measures": ["M1"]}
+          - New: {"tables": [{"name": "A", "confidence": 0.9}], "measures": [...]}
+
+        Filters items below confidence_threshold (0.0 = keep all).
+        Returns normalized dict with plain string lists.
+        """
+        for key in ("tables", "measures"):
+            items = parsed.get(key, [])
+            if not items:
+                continue
+
+            normalized = []
+            for item in items:
+                if isinstance(item, str):
+                    # Old format — no confidence info, always keep
+                    normalized.append(item)
+                elif isinstance(item, dict) and "name" in item:
+                    conf = item.get("confidence", 1.0)
+                    if conf >= confidence_threshold:
+                        normalized.append(item["name"])
+                    else:
+                        logger.info(
+                            f"[MetadataReducer] LLM confidence filter: "
+                            f"dropped {key[:-1]} '{item['name']}' "
+                            f"(confidence={conf:.2f} < threshold={confidence_threshold:.2f})"
+                        )
+
+            parsed[key] = normalized
+
+        return parsed
