@@ -1338,7 +1338,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
     ) -> Dict[str, Dict[str, Any]]:
         """Fetch sample values for key columns."""
         sample_values: Dict[str, Dict[str, Any]] = {}
-        tables = model_context.get("tables", [])[:5]
+        tables = model_context.get("tables", [])
 
         # Suffixes that indicate ID/key columns (match end of name or standalone)
         _skip_suffixes = ("id", "key", "pk", "fk", "_id", "_key", "_pk", "_fk")
