@@ -738,6 +738,19 @@ class ToolFactory:
                     if resolved_count > 0:
                         logger.info(f"[ToolFactory] ✓ Resolved {resolved_count} placeholders in {tool_name} config")
 
+                    # Inject key execution input values into tool_config if not already present.
+                    # This ensures tools like the DAX Generator get user_question reliably
+                    # instead of depending on the LLM agent to pass it at runtime.
+                    for input_key in ['user_question']:
+                        if input_key in execution_inputs and (
+                            input_key not in tool_config or tool_config.get(input_key) is None
+                        ):
+                            tool_config[input_key] = execution_inputs[input_key]
+                            logger.info(
+                                f"[ToolFactory] Injected '{input_key}' from execution_inputs "
+                                f"into {tool_name} config"
+                            )
+
                     # Remove execution_inputs from tool_config after placeholder resolution
                     # Tool constructors don't accept this key and will raise TypeError
                     tool_config.pop('execution_inputs', None)
@@ -1732,7 +1745,7 @@ class ToolFactory:
                     logger.error(f"[ToolFactory] Traceback: {traceback.format_exc()}")
                     raise
 
-            # For all other tools (ScrapeWebsiteTool, DallETool), try to create with config parameters
+            # For all other tools (ScrapeWebsiteTool, DallETool, DAX Generator, etc.)
             else:
                 # Check if the config has any data
                 if tool_config and isinstance(tool_config, dict):
@@ -1740,7 +1753,7 @@ class ToolFactory:
                     tool_config['result_as_answer'] = result_as_answer or tool_config.get('result_as_answer', False)
 
                     # Create the tool with the config as kwargs
-                    logger.info(f"Creating {tool_name} with config parameters: {tool_config}")
+                    logger.info(f"Creating {tool_name} with config parameters: {list(tool_config.keys())}")
                     return tool_class(**tool_config)
                 else:
                     # Create with default parameters if no config

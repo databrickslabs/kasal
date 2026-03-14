@@ -560,8 +560,14 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
         'src.services.trace_queue',  # Add trace queue logger
         'src.engines.crewai.execution_runner',  # Add execution runner logger
         'src.services.databricks_knowledge_service',  # Add knowledge service logger for search debugging
+        'src.engines.crewai.tools.tool_factory',  # Tool factory creation + config injection logs
         'src.engines.crewai.tools.custom.powerbi_analysis_tool',  # Add PowerBI tool logger
+        'src.engines.crewai.tools.custom.powerbi_semantic_model_dax_tool',  # DAX Generator tool logs
+        'src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool',  # Metadata Reducer tool logs
+        'src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool',  # Fetcher tool logs
         'src.engines.crewai.tools.custom.databricks_jobs_tool',  # Add Databricks jobs tool logger
+        'src.engines.crewai.helpers.task_helpers',  # Task tool resolution logs
+        'src.engines.crewai.helpers.agent_helpers',  # Agent tool resolution logs
         'src.engines.crewai.security.tool_capability_manifest',  # Trifecta detection warnings
         'src.engines.crewai.security.prompt_injection_detector',  # Injection detection warnings
         '__main__'  # For any direct logging in subprocess
@@ -570,7 +576,9 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
         module_logger.handlers = []  # Clear existing handlers
         module_logger.addHandler(file_handler)
         # IMPORTANT: Set to DEBUG for tool loggers to capture all DAX Generation logs
-        if 'powerbi_analysis_tool' in logger_name or 'databricks_jobs_tool' in logger_name:
+        if any(t in logger_name for t in ['powerbi_analysis_tool', 'databricks_jobs_tool',
+               'powerbi_semantic_model_dax_tool', 'powerbi_metadata_reducer_tool',
+               'powerbi_semantic_model_fetcher_tool', 'tool_factory']):
             module_logger.setLevel(logging.DEBUG)
         else:
             module_logger.setLevel(log_level)
