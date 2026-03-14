@@ -135,6 +135,7 @@ class PowerBIMetadataReducerTool(BaseTool):
             "business_mappings": kwargs.get("business_mappings", {}),
             "field_synonyms": kwargs.get("field_synonyms", {}),
             "active_filters": kwargs.get("active_filters", {}),
+            "business_terms": kwargs.get("business_terms", {}),
         }
 
         tool_kwargs = {k: v for k, v in kwargs.items() if k not in default_config}
@@ -242,11 +243,23 @@ class PowerBIMetadataReducerTool(BaseTool):
         llm_workspace_url = config.get("llm_workspace_url")
         llm_token = config.get("llm_token")
 
+        # Parse business_terms: {"BU": ["Business Unit"], "CGR": ["Complete Good Receipt"]}
+        business_terms_raw = config.get("business_terms", {})
+        if isinstance(business_terms_raw, str):
+            try:
+                business_terms = json.loads(business_terms_raw)
+            except (json.JSONDecodeError, TypeError):
+                business_terms = {}
+        else:
+            business_terms = business_terms_raw or {}
+        if business_terms:
+            logger.info(f"[MetadataReducer] Business terms loaded: {list(business_terms.keys())}")
+
         if strategy == "fuzzy":
             # ── Fuzzy-only: deterministic scoring, no LLM ──
             logger.info(f"[MetadataReducer] Step 2: Fuzzy scoring (threshold={threshold})...")
-            ranked_tables = scorer.rank_tables(tables, user_question)
-            ranked_measures = scorer.rank_measures(measures, user_question)
+            ranked_tables = scorer.rank_tables(tables, user_question, sample_data=sample_data, business_terms=business_terms)
+            ranked_measures = scorer.rank_measures(measures, user_question, business_terms=business_terms)
 
             # Log top fuzzy scores for visibility
             top_tables = [(r["table"]["name"], r["score"]) for r in ranked_tables[:8]]
@@ -273,8 +286,8 @@ class PowerBIMetadataReducerTool(BaseTool):
                     "error": "LLM strategy requires llm_workspace_url and llm_token to be configured."
                 })
             logger.info(f"[MetadataReducer] Step 2+3: LLM-only selection (model={config.get('llm_model')})...")
-            ranked_tables = scorer.rank_tables(tables, user_question)
-            ranked_measures = scorer.rank_measures(measures, user_question)
+            ranked_tables = scorer.rank_tables(tables, user_question, sample_data=sample_data, business_terms=business_terms)
+            ranked_measures = scorer.rank_measures(measures, user_question, business_terms=business_terms)
             for entry in ranked_tables:
                 entry["likely_relevant"] = False
             selected = await self._llm_select_tables_and_measures(
@@ -292,8 +305,8 @@ class PowerBIMetadataReducerTool(BaseTool):
         elif strategy == "combined":
             # ── Combined: fuzzy pre-screening + LLM with hints ──
             logger.info(f"[MetadataReducer] Step 2: Fuzzy pre-screening...")
-            ranked_tables = scorer.rank_tables(tables, user_question)
-            ranked_measures = scorer.rank_measures(measures, user_question)
+            ranked_tables = scorer.rank_tables(tables, user_question, sample_data=sample_data, business_terms=business_terms)
+            ranked_measures = scorer.rank_measures(measures, user_question, business_terms=business_terms)
             fuzzy_time = time.time() - t2
 
             top_tables = [(r["table"]["name"], r["score"], r["likely_relevant"]) for r in ranked_tables[:8]]

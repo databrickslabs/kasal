@@ -73,6 +73,7 @@ export interface PowerBIMetadataReducerConfig {
   business_mappings?: string;
   field_synonyms?: string;
   active_filters?: string;
+  business_terms?: string;
 
   // Index signature
   [key: string]: string | number | boolean | undefined;
@@ -276,6 +277,20 @@ export const PowerBIMetadataReducerConfigSelector: React.FC<PowerBIMetadataReduc
                 </Tooltip>
               </Box>
             }
+          />
+
+          {/* Business Terms Dictionary */}
+          <TextField
+            label="Business Terms Dictionary"
+            value={value.business_terms || ''}
+            onChange={(e) => handleFieldChange('business_terms', e.target.value)}
+            disabled={disabled}
+            fullWidth
+            multiline
+            rows={3}
+            placeholder='{"BU": ["Business Unit"], "CGR": ["Complete Good Receipt"], "YoY": ["Year over Year"]}'
+            helperText="Optional JSON: maps abbreviations to expansions for fuzzy matching. Each key is an abbreviation, value is a list of expansion phrases."
+            size="small"
           />
 
           {/* Thresholds & Limits — shown when fuzzy is involved */}
