@@ -229,9 +229,13 @@ class PowerBISemanticModelDaxTool(BaseTool):
             kwarg_keys = list(kwargs.keys())
             has_mcj = "model_context_json" in kwargs and kwargs["model_context_json"] is not None
             mcj_len = len(str(kwargs.get("model_context_json", ""))) if has_mcj else 0
+            kwarg_question = kwargs.get("user_question")
+            default_question = self._default_config.get("user_question")
             logger.info(
                 f"[DaxTool] ═══ Agent kwargs ═══ "
-                f"keys={kwarg_keys} | model_context_json={'YES (' + str(mcj_len) + ' chars)' if has_mcj else 'NOT PROVIDED'}"
+                f"keys={kwarg_keys} | model_context_json={'YES (' + str(mcj_len) + ' chars)' if has_mcj else 'NOT PROVIDED'} | "
+                f"agent_user_question={'YES' if kwarg_question else 'NULL'} | "
+                f"default_user_question={'YES' if default_question else 'NULL'}"
             )
             if has_mcj:
                 logger.info(f"[DaxTool] model_context_json preview: {str(kwargs['model_context_json'])[:300]}...")
