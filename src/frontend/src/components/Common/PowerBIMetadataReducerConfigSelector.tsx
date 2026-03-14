@@ -74,6 +74,8 @@ export interface PowerBIMetadataReducerConfig {
   field_synonyms?: string;
   active_filters?: string;
   business_terms?: string;
+  enrichment_data?: string;
+  reference_dax?: string;
 
   // Index signature
   [key: string]: string | number | boolean | undefined;
@@ -290,6 +292,50 @@ export const PowerBIMetadataReducerConfigSelector: React.FC<PowerBIMetadataReduc
             rows={3}
             placeholder='{"BU": ["Business Unit"], "CGR": ["Complete Good Receipt"], "YoY": ["Year over Year"]}'
             helperText="Optional JSON: maps abbreviations to expansions for fuzzy matching. Each key is an abbreviation, value is a list of expansion phrases."
+            size="small"
+          />
+
+          {/* Enrichment Data */}
+          <Accordion>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography variant="subtitle2">Enrichment Data (Optional)</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <Alert severity="info" variant="outlined" sx={{ py: 0.5 }}>
+                  <Typography variant="caption">
+                    Pre-computed metadata enrichment: table purpose/grain, column synonyms/descriptions,
+                    measure synonyms/descriptions. Merged into model context before scoring to improve
+                    relevance matching.
+                  </Typography>
+                </Alert>
+                <TextField
+                  label="Enrichment Data"
+                  value={value.enrichment_data || ''}
+                  onChange={(e) => handleFieldChange('enrichment_data', e.target.value)}
+                  disabled={disabled}
+                  fullWidth
+                  multiline
+                  rows={5}
+                  placeholder={'{\n  "tables": {"tbl_sizing": {"purpose": "Tracks sizing data", "grain": "One row per customer per month"}},\n  "columns": {"tbl_sizing[region]": {"synonyms": ["area", "territory"], "description": "Geographic region"}},\n  "measures": {"Total Score": {"synonyms": ["total count"], "description": "Sum of all scores"}}\n}'}
+                  helperText="Optional JSON: enrichment data for tables, columns, and measures. Improves fuzzy matching accuracy."
+                  size="small"
+                />
+              </Box>
+            </AccordionDetails>
+          </Accordion>
+
+          {/* Reference DAX */}
+          <TextField
+            label="Reference DAX Queries"
+            value={value.reference_dax || ''}
+            onChange={(e) => handleFieldChange('reference_dax', e.target.value)}
+            disabled={disabled}
+            fullWidth
+            multiline
+            rows={3}
+            placeholder={'EVALUATE\nSUMMARIZECOLUMNS(\n    \'DimCountry\'[Country],\n    "Revenue", [Total Revenue]\n)'}
+            helperText="Optional: working DAX queries as reference. Tables and measures used here are auto-included in the reduced output."
             size="small"
           />
 
