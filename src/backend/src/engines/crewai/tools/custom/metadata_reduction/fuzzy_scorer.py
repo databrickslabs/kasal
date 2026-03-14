@@ -10,7 +10,10 @@ Dependencies: rapidfuzz (optional, falls back to difflib)
 import re
 import unicodedata
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .question_preprocessor import QuestionIntent
 
 logger = logging.getLogger(__name__)
 
@@ -224,22 +227,166 @@ class FuzzyScorer:
 
         return tokens
 
+    def score_column(
+        self,
+        column: dict,
+        question_tokens: List[str],
+        sample_data: Optional[Dict[str, Any]] = None,
+        table_name: str = "",
+    ) -> float:
+        """Score a single column's relevance to the question.
+
+        Matches against: column name, description, synonyms, sample values.
+        """
+        if not question_tokens:
+            return 0.0
+
+        candidates: List[str] = []
+
+        col_name = column.get("name", "") if isinstance(column, dict) else str(column)
+        if col_name:
+            candidates.append(self.normalize_text(col_name))
+
+        if isinstance(column, dict):
+            col_desc = column.get("description", "")
+            if col_desc:
+                candidates.append(col_desc)
+            for syn in column.get("synonyms", []):
+                candidates.append(syn)
+
+        # Include sample data values for this column
+        if sample_data and table_name and col_name:
+            key = f"{table_name}[{col_name}]"
+            entry = sample_data.get(key)
+            if entry and isinstance(entry, dict):
+                for val in entry.get("sample_values", []):
+                    if isinstance(val, str) and val:
+                        candidates.append(val.lower())
+
+        return self._best_score(question_tokens, candidates)
+
+    def reduce_columns(
+        self,
+        table: dict,
+        question_tokens: List[str],
+        sample_data: Optional[Dict[str, Any]] = None,
+        kept_relationship_cols: Optional[set] = None,
+        filter_columns: Optional[set] = None,
+        has_time_intelligence: bool = False,
+        threshold: float = 50.0,
+    ) -> List:
+        """Reduce a table's columns to only question-relevant ones.
+
+        Always keeps:
+        - Columns referenced in kept relationships (primary/foreign keys)
+        - Columns referenced in active/default filters
+        - Date/time columns if time intelligence detected in question
+        - Columns scoring above threshold
+
+        Safety: if reduction would remove >80% of columns, keep all.
+        Returns the filtered column list (same type as input: dicts or strings).
+        """
+        columns = table.get("columns", [])
+        if not columns or not question_tokens:
+            return columns
+
+        table_name = table.get("name", "")
+        kept_rel_cols = kept_relationship_cols or set()
+        filter_cols = filter_columns or set()
+
+        # Date/time column heuristic
+        _date_keywords = {"date", "year", "month", "quarter", "week", "day", "time", "period", "calendar"}
+
+        kept = []
+        for col in columns:
+            col_name = col.get("name", "") if isinstance(col, dict) else str(col)
+            col_name_lower = col_name.lower()
+
+            # Always keep: relationship columns
+            if col_name in kept_rel_cols:
+                kept.append(col)
+                continue
+
+            # Always keep: filter-referenced columns
+            if col_name in filter_cols:
+                kept.append(col)
+                continue
+
+            # Always keep: date/time columns if time intelligence detected
+            if has_time_intelligence:
+                normalized = self.normalize_text(col_name)
+                if any(kw in normalized for kw in _date_keywords):
+                    kept.append(col)
+                    continue
+
+            # Score-based inclusion
+            score = self.score_column(
+                col, question_tokens,
+                sample_data=sample_data,
+                table_name=table_name,
+            )
+            if score >= threshold:
+                kept.append(col)
+
+        # Safety: if we'd remove >80% of columns, keep all
+        if len(columns) > 0 and len(kept) < len(columns) * 0.2:
+            logger.info(
+                f"[COLUMN_REDUCTION] Safety override: {table_name} would keep "
+                f"only {len(kept)}/{len(columns)} cols (<20%), keeping all"
+            )
+            return columns
+
+        if len(kept) < len(columns):
+            logger.info(
+                f"[COLUMN_REDUCTION] {table_name} "
+                f"{len(columns)}→{len(kept)} columns"
+            )
+
+        return kept
+
     def rank_tables(
         self,
         tables: List[dict],
         question: str,
         sample_data: Optional[Dict[str, Any]] = None,
         business_terms: Optional[Dict[str, List[str]]] = None,
+        question_intent: Optional["QuestionIntent"] = None,
     ) -> List[Dict]:
         """Score and rank all tables against the question.
 
         Returns list of dicts: {"table": <table_dict>, "score": float, "likely_relevant": bool}
         sorted by score descending.
+
+        If question_intent is provided, tables containing matched measures or dimensions
+        receive a scoring boost.
         """
         tokens = self.extract_question_tokens(question, business_terms=business_terms)
+        # Build boost sets from preprocessor intent
+        intent_measure_names = set()
+        intent_dim_names = set()
+        if question_intent:
+            intent_measure_names = {m.lower() for m in (question_intent.measures or [])}
+            intent_dim_names = {d.lower() for d in (question_intent.dimensions or [])}
+
         results = []
         for table in tables:
             score = self.score_table(table, tokens, sample_data=sample_data)
+
+            # Boost tables containing intent-matched measures or dimensions
+            if intent_measure_names or intent_dim_names:
+                table_measures = {
+                    (m.get("name", "") if isinstance(m, dict) else str(m)).lower()
+                    for m in table.get("measures", [])
+                }
+                table_cols = {
+                    (c.get("name", "") if isinstance(c, dict) else str(c)).lower()
+                    for c in table.get("columns", [])
+                }
+                if table_measures & intent_measure_names:
+                    score = max(score, self.boost_min + 10)
+                if table_cols & intent_dim_names:
+                    score = max(score, self.boost_min + 5)
+
             results.append({
                 "table": table,
                 "score": score,
@@ -253,16 +400,30 @@ class FuzzyScorer:
         measures: List[dict],
         question: str,
         business_terms: Optional[Dict[str, List[str]]] = None,
+        question_intent: Optional["QuestionIntent"] = None,
     ) -> List[Dict]:
         """Score and rank all measures against the question.
 
         Returns list of dicts: {"measure": <measure_dict>, "score": float}
         sorted by score descending.
+
+        If question_intent is provided, measures matching intent.measures receive a boost.
         """
         tokens = self.extract_question_tokens(question, business_terms=business_terms)
+        intent_measure_names = set()
+        if question_intent:
+            intent_measure_names = {m.lower() for m in (question_intent.measures or [])}
+
         results = []
         for measure in measures:
             score = self.score_measure(measure, tokens)
+
+            # Boost measures matching preprocessor intent
+            if intent_measure_names:
+                m_name = measure.get("name", "").lower()
+                if m_name in intent_measure_names:
+                    score = max(score, self.boost_min + 15)
+
             results.append({
                 "measure": measure,
                 "score": score,

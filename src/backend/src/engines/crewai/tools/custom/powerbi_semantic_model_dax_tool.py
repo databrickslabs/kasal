@@ -908,6 +908,38 @@ class PowerBISemanticModelDaxTool(BaseTool):
             sections.append(f"REFERENCE DAX:\n{reference_dax}")
             sections.append("")
 
+        # ── DAX Skeleton (from Metadata Reducer) ──
+        dax_skeleton = model_context.get("dax_skeleton", {})
+        if dax_skeleton and dax_skeleton.get("skeleton"):
+            sections.append("DAX SKELETON (use as starting point — fill in placeholders):")
+            sections.append(dax_skeleton["skeleton"])
+            if dax_skeleton.get("strategy_notes"):
+                for note in dax_skeleton["strategy_notes"]:
+                    sections.append(f"  NOTE: {note}")
+            if dax_skeleton.get("open_placeholders"):
+                sections.append(f"  PLACEHOLDERS TO FILL: {', '.join(dax_skeleton['open_placeholders'])}")
+            sections.append("")
+
+        # ── Measure Resolution Flags ──
+        resolution_warnings = []
+        for m in measures:
+            resolution = m.get("_resolution", {})
+            flags = resolution.get("expression_flags", {})
+            if flags.get("has_removefilters"):
+                resolution_warnings.append(
+                    f"  WARNING: [{m.get('name', '')}] uses REMOVEFILTERS — "
+                    f"do NOT call directly in SUMMARIZECOLUMNS. Decompose or use explicit CALCULATE."
+                )
+            if flags.get("handles_date_internally"):
+                resolution_warnings.append(
+                    f"  INFO: [{m.get('name', '')}] handles date filtering internally — "
+                    f"do NOT add additional date filters for this measure."
+                )
+        if resolution_warnings:
+            sections.append("MEASURE RESOLUTION WARNINGS:")
+            sections.extend(resolution_warnings)
+            sections.append("")
+
         # ── Conversation history ──
         conversation_history = config.get("conversation_history", [])
         if conversation_history:
