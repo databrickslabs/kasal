@@ -10,7 +10,7 @@ Dependencies: rapidfuzz (optional, falls back to difflib)
 import re
 import unicodedata
 import logging
-from typing import List, Dict
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -56,11 +56,16 @@ class FuzzyScorer:
         self.synonym_threshold = synonym_threshold
         self.boost_min = boost_min
 
-    def score_table(self, table: dict, question_tokens: List[str]) -> float:
+    def score_table(
+        self,
+        table: dict,
+        question_tokens: List[str],
+        sample_data: Optional[Dict[str, Any]] = None,
+    ) -> float:
         """Score a table's relevance to the question.
 
         Matches against: table name, column names, column descriptions,
-        measure names, measure descriptions, synonyms.
+        measure names, measure descriptions, synonyms, AND sample data values.
         """
         if not question_tokens:
             return 0.0
@@ -72,7 +77,7 @@ class FuzzyScorer:
         if table_name:
             candidates.append(self.normalize_text(table_name))
 
-        # Purpose / grain (enriched metadata)
+        # Purpose / grain (enriched metadata — populated by LLM enrichment step)
         for field in ("purpose", "grain", "description"):
             val = table.get(field)
             if val:
@@ -107,6 +112,20 @@ class FuzzyScorer:
                     candidates.append(m_desc)
                 for syn in measure.get("synonyms", []):
                     candidates.append(syn)
+
+        # Sample data values: keys are "TableName[ColumnName]" → {sample_values: [...]}
+        # Include sample values as candidates so value-based matches (e.g. "Ireland")
+        # boost the table's score.
+        if sample_data and table_name:
+            for key, entry in sample_data.items():
+                # Extract table name from "TableName[ColumnName]" format
+                sd_table = key.split("[")[0] if "[" in key else key
+                if sd_table != table_name:
+                    continue
+                values = entry.get("sample_values", []) if isinstance(entry, dict) else []
+                for val in values:
+                    if isinstance(val, str) and val:
+                        candidates.append(val.lower())
 
         return self._best_score(question_tokens, candidates)
 
@@ -165,33 +184,62 @@ class FuzzyScorer:
         # Collapse whitespace
         return re.sub(r"\s+", " ", lower).strip()
 
-    def extract_question_tokens(self, question: str) -> List[str]:
+    def extract_question_tokens(
+        self,
+        question: str,
+        business_terms: Optional[Dict[str, List[str]]] = None,
+    ) -> List[str]:
         """Extract meaningful tokens from the user question.
 
         Removes stopwords, normalizes, returns unique tokens.
+        Expands abbreviations via business_terms dict (e.g. {"BU": ["Business Unit"]}).
         """
         normalized = self.normalize_text(question)
         words = normalized.split()
-        seen = set()
-        tokens = []
+        seen: set = set()
+        tokens: List[str] = []
         for w in words:
             if w not in _STOPWORDS and len(w) >= 2 and w not in seen:
                 seen.add(w)
                 tokens.append(w)
+
+        # Expand business terms: if a question token matches an abbreviation key,
+        # add the expansion phrases as additional tokens.
+        if business_terms:
+            # Build case-insensitive lookup
+            terms_lower = {k.lower(): v for k, v in business_terms.items()}
+            # Check both raw question words and normalized tokens
+            raw_words = {w.lower() for w in question.split()}
+            for abbrev, expansions in terms_lower.items():
+                if abbrev in raw_words or abbrev in seen:
+                    for expansion in expansions:
+                        norm_exp = self.normalize_text(expansion)
+                        if norm_exp and norm_exp not in seen:
+                            seen.add(norm_exp)
+                            tokens.append(norm_exp)
+                            logger.info(
+                                f"[FuzzyScorer] Business term expansion: "
+                                f"'{abbrev}' → '{expansion}'"
+                            )
+
         return tokens
 
     def rank_tables(
-        self, tables: List[dict], question: str
+        self,
+        tables: List[dict],
+        question: str,
+        sample_data: Optional[Dict[str, Any]] = None,
+        business_terms: Optional[Dict[str, List[str]]] = None,
     ) -> List[Dict]:
         """Score and rank all tables against the question.
 
         Returns list of dicts: {"table": <table_dict>, "score": float, "likely_relevant": bool}
         sorted by score descending.
         """
-        tokens = self.extract_question_tokens(question)
+        tokens = self.extract_question_tokens(question, business_terms=business_terms)
         results = []
         for table in tables:
-            score = self.score_table(table, tokens)
+            score = self.score_table(table, tokens, sample_data=sample_data)
             results.append({
                 "table": table,
                 "score": score,
@@ -201,14 +249,17 @@ class FuzzyScorer:
         return results
 
     def rank_measures(
-        self, measures: List[dict], question: str
+        self,
+        measures: List[dict],
+        question: str,
+        business_terms: Optional[Dict[str, List[str]]] = None,
     ) -> List[Dict]:
         """Score and rank all measures against the question.
 
         Returns list of dicts: {"measure": <measure_dict>, "score": float}
         sorted by score descending.
         """
-        tokens = self.extract_question_tokens(question)
+        tokens = self.extract_question_tokens(question, business_terms=business_terms)
         results = []
         for measure in measures:
             score = self.score_measure(measure, tokens)

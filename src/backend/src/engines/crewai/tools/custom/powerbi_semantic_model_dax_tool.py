@@ -1358,8 +1358,8 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
         for table in model_context.get("tables", []):
             for col in table.get("columns", []):
                 col_lower = col.lower()
-                # If the question mentions a column name, DAX should reference it
-                if col_lower in question_lower and len(col_lower) > 3:
+                # If the question mentions a column name as a whole word, DAX should reference it
+                if len(col_lower) > 3 and re.search(r'\b' + re.escape(col_lower) + r'\b', question_lower):
                     col_ref = f"{table['name']}[{col}]"
                     if col_ref not in value_to_columns.get(col_lower, []):
                         if col_lower not in value_to_columns:
@@ -1367,19 +1367,32 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                         value_to_columns[col_lower].append(col_ref)
 
         # Find question terms that match sample data values
+        # Use word-boundary matching to avoid false positives from substring hits
+        # (e.g. country code "it" matching inside "Italy", "pl" inside "complete")
+        question_words = set(re.findall(r'\b\w+\b', question_lower))
         missing_filters = []
         for val_lower, col_refs in value_to_columns.items():
-            if val_lower in question_lower and len(val_lower) > 1:
-                # Check if DAX references any of the associated columns
-                found_in_dax = False
-                for col_ref in col_refs:
-                    # Check for table[column] pattern in DAX
-                    table_name = col_ref.split("[")[0]
-                    if table_name.upper() in dax_upper:
-                        found_in_dax = True
-                        break
-                if not found_in_dax:
-                    missing_filters.append(f'"{val_lower}" (from {col_refs[0]})')
+            # Skip very short values (2-letter codes cause too many false positives)
+            if len(val_lower) < 3:
+                continue
+            # Require whole-word match for short values (3-5 chars),
+            # substring match OK for longer values (6+ chars)
+            if len(val_lower) <= 5:
+                if val_lower not in question_words:
+                    continue
+            else:
+                if val_lower not in question_lower:
+                    continue
+            # Check if DAX references any of the associated columns
+            found_in_dax = False
+            for col_ref in col_refs:
+                # Check for table[column] pattern in DAX
+                table_name = col_ref.split("[")[0]
+                if table_name.upper() in dax_upper:
+                    found_in_dax = True
+                    break
+            if not found_in_dax:
+                missing_filters.append(f'"{val_lower}" (from {col_refs[0]})')
 
         # Check for numeric filters (e.g., "Week 3" → dim_weeks[Week])
         number_patterns = re.findall(r'(?:week|month|year|quarter)\s+(\d+)', question_lower)
