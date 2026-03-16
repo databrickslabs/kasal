@@ -405,22 +405,26 @@ class TestUserContextConstants:
 
 
 # ---------------------------------------------------------------------------
-# _get_user_group_memberships_with_roles — uses local DB, not Lakebase
+# _get_user_group_memberships / _get_user_group_memberships_with_roles
+# — uses execute_db_operation_smart (Lakebase-aware smart session)
 # ---------------------------------------------------------------------------
 
-class TestGroupMembershipsUsesLocalDb:
-    """Verify that group membership lookups always use the local session factory,
-    not the swapped Lakebase factory. This prevents the bug where group data
-    (which lives in SQLite) becomes unreachable after Lakebase activation."""
+
+def _make_smart_mock(mock_session):
+    """Create an execute_db_operation_smart mock that calls the callback with mock_session."""
+    async def _smart(operation):
+        return await operation(mock_session)
+    return AsyncMock(side_effect=_smart)
+
+
+class TestGetUserGroupMembershipsWithRoles:
+    """Tests for _get_user_group_memberships_with_roles using smart session."""
 
     @pytest.mark.asyncio
-    async def test_memberships_with_roles_uses_local_session_factory(self):
-        """_get_user_group_memberships_with_roles should import _local_session_factory."""
+    async def test_uses_execute_db_operation_smart(self):
+        """Should delegate to execute_db_operation_smart, not _local_session_factory."""
         mock_session = AsyncMock()
-        mock_user = Mock()
-        mock_user.id = "user-1"
-        mock_user.email = "test@example.com"
-        mock_user.is_system_admin = False
+        mock_user = Mock(id="user-1", email="test@example.com", is_system_admin=False)
 
         mock_user_service = Mock()
         mock_user_service.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
@@ -428,68 +432,366 @@ class TestGroupMembershipsUsesLocalDb:
         mock_group_service = Mock()
         mock_group_service.get_user_groups_with_roles = AsyncMock(return_value=[])
 
-        # _local_session_factory is used as async context manager
-        class _LocalCtx:
-            async def __aenter__(self):
-                return mock_session
-            async def __aexit__(self, *args):
-                return False
+        smart_mock = _make_smart_mock(mock_session)
 
-        mock_local_factory = Mock(return_value=_LocalCtx())
-
-        with patch("src.db.session._local_session_factory", mock_local_factory), \
+        with patch("src.utils.user_context.execute_db_operation_smart", smart_mock, create=True), \
+             patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
              patch("src.services.user_service.UserService", return_value=mock_user_service), \
              patch("src.services.group_service.GroupService", return_value=mock_group_service):
             user, groups = await GroupContext._get_user_group_memberships_with_roles("test@example.com")
 
         assert user is mock_user
-        # Verify the local factory was called (not async_session_factory)
-        mock_local_factory.assert_called_once()
+        assert groups == []
+        smart_mock.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_memberships_uses_local_session_factory(self):
-        """_get_user_group_memberships should also use _local_session_factory."""
+    async def test_returns_user_and_groups_with_roles(self):
+        """Should return (user, [(group, role)]) when user has group memberships."""
         mock_session = AsyncMock()
-        mock_user = Mock()
-        mock_user.id = "user-1"
+        mock_user = Mock(id="user-1", email="alice@corp.com", is_system_admin=False)
+
+        mock_group_a = Mock(id="team_alpha")
+        mock_group_b = Mock(id="team_beta")
+        groups_with_roles = [(mock_group_a, "admin"), (mock_group_b, "operator")]
 
         mock_user_service = Mock()
         mock_user_service.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
 
-        mock_group = Mock()
-        mock_group.id = "group-1"
+        mock_group_service = Mock()
+        mock_group_service.get_user_groups_with_roles = AsyncMock(return_value=groups_with_roles)
+
+        smart_mock = _make_smart_mock(mock_session)
+
+        with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
+             patch("src.services.user_service.UserService", return_value=mock_user_service), \
+             patch("src.services.group_service.GroupService", return_value=mock_group_service):
+            user, result = await GroupContext._get_user_group_memberships_with_roles("alice@corp.com")
+
+        assert user is mock_user
+        assert len(result) == 2
+        assert result[0] == (mock_group_a, "admin")
+        assert result[1] == (mock_group_b, "operator")
+
+    @pytest.mark.asyncio
+    async def test_returns_none_tuple_when_user_not_found(self):
+        """Should return (None, []) when get_or_create_user_by_email returns None."""
+        mock_session = AsyncMock()
+
+        mock_user_service = Mock()
+        mock_user_service.get_or_create_user_by_email = AsyncMock(return_value=None)
+
+        smart_mock = _make_smart_mock(mock_session)
+
+        with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
+             patch("src.services.user_service.UserService", return_value=mock_user_service), \
+             patch("src.services.group_service.GroupService"):
+            user, groups = await GroupContext._get_user_group_memberships_with_roles("ghost@example.com")
+
+        assert user is None
+        assert groups == []
+
+    @pytest.mark.asyncio
+    async def test_commits_session_on_success(self):
+        """Should commit the session after successful lookup."""
+        mock_session = AsyncMock()
+        mock_user = Mock(id="user-1", email="test@example.com", is_system_admin=False)
+
+        mock_user_service = Mock()
+        mock_user_service.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
+
+        mock_group_service = Mock()
+        mock_group_service.get_user_groups_with_roles = AsyncMock(return_value=[])
+
+        smart_mock = _make_smart_mock(mock_session)
+
+        with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
+             patch("src.services.user_service.UserService", return_value=mock_user_service), \
+             patch("src.services.group_service.GroupService", return_value=mock_group_service):
+            await GroupContext._get_user_group_memberships_with_roles("test@example.com")
+
+        mock_session.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_exception_returns_none_tuple(self):
+        """When execute_db_operation_smart raises, return (None, []) gracefully."""
+        async def _failing(operation):
+            raise ConnectionError("DB unavailable")
+
+        smart_mock = AsyncMock(side_effect=_failing)
+
+        with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock):
+            user, groups = await GroupContext._get_user_group_memberships_with_roles("test@example.com")
+
+        assert user is None
+        assert groups == []
+
+    @pytest.mark.asyncio
+    async def test_does_not_update_last_login(self):
+        """Should pass update_login=False to avoid DB lock contention."""
+        mock_session = AsyncMock()
+        mock_user = Mock(id="user-1", email="test@example.com", is_system_admin=False)
+
+        mock_user_service = Mock()
+        mock_user_service.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
+
+        mock_group_service = Mock()
+        mock_group_service.get_user_groups_with_roles = AsyncMock(return_value=[])
+
+        smart_mock = _make_smart_mock(mock_session)
+
+        with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
+             patch("src.services.user_service.UserService", return_value=mock_user_service), \
+             patch("src.services.group_service.GroupService", return_value=mock_group_service):
+            await GroupContext._get_user_group_memberships_with_roles("test@example.com")
+
+        mock_user_service.get_or_create_user_by_email.assert_awaited_once_with(
+            "test@example.com", update_login=False
+        )
+
+    @pytest.mark.asyncio
+    async def test_passes_user_id_to_group_service(self):
+        """Should call get_user_groups_with_roles with the resolved user ID."""
+        mock_session = AsyncMock()
+        mock_user = Mock(id="user-42", email="test@example.com", is_system_admin=False)
+
+        mock_user_service = Mock()
+        mock_user_service.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
+
+        mock_group_service = Mock()
+        mock_group_service.get_user_groups_with_roles = AsyncMock(return_value=[])
+
+        smart_mock = _make_smart_mock(mock_session)
+
+        with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
+             patch("src.services.user_service.UserService", return_value=mock_user_service), \
+             patch("src.services.group_service.GroupService", return_value=mock_group_service):
+            await GroupContext._get_user_group_memberships_with_roles("test@example.com")
+
+        mock_group_service.get_user_groups_with_roles.assert_awaited_once_with("user-42")
+
+
+class TestGetUserGroupMemberships:
+    """Tests for _get_user_group_memberships using smart session."""
+
+    @pytest.mark.asyncio
+    async def test_uses_execute_db_operation_smart(self):
+        """Should delegate to execute_db_operation_smart."""
+        mock_session = AsyncMock()
+        mock_user = Mock(id="user-1")
+
+        mock_user_service = Mock()
+        mock_user_service.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
+
+        mock_group = Mock(id="group-1")
         mock_group_service = Mock()
         mock_group_service.get_user_group_memberships = AsyncMock(return_value=[mock_group])
 
-        class _LocalCtx:
-            async def __aenter__(self):
-                return mock_session
-            async def __aexit__(self, *args):
-                return False
+        smart_mock = _make_smart_mock(mock_session)
 
-        mock_local_factory = Mock(return_value=_LocalCtx())
-
-        with patch("src.db.session._local_session_factory", mock_local_factory), \
+        with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
              patch("src.services.user_service.UserService", return_value=mock_user_service), \
              patch("src.services.group_service.GroupService", return_value=mock_group_service):
             result = await GroupContext._get_user_group_memberships("test@example.com")
 
         assert result == ["group-1"]
-        mock_local_factory.assert_called_once()
+        smart_mock.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_memberships_exception_returns_empty(self):
-        """When _local_session_factory raises, return (None, []) gracefully."""
-        class _FailingCtx:
-            async def __aenter__(self):
-                raise ConnectionError("DB unavailable")
-            async def __aexit__(self, *args):
-                return False
+    async def test_returns_multiple_group_ids(self):
+        """Should return list of group IDs when user belongs to multiple groups."""
+        mock_session = AsyncMock()
+        mock_user = Mock(id="user-1")
 
-        mock_local_factory = Mock(return_value=_FailingCtx())
+        mock_user_service = Mock()
+        mock_user_service.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
 
-        with patch("src.db.session._local_session_factory", mock_local_factory):
-            user, groups = await GroupContext._get_user_group_memberships_with_roles("test@example.com")
+        mock_groups = [Mock(id="alpha"), Mock(id="beta"), Mock(id="gamma")]
+        mock_group_service = Mock()
+        mock_group_service.get_user_group_memberships = AsyncMock(return_value=mock_groups)
 
-        assert user is None
-        assert groups == []
+        smart_mock = _make_smart_mock(mock_session)
+
+        with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
+             patch("src.services.user_service.UserService", return_value=mock_user_service), \
+             patch("src.services.group_service.GroupService", return_value=mock_group_service):
+            result = await GroupContext._get_user_group_memberships("test@example.com")
+
+        assert result == ["alpha", "beta", "gamma"]
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_when_user_not_found(self):
+        """Should return [] when user cannot be created/found."""
+        mock_session = AsyncMock()
+
+        mock_user_service = Mock()
+        mock_user_service.get_or_create_user_by_email = AsyncMock(return_value=None)
+
+        smart_mock = _make_smart_mock(mock_session)
+
+        with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
+             patch("src.services.user_service.UserService", return_value=mock_user_service), \
+             patch("src.services.group_service.GroupService"):
+            result = await GroupContext._get_user_group_memberships("ghost@example.com")
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_when_no_groups(self):
+        """Should return [] when user has no group memberships."""
+        mock_session = AsyncMock()
+        mock_user = Mock(id="user-1")
+
+        mock_user_service = Mock()
+        mock_user_service.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
+
+        mock_group_service = Mock()
+        mock_group_service.get_user_group_memberships = AsyncMock(return_value=[])
+
+        smart_mock = _make_smart_mock(mock_session)
+
+        with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
+             patch("src.services.user_service.UserService", return_value=mock_user_service), \
+             patch("src.services.group_service.GroupService", return_value=mock_group_service):
+            result = await GroupContext._get_user_group_memberships("loner@example.com")
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_commits_session_twice_on_success(self):
+        """Should commit after user creation and after group lookup."""
+        mock_session = AsyncMock()
+        mock_user = Mock(id="user-1")
+
+        mock_user_service = Mock()
+        mock_user_service.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
+
+        mock_group_service = Mock()
+        mock_group_service.get_user_group_memberships = AsyncMock(return_value=[])
+
+        smart_mock = _make_smart_mock(mock_session)
+
+        with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
+             patch("src.services.user_service.UserService", return_value=mock_user_service), \
+             patch("src.services.group_service.GroupService", return_value=mock_group_service):
+            await GroupContext._get_user_group_memberships("test@example.com")
+
+        assert mock_session.commit.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_exception_returns_empty_list(self):
+        """When execute_db_operation_smart raises, return [] gracefully."""
+        async def _failing(operation):
+            raise ConnectionError("DB unavailable")
+
+        smart_mock = AsyncMock(side_effect=_failing)
+
+        with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock):
+            result = await GroupContext._get_user_group_memberships("test@example.com")
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_passes_email_to_group_service(self):
+        """Should call get_user_group_memberships with the user's email."""
+        mock_session = AsyncMock()
+        mock_user = Mock(id="user-1")
+
+        mock_user_service = Mock()
+        mock_user_service.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
+
+        mock_group_service = Mock()
+        mock_group_service.get_user_group_memberships = AsyncMock(return_value=[])
+
+        smart_mock = _make_smart_mock(mock_session)
+
+        with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
+             patch("src.services.user_service.UserService", return_value=mock_user_service), \
+             patch("src.services.group_service.GroupService", return_value=mock_group_service):
+            await GroupContext._get_user_group_memberships("alice@corp.com")
+
+        mock_group_service.get_user_group_memberships.assert_awaited_once_with("alice@corp.com")
+
+
+class TestFromEmailUsesSmartSession:
+    """Integration tests verifying from_email resolves groups via smart session,
+    ensuring correct group_id assignment when Lakebase is active."""
+
+    @pytest.mark.asyncio
+    async def test_from_email_with_shared_group_sets_correct_primary_group_id(self):
+        """When user selects a shared group, primary_group_id should be that group."""
+        mock_group = Mock(id="energy_0380b619")
+        groups_with_roles = [(mock_group, "operator")]
+        mock_user = Mock(id="user-1", email="nehme@databricks.com", is_system_admin=False)
+
+        with patch.object(
+            GroupContext, "_get_user_group_memberships_with_roles",
+            new=AsyncMock(return_value=(mock_user, groups_with_roles))
+        ):
+            ctx = await GroupContext.from_email(
+                email="nehme@databricks.com",
+                access_token="tok",
+                group_id="energy_0380b619"
+            )
+
+        assert ctx.primary_group_id == "energy_0380b619"
+        assert "energy_0380b619" in ctx.group_ids
+        # Personal workspace should also be included for data access
+        personal = GroupContext.generate_individual_group_id("nehme@databricks.com")
+        assert personal in ctx.group_ids
+
+    @pytest.mark.asyncio
+    async def test_from_email_with_personal_workspace_sets_personal_primary(self):
+        """When user selects personal workspace, primary_group_id should be personal."""
+        mock_group = Mock(id="energy_0380b619")
+        groups_with_roles = [(mock_group, "operator")]
+        mock_user = Mock(id="user-1", email="nehme@databricks.com", is_system_admin=False)
+        personal = GroupContext.generate_individual_group_id("nehme@databricks.com")
+
+        with patch.object(
+            GroupContext, "_get_user_group_memberships_with_roles",
+            new=AsyncMock(return_value=(mock_user, groups_with_roles))
+        ):
+            ctx = await GroupContext.from_email(
+                email="nehme@databricks.com",
+                access_token="tok",
+                group_id=personal
+            )
+
+        assert ctx.primary_group_id == personal
+
+    @pytest.mark.asyncio
+    async def test_from_email_no_groups_falls_back_to_individual(self):
+        """When user has no group memberships, falls back to individual group ID."""
+        mock_user = Mock(id="user-1", email="solo@example.com", is_system_admin=False)
+
+        with patch.object(
+            GroupContext, "_get_user_group_memberships_with_roles",
+            new=AsyncMock(return_value=(mock_user, []))
+        ):
+            ctx = await GroupContext.from_email(
+                email="solo@example.com",
+                access_token="tok",
+                group_id="some_group"
+            )
+
+        # With no group memberships, should use individual group ID
+        expected = GroupContext.generate_individual_group_id("solo@example.com")
+        assert ctx.primary_group_id == expected
+
+    @pytest.mark.asyncio
+    async def test_from_email_unauthorized_group_raises(self):
+        """When user tries to access a group they don't belong to, should raise ValueError."""
+        mock_group = Mock(id="team_alpha")
+        groups_with_roles = [(mock_group, "admin")]
+        mock_user = Mock(id="user-1", email="test@example.com", is_system_admin=False)
+
+        with patch.object(
+            GroupContext, "_get_user_group_memberships_with_roles",
+            new=AsyncMock(return_value=(mock_user, groups_with_roles))
+        ):
+            with pytest.raises(ValueError, match="Access denied"):
+                await GroupContext.from_email(
+                    email="test@example.com",
+                    access_token="tok",
+                    group_id="unauthorized_group"
+                )

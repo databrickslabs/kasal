@@ -15,6 +15,37 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
+# Standard Python LogRecord attributes that may legitimately be None
+# (e.g. exc_info, exc_text, stack_info) and should never be stripped.
+_STANDARD_LOG_RECORD_ATTRS = frozenset({
+    'args', 'created', 'exc_info', 'exc_text', 'filename', 'funcName',
+    'levelname', 'levelno', 'lineno', 'message', 'module', 'msg', 'msecs',
+    'name', 'pathname', 'process', 'processName', 'relativeCreated',
+    'stack_info', 'thread', 'threadName', 'taskName',
+})
+
+
+class _NoneAttributeFilter(logging.Filter):
+    """Strips None-valued non-standard attributes from log records.
+
+    The OTel OTLP exporter cannot encode ``None`` values in log record
+    attributes — it raises ``Invalid type <class 'NoneType'>``.
+    Third-party libraries (notably MLflow) add extra attributes such as
+    ``experiment_id=None`` to their Python log records.  This filter
+    removes those before the OTel LoggingHandler extracts them.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        for key in list(record.__dict__):
+            if (
+                record.__dict__[key] is None
+                and not key.startswith('_')
+                and key not in _STANDARD_LOG_RECORD_ATTRS
+            ):
+                del record.__dict__[key]
+        return True
+
+
 class LoggerManager:
     """Manages domain-specific loggers with file and console output."""
     
@@ -254,12 +285,18 @@ class LoggerManager:
 
             # Use dedicated logs endpoint if set, otherwise share the main endpoint
             logs_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", endpoint)
-            # Only allow insecure (non-TLS) channels for local development;
-            # deployed Databricks Apps always use TLS-secured sidecar endpoints.
-            is_local = not os.environ.get("DATABRICKS_APP_NAME")
-            use_insecure = (
-                is_local and logs_endpoint.startswith("http://")
-            ) if logs_endpoint else False
+            # Determine TLS mode:
+            # - Localhost endpoints (Databricks Apps sidecar, local collectors)
+            #   never need TLS — the sidecar runs in the same pod.
+            # - Remote endpoints respect the URL scheme (http:// = insecure).
+            is_localhost = bool(
+                logs_endpoint
+                and ("localhost" in logs_endpoint or "127.0.0.1" in logs_endpoint)
+            )
+            is_http_scheme = bool(
+                logs_endpoint and logs_endpoint.startswith("http://")
+            )
+            use_insecure = is_localhost or is_http_scheme
             exporter = OTLPLogExporter(endpoint=logs_endpoint, insecure=use_insecure)  # type: ignore[call-arg]
             provider = LoggerProvider(resource=resource)
             provider.add_log_record_processor(BatchLogRecordProcessor(exporter))
@@ -269,6 +306,14 @@ class LoggerManager:
                 level=otel_level,
                 logger_provider=provider,
             )
+
+            # Add filter to strip None-valued extra attributes from log records.
+            # The OTLP exporter cannot encode None values — it raises:
+            #   "Invalid type <class 'NoneType'> of value None"
+            # Third-party libraries (notably MLflow) add extra attributes such as
+            # experiment_id=None to their log records.  This filter strips those
+            # before the OTel pipeline processes them.
+            otel_handler.addFilter(_NoneAttributeFilter())
 
             self._otel_logger_provider = provider
             self._otel_handler = otel_handler
