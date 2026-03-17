@@ -1,7 +1,7 @@
 import React from 'react';
-import { 
-  Paper, 
-  Box, 
+import {
+  Paper,
+  Box,
   IconButton,
   Tooltip,
 } from '@mui/material';
@@ -13,6 +13,9 @@ import WorkflowChat from './WorkflowChat';
 import { Node, Edge } from 'reactflow';
 import { useCrewExecutionStore } from '../../store/crewExecution';
 import { useJobManagementStore } from '../../store/jobManagement';
+
+// Resolve public asset path using Vite's base URL (handles Databricks Apps proxy path)
+const kasalIcon24 = `${import.meta.env.BASE_URL}kasal-icon-24.png`;
 
 interface ChatPanelProps {
   onNodesGenerated?: (nodes: Node[], edges: Edge[]) => void;
@@ -75,7 +78,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           alignItems: 'center',
           gap: 1
         }}>
-          <Box component="img" src="/kasal-icon-24.png" alt="Kasal"
+          <Box component="img" src={kasalIcon24} alt="Kasal"
             sx={{ width: 24, height: 24, borderRadius: 0.5 }}
           />
           <Tooltip title="Expand Kasal Chat" placement={chatSide === 'right' ? 'left' : 'right'}>
