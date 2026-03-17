@@ -207,26 +207,31 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
   const handleDownloadHtml = () => {
     if (!run) return;
 
-    // Extract the HTML content from the result
-    let htmlContent = '';
-
-    // Check if result contains HTML
-    if (result && typeof result === 'object') {
-      // Look for HTML in the result values
-      const resultString = JSON.stringify(result);
-
-      // If the result contains HTML tags, extract the HTML
-      if (resultString.includes('<html') || resultString.includes('<!DOCTYPE')) {
-        // Find the actual HTML content in the result
-        for (const value of Object.values(result)) {
-          const valueStr = String(value);
-          if (valueStr.includes('<html') || valueStr.includes('<!DOCTYPE')) {
-            htmlContent = valueStr;
-            break;
-          }
+    // Recursively search for an HTML string in a nested result object
+    const findHtmlString = (obj: unknown): string | null => {
+      if (typeof obj === 'string') {
+        // Check for markdown-wrapped HTML first: ```html\n...\n```
+        // Must come before raw HTML check, otherwise the wrapping is returned as-is
+        const mdMatch = obj.match(/^```(?:html|HTML)\s*\n([\s\S]*)\n```\s*$/);
+        if (mdMatch && (mdMatch[1].includes('<html') || mdMatch[1].includes('<!DOCTYPE'))) {
+          return mdMatch[1];
+        }
+        // Check if this string itself is HTML
+        if (obj.includes('<html') || obj.includes('<!DOCTYPE')) {
+          return obj;
+        }
+        return null;
+      }
+      if (obj && typeof obj === 'object') {
+        for (const value of Object.values(obj)) {
+          const found = findHtmlString(value);
+          if (found) return found;
         }
       }
-    }
+      return null;
+    };
+
+    let htmlContent = findHtmlString(result) || '';
 
     // If no HTML found, create a simple HTML with the result
     if (!htmlContent) {
