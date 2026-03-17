@@ -549,6 +549,16 @@ export const MQueryConverterConfigSelector: React.FC<MQueryConverterConfigSelect
                   helperText="Databricks workspace URL for LLM (uses default if empty)"
                   size="small"
                 />
+                <TextField
+                  label="LLM Token (DAPI)"
+                  value={value.llm_token || ''}
+                  onChange={(e) => handleFieldChange('llm_token', e.target.value)}
+                  disabled={disabled}
+                  fullWidth
+                  type="password"
+                  helperText="Databricks API token (PAT) for LLM access (uses DATABRICKS_TOKEN env var if empty)"
+                  size="small"
+                />
               </>
             )}
 
