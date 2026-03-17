@@ -18,6 +18,7 @@ function computeResponsiveValues({
   chatPanelWidth,
   chatPanelCollapsedWidth,
   leftSidebarBaseWidth,
+  areFlowsVisible = false,
 }: {
   isCompact: boolean;
   isMobile: boolean;
@@ -26,9 +27,10 @@ function computeResponsiveValues({
   chatPanelWidth: number;
   chatPanelCollapsedWidth: number;
   leftSidebarBaseWidth: number;
+  areFlowsVisible?: boolean;
 }) {
   const effectiveChatVisible = showChatPanel;
-  const effectiveChatCollapsed = (isCompact || isMobile) ? true : isChatCollapsed;
+  const effectiveChatCollapsed = (isCompact || isMobile || areFlowsVisible) ? true : isChatCollapsed;
   const effectiveChatWidth = effectiveChatCollapsed ? chatPanelCollapsedWidth : chatPanelWidth;
   const effectiveLeftMargin = leftSidebarBaseWidth;
 
@@ -124,6 +126,31 @@ describe('WorkflowDesigner Responsive Layout Logic', () => {
     it('reserves left sidebar margin', () => {
       const result = computeResponsiveValues(params);
       expect(result.effectiveLeftMargin).toBe(48);
+    });
+  });
+
+  describe('flow canvas visible', () => {
+    const params = { ...baseStore, isCompact: false, isMobile: false, areFlowsVisible: true };
+
+    it('force-collapses the chat panel when flows are visible', () => {
+      const result = computeResponsiveValues(params);
+      expect(result.effectiveChatCollapsed).toBe(true);
+    });
+
+    it('uses collapsed width when flows are visible', () => {
+      const result = computeResponsiveValues(params);
+      expect(result.effectiveChatWidth).toBe(60);
+    });
+
+    it('still shows the collapsed chat strip when flows are visible', () => {
+      const result = computeResponsiveValues(params);
+      expect(result.effectiveChatVisible).toBe(true);
+    });
+
+    it('does not force-collapse when flows are hidden', () => {
+      const result = computeResponsiveValues({ ...params, areFlowsVisible: false });
+      expect(result.effectiveChatCollapsed).toBe(false);
+      expect(result.effectiveChatWidth).toBe(450);
     });
   });
 
