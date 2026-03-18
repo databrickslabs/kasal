@@ -302,10 +302,11 @@ class KasalDBSpanExporter(SpanExporter):
     job_id, event_source, event_context, event_type, output, trace_metadata,
     plus new OTel columns: span_id, trace_id, parent_span_id.
 
-    Uses a synchronous SQLAlchemy engine + ThreadPoolExecutor for non-blocking
-    writes.  The sync engine avoids MissingGreenlet errors that occurred with
-    aiosqlite when connections were closed outside the greenlet context during
-    asyncio.run() teardown in thread-pool workers.
+    Uses request_scoped_session() (the same smart session used by the rest of
+    the subprocess) so that traces automatically go to Lakebase when active or
+    local DB otherwise.  Writes happen in a ThreadPoolExecutor; each worker
+    creates its own event loop via create_and_run_loop() to run the async
+    session operations.
     """
 
     def __init__(
@@ -318,53 +319,6 @@ class KasalDBSpanExporter(SpanExporter):
         self._group_context = group_context
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._total_exported = 0
-
-        # Always use the local database (settings.DATABASE_URI) for trace writes.
-        # Even when Lakebase is the primary backend, the subprocess cannot
-        # authenticate to Lakebase (no user token / PAT available in the
-        # spawned process). Traces are written locally and the main process
-        # reads them back via TraceBroadcastService for SSE and API responses.
-        #
-        # We use a SYNCHRONOUS engine here because _write_batch runs in a
-        # ThreadPoolExecutor.  An async engine (aiosqlite) + NullPool causes
-        # MissingGreenlet errors when connections are closed during
-        # asyncio.run() teardown — the greenlet context is already gone.
-        # A sync engine avoids the greenlet layer entirely.
-        from sqlalchemy import create_engine
-        from sqlalchemy.orm import sessionmaker
-        from sqlalchemy.pool import NullPool
-        from src.config.settings import settings
-
-        import os
-
-        db_uri = str(settings.DATABASE_URI)
-
-        # Convert async URI schemes to sync equivalents
-        sync_uri = db_uri
-        if sync_uri.startswith("sqlite+aiosqlite"):
-            sync_uri = sync_uri.replace("sqlite+aiosqlite", "sqlite", 1)
-        elif sync_uri.startswith("postgresql+asyncpg"):
-            sync_uri = sync_uri.replace("postgresql+asyncpg", "postgresql+pg8000", 1)
-
-        connect_args = {}
-        if sync_uri.startswith("sqlite"):
-            connect_args["check_same_thread"] = False
-
-        logger.info(
-            f"[OTel-DB][{job_id}] Using SYNC local DB for trace writes: "
-            f"uri={sync_uri}, cwd={os.getcwd()}, pid={os.getpid()}"
-        )
-
-        self._sync_engine = create_engine(
-            sync_uri,
-            poolclass=NullPool,
-            connect_args=connect_args,
-        )
-        self._sync_session_factory = sessionmaker(
-            self._sync_engine,
-            expire_on_commit=False,
-            autoflush=False,
-        )
 
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
         logger.info(
@@ -434,68 +388,79 @@ class KasalDBSpanExporter(SpanExporter):
     def _write_batch(self, records: list) -> None:
         """Write a batch of trace records to the DB (runs in thread pool).
 
-        Uses a synchronous engine + session to avoid MissingGreenlet errors.
-        Inserts ExecutionTrace model instances directly — no async service
-        layer needed since we skip the job-existence check in subprocess mode.
+        Uses request_scoped_session() — the same smart session used by the
+        rest of the subprocess.  When Lakebase is active (hot-swapped via
+        activate_lakebase_in_subprocess), traces go to Lakebase automatically.
+        Otherwise they go to the local DB.
+
+        Runs in a ThreadPoolExecutor, so we create a fresh event loop via
+        create_and_run_loop() to execute the async session operations.
         """
         from src.models.execution_trace import ExecutionTrace
+        from src.db.session import request_scoped_session
+        from src.utils.asyncio_utils import create_and_run_loop
 
-        written = 0
-        session = self._sync_session_factory()
-        try:
-            for record in records:
-                try:
-                    # Clean output for JSON serialization
-                    output = record.get("output", {})
-                    if output:
-                        cleaned = json.loads(json.dumps(output, cls=UUIDEncoder))
-                    else:
-                        cleaned = {}
+        job_id = self._job_id
 
-                    trace = ExecutionTrace(
-                        job_id=record["job_id"],
-                        event_source=record["event_source"],
-                        event_context=record["event_context"],
-                        event_type=record["event_type"],
-                        output=cleaned,
-                        trace_metadata=record.get("trace_metadata", {}),
-                        span_id=record.get("span_id"),
-                        trace_id=record.get("trace_id"),
-                        parent_span_id=record.get("parent_span_id"),
-                        span_name=record.get("span_name"),
-                        status_code=record.get("status_code"),
-                        duration_ms=record.get("duration_ms"),
-                        group_id=record.get("group_id"),
-                        group_email=record.get("group_email"),
-                    )
-                    session.add(trace)
-                    written += 1
-                except Exception as e:
-                    logger.error(
-                        f"[OTel-DB][{self._job_id}] Failed to write trace: {e}",
-                        exc_info=True,
-                    )
+        async def _write_async():
+            written = 0
+            try:
+                async with request_scoped_session() as session:
+                    for record in records:
+                        try:
+                            # Clean output for JSON serialization
+                            output = record.get("output", {})
+                            if output:
+                                cleaned = json.loads(
+                                    json.dumps(output, cls=UUIDEncoder)
+                                )
+                            else:
+                                cleaned = {}
 
-            if written:
-                session.commit()
-                logger.info(
-                    f"[OTel-DB][{self._job_id}] Wrote {written}/{len(records)} traces to DB"
+                            trace = ExecutionTrace(
+                                job_id=record["job_id"],
+                                event_source=record["event_source"],
+                                event_context=record["event_context"],
+                                event_type=record["event_type"],
+                                output=cleaned,
+                                trace_metadata=record.get("trace_metadata", {}),
+                                span_id=record.get("span_id"),
+                                trace_id=record.get("trace_id"),
+                                parent_span_id=record.get("parent_span_id"),
+                                span_name=record.get("span_name"),
+                                status_code=record.get("status_code"),
+                                duration_ms=record.get("duration_ms"),
+                                group_id=record.get("group_id"),
+                                group_email=record.get("group_email"),
+                            )
+                            session.add(trace)
+                            written += 1
+                        except Exception as e:
+                            logger.error(
+                                f"[OTel-DB][{job_id}] Failed to write trace: {e}",
+                                exc_info=True,
+                            )
+
+                    if written:
+                        await session.commit()
+                        logger.info(
+                            f"[OTel-DB][{job_id}] Wrote {written}/{len(records)} "
+                            f"traces to DB"
+                        )
+                    elif records:
+                        logger.warning(
+                            f"[OTel-DB][{job_id}] 0/{len(records)} traces written"
+                        )
+            except Exception as e:
+                logger.error(
+                    f"[OTel-DB][{job_id}] Batch write error: {e}",
+                    exc_info=True,
                 )
-            elif records:
-                logger.warning(
-                    f"[OTel-DB][{self._job_id}] 0/{len(records)} traces written"
-                )
-        except Exception as e:
-            session.rollback()
-            logger.error(
-                f"[OTel-DB][{self._job_id}] Batch write error: {e}",
-                exc_info=True,
-            )
-        finally:
-            session.close()
+
+        create_and_run_loop(_write_async())
 
     def shutdown(self) -> None:
-        """Shutdown thread pool, dispose sync engine, and log final count.
+        """Shutdown thread pool and log final count.
 
         Waits up to 10 seconds for pending writes to complete.  Previous
         implementation used ``cancel_futures=True`` which silently dropped
@@ -521,12 +486,6 @@ class KasalDBSpanExporter(SpanExporter):
             logger.warning(
                 f"[OTel-DB][{self._job_id}] Thread pool shutdown timed out after 10s"
             )
-
-        # Dispose the sync engine to release the connection cleanly
-        try:
-            self._sync_engine.dispose()
-        except Exception as e:
-            logger.warning(f"[OTel-DB][{self._job_id}] Error disposing sync engine: {e}")
 
         logger.info(
             f"[OTel-DB][{self._job_id}] shutdown() complete, "

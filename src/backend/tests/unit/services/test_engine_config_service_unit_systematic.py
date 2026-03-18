@@ -17,6 +17,7 @@ class FakeRepo:
         self.update_config_value_calls = []
         self.crewai_flow_enabled = True  # Default to enabled
         self.otel_app_telemetry_enabled = False  # Default to disabled
+        self.otel_app_telemetry_log_level = "INFO"
     async def find_all(self):
         return []
     async def find_enabled_configs(self):
@@ -51,6 +52,11 @@ class FakeRepo:
         return self.otel_app_telemetry_enabled
     async def set_otel_app_telemetry_enabled(self, enabled):
         self.otel_app_telemetry_enabled = enabled
+        return True
+    async def get_otel_app_telemetry_log_level(self):
+        return self.otel_app_telemetry_log_level
+    async def set_otel_app_telemetry_log_level(self, log_level):
+        self.otel_app_telemetry_log_level = log_level
         return True
 
 
@@ -202,6 +208,33 @@ async def test_get_otel_app_telemetry_enabled_error_returns_false():
     svc.repository.get_otel_app_telemetry_enabled = AsyncMock(side_effect=Exception("DB error"))
     out = await svc.get_otel_app_telemetry_enabled()
     assert out is False
+
+
+@pytest.mark.asyncio
+async def test_get_otel_app_telemetry_log_level():
+    svc = Svc(SimpleNamespace())
+    svc.repository = FakeRepo(None)
+    svc.repository.otel_app_telemetry_log_level = "WARNING"
+    out = await svc.get_otel_app_telemetry_log_level()
+    assert out == "WARNING"
+
+
+@pytest.mark.asyncio
+async def test_set_otel_app_telemetry_log_level():
+    svc = Svc(SimpleNamespace())
+    svc.repository = FakeRepo(None)
+    ok = await svc.set_otel_app_telemetry_log_level("ERROR")
+    assert ok is True
+    assert svc.repository.otel_app_telemetry_log_level == "ERROR"
+
+
+@pytest.mark.asyncio
+async def test_get_otel_app_telemetry_log_level_error_returns_info():
+    svc = Svc(SimpleNamespace())
+    svc.repository = FakeRepo(None)
+    svc.repository.get_otel_app_telemetry_log_level = AsyncMock(side_effect=Exception("DB error"))
+    out = await svc.get_otel_app_telemetry_log_level()
+    assert out == "INFO"
 
 
 # Removed failing tests with incorrect method assumptions

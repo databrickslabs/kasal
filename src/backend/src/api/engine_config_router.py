@@ -416,7 +416,7 @@ async def get_otel_app_telemetry_enabled(
     service: EngineConfigServiceDep,
     group_context: GroupContextDep,
 ):
-    """Get the OTel App Telemetry enabled status (system-level, Preview).
+    """Get the OTel App Telemetry configuration (system-level, Preview).
 
     Only system administrators can access this configuration.
     """
@@ -424,7 +424,8 @@ async def get_otel_app_telemetry_enabled(
         raise ForbiddenError("Only system administrators can access OTel App Telemetry configuration")
 
     enabled = await service.get_otel_app_telemetry_enabled()
-    return {"otel_app_telemetry_enabled": enabled}
+    log_level = await service.get_otel_app_telemetry_log_level()
+    return {"otel_app_telemetry_enabled": enabled, "otel_app_telemetry_log_level": log_level}
 
 
 @router.patch("/kasal/otel-app-telemetry")
@@ -433,7 +434,7 @@ async def set_otel_app_telemetry_enabled(
     service: EngineConfigServiceDep,
     group_context: GroupContextDep,
 ):
-    """Set the OTel App Telemetry enabled status (system-level, Preview).
+    """Update the OTel App Telemetry configuration (system-level, Preview).
 
     Only system administrators can manage this configuration.
     When enabled, structured OpenTelemetry logs are exported to Unity Catalog
@@ -442,16 +443,26 @@ async def set_otel_app_telemetry_enabled(
     if not is_system_admin(group_context):
         raise ForbiddenError("Only system administrators can manage OTel App Telemetry configuration")
 
-    success = await service.set_otel_app_telemetry_enabled(config_data.enabled)
-    if not success:
-        raise KasalError("Failed to update OTel App Telemetry configuration")
-
-    # Apply the change to the running logger
     from src.core.logger import LoggerManager
     logger_manager = LoggerManager.get_instance()
-    logger_manager.enable_otel_app_telemetry(enabled=config_data.enabled)
 
-    return {"success": True, "otel_app_telemetry_enabled": config_data.enabled}
+    result: dict = {"success": True}
+
+    if config_data.enabled is not None:
+        success = await service.set_otel_app_telemetry_enabled(config_data.enabled)
+        if not success:
+            raise KasalError("Failed to update OTel App Telemetry configuration")
+        logger_manager.enable_otel_app_telemetry(enabled=config_data.enabled)
+        result["otel_app_telemetry_enabled"] = config_data.enabled
+
+    if config_data.log_level is not None:
+        success = await service.set_otel_app_telemetry_log_level(config_data.log_level)
+        if not success:
+            raise KasalError("Failed to update OTel App Telemetry log level")
+        logger_manager.set_otel_log_level(config_data.log_level)
+        result["otel_app_telemetry_log_level"] = config_data.log_level
+
+    return result
 
 
 @router.delete("/engine/{engine_name}", status_code=status.HTTP_204_NO_CONTENT)

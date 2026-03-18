@@ -59,12 +59,13 @@ class ExecutionTraceService:
         Initialize the service with session(s).
 
         Args:
-            session: Database session for trace operations (local DB).
+            session: Database session for trace and execution_history operations.
+                When Lakebase is active the OTel exporter writes traces
+                directly to Lakebase, so a single smart session is sufficient
+                for both trace CRUD and execution_history auth checks.
             auth_session: Optional separate session for execution_history
-                authorization queries.  When Lakebase is active, execution
-                records live in Lakebase while traces live in local DB, so
-                two different sessions are needed.  Falls back to *session*
-                when not provided.
+                authorization queries.  Kept for backward compatibility;
+                defaults to *session* when not provided.
         """
         self.session = session
         self.repository = ExecutionTraceRepository(session)

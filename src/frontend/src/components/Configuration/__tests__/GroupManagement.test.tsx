@@ -5,7 +5,7 @@
  * group CRUD operations, member management, and user interactions.
  */
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { ThemeProvider } from '@mui/material/styles';
 import { BrowserRouter } from 'react-router-dom';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
@@ -17,6 +17,9 @@ import theme from '../../../theme/theme';
 const mocks = vi.hoisted(() => ({
   mockGetGroups: vi.fn(),
   mockGetUsers: vi.fn(),
+  mockCreateGroup: vi.fn(),
+  mockDeleteGroup: vi.fn(),
+  mockRefreshGroupStore: vi.fn(),
 }));
 
 // Mock GroupService as singleton
@@ -24,9 +27,9 @@ vi.mock('../../../api/GroupService', () => ({
   GroupService: {
     getInstance: vi.fn(() => ({
       getGroups: mocks.mockGetGroups,
-      createGroup: vi.fn(),
+      createGroup: mocks.mockCreateGroup,
       updateGroup: vi.fn(),
-      deleteGroup: vi.fn(),
+      deleteGroup: mocks.mockDeleteGroup,
       assignUserToGroup: vi.fn(),
       removeUserFromGroup: vi.fn(),
       getGroupUsers: vi.fn(),
@@ -54,11 +57,11 @@ vi.mock('../../../store/permissions', () => ({
   }),
 }));
 
-// Mock group store
+// Mock group store — use the hoisted mock so tests can assert on it
 vi.mock('../../../store/groups', () => ({
   useGroupStore: vi.fn((selector) => {
     const state = {
-      refresh: vi.fn(),
+      refresh: mocks.mockRefreshGroupStore,
     };
     return selector ? selector(state) : state;
   }),
@@ -138,5 +141,33 @@ describe('GroupManagement', () => {
       // Component should handle error gracefully
       expect(mocks.mockGetGroups).toHaveBeenCalled();
     });
+  });
+
+  it('wires up refreshGroupStore from the Zustand group store', async () => {
+    // GroupManagement calls useGroupStore(s => s.refresh) during render.
+    // Our mock (line 58-65) returns mocks.mockRefreshGroupStore for the
+    // refresh selector.  The component's handleCreateGroup and
+    // handleDeleteGroup call refreshGroupStore() after their API calls.
+    // Verifying the mock was invoked with a selector that returns the
+    // refresh function confirms the wiring is correct.
+    renderWithProviders(<GroupManagement />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Workspaces')).toBeInTheDocument();
+    });
+
+    // The mock useGroupStore was called with selector functions during render.
+    // Verify one of those selectors correctly extracts 'refresh'.
+    const { useGroupStore } = await import('../../../store/groups');
+    const mockedStore = vi.mocked(useGroupStore);
+    const refreshSelector = mockedStore.mock.calls.find(
+      (call) => {
+        if (typeof call[0] === 'function') {
+          return call[0]({ refresh: mocks.mockRefreshGroupStore } as any) === mocks.mockRefreshGroupStore;
+        }
+        return false;
+      }
+    );
+    expect(refreshSelector).toBeDefined();
   });
 });

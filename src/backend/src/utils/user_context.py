@@ -282,13 +282,9 @@ class GroupContext:
             # Import here to avoid circular imports
             from src.services.group_service import GroupService
             from src.services.user_service import UserService
-            from src.db.session import _local_session_factory
+            from src.utils.asyncio_utils import execute_db_operation_smart
 
-            # Always use the LOCAL database for user/group lookups.
-            # These config tables live in SQLite and are never migrated
-            # to Lakebase — using the swapped session factory would query
-            # Lakebase where the data doesn't exist.
-            async with _local_session_factory() as session:
+            async def _lookup(session):
                 # Get or create the user
                 user_service = UserService(session)
                 user = await user_service.get_or_create_user_by_email(email)
@@ -307,6 +303,10 @@ class GroupContext:
                 await session.commit()
 
                 return [group.id for group in user_groups]
+
+            # Use the smart session which routes to Lakebase when active
+            # (where groups/users live) and falls back to local SQLite otherwise.
+            return await execute_db_operation_smart(_lookup)
 
         except Exception as e:
             logger.error(f"Error getting user group memberships for {email}: {e}")
@@ -328,13 +328,9 @@ class GroupContext:
             # Import here to avoid circular imports
             from src.services.group_service import GroupService
             from src.services.user_service import UserService
-            from src.db.session import _local_session_factory
+            from src.utils.asyncio_utils import execute_db_operation_smart
 
-            # Always use the LOCAL database for user/group lookups.
-            # These config tables live in SQLite and are never migrated
-            # to Lakebase — using the swapped session factory would query
-            # Lakebase where the data doesn't exist.
-            async with _local_session_factory() as session:
+            async def _lookup(session):
                 # Get or create the user
                 logger.debug(f"[USER CONTEXT] Creating UserService and calling get_or_create_user_by_email for {email}")
                 user_service = UserService(session)
@@ -355,6 +351,10 @@ class GroupContext:
                 logger.debug(f"[USER CONTEXT] Session committed for user {user.email}")
 
                 return user, groups_with_roles
+
+            # Use the smart session which routes to Lakebase when active
+            # (where groups/users live) and falls back to local SQLite otherwise.
+            return await execute_db_operation_smart(_lookup)
 
         except Exception as e:
             logger.error(f"Error getting user group memberships with roles for {email}: {e}")

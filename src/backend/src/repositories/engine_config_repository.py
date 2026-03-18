@@ -213,6 +213,48 @@ class EngineConfigRepository(BaseRepository[EngineConfig]):
 
         return success
 
+    async def get_otel_app_telemetry_log_level(self) -> str:
+        """Get the OTel App Telemetry log level (system-level).
+
+        Returns:
+            Log level string (defaults to "INFO").
+        """
+        config = await self.find_by_engine_and_key("kasal", "otel_app_telemetry_log_level")
+        if not config:
+            return "INFO"
+        return config.config_value.upper()
+
+    async def set_otel_app_telemetry_log_level(self, log_level: str) -> bool:
+        """Set the OTel App Telemetry log level (system-level).
+
+        Args:
+            log_level: One of DEBUG, INFO, WARNING, ERROR
+
+        Returns:
+            True if successful
+        """
+        success = await self.update_config_value("kasal", "otel_app_telemetry_log_level", log_level.upper())
+
+        if not success:
+            try:
+                new_config_data = {
+                    "engine_name": "kasal",
+                    "engine_type": "system",
+                    "config_key": "otel_app_telemetry_log_level",
+                    "config_value": log_level.upper(),
+                    "enabled": True,
+                    "description": "Log level for OTel App Telemetry structured log export"
+                }
+                await self.create(new_config_data)
+                return True
+            except Exception as e:
+                import logging
+                logging.error(f"Error creating OTel App Telemetry log level config: {str(e)}")
+                await self.session.rollback()
+                raise
+
+        return success
+
     async def set_crewai_flow_enabled(self, enabled: bool) -> bool:
         """
         Set the CrewAI flow enabled status.
