@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field, PrivateAttr
 import httpx
 
 from src.services.powerbi_semantic_model_cache_service import PowerBISemanticModelCacheService
+from src.services.dax_rag_retriever import DaxRagRetriever
 from src.db.session import async_session_factory
 
 logger = logging.getLogger(__name__)
@@ -472,6 +473,13 @@ class PowerBISemanticModelDaxTool(BaseTool):
         # Initialize prompt tracker — will be set by _generate_dax_with_llm / _generate_dax_with_self_correction
         self._last_llm_prompt = None
 
+        # Retrieve RAG few-shot examples (fail-open — returns [] if not configured)
+        _rag_retriever = DaxRagRetriever()
+        rag_examples: List[Dict[str, Any]] = await _rag_retriever.retrieve(
+            question=user_question,
+            config=config,
+        )
+
         if model_context.get("measures") or model_context.get("tables"):
             logger.info(f"[DaxTool] Step 3/4: DAX generation + execution (max_retries={max_retries})")
             # Count consecutive LLM failures to trigger deterministic fallback
@@ -488,7 +496,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
                         consecutive_llm_failures = 0  # Reset so next attempt tries LLM again
                     elif attempt == 0:
                         logger.info(f"[DaxTool] Step 3/4: Attempt {attempt + 1}/{max_retries} — generating DAX via LLM...")
-                        generated_dax = await self._generate_dax_with_llm(user_question, model_context, config)
+                        generated_dax = await self._generate_dax_with_llm(user_question, model_context, config, rag_examples=rag_examples)
                     else:
                         logger.info(f"[DaxTool] Step 3/4: Attempt {attempt + 1}/{max_retries} — self-correction retry...")
                         generated_dax = await self._generate_dax_with_self_correction(
@@ -545,6 +553,18 @@ class PowerBISemanticModelDaxTool(BaseTool):
                             })
                             results["dax_execution"] = execution_result
                             logger.info(f"[DaxTool] Step 3/4: ✓ DAX SUCCESS on attempt {attempt + 1} — rows={execution_result.get('row_count', 0)}")
+
+                            # Store successful Q→DAX pair for future RAG retrieval
+                            try:
+                                await _rag_retriever.store(
+                                    question=user_question,
+                                    dax=generated_dax,
+                                    config=config,
+                                    dataset_id=model_context.get("dataset_id"),
+                                )
+                            except Exception:
+                                pass  # Fail-open: never block on storage failures
+
                             break
                         else:
                             dax_attempts.append({
@@ -791,7 +811,12 @@ class PowerBISemanticModelDaxTool(BaseTool):
     # DAX Generation
     # =====================================================================
 
-    def _build_enriched_semantic_context(self, model_context: Dict[str, Any], config: Dict[str, Any]) -> str:
+    def _build_enriched_semantic_context(
+        self,
+        model_context: Dict[str, Any],
+        config: Dict[str, Any],
+        rag_examples: Optional[List[Dict[str, Any]]] = None,
+    ) -> str:
         """Build enriched semantic context for LLM prompt.
 
         Designed for strictness: starts with an explicit ALLOWED TABLES whitelist,
@@ -919,6 +944,28 @@ class PowerBISemanticModelDaxTool(BaseTool):
             sections.append(f"REFERENCE DAX:\n{reference_dax}")
             sections.append("")
 
+        # ── Dimension bindings (explicit keyword → table-qualified column mapping) ──
+        dimension_bindings = model_context.get("dimension_bindings", [])
+        if dimension_bindings:
+            sections.append("DIMENSION BINDINGS (use these exact table-qualified columns for GROUP BY):")
+            for b in dimension_bindings:
+                tbl = b.get("resolved_table", "")
+                col = b.get("resolved_column", "")
+                term = b.get("user_term", "")
+                sample = b.get("sample_values", [])
+                sample_str = f" [e.g. {', '.join(str(v) for v in sample[:3])}]" if sample else ""
+                sections.append(f"  \"{term}\" → '{tbl}'[{col}]{sample_str}")
+            sections.append("")
+
+        # ── RAG few-shot examples ──
+        if rag_examples:
+            sections.append("SIMILAR QUESTIONS WITH WORKING DAX (use as structural reference only):")
+            for ex in rag_examples:
+                sections.append(f"Q: {ex.get('question', '')}")
+                sections.append(f"DAX:\n{ex.get('dax', '')}")
+                sections.append("---")
+            sections.append("")
+
         # ── DAX Skeleton (from Metadata Reducer) ──
         dax_skeleton = model_context.get("dax_skeleton", {})
         if dax_skeleton and dax_skeleton.get("skeleton"):
@@ -1020,7 +1067,11 @@ class PowerBISemanticModelDaxTool(BaseTool):
             )
 
     async def _generate_dax_with_llm(
-        self, user_question: str, model_context: Dict[str, Any], config: Dict[str, Any]
+        self,
+        user_question: str,
+        model_context: Dict[str, Any],
+        config: Dict[str, Any],
+        rag_examples: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[str]:
         """Generate DAX query using LLM with enriched context."""
         llm_workspace_url = config.get("llm_workspace_url")
@@ -1035,7 +1086,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
             logger.warning("[DAX Generation] No measures available")
             return None
 
-        enriched_context = self._build_enriched_semantic_context(model_context, config)
+        enriched_context = self._build_enriched_semantic_context(model_context, config, rag_examples=rag_examples)
         example_dax = self._build_example_dax(model_context)
 
         has_filters = "ACTIVE FILTERS" in enriched_context

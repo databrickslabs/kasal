@@ -42,6 +42,7 @@ from .metadata_reduction.value_normalizer import ValueNormalizer
 from .metadata_reduction.question_preprocessor import QuestionPreprocessor
 from .metadata_reduction.measure_resolver import MeasureResolver
 from .metadata_reduction.dax_skeleton_builder import DaxSkeletonBuilder
+from .metadata_reduction.dimension_resolver import DimensionResolver
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -243,6 +244,10 @@ class PowerBIMetadataReducerTool(BaseTool):
             enriched_counts = self._merge_enrichment_data(tables, measures, columns, enrichment_data)
             logger.info(f"[MetadataReducer][ENRICHMENT] Merged enrichment data — {enriched_counts}")
 
+        # Step 1b-dim: Resolve dimension keywords → explicit table-qualified column bindings
+        # This runs before fuzzy scoring so the skeleton builder has concrete bindings.
+        dimension_bindings: List = []
+
         # Step 1c: Parse reference DAX for force-include table/measure names
         reference_dax = config.get("reference_dax", "")
         if isinstance(reference_dax, str) and reference_dax.strip():
@@ -309,6 +314,33 @@ class PowerBIMetadataReducerTool(BaseTool):
         # Detect question split
         question_intent = preprocessor.detect_split(question_intent, known_measures=known_measure_names)
         logger.info(f"[MetadataReducer][PREPROCESSOR] Done in {time.time()-t2a:.3f}s")
+
+        # Step 1b-dim (continued): now that question_intent is available, resolve dimensions
+        dim_keywords = [
+            kw for kw in (getattr(question_intent, "dimensions", []) or [])
+            if kw and kw.lower() not in {m.lower() for m in known_measure_names}
+        ]
+        if dim_keywords:
+            field_synonyms_raw = config.get("field_synonyms", {})
+            dim_resolver = DimensionResolver()
+            dimension_bindings = [
+                b.to_dict()
+                for b in dim_resolver.resolve(
+                    keywords=dim_keywords,
+                    selected_tables=tables,
+                    sample_data=sample_data,
+                    field_synonyms=field_synonyms_raw if isinstance(field_synonyms_raw, dict) else {},
+                    threshold=0.70,
+                )
+            ]
+            if dimension_bindings:
+                logger.info(
+                    f"[MetadataReducer][DIMENSION_RESOLVER] Resolved {len(dimension_bindings)} bindings: "
+                    + ", ".join(
+                        f"'{b['user_term']}'→'{b['resolved_table']}'['{b['resolved_column']}']"
+                        for b in dimension_bindings
+                    )
+                )
 
         if strategy == "fuzzy":
             # ── Fuzzy-only: deterministic scoring, no LLM ──
@@ -415,6 +447,43 @@ class PowerBIMetadataReducerTool(BaseTool):
                     selected_measure_names.append(rm)
             logger.info(f"[MetadataReducer][REFERENCE_DAX] Force-included {len(ref_measures)} measures")
 
+        # Dimension column anchor: if question_intent names a dimension (e.g. "Business Unit")
+        # and a table has a column with that exact name, force-include it regardless of
+        # fuzzy/LLM scoring. This is a hard guarantee that the GROUP BY table is always present.
+        if question_intent and question_intent.dimensions:
+            _dim_names_lower = {d.lower() for d in question_intent.dimensions}
+            for _table in tables:
+                _tname = _table["name"]
+                if _tname in selected_table_names:
+                    continue
+                _table_col_names_lower = {
+                    (c.get("name", "") if isinstance(c, dict) else str(c)).lower()
+                    for c in _table.get("columns", [])
+                }
+                if _table_col_names_lower & _dim_names_lower:
+                    selected_table_names.append(_tname)
+                    logger.info(
+                        f"[MetadataReducer][DIM_ANCHOR] Force-included '{_tname}' "
+                        f"(column matches question dimension: {_table_col_names_lower & _dim_names_lower})"
+                    )
+
+        # Slicer anchor: if a slicer's column matches a question intent dimension or measure,
+        # its table must be in context — slicers represent actively used filter axes in the report.
+        if question_intent:
+            _slicer_anchor_names = {d.lower() for d in (question_intent.dimensions or [])}
+            _slicer_anchor_names |= {m.lower() for m in (question_intent.measures or [])}
+            if _slicer_anchor_names:
+                for _slicer in slicers:
+                    _s_table = _slicer.get("table", "")
+                    _s_column = _slicer.get("column", "").lower()
+                    if _s_table and _s_column in _slicer_anchor_names and _s_table not in selected_table_names:
+                        if any(t["name"] == _s_table for t in tables):
+                            selected_table_names.append(_s_table)
+                            logger.info(
+                                f"[MetadataReducer][SLICER_ANCHOR] Force-included '{_s_table}' "
+                                f"(slicer column '{_s_column}' matches question intent)"
+                            )
+
         # Enforce max limits
         max_tables = config.get("max_tables", 15)
         max_measures = config.get("max_measures", 30)
@@ -452,6 +521,19 @@ class PowerBIMetadataReducerTool(BaseTool):
         measure_resolver = MeasureResolver(measures, tables, sample_data=sample_data)
         resolved_measures = measure_resolver.resolve(resolved_measures)
         logger.info(f"[MetadataReducer][MEASURE_RESOLVER] Done in {time.time()-t45:.3f}s")
+
+        # Step 4.6: Auto-include filter_table from FILTERED_MEASURE resolutions.
+        # When a measure resolves as FILTERED_MEASURE (e.g. [Score] WHERE Quality Category = "Conformity"),
+        # its filter_table (e.g. dim_Rules Inventory) must be in context for the CALCULATE to work.
+        _all_table_names_set = {t["name"] for t in tables}
+        for _m in resolved_measures:
+            _filter_table = _m.get("_resolution", {}).get("filter_table", "")
+            if _filter_table and _filter_table not in selected_table_names and _filter_table in _all_table_names_set:
+                selected_table_names.append(_filter_table)
+                logger.info(
+                    f"[MetadataReducer][FILTERED_MEASURE_ANCHOR] Auto-included '{_filter_table}' "
+                    f"as filter_table for measure '{_m.get('name', '')}'"
+                )
 
         # Step 4b: MANDATORY — include all default_filter tables in reduced output
         # Default filters are report-level filters that MUST ALWAYS be applied.
@@ -647,6 +729,8 @@ class PowerBIMetadataReducerTool(BaseTool):
             relationships=kept_relationships,
             active_filters=normalized_filters,
             question_intent=question_intent.to_dict() if question_intent else None,
+            tables=kept_tables,
+            dimension_bindings=dimension_bindings if dimension_bindings else None,
         )
         if dax_skeleton.skeleton:
             logger.info(
@@ -678,6 +762,10 @@ class PowerBIMetadataReducerTool(BaseTool):
             "default_filters": normalized_filters,
             "slicers": kept_slicers,
         }
+
+        # Add dimension bindings if resolved
+        if dimension_bindings:
+            reduced_output["dimension_bindings"] = dimension_bindings
 
         # Add DAX skeleton if built
         if dax_skeleton.skeleton:

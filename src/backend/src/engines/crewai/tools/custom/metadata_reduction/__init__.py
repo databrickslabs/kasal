@@ -8,6 +8,7 @@ Provides intelligent metadata reduction for Power BI semantic models:
 - QuestionPreprocessor: Structured intent extraction from user questions
 - MeasureResolver: Deterministic measure type resolution + expression analysis
 - DaxSkeletonBuilder: Partial DAX skeleton generation from resolver output
+- DimensionResolver: Explicit dimension keyword → table-qualified column binding
 """
 
 from .fuzzy_scorer import FuzzyScorer
@@ -16,6 +17,7 @@ from .value_normalizer import ValueNormalizer
 from .question_preprocessor import QuestionPreprocessor
 from .measure_resolver import MeasureResolver
 from .dax_skeleton_builder import DaxSkeletonBuilder
+from .dimension_resolver import DimensionResolver, DimensionBinding
 
 __all__ = [
     "FuzzyScorer",
@@ -24,4 +26,6 @@ __all__ = [
     "QuestionPreprocessor",
     "MeasureResolver",
     "DaxSkeletonBuilder",
+    "DimensionResolver",
+    "DimensionBinding",
 ]

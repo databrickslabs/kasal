@@ -42,6 +42,7 @@ class ExpressionFlags:
     has_allselected: bool = False
     has_allexcept: bool = False
     uses_calculate: bool = False
+    has_context_routing: bool = False
 
 
 @dataclass
@@ -70,6 +71,7 @@ class ResolvedMeasure:
                 "has_allselected": self.expression_flags.has_allselected,
                 "has_allexcept": self.expression_flags.has_allexcept,
                 "uses_calculate": self.expression_flags.uses_calculate,
+                "has_context_routing": self.expression_flags.has_context_routing,
             },
         }
         if self.base_measure:
@@ -115,6 +117,11 @@ _ALL_FUNC = re.compile(r"\bALL\s*\(", re.IGNORECASE)
 
 # CALCULATE pattern
 _CALCULATE = re.compile(r"\bCALCULATE\s*\(", re.IGNORECASE)
+
+# Context-routing patterns (SWITCH/ISFILTERED/SELECTEDVALUE/HASONEVALUE/ISINSCOPE)
+_CONTEXT_ROUTING = re.compile(
+    r"\b(ISFILTERED|SELECTEDVALUE|HASONEVALUE|ISINSCOPE)\b", re.IGNORECASE
+)
 
 # Qualified column reference: 'Table'[Column] or Table[Column]
 _QUALIFIED_COL_REF = re.compile(r"'?([^'[\]]+)'?\[([^\]]+)\]")
@@ -380,6 +387,7 @@ class MeasureResolver:
         flags.has_allselected = bool(_ALLSELECTED.search(expression))
         flags.has_allexcept = bool(_ALLEXCEPT.search(expression))
         flags.handles_date_internally = bool(_DATE_FUNCTIONS.search(expression))
+        flags.has_context_routing = bool(_CONTEXT_ROUTING.search(expression))
 
         # safe_for_decompose: True if no dangerous context modifiers
         if _DANGEROUS_CONTEXT.search(expression):

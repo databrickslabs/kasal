@@ -16,9 +16,18 @@ Date: 2026
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+# Date table detection: canonical names (case-insensitive)
+_DATE_TABLE_NAMES = frozenset({
+    "date", "calendar", "dates", "dim_date", "dimdate", "date table", "calendar table",
+    "dim date", "dim calendar", "datetable",
+})
+
+# Date column detection: canonical column names in a date table (case-insensitive)
+_DATE_COLUMN_HINTS = frozenset({"date", "year", "month", "day", "quarter", "week"})
 
 
 @dataclass
@@ -47,6 +56,8 @@ class DaxSkeletonBuilder:
         relationships: Optional[List[Dict]] = None,
         active_filters: Optional[Dict[str, Any]] = None,
         question_intent: Optional[Dict[str, Any]] = None,
+        tables: Optional[List[Dict]] = None,
+        dimension_bindings: Optional[List[Dict]] = None,
     ) -> DaxSkeleton:
         """Build a DAX skeleton from resolved measures.
 
@@ -55,6 +66,8 @@ class DaxSkeletonBuilder:
             relationships: Model relationships for join hints.
             active_filters: Active filters to apply.
             question_intent: Preprocessor output for shape/grouping hints.
+            tables: Full list of model tables (for date table detection).
+            dimension_bindings: Resolved dimension bindings with table-qualified columns.
 
         Returns:
             DaxSkeleton with partial DAX and metadata.
@@ -71,7 +84,6 @@ class DaxSkeletonBuilder:
         for m in resolved_measures:
             resolution = m.get("_resolution", {})
             rtype = resolution.get("resolution_type", "unresolved")
-            flags = resolution.get("expression_flags", {})
 
             if rtype == "model_measure":
                 model_measures.append(m)
@@ -82,29 +94,46 @@ class DaxSkeletonBuilder:
             else:
                 other_measures.append(m)
 
-        # Determine grouping columns from intent
-        group_cols = self._extract_group_columns(question_intent)
+        # Determine grouping columns from intent, preferring dimension_bindings
+        group_cols = self._extract_group_columns(question_intent, dimension_bindings)
+
+        # Detect date table for time intelligence skeleton generation
+        date_table, date_col = self._detect_date_table(tables or [])
 
         # Build skeleton based on what we have
         if len(resolved_measures) == 1:
-            return self._build_single_measure(
+            result = self._build_single_measure(
                 resolved_measures[0], group_cols, active_filters
             )
-
-        if composite_measures:
-            return self._build_composite(
+        elif composite_measures:
+            result = self._build_composite(
                 composite_measures[0], filtered_measures, group_cols, active_filters
             )
-
-        if filtered_measures and not model_measures and not other_measures:
-            return self._build_filtered_only(
+        elif filtered_measures and not model_measures and not other_measures:
+            result = self._build_filtered_only(
                 filtered_measures, group_cols, active_filters
             )
+        else:
+            # Multiple model measures or mixed types
+            result = self._build_multi_measure(
+                resolved_measures, group_cols, active_filters
+            )
 
-        # Multiple model measures or mixed types
-        return self._build_multi_measure(
-            resolved_measures, group_cols, active_filters
-        )
+        # Inject time intelligence date filter VAR block if applicable
+        if date_table and date_col and question_intent:
+            time_intelligence = question_intent.get("time_intelligence", {})
+            if time_intelligence:
+                date_filter_block = self._build_date_filter(
+                    time_intelligence, date_table, date_col
+                )
+                if date_filter_block:
+                    result.skeleton = date_filter_block + "\n" + result.skeleton
+                    result.strategy_notes.append(
+                        f"Time intelligence applied using '{date_table}'[{date_col}]"
+                    )
+                    result.can_skip_llm = False
+
+        return result
 
     def _build_single_measure(
         self,
@@ -139,6 +168,31 @@ class DaxSkeletonBuilder:
                 f"SUMMARIZECOLUMNS(\n"
                 f"    {self._format_group_cols(group_cols, placeholders)}\n"
                 f'    "Result", CALCULATE([{name}], /* add explicit filter context */)\n'
+                f")"
+            )
+            return DaxSkeleton(
+                skeleton=skeleton,
+                can_skip_llm=False,
+                open_placeholders=placeholders,
+                strategy_notes=notes,
+            )
+
+        # Context-routing measure: ISFILTERED/SELECTEDVALUE/HASONEVALUE/ISINSCOPE
+        # These measures branch on filter context — must wrap in explicit CALCULATE
+        if rtype == "model_measure" and flags.get("has_context_routing"):
+            notes.append(
+                f"CONTEXT-ROUTING: [{name}] uses ISFILTERED/SELECTEDVALUE/HASONEVALUE — "
+                f"wrap in CALCULATE with explicit filter to activate the correct branch."
+            )
+            placeholders.append("EXPLICIT_FILTER_CONTEXT")
+            filter_lines = self._format_filter_lines(active_filters)
+            skeleton = (
+                f"// [{name}] uses context-routing — LLM must supply explicit filter in CALCULATE\n"
+                f"EVALUATE\n"
+                f"SUMMARIZECOLUMNS(\n"
+                f"    {self._format_group_cols(group_cols, placeholders)}"
+                f"{filter_lines}"
+                f'\n    "Result", CALCULATE([{name}], /* LLM: add explicit filter context to activate routing branch */)\n'
                 f")"
             )
             return DaxSkeleton(
@@ -360,12 +414,144 @@ class DaxSkeletonBuilder:
     @staticmethod
     def _extract_group_columns(
         question_intent: Optional[Dict[str, Any]],
+        dimension_bindings: Optional[List[Dict]] = None,
     ) -> List[str]:
-        """Extract grouping column references from question intent."""
+        """Extract grouping column references from question intent.
+
+        Prefers table-qualified references from dimension_bindings over raw dimension strings.
+        """
         if not question_intent:
             return []
         dims = question_intent.get("dimensions", [])
+        if not dims:
+            return []
+
+        if dimension_bindings:
+            # Build lookup: user_term (lower) → 'Table'[Column]
+            binding_map: Dict[str, str] = {}
+            for b in dimension_bindings:
+                user_term = b.get("user_term", "").lower()
+                tbl = b.get("resolved_table", "")
+                col = b.get("resolved_column", "")
+                if user_term and tbl and col:
+                    binding_map[user_term] = f"'{tbl}'[{col}]"
+
+            qualified = []
+            for dim in dims:
+                key = dim.lower()
+                if key in binding_map:
+                    qualified.append(binding_map[key])
+                else:
+                    qualified.append(dim)
+            return qualified
+
         return dims
+
+    @staticmethod
+    def _detect_date_table(tables: List[Dict]) -> Tuple[Optional[str], Optional[str]]:
+        """Detect the date/calendar table and its primary date column.
+
+        Priority 1: table name in _DATE_TABLE_NAMES (case-insensitive).
+        Priority 2: table with ≥2 columns matching _DATE_COLUMN_HINTS.
+
+        Returns (table_name, date_column) or (None, None).
+        """
+        # Priority 1: canonical name match
+        for table in tables:
+            name = table.get("name", "")
+            if name.lower() in _DATE_TABLE_NAMES:
+                cols = table.get("columns", [])
+                # Find the best date column: prefer exact "Date" or "date", then first matching
+                date_col = None
+                for col in cols:
+                    col_name = col if isinstance(col, str) else col.get("name", "")
+                    if col_name.lower() == "date":
+                        date_col = col_name
+                        break
+                if date_col is None and cols:
+                    # Fall back to first column that hints at a date
+                    for col in cols:
+                        col_name = col if isinstance(col, str) else col.get("name", "")
+                        if col_name.lower() in _DATE_COLUMN_HINTS:
+                            date_col = col_name
+                            break
+                if date_col is None and cols:
+                    date_col = cols[0] if isinstance(cols[0], str) else cols[0].get("name", "")
+                if date_col:
+                    return name, date_col
+
+        # Priority 2: table with ≥2 date-hint columns
+        best_table = None
+        best_col = None
+        best_hits = 0
+        for table in tables:
+            cols = table.get("columns", [])
+            col_names = [
+                (col if isinstance(col, str) else col.get("name", "")).lower()
+                for col in cols
+            ]
+            hits = sum(1 for c in col_names if c in _DATE_COLUMN_HINTS)
+            if hits >= 2 and hits > best_hits:
+                best_hits = hits
+                best_table = table.get("name", "")
+                # Find best date column
+                for col in cols:
+                    col_name = col if isinstance(col, str) else col.get("name", "")
+                    if col_name.lower() == "date":
+                        best_col = col_name
+                        break
+                if best_col is None:
+                    for col in cols:
+                        col_name = col if isinstance(col, str) else col.get("name", "")
+                        if col_name.lower() in _DATE_COLUMN_HINTS:
+                            best_col = col_name
+                            break
+
+        return best_table, best_col
+
+    @staticmethod
+    def _build_date_filter(
+        time_intelligence: Dict[str, Any],
+        date_table: str,
+        date_col: str,
+    ) -> str:
+        """Build a DAX VAR block comment for time intelligence date filtering.
+
+        Returns a comment block that the LLM uses as structural guidance.
+        The actual filter must be integrated into CALCULATE by the LLM.
+        """
+        if not time_intelligence or not date_table or not date_col:
+            return ""
+
+        tbl = f"'{date_table}'" if " " in date_table else date_table
+        col_ref = f"{tbl}[{date_col}]"
+        lines = [f"// TIME INTELLIGENCE — date table: {tbl}[{date_col}]"]
+
+        has_ytd = time_intelligence.get("has_ytd", False)
+        has_mtd = time_intelligence.get("has_mtd", False)
+        has_qtd = time_intelligence.get("has_qtd", False)
+        delta_periods = time_intelligence.get("delta_periods", [])
+        grain = time_intelligence.get("grain", "")
+
+        if has_ytd:
+            lines.append(f"// YTD: use DATESYTD({col_ref})")
+        elif has_mtd:
+            lines.append(f"// MTD: use DATESMTD({col_ref})")
+        elif has_qtd:
+            lines.append(f"// QTD: use DATESQTD({col_ref})")
+        elif "yoy" in (delta_periods or []):
+            lines.append(f"// YoY: use SAMEPERIODLASTYEAR({col_ref})")
+        elif "mom" in (delta_periods or []):
+            lines.append(f"// MoM: use DATEADD({col_ref}, -1, MONTH)")
+        elif grain:
+            lines.append(
+                f"// Latest {grain}: VAR _LatestDate = MAX({col_ref})"
+                f" — FILTER(ALL({col_ref}), {col_ref} <= _LatestDate)"
+            )
+        else:
+            return ""
+
+        return "\n".join(lines)
 
     @staticmethod
     def _format_group_cols(

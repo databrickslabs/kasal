@@ -383,9 +383,11 @@ class FuzzyScorer:
                     for c in table.get("columns", [])
                 }
                 if table_measures & intent_measure_names:
-                    score = max(score, self.boost_min + 10)
+                    # Boost must exceed synonym_threshold to guarantee inclusion
+                    score = max(score, self.synonym_threshold + 10)
                 if table_cols & intent_dim_names:
-                    score = max(score, self.boost_min + 5)
+                    # Exact column name match for a named dimension → guaranteed in
+                    score = max(score, self.synonym_threshold + 5)
 
             results.append({
                 "table": table,
