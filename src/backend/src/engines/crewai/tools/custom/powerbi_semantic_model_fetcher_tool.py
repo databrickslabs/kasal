@@ -2319,55 +2319,103 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 for col_name, dtype in table.get("column_types", {}).items():
                     column_type_map[f"{table_name}[{col_name}]"] = str(dtype)
 
+        def _process_filter_list(filter_definitions: list, source: str) -> None:
+            """Parse a list of PBI filter defs into the outer `filters` dict."""
+            for filter_def in filter_definitions:
+                param_reason = self._is_parameter_filter(filter_def)
+                if param_reason:
+                    expression = filter_def.get("expression", {})
+                    col = expression.get("Column", {})
+                    entity = col.get("Expression", {}).get("SourceRef", {}).get("Entity", "")
+                    prop = col.get("Property", "")
+                    logger.info(
+                        f"[Filter Extraction] Skipping parameter filter: "
+                        f"{entity}[{prop}] — reason: {param_reason} (source: {source})"
+                    )
+                    continue
+                filter_name, filter_description = self._extract_filter_from_definition(filter_def)
+                if filter_name and filter_description:
+                    if column_type_map and filter_name in column_type_map:
+                        filter_description = self._validate_filter_datatype(
+                            filter_name, filter_description, column_type_map[filter_name],
+                        )
+                    if filter_name not in filters:
+                        filters[filter_name] = filter_description
+                        logger.info(f"[Filter Extraction] {source}: {filter_name} = {filter_description}")
+                else:
+                    expr_keys = list(filter_def.get("expression", {}).keys())
+                    logger.info(
+                        f"[Filter Extraction] Could not parse filter from {source} "
+                        f"(expression keys: {expr_keys}): "
+                        f"{json.dumps(filter_def, default=str)[:300]}"
+                    )
+
+        # Accumulate page-level filters separately so we can merge them after
+        # report-level filters (report-level takes precedence on conflicts).
+        page_filter_raw: Dict[str, Any] = {}   # filter_name → description
+        page_filter_pages: Dict[str, set] = {}  # filter_name → set of page names
+
         try:
             for part in tmdl_parts:
                 payload = part.get("payload", "")
                 path = part.get("path", "")
-                if "report.json" in path.lower():
+                path_lower = path.lower()
+
+                # ── Report-level filters ("Filters on all pages") ──
+                if "report.json" in path_lower:
                     try:
                         content = base64.b64decode(payload).decode("utf-8")
                         report_json = json.loads(content)
                         if "filters" in report_json:
                             filters_str = report_json["filters"]
-                            if isinstance(filters_str, str):
-                                filter_definitions = json.loads(filters_str)
-                            else:
-                                filter_definitions = filters_str
-                            for filter_def in filter_definitions:
-                                # Skip parameter / dynamic filters
-                                param_reason = self._is_parameter_filter(filter_def)
-                                if param_reason:
-                                    expression = filter_def.get("expression", {})
-                                    col = expression.get("Column", {})
-                                    entity = col.get("Expression", {}).get("SourceRef", {}).get("Entity", "")
-                                    prop = col.get("Property", "")
-                                    logger.info(
-                                        f"[Filter Extraction] Skipping parameter filter: "
-                                        f"{entity}[{prop}] — reason: {param_reason}"
-                                    )
-                                    continue
-
-                                filter_name, filter_description = self._extract_filter_from_definition(filter_def)
-                                if filter_name and filter_description:
-                                    # Validate datatype if column metadata available
-                                    if column_type_map and filter_name in column_type_map:
-                                        filter_description = self._validate_filter_datatype(
-                                            filter_name, filter_description,
-                                            column_type_map[filter_name],
-                                        )
-                                    filters[filter_name] = filter_description
-                                else:
-                                    # Log unparseable filters for debugging
-                                    expr_keys = list(filter_def.get("expression", {}).keys())
-                                    logger.info(
-                                        f"[Filter Extraction] Could not parse filter "
-                                        f"(expression keys: {expr_keys}): "
-                                        f"{json.dumps(filter_def, default=str)[:300]}"
-                                    )
+                            defs = json.loads(filters_str) if isinstance(filters_str, str) else filters_str
+                            _process_filter_list(defs, "report-level")
                     except json.JSONDecodeError as e:
-                        logger.warning(f"[Filter Extraction] Failed to parse JSON: {e}")
+                        logger.warning(f"[Filter Extraction] Failed to parse report.json: {e}")
+
+                # ── Page-level filters ("Filters on this page") ──
+                elif "/pages/" in path_lower and path_lower.endswith("/page.json"):
+                    try:
+                        content = base64.b64decode(payload).decode("utf-8")
+                        page_json = json.loads(content)
+                        if "filters" in page_json:
+                            page_name = page_json.get("displayName", page_json.get("name", path))
+                            filters_str = page_json["filters"]
+                            defs = json.loads(filters_str) if isinstance(filters_str, str) else filters_str
+                            for filter_def in defs:
+                                if self._is_parameter_filter(filter_def):
+                                    continue
+                                fname, fdesc = self._extract_filter_from_definition(filter_def)
+                                if fname and fdesc:
+                                    page_filter_pages.setdefault(fname, set()).add(page_name)
+                                    if fname not in page_filter_raw:
+                                        page_filter_raw[fname] = fdesc
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"[Filter Extraction] Failed to parse page.json at {path}: {e}")
+
         except Exception as e:
             logger.warning(f"[Filter Extraction] Error parsing report: {e}")
+
+        # Merge page-level filters — report-level already in `filters` takes precedence.
+        # Count total pages to describe scope in logs.
+        total_pages = len([
+            p for p in tmdl_parts
+            if "/pages/" in p.get("path", "").lower()
+            and p.get("path", "").lower().endswith("/page.json")
+        ])
+        for fname, page_names in page_filter_pages.items():
+            if fname in filters:
+                continue  # already captured at report level
+            fdesc = page_filter_raw[fname]
+            if column_type_map and fname in column_type_map:
+                fdesc = self._validate_filter_datatype(fname, fdesc, column_type_map[fname])
+            filters[fname] = fdesc
+            scope = (
+                "all pages" if total_pages > 0 and len(page_names) >= total_pages
+                else f"{len(page_names)}/{total_pages} pages"
+            )
+            logger.info(f"[Filter Extraction] page-level ({scope}): {fname} = {fdesc}")
+
         return filters
 
     # Power BI DataType enum → human-readable name
