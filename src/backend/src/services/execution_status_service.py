@@ -94,8 +94,9 @@ class ExecutionStatusService:
                 # Set completed_at if status is a terminal status
                 if status in [ExecutionStatus.COMPLETED.value, ExecutionStatus.FAILED.value, ExecutionStatus.CANCELLED.value]:
                     from datetime import datetime
-                    # Always set completed_at to current time for terminal statuses
-                    update_data["completed_at"] = datetime.now()  # Use timezone-naive datetime
+                    # Always set completed_at to current UTC time for terminal statuses
+                    # Must use utcnow() to match created_at which also uses utcnow()
+                    update_data["completed_at"] = datetime.utcnow()
                     logger.info(f"[ExecutionStatusService] Setting completed_at for terminal status {status} on job {job_id}")
 
                 logger.info(f"[ExecutionStatusService] Update data keys: {', '.join(update_data.keys())}")

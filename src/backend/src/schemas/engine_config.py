@@ -57,4 +57,9 @@ class CrewAIFlowConfigUpdate(BaseModel):
 
 class OtelAppTelemetryConfigUpdate(BaseModel):
     """Schema for updating OTel App Telemetry configuration."""
-    enabled: bool = Field(..., description="Whether OTel App Telemetry is enabled")
+    enabled: Optional[bool] = Field(None, description="Whether OTel App Telemetry is enabled")
+    log_level: Optional[str] = Field(
+        None,
+        description="OTel log export level (DEBUG, INFO, WARNING, ERROR)",
+        pattern="^(DEBUG|INFO|WARNING|ERROR)$",
+    )

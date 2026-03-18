@@ -97,8 +97,42 @@ class TestOtelAppTelemetry:
         "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
         "DATABRICKS_APP_NAME": "kasal",
     })
-    def test_otel_insecure_blocked_in_databricks_app(self):
-        """insecure channel must be False when running inside a Databricks App, even with http:// endpoint."""
+    def test_otel_insecure_for_localhost_in_databricks_app(self):
+        """insecure must be True for localhost endpoints in Databricks Apps (sidecar has no TLS)."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mock_exporter_cls = MagicMock()
+            mock_provider = MagicMock()
+            mock_handler = MagicMock(spec=logging.Handler)
+            mock_handler.level = logging.INFO
+
+            with patch(
+                "opentelemetry.sdk._logs.LoggerProvider",
+                return_value=mock_provider,
+            ), patch(
+                "opentelemetry.sdk._logs.LoggingHandler",
+                return_value=mock_handler,
+            ), patch(
+                "opentelemetry.exporter.otlp.proto.grpc._log_exporter.OTLPLogExporter",
+                mock_exporter_cls,
+            ), patch(
+                "opentelemetry.sdk._logs.export.BatchLogRecordProcessor",
+            ):
+                manager = LoggerManager.get_instance(temp_dir)
+                manager.enable_otel_app_telemetry(enabled=True)
+
+                mock_exporter_cls.assert_called_once()
+                _, kwargs = mock_exporter_cls.call_args
+                assert kwargs.get("insecure") is True, (
+                    "insecure must be True for localhost sidecar — no TLS needed"
+                )
+
+    @patch.dict(os.environ, {
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "https://remote-collector.example.com:4317",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+        "DATABRICKS_APP_NAME": "kasal",
+    })
+    def test_otel_secure_for_remote_https_endpoint(self):
+        """insecure must be False for remote HTTPS endpoints."""
         with tempfile.TemporaryDirectory() as temp_dir:
             mock_exporter_cls = MagicMock()
             mock_provider = MagicMock()
@@ -123,7 +157,7 @@ class TestOtelAppTelemetry:
                 mock_exporter_cls.assert_called_once()
                 _, kwargs = mock_exporter_cls.call_args
                 assert kwargs.get("insecure") is False, (
-                    "insecure must be False inside Databricks Apps"
+                    "insecure must be False for remote HTTPS endpoints"
                 )
 
     @patch.dict(os.environ, {
@@ -160,6 +194,68 @@ class TestOtelAppTelemetry:
                 assert kwargs.get("insecure") is True, (
                     "insecure should be True for http:// in local dev"
                 )
+
+    @patch.dict(os.environ, {
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4314",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+    })
+    def test_otel_custom_log_level(self):
+        """Should apply custom log level to OTel handler."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mock_handler_cls = MagicMock()
+            mock_handler = MagicMock(spec=logging.Handler)
+            mock_handler.level = logging.WARNING
+            mock_handler_cls.return_value = mock_handler
+
+            with patch(
+                "opentelemetry.sdk._logs.LoggerProvider",
+            ), patch(
+                "opentelemetry.sdk._logs.LoggingHandler",
+                mock_handler_cls,
+            ), patch(
+                "opentelemetry.exporter.otlp.proto.grpc._log_exporter.OTLPLogExporter",
+            ), patch(
+                "opentelemetry.sdk._logs.export.BatchLogRecordProcessor",
+            ):
+                manager = LoggerManager.get_instance(temp_dir)
+                manager.enable_otel_app_telemetry(enabled=True, log_level="WARNING")
+
+                mock_handler_cls.assert_called_once()
+                _, kwargs = mock_handler_cls.call_args
+                assert kwargs.get("level") == logging.WARNING
+
+    @patch.dict(os.environ, {
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4314",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+    })
+    def test_set_otel_log_level_runtime(self):
+        """set_otel_log_level should change the handler level at runtime."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mock_handler = MagicMock(spec=logging.Handler)
+            mock_handler.level = logging.INFO
+
+            with patch(
+                "opentelemetry.sdk._logs.LoggerProvider",
+            ), patch(
+                "opentelemetry.sdk._logs.LoggingHandler",
+                return_value=mock_handler,
+            ), patch(
+                "opentelemetry.exporter.otlp.proto.grpc._log_exporter.OTLPLogExporter",
+            ), patch(
+                "opentelemetry.sdk._logs.export.BatchLogRecordProcessor",
+            ):
+                manager = LoggerManager.get_instance(temp_dir)
+                manager.enable_otel_app_telemetry(enabled=True)
+
+                manager.set_otel_log_level("ERROR")
+                mock_handler.setLevel.assert_called_once_with(logging.ERROR)
+
+    def test_set_otel_log_level_noop_when_inactive(self):
+        """set_otel_log_level should be a no-op when OTel is not active."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = LoggerManager.get_instance(temp_dir)
+            assert manager._otel_handler is None
+            manager.set_otel_log_level("DEBUG")  # should not raise
 
     @patch.dict(os.environ, {
         "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4318",
@@ -355,6 +451,135 @@ class TestOtelAppTelemetry:
             assert len(domain_loggers) == 15
             for lg in domain_loggers:
                 assert isinstance(lg, logging.Logger)
+
+
+class TestNoneAttributeFilter:
+    """Test the _NoneAttributeFilter that sanitizes log records for OTel export.
+
+    The OTLP exporter crashes on None-valued attributes with:
+        Invalid type <class 'NoneType'> of value None
+    This filter strips those before the OTel LoggingHandler processes them.
+    """
+
+    def test_strips_none_valued_extra_attributes(self):
+        """Should remove non-standard attributes with None values."""
+        from src.core.logger import _NoneAttributeFilter
+
+        filt = _NoneAttributeFilter()
+        record = logging.LogRecord(
+            name="test", level=logging.INFO, pathname="", lineno=0,
+            msg="test message", args=None, exc_info=None,
+        )
+        # Simulate MLflow adding experiment_id=None
+        record.experiment_id = None
+        record.run_id = None
+
+        result = filt.filter(record)
+
+        assert result is True
+        assert not hasattr(record, "experiment_id")
+        assert not hasattr(record, "run_id")
+
+    def test_preserves_non_none_extra_attributes(self):
+        """Should keep extra attributes that have non-None values."""
+        from src.core.logger import _NoneAttributeFilter
+
+        filt = _NoneAttributeFilter()
+        record = logging.LogRecord(
+            name="test", level=logging.INFO, pathname="", lineno=0,
+            msg="test message", args=None, exc_info=None,
+        )
+        record.experiment_id = "abc123"
+        record.custom_field = 42
+
+        result = filt.filter(record)
+
+        assert result is True
+        assert record.experiment_id == "abc123"
+        assert record.custom_field == 42
+
+    def test_preserves_standard_none_attributes(self):
+        """Should NOT strip standard LogRecord attrs even when None (e.g. exc_info)."""
+        from src.core.logger import _NoneAttributeFilter
+
+        filt = _NoneAttributeFilter()
+        record = logging.LogRecord(
+            name="test", level=logging.INFO, pathname="", lineno=0,
+            msg="test message", args=None, exc_info=None,
+        )
+
+        result = filt.filter(record)
+
+        assert result is True
+        # Standard attrs like exc_info and args should remain even though they are None
+        assert hasattr(record, "exc_info")
+        assert hasattr(record, "args")
+
+    def test_mixed_none_and_non_none_extras(self):
+        """Should strip only the None-valued extras, leaving others intact."""
+        from src.core.logger import _NoneAttributeFilter
+
+        filt = _NoneAttributeFilter()
+        record = logging.LogRecord(
+            name="test", level=logging.INFO, pathname="", lineno=0,
+            msg="test message", args=None, exc_info=None,
+        )
+        record.experiment_id = None  # Should be stripped
+        record.run_name = "my_run"  # Should be kept
+        record.trace_id = None  # Should be stripped
+
+        filt.filter(record)
+
+        assert not hasattr(record, "experiment_id")
+        assert record.run_name == "my_run"
+        assert not hasattr(record, "trace_id")
+
+    def test_no_extras_passes_through(self):
+        """Records without extra attributes should pass through unmodified."""
+        from src.core.logger import _NoneAttributeFilter
+
+        filt = _NoneAttributeFilter()
+        record = logging.LogRecord(
+            name="test", level=logging.INFO, pathname="", lineno=0,
+            msg="test message", args=None, exc_info=None,
+        )
+        original_keys = set(record.__dict__.keys())
+
+        filt.filter(record)
+
+        # Standard None attrs (args, exc_info) should still be present
+        assert hasattr(record, "args")
+        assert hasattr(record, "exc_info")
+
+    @patch.dict(os.environ, {
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4314",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+    })
+    def test_filter_attached_to_otel_handler(self):
+        """The _NoneAttributeFilter should be attached to the OTel handler."""
+        LoggerManager._instance = None
+        LoggerManager._initialized = False
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mock_handler = MagicMock(spec=logging.Handler)
+            mock_handler.level = logging.INFO
+
+            with patch(
+                "opentelemetry.sdk._logs.LoggerProvider",
+            ), patch(
+                "opentelemetry.sdk._logs.LoggingHandler",
+                return_value=mock_handler,
+            ), patch(
+                "opentelemetry.exporter.otlp.proto.grpc._log_exporter.OTLPLogExporter",
+            ), patch(
+                "opentelemetry.sdk._logs.export.BatchLogRecordProcessor",
+            ):
+                manager = LoggerManager.get_instance(temp_dir)
+                manager.enable_otel_app_telemetry(enabled=True)
+
+                mock_handler.addFilter.assert_called_once()
+                filter_arg = mock_handler.addFilter.call_args[0][0]
+                from src.core.logger import _NoneAttributeFilter
+                assert isinstance(filter_arg, _NoneAttributeFilter)
 
 
 class TestLoggerManager:

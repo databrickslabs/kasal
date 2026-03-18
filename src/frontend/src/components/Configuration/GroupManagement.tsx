@@ -182,11 +182,13 @@ const GroupManagement: React.FC = () => {
     try {
       const groupService = GroupService.getInstance();
       await groupService.createGroup(newGroup);
-      
+
       setCreateDialogOpen(false);
       setNewGroup({ name: '', description: '' });
       showNotification('Workspace created successfully', 'success');
       loadGroups();
+      // Refresh the Zustand store so GroupSelector picks up the new workspace
+      refreshGroupStore();
     } catch (error) {
       console.error('Error creating workspace:', error);
       showNotification('Failed to create workspace', 'error');
@@ -274,6 +276,8 @@ const GroupManagement: React.FC = () => {
       }
       showNotification('Workspace deleted successfully', 'success');
       loadGroups();
+      // Refresh the Zustand store so GroupSelector reflects the deletion
+      refreshGroupStore();
     } catch (error) {
       console.error('Error deleting workspace:', error);
       showNotification('Failed to delete workspace', 'error');

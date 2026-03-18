@@ -26,6 +26,9 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 
+// Resolve public asset path using Vite's base URL (handles Databricks Apps proxy path)
+const kasalIcon16 = `${import.meta.env.BASE_URL}kasal-icon-16.png`;
+
 import DispatcherService, { DispatchResult, ConfigureCrewResult, CatalogListResult, CatalogLoadResult, FlowListResult, FlowLoadResult, StreamingGenerationResult } from '../../api/DispatcherService';
 import { useWorkflowStore } from '../../store/workflow';
 import { useCrewExecutionStore } from '../../store/crewExecution';
@@ -1492,7 +1495,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               fontWeight: 600
             }}
           >
-            <Box component="img" src="/kasal-icon-16.png" alt="Kasal" sx={{ width: 16, height: 16, borderRadius: 0.5 }} />
+            <Box component="img" src={kasalIcon16} alt="Kasal" sx={{ width: 16, height: 16, borderRadius: 0.5 }} />
             Kasal
           </Typography>
           {currentSessionName !== 'New Chat' && (

@@ -644,3 +644,98 @@ class TestEngineConfigRepositoryEdgeCases:
             # This should raise an AttributeError when trying to call .lower() on None
             with pytest.raises(AttributeError):
                 await engine_config_repository.get_crewai_flow_enabled()
+
+
+class TestOtelAppTelemetryMethods:
+    """Test cases for OTel App Telemetry repository methods."""
+
+    @pytest.mark.asyncio
+    async def test_get_otel_enabled_true(self, engine_config_repository):
+        config = MockEngineConfig(config_value="true")
+        with patch.object(engine_config_repository, 'find_by_engine_and_key', return_value=config):
+            result = await engine_config_repository.get_otel_app_telemetry_enabled()
+            assert result is True
+
+    @pytest.mark.asyncio
+    async def test_get_otel_enabled_false(self, engine_config_repository):
+        config = MockEngineConfig(config_value="false")
+        with patch.object(engine_config_repository, 'find_by_engine_and_key', return_value=config):
+            result = await engine_config_repository.get_otel_app_telemetry_enabled()
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_get_otel_enabled_not_found_defaults_false(self, engine_config_repository):
+        with patch.object(engine_config_repository, 'find_by_engine_and_key', return_value=None):
+            result = await engine_config_repository.get_otel_app_telemetry_enabled()
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_set_otel_enabled_update_existing(self, engine_config_repository):
+        with patch.object(engine_config_repository, 'update_config_value', return_value=True) as mock_update:
+            result = await engine_config_repository.set_otel_app_telemetry_enabled(True)
+            assert result is True
+            mock_update.assert_called_once_with("kasal", "otel_app_telemetry_enabled", "true")
+
+    @pytest.mark.asyncio
+    async def test_set_otel_enabled_create_new(self, engine_config_repository):
+        with patch.object(engine_config_repository, 'update_config_value', return_value=False):
+            with patch.object(engine_config_repository, 'create', return_value=MockEngineConfig()) as mock_create:
+                result = await engine_config_repository.set_otel_app_telemetry_enabled(False)
+                assert result is True
+                create_data = mock_create.call_args[0][0]
+                assert create_data["engine_name"] == "kasal"
+                assert create_data["config_key"] == "otel_app_telemetry_enabled"
+                assert create_data["config_value"] == "false"
+
+    @pytest.mark.asyncio
+    async def test_set_otel_enabled_create_error(self, engine_config_repository, mock_async_session):
+        with patch.object(engine_config_repository, 'update_config_value', return_value=False):
+            with patch.object(engine_config_repository, 'create', side_effect=Exception("DB error")):
+                with pytest.raises(Exception, match="DB error"):
+                    await engine_config_repository.set_otel_app_telemetry_enabled(True)
+                mock_async_session.rollback.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_get_log_level_returns_value(self, engine_config_repository):
+        config = MockEngineConfig(config_value="WARNING")
+        with patch.object(engine_config_repository, 'find_by_engine_and_key', return_value=config):
+            result = await engine_config_repository.get_otel_app_telemetry_log_level()
+            assert result == "WARNING"
+
+    @pytest.mark.asyncio
+    async def test_get_log_level_not_found_defaults_info(self, engine_config_repository):
+        with patch.object(engine_config_repository, 'find_by_engine_and_key', return_value=None):
+            result = await engine_config_repository.get_otel_app_telemetry_log_level()
+            assert result == "INFO"
+
+    @pytest.mark.asyncio
+    async def test_get_log_level_normalizes_case(self, engine_config_repository):
+        config = MockEngineConfig(config_value="debug")
+        with patch.object(engine_config_repository, 'find_by_engine_and_key', return_value=config):
+            result = await engine_config_repository.get_otel_app_telemetry_log_level()
+            assert result == "DEBUG"
+
+    @pytest.mark.asyncio
+    async def test_set_log_level_update_existing(self, engine_config_repository):
+        with patch.object(engine_config_repository, 'update_config_value', return_value=True) as mock_update:
+            result = await engine_config_repository.set_otel_app_telemetry_log_level("ERROR")
+            assert result is True
+            mock_update.assert_called_once_with("kasal", "otel_app_telemetry_log_level", "ERROR")
+
+    @pytest.mark.asyncio
+    async def test_set_log_level_create_new(self, engine_config_repository):
+        with patch.object(engine_config_repository, 'update_config_value', return_value=False):
+            with patch.object(engine_config_repository, 'create', return_value=MockEngineConfig()) as mock_create:
+                result = await engine_config_repository.set_otel_app_telemetry_log_level("DEBUG")
+                assert result is True
+                create_data = mock_create.call_args[0][0]
+                assert create_data["config_key"] == "otel_app_telemetry_log_level"
+                assert create_data["config_value"] == "DEBUG"
+
+    @pytest.mark.asyncio
+    async def test_set_log_level_create_error(self, engine_config_repository, mock_async_session):
+        with patch.object(engine_config_repository, 'update_config_value', return_value=False):
+            with patch.object(engine_config_repository, 'create', side_effect=Exception("DB error")):
+                with pytest.raises(Exception, match="DB error"):
+                    await engine_config_repository.set_otel_app_telemetry_log_level("WARNING")
+                mock_async_session.rollback.assert_called_once()
