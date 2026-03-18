@@ -28,6 +28,13 @@ from src.services.powerbi_semantic_model_cache_service import PowerBISemanticMod
 from src.db.session import async_session_factory
 
 logger = logging.getLogger(__name__)
+
+
+def _dax_quote_table(name: str) -> str:
+    """Wrap a table name in single quotes if it contains spaces (DAX requirement)."""
+    if " " in name:
+        return f"'{name}'"
+    return name
 logger.setLevel(logging.DEBUG)
 
 _EXECUTOR = ThreadPoolExecutor(max_workers=5)
@@ -815,7 +822,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
             for col in columns:
                 col_type = column_types.get(col, "")
                 col_parts.append(f"{col} ({col_type})" if col_type else col)
-            sections.append(f"TABLE {table_name}: {', '.join(col_parts)}")
+            sections.append(f"TABLE {_dax_quote_table(table_name)}: {', '.join(col_parts)}")
 
         sections.append("")
 
@@ -832,7 +839,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
             if relevant:
                 sections.append("RELATIONSHIPS:")
                 for rel in relevant:
-                    sections.append(f"  {rel['from_table']}[{rel['from_column']}] -> {rel['to_table']}[{rel['to_column']}]")
+                    sections.append(f"  {_dax_quote_table(rel['from_table'])}[{rel['from_column']}] -> {_dax_quote_table(rel['to_table'])}[{rel['to_column']}]")
                 sections.append("")
 
         # ── Sample data (ALL from reduced context — critical for filter matching) ──
@@ -1000,7 +1007,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
             return (
                 f"EVALUATE\n"
                 f"SUMMARIZECOLUMNS(\n"
-                f'    TREATAS({{"SomeValue"}}, {dim_table}[{dim_col}]),\n'
+                f'    TREATAS({{"SomeValue"}}, {_dax_quote_table(dim_table)}[{dim_col}]),\n'
                 f'    "Result", [{measure["name"]}]\n'
                 f")"
             )
@@ -1040,11 +1047,12 @@ RULES:
 2. ONLY use columns listed under each TABLE. Any other column = error.
 3. ONLY use measures listed under MEASURE. Do not invent measure names.
 4. Use EVALUATE + SUMMARIZECOLUMNS for all queries.
-5. For cross-table filters use TREATAS: TREATAS({{"value"}}, table[column])
+5. For cross-table filters use TREATAS: TREATAS({{"value"}}, 'Table Name'[column])
 6. Filters go BEFORE measure expressions in SUMMARIZECOLUMNS.
 7. NEVER use CALCULATETABLE with empty first argument.
 8. Use LEFT() instead of STARTSWITH().
-{"9. Apply the ACTIVE FILTERS listed above." if has_filters else "9. No active filters — only filter if the question asks for it."}
+9. Table names with spaces MUST be wrapped in single quotes: 'dim_Rules Inventory'[col], NOT dim_Rules Inventory[col].
+{"10. Apply the ACTIVE FILTERS listed above." if has_filters else "10. No active filters — only filter if the question asks for it."}
 
 EXAMPLE using this model:
 {example_dax}
@@ -1150,6 +1158,7 @@ RULES:
 2. Use EVALUATE + SUMMARIZECOLUMNS. Use TREATAS for cross-table filters.
 3. NEVER leave CALCULATETABLE first argument empty.
 4. Use LEFT() instead of STARTSWITH().
+5. Table names with spaces MUST be in single quotes: 'dim_Rules Inventory'[col].
 
 EXAMPLE using this model:
 {example_dax}
@@ -1254,7 +1263,7 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
         col_to_ref: Dict[str, str] = {}
         for table in model_context.get("tables", []):
             for col in table.get("columns", []):
-                col_to_ref[col.lower()] = f"{table['name']}[{col}]"
+                col_to_ref[col.lower()] = f"{_dax_quote_table(table['name'])}[{col}]"
 
         # Find filters from question
         treatas_parts = []
@@ -1270,7 +1279,11 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                     if str(v_info).lower() == val_lower:
                         original_val = str(v_info)
                         break
-                treatas_parts.append(f'    TREATAS({{"{original_val}"}}, {col_ref})')
+                quoted_col_ref = col_ref
+                if "[" in col_ref:
+                    tbl, rest = col_ref.split("[", 1)
+                    quoted_col_ref = f"{_dax_quote_table(tbl)}[{rest}"
+                treatas_parts.append(f'    TREATAS({{"{original_val}"}}, {quoted_col_ref})')
                 matched_values.add(val_lower)
 
         # Check for numeric patterns like "Week 3", "Month 5"
@@ -1280,7 +1293,11 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                 # Find a column that matches this concept
                 for col_lower, col_ref in col_to_ref.items():
                     if col_lower in ("week", "month", "year", "quarter") and col_lower in question_lower:
-                        treatas_parts.append(f'    TREATAS({{{num}}}, {col_ref})')
+                        quoted_num_ref = col_ref
+                        if "[" in col_ref:
+                            tbl, rest = col_ref.split("[", 1)
+                            quoted_num_ref = f"{_dax_quote_table(tbl)}[{rest}"
+                        treatas_parts.append(f'    TREATAS({{{num}}}, {quoted_num_ref})')
                         break
 
         # Check for direct column value matches (e.g., "description" = "Complete CGR")
@@ -1290,6 +1307,7 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                 if col_lower in question_lower and len(col_lower) > 3:
                     # Look for a quoted or named value after the column mention
                     col_ref = f"{table['name']}[{col}]"
+                    quoted_col_ref = f"{_dax_quote_table(table['name'])}[{col}]"
                     # Check if any sample value for this column appears in the question
                     for sv_col_ref, sv_info in sample_data.items():
                         if sv_col_ref == col_ref:
@@ -1297,7 +1315,7 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                                 sv_lower = str(sv).lower()
                                 if sv_lower in question_lower and sv_lower not in matched_values and len(sv_lower) > 2:
                                     filter_parts.append(
-                                        f'    FILTER(VALUES({col_ref}), {col_ref} = "{sv}")'
+                                        f'    FILTER(VALUES({quoted_col_ref}), {quoted_col_ref} = "{sv}")'
                                     )
                                     matched_values.add(sv_lower)
 
@@ -1330,18 +1348,25 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
             known_tables.add(table["name"])
 
         # Extract all table[column] references from DAX
-        refs = re.findall(r'(\w+)\[([^\]]+)\]', dax)
+        # Match both 'Table Name'[col] (quoted) and TableName[col] (unquoted)
+        refs_quoted = re.findall(r"'([^']+)'\[([^\]]+)\]", dax)
+        refs_unquoted = re.findall(r'(\w+)\[([^\]]+)\]', dax)
+
+        dax_functions = {
+            "EVALUATE", "SUMMARIZECOLUMNS", "CALCULATETABLE", "CALCULATE",
+            "FILTER", "VALUES", "ALL", "ALLEXCEPT", "TREATAS", "ADDCOLUMNS",
+            "SELECTCOLUMNS", "TOPN", "RELATED", "RELATEDTABLE", "REMOVEFILTERS",
+            "KEEPFILTERS", "USERELATIONSHIP", "CROSSFILTER", "DISTINCT",
+            "DATATABLE", "ROW", "UNION", "INTERSECT", "EXCEPT", "GENERATE",
+            "GENERATESERIES", "NATURALINNERJOIN", "NATURALLEFTOUTERJOIN",
+        }
+
         unknown_tables = set()
-        for table_name, _ in refs:
-            # Skip DAX functions that use bracket syntax (VALUES, FILTER, etc.)
-            if table_name.upper() in (
-                "EVALUATE", "SUMMARIZECOLUMNS", "CALCULATETABLE", "CALCULATE",
-                "FILTER", "VALUES", "ALL", "ALLEXCEPT", "TREATAS", "ADDCOLUMNS",
-                "SELECTCOLUMNS", "TOPN", "RELATED", "RELATEDTABLE", "REMOVEFILTERS",
-                "KEEPFILTERS", "USERELATIONSHIP", "CROSSFILTER", "DISTINCT",
-                "DATATABLE", "ROW", "UNION", "INTERSECT", "EXCEPT", "GENERATE",
-                "GENERATESERIES", "NATURALINNERJOIN", "NATURALLEFTOUTERJOIN",
-            ):
+        for table_name, _ in refs_quoted:
+            if table_name not in known_tables:
+                unknown_tables.add(table_name)
+        for table_name, _ in refs_unquoted:
+            if table_name.upper() in dax_functions:
                 continue
             if table_name not in known_tables:
                 unknown_tables.add(table_name)

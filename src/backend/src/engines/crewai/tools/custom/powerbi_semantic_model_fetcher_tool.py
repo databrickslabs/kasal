@@ -1336,25 +1336,18 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         self, workspace_id: str, dataset_id: str, access_token: str,
         model_context: Dict[str, Any], config: Dict[str, Any]
     ) -> Dict[str, Dict[str, Any]]:
-        """Fetch sample values for key columns."""
+        """Fetch sample values for ALL columns across all tables."""
         sample_values: Dict[str, Dict[str, Any]] = {}
         tables = model_context.get("tables", [])
 
-        # Suffixes that indicate ID/key columns (match end of name or standalone)
-        _skip_suffixes = ("id", "key", "pk", "fk", "_id", "_key", "_pk", "_fk")
-
         for table in tables:
             table_name = table["name"]
-            columns = table.get("columns", [])[:10]
+            columns = table.get("columns", [])
             if not columns:
                 logger.debug(f"[Sample Values] Skipping table '{table_name}' — no columns")
                 continue
             for column in columns:
                 try:
-                    col_lower = column.lower().rstrip()
-                    # Skip columns whose name ends with an ID/key suffix
-                    if col_lower.endswith(_skip_suffixes):
-                        continue
                     # Quote table name for DAX (handles spaces/special chars)
                     dax_query = f"EVALUATE TOPN(10, SUMMARIZECOLUMNS('{table_name}'[{column}]))"
                     result = await self._execute_dax_query(workspace_id, dataset_id, access_token, dax_query)
