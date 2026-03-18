@@ -623,6 +623,47 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 logger.error(f"[FetcherTool] Model extraction error: {e}")
                 return json.dumps({"error": f"Model extraction error: {str(e)}"})
 
+        # Slicer-gap recovery: tables referenced by report slicers must be in the
+        # model context. The TMDL/Admin/DAX fetch can miss tables that have no
+        # relationships or that the API does not expose (e.g. hidden measure tables).
+        # Slicers come from the report definition (a separate fetch), which gives us
+        # a reliable secondary source of table names. Add any that are missing.
+        if slicers:
+            _existing_table_names = {t["name"] for t in model_context.get("tables", [])}
+            _slicer_tables_missing: Dict[str, bool] = {}
+            for _s in slicers:
+                _s_tbl = _s.get("table", "")
+                if _s_tbl and _s_tbl not in _existing_table_names and _s_tbl not in _slicer_tables_missing:
+                    _slicer_tables_missing[_s_tbl] = True
+            if _slicer_tables_missing:
+                logger.info(
+                    f"[FetcherTool][SLICER_GAP] {len(_slicer_tables_missing)} table(s) "
+                    f"referenced by slicers but missing from model context: {list(_slicer_tables_missing)}"
+                )
+                for _missing_tbl in _slicer_tables_missing:
+                    _stub: Dict[str, Any] = {"name": _missing_tbl, "columns": []}
+                    # Try to fetch columns for this table from the API
+                    if workspace_id and dataset_id and access_token:
+                        try:
+                            _col_meta = await self._fetch_column_metadata_for_table(
+                                workspace_id, dataset_id, access_token, _missing_tbl, config
+                            )
+                            _stub["columns"] = [
+                                c["column_name"] for c in _col_meta
+                                if c.get("column_name") and not c.get("is_hidden", False)
+                            ]
+                        except Exception as _e:
+                            logger.warning(
+                                f"[FetcherTool][SLICER_GAP] Could not fetch columns "
+                                f"for '{_missing_tbl}': {_e}"
+                            )
+                    model_context.setdefault("tables", []).append(_stub)
+                    _existing_table_names.add(_missing_tbl)
+                    logger.info(
+                        f"[FetcherTool][SLICER_GAP] Added '{_missing_tbl}' "
+                        f"with {len(_stub['columns'])} columns"
+                    )
+
         # Merge slicer default selections into default_filters
         self._merge_slicer_defaults_into_filters(slicers, default_filters)
 
@@ -649,6 +690,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 "report_id": report_id,
                 "cache_hit": cache_hit,
                 "cache_saved": True,
+                "semantic_enrichment_applied": config.get("enable_semantic_enrichment", False),
                 "summary": {
                     "measure_count": measure_count,
                     "table_count": table_count,
@@ -919,13 +961,34 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                             workspace_id, dataset_id, sp_access_token, config
                         )
 
-                # Fill gaps: only replace empty categories
+                # Measures: SP result fills the empty list from the DAX-fallback path
                 if not sa_measures and sp_measures:
                     model_context["measures"] = sp_measures
                     logger.info(f"[SP Fallback] Filled {len(sp_measures)} measures from SP")
-                if not sa_tables and sp_tables:
-                    model_context["tables"] = sp_tables
-                    logger.info(f"[SP Fallback] Filled {len(sp_tables)} tables from SP")
+
+                # Tables: UNION merge — SP TMDL/Admin discovers more tables than
+                # INFO.VIEW.RELATIONSHIPS() (which only sees tables with relationships).
+                # Rather than discarding SP results when sa_tables is non-empty, we:
+                #   1. Add SP-exclusive tables (those not yet in the list)
+                #   2. Enrich existing 0-column tables with SP column data
+                if sp_tables:
+                    _existing_by_name = {t["name"]: t for t in model_context["tables"]}
+                    _added, _enriched = 0, 0
+                    for _sp_tbl in sp_tables:
+                        _name = _sp_tbl["name"]
+                        if _name not in _existing_by_name:
+                            model_context["tables"].append(_sp_tbl)
+                            _existing_by_name[_name] = _sp_tbl
+                            _added += 1
+                        elif not _existing_by_name[_name].get("columns") and _sp_tbl.get("columns"):
+                            # Existing table has no columns — enrich from SP
+                            _existing_by_name[_name]["columns"] = _sp_tbl["columns"]
+                            _enriched += 1
+                    logger.info(
+                        f"[SP Fallback] Table union merge: "
+                        f"+{_added} new tables, enriched {_enriched} with columns "
+                        f"(total now: {len(model_context['tables'])})"
+                    )
 
             except Exception as e:
                 logger.warning(f"[SP Fallback] SP extraction failed (continuing with SA data): {e}")
@@ -1145,6 +1208,28 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                     if cols:
                         table["columns"] = cols
                 logger.info(f"[PowerBI Fallback] Enriched {sum(1 for t in tables if t.get('columns'))} tables with columns via INFO.VIEW.COLUMNS()")
+
+                # Discover additional tables that have columns but no relationships.
+                # INFO.VIEW.RELATIONSHIPS() only returns tables that participate in a
+                # relationship — isolated measure tables and standalone lookup tables
+                # are invisible to it. INFO.VIEW.COLUMNS() covers ALL tables, so use
+                # its table-name list to close the gap.
+                pre_discovery_count = len(tables)
+                skip_system = config.get("skip_system_tables", True)
+                _known_table_names = {t["name"] for t in tables}
+                for tbl_name, cols in columns_by_table.items():
+                    if tbl_name in _known_table_names:
+                        continue
+                    if skip_system and ("LocalDateTable" in tbl_name or "DateTableTemplate" in tbl_name):
+                        continue
+                    _known_table_names.add(tbl_name)
+                    tables.append({"name": tbl_name, "columns": cols})
+                added_count = len(tables) - pre_discovery_count
+                if added_count:
+                    logger.info(
+                        f"[PowerBI Fallback] Discovered {added_count} additional tables "
+                        f"via INFO.VIEW.COLUMNS() (no relationships, previously invisible)"
+                    )
             except Exception as e:
                 logger.warning(f"[PowerBI Fallback] INFO.VIEW.COLUMNS() failed: {e}")
 
@@ -1184,9 +1269,11 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 if columns:
                     tables[-1]["columns"] = columns
 
-                # Measures
+                # Measures — also captures calculationItem (Power BI Calculation Groups)
+                # which the enrichment pipeline counts identically to regular measures.
                 measure_pattern = re.compile(
-                    r"measure\s+(?:'([^']+)'|(\w+))\s*=\s*([\s\S]*?)(?=\n\s*measure|\n\s*column|\n\t[^\t]|\Z)",
+                    r"(?:measure|calculationItem)\s+(?:'([^']+)'|(\w+))\s*=\s*([\s\S]*?)"
+                    r"(?=\n\s*(?:measure|calculationItem)|\n\s*column|\n\t[^\t]|\Z)",
                     re.MULTILINE,
                 )
                 for match in measure_pattern.finditer(tmdl_content):
@@ -1299,6 +1386,13 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         except Exception as e:
             logger.warning(f"[Context Enrichment] Could not fetch sample values: {e}")
 
+        # Semantic enrichment: LLM-generated grain, purpose, descriptions, synonyms
+        if config.get("enable_semantic_enrichment", False):
+            try:
+                await self._generate_semantic_enrichment(enriched_context, config)
+            except Exception as e:
+                logger.warning(f"[Context Enrichment] Semantic enrichment failed (continuing): {e}")
+
         return enriched_context
 
     async def _fetch_column_metadata_for_table(
@@ -1364,6 +1458,282 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                     continue
         logger.info(f"[Sample Values] Fetched {len(sample_values)} column sample value sets")
         return sample_values
+
+    # =====================================================================
+    # Semantic Enrichment (LLM-generated descriptions, grain, synonyms)
+    # =====================================================================
+
+    @staticmethod
+    def _parse_llm_json(content: str) -> Any:
+        """Strip optional markdown code fences and parse JSON from LLM response."""
+        content = content.strip()
+        if content.startswith("```"):
+            content = re.sub(r"^```(?:json)?\s*", "", content)
+            content = re.sub(r"\s*```$", "", content)
+        return json.loads(content)
+
+    async def _generate_semantic_enrichment(
+        self,
+        model_context: Dict[str, Any],
+        config: Dict[str, Any],
+    ) -> None:
+        """Generate semantic enrichments via Databricks model serving.
+
+        Calls the serving endpoint to generate per-table grain/purpose and
+        per-column/measure descriptions + synonyms. Mutates table, column and
+        measure dicts in-place so the enriched fields flow into the daily cache.
+
+        Config keys:
+          - llm_workspace_url: Databricks workspace URL (already used by Reducer)
+          - llm_token: Personal access token (already used by Reducer)
+          - semantic_enrichment_endpoint: Serving endpoint name
+                (default: databricks-meta-llama-3-3-70b-instruct)
+
+        Fail-open: any batch failure is logged and skipped.
+        """
+        workspace_url = (config.get("llm_workspace_url") or "").rstrip("/")
+        token = config.get("llm_token") or ""
+        endpoint = config.get(
+            "semantic_enrichment_endpoint",
+            "databricks-meta-llama-3-3-70b-instruct",
+        )
+
+        if not workspace_url or not token:
+            logger.warning(
+                "[SemanticEnrichment] llm_workspace_url or llm_token missing — skipping"
+            )
+            return
+
+        _SYSTEM_TABLES = ("LocalDateTable", "DateTableTemplate", "DateTable")
+        tables = [
+            t for t in model_context.get("tables", [])
+            if not any(skip in t.get("name", "") for skip in _SYSTEM_TABLES)
+        ]
+        measures = model_context.get("measures", [])
+        sample_data = model_context.get("sample_data", {})
+
+        serving_url = f"{workspace_url}/serving-endpoints/{endpoint}/invocations"
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+        logger.info(
+            f"[SemanticEnrichment] Starting — {len(tables)} tables, "
+            f"{len(measures)} measures via endpoint '{endpoint}'"
+        )
+
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            await self._enrich_tables_semantic(client, serving_url, headers, tables)
+            await self._enrich_columns_and_measures_semantic(
+                client, serving_url, headers, tables, measures, sample_data
+            )
+
+        total_cols = sum(
+            len([c for c in t.get("columns", []) if isinstance(c, dict)])
+            for t in tables
+        )
+        logger.info(
+            f"[SemanticEnrichment] Completed — "
+            f"{len(tables)} tables, {total_cols} columns, {len(measures)} measures enriched"
+        )
+
+    async def _enrich_tables_semantic(
+        self,
+        client: "httpx.AsyncClient",
+        serving_url: str,
+        headers: Dict[str, str],
+        tables: List[Dict[str, Any]],
+        batch_size: int = 5,
+    ) -> None:
+        """Batch-enrich tables with grain and purpose via LLM. Mutates in-place."""
+        _SYSTEM = (
+            "You are a senior data architect specialising in Power BI semantic models. "
+            "Analyse each table and output strict JSON only — no markdown, no prose."
+        )
+
+        for i in range(0, len(tables), batch_size):
+            batch = tables[i : i + batch_size]
+            table_blocks = []
+            for t in batch:
+                cols = [
+                    (c if isinstance(c, str) else c.get("name", ""))
+                    for c in t.get("columns", [])[:20]
+                ]
+                ms = [m.get("name", "") for m in t.get("measures", [])][:10]
+                table_blocks.append(
+                    f"Table: {t['name']}\n"
+                    f"Columns (sample): {', '.join(cols) or 'none'}\n"
+                    f"Measures: {', '.join(ms) or 'none'}"
+                )
+
+            prompt = (
+                "For each table below provide:\n"
+                "- grain: what one row represents (≤1 sentence)\n"
+                "- purpose: what business entity this table represents (≤1 sentence)\n\n"
+                + "\n\n".join(table_blocks)
+                + '\n\nOutput ONLY this JSON:\n'
+                '{"tables": [{"name": "...", "grain": "...", "purpose": "..."}]}'
+            )
+
+            try:
+                resp = await client.post(
+                    serving_url,
+                    headers=headers,
+                    json={"messages": [
+                        {"role": "system", "content": _SYSTEM},
+                        {"role": "user", "content": prompt},
+                    ]},
+                )
+                resp.raise_for_status()
+                result = self._parse_llm_json(resp.json()["choices"][0]["message"]["content"])
+                table_map = {t["name"]: t for t in batch}
+                for item in result.get("tables", []):
+                    target = table_map.get(item.get("name"))
+                    if not target:
+                        continue
+                    if item.get("grain") and not target.get("grain"):
+                        target["grain"] = item["grain"]
+                    if item.get("purpose") and not target.get("purpose"):
+                        target["purpose"] = item["purpose"]
+                logger.debug(
+                    f"[SemanticEnrichment] Table batch {i // batch_size + 1} — "
+                    f"{len(result.get('tables', []))} tables enriched"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[SemanticEnrichment] Table batch {i // batch_size + 1} failed: {e}"
+                )
+
+    async def _enrich_columns_and_measures_semantic(
+        self,
+        client: "httpx.AsyncClient",
+        serving_url: str,
+        headers: Dict[str, str],
+        tables: List[Dict[str, Any]],
+        measures: List[Dict[str, Any]],
+        sample_data: Dict[str, Any],
+        batch_size: int = 10,
+    ) -> None:
+        """Batch-enrich columns and measures with descriptions + synonyms. Mutates in-place."""
+        _SYSTEM_COL = (
+            "You are a senior data architect specialising in Power BI semantic models. "
+            "Understand how business users refer to data fields differently from technical names. "
+            "Output strict JSON only — no markdown, no prose."
+        )
+        _SYSTEM_MEAS = (
+            "You are a senior data architect specialising in Power BI semantic models. "
+            "You can read DAX expressions and explain what they compute in plain business language. "
+            "Output strict JSON only — no markdown, no prose."
+        )
+
+        # ── Column enrichment (per table, batched) ────────────────────────────
+        for table in tables:
+            table_name = table.get("name", "")
+            table_purpose = table.get("purpose", "")
+            dict_cols = [c for c in table.get("columns", []) if isinstance(c, dict)]
+            if not dict_cols:
+                continue
+
+            for i in range(0, len(dict_cols), batch_size):
+                batch = dict_cols[i : i + batch_size]
+                col_lines = []
+                for c in batch:
+                    cname = c.get("name", "")
+                    key = f"{table_name}[{cname}]"
+                    samples = sample_data.get(key, {}).get("sample_values", [])
+                    sample_str = (
+                        f" (examples: {', '.join(str(v) for v in samples[:5])})"
+                        if samples else ""
+                    )
+                    col_lines.append(f"- {cname}{sample_str}")
+
+                prompt = (
+                    f"TABLE: {table_name}\n"
+                    f"TABLE PURPOSE: {table_purpose}\n\n"
+                    "COLUMNS TO ANALYSE:\n"
+                    + "\n".join(col_lines)
+                    + "\n\nFor each column produce:\n"
+                    "- description: one sentence explaining what the column represents\n"
+                    "- synonyms: list of 2-4 alternative names business users might use\n\n"
+                    'Output ONLY: {"columns": [{"name": "...", "description": "...", "synonyms": ["..."]}]}'
+                )
+
+                try:
+                    resp = await client.post(
+                        serving_url,
+                        headers=headers,
+                        json={"messages": [
+                            {"role": "system", "content": _SYSTEM_COL},
+                            {"role": "user", "content": prompt},
+                        ]},
+                    )
+                    resp.raise_for_status()
+                    result = self._parse_llm_json(resp.json()["choices"][0]["message"]["content"])
+                    col_map = {c.get("name", ""): c for c in batch}
+                    for item in result.get("columns", []):
+                        target = col_map.get(item.get("name"))
+                        if not target:
+                            continue
+                        if item.get("description") and not target.get("description"):
+                            target["description"] = item["description"]
+                        if item.get("synonyms"):
+                            existing = target.get("synonyms", [])
+                            new_syns = [s for s in item["synonyms"] if s not in existing]
+                            target["synonyms"] = existing + new_syns
+                    logger.debug(
+                        f"[SemanticEnrichment] Column batch {table_name}[{i}:{i+batch_size}] — "
+                        f"{len(result.get('columns', []))} columns enriched"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"[SemanticEnrichment] Column batch {table_name}[{i}:{i+batch_size}] failed: {e}"
+                    )
+
+        # ── Measure enrichment (all tables, batched) ──────────────────────────
+        for i in range(0, len(measures), batch_size):
+            batch = measures[i : i + batch_size]
+            measure_lines = []
+            for m in batch:
+                expr = (m.get("expression") or "")[:120]
+                measure_lines.append(f"- {m['name']}\n  Expression: {expr}")
+
+            prompt = (
+                "MEASURES TO ANALYSE:\n"
+                + "\n".join(measure_lines)
+                + "\n\nFor each measure produce:\n"
+                "- description: one sentence explaining what the measure computes in business terms\n"
+                "- synonyms: list of 2-4 alternative names business users might use\n\n"
+                'Output ONLY: {"measures": [{"name": "...", "description": "...", "synonyms": ["..."]}]}'
+            )
+
+            try:
+                resp = await client.post(
+                    serving_url,
+                    headers=headers,
+                    json={"messages": [
+                        {"role": "system", "content": _SYSTEM_MEAS},
+                        {"role": "user", "content": prompt},
+                    ]},
+                )
+                resp.raise_for_status()
+                result = self._parse_llm_json(resp.json()["choices"][0]["message"]["content"])
+                measure_map = {m["name"]: m for m in batch}
+                for item in result.get("measures", []):
+                    target = measure_map.get(item.get("name"))
+                    if not target:
+                        continue
+                    if item.get("description") and not target.get("description"):
+                        target["description"] = item["description"]
+                    if item.get("synonyms"):
+                        existing = target.get("synonyms", [])
+                        new_syns = [s for s in item["synonyms"] if s not in existing]
+                        target["synonyms"] = existing + new_syns
+                logger.debug(
+                    f"[SemanticEnrichment] Measure batch {i // batch_size + 1} — "
+                    f"{len(result.get('measures', []))} measures enriched"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[SemanticEnrichment] Measure batch {i // batch_size + 1} failed: {e}"
+                )
 
     async def _fetch_slicer_distinct_values(
         self, workspace_id: str, dataset_id: str, access_token: str,
