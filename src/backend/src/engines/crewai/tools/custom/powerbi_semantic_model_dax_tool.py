@@ -1332,6 +1332,21 @@ EXAMPLE using this model:
 OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text."""
 
         active_filters = config.get("active_filters", {})
+
+        # Extract TREATAS expressions from the most recent attempt that correctly
+        # applied the active_filters — preserve these even while fixing other issues.
+        preserved_treatas = []
+        if active_filters and previous_attempts:
+            last_dax = previous_attempts[-1].get("dax", "") or ""
+            import re as _re
+            treatas_calls = _re.findall(r'TREATAS\([^)]+\)', last_dax, _re.IGNORECASE)
+            for call in treatas_calls:
+                for af_key in active_filters:
+                    table = af_key.split("[")[0] if "[" in af_key else ""
+                    if table and table.upper() in call.upper():
+                        preserved_treatas.append(call)
+                        break
+
         filter_reminder = ""
         if active_filters:
             filter_lines = []
@@ -1341,7 +1356,10 @@ OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text."""
                     filter_lines.append(f"  {k}: TREATAS({{{vals}}}, ...)")
                 else:
                     filter_lines.append(f"  {k} = \"{v}\"")
-            filter_reminder = f"\n\nREMINDER — ALL these filters MUST appear in the new query:\n" + "\n".join(filter_lines)
+            filter_reminder = f"\n\nMANDATORY — these active_filters MUST appear in the new query, exactly as shown:\n" + "\n".join(filter_lines)
+            if preserved_treatas:
+                filter_reminder += f"\n\nCOPY these TREATAS expressions from the previous attempt unchanged:\n" + "\n".join(f"  {t}" for t in preserved_treatas)
+            filter_reminder += "\n\nFix ONLY what the error says. Do NOT remove any of the above TREATAS expressions."
 
         user_prompt = f"""SELF-CORRECTION: Previous attempts failed. Generate a DIFFERENT query.
 
