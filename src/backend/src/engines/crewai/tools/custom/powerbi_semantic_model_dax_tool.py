@@ -416,14 +416,24 @@ class PowerBISemanticModelDaxTool(BaseTool):
         default_filters = model_context.get("default_filters") if isinstance(model_context.get("default_filters"), dict) else {}
 
         # Normalize active_filters: UI may send list format
-        # [{"table": "T", "column": "C", "value": "V"}] → {"T[C]": "V"}
+        # [{"table": "T", "column": "C", "value": "V"}] → {"T[C]": "V"} or {"T[C]": ["V1", "V2"]}
+        # Multiple entries for the same Table[Column] are aggregated into a list (multi-value filter).
         existing = config.get("active_filters") or {}
         if isinstance(existing, list):
-            normalized = {}
+            normalized: Dict[str, Any] = {}
             for f in existing:
                 if isinstance(f, dict) and "table" in f and "column" in f:
                     key = f"{f['table']}[{f['column']}]"
-                    normalized[key] = f.get("value", "NOT NULL")
+                    value = f.get("value", "NOT NULL")
+                    if key in normalized:
+                        # Aggregate multiple values for the same column into a list
+                        existing_val = normalized[key]
+                        if isinstance(existing_val, list):
+                            existing_val.append(value)
+                        else:
+                            normalized[key] = [existing_val, value]
+                    else:
+                        normalized[key] = value
             logger.info(f"[DaxTool] Normalized {len(existing)} list-format active_filters → {normalized}")
             existing = normalized
         elif not isinstance(existing, dict):
@@ -897,25 +907,43 @@ class PowerBISemanticModelDaxTool(BaseTool):
                 )
 
             if relevant_filters:
-                sections.append("ACTIVE FILTERS (must apply):")
+                sections.append("ACTIVE FILTERS — include ALL of these as TREATAS in SUMMARIZECOLUMNS:")
                 for filter_name, filter_value in relevant_filters.items():
-                    if isinstance(filter_value, list):
-                        quoted = ', '.join([f'"{v}"' for v in filter_value])
-                        sections.append(f"  {filter_name} IN ({quoted})")
-                    elif isinstance(filter_value, str):
-                        val = filter_value.strip()
-                        if val.upper() == "NOT NULL":
-                            sections.append(f"  {filter_name} is not blank")
-                        elif val.upper().startswith("NOT STARTS WITH"):
-                            prefix = val[len("NOT STARTS WITH"):].strip().strip("'\"")
-                            sections.append(f'  {filter_name} does NOT start with "{prefix}"')
-                        elif val.upper().startswith("STARTS WITH"):
-                            prefix = val[len("STARTS WITH"):].strip().strip("'\"")
-                            sections.append(f'  {filter_name} starts with "{prefix}"')
+                    # Render as DAX TREATAS hint when filter is table-qualified (Table[Column])
+                    if "[" in filter_name:
+                        table_part = filter_name.split("[")[0]
+                        # Wrap table name in single quotes if it contains spaces
+                        if " " in table_part:
+                            table_col = f"'{filter_name}'"
                         else:
-                            sections.append(f'  {filter_name} = "{val}"')
+                            table_col = filter_name
+                        if isinstance(filter_value, list):
+                            values = ", ".join([f'"{v}"' for v in filter_value])
+                            sections.append(f"  TREATAS({{{values}}}, {table_col})")
+                        elif isinstance(filter_value, str):
+                            val = filter_value.strip()
+                            if val.upper() == "NOT NULL":
+                                sections.append(f"  FILTER(ALL({table_col}), NOT ISBLANK({table_col}))")
+                            elif val.upper().startswith("NOT STARTS WITH"):
+                                prefix = val[len("NOT STARTS WITH"):].strip().strip("'\"")
+                                sections.append(f'  FILTER(ALL({table_col}), LEFT({table_col}, {len(prefix)}) <> "{prefix}")')
+                            elif val.upper().startswith("STARTS WITH"):
+                                prefix = val[len("STARTS WITH"):].strip().strip("'\"")
+                                sections.append(f'  FILTER(ALL({table_col}), LEFT({table_col}, {len(prefix)}) = "{prefix}")')
+                            else:
+                                sections.append(f'  TREATAS({{"{val}"}}, {table_col})')
+                        else:
+                            sections.append(f'  TREATAS({{"{filter_value}"}}, {table_col})')
                     else:
-                        sections.append(f"  {filter_name} = {filter_value}")
+                        # Unqualified key — give hint so LLM knows to find the right table
+                        if isinstance(filter_value, list):
+                            values = ", ".join([f'"{v}"' for v in filter_value])
+                            sections.append(f"  [{filter_name}] — multi-value: use TREATAS({{{values}}}, CorrectTable[{filter_name}])")
+                        elif isinstance(filter_value, str):
+                            val = filter_value.strip()
+                            sections.append(f'  [{filter_name}] = "{val}" — use TREATAS({{"{val}"}}, CorrectTable[{filter_name}])')
+                        else:
+                            sections.append(f'  [{filter_name}] = {filter_value}')
                 sections.append("")
 
         # ── Business terminology ──
@@ -1098,12 +1126,12 @@ RULES:
 2. ONLY use columns listed under each TABLE. Any other column = error.
 3. ONLY use measures listed under MEASURE. Do not invent measure names.
 4. Use EVALUATE + SUMMARIZECOLUMNS for all queries.
-5. For cross-table filters use TREATAS: TREATAS({{"value"}}, 'Table Name'[column])
+5. For cross-table filters use TREATAS. Single value: TREATAS({{"value"}}, 'Table Name'[column]). Multiple values: TREATAS({{"v1", "v2", "v3"}}, 'Table Name'[column]).
 6. Filters go BEFORE measure expressions in SUMMARIZECOLUMNS.
 7. NEVER use CALCULATETABLE with empty first argument.
 8. Use LEFT() instead of STARTSWITH().
 9. Table names with spaces MUST be wrapped in single quotes: 'dim_Rules Inventory'[col], NOT dim_Rules Inventory[col].
-{"10. Apply the ACTIVE FILTERS listed above." if has_filters else "10. No active filters — only filter if the question asks for it."}
+{"10. MANDATORY: You MUST include ALL ACTIVE FILTERS listed above as TREATAS expressions in SUMMARIZECOLUMNS. Every single filter must appear in the generated DAX — do not skip any." if has_filters else "10. No active filters — only filter if the question explicitly asks for it."}
 
 EXAMPLE using this model:
 {example_dax}
@@ -1202,26 +1230,40 @@ OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text, no explanatio
 
         enriched_context = self._build_enriched_semantic_context(model_context, config)
         example_dax = self._build_example_dax(model_context)
+        has_filters = "ACTIVE FILTERS" in enriched_context
 
         system_prompt = f"""{enriched_context}
 RULES:
 1. ONLY use tables from ALLOWED TABLES list. Any other table = error.
-2. Use EVALUATE + SUMMARIZECOLUMNS. Use TREATAS for cross-table filters.
+2. Use EVALUATE + SUMMARIZECOLUMNS. Use TREATAS for cross-table filters. Single value: TREATAS({{"value"}}, Table[col]). Multiple values: TREATAS({{"v1", "v2", "v3"}}, Table[col]).
 3. NEVER leave CALCULATETABLE first argument empty.
 4. Use LEFT() instead of STARTSWITH().
 5. Table names with spaces MUST be in single quotes: 'dim_Rules Inventory'[col].
+{"6. MANDATORY: You MUST include ALL ACTIVE FILTERS listed above as TREATAS expressions in SUMMARIZECOLUMNS." if has_filters else ""}
 
 EXAMPLE using this model:
 {example_dax}
 
 OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text."""
 
+        active_filters = config.get("active_filters", {})
+        filter_reminder = ""
+        if active_filters:
+            filter_lines = []
+            for k, v in active_filters.items():
+                if isinstance(v, list):
+                    vals = ", ".join([f'"{x}"' for x in v])
+                    filter_lines.append(f"  {k}: TREATAS({{{vals}}}, ...)")
+                else:
+                    filter_lines.append(f"  {k} = \"{v}\"")
+            filter_reminder = f"\n\nREMINDER — ALL these filters MUST appear in the new query:\n" + "\n".join(filter_lines)
+
         user_prompt = f"""SELF-CORRECTION: Previous attempts failed. Generate a DIFFERENT query.
 
 Question: {user_question}
 
 Failed attempts:
-{attempts_text}
+{attempts_text}{filter_reminder}
 
 Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the DAX."""
 

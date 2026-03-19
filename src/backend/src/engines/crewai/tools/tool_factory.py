@@ -741,9 +741,17 @@ class ToolFactory:
                     # Inject key execution input values into tool_config if not already present.
                     # This ensures tools like the DAX Generator get user_question reliably
                     # instead of depending on the LLM agent to pass it at runtime.
-                    for input_key in ['user_question']:
+                    # Context enrichment fields are also injected so dynamic crew inputs
+                    # (active_filters, business_mappings, etc.) reach the LLM generation stage.
+                    _empty_values = (None, {}, [], "")
+                    for input_key in [
+                        'user_question',
+                        'active_filters', 'business_mappings', 'field_synonyms',
+                        'visible_tables', 'conversation_history',
+                        'context_knowledge', 'reference_dax',
+                    ]:
                         if input_key in execution_inputs and (
-                            input_key not in tool_config or tool_config.get(input_key) is None
+                            input_key not in tool_config or tool_config.get(input_key) in _empty_values
                         ):
                             tool_config[input_key] = execution_inputs[input_key]
                             logger.info(
@@ -755,8 +763,8 @@ class ToolFactory:
                     # Tool constructors don't accept this key and will raise TypeError
                     tool_config.pop('execution_inputs', None)
 
-            # Parse JSON strings for PowerBI Analysis Tool context enrichment fields
-            if "Power BI" in tool_name and "Analysis" in tool_name:
+            # Parse JSON strings for PowerBI context enrichment fields (DAX Generator + Analysis Tool)
+            if "Power BI" in tool_name and ("Analysis" in tool_name or "DAX" in tool_name):
                 import json
                 json_fields = ['business_mappings', 'field_synonyms', 'active_filters', 'visible_tables', 'conversation_history']
                 for field in json_fields:
