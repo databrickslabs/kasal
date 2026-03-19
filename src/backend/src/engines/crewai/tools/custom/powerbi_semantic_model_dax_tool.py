@@ -997,9 +997,10 @@ class PowerBISemanticModelDaxTool(BaseTool):
                     # Render as DAX TREATAS hint when filter is table-qualified (Table[Column])
                     if "[" in filter_name:
                         table_part = filter_name.split("[")[0]
-                        # Wrap table name in single quotes if it contains spaces
+                        col_part = filter_name.split("[", 1)[1].rstrip("]")
+                        # Wrap ONLY the table name in single quotes if it contains spaces
                         if " " in table_part:
-                            table_col = f"'{filter_name}'"
+                            table_col = f"'{table_part}'[{col_part}]"
                         else:
                             table_col = filter_name
                         if isinstance(filter_value, list):
