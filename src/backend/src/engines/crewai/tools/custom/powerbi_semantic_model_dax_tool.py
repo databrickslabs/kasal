@@ -1487,24 +1487,20 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
             logger.info(f"[DaxTool] Deterministic fallback using {len(treatas_parts)} active_filter TREATAS (skipping sample-data matching)")
         else:
             # No active_filters — match sample data values against question
-            pass
-
-        if not active_filters:
-            # Match sample data values against question (only when no active_filters configured)
             for val_lower, col_ref in sorted(value_to_col.items(), key=lambda x: -len(x[0])):
                 if val_lower in question_lower and val_lower not in matched_values:
-                # Find original case value
-                original_val = val_lower
-                for v_info in sample_data.get(col_ref, {}).get("sample_values", []):
-                    if str(v_info).lower() == val_lower:
-                        original_val = str(v_info)
-                        break
-                quoted_col_ref = col_ref
-                if "[" in col_ref:
-                    tbl, rest = col_ref.split("[", 1)
-                    quoted_col_ref = f"{_dax_quote_table(tbl)}[{rest}"
-                treatas_parts.append(f'    TREATAS({{"{original_val}"}}, {quoted_col_ref})')
-                matched_values.add(val_lower)
+                    # Find original case value
+                    original_val = val_lower
+                    for v_info in sample_data.get(col_ref, {}).get("sample_values", []):
+                        if str(v_info).lower() == val_lower:
+                            original_val = str(v_info)
+                            break
+                    quoted_col_ref = col_ref
+                    if "[" in col_ref:
+                        tbl, rest = col_ref.split("[", 1)
+                        quoted_col_ref = f"{_dax_quote_table(tbl)}[{rest}"
+                    treatas_parts.append(f'    TREATAS({{"{original_val}"}}, {quoted_col_ref})')
+                    matched_values.add(val_lower)
 
         # Check for numeric patterns like "Week 3", "Month 5" — only when no active_filters
         number_patterns = re.findall(r'(?:week|month|year|quarter)\s+(\d+)', question_lower)
