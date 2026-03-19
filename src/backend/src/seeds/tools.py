@@ -287,6 +287,12 @@ def get_tool_configs():
             "user_question": "",
             "context_knowledge": "",
             "reference_dax": "",
+            # Context enrichment fields (dynamic context passed via crew inputs or UI config)
+            "active_filters": {},
+            "business_mappings": {},
+            "field_synonyms": {},
+            "visible_tables": [],
+            "conversation_history": [],
         },  # Power BI Semantic Model DAX Generator
         "81": {
             "result_as_answer": True,
