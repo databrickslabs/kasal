@@ -499,10 +499,21 @@ class PowerBISemanticModelDaxTool(BaseTool):
                 try:
                     generated_dax = None
 
-                    # After 2 consecutive LLM failures, try deterministic approach
+                    # After 2 consecutive LLM failures, try deterministic approach.
+                    # If we have a previous LLM attempt that had good structure (measures, grouping)
+                    # but failed due to invalid table references, patch it instead of starting from scratch.
                     if consecutive_llm_failures >= 2 and attempt >= 2:
                         logger.info(f"[DaxTool] Step 3/4: Attempt {attempt + 1}/{max_retries} — DETERMINISTIC fallback (LLM failed {consecutive_llm_failures}x)")
-                        generated_dax = self._generate_deterministic_dax(user_question, model_context, config)
+                        best_llm_dax = next(
+                            (a["dax"] for a in reversed(dax_attempts)
+                             if a.get("dax") and "SUMMARIZECOLUMNS" in (a.get("dax") or "").upper()),
+                            None
+                        )
+                        if best_llm_dax and config.get("active_filters"):
+                            generated_dax = self._patch_dax_with_active_filters(best_llm_dax, config, model_context)
+                            logger.info(f"[DaxTool] Using patched LLM DAX with active_filters instead of full deterministic")
+                        else:
+                            generated_dax = self._generate_deterministic_dax(user_question, model_context, config)
                         consecutive_llm_failures = 0  # Reset so next attempt tries LLM again
                     elif attempt == 0:
                         logger.info(f"[DaxTool] Step 3/4: Attempt {attempt + 1}/{max_retries} — generating DAX via LLM...")
@@ -1427,6 +1438,63 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                 except Exception as e:
                     logger.error(f"LLM self-correction error: {e}")
                     return None
+
+    def _patch_dax_with_active_filters(
+        self, dax: str, config: Dict[str, Any], model_context: Dict[str, Any]
+    ) -> str:
+        """Take the best LLM DAX attempt, strip TREATAS calls for tables not in the model,
+        and inject the active_filter TREATAS expressions. Preserves grouping columns and measures."""
+        import re as _re
+        tables_seen = {t["name"] for t in model_context.get("tables", [])}
+        active_filters = config.get("active_filters", {})
+
+        # Remove TREATAS calls that reference tables NOT in model (caused schema validation errors)
+        def remove_invalid_treatas(dax_str: str) -> str:
+            lines = dax_str.split("\n")
+            cleaned = []
+            for line in lines:
+                if "TREATAS" in line.upper():
+                    # Extract table name from TREATAS({"val"}, TableName[col]) or 'TableName'[col]
+                    table_match = _re.search(r"TREATAS\([^,]+,\s*'?([^'\[]+)'?\[", line, _re.IGNORECASE)
+                    if table_match:
+                        table_name = table_match.group(1).strip()
+                        if table_name not in tables_seen:
+                            logger.info(f"[DaxTool] Patch: removing invalid TREATAS for '{table_name}'")
+                            continue  # skip this line
+                cleaned.append(line)
+            return "\n".join(cleaned)
+
+        # Build active_filter TREATAS lines
+        af_treatas_lines = []
+        for filter_name, filter_value in active_filters.items():
+            if "[" not in filter_name:
+                continue
+            table_part = filter_name.split("[")[0]
+            col_part = filter_name.split("[", 1)[1].rstrip("]")
+            if table_part not in tables_seen:
+                continue
+            table_col = f"'{table_part}'[{col_part}]" if " " in table_part else filter_name
+            if isinstance(filter_value, list):
+                vals = ", ".join([f'"{v}"' for v in filter_value])
+                af_treatas_lines.append(f"    TREATAS({{{vals}}}, {table_col}),")
+            elif isinstance(filter_value, str) and filter_value.upper() != "NOT NULL":
+                af_treatas_lines.append(f'    TREATAS({{"{filter_value}"}}, {table_col}),')
+
+        patched = remove_invalid_treatas(dax)
+
+        # Inject active_filter TREATAS right after SUMMARIZECOLUMNS(
+        if af_treatas_lines and "SUMMARIZECOLUMNS(" in patched.upper():
+            inject = "\n".join(af_treatas_lines)
+            patched = _re.sub(
+                r"(SUMMARIZECOLUMNS\s*\()",
+                r"\1\n" + inject,
+                patched,
+                count=1,
+                flags=_re.IGNORECASE,
+            )
+            logger.info(f"[DaxTool] Patched DAX: injected {len(af_treatas_lines)} active_filter TREATAS")
+
+        return patched.strip()
 
     def _generate_deterministic_dax(self, user_question: str, model_context: Dict[str, Any], config: Optional[Dict[str, Any]] = None) -> Optional[str]:
         """Build DAX deterministically by matching question terms to sample data.
