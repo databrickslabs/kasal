@@ -502,7 +502,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
                     # After 2 consecutive LLM failures, try deterministic approach
                     if consecutive_llm_failures >= 2 and attempt >= 2:
                         logger.info(f"[DaxTool] Step 3/4: Attempt {attempt + 1}/{max_retries} — DETERMINISTIC fallback (LLM failed {consecutive_llm_failures}x)")
-                        generated_dax = self._generate_deterministic_dax(user_question, model_context)
+                        generated_dax = self._generate_deterministic_dax(user_question, model_context, config)
                         consecutive_llm_failures = 0  # Reset so next attempt tries LLM again
                     elif attempt == 0:
                         logger.info(f"[DaxTool] Step 3/4: Attempt {attempt + 1}/{max_retries} — generating DAX via LLM...")
@@ -947,10 +947,12 @@ class PowerBISemanticModelDaxTool(BaseTool):
         sections.append("")
 
         # ── Measures ──
+        # NOTE: measure expressions are intentionally stripped of table references to prevent
+        # the LLM from hallucinating table names (e.g. UC, aliases) that appear inside
+        # internal measure formulas but are NOT in the ALLOWED TABLES list.
         if measures:
             for measure in measures:
-                expr = measure.get("expression", "")[:120]
-                sections.append(f"MEASURE [{measure['name']}] on {measure.get('table', '?')}: {expr}")
+                sections.append(f"MEASURE [{measure['name']}] on {measure.get('table', '?')}")
             sections.append("")
 
         # ── Relationships ──
@@ -1193,7 +1195,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
         llm_model = config.get("llm_model", "databricks-claude-sonnet-4")
 
         if not llm_workspace_url or not llm_token:
-            return self._generate_deterministic_dax(user_question, model_context)
+            return self._generate_deterministic_dax(user_question, model_context, config)
 
         measures = model_context.get("measures", [])
         if not measures:
@@ -1278,7 +1280,7 @@ OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text, no explanatio
                     dax = self._extract_dax_from_llm_response(content)
                     if not dax:
                         logger.warning(f"[DaxTool] LLM returned no extractable DAX, trying deterministic fallback")
-                        return self._generate_deterministic_dax(user_question, model_context)
+                        return self._generate_deterministic_dax(user_question, model_context, config)
                     dax = self._auto_wrap_with_report_filters(dax, config)
                     return dax
 
@@ -1287,10 +1289,10 @@ OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text, no explanatio
                         logger.warning(f"[DaxTool] system+user payload got 400, retrying with single user message...")
                         continue
                     logger.error(f"LLM DAX generation error: {e}")
-                    return self._generate_deterministic_dax(user_question, model_context)
+                    return self._generate_deterministic_dax(user_question, model_context, config)
                 except Exception as e:
                     logger.error(f"LLM DAX generation error: {e}")
-                    return self._generate_deterministic_dax(user_question, model_context)
+                    return self._generate_deterministic_dax(user_question, model_context, config)
 
     async def _generate_dax_with_self_correction(
         self, user_question: str, model_context: Dict[str, Any],
@@ -1426,7 +1428,7 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                     logger.error(f"LLM self-correction error: {e}")
                     return None
 
-    def _generate_deterministic_dax(self, user_question: str, model_context: Dict[str, Any]) -> Optional[str]:
+    def _generate_deterministic_dax(self, user_question: str, model_context: Dict[str, Any], config: Optional[Dict[str, Any]] = None) -> Optional[str]:
         """Build DAX deterministically by matching question terms to sample data.
 
         This is the fallback when the LLM keeps hallucinating. It parses the user
@@ -1467,9 +1469,30 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
         filter_parts = []
         matched_values = set()
 
-        # Match sample data values against question
-        for val_lower, col_ref in sorted(value_to_col.items(), key=lambda x: -len(x[0])):
-            if val_lower in question_lower and val_lower not in matched_values:
+        # If active_filters are configured, use them directly as TREATAS — skip sample-data matching
+        # which causes the chaotic country-code / customer-group garbage.
+        active_filters = (config or {}).get("active_filters") or {}
+        if active_filters:
+            for filter_name, filter_value in active_filters.items():
+                if "[" not in filter_name:
+                    continue
+                table_part = filter_name.split("[")[0]
+                col_part = filter_name.split("[", 1)[1].rstrip("]")
+                table_col = f"'{table_part}'[{col_part}]" if " " in table_part else filter_name
+                if isinstance(filter_value, list):
+                    vals = ", ".join([f'"{v}"' for v in filter_value])
+                    treatas_parts.append(f'    TREATAS({{{vals}}}, {table_col})')
+                elif isinstance(filter_value, str) and filter_value.upper() != "NOT NULL":
+                    treatas_parts.append(f'    TREATAS({{"{filter_value}"}}, {table_col})')
+            logger.info(f"[DaxTool] Deterministic fallback using {len(treatas_parts)} active_filter TREATAS (skipping sample-data matching)")
+        else:
+            # No active_filters — match sample data values against question
+            pass
+
+        if not active_filters:
+            # Match sample data values against question (only when no active_filters configured)
+            for val_lower, col_ref in sorted(value_to_col.items(), key=lambda x: -len(x[0])):
+                if val_lower in question_lower and val_lower not in matched_values:
                 # Find original case value
                 original_val = val_lower
                 for v_info in sample_data.get(col_ref, {}).get("sample_values", []):
@@ -1483,9 +1506,9 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                 treatas_parts.append(f'    TREATAS({{"{original_val}"}}, {quoted_col_ref})')
                 matched_values.add(val_lower)
 
-        # Check for numeric patterns like "Week 3", "Month 5"
+        # Check for numeric patterns like "Week 3", "Month 5" — only when no active_filters
         number_patterns = re.findall(r'(?:week|month|year|quarter)\s+(\d+)', question_lower)
-        if number_patterns:
+        if not active_filters and number_patterns:
             for num in number_patterns:
                 # Find a column that matches this concept
                 for col_lower, col_ref in col_to_ref.items():
@@ -1497,8 +1520,8 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                         treatas_parts.append(f'    TREATAS({{{num}}}, {quoted_num_ref})')
                         break
 
-        # Check for direct column value matches (e.g., "description" = "Complete CGR")
-        for table in model_context.get("tables", []):
+        # Check for direct column value matches — only when no active_filters
+        for table in ([] if active_filters else model_context.get("tables", [])):
             for col in table.get("columns", []):
                 col_lower = col.lower()
                 if col_lower in question_lower and len(col_lower) > 3:
