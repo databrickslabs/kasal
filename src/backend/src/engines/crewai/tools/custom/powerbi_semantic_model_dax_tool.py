@@ -641,7 +641,92 @@ class PowerBISemanticModelDaxTool(BaseTool):
             f"[DaxTool] ═══ Pipeline result: success={success}, attempts={n_attempts}, "
             f"errors={n_errors}, rows={results.get('dax_execution', {}).get('row_count', 0)} ═══"
         )
+
+        # Persist to conversion_history so the customer can query the LLM prompt,
+        # generated DAX, and active filters from Lakebase after execution.
+        await self._save_to_conversion_history(results, config, dax_attempts)
+
         return self._format_output(results, output_format)
+
+    async def _save_to_conversion_history(
+        self,
+        results: Dict[str, Any],
+        config: Dict[str, Any],
+        dax_attempts: List[Dict[str, Any]],
+    ) -> None:
+        """Persist DAX generation details to conversion_history (fail-open)."""
+        try:
+            from src.schemas.conversion import ConversionHistoryCreate
+            from src.repositories.conversion_repository import ConversionHistoryRepository
+
+            success = results.get("dax_execution", {}).get("success", False)
+            exec_result = results.get("dax_execution", {})
+            active_filters = config.get("active_filters") or {}
+            llm_prompt = results.get("llm_prompt", "")
+
+            history_data = ConversionHistoryCreate(
+                execution_id=config.get("execution_id") or (
+                    getattr(self, "trace_context", None) or {}
+                ).get("job_id"),
+                source_format="nl_question",
+                target_format="dax",
+                input_data={
+                    "question": results.get("user_question", ""),
+                    "active_filters": active_filters,
+                    "business_mappings": config.get("business_mappings") or {},
+                    "field_synonyms": config.get("field_synonyms") or {},
+                    "context_knowledge": config.get("context_knowledge") or "",
+                    "llm_prompt": llm_prompt,
+                    "workspace_id": config.get("workspace_id", ""),
+                    "dataset_id": config.get("dataset_id", ""),
+                    "llm_model": config.get("llm_model", ""),
+                },
+                input_summary=results.get("user_question", "")[:500],
+                output_data={
+                    "dax": results.get("generated_dax") or "",
+                    "row_count": exec_result.get("row_count", 0),
+                    "columns": exec_result.get("columns", []),
+                    "attempts": len(dax_attempts),
+                },
+                output_summary=(
+                    f"DAX generated in {len(dax_attempts)} attempt(s), "
+                    f"{exec_result.get('row_count', 0)} rows returned"
+                ),
+                configuration={
+                    "llm_model": config.get("llm_model"),
+                    "max_dax_retries": config.get("max_dax_retries"),
+                    "active_filters_count": len(active_filters),
+                    "has_context_knowledge": bool(config.get("context_knowledge")),
+                    "has_reference_dax": bool(config.get("reference_dax")),
+                },
+                status="success" if success else "failed",
+                error_message="; ".join(results.get("errors", [])) or None,
+                execution_time_ms=None,  # not measured end-to-end yet
+                extra_metadata={
+                    "attempt_count": len(dax_attempts),
+                    "has_active_filters": bool(active_filters),
+                    "filter_keys": list(active_filters.keys()),
+                },
+            )
+
+            group_id = (
+                config.get("group_id")
+                or (getattr(self, "trace_context", None) or {})
+                    .get("group_context", {}).get("primary_group_id")
+            )
+
+            async with async_session_factory() as session:
+                repo = ConversionHistoryRepository(session)
+                record = await repo.create(history_data.model_dump())
+                if group_id:
+                    record.group_id = group_id
+                await session.commit()
+                logger.info(
+                    f"[DaxTool] Saved conversion_history record id={record.id} "
+                    f"(status={history_data.status}, filters={list(active_filters.keys())})"
+                )
+        except Exception as e:
+            logger.warning(f"[DaxTool] Failed to save conversion_history (non-fatal): {e}")
 
     async def _resolve_model_context(self, config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Resolve model context with 3-tier priority.
