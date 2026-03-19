@@ -1225,11 +1225,12 @@ RULES:
 2. ONLY use columns listed under each TABLE. Any other column = error.
 3. ONLY use measures listed under MEASURE. Do not invent measure names.
 4. Use EVALUATE + SUMMARIZECOLUMNS for all queries.
-5. For cross-table filters use TREATAS. Single value: TREATAS({{"value"}}, 'Table Name'[column]). Multiple values: TREATAS({{"v1", "v2", "v3"}}, 'Table Name'[column]).
-6. Filters go BEFORE measure expressions in SUMMARIZECOLUMNS.
+5. For cross-table filters use TREATAS. Single value: TREATAS({{"value"}}, 'Table Name'[column]). Multiple values: TREATAS({{"v1", "v2", "v3"}}, 'Table Name'[column]). NEVER put functions like MAX() inside TREATAS{{}} — use FILTER(ALL(...), ...) for computed filters.
+6. Grouping columns go FIRST in SUMMARIZECOLUMNS, then TREATAS filters, then measure expressions.
 7. NEVER use CALCULATETABLE with empty first argument.
 8. Use LEFT() instead of STARTSWITH().
 9. Table names with spaces MUST be wrapped in single quotes: 'dim_Rules Inventory'[col], NOT dim_Rules Inventory[col].
+10. For "latest date" filters use: FILTER(CALCULATETABLE(VALUES(Calendar445[Date]), ALL(Calendar445)), Calendar445[Date] = CALCULATE(MAX(FactTable[Loading Date]), ALL()))
 {"10. MANDATORY: You MUST include ALL ACTIVE FILTERS listed above as TREATAS expressions in SUMMARIZECOLUMNS. Every single filter must appear in the generated DAX — do not skip any." if has_filters else "10. No active filters — only filter if the question explicitly asks for it."}
 
 EXAMPLE using this model:
@@ -1464,7 +1465,11 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                 cleaned.append(line)
             return "\n".join(cleaned)
 
-        # Build active_filter TREATAS lines
+        # Strip invalid TREATAS first so we can check what remains
+        patched = remove_invalid_treatas(dax)
+        dax_upper = patched.upper()
+
+        # Build active_filter TREATAS lines — skip any already present in the patched DAX
         af_treatas_lines = []
         for filter_name, filter_value in active_filters.items():
             if "[" not in filter_name:
@@ -1473,14 +1478,16 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
             col_part = filter_name.split("[", 1)[1].rstrip("]")
             if table_part not in tables_seen:
                 continue
+            # Skip if this table's TREATAS already exists in the patched DAX
+            if "TREATAS(" in dax_upper and table_part.upper() in dax_upper:
+                logger.info(f"[DaxTool] Patch: skipping already-present TREATAS for '{table_part}'")
+                continue
             table_col = f"'{table_part}'[{col_part}]" if " " in table_part else filter_name
             if isinstance(filter_value, list):
                 vals = ", ".join([f'"{v}"' for v in filter_value])
                 af_treatas_lines.append(f"    TREATAS({{{vals}}}, {table_col}),")
             elif isinstance(filter_value, str) and filter_value.upper() != "NOT NULL":
                 af_treatas_lines.append(f'    TREATAS({{"{filter_value}"}}, {table_col}),')
-
-        patched = remove_invalid_treatas(dax)
 
         # Inject active_filter TREATAS right after SUMMARIZECOLUMNS(
         if af_treatas_lines and "SUMMARIZECOLUMNS(" in patched.upper():
