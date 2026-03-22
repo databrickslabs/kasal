@@ -716,8 +716,9 @@ class GenieRepository:
 
     def __del__(self):
         """Cleanup client on deletion."""
-        if self._client and not self._client.is_closed:
+        client = getattr(self, "_client", None)
+        if client and not client.is_closed:
             try:
-                asyncio.get_running_loop().create_task(self._client.aclose())
+                asyncio.get_running_loop().create_task(client.aclose())
             except RuntimeError:
                 pass
