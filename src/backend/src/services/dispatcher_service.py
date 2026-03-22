@@ -749,170 +749,21 @@ class DispatcherService:
         Returns:
             Dictionary containing semantic analysis results
         """
-        # Normalize message for analysis
+        # Extract factual observations from the message for the LLM.
+        # NO scoring, NO intent suggestion — the LLM decides.
         msg_lower = message.lower()
         words = re.findall(r"\b\w+\b", msg_lower)
         word_set = set(words)
 
-        # Count different types of keywords
+        # Extract keyword groups (factual, no scoring)
         task_actions = word_set.intersection(self.TASK_ACTION_WORDS)
-
         agent_keywords = word_set.intersection(self.AGENT_KEYWORDS)
         crew_keywords = word_set.intersection(self.CREW_KEYWORDS)
-
         execute_keywords = word_set.intersection(self.EXECUTE_KEYWORDS)
         configure_keywords = word_set.intersection(self.CONFIGURE_KEYWORDS)
         catalog_keywords = word_set.intersection(self.CATALOG_KEYWORDS)
 
-        # Analyze message structure patterns
-        has_imperative = any(
-            word in words[:3] for word in self.TASK_ACTION_WORDS
-        )  # Action word in first 3 words
-        has_question = message.strip().endswith("?") or any(
-            word in words[:2] for word in ["what", "how", "why", "when", "where", "who"]
-        )
-        has_greeting = False  # Removed conversation detection
-
-        # Detect configuration patterns
-        configure_patterns = [
-            r"(configure|config|setup|set up)",  # Configuration words
-            r"(change|update|modify|adjust).*?(llm|model|tools|maxr|max|rpm)",  # Change configuration
-            r"(select|choose|pick).*?(llm|model|tools)",  # Selection patterns
-            r"(llm|model|tools|maxr).*?(setting|config)",  # Configuration contexts
-        ]
-
-        has_configure_structure = any(
-            re.search(pattern, msg_lower) for pattern in configure_patterns
-        )
-
-        # Multi-step workflow detection — boosts crew
-        has_multi_step = any(
-            re.search(pattern, msg_lower) for pattern in self.MULTI_STEP_PATTERNS
-        )
         has_multiple_actions = len(task_actions) > 1
-        has_complex_task = has_multiple_actions or bool(
-            re.search(r"multiple|several|all|various|different", msg_lower)
-        )
-
-        # Explicit agent creation — requires a creation verb + agent entity word
-        has_explicit_agent = any(
-            re.search(pattern, msg_lower) for pattern in self.AGENT_CREATION_PATTERNS
-        )
-
-        # Explicit task creation — user literally says "task"
-        has_explicit_task = bool(
-            re.search(r"\b(create|make|add|generate)\b.*\btask\b", msg_lower)
-        )
-
-        # Single atomic action check — ONLY true when message is clearly
-        # one simple action with no workflow indicators
-        is_single_atomic = (
-            len(task_actions) <= 1
-            and not has_multi_step
-            and not has_multiple_actions
-            and not crew_keywords
-            and not has_explicit_agent
-        )
-
-        # ── Crew-first intent scoring ─────────────────────────────
-        # generate_crew starts with a base score; others must earn it.
-
-        crew_score = self.CREW_BASE_SCORE  # Default advantage
-        crew_score += len(crew_keywords) * 3
-        if has_multi_step or has_multiple_actions:
-            crew_score += self.MULTI_STEP_BONUS
-        if has_complex_task:
-            crew_score += 2
-
-        # generate_task only wins when clearly a single atomic action
-        task_score = 0
-        if has_explicit_task and not crew_keywords:
-            task_score = 15  # User literally said "create a task" — overrides crew
-        elif is_single_atomic and not has_question:
-            task_score = 5  # Simple single action, might be a task
-
-        # generate_agent only wins when user explicitly asks for one
-        agent_score = 0
-        if has_explicit_agent and not crew_keywords:
-            agent_score = 15  # User literally said "create an agent" — overrides crew
-
-        intent_scores = {
-            "generate_crew": crew_score,
-            "generate_task": task_score,
-            "generate_agent": agent_score,
-            "execute_crew": len(execute_keywords) * 4
-            + (2 if execute_keywords.intersection({"execute", "ec"}) else 0),
-            "configure_crew": len(configure_keywords) * 3
-            + (2 if has_configure_structure else 0),
-            "catalog_list": (
-                3
-                if word_set.intersection({"list", "browse", "show", "view"})
-                and word_set.intersection({"plans", "catalog", "saved", "crews"})
-                else 0
-            ),
-            "catalog_load": (
-                3
-                if word_set.intersection({"load", "open", "restore", "import"})
-                and word_set.intersection({"plan", "crew", "saved"})
-                else 0
-            ),
-            "catalog_save": (
-                3
-                if word_set.intersection({"save", "store", "persist", "export"})
-                and word_set.intersection({"plan", "crew", "catalog"})
-                else 0
-            ),
-            "catalog_schedule": (
-                3
-                if word_set.intersection({"schedule", "cron", "recurring", "automate"})
-                and word_set.intersection({"plan", "crew", "this"})
-                else 0
-            ),
-        }
-
-        # Determine semantic hints
-        semantic_hints = []
-        if task_actions:
-            semantic_hints.append(f"Action words detected: {', '.join(task_actions)}")
-        if has_multi_step:
-            semantic_hints.append("Multi-step workflow detected")
-        if has_multiple_actions:
-            semantic_hints.append("Multiple action words detected")
-        if has_explicit_agent:
-            semantic_hints.append("Explicit agent creation detected")
-        if has_explicit_task:
-            semantic_hints.append("Explicit task creation detected")
-        if execute_keywords:
-            semantic_hints.append(
-                f"Execution words detected: {', '.join(execute_keywords)}"
-            )
-        if configure_keywords:
-            semantic_hints.append(
-                f"Configuration words detected: {', '.join(configure_keywords)}"
-            )
-        if catalog_keywords:
-            semantic_hints.append(
-                f"Catalog keywords detected: {', '.join(catalog_keywords)}"
-            )
-        if has_configure_structure:
-            semantic_hints.append("Configuration structure detected")
-        if has_question:
-            semantic_hints.append("Question form detected")
-
-        # Tie-breaking: prefer crew over task over agent
-        suggested_intent = "generate_crew"
-        max_score = max(intent_scores.values())
-        if max_score > 0:
-            # Among intents tied at max, prefer crew > execute > configure > task > agent
-            priority_order = [
-                "generate_crew", "execute_crew", "configure_crew",
-                "catalog_list", "catalog_load", "catalog_save", "catalog_schedule",
-                "generate_task", "generate_agent",
-            ]
-            for intent_name in priority_order:
-                if intent_scores.get(intent_name, 0) == max_score:
-                    suggested_intent = intent_name
-                    break
 
         return {
             "task_actions": list(task_actions),
@@ -921,18 +772,13 @@ class DispatcherService:
             "execute_keywords": list(execute_keywords),
             "configure_keywords": list(configure_keywords),
             "catalog_keywords": list(catalog_keywords),
-            "has_imperative": has_imperative,
-            "has_question": has_question,
-            "has_greeting": has_greeting,
-            "has_command_structure": False,  # Removed — no longer used
-            "has_configure_structure": has_configure_structure,
-            "has_complex_task": has_complex_task,
-            "has_multi_step": has_multi_step,
-            "has_explicit_agent": has_explicit_agent,
-            "has_explicit_task": has_explicit_task,
-            "intent_scores": intent_scores,
-            "semantic_hints": semantic_hints,
-            "suggested_intent": suggested_intent,
+            "has_multi_step": has_multiple_actions,
+            "has_explicit_agent": bool(agent_keywords),
+            "has_explicit_task": "task" in word_set,
+            "has_configure_structure": bool(configure_keywords),
+            "semantic_hints": [],
+            "suggested_intent": "generate_crew",
+            "intent_scores": {"generate_crew": 1},
         }
 
     @staticmethod
@@ -1043,27 +889,8 @@ Examples of other intents (ONLY with explicit signals):
 
 """
 
-        # Enhance the user message with factual observations only
-        # NOTE: We intentionally do NOT inject intent scores or suggested intent
-        # to avoid anchoring the LLM toward a biased classification.
-        observations = []
-        if semantic_analysis.get("has_multi_step"):
-            observations.append("Multi-step workflow indicators detected")
-        if semantic_analysis.get("has_explicit_agent"):
-            observations.append("Explicit agent creation pattern detected")
-        if semantic_analysis.get("has_explicit_task"):
-            observations.append("Explicit task creation pattern detected")
-        if semantic_analysis.get("execute_keywords"):
-            observations.append(f"Execution words: {', '.join(semantic_analysis['execute_keywords'])}")
-        if semantic_analysis.get("configure_keywords"):
-            observations.append(f"Configuration words: {', '.join(semantic_analysis['configure_keywords'])}")
-        if semantic_analysis.get("has_configure_structure"):
-            observations.append("Configuration structure detected")
-
+        # Send the raw message to the LLM — let it do all the analysis
         enhanced_user_message = f"""Message: {message}
-
-Observations:
-{chr(10).join(f'- {obs}' for obs in observations) if observations else '- No special patterns detected (default: generate_crew)'}
 
 Please analyze this message and provide your intent classification."""
 
@@ -1078,23 +905,9 @@ Please analyze this message and provide your intent classification."""
 
         # Circuit breaker check — fail fast if model is in open state
         if self._check_circuit_breaker(model):
-            semantic_confidence = (
-                max(semantic_analysis["intent_scores"].values())
-                / self.SEMANTIC_CONFIDENCE_NORMALIZER
-            )
-            # Default to crew when circuit breaker is open
-            suggested = semantic_analysis["suggested_intent"]
-            if suggested in ("generate_task", "generate_agent") and semantic_confidence < 0.8:
-                suggested = "generate_crew"
             return {
-                "intent": (
-                    suggested
-                    if semantic_confidence > self.SEMANTIC_FALLBACK_MIN_CONFIDENCE
-                    else "generate_crew"
-                ),
-                "confidence": min(1.0, max(
-                    self.DEFAULT_FALLBACK_CONFIDENCE, semantic_confidence
-                )),
+                "intent": "generate_crew",
+                "confidence": self.DEFAULT_FALLBACK_CONFIDENCE,
                 "extracted_info": {"semantic_analysis": semantic_analysis},
                 "suggested_prompt": message,
                 "source": "circuit_breaker_fallback",
@@ -1202,35 +1015,10 @@ Please analyze this message and provide your intent classification."""
             else:
                 result["suggested_tools"] = []
 
-            # Enhance extracted_info with semantic analysis
+            # Enhance extracted_info with semantic analysis (factual only)
             result["extracted_info"]["semantic_analysis"] = semantic_analysis
 
-            # Semantic override — only for non-crew intents.
-            # The semantic layer can override the LLM for execute, configure,
-            # and catalog intents, but it should NEVER downgrade crew to task
-            # or agent, since crew is the safe default.
-            semantic_confidence = (
-                max(semantic_analysis["intent_scores"].values())
-                / self.SEMANTIC_CONFIDENCE_NORMALIZER
-            )
-            semantic_suggested = semantic_analysis["suggested_intent"]
-
-            if (
-                semantic_confidence > self.SEMANTIC_OVERRIDE_THRESHOLD
-                and result["confidence"] < self.LLM_CONFIDENCE_WEAK_THRESHOLD
-                # Only override if semantic suggests a non-generation intent
-                # (execute, configure, catalog) OR if LLM returned a weaker
-                # generation intent and semantic suggests crew
-                and semantic_suggested not in ("generate_task", "generate_agent")
-            ):
-                logger.info(
-                    f"Using semantic analysis suggestion: {semantic_suggested} "
-                    f"(confidence: {semantic_confidence:.2f}) over LLM result: "
-                    f"{result['intent']} (confidence: {result['confidence']:.2f})"
-                )
-                result["intent"] = semantic_suggested
-                result["confidence"] = min(1.0, max(result["confidence"], semantic_confidence))
-
+            # Trust the LLM — no semantic override
             result["source"] = "llm"
 
             # Cache successful LLM results (never cache fallback/degraded)
@@ -1241,31 +1029,10 @@ Please analyze this message and provide your intent classification."""
         except Exception as e:
             logger.error(f"Error detecting intent: {str(e)}")
             self._record_failure(model)
-            # Fall back to semantic analysis if LLM fails.
-            # Default to generate_crew (the safe default) unless semantic
-            # analysis strongly suggests a specific non-crew intent.
-            semantic_confidence = (
-                max(semantic_analysis["intent_scores"].values())
-                / self.SEMANTIC_CONFIDENCE_NORMALIZER
-            )
-            semantic_suggested = semantic_analysis["suggested_intent"]
-
-            # Only use non-crew semantic suggestions if they're very confident
-            if (
-                semantic_suggested in ("generate_task", "generate_agent")
-                and semantic_confidence < 0.8
-            ):
-                semantic_suggested = "generate_crew"
-
+            # LLM failed — default to generate_crew (the safe default)
             return {
-                "intent": (
-                    semantic_suggested
-                    if semantic_confidence > self.SEMANTIC_FALLBACK_MIN_CONFIDENCE
-                    else "generate_crew"
-                ),
-                "confidence": min(1.0, max(
-                    self.DEFAULT_FALLBACK_CONFIDENCE, semantic_confidence
-                )),
+                "intent": "generate_crew",
+                "confidence": self.DEFAULT_FALLBACK_CONFIDENCE,
                 "extracted_info": {"semantic_analysis": semantic_analysis},
                 "suggested_prompt": message,
                 "source": "semantic_fallback",
