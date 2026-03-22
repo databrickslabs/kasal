@@ -185,6 +185,26 @@ class CrewGenerationService:
             logger.error("Missing or empty 'tasks' array in LLM response")
             raise ValueError("Missing or empty 'tasks' array in response")
 
+        # Remove orphan agents that have no tasks assigned to them
+        assigned_agent_names = set()
+        for task in setup["tasks"]:
+            agent_name = task.get("agent") or task.get("assigned_agent")
+            if agent_name:
+                assigned_agent_names.add(agent_name)
+        orphan_agents = [
+            a.get("name", "Unknown") for a in setup["agents"]
+            if a.get("name") not in assigned_agent_names
+        ]
+        if orphan_agents:
+            logger.warning(
+                f"PROCESSING: Removing {len(orphan_agents)} orphan agent(s) "
+                f"with no tasks: {orphan_agents}"
+            )
+            setup["agents"] = [
+                a for a in setup["agents"]
+                if a.get("name") in assigned_agent_names
+            ]
+
         # Validate agent fields
         for i, agent in enumerate(setup["agents"]):
             agent_name = agent.get('name', f'Agent_{i}')
@@ -803,16 +823,31 @@ class CrewGenerationService:
                 model = request.model or os.getenv("CREW_MODEL", "databricks-llama-4-maverick")
 
                 # ── Compute caps BEFORE planning so the LLM knows the limits ──
-                # CrewAI best practice: default to 1 agent, 1 task.
-                # Only allow more when (a) user explicitly requests it, or
-                # (b) user describes multiple distinct specialist roles.
+                # Count distinct action verbs to determine task count.
+                # Each verb maps to one task. Agents stay minimal.
                 ABSOLUTE_MAX_AGENTS = 10
                 ABSOLUTE_MAX_TASKS = 10
 
+                # Action verbs that indicate distinct tasks
+                ACTION_VERBS = {
+                    "find", "search", "locate", "discover", "identify",
+                    "get", "fetch", "retrieve", "collect", "gather",
+                    "analyze", "examine", "study", "investigate", "review",
+                    "assess", "evaluate", "compare", "contrast",
+                    "create", "make", "build", "generate", "produce", "develop",
+                    "write", "compose", "draft", "prepare", "document",
+                    "calculate", "compute", "determine", "measure",
+                    "summarize", "condense", "extract", "compile",
+                    "organize", "sort", "categorize", "classify",
+                    "check", "verify", "validate", "test", "inspect", "audit",
+                    "monitor", "track",
+                    "send", "deliver", "share", "distribute",
+                    "convert", "transform", "translate", "format", "parse",
+                    "scrape", "research", "recommend", "load",
+                }
+
                 # Check BOTH the (possibly LLM-rewritten) prompt AND the original
-                # user message for cap signals.  The LLM rewrite can lose explicit
-                # agent counts (e.g. "3 agents" → "3 specialized agents") or add
-                # false-positive triggers (e.g. "Create a crew…with key insights").
+                # user message for cap signals.
                 user_prompt = (request.prompt or "").lower()
                 original_prompt = (
                     getattr(request, "original_prompt", None) or ""
@@ -820,46 +855,56 @@ class CrewGenerationService:
                 # Combine both for signal detection
                 combined = user_prompt + " " + original_prompt
 
+                # Count distinct action verbs in the original user message
+                # to determine task count (verb-to-task mapping).
+                verb_source = original_prompt if original_prompt.strip() else user_prompt
+                words = set(re.findall(r'\b[a-z]+\b', verb_source))
+                detected_verbs = words & ACTION_VERBS
+                verb_count = max(1, len(detected_verbs))
+                logger.info(
+                    f"PROGRESSIVE [{generation_id}]: Detected {verb_count} action verb(s): "
+                    f"{sorted(detected_verbs)}"
+                )
+
                 # Detect explicit user-requested counts in the prompt.
-                # Allow optional adjective(s) between the number and "agents/tasks"
-                # because the LLM rewrite may expand "3 agents" to "3 specialized agents".
                 agent_count_match = re.search(r'(\d+)\s+(?:\w+\s+)*agents?', combined)
                 task_count_match = re.search(r'(\d+)\s+(?:\w+\s+)*tasks?', combined)
 
                 # Detect if user explicitly asks for multiple roles/specialists.
-                # NOTE: "crew" is excluded from the team pattern because the LLM
-                # rewrite adds "Create a crew that will..." prefix, which would
-                # false-positive on "crew ... with key insights".
                 multi_role_patterns = [
                     r'\b(team|group|squad)\b\s+\b(of|with)\b\s+(\w+\s+)?(agents?|roles?|specialists?|members?)\b',
                     r'\b(multiple|several|different)\b.*\b(agents?|roles?|specialists?)\b',
-                    # Match "researcher and writer" style — limit gap to ~40 chars to avoid
-                    # false positives across sentences (e.g., "analyst ... anomalies and ...")
                     r'\b(researcher|writer|analyst|designer|developer|validator|reviewer)\b.{1,40}\band\b.{1,20}\b(researcher|writer|analyst|designer|developer|validator|reviewer)\b',
                 ]
-                # Only check multi-role patterns on the ORIGINAL prompt to avoid
-                # false positives from the LLM rewrite which may enumerate roles.
                 multi_check_text = original_prompt if original_prompt.strip() else combined
                 user_wants_multi = any(
                     re.search(p, multi_check_text) for p in multi_role_patterns
                 )
 
-                if agent_count_match:
-                    max_agents = min(int(agent_count_match.group(1)), ABSOLUTE_MAX_AGENTS)
-                    logger.info(f"PROGRESSIVE [{generation_id}]: User requested {max_agents} agents")
-                elif user_wants_multi:
-                    max_agents = 3
-                    logger.info(f"PROGRESSIVE [{generation_id}]: Multi-role detected, max {max_agents} agents")
-                else:
-                    max_agents = 1
-                    logger.info(f"PROGRESSIVE [{generation_id}]: Default 1 agent")
-
+                # Determine max_tasks from verb count (primary) or explicit request
                 if task_count_match:
                     max_tasks = min(int(task_count_match.group(1)), ABSOLUTE_MAX_TASKS)
                     logger.info(f"PROGRESSIVE [{generation_id}]: User requested {max_tasks} tasks")
                 else:
-                    max_tasks = max_agents
-                    logger.info(f"PROGRESSIVE [{generation_id}]: 1:1 ratio, max_tasks={max_tasks}")
+                    max_tasks = min(verb_count, 6)
+                    logger.info(f"PROGRESSIVE [{generation_id}]: Verb-based max_tasks={max_tasks}")
+
+                # Determine max_agents: keep minimal, scale with tasks
+                if agent_count_match:
+                    max_agents = min(int(agent_count_match.group(1)), ABSOLUTE_MAX_AGENTS)
+                    logger.info(f"PROGRESSIVE [{generation_id}]: User requested {max_agents} agents")
+                elif user_wants_multi:
+                    max_agents = min(3, max_tasks)
+                    logger.info(f"PROGRESSIVE [{generation_id}]: Multi-role detected, max {max_agents} agents")
+                elif max_tasks >= 3:
+                    max_agents = 2
+                    logger.info(f"PROGRESSIVE [{generation_id}]: 3+ tasks, allowing 2 agents")
+                elif max_tasks == 2:
+                    max_agents = 2
+                    logger.info(f"PROGRESSIVE [{generation_id}]: 2 tasks, allowing up to 2 agents")
+                else:
+                    max_agents = 1
+                    logger.info(f"PROGRESSIVE [{generation_id}]: Single task, 1 agent")
 
                 # ── Phase 1: Planning (LLM only, no DB writes) ───────────
                 # Inject the computed cap into the request so the LLM generates
@@ -924,6 +969,24 @@ class CrewGenerationService:
                         task["context"] = [
                             c for c in task["context"] if c in valid_task_names
                         ]
+
+                # Remove orphan agents that have no tasks assigned
+                assigned_agents = {t.get("assigned_agent") for t in plan_tasks}
+                orphan_agents = [
+                    a for a in plan_agents
+                    if a.get("name") not in assigned_agents
+                ]
+                if orphan_agents:
+                    orphan_names = [a.get("name") for a in orphan_agents]
+                    logger.warning(
+                        f"PROGRESSIVE [{generation_id}]: Removing "
+                        f"{len(orphan_agents)} orphan agent(s) with no tasks: "
+                        f"{orphan_names}"
+                    )
+                    plan_agents = [
+                        a for a in plan_agents
+                        if a.get("name") in assigned_agents
+                    ]
 
                 # ── Enforce sequential dependency chain ────────────────
                 if process_type == "sequential":
@@ -1097,7 +1160,8 @@ class CrewGenerationService:
                                     task_request = TaskGenerationRequest(
                                         text=(
                                             f"Create a task named '{task_name}' "
-                                            f"for a crew that: {request.prompt}"
+                                            f"for a crew that: {request.prompt}. "
+                                            f"THIS SPECIFIC TASK is '{task_name}'."
                                         ),
                                         model=model,
                                         agent=agent_context,
@@ -1311,7 +1375,7 @@ class CrewGenerationService:
         """Query Genie spaces and suggest the best match based on task context."""
         try:
             from src.repositories.genie_repository import GenieRepository
-            genie_repo = GenieRepository(session=None)
+            genie_repo = GenieRepository()
 
             # Search using task name as query
             response = await genie_repo.get_spaces(
@@ -1357,41 +1421,34 @@ class CrewGenerationService:
             max_tasks: Maximum number of tasks to generate.
         """
         system_message = await TemplateService.get_effective_template_content(
-            "generate_crew_plan", group_context
+            "generate_crew", group_context
         )
         if not system_message:
-            raise KasalError("Required prompt template 'generate_crew_plan' not found")
+            raise KasalError("Required prompt template 'generate_crew' not found")
 
-        # Inject cap constraints. Strategy differs by agent count:
-        # - Single-agent: Aggressive PREFIX to override model tendency to decompose
-        # - Multi-agent: Softer constraint that cooperates with the user's intent
-        if max_agents == 1:
-            system_cap = (
-                f"MANDATORY OUTPUT CONSTRAINT — RESPOND WITH EXACTLY 1 AGENT AND 1 TASK:\n"
-                f"Your JSON response MUST contain EXACTLY 1 agent and EXACTLY 1 task. "
-                f"Any response with more than 1 is INVALID.\n"
-                f"Even if the goal involves multiple steps (scrape, analyze, build, format), "
-                f"combine them into ONE comprehensive task handled by ONE generalist agent.\n"
-                f"WRONG: 3 agents (Scraper, Analyst, Builder) with 3 tasks\n"
-                f"RIGHT: 1 agent (Full-Stack Specialist) with 1 task that covers the entire workflow\n\n"
-            )
-            cap_instruction = (
-                f"\n\nHARD CONSTRAINT: Generate EXACTLY 1 agent and 1 task. "
-                f"The single agent must be capable of handling the entire goal. "
-                f"The single task must describe the COMPLETE end-to-end objective "
-                f"(not just the first step). The task name and description should "
-                f"reflect the user's ultimate goal, not an intermediate step."
-            )
-        else:
-            system_cap = (
-                f"OUTPUT CONSTRAINT: Your JSON response must contain EXACTLY "
-                f"{max_agents} agent(s) and EXACTLY {max_tasks} task(s). "
-                f"Each agent should be a distinct specialist with a unique role.\n\n"
-            )
-            cap_instruction = (
-                f"\n\nCONSTRAINT: Generate EXACTLY {max_agents} distinct agent(s) and "
-                f"EXACTLY {max_tasks} task(s). Each agent should have a specialized role."
-            )
+        # Override: for planning phase we only need the skeleton (names/roles),
+        # not full descriptions/backstories. Prepend a planning instruction.
+        planning_prefix = (
+            "You are generating a PLAN OUTLINE only. Return a lightweight JSON with:\n"
+            '{"complexity": "light|standard|complex", "process_type": "sequential|parallel", '
+            '"agents": [{"name": "...", "role": "..."}], '
+            '"tasks": [{"name": "...", "assigned_agent": "...", "context": []}]}\n'
+            "Do NOT include descriptions, goals, backstories, or tools — those will be generated separately.\n\n"
+        )
+        system_message = planning_prefix + system_message
+
+        # Inject cap constraints based on verb-counted max_tasks
+        system_cap = (
+            f"OUTPUT CONSTRAINT: Generate up to {max_agents} agent(s) and "
+            f"up to {max_tasks} task(s). Each distinct action verb in the user's "
+            f"message should map to a separate task. Use the minimum number of "
+            f"agents needed to cover the tasks.\n\n"
+        )
+        cap_instruction = (
+            f"\n\nCONSTRAINT: Generate up to {max_agents} agent(s) and "
+            f"up to {max_tasks} task(s). Match task count to the number of "
+            f"distinct action verbs in the message."
+        )
 
         user_message = request.prompt + cap_instruction
 
@@ -1399,28 +1456,21 @@ class CrewGenerationService:
             {"role": "system", "content": system_cap + system_message},
         ]
 
-        # For single-agent plans, add a few-shot example showing the correct
-        # behavior for a multi-step pipeline prompt. Claude models in particular
-        # tend to decompose pipeline tasks into multiple agents; a concrete
-        # example in the conversation history reliably overrides this tendency.
-        if max_agents == 1:
-            messages.extend([
-                {
-                    "role": "user",
-                    "content": (
-                        "scrape the latest AI news and build an interactive visualization dashboard\n\n"
-                        "HARD CONSTRAINT: Generate EXACTLY 1 agent and 1 task. "
-                        "The single agent must be capable of handling the entire goal. "
-                        "The single task must describe the COMPLETE end-to-end objective "
-                        "(not just the first step). The task name and description should "
-                        "reflect the user's ultimate goal, not an intermediate step."
-                    ),
-                },
-                {
-                    "role": "assistant",
-                    "content": '{"complexity":"light","process_type":"sequential","agents":[{"name":"AI News Dashboard Specialist","role":"Full-Stack Data Journalist and Visualization Developer"}],"tasks":[{"name":"Scrape AI News and Build Interactive Dashboard","assigned_agent":"AI News Dashboard Specialist","context":[]}]}',
-                },
-            ])
+        # Add a few-shot example showing verb-to-task mapping
+        messages.extend([
+            {
+                "role": "user",
+                "content": (
+                    "gather swiss news, create a presentation, and send an email to the team\n\n"
+                    "CONSTRAINT: Generate up to 2 agent(s) and up to 3 task(s). "
+                    "Match task count to the number of distinct action verbs in the message."
+                ),
+            },
+            {
+                "role": "assistant",
+                "content": '{"complexity":"complex","process_type":"sequential","agents":[{"name":"Swiss News Specialist","role":"News Research and Content Creation Expert"}],"tasks":[{"name":"Gather Swiss News","assigned_agent":"Swiss News Specialist","context":[]},{"name":"Create News Presentation","assigned_agent":"Swiss News Specialist","context":["Gather Swiss News"]},{"name":"Send Email to Team","assigned_agent":"Swiss News Specialist","context":["Create News Presentation"]}]}',
+            },
+        ])
 
         messages.append(
             {"role": "user", "content": user_message},
