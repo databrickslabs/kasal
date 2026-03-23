@@ -38,7 +38,7 @@ interface DatabaseInfo {
 interface DatabaseStore {
   // Database info
   databaseInfo: DatabaseInfo | null;
-  setDatabaseInfo: (info: DatabaseInfo) => void;
+  setDatabaseInfo: (info: DatabaseInfo | null) => void;
 
   // Current database backend
   currentBackend: 'sqlite' | 'postgresql' | 'lakebase' | null;
