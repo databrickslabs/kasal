@@ -111,31 +111,141 @@ class LakebaseService(BaseService):
         """
         return await self.connection_service.get_workspace_client()
 
-    async def list_instances(self) -> List[Dict[str, Any]]:
+    async def list_instances(
+        self,
+        search: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 30,
+    ) -> Dict[str, Any]:
         """
-        List all available Lakebase database instances.
+        List Lakebase instances with server-side pagination and search.
+
+        Fetches one page at a time from both the provisioned (DatabaseAPI)
+        and autoscaling (PostgresAPI) backends using REST-level pagination.
+
+        Args:
+            search: Optional name filter (case-insensitive substring match)
+            page: 1-indexed page number
+            page_size: Items per page (max 100)
 
         Returns:
-            List of instance dicts with name, state, capacity, read_write_dns, node_count
+            Dict with items, total, page, page_size, total_pages, next_page_token
         """
         if not LAKEBASE_AVAILABLE:
             logger.warning("Lakebase features not available, cannot list instances")
-            return []
+            return {"items": [], "total": 0, "page": 1, "page_size": page_size, "total_pages": 0}
+
+        page_size = min(page_size, 100)
 
         try:
             w = await self.get_workspace_client()
-            instances = w.database.list_database_instances()
+            items: List[Dict[str, Any]] = []
 
-            result = []
-            for inst in instances:
-                result.append({
-                    "name": inst.name,
-                    "state": inst.state if hasattr(inst, 'state') else None,
-                    "capacity": inst.capacity if hasattr(inst, 'capacity') else None,
-                    "read_write_dns": inst.read_write_dns if hasattr(inst, 'read_write_dns') else None,
-                    "node_count": inst.node_count if hasattr(inst, 'node_count') else None,
-                })
-            return result
+            # Build org-id header
+            headers: Dict[str, str] = {"Accept": "application/json"}
+            if w.config.workspace_id:
+                headers["X-Databricks-Org-Id"] = str(w.config.workspace_id)
+
+            # --- 1. Provisioned instances (one page from REST API) ---
+            try:
+                resp = w.api_client.do("GET", "/api/2.0/database/instances",
+                                       query={"page_size": 100}, headers=headers)
+                for inst_data in resp.get("database_instances", []):
+                    name = inst_data.get("name", "")
+                    if search and search.lower() not in name.lower():
+                        continue
+                    items.append({
+                        "name": name,
+                        "state": inst_data.get("state"),
+                        "capacity": inst_data.get("capacity"),
+                        "read_write_dns": inst_data.get("read_write_dns"),
+                        "node_count": inst_data.get("node_count"),
+                        "type": "provisioned",
+                    })
+            except Exception as e:
+                logger.warning(f"Error listing provisioned instances: {e}")
+
+            provisioned_names = {i["name"] for i in items}
+
+            # --- 2. Autoscaling projects (paginated REST API) ---
+            # Collect enough projects to fill the requested page.
+            # The REST API max page_size is 100 and doesn't support search,
+            # so we fetch pages until we have enough matching results.
+            try:
+                needed = page * page_size  # total items we need to have seen
+                pg_token: Optional[str] = None
+                while True:
+                    query: Dict[str, Any] = {"page_size": 100}
+                    if pg_token:
+                        query["page_token"] = pg_token
+
+                    resp = w.api_client.do("GET", "/api/2.0/postgres/projects",
+                                           query=query, headers=headers)
+
+                    for proj in resp.get("projects", []):
+                        proj_name = (proj.get("name") or "").removeprefix("projects/")
+                        if proj_name in provisioned_names:
+                            continue
+                        if search and search.lower() not in proj_name.lower():
+                            continue
+
+                        # Extract capacity from status
+                        capacity = None
+                        status = proj.get("status", {})
+                        des = status.get("default_endpoint_settings", {})
+                        min_cu = des.get("autoscaling_limit_min_cu")
+                        max_cu = des.get("autoscaling_limit_max_cu")
+                        if min_cu is not None and max_cu is not None:
+                            capacity = f"CU_{int(min_cu)}-{int(max_cu)}"
+
+                        items.append({
+                            "name": proj_name,
+                            "state": "AVAILABLE",
+                            "capacity": capacity,
+                            "read_write_dns": None,
+                            "node_count": None,
+                            "type": "autoscaling",
+                        })
+
+                    pg_token = resp.get("next_page_token")
+                    # Stop if no more pages or we have enough items
+                    if not pg_token or len(items) >= needed:
+                        break
+            except Exception as e:
+                logger.warning(f"Error listing autoscaling projects: {e}")
+
+            # Apply pagination over the collected items
+            total = len(items)
+            total_pages = max(1, (total + page_size - 1) // page_size)
+            page = max(1, min(page, total_pages))
+            start = (page - 1) * page_size
+            page_items = items[start:start + page_size]
+
+            # For autoscaling items on this page, resolve DNS lazily
+            for item in page_items:
+                if item["type"] == "autoscaling" and not item.get("read_write_dns"):
+                    try:
+                        ep_resp = w.api_client.do(
+                            "GET",
+                            f"/api/2.0/postgres/projects/{item['name']}/branches/production/endpoints",
+                            query={"page_size": 1}, headers=headers,
+                        )
+                        for ep in ep_resp.get("endpoints", []):
+                            host = (ep.get("status", {}).get("hosts", {}) or {}).get("host")
+                            if host:
+                                item["read_write_dns"] = host
+                                break
+                    except Exception:
+                        pass
+
+            return {
+                "items": page_items,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": total_pages,
+                "has_more": page < total_pages,
+            }
         except Exception as e:
             logger.error(f"Error listing Lakebase instances: {e}")
             raise
@@ -313,9 +423,61 @@ class LakebaseService(BaseService):
             logger.error(f"Error creating Lakebase instance: {e}")
             raise
 
+    async def _get_autoscaling_project(self, w, instance_name: str) -> Optional[Dict[str, Any]]:
+        """Look up an autoscaling project by name via PostgresAPI.
+
+        Returns a dict compatible with the provisioned instance format,
+        or None if not found.
+        """
+        try:
+            project = w.postgres.get_project(name=f"projects/{instance_name}")
+            dns = None
+            capacity = None
+
+            if hasattr(project, 'status') and project.status:
+                s = project.status
+                des = getattr(s, 'default_endpoint_settings', None)
+                if des:
+                    min_cu = getattr(des, 'autoscaling_limit_min_cu', None)
+                    max_cu = getattr(des, 'autoscaling_limit_max_cu', None)
+                    if min_cu is not None and max_cu is not None:
+                        capacity = f"CU_{int(min_cu)}-{int(max_cu)}"
+
+            # Get endpoint DNS from the production branch
+            try:
+                endpoints = list(w.postgres.list_endpoints(
+                    parent=f"projects/{instance_name}/branches/production"
+                ))
+                for ep in endpoints:
+                    if hasattr(ep, 'status') and ep.status:
+                        hosts = getattr(ep.status, 'hosts', None)
+                        if hosts and hasattr(hosts, 'host') and hosts.host:
+                            dns = hosts.host
+                            break
+            except Exception:
+                pass
+
+            return {
+                "name": instance_name,
+                "state": "AVAILABLE",
+                "capacity": capacity,
+                "read_write_dns": dns,
+                "created_at": None,
+                "node_count": None,
+                "type": "autoscaling",
+            }
+        except Exception as e:
+            error_str = str(e).lower()
+            if "not_found" in error_str or "does not exist" in error_str:
+                return None
+            raise
+
     async def get_instance(self, instance_name: str) -> Optional[Dict[str, Any]]:
         """
-        Get Lakebase instance details.
+        Get Lakebase instance details (provisioned or autoscaling).
+
+        Tries the provisioned DatabaseAPI first, then falls back to the
+        autoscaling PostgresAPI.
 
         Args:
             instance_name: Name of the instance
@@ -324,27 +486,34 @@ class LakebaseService(BaseService):
             Instance details or None if not found
         """
         try:
-            # Check if Lakebase is available
             if not LAKEBASE_AVAILABLE:
                 logger.info("Lakebase features not available, returning NOT_FOUND state")
                 return {"state": "NOT_FOUND", "name": instance_name, "message": "Lakebase not available"}
 
             w = await self.get_workspace_client()
-            instance = w.database.get_database_instance(name=instance_name)
 
-            return {
-                "name": instance.name,
-                "state": instance.state,
-                "capacity": instance.capacity,
-                "read_write_dns": instance.read_write_dns,
-                "created_at": instance.created_at if hasattr(instance, 'created_at') else None,
-                "node_count": instance.node_count if hasattr(instance, 'node_count') else 1
-            }
+            # Try provisioned instance first
+            try:
+                instance = w.database.get_database_instance(name=instance_name)
+                return {
+                    "name": instance.name,
+                    "state": instance.state,
+                    "capacity": instance.capacity,
+                    "read_write_dns": instance.read_write_dns,
+                    "created_at": instance.created_at if hasattr(instance, 'created_at') else None,
+                    "node_count": instance.node_count if hasattr(instance, 'node_count') else 1,
+                    "type": "provisioned",
+                }
+            except Exception:
+                pass
+
+            # Try autoscaling project
+            project_info = await self._get_autoscaling_project(w, instance_name)
+            if project_info:
+                return project_info
+
+            return {"state": "NOT_FOUND", "name": instance_name}
         except Exception as e:
-            error_str = str(e).lower()
-            if "not_found" in error_str or "does not exist" in error_str or "resource not found" in error_str:
-                logger.info(f"Lakebase instance {instance_name} not found, returning NOT_FOUND state")
-                return {"state": "NOT_FOUND", "name": instance_name}
             logger.error(f"Error getting Lakebase instance: {e}")
             raise
 
@@ -366,10 +535,8 @@ class LakebaseService(BaseService):
 
             logger.info(f"Starting Lakebase instance {instance_name}")
 
-            # Get workspace client
+            # Get workspace client and start the instance
             w = await self.get_workspace_client()
-
-            # Start the instance
             w.database.start_database_instance(name=instance_name)
 
             # Wait for instance to be ready
@@ -1095,12 +1262,8 @@ class LakebaseService(BaseService):
             if not instance or instance_state not in ready_states:
                 raise ValueError(f"Lakebase instance {instance_name} is not ready (state: {raw_state})")
 
-            # Generate temporary token
-            w = await self.get_workspace_client()
-            cred = w.database.generate_database_credential(
-                request_id=str(uuid.uuid4()),
-                instance_names=[instance_name]
-            )
+            # Generate temporary token (handles both provisioned and autoscaling)
+            cred = await self.connection_service.generate_credentials(instance_name)
 
             # Use SPN client_id as PG username (deterministic)
             endpoint = instance["read_write_dns"]
@@ -1278,27 +1441,23 @@ class LakebaseService(BaseService):
             if not LAKEBASE_AVAILABLE:
                 raise NotImplementedError("Lakebase features are not available in the current environment")
 
-            # Get instance details directly (bypass enabled check)
-            w = await self.get_workspace_client()
-            instance = w.database.get_database_instance(name=instance_name)
-            raw_state = instance.state if hasattr(instance, 'state') else None
+            # Get instance details (handles both provisioned and autoscaling)
+            instance_info = await self.get_instance(instance_name)
+            raw_state = instance_info.get("state") if instance_info else None
             state = str(raw_state.value if hasattr(raw_state, 'value') else raw_state or '').upper()
             ready_states = {"READY", "AVAILABLE", "RUNNING"}
-            if not state or state not in ready_states:
+            if not instance_info or state not in ready_states:
                 raise ValueError(
                     f"Lakebase instance {instance_name} is in state '{state}'. "
                     f"Expected one of: {', '.join(sorted(ready_states))}"
                 )
 
-            endpoint = instance.read_write_dns
+            endpoint = instance_info.get("read_write_dns")
             if not endpoint:
                 raise ValueError(f"Lakebase instance {instance_name} has no endpoint")
 
-            # Generate temporary token
-            cred = w.database.generate_database_credential(
-                request_id=str(uuid.uuid4()),
-                instance_names=[instance_name]
-            )
+            # Generate temporary token (handles both provisioned and autoscaling)
+            cred = await self.connection_service.generate_credentials(instance_name)
 
             username = await self.connection_service.get_username()
             engine = await self.connection_service.create_lakebase_engine_async(

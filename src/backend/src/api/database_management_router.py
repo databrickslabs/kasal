@@ -543,14 +543,24 @@ async def get_lakebase_config(service: LakebaseServiceDep) -> Dict[str, Any]:
 
 
 @router.get("/lakebase/instances")
-async def list_lakebase_instances(service: LakebaseServiceDep) -> list:
+async def list_lakebase_instances(
+    service: LakebaseServiceDep,
+    search: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 30,
+) -> Dict[str, Any]:
     """
-    List all available Lakebase database instances.
+    List Lakebase instances with server-side pagination and search.
+
+    Args:
+        search: Optional search filter (matches instance name)
+        page: Page number (1-indexed)
+        page_size: Number of items per page (max 100)
 
     Returns:
-        List of available instances with name, state, capacity, endpoint, node_count
+        Dict with items, total, page, page_size, total_pages, has_more
     """
-    return await service.list_instances()
+    return await service.list_instances(search=search, page=page, page_size=page_size)
 
 
 @router.post("/lakebase/config")
@@ -870,8 +880,18 @@ async def enable_lakebase_without_migration(
     instance_name = request.get("instance_name")
     endpoint = request.get("endpoint")
 
-    if not instance_name or not endpoint:
-        raise BadRequestError("instance_name and endpoint are required to enable Lakebase")
+    if not instance_name:
+        raise BadRequestError("instance_name is required to enable Lakebase")
+
+    # Resolve endpoint if not provided (autoscaling projects)
+    if not endpoint:
+        instance_info = await service.get_instance(instance_name)
+        endpoint = instance_info.get("read_write_dns") if instance_info else None
+        if not endpoint:
+            raise BadRequestError(
+                f"Could not resolve endpoint for instance '{instance_name}'. "
+                "Provide the endpoint manually or verify the instance exists."
+            )
 
     return await service.enable_lakebase(instance_name, endpoint)
 

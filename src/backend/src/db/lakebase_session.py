@@ -94,6 +94,7 @@ class LakebaseSessionFactory:
                 finally:
                     os.environ.update(_pat_backup)
                 logger.info("[LAKEBASE SESSION] SPN WorkspaceClient created successfully")
+                logger.info("[LAKEBASE SESSION] SPN WorkspaceClient created successfully")
                 return self._workspace_client
 
             # Priority 2: PAT — pass user_token=None to skip OBO entirely
@@ -109,7 +110,6 @@ class LakebaseSessionFactory:
                     "For deployed apps: set DATABRICKS_HOST, DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET. "
                     "For local dev: configure a PAT via API Keys (Configuration → API Keys) or Databricks CLI profile."
                 )
-
             logger.info("[LAKEBASE SESSION] Local dev WorkspaceClient created via PAT")
             return self._workspace_client
 
@@ -162,17 +162,38 @@ class LakebaseSessionFactory:
         """
         Generate a fresh database credential token.
 
+        Tries provisioned DatabaseAPI first, falls back to autoscaling PostgresAPI.
+
         Returns:
             Fresh token string
         """
         w = await self._get_workspace_client()
-        cred = w.database.generate_database_credential(
-            request_id=str(uuid.uuid4()),
-            instance_names=[self.instance_name]
-        )
+
+        # Try provisioned instance first
+        try:
+            cred = w.database.generate_database_credential(
+                request_id=str(uuid.uuid4()),
+                instance_names=[self.instance_name]
+            )
+            self._token_holder["token"] = cred.token
+            self._token_holder["refreshed_at"] = time.time()
+            logger.info(f"Refreshed Lakebase token for instance {self.instance_name} (length: {len(cred.token)})")
+            return cred.token
+        except Exception as e:
+            if "not found" not in str(e).lower() and "not_found" not in str(e).lower():
+                raise
+            logger.info(f"Instance {self.instance_name} not in DatabaseAPI, trying PostgresAPI")
+
+        # Fall back to autoscaling project
+        endpoints = list(w.postgres.list_endpoints(
+            parent=f"projects/{self.instance_name}/branches/production"
+        ))
+        if not endpoints:
+            raise ValueError(f"No endpoints found for project {self.instance_name}")
+        cred = w.postgres.generate_database_credential(endpoint=endpoints[0].name)
         self._token_holder["token"] = cred.token
         self._token_holder["refreshed_at"] = time.time()
-        logger.info(f"Refreshed Lakebase token for instance {self.instance_name} (length: {len(cred.token)})")
+        logger.info(f"Refreshed Lakebase token for project {self.instance_name} (length: {len(cred.token)})")
         return cred.token
 
     async def _schedule_token_refresh(self):
@@ -202,12 +223,31 @@ class LakebaseSessionFactory:
         """
         try:
             w = await self._get_workspace_client()
-            instance = w.database.get_database_instance(name=self.instance_name)
 
-            # Check if instance is ready
-            state_str = str(instance.state).upper()
-            if "AVAILABLE" not in state_str and "READY" not in state_str:
-                raise ValueError(f"Lakebase instance {self.instance_name} is not ready (state: {instance.state})")
+            # Try provisioned instance first, fall back to autoscaling project
+            dns = None
+            try:
+                instance = w.database.get_database_instance(name=self.instance_name)
+                state_str = str(instance.state).upper()
+                if "AVAILABLE" not in state_str and "READY" not in state_str:
+                    raise ValueError(f"Lakebase instance {self.instance_name} is not ready (state: {instance.state})")
+                dns = instance.read_write_dns
+            except Exception as e:
+                if "not found" not in str(e).lower() and "not_found" not in str(e).lower():
+                    raise
+                # Try autoscaling project
+                logger.info(f"Instance {self.instance_name} not in DatabaseAPI, trying PostgresAPI")
+                endpoints = list(w.postgres.list_endpoints(
+                    parent=f"projects/{self.instance_name}/branches/production"
+                ))
+                for ep in endpoints:
+                    if hasattr(ep, 'status') and ep.status:
+                        hosts = getattr(ep.status, 'hosts', None)
+                        if hosts and hasattr(hosts, 'host') and hosts.host:
+                            dns = hosts.host
+                            break
+                if not dns:
+                    raise ValueError(f"No endpoint found for Lakebase instance/project {self.instance_name}")
 
             username = await self._get_username()
 
@@ -217,7 +257,7 @@ class LakebaseSessionFactory:
             # Build URL with placeholder password (do_connect injects real token)
             connection_url = (
                 f"postgresql+asyncpg://{username}:placeholder@"
-                f"{instance.read_write_dns}:5432/databricks_postgres"
+                f"{dns}:5432/databricks_postgres"
             )
 
             return connection_url
