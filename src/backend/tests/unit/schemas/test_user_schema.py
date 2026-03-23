@@ -130,9 +130,14 @@ class TestUserBase:
             user = UserBase(username="testuser", email=email)
             assert user.email == email
 
-    def test_user_base_email_validation_invalid(self):
-        """Test UserBase email validation with invalid emails."""
-        invalid_emails = [
+    def test_user_base_email_validation_tolerates_invalid_on_read(self):
+        """Test UserBase email validator accepts any stored value for read tolerance.
+
+        The validator was relaxed to prevent response serialization failures
+        when partial emails exist in the DB. Write-path validation is handled
+        by UserUpdate (EmailStr) and get_or_create_user_by_email.
+        """
+        tolerant_emails = [
             "notanemail",
             "@example.com",
             "test@",
@@ -140,11 +145,9 @@ class TestUserBase:
             "test@example"
         ]
 
-        for email in invalid_emails:
-            with pytest.raises(ValidationError) as exc_info:
-                UserBase(username="testuser", email=email)
-
-            assert "Invalid email format" in str(exc_info.value)
+        for email in tolerant_emails:
+            user = UserBase(username="testuser", email=email)
+            assert user.email == email
 
 
 class TestUserUpdate:

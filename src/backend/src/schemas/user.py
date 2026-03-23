@@ -29,13 +29,10 @@ class UserBase(BaseModel):
     
     @field_validator('email', mode='before')
     def email_validator(cls, v):
-        # Allow localhost domains for development
-        if '@localhost' in v:
-            return v
-        # For other domains, use basic email regex validation
-        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', v):
-            raise ValueError('Invalid email format')
-        return v
+        # Accept any stored value on read — partial emails may exist in the DB
+        # from incremental header processing. Write-path validation is handled
+        # by UserUpdate (EmailStr) and get_or_create_user_by_email.
+        return v if v else ''
 
 # User update
 class UserUpdate(BaseModel):
