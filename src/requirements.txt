@@ -7,7 +7,7 @@ pydantic-settings==2.10.1
 cryptography
 python-multipart
 databricks
-databricks-sdk==0.76.0  # Pinned from uv.lock to prevent pip backtracking
+databricks-sdk==0.102.0  # Lakebase Autoscaling requires >=0.101.0 (X-Databricks-Org-Id header)
 databricks-vectorsearch==0.63  # Pinned from uv.lock to prevent pip backtracking
 croniter
 crewai[tools]==1.9.3  # Pinned from uv.lock - [tools] extra installs crewai-tools package
