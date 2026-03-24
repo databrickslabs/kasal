@@ -31,7 +31,14 @@ The following diagram shows all active security layers and where in the executio
                            │
                            ▼
 ┌─────────────────────────────────────────────────────────┐
-│  Layer 2 — CREW ASSEMBLY CHECKS (crew_preparation.py)   │
+│  Layer 2 — CREW ASSEMBLY CHECKS                         │
+│  crew_preparation.py (regular crews)                    │
+│  flow_methods.py + flow_builder.py (flow crews)         │
+│                                                         │
+│  ALL crew types — starting-point, listener, router —    │
+│  go through the same shared run_crew_security_checks()  │
+│  function in tool_capability_manifest.py:               │
+│                                                         │
 │  • Per-agent spotlighting wrapper applied to all _U     │  Always-on [NEW Area 17]
 │    tools: output wrapped in << … >> delimiters          │
 │  • Crew-wide lethal-trifecta check (log warning)        │  Always-on [Area 8]
@@ -109,7 +116,7 @@ The following diagram shows all active security layers and where in the executio
 | Decision | Rationale |
 |----------|-----------|
 | All scanning layers are log-only (fail-open) | False positives in blocking mode would halt legitimate crew execution. Detection feeds audit logs; LLM guardrails are the opt-in blocking tier. |
-| Spotlighting at crew assembly (not tool class) | Tools are wrapped once at Crew build time — zero change to tool implementations, no risk of breaking tool logic. |
+| Spotlighting at crew assembly (not tool class) | Tools are wrapped once at Crew build time — zero change to tool implementations, no risk of breaking tool logic. Applies to all crew types: regular crews via `CrewPreparation`, flow starting-point/listener/router crews via `flow_methods.py` and `flow_builder.py`. |
 | Per-task trifecta check in addition to per-crew | A crew-wide trifecta can be benign (different tasks, never combined). A single task combining _U + _S tools in one ReAct loop is the real risk. |
 | LLM guardrails opt-in, not always-on | LLM calls add latency and cost. Users enable guardrails only on tasks where external/untrusted input reaches the agent. |
 | `object.__setattr__` to wrap Pydantic tool lists | CrewAI agents are Pydantic models — direct attribute assignment is blocked. `object.__setattr__` bypasses Pydantic validation to patch `tools` in-place post-creation. |
@@ -550,21 +557,36 @@ A `SecretLeakDetector` scans all agent outputs for accidentally leaked credentia
 
 ---
 
-### 10 — Flow Trust Boundary Scanning (beyond reference doc)
+### 10 — Flow Security: Full Coverage Across All Crew Types
 
 **Document says:** Not explicitly covered. This addresses indirect prompt injection propagation between crews in multi-crew flows.
 
-**Kasal implementation:** `src/backend/src/engines/crewai/flow/modules/flow_state.py`
+**Kasal implementation — two layers:**
+
+**Layer A — Inter-crew output scanning:** `src/backend/src/engines/crewai/flow/modules/flow_state.py`
 
 In `FlowStateManager.parse_crew_output()`, the output of a completed crew is scanned via `security_scanner.scan()` **before** it is passed to the next crew in a flow. This is a trust boundary — one crew's output is the next crew's input.
 
-**Rationale:** In multi-crew flows, a compromised crew (e.g., one that ingested a poisoned web page) could produce output containing injection payloads. Without boundary scanning, those payloads would flow directly into the next crew's context unchecked.
+**Layer B — Assembly-time checks on all flow crew types:** `flow_methods.py`, `flow_builder.py`
+
+Flow crews bypass `CrewPreparation` — they build their `Crew` objects directly. All three flow crew types now call the shared `run_crew_security_checks()` function from `tool_capability_manifest.py` immediately after the Crew is created:
+
+| Flow crew type | File | Checks applied |
+|---|---|---|
+| Starting-point crew | `flow_methods.py` | Spotlighting, trifecta, mixed-task, destructive |
+| Listener crew | `flow_methods.py` | Spotlighting, trifecta, mixed-task, destructive |
+| Router crew | `flow_builder.py` | Spotlighting, trifecta, mixed-task, destructive |
+
+This means **flows and regular crews now have identical assembly-time security coverage**. The `run_crew_security_checks()` function is the single shared implementation used by all four paths (1 regular + 3 flow).
+
+**Rationale:** In multi-crew flows, a compromised crew (e.g., one that ingested a poisoned web page) could produce output containing injection payloads. Layer A catches payloads crossing crew boundaries. Layer B ensures each crew's tool configuration is checked for trifecta/mixed-task risks before it ever runs.
 
 **Coverage vs document:**
 - ✅ Goes beyond document (addresses multi-agent flow-specific risk)
-- ✅ Scans for both injection patterns and leaked secrets
-- ✅ Non-blocking — parsing always succeeds, findings are logged
-- ✅ Defence-in-depth for the Kasal flow execution model
+- ✅ Layer A: scans for injection patterns and leaked secrets at flow boundaries
+- ✅ Layer B: spotlighting + trifecta + mixed-task on all three flow crew types
+- ✅ Both layers non-blocking — findings are logged, execution continues
+- ✅ Single shared implementation — no risk of flow path diverging from crew path
 
 ---
 
