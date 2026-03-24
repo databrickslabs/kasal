@@ -108,55 +108,8 @@ class CrewPreparation:
             logger.info(f"[CrewPreparation.__init__] Memory backend config found: {config['memory_backend_config']}")
 
     def _apply_spotlighting_wrappers(self) -> None:
-        """
-        SECURITY: Wrap every _U (INGESTS_UNTRUSTED_CONTENT) tool's _run output
-        in << ... >> spotlighting delimiters, completing the prompt-hardening setup.
-
-        The system prompt (agent_helpers._SECURITY_PREAMBLE) already instructs agents
-        to treat content between << and >> as untrusted data that may contain injection
-        attempts.  Without this step the delimiters were declared but never injected,
-        leaving the spotlighting mitigation incomplete.
-
-        Failure is non-blocking — a warning is logged and execution continues.
-        """
-        try:
-            from src.engines.crewai.security.tool_capability_manifest import (
-                TOOL_CAPABILITIES,
-                ToolCapability,
-            )
-
-            wrapped_count = 0
-            for agent in self.crew.agents:
-                new_tools = []
-                for tool in (agent.tools or []):
-                    tool_name = getattr(tool, "name", "")
-                    caps = TOOL_CAPABILITIES.get(tool_name, ToolCapability.NONE)
-                    if caps & ToolCapability.INGESTS_UNTRUSTED_CONTENT:
-                        original_run = tool._run
-
-                        def make_wrapper(fn):
-                            def _wrapped(*args, **kwargs):
-                                result = fn(*args, **kwargs)
-                                return f"<<\n{result}\n>>"
-                            return _wrapped
-
-                        tool._run = make_wrapper(original_run)
-                        wrapped_count += 1
-                        logger.info(
-                            "[SECURITY] Spotlighting wrapper applied to tool '%s'",
-                            tool_name,
-                        )
-                    new_tools.append(tool)
-                object.__setattr__(agent, "tools", new_tools)
-
-            logger.info(
-                "[SECURITY] Spotlighting complete: %d untrusted tool(s) wrapped with << >> delimiters.",
-                wrapped_count,
-            )
-        except Exception as _err:
-            logger.warning(
-                "[SECURITY] Spotlighting wrapper application failed (non-blocking): %s", _err
-            )
+        """Delegate to the shared security helper in tool_capability_manifest."""
+        pass  # Handled by _run_security_checks below via run_crew_security_checks
 
     def _needs_entity_extraction_fallback(self, model_name: str) -> bool:
         """
@@ -911,66 +864,21 @@ class CrewPreparation:
                 logger.error("Failed to create crew")
                 return False
 
-            # SECURITY: Apply spotlighting wrappers to all _U (untrusted-input) tools.
-            # This closes the << >> loop: the system prompt already instructs agents to
-            # treat content between << and >> as untrusted data.  Without this step the
-            # delimiters were declared but never injected.
-            self._apply_spotlighting_wrappers()
-
-            # SECURITY: Detect lethal-trifecta tool combination (log-only, non-blocking)
+            # SECURITY: Run all assembly-time security checks via the shared helper.
+            # Covers: spotlighting wrappers, crew-wide trifecta, per-task trifecta,
+            # mixed-task anti-pattern, and destructive-tool detection.
+            # The same function is called by flow_methods.py so both execution paths
+            # get identical protection.
             try:
                 from src.engines.crewai.security.tool_capability_manifest import (
-                    assess_trifecta as _assess_trifecta,
-                    log_trifecta_warning as _log_trifecta_warning,
-                    assess_mixed_task as _assess_mixed_task,
-                    log_mixed_task_warning as _log_mixed_task_warning,
+                    run_crew_security_checks as _run_security_checks,
                 )
-                _tool_names = list({
-                    t.name
-                    for task in self.crew.tasks for t in (task.tools or [])
-                } | {
-                    t.name
-                    for agent in self.crew.agents for t in (agent.tools or [])
-                })
-                logger.info("[SECURITY] Trifecta tool names collected: %s", _tool_names)
-
-                # Crew-wide trifecta check (existing)
-                _trifecta = _assess_trifecta(_tool_names)
-                _log_trifecta_warning(_trifecta, context=f"crew with {len(self.crew.tasks)} task(s)")
-
-                # SECURITY: Detect destructive tools — recommend human_input (log-only)
-                from src.engines.crewai.security.tool_capability_manifest import (
-                    assess_destructive_risk as _assess_destructive,
-                    log_destructive_warning as _log_destructive,
+                _run_security_checks(
+                    self.crew,
+                    context=f"crew with {len(self.crew.tasks)} task(s)",
                 )
-                _destructive = _assess_destructive(_tool_names)
-                _log_destructive(_destructive, context=f"crew with {len(self.crew.tasks)} task(s)")
-
-                # SECURITY: Per-task trifecta + mixed-task anti-pattern check.
-                # A task that combines _U and _S/_D tools in the same ReAct loop is the
-                # scenario where guardrails are most likely to be bypassed — the external
-                # tool fires and its output reaches the internal tool without any scan.
-                for _task in self.crew.tasks:
-                    _task_tool_names: List[str] = [
-                        t.name for t in (_task.tools or [])
-                    ]
-                    # Agent-level tools also apply to every task the agent runs
-                    if hasattr(_task, "agent") and _task.agent:
-                        _task_tool_names += [
-                            t.name for t in (_task.agent.tools or [])
-                        ]
-                    _task_label = (getattr(_task, "description", "") or "")[:80]
-
-                    _task_trifecta = _assess_trifecta(_task_tool_names)
-                    _log_trifecta_warning(
-                        _task_trifecta, context=f"task '{_task_label}'"
-                    )
-
-                    _mixed = _assess_mixed_task(_task_tool_names, task_name=_task_label)
-                    _log_mixed_task_warning(_mixed)
-
             except Exception as _sec_err:
-                logger.debug("[SECURITY] Trifecta check skipped: %s", _sec_err)
+                logger.debug("[SECURITY] Crew security checks skipped: %s", _sec_err)
 
             # 16. Set crew references and attach trace context
             memory_service.set_crew_reference_on_memory(self.crew)

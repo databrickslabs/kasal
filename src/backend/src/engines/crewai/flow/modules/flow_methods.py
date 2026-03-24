@@ -358,6 +358,18 @@ class FlowMethodFactory:
             crew = Crew(**crew_kwargs)
             logger.info(f"Crew instance '{crew_name}' created successfully with {len(task_list)} tasks, kwargs: {list(crew_kwargs.keys())}")
 
+            # SECURITY: Run all assembly-time security checks (spotlighting, trifecta,
+            # mixed-task anti-pattern, destructive tools).  Flow crews are built here
+            # directly — they bypass CrewPreparation — so we must call the shared helper
+            # explicitly to ensure identical protection on both execution paths.
+            try:
+                from src.engines.crewai.security.tool_capability_manifest import (
+                    run_crew_security_checks as _run_security_checks,
+                )
+                _run_security_checks(crew, context=f"flow crew '{crew_name}'")
+            except Exception as _sec_err:
+                logger.debug("[SECURITY] Flow crew security checks skipped: %s", _sec_err)
+
             # Set up execution callbacks
             job_id = None
             if callbacks:
@@ -710,6 +722,15 @@ class FlowMethodFactory:
 
             crew = Crew(**crew_kwargs)
             logger.info(f"Crew instance '{listener_crew_name}' created for listener, kwargs: {list(crew_kwargs.keys())}")
+
+            # SECURITY: Same assembly-time checks as starting-point crews.
+            try:
+                from src.engines.crewai.security.tool_capability_manifest import (
+                    run_crew_security_checks as _run_security_checks,
+                )
+                _run_security_checks(crew, context=f"flow listener crew '{listener_crew_name}'")
+            except Exception as _sec_err:
+                logger.debug("[SECURITY] Flow listener crew security checks skipped: %s", _sec_err)
 
             # Set up execution callbacks
             job_id = None

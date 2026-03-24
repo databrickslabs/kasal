@@ -19,7 +19,7 @@ Usage:
 import logging
 from dataclasses import dataclass, field
 from enum import Flag, auto
-from typing import Dict, Iterable, List
+from typing import Any, Dict, Iterable, List
 
 logger = logging.getLogger(__name__)
 
@@ -269,6 +269,116 @@ def log_mixed_task_warning(assessment: MixedTaskAssessment) -> None:
         assessment.sensitive_tools,
         assessment.destructive_tools,
     )
+
+
+def apply_spotlighting_wrappers(crew: Any) -> int:
+    """
+    Wrap every _U (INGESTS_UNTRUSTED_CONTENT) tool's _run output in
+    ``<< ... >>`` spotlighting delimiters.
+
+    This is the shared implementation used by both the regular crew path
+    (CrewPreparation) and the flow crew path (flow_methods.py).  Keeping
+    it here avoids duplicating the wrapping logic and ensures flows get
+    identical protection to regular crews.
+
+    Args:
+        crew: A CrewAI Crew instance whose agents' tools should be wrapped.
+
+    Returns:
+        Number of tools wrapped (0 = no untrusted tools found).
+    """
+    wrapped_count = 0
+    for agent in getattr(crew, "agents", []):
+        new_tools = []
+        for tool in (getattr(agent, "tools", None) or []):
+            tool_name = getattr(tool, "name", "")
+            caps = TOOL_CAPABILITIES.get(tool_name, ToolCapability.NONE)
+            if caps & ToolCapability.INGESTS_UNTRUSTED_CONTENT:
+                original_run = tool._run
+
+                def make_wrapper(fn):
+                    def _wrapped(*args, **kwargs):
+                        result = fn(*args, **kwargs)
+                        return f"<<\n{result}\n>>"
+                    return _wrapped
+
+                tool._run = make_wrapper(original_run)
+                wrapped_count += 1
+            new_tools.append(tool)
+        object.__setattr__(agent, "tools", new_tools)
+    return wrapped_count
+
+
+def run_crew_security_checks(crew: Any, context: str = "") -> None:
+    """
+    Run all assembly-time security checks on a Crew object.
+
+    Covers: spotlighting wrappers, crew-wide trifecta, per-task trifecta,
+    mixed-task anti-pattern, and destructive-tool detection.
+
+    This is the shared entry point used by both CrewPreparation and
+    flow_methods.py so both execution paths get identical security coverage.
+
+    Args:
+        crew:    A CrewAI Crew instance (already assembled).
+        context: Label for log messages (e.g. "flow crew 'ResearchFlow'").
+    """
+    _log = logging.getLogger(__name__)
+
+    # 1. Spotlighting
+    try:
+        n = apply_spotlighting_wrappers(crew)
+        _log.info(
+            "[SECURITY]%s Spotlighting: %d untrusted tool(s) wrapped.",
+            f" [{context}]" if context else "",
+            n,
+        )
+    except Exception as err:
+        _log.warning("[SECURITY] Spotlighting failed (non-blocking): %s", err)
+
+    # 2. Collect all tool names (task-level + agent-level)
+    try:
+        tool_names = list({
+            t.name
+            for task in getattr(crew, "tasks", [])
+            for t in (getattr(task, "tools", None) or [])
+        } | {
+            t.name
+            for agent in getattr(crew, "agents", [])
+            for t in (getattr(agent, "tools", None) or [])
+        })
+
+        ctx = f" [{context}]" if context else ""
+        n_tasks = len(getattr(crew, "tasks", []))
+
+        # 3. Crew-wide trifecta
+        _trifecta = assess_trifecta(tool_names)
+        log_trifecta_warning(_trifecta, context=f"{context} (crew-wide)" if context else "crew-wide")
+
+        # 4. Destructive tools
+        _destructive = assess_destructive_risk(tool_names)
+        log_destructive_warning(_destructive, context=f"{context}" if context else f"crew with {n_tasks} task(s)")
+
+        # 5. Per-task trifecta + mixed-task check
+        for task in getattr(crew, "tasks", []):
+            task_tool_names: List[str] = [
+                t.name for t in (getattr(task, "tools", None) or [])
+            ]
+            agent = getattr(task, "agent", None)
+            if agent:
+                task_tool_names += [
+                    t.name for t in (getattr(agent, "tools", None) or [])
+                ]
+            task_label = (getattr(task, "description", "") or "")[:80]
+
+            _task_trifecta = assess_trifecta(task_tool_names)
+            log_trifecta_warning(_task_trifecta, context=f"task '{task_label}'{ctx}")
+
+            _mixed = assess_mixed_task(task_tool_names, task_name=task_label)
+            log_mixed_task_warning(_mixed)
+
+    except Exception as err:
+        _log.debug("[SECURITY] Crew security checks skipped: %s", err)
 
 
 def log_destructive_warning(destructive_tools: List[str], context: str = "") -> None:
