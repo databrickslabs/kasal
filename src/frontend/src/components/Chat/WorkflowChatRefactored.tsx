@@ -502,6 +502,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       appendProgressLine('\n✓ Crew generated successfully');
       progressMsgIdRef.current = null;
 
+      // Signal the Play button to pulse
+      window.dispatchEvent(new CustomEvent('crew-ready'));
+
       // Show GenieTool config prompt if any tasks need it
       const hasPendingConfigs = pendingGenieConfigsRef.current.length > 0;
       if (hasPendingConfigs) {
@@ -1284,7 +1287,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           }
         }
 
-        response += "\nTo execute plan type either **execute crew** or **ec**";
+        response += "\nClick the **▶ Play** button on the right sidebar to run the crew.";
         return response;
       }
       case 'generate_plan': {
@@ -1316,7 +1319,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           }
         }
 
-        response += "\nTo execute plan type either **execute crew** or **ec**";
+        response += "\nClick the **▶ Play** button on the right sidebar to run the crew.";
         return response;
       }
       case 'catalog_list': {
