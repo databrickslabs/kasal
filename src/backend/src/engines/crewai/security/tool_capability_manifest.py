@@ -70,13 +70,23 @@ TOOL_CAPABILITIES: Dict[str, ToolCapability] = {
     # Power BI tools (read internal analytics data)
     "PowerBIAnalysisTool":                            _S | _E,
     "Power BI Comprehensive Analysis Tool":           _S | _E,
+    "Power BI Intelligent Analysis (Copilot-Style)":  _S | _E,   # runtime name for PowerBIAnalysisTool
     "PowerBIConnectorTool":                           _S | _E,
+    "Power BI Connector":                             _S | _E,   # runtime name for PowerBIConnectorTool
     "Measure Conversion Pipeline":                    _S | _E,
     "M-Query Conversion Pipeline":                    _S | _E,
     "Power BI Relationships Tool":                    _S | _E,
     "Power BI Hierarchies Tool":                      _S | _E,
     "Power BI Field Parameters & Calculation Groups Tool": _S | _E,
     "Power BI Report References Tool":                _S | _E,
+
+    # PowerBI tools added in recent PRs — were missing from original manifest
+    "Power BI Semantic Model Fetcher":                _S | _E,   # fetches PBI model metadata via API
+    "Power BI Semantic Model DAX Generator":          _S | _E,   # reads + executes DAX against PBI
+    "Power BI Metadata Reducer":                      _S | _E,   # processes PBI semantic model data
+
+    # DatabricksJobsTool runtime name (BaseTool.name differs from class name)
+    "Databricks Jobs Manager":                        _S | _E | _D,
 }
 
 
@@ -180,6 +190,85 @@ def assess_destructive_risk(tool_names: Iterable[str]) -> List[str]:
         if TOOL_CAPABILITIES.get(name, ToolCapability.NONE)
         & ToolCapability.PERFORMS_DESTRUCTIVE_OPERATIONS
     ]
+
+
+@dataclass
+class MixedTaskAssessment:
+    """Result of checking whether a single task mixes untrusted input with sensitive/destructive tools."""
+    is_mixed: bool
+    untrusted_tools: List[str]
+    sensitive_tools: List[str]
+    destructive_tools: List[str]
+    task_name: str = ""
+
+
+def assess_mixed_task(tool_names: Iterable[str], task_name: str = "") -> MixedTaskAssessment:
+    """
+    Detect the anti-pattern where a single task combines untrusted-input tools
+    (_U) with sensitive-data or destructive tools (_S or _D).
+
+    This is the scenario where guardrails are bypassed: the ReAct loop runs
+    web scraping + an internal/destructive tool in one shot, so the intermediate
+    external output is never scanned before the sensitive tool fires.
+
+    Args:
+        tool_names: Iterable of tool name strings for a single task.
+        task_name:  Human-readable task label for log context.
+
+    Returns:
+        MixedTaskAssessment with is_mixed=True when the anti-pattern is present.
+    """
+    tool_names = list(tool_names)
+    untrusted: List[str] = []
+    sensitive: List[str] = []
+    destructive: List[str] = []
+
+    for name in tool_names:
+        caps = TOOL_CAPABILITIES.get(name, ToolCapability.NONE)
+        if caps & ToolCapability.INGESTS_UNTRUSTED_CONTENT:
+            untrusted.append(name)
+        if caps & ToolCapability.READS_SENSITIVE_DATA:
+            sensitive.append(name)
+        if caps & ToolCapability.PERFORMS_DESTRUCTIVE_OPERATIONS:
+            destructive.append(name)
+
+    is_mixed = bool(untrusted) and bool(sensitive or destructive)
+    return MixedTaskAssessment(
+        is_mixed=is_mixed,
+        untrusted_tools=untrusted,
+        sensitive_tools=sensitive,
+        destructive_tools=destructive,
+        task_name=task_name,
+    )
+
+
+def log_mixed_task_warning(assessment: MixedTaskAssessment) -> None:
+    """
+    Log an architectural recommendation when a single task mixes untrusted-input
+    tools with sensitive-data or destructive tools.
+
+    This is log-only — it never blocks execution.
+
+    Args:
+        assessment: Result from assess_mixed_task().
+    """
+    if not assessment.is_mixed:
+        return
+    logger.warning(
+        "[SECURITY] Mixed-task anti-pattern detected in task '%s': "
+        "untrusted_tools=%s, sensitive_tools=%s, destructive_tools=%s. "
+        "This task combines external/untrusted input tools with internal data or "
+        "destructive tools in a single ReAct loop — a guardrail cannot inspect the "
+        "intermediate output before the internal tool fires. "
+        "RECOMMENDATION: Split into two tasks — (1) external input only, with an "
+        "LLM injection guardrail configured on that task; (2) internal/destructive "
+        "tool usage that receives the first task's output as context. "
+        "This is the architecture the LLM injection guardrail is designed to protect.",
+        assessment.task_name,
+        assessment.untrusted_tools,
+        assessment.sensitive_tools,
+        assessment.destructive_tools,
+    )
 
 
 def log_destructive_warning(destructive_tools: List[str], context: str = "") -> None:
