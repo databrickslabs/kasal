@@ -2,6 +2,7 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 import json
 import logging
+import re
 
 from src.models.user import User
 from src.repositories.user_repository import UserRepository
@@ -140,6 +141,13 @@ class UserService:
         """
         logger.debug(f"get_or_create_user_by_email called for email: {email}")
 
+        # Reject partial/invalid emails to prevent junk records from
+        # incremental header processing (e.g. "user@", "user@d", etc.)
+        if not email or not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
+            if email and '@localhost' not in email:
+                logger.warning(f"Rejecting invalid email for user creation: {email!r}")
+                return None
+
         # Use try-catch to handle race conditions where user might be created between check and create
         try:
             # Check if user exists
@@ -165,7 +173,6 @@ class UserService:
             # Replace dots and other invalid characters with underscores
             username_base = username_base.replace(".", "_").replace("-", "_")
             # Remove any other invalid characters (keep only letters, numbers, underscores)
-            import re
             username_base = re.sub(r'[^a-zA-Z0-9_]', '_', username_base)
 
             username = username_base

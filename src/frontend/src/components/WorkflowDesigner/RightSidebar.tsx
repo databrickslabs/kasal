@@ -82,6 +82,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   const [animateAIAssistant, setAnimateAIAssistant] = useState(true);
   const [chatOpenedByClick, setChatOpenedByClick] = useState(false);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
+  const [pulsePlay, setPulsePlay] = useState(false);
 
   const { crewAIFlowEnabled } = useFlowConfigStore();
 
@@ -163,6 +164,19 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
       setChatOpenedByClick(false);
     }
   }, [isChatOpen]);
+
+  // Listen for crew-ready event to pulse the Play button
+  useEffect(() => {
+    const handleCrewReady = () => {
+      setPulsePlay(true);
+      setTimeout(() => setPulsePlay(false), 3000);
+    };
+    window.addEventListener('crew-ready', handleCrewReady);
+    return () => window.removeEventListener('crew-ready', handleCrewReady);
+  }, []);
+
+  // Compute play button pulse state
+  const isPlayPulsing = (itemId: string) => itemId === 'play-execution' && pulsePlay;
 
   // Determine if play button should be enabled based on context
   const canExecute = areFlowsVisible ? canRunFlow : hasCrewNodes;
@@ -306,6 +320,11 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
           80% { transform: scale(0.98) translateY(0); }
           100% { transform: scale(1) translateY(0); }
         }
+        @keyframes play-pulse {
+          0% { box-shadow: 0 0 0 0 rgba(25, 118, 210, 0.7); transform: scale(1); }
+          50% { box-shadow: 0 0 12px 6px rgba(25, 118, 210, 0.3); transform: scale(1.15); }
+          100% { box-shadow: 0 0 0 0 rgba(25, 118, 210, 0.7); transform: scale(1); }
+        }
       `} />
       <Box
         sx={{
@@ -358,8 +377,12 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                       width: 40,
                       height: 40,
                       mb: 1,
-                      color: item.isActive ? 'primary.main' : 'text.secondary',
-                      backgroundColor: item.isActive ? 'primary.light' : 'transparent',
+                      color: isPlayPulsing(item.id)
+                        ? 'primary.main'
+                        : item.isActive ? 'primary.main' : 'text.secondary',
+                      backgroundColor: isPlayPulsing(item.id)
+                        ? 'rgba(25, 118, 210, 0.12)'
+                        : item.isActive ? 'primary.light' : 'transparent',
                       borderRight: '2px solid transparent',
                       borderRadius: '50%',
                       display: 'flex',
@@ -372,7 +395,9 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                         backgroundColor: item.isActive ? 'primary.dark' : 'action.hover',
                         color: item.isActive ? 'primary.contrastText' : 'text.primary',
                       } : {},
-                      animation: 'none',
+                      animation: isPlayPulsing(item.id)
+                        ? 'play-pulse 0.8s ease-in-out infinite'
+                        : 'none',
                     }}
                   >
                     {item.icon}

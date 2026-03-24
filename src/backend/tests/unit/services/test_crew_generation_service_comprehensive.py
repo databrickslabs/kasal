@@ -325,7 +325,7 @@ class TestProcessCrewSetup:
             )
 
     def test_agent_missing_required_field_raises(self):
-        setup = {"agents": [{"name": "a", "role": "r"}], "tasks": [{"name": "t"}]}
+        setup = {"agents": [{"name": "a", "role": "r"}], "tasks": [{"name": "t", "agent": "a"}]}
         with pytest.raises(ValueError, match="Missing required field"):
             self.service._process_crew_setup(setup, [], {})
 
@@ -353,6 +353,7 @@ class TestProcessCrewSetup:
     def test_agent_tools_filtered_to_allowed(self):
         setup = _minimal_setup(
             agents=[{"name": "A", "role": "r", "goal": "g", "backstory": "b", "tools": ["ToolA", "Bad"]}],
+            tasks=[{"name": "T", "agent": "A", "tools": []}],
         )
         result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
         assert result["agents"][0]["tools"] == ["id-a"]
@@ -360,6 +361,7 @@ class TestProcessCrewSetup:
     def test_agent_tool_id_not_in_map_keeps_name(self):
         setup = _minimal_setup(
             agents=[{"name": "A", "role": "r", "goal": "g", "backstory": "b", "tools": ["ToolA"]}],
+            tasks=[{"name": "T", "agent": "A", "tools": []}],
         )
         result = self.service._process_crew_setup(setup, _allowed_tools(), {})
         assert result["agents"][0]["tools"] == ["ToolA"]
@@ -367,6 +369,7 @@ class TestProcessCrewSetup:
     def test_agent_existing_id_removed(self):
         setup = _minimal_setup(
             agents=[{"name": "A", "role": "r", "goal": "g", "backstory": "b", "id": "old-id"}],
+            tasks=[{"name": "T", "agent": "A", "tools": []}],
         )
         result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
         assert "id" not in result["agents"][0]
@@ -374,6 +377,7 @@ class TestProcessCrewSetup:
     def test_agent_non_list_tools_initialized(self):
         setup = _minimal_setup(
             agents=[{"name": "A", "role": "r", "goal": "g", "backstory": "b", "tools": "invalid"}],
+            tasks=[{"name": "T", "agent": "A", "tools": []}],
         )
         result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
         assert result["agents"][0]["tools"] == []
@@ -381,6 +385,7 @@ class TestProcessCrewSetup:
     def test_agent_no_tools_key_initialized(self):
         setup = _minimal_setup(
             agents=[{"name": "A", "role": "r", "goal": "g", "backstory": "b"}],
+            tasks=[{"name": "T", "agent": "A", "tools": []}],
         )
         result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
         assert result["agents"][0]["tools"] == []
@@ -388,6 +393,7 @@ class TestProcessCrewSetup:
     def test_agent_tools_none_initialized(self):
         setup = _minimal_setup(
             agents=[{"name": "A", "role": "r", "goal": "g", "backstory": "b", "tools": None}],
+            tasks=[{"name": "T", "agent": "A", "tools": []}],
         )
         result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
         assert result["agents"][0]["tools"] == []
@@ -492,16 +498,23 @@ class TestProcessCrewSetup:
         assert result["tasks"][0]["tools"] == ["id-a"]
 
     def test_agent_missing_name_uses_index(self):
-        """Agent without 'name' falls back to Agent_{i} for logging, then fails validation on 'name'."""
-        setup = {"agents": [{"role": "r", "goal": "g", "backstory": "b"}], "tasks": [{"name": "t"}]}
-        with pytest.raises(ValueError, match="Missing required field 'name'"):
-            self.service._process_crew_setup(setup, [], {})
+        """Agent without 'name' is removed as orphan (no name -> can't match task assignment).
+        The method proceeds with an empty agents list after orphan removal."""
+        setup = {"agents": [{"role": "r", "goal": "g", "backstory": "b"}], "tasks": [{"name": "t", "agent": "nonexistent"}]}
+        # Agent has no name -> not in assigned_agent_names -> removed as orphan
+        # After orphan removal, agents list is empty but validation already passed
+        result = self.service._process_crew_setup(setup, [], {})
+        assert len(result["agents"]) == 0
 
     def test_model_assigned_to_all_agents(self):
         setup = _minimal_setup(
             agents=[
                 {"name": "A1", "role": "r", "goal": "g", "backstory": "b"},
                 {"name": "A2", "role": "r", "goal": "g", "backstory": "b"},
+            ],
+            tasks=[
+                {"name": "T1", "agent": "A1", "tools": []},
+                {"name": "T2", "agent": "A2", "tools": []},
             ],
         )
         result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map(), model="some-model")
@@ -512,6 +525,7 @@ class TestProcessCrewSetup:
         """When no tools are removed, the removed-tools log branch is skipped."""
         setup = _minimal_setup(
             agents=[{"name": "A", "role": "r", "goal": "g", "backstory": "b", "tools": ["ToolA"]}],
+            tasks=[{"name": "T", "agent": "A", "tools": []}],
         )
         result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
         assert result["agents"][0]["tools"] == ["id-a"]
@@ -2025,13 +2039,14 @@ class TestProgressiveGeneration:
                 {"name": "Agent2", "role": "R2"},
             ],
             tasks=[
+                {"name": "Task1", "assigned_agent": "Agent1"},
                 {"name": "Task2", "assigned_agent": "Agent2"},
             ],
         )
         agent_saved_2 = {"id": "agent-id-2", "name": "Agent2", "role": "R2"}
         task_saved = {"id": "task-id-1", "name": "Task2", "description": "desc"}
 
-        request = self._make_progressive_request(prompt="build a crew with 2 agents and 1 task")
+        request = self._make_progressive_request(prompt="build a crew with 2 agents and 2 tasks")
         gen_id = "gen-agent-err"
 
         with self._progressive_patches(plan=plan, agent_saved=agent_saved_2, task_saved=task_saved) as m:
@@ -2442,3 +2457,688 @@ class TestProgressiveGeneration:
             ]
             assert len(complete_events) == 1
             assert len(complete_events[0].args[1].data["tasks"]) == 2
+
+    # ------------------------------------------------------------------
+    # mlflow_enabled branch (lines 810-817)
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_create_crew_progressive_mlflow_enabled_success(self):
+        """When mlflow_enabled=True, start_root_trace is called as context manager."""
+        request = self._make_progressive_request()
+        gen_id = "gen-mlflow-ok"
+
+        with self._progressive_patches() as m:
+            mock_trace_ctx = MagicMock()
+            mock_trace_ctx.__enter__ = Mock(return_value=None)
+            mock_trace_ctx.__exit__ = Mock(return_value=False)
+
+            with patch.dict("sys.modules", {
+                "src.services.mlflow_tracing_service": Mock(
+                    start_root_trace=Mock(return_value=mock_trace_ctx)
+                ),
+            }):
+                await self.service.create_crew_progressive(
+                    request, None, gen_id, mlflow_enabled=True
+                )
+
+            calls = m["sse"].broadcast_to_job.call_args_list
+            event_types = [c.args[1].data["type"] for c in calls]
+            assert "generation_complete" in event_types
+
+    @pytest.mark.asyncio
+    async def test_create_crew_progressive_mlflow_enabled_import_error(self):
+        """When mlflow tracing import fails, falls back to nullcontext."""
+        request = self._make_progressive_request()
+        gen_id = "gen-mlflow-err"
+
+        with self._progressive_patches() as m:
+            # Make start_root_trace raise an exception
+            with patch.dict("sys.modules", {
+                "src.services.mlflow_tracing_service": Mock(
+                    start_root_trace=Mock(side_effect=ImportError("no mlflow"))
+                ),
+            }):
+                await self.service.create_crew_progressive(
+                    request, None, gen_id, mlflow_enabled=True
+                )
+
+            calls = m["sse"].broadcast_to_job.call_args_list
+            event_types = [c.args[1].data["type"] for c in calls]
+            assert "generation_complete" in event_types
+
+    # ------------------------------------------------------------------
+    # user_wants_multi branch for max_agents (lines 897-898)
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_create_crew_progressive_user_wants_multi_roles(self):
+        """When prompt has multiple role patterns, max_agents uses min(3, max_tasks)."""
+        request = self._make_progressive_request(
+            prompt="use a researcher and writer to analyze data"
+        )
+        request.original_prompt = None
+        gen_id = "gen-multi-roles"
+
+        with self._progressive_patches() as m:
+            await self.service.create_crew_progressive(request, None, gen_id)
+
+            # Verify _generate_crew_plan was called - the multi-role detection
+            # should have set max_agents = min(3, max_tasks)
+            m["plan"].assert_awaited_once()
+
+    # ------------------------------------------------------------------
+    # Agent truncation (lines 937-944)
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_create_crew_progressive_truncate_agents_single_sequential(self):
+        """When max_agents==1 and process_type==sequential, keep LAST agent."""
+        plan = self._make_plan(
+            agents=[
+                {"name": "Agent1", "role": "R1"},
+                {"name": "Agent2", "role": "R2"},
+            ],
+            tasks=[{"name": "Task1", "assigned_agent": "Agent2"}],
+            process_type="sequential",
+        )
+        # The prompt has only 1 verb, so max_agents should be 1.
+        # Plan has 2 agents -> truncation should keep the LAST one.
+        request = self._make_progressive_request(prompt="find something")
+        request.original_prompt = None
+        gen_id = "gen-trunc-single"
+
+        agent_saved = {"id": "aid-2", "name": "Agent2", "role": "R2"}
+
+        with self._progressive_patches(plan=plan, agent_saved=agent_saved) as m:
+            await self.service.create_crew_progressive(request, None, gen_id)
+
+            calls = m["sse"].broadcast_to_job.call_args_list
+            agent_events = [
+                c for c in calls if c.args[1].data.get("type") == "agent_detail"
+            ]
+            # Should have only 1 agent (the last one kept)
+            assert len(agent_events) == 1
+
+    @pytest.mark.asyncio
+    async def test_create_crew_progressive_truncate_agents_multi(self):
+        """When max_agents>1 but LLM returns more, keep first N agents."""
+        plan = self._make_plan(
+            agents=[
+                {"name": "Agent1", "role": "R1"},
+                {"name": "Agent2", "role": "R2"},
+                {"name": "Agent3", "role": "R3"},
+            ],
+            tasks=[
+                {"name": "Task1", "assigned_agent": "Agent1"},
+                {"name": "Task2", "assigned_agent": "Agent2"},
+            ],
+            process_type="sequential",
+        )
+        # Prompt with 2 verbs -> max_tasks=2, max_agents=2
+        # Plan has 3 agents -> should truncate to first 2
+        request = self._make_progressive_request(prompt="find and analyze data")
+        request.original_prompt = None
+        gen_id = "gen-trunc-multi"
+
+        agent_saves = [
+            {"id": "aid-1", "name": "Agent1", "role": "R1"},
+            {"id": "aid-2", "name": "Agent2", "role": "R2"},
+        ]
+
+        with self._progressive_patches(plan=plan) as m:
+            agent_call_idx = [0]
+
+            async def agent_save_se(data, gc):
+                idx = agent_call_idx[0]
+                agent_call_idx[0] += 1
+                return agent_saves[min(idx, len(agent_saves) - 1)]
+
+            m["repo"].create_single_agent = AsyncMock(side_effect=agent_save_se)
+
+            await self.service.create_crew_progressive(request, None, gen_id)
+
+            calls = m["sse"].broadcast_to_job.call_args_list
+            agent_events = [
+                c for c in calls if c.args[1].data.get("type") == "agent_detail"
+            ]
+            # Should have at most 2 agents
+            assert len(agent_events) <= 2
+
+    # ------------------------------------------------------------------
+    # Task truncation - non-single (line 953)
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_create_crew_progressive_truncate_tasks_multi(self):
+        """When max_tasks>1 but LLM returns more tasks, keep first N tasks."""
+        plan = self._make_plan(
+            agents=[{"name": "Agent1", "role": "R1"}],
+            tasks=[
+                {"name": "Task1", "assigned_agent": "Agent1"},
+                {"name": "Task2", "assigned_agent": "Agent1"},
+                {"name": "Task3", "assigned_agent": "Agent1"},
+            ],
+            process_type="parallel",  # Not sequential, so [:max_tasks]
+        )
+        # Prompt with 2 verbs -> max_tasks=2, but plan has 3
+        request = self._make_progressive_request(prompt="find and analyze data")
+        request.original_prompt = None
+        gen_id = "gen-trunc-tasks"
+
+        with self._progressive_patches(plan=plan) as m:
+            await self.service.create_crew_progressive(request, None, gen_id)
+
+            calls = m["sse"].broadcast_to_job.call_args_list
+            task_events = [
+                c for c in calls if c.args[1].data.get("type") == "task_detail"
+            ]
+            # Should have at most 2 tasks
+            assert len(task_events) <= 2
+
+    # ------------------------------------------------------------------
+    # Context filtering for truncated tasks (line 969)
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_create_crew_progressive_context_filtered_after_truncation(self):
+        """Stale context references are removed after task truncation."""
+        plan = self._make_plan(
+            agents=[{"name": "Agent1", "role": "R1"}],
+            tasks=[
+                {"name": "Task1", "assigned_agent": "Agent1", "context": []},
+                {"name": "Task2", "assigned_agent": "Agent1", "context": ["Task1", "Task3"]},
+                {"name": "Task3", "assigned_agent": "Agent1", "context": ["Task1"]},
+            ],
+            process_type="parallel",
+        )
+        # max_tasks=2 -> Task3 gets truncated, Task2's context ref to Task3 should be removed
+        request = self._make_progressive_request(prompt="find and analyze data")
+        request.original_prompt = None
+        gen_id = "gen-context-filter"
+
+        with self._progressive_patches(plan=plan) as m:
+            await self.service.create_crew_progressive(request, None, gen_id)
+
+            calls = m["sse"].broadcast_to_job.call_args_list
+            task_events = [
+                c for c in calls if c.args[1].data.get("type") == "task_detail"
+            ]
+            # Only 2 tasks should have been generated (Task3 was truncated)
+            assert len(task_events) == 2
+
+    # ------------------------------------------------------------------
+    # Orphan agent removal (lines 980-986)
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_create_crew_progressive_orphan_agents_removed(self):
+        """Agents with no tasks assigned are removed."""
+        plan = self._make_plan(
+            agents=[
+                {"name": "Worker", "role": "R1"},
+                {"name": "Orphan", "role": "R2"},
+            ],
+            tasks=[
+                {"name": "Task1", "assigned_agent": "Worker"},
+            ],
+        )
+        request = self._make_progressive_request(prompt="find and analyze data with 2 agents")
+        request.original_prompt = None
+        gen_id = "gen-orphan"
+
+        agent_saved = {"id": "aid-1", "name": "Worker", "role": "R1"}
+
+        with self._progressive_patches(plan=plan, agent_saved=agent_saved) as m:
+            await self.service.create_crew_progressive(request, None, gen_id)
+
+            calls = m["sse"].broadcast_to_job.call_args_list
+            agent_events = [
+                c for c in calls if c.args[1].data.get("type") == "agent_detail"
+            ]
+            # Only Worker should remain; Orphan should be removed
+            assert len(agent_events) == 1
+
+    # ------------------------------------------------------------------
+    # Lakebase enabled path (lines 1026-1031)
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_create_crew_progressive_lakebase_enabled(self):
+        """When lakebase is enabled, uses lakebase session factory."""
+        request = self._make_progressive_request()
+        gen_id = "gen-lakebase"
+
+        plan = self._make_plan()
+
+        with self._progressive_patches(plan=plan) as m:
+            # Override is_lakebase_enabled to return True
+            with patch(
+                "src.db.database_router.is_lakebase_enabled",
+                new_callable=AsyncMock,
+                return_value=True,
+            ):
+                with patch(
+                    "src.db.database_router.get_lakebase_config_from_db",
+                    new_callable=AsyncMock,
+                    return_value={"instance_name": "test-lakebase"},
+                ):
+                    mock_lb_session = AsyncMock()
+                    mock_lb_session.__aenter__ = AsyncMock(return_value=AsyncMock(
+                        commit=AsyncMock(), rollback=AsyncMock()
+                    ))
+                    mock_lb_session.__aexit__ = AsyncMock(return_value=False)
+
+                    with patch(
+                        "src.db.lakebase_session.get_lakebase_session",
+                        return_value=mock_lb_session,
+                    ):
+                        await self.service.create_crew_progressive(request, None, gen_id)
+
+            calls = m["sse"].broadcast_to_job.call_args_list
+            event_types = [c.args[1].data["type"] for c in calls]
+            assert "generation_complete" in event_types
+
+    @pytest.mark.asyncio
+    async def test_create_crew_progressive_lakebase_no_config(self):
+        """When lakebase config is None, uses env var fallback for instance name."""
+        request = self._make_progressive_request()
+        gen_id = "gen-lakebase-noconf"
+
+        with self._progressive_patches() as m:
+            with patch(
+                "src.db.database_router.is_lakebase_enabled",
+                new_callable=AsyncMock,
+                return_value=True,
+            ):
+                with patch(
+                    "src.db.database_router.get_lakebase_config_from_db",
+                    new_callable=AsyncMock,
+                    return_value=None,
+                ):
+                    mock_lb_session = AsyncMock()
+                    mock_lb_session.__aenter__ = AsyncMock(return_value=AsyncMock(
+                        commit=AsyncMock(), rollback=AsyncMock()
+                    ))
+                    mock_lb_session.__aexit__ = AsyncMock(return_value=False)
+
+                    with patch(
+                        "src.db.lakebase_session.get_lakebase_session",
+                        return_value=mock_lb_session,
+                    ) as mock_get_lb:
+                        await self.service.create_crew_progressive(request, None, gen_id)
+                        # Should fall back to env var or "kasal-lakebase"
+                        mock_get_lb.assert_called_once()
+
+    # ------------------------------------------------------------------
+    # Tool resolution exception (lines 1065-1066)
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_create_crew_progressive_tool_resolution_failure(self):
+        """When tool resolution fails, continues without tools."""
+        request = self._make_progressive_request(tools=["some-tool"])
+        gen_id = "gen-tool-fail"
+
+        with self._progressive_patches() as m:
+            m["gtd"].side_effect = RuntimeError("tool resolution failed")
+
+            await self.service.create_crew_progressive(request, None, gen_id)
+
+            calls = m["sse"].broadcast_to_job.call_args_list
+            event_types = [c.args[1].data["type"] for c in calls]
+            assert "generation_complete" in event_types
+
+    # ------------------------------------------------------------------
+    # Unassigned tasks - task_plan with empty assigned_agent (line 1084)
+    # To hit this path, we need a task whose assigned_agent is falsy AFTER
+    # the orphan-reassignment at line 964-966. This happens when the first
+    # agent has an empty name (plan_agents[0].get("name","") == "").
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_create_crew_progressive_task_empty_assigned_agent(self):
+        """Task with empty string assigned_agent goes to unassigned list.
+
+        When the first agent has name="" and a task references a non-existent agent,
+        the orphan reassignment sets assigned_agent="" which is falsy -> unassigned.
+        """
+        # First agent has empty name. The orphan reassignment code at line 965-966
+        # assigns tasks with missing/invalid assigned_agent to plan_agents[0].get("name","") = ""
+        # Then in the task grouping loop, assigned="" is falsy -> unassigned_tasks
+        plan = self._make_plan(
+            agents=[
+                {"name": "", "role": "Worker"},
+                {"name": "Agent2", "role": "R2"},
+            ],
+            tasks=[
+                {"name": "Task1", "assigned_agent": "Agent2"},
+                {"name": "Task2", "assigned_agent": "NonExistent"},  # Will be reassigned to ""
+            ],
+        )
+        agent_saves = [
+            {"id": "aid-1", "name": "", "role": "Worker"},
+            {"id": "aid-2", "name": "Agent2", "role": "R2"},
+        ]
+        task_saves = [
+            {"id": "tid-1", "name": "Task1", "description": "d1"},
+            {"id": "tid-2", "name": "Task2", "description": "d2"},
+        ]
+
+        task_responses = []
+        for ts in task_saves:
+            tr = Mock()
+            tr.name = ts["name"]
+            tr.description = ts["description"]
+            tr.expected_output = "output"
+            tr.tools = []
+            tr.llm_guardrail = None
+            task_responses.append(tr)
+
+        agent_configs = [
+            {"name": "", "role": "Worker", "goal": "G1", "backstory": "B1", "advanced_config": {}},
+            {"name": "Agent2", "role": "R2", "goal": "G2", "backstory": "B2", "advanced_config": {}},
+        ]
+
+        request = self._make_progressive_request(prompt="find and analyze data with 2 agents")
+        request.original_prompt = None
+        gen_id = "gen-empty-assigned"
+
+        with self._progressive_patches(plan=plan) as m:
+            agent_call_idx = [0]
+            task_call_idx = [0]
+
+            async def agent_gen_se(**kwargs):
+                idx = agent_call_idx[0]
+                agent_call_idx[0] += 1
+                return agent_configs[min(idx, len(agent_configs) - 1)]
+
+            async def agent_save_se(data, gc):
+                idx = min(agent_call_idx[0] - 1, len(agent_saves) - 1)
+                return agent_saves[idx]
+
+            async def task_gen_se(req, gc=None):
+                idx = task_call_idx[0]
+                task_call_idx[0] += 1
+                return task_responses[min(idx, len(task_responses) - 1)]
+
+            async def task_save_se(data, agent_id, gc):
+                name = data.get("name", "")
+                for s in task_saves:
+                    if s["name"] == name:
+                        return s
+                return task_saves[0]
+
+            m["agent_gen"].generate_agent = AsyncMock(side_effect=agent_gen_se)
+            m["repo"].create_single_agent = AsyncMock(side_effect=agent_save_se)
+            m["task_gen"].generate_task = AsyncMock(side_effect=task_gen_se)
+            m["repo"].create_single_task = AsyncMock(side_effect=task_save_se)
+
+            await self.service.create_crew_progressive(request, None, gen_id)
+
+            calls = m["sse"].broadcast_to_job.call_args_list
+            event_types = [c.args[1].data["type"] for c in calls]
+            assert "generation_complete" in event_types
+
+    # ------------------------------------------------------------------
+    # Advanced config keys applied to agent_data (line 1126)
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_create_crew_progressive_advanced_config_applied(self):
+        """Agent advanced_config keys are copied to agent_data."""
+        agent_gen_return = {
+            "name": "Agent1", "role": "Specialist",
+            "goal": "Do work", "backstory": "Expert",
+            "advanced_config": {
+                "max_iter": 5,
+                "verbose": True,
+                "allow_delegation": False,
+            },
+        }
+
+        request = self._make_progressive_request()
+        gen_id = "gen-adv-config"
+
+        with self._progressive_patches(agent_gen_return=agent_gen_return) as m:
+            await self.service.create_crew_progressive(request, None, gen_id)
+
+            # Verify create_single_agent was called with advanced config keys
+            call_args = m["repo"].create_single_agent.call_args
+            agent_data = call_args[0][0]
+            assert agent_data["max_iter"] == 5
+            assert agent_data["verbose"] is True
+            assert agent_data["allow_delegation"] is False
+
+    # ------------------------------------------------------------------
+    # Unassigned tasks with GenieTool (lines 1243-1298)
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_create_crew_progressive_unassigned_tasks_genie_tool(self):
+        """Unassigned tasks with GenieTool trigger tool_config_needed.
+
+        Uses an agent with name="" so that orphan-reassigned tasks get
+        assigned_agent="" (falsy) and end up in unassigned_tasks.
+        """
+        genie_tool_id = "genie-id"
+        tool_details = [
+            {"title": "GenieTool", "name": "GenieTool", "description": "Genie", "id": genie_tool_id},
+        ]
+
+        plan = self._make_plan(
+            agents=[
+                {"name": "", "role": "Worker"},
+                {"name": "Agent2", "role": "R2"},
+            ],
+            tasks=[
+                {"name": "Task1", "assigned_agent": "Agent2"},
+                {"name": "Unassigned Genie Task", "assigned_agent": "NonExistent"},
+            ],
+        )
+
+        agent_saves = [
+            {"id": "aid-1", "name": "", "role": "Worker"},
+            {"id": "aid-2", "name": "Agent2", "role": "R2"},
+        ]
+
+        task_response_genie = Mock()
+        task_response_genie.name = "Unassigned Genie Task"
+        task_response_genie.description = "Query with genie"
+        task_response_genie.expected_output = "Data"
+        task_response_genie.tools = [{"name": "GenieTool"}]
+        task_response_genie.llm_guardrail = None
+
+        task_response_normal = Mock()
+        task_response_normal.name = "Task1"
+        task_response_normal.description = "Normal task"
+        task_response_normal.expected_output = "Result"
+        task_response_normal.tools = []
+        task_response_normal.llm_guardrail = None
+
+        task_saves = [
+            {"id": "tid-1", "name": "Task1", "description": "Normal task"},
+            {"id": "tid-2", "name": "Unassigned Genie Task", "description": "Query with genie"},
+        ]
+
+        agent_configs = [
+            {"name": "", "role": "Worker", "goal": "G", "backstory": "B", "advanced_config": {}},
+            {"name": "Agent2", "role": "R2", "goal": "G2", "backstory": "B2", "advanced_config": {}},
+        ]
+
+        request = self._make_progressive_request(
+            prompt="find and analyze data with 2 agents", tools=["genie-id"]
+        )
+        request.original_prompt = None
+        gen_id = "gen-unassigned-genie"
+
+        with self._progressive_patches(
+            plan=plan, tool_details=tool_details
+        ) as m:
+            agent_call_idx = [0]
+            task_call_idx = [0]
+
+            async def agent_gen_se(**kwargs):
+                idx = agent_call_idx[0]
+                agent_call_idx[0] += 1
+                return agent_configs[min(idx, len(agent_configs) - 1)]
+
+            async def agent_save_se(data, gc):
+                idx = min(agent_call_idx[0] - 1, len(agent_saves) - 1)
+                return agent_saves[idx]
+
+            async def task_gen_se(req, gc=None):
+                idx = task_call_idx[0]
+                task_call_idx[0] += 1
+                if idx == 0:
+                    return task_response_normal
+                return task_response_genie
+
+            async def task_save_se(data, agent_id, gc):
+                name = data.get("name", "")
+                for s in task_saves:
+                    if s["name"] == name:
+                        return s
+                return task_saves[0]
+
+            m["agent_gen"].generate_agent = AsyncMock(side_effect=agent_gen_se)
+            m["repo"].create_single_agent = AsyncMock(side_effect=agent_save_se)
+            m["task_gen"].generate_task = AsyncMock(side_effect=task_gen_se)
+            m["repo"].create_single_task = AsyncMock(side_effect=task_save_se)
+
+            with patch.object(
+                self.service, "_create_tool_name_to_id_map",
+                return_value={"GenieTool": genie_tool_id},
+            ):
+                with patch.object(
+                    self.service, "_suggest_genie_space",
+                    new_callable=AsyncMock,
+                    return_value={"id": "space-1", "name": "Sales"},
+                ):
+                    await self.service.create_crew_progressive(request, None, gen_id)
+
+            calls = m["sse"].broadcast_to_job.call_args_list
+            event_types = [c.args[1].data["type"] for c in calls]
+            assert "tool_config_needed" in event_types
+
+    # ------------------------------------------------------------------
+    # Unassigned task exception handling (lines 1314-1324)
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_create_crew_progressive_unassigned_task_error(self):
+        """Error in unassigned task processing broadcasts entity_error.
+
+        Uses agent with name="" to force tasks into unassigned_tasks list.
+        """
+        plan = self._make_plan(
+            agents=[
+                {"name": "", "role": "Worker"},
+                {"name": "Agent2", "role": "R2"},
+            ],
+            tasks=[
+                {"name": "Assigned Task", "assigned_agent": "Agent2"},
+                {"name": "Failing Task", "assigned_agent": "NonExistent"},
+            ],
+        )
+
+        agent_saves = [
+            {"id": "aid-1", "name": "", "role": "Worker"},
+            {"id": "aid-2", "name": "Agent2", "role": "R2"},
+        ]
+
+        task_response_ok = Mock()
+        task_response_ok.name = "Assigned Task"
+        task_response_ok.description = "OK task"
+        task_response_ok.expected_output = "output"
+        task_response_ok.tools = []
+        task_response_ok.llm_guardrail = None
+
+        task_saved_ok = {"id": "tid-1", "name": "Assigned Task", "description": "OK task"}
+
+        agent_configs = [
+            {"name": "", "role": "Worker", "goal": "G", "backstory": "B", "advanced_config": {}},
+            {"name": "Agent2", "role": "R2", "goal": "G2", "backstory": "B2", "advanced_config": {}},
+        ]
+
+        request = self._make_progressive_request(prompt="find and analyze data with 2 agents")
+        request.original_prompt = None
+        gen_id = "gen-unassigned-err"
+
+        with self._progressive_patches(
+            plan=plan, task_gen_response=task_response_ok, task_saved=task_saved_ok,
+        ) as m:
+            agent_call_idx = [0]
+            call_count = [0]
+
+            async def agent_gen_se(**kwargs):
+                idx = agent_call_idx[0]
+                agent_call_idx[0] += 1
+                return agent_configs[min(idx, len(agent_configs) - 1)]
+
+            async def agent_save_se(data, gc):
+                idx = min(agent_call_idx[0] - 1, len(agent_saves) - 1)
+                return agent_saves[idx]
+
+            async def task_gen_se(req, gc=None):
+                call_count[0] += 1
+                if call_count[0] == 1:
+                    return task_response_ok
+                raise RuntimeError("unassigned task generation failed")
+
+            m["agent_gen"].generate_agent = AsyncMock(side_effect=agent_gen_se)
+            m["repo"].create_single_agent = AsyncMock(side_effect=agent_save_se)
+            m["task_gen"].generate_task = AsyncMock(side_effect=task_gen_se)
+
+            await self.service.create_crew_progressive(request, None, gen_id)
+
+            calls = m["sse"].broadcast_to_job.call_args_list
+            event_types = [c.args[1].data["type"] for c in calls]
+            assert "entity_error" in event_types
+            assert "generation_complete" in event_types
+
+            error_events = [
+                c for c in calls if c.args[1].data.get("type") == "entity_error"
+            ]
+            unassigned_errors = [
+                e for e in error_events
+                if e.args[1].data.get("entity_type") == "task"
+            ]
+            assert len(unassigned_errors) >= 1
+
+    # ------------------------------------------------------------------
+    # _generate_crew_plan logging exception (lines 1502-1503)
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_generate_crew_plan_log_failure_swallowed(self):
+        """Exception during plan LLM interaction logging is swallowed."""
+        request = Mock()
+        request.prompt = "build something"
+        plan_dict = {
+            "agents": [{"name": "A", "role": "R"}],
+            "tasks": [{"name": "T", "assigned_agent": "A"}],
+        }
+
+        with patch("src.services.crew_generation_service.TemplateService") as ts, \
+             patch("src.services.crew_generation_service.LLMManager") as lm, \
+             patch("src.services.crew_generation_service.robust_json_parser") as rjp:
+            ts.get_effective_template_content = AsyncMock(return_value="sys prompt")
+            lm.completion = AsyncMock(return_value='{"agents":[{"name":"A"}]}')
+            rjp.return_value = plan_dict
+
+            # Make the session factory raise to trigger the except on line 1502
+            mock_session_factory = AsyncMock()
+            mock_session_factory.__aenter__ = AsyncMock(
+                side_effect=RuntimeError("db connection failed")
+            )
+            mock_session_factory.__aexit__ = AsyncMock(return_value=False)
+
+            with patch(
+                "src.db.session.async_session_factory",
+                return_value=mock_session_factory,
+            ):
+                result = await self.service._generate_crew_plan(request, None, "m")
+
+            assert result == plan_dict
+            assert "agents" in result

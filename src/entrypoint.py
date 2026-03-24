@@ -380,6 +380,13 @@ def run_app():
                 async def serve_kasal_icon_16():
                     return FileResponse(kasal_icon_16)
 
+            # Serve Kasal icon 24px image
+            kasal_icon_24 = os.path.join(frontend_static_dir, "kasal-icon-24.png")
+            if os.path.exists(kasal_icon_24):
+                @app.get("/kasal-icon-24.png")
+                async def serve_kasal_icon_24():
+                    return FileResponse(kasal_icon_24)
+
             # Serve markdown files from docs directory
             docs_dir = os.path.join(frontend_static_dir, "docs")
             if os.path.exists(docs_dir):

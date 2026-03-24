@@ -158,27 +158,56 @@ class LakebaseConnectionService(BaseService):
 
     async def generate_credentials(self, instance_name: str) -> Any:
         """
-        Generate database credentials for Lakebase instance.
+        Generate database credentials for a Lakebase instance or autoscaling project.
+
+        Tries the provisioned DatabaseAPI first, then falls back to the
+        autoscaling PostgresAPI.
 
         Args:
-            instance_name: Name of the Lakebase instance
+            instance_name: Name of the Lakebase instance or project
 
         Returns:
-            Database credential object with token and expiration_time
+            Database credential object with token attribute
 
         Raises:
             Exception: If credential generation fails
         """
         w = await self.get_workspace_client()
-
         logger.info(f"Generating database credentials for instance: {instance_name}")
-        cred = w.database.generate_database_credential(
-            request_id=str(uuid.uuid4()),
-            instance_names=[instance_name]
-        )
 
-        logger.info(f"Generated database credential, token length: {len(cred.token)}")
-        return cred
+        # Try provisioned instance first
+        try:
+            cred = w.database.generate_database_credential(
+                request_id=str(uuid.uuid4()),
+                instance_names=[instance_name]
+            )
+            logger.info(f"Generated provisioned credential, token length: {len(cred.token)}")
+            return cred
+        except Exception as e:
+            if "not found" not in str(e).lower() and "not_found" not in str(e).lower():
+                raise
+            logger.info(f"Instance {instance_name} not found in DatabaseAPI, trying PostgresAPI")
+
+        # Fall back to autoscaling project
+        # Find the primary endpoint on the production branch
+        try:
+            endpoints = list(w.postgres.list_endpoints(
+                parent=f"projects/{instance_name}/branches/production"
+            ))
+            endpoint_name = None
+            for ep in endpoints:
+                endpoint_name = ep.name
+                break
+
+            if not endpoint_name:
+                raise ValueError(f"No endpoints found for project {instance_name}")
+
+            cred = w.postgres.generate_database_credential(endpoint=endpoint_name)
+            logger.info(f"Generated autoscaling credential, token length: {len(cred.token)}")
+            return cred
+        except Exception as e:
+            logger.error(f"Failed to generate credentials for {instance_name}: {e}")
+            raise
 
     async def test_connection(
         self,
