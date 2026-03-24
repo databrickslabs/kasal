@@ -5,8 +5,9 @@
  * Just enter workspace URL and click setup - everything else is automatic.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
+  Autocomplete,
   Box,
   Paper,
   Typography,
@@ -22,11 +23,6 @@ import {
   Button,
   Chip,
   TextField,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  FormHelperText,
   Tooltip,
 } from '@mui/material';
 import {
@@ -77,7 +73,7 @@ import { IndexDocumentsDialog } from './IndexDocumentsDialog';
 import LakebaseDocumentsDialog from './LakebaseDocumentsDialog';
 
 export const DatabricksOneClickSetup: React.FC = () => {
-  const [mode, setMode] = useState<'disabled' | 'databricks' | 'lakebase'>('disabled');
+  const [mode, setMode] = useState<'disabled' | 'lakebase'>('disabled');
   const [setupMode, setSetupMode] = useState<'auto' | 'manual'>('auto');
   const [detectedWorkspaceUrl, setDetectedWorkspaceUrl] = useState<string | null>(null);
   const [catalog, setCatalog] = useState('ml');
@@ -101,8 +97,12 @@ export const DatabricksOneClickSetup: React.FC = () => {
   const [lakebaseConfig, setLakebaseConfig] = useState<LakebaseMemoryConfig>(DEFAULT_LAKEBASE_CONFIG);
   const [lakebaseStatus, setLakebaseStatus] = useState<{ success: boolean; message: string } | null>(null);
   const [lakebaseLoading, setLakebaseLoading] = useState(false);
-  const [lakebaseInstances, setLakebaseInstances] = useState<Array<{ name: string; state: string; capacity?: string; read_write_dns?: string }>>([]);
+  const [lakebaseInstances, setLakebaseInstances] = useState<Array<{ name: string; state: string; capacity?: string; read_write_dns?: string; type?: 'provisioned' | 'autoscaling' }>>([]);
   const [lakebaseInstancesLoading, setLakebaseInstancesLoading] = useState(false);
+  const [instanceSearch, setInstanceSearch] = useState('');
+  const [instancePage, setInstancePage] = useState(1);
+  const [instanceHasMore, setInstanceHasMore] = useState(false);
+  const instanceSearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [lakebaseTableStats, setLakebaseTableStats] = useState<Record<string, { table_name: string; exists: boolean; row_count: number }> | null>(null);
   
   // Save relationship retrieval setting when it changes
@@ -357,7 +357,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
       console.log('Endpoints memory:', savedInfo.endpoints?.memory);
       console.log('Endpoints document:', savedInfo.endpoints?.document);
       setSavedConfig(savedInfo);
-      setMode('databricks');
+      setMode('lakebase');
       
       // Load relationship retrieval setting from the top-level config
       setEnableRelationshipRetrieval(configData.enable_relationship_retrieval || false);
@@ -385,7 +385,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
   };
 
   const handleModeChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const newMode = event.target.value as 'disabled' | 'databricks' | 'lakebase';
+    const newMode = event.target.value as 'disabled' | 'lakebase';
     setMode(newMode);
 
     if (newMode === 'disabled') {
@@ -420,18 +420,39 @@ export const DatabricksOneClickSetup: React.FC = () => {
     }
   };
 
-  const loadLakebaseInstances = async () => {
+  const loadLakebaseInstances = useCallback(async (search?: string, page?: number, append?: boolean) => {
     setLakebaseInstancesLoading(true);
     try {
-      const response = await apiClient.get('/database-management/lakebase/instances');
-      setLakebaseInstances(response.data || []);
+      const requestPage = page || 1;
+      const params: Record<string, string | number> = {
+        page: requestPage,
+        page_size: 30,
+      };
+      const searchQuery = search !== undefined ? search : instanceSearch;
+      if (searchQuery) {
+        params.search = searchQuery;
+      }
+      const response = await apiClient.get<{
+        items: Array<{ name: string; state: string; capacity?: string; read_write_dns?: string; type?: 'provisioned' | 'autoscaling' }>;
+        total: number;
+        page: number;
+        total_pages: number;
+      }>('/database-management/lakebase/instances', { params });
+      const newItems = response.data.items || [];
+      if (append) {
+        setLakebaseInstances(prev => [...prev, ...newItems]);
+      } else {
+        setLakebaseInstances(newItems);
+      }
+      setInstancePage(response.data.page || 1);
+      setInstanceHasMore((response.data.page || 1) < (response.data.total_pages || 1));
     } catch (err) {
       console.error('Failed to load Lakebase instances:', err);
-      setLakebaseInstances([]);
+      if (!append) setLakebaseInstances([]);
     } finally {
       setLakebaseInstancesLoading(false);
     }
-  };
+  }, [instanceSearch]);
 
   const loadLakebaseTableStats = async (instanceName: string) => {
     try {
@@ -1346,17 +1367,6 @@ export const DatabricksOneClickSetup: React.FC = () => {
 
       <RadioGroup value={mode} onChange={handleModeChange} row sx={{ mb: 2 }}>
         <FormControlLabel
-          value="databricks"
-          control={<Radio size="small" />}
-          label={
-            <Box sx={{ display: 'flex', alignItems: 'center' }}>
-              <CloudSyncIcon sx={{ fontSize: 18, mr: 0.5 }} />
-              Databricks Vector Search
-            </Box>
-          }
-          sx={{ mr: 3 }}
-        />
-        <FormControlLabel
           value="lakebase"
           control={<Radio size="small" />}
           label={
@@ -1379,7 +1389,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
         />
       </RadioGroup>
 
-      <Collapse in={mode === 'databricks'}>
+      <Collapse in={false /* Databricks Vector Search removed */}>
         <Box>
           {(!savedConfig || !savedConfig.workspace_url) && (
             <>
@@ -1648,54 +1658,120 @@ export const DatabricksOneClickSetup: React.FC = () => {
             <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1.5, textTransform: 'uppercase', fontSize: '0.7rem', letterSpacing: '0.08em' }}>
               Connection
             </Typography>
-            <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
-              <FormControl sx={{ flex: 1 }} required>
-                <InputLabel size="small">Lakebase Instance</InputLabel>
-                <Select
-                  size="small"
-                  value={lakebaseConfig.instance_name || ''}
-                  onChange={(e) => {
-                    setLakebaseConfig(prev => ({ ...prev, instance_name: e.target.value as string, tables_initialized: false }));
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+              <Autocomplete
+                fullWidth
+                freeSolo
+                options={lakebaseInstances}
+                getOptionLabel={(option) => typeof option === 'string' ? option : option.name}
+                value={lakebaseInstances.find(i => i.name === lakebaseConfig.instance_name) || null}
+                inputValue={instanceSearch}
+                onInputChange={(_e, value, reason) => {
+                  setInstanceSearch(value);
+                  if (reason === 'input') {
+                    if (instanceSearchTimeout.current) clearTimeout(instanceSearchTimeout.current);
+                    instanceSearchTimeout.current = setTimeout(() => {
+                      setInstancePage(1);
+                      loadLakebaseInstances(value, 1);
+                    }, 300);
+                  }
+                }}
+                onChange={(_e, value) => {
+                  if (value && typeof value !== 'string') {
+                    setLakebaseConfig(prev => ({ ...prev, instance_name: value.name, tables_initialized: false }));
                     setLakebaseStatus(null);
                     setLakebaseTableStats(null);
-                  }}
-                  label="Lakebase Instance"
-                  disabled={lakebaseInstancesLoading}
-                  endAdornment={lakebaseInstancesLoading ? <CircularProgress size={18} sx={{ mr: 2 }} /> : undefined}
-                >
-                  <MenuItem value="">
-                    <em>Select an instance</em>
-                  </MenuItem>
-                  {lakebaseInstances.map((inst) => (
-                    <MenuItem key={inst.name} value={inst.name}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                        <Typography variant="body2">{inst.name}</Typography>
-                        <Chip
-                          label={inst.state}
-                          size="small"
-                          color={inst.state === 'ACTIVE' || inst.state === 'AVAILABLE' ? 'success' : 'default'}
-                          sx={{ height: 20, fontSize: '0.7rem', ml: 2 }}
-                        />
+                  }
+                }}
+                onOpen={() => {
+                  if (lakebaseInstances.length === 0 && !lakebaseInstancesLoading) {
+                    loadLakebaseInstances('', 1);
+                  }
+                }}
+                loading={lakebaseInstancesLoading}
+                filterOptions={(x) => x}
+                isOptionEqualToValue={(option, value) => option.name === value.name}
+                ListboxProps={{
+                  onScroll: (event) => {
+                    const listbox = event.currentTarget;
+                    if (
+                      listbox.scrollTop + listbox.clientHeight >= listbox.scrollHeight - 20 &&
+                      instanceHasMore &&
+                      !lakebaseInstancesLoading
+                    ) {
+                      const nextPage = instancePage + 1;
+                      setInstancePage(nextPage);
+                      loadLakebaseInstances(instanceSearch, nextPage, true);
+                    }
+                  },
+                  style: { maxHeight: 300 },
+                }}
+                renderOption={(props, option) => (
+                  <li {...props} key={option.name}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%', py: 0.5 }}>
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          <Typography variant="body2" noWrap>{option.name}</Typography>
+                          {option.type && (
+                            <Chip
+                              label={option.type === 'autoscaling' ? 'Auto' : 'Prov'}
+                              size="small"
+                              variant="outlined"
+                              color={option.type === 'autoscaling' ? 'primary' : 'default'}
+                              sx={{ height: 18, fontSize: '0.65rem', '& .MuiChip-label': { px: 0.5 } }}
+                            />
+                          )}
+                        </Box>
                       </Box>
-                    </MenuItem>
-                  ))}
-                </Select>
-                <FormHelperText>
-                  {lakebaseInstances.length === 0 && !lakebaseInstancesLoading
-                    ? 'No instances found. Create one in Database Management first.'
-                    : 'Select the Lakebase instance for memory storage'}
-                </FormHelperText>
-              </FormControl>
-              <Button
-                variant="outlined"
+                      <Chip
+                        label={option.state || 'UNKNOWN'}
+                        size="small"
+                        color={
+                          option.state === 'ACTIVE' || option.state === 'AVAILABLE' || option.state === 'RUNNING'
+                            ? 'success'
+                            : option.state === 'STOPPED' || option.state === 'STOPPING'
+                            ? 'warning'
+                            : option.state === 'ERROR' || option.state === 'FAILED'
+                            ? 'error'
+                            : 'default'
+                        }
+                        sx={{ height: 20, fontSize: '0.7rem' }}
+                      />
+                    </Box>
+                  </li>
+                )}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    size="small"
+                    label="Lakebase Instance"
+                    placeholder="Search instances..."
+                    required
+                    InputProps={{
+                      ...params.InputProps,
+                      endAdornment: (
+                        <>
+                          {lakebaseInstancesLoading ? <CircularProgress size={18} /> : null}
+                          {params.InputProps.endAdornment}
+                        </>
+                      ),
+                    }}
+                    helperText={
+                      lakebaseInstances.length === 0 && !lakebaseInstancesLoading
+                        ? 'No instances found. Create one in Database Management first.'
+                        : 'Search and select a Lakebase instance for memory storage'
+                    }
+                  />
+                )}
+              />
+              <IconButton
                 size="small"
-                startIcon={lakebaseInstancesLoading ? <CircularProgress size={14} /> : <RefreshIcon />}
+                onClick={() => loadLakebaseInstances('', 1)}
                 disabled={lakebaseInstancesLoading}
-                onClick={loadLakebaseInstances}
-                sx={{ mt: '4px', minWidth: 'auto', px: 1.5, whiteSpace: 'nowrap' }}
+                sx={{ mt: '8px' }}
               >
-                Refresh
-              </Button>
+                <RefreshIcon fontSize="small" />
+              </IconButton>
               <Button
                 variant="outlined"
                 size="small"

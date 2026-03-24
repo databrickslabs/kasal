@@ -335,7 +335,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   // Responsive layout — computed overrides, never mutates the store
   const { isCompact, isMobile } = useResponsiveLayout();
   const effectiveChatVisible = showChatPanel; // Always respect user toggle
-  const effectiveChatCollapsed = (isCompact || isMobile || areFlowsVisible) ? true : isChatCollapsed; // Force-collapse on compact, mobile, & flow canvas
+  const effectiveChatCollapsed = (isCompact || isMobile) ? true : isChatCollapsed; // Force-collapse on compact & mobile
   const effectiveChatWidth = effectiveChatCollapsed ? chatPanelCollapsedWidth : chatPanelWidth;
   const effectiveLeftMargin = leftSidebarBaseWidth; // Always reserve sidebar space
 
@@ -1156,8 +1156,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           position: 'relative',
           marginLeft: `${effectiveLeftMargin}px` // Push entire content area to the right of LeftSidebar
         }}>
-          {/* Chat Panel on Left (when positioned left) - Force-collapsed when flow panel is visible */}
-          {effectiveChatVisible && chatPanelSide === 'left' && (!areFlowsVisible || effectiveChatCollapsed) && (
+          {/* Chat Panel on Left (when positioned left) - Hidden when flow panel is visible */}
+          {effectiveChatVisible && chatPanelSide === 'left' && !areFlowsVisible && (
             <Box
               onMouseEnter={() => {
                 window.postMessage({ type: 'chat-hover-state', isHovering: true }, '*');
@@ -1376,8 +1376,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               }}
             />
 
-            {/* Chat Panel on Right (when positioned right) - Force-collapsed when flow panel is visible */}
-            {effectiveChatVisible && chatPanelSide === 'right' && (!areFlowsVisible || effectiveChatCollapsed) && (
+            {/* Chat Panel on Right (when positioned right) - Hidden when flow panel is visible */}
+            {effectiveChatVisible && chatPanelSide === 'right' && !areFlowsVisible && (
               <Box
                 onMouseEnter={() => {
                   window.postMessage({ type: 'chat-hover-state', isHovering: true }, '*');

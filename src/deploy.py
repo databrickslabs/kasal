@@ -121,12 +121,11 @@ def configure_oauth_scopes(app_name, exclude_dataplane=True):
             # Dashboards/Genie
             "dashboards.genie",
 
-            # Unity Catalog - CRITICAL for volumes and catalog operations
+            # Unity Catalog - CRITICAL for catalog operations
             "catalog.connections",
             "catalog.catalogs:read",
             "catalog.tables:read",
             "catalog.schemas:read",
-            "catalog.volumes",
         ]
 
         # Add data-plane scope only if explicitly requested
@@ -189,12 +188,13 @@ def configure_oauth_scopes(app_name, exclude_dataplane=True):
         else:
             logger.error(f"OAuth scope configuration failed with exit code {result.returncode}")
 
-            # Check for specific scope errors
-            if result.stderr and "is not a valid scope" in result.stderr:
+            # Log actual error for debugging
+            if result.stderr:
+                logger.error(f"Scope error: {result.stderr.strip()}")
+            if result.stdout:
+                logger.error(f"Scope output: {result.stdout.strip()}")
+            if "is not a valid scope" in (result.stderr or ""):
                 logger.warning("Invalid scope detected. The app may require manual scope configuration.")
-            else:
-                logger.debug(f"Error output: {result.stderr}")
-                logger.debug(f"Standard output: {result.stdout}")
 
             return False
 

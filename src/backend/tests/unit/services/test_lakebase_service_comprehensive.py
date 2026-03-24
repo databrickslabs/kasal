@@ -522,12 +522,9 @@ class TestLakebaseServiceTestConnection:
         svc = LakebaseService.__new__(LakebaseService)
         svc.connection_service = MagicMock()
 
-        mock_ws = MagicMock()
-        mock_ws.database.get_database_instance.side_effect = Exception(
-            "Provided OAuth token does not have required scopes: postgres"
-        )
-
-        with patch.object(svc, "get_workspace_client", new_callable=AsyncMock, return_value=mock_ws), \
+        # test_connection now uses self.get_instance() instead of w.database directly
+        with patch.object(svc, "get_instance", new_callable=AsyncMock,
+                         side_effect=Exception("Provided OAuth token does not have required scopes: postgres")), \
              patch.dict("os.environ", {"DATABRICKS_CLIENT_ID": "test-spn-id"}):
             result = await svc.test_connection("my-instance")
 
@@ -544,12 +541,8 @@ class TestLakebaseServiceTestConnection:
         svc = LakebaseService.__new__(LakebaseService)
         svc.connection_service = MagicMock()
 
-        mock_ws = MagicMock()
-        mock_ws.database.get_database_instance.side_effect = Exception(
-            "Provided OAuth token does not have required scopes: postgres"
-        )
-
-        with patch.object(svc, "get_workspace_client", new_callable=AsyncMock, return_value=mock_ws), \
+        with patch.object(svc, "get_instance", new_callable=AsyncMock,
+                         side_effect=Exception("Provided OAuth token does not have required scopes: postgres")), \
              patch.dict("os.environ", {}, clear=True):
             result = await svc.test_connection("my-instance")
 
@@ -565,10 +558,8 @@ class TestLakebaseServiceTestConnection:
         svc = LakebaseService.__new__(LakebaseService)
         svc.connection_service = MagicMock()
 
-        mock_ws = MagicMock()
-        mock_ws.database.get_database_instance.side_effect = Exception("Connection refused")
-
-        with patch.object(svc, "get_workspace_client", new_callable=AsyncMock, return_value=mock_ws):
+        with patch.object(svc, "get_instance", new_callable=AsyncMock,
+                         side_effect=Exception("Connection refused")):
             result = await svc.test_connection("my-instance")
 
         assert result["success"] is False
