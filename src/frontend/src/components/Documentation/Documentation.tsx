@@ -40,6 +40,13 @@ const docSections: DocSection[] = [
     ],
   },
   {
+    label: 'Security',
+    items: [
+      { label: 'Security Compliance', file: 'README_SECURITY_COMPLIANCE' },
+      { label: 'Security Test Guide', file: 'README_SECURITY_GUARDRAILS_TESTGUIDE' },
+    ],
+  },
+  {
     label: 'Development',
     items: [
       { label: 'Developer Guide', file: 'DEVELOPER_GUIDE' },
