@@ -926,7 +926,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
       }
 
       // Validate bulk data
-      if (!bulkData.crews && !bulkData.flows && !bulkData.agents && !bulkData.tasks) {
+      if (!bulkData.crews && !bulkData.flows && !bulkData.agents && !bulkData.tasks && !bulkData.crew) {
         throw new Error('Invalid import data: no valid data found');
       }
 
