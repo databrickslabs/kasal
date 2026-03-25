@@ -44,6 +44,7 @@ const docSections: DocSection[] = [
     items: [
       { label: 'Security Compliance', file: 'README_SECURITY_COMPLIANCE' },
       { label: 'Security Test Guide', file: 'README_SECURITY_GUARDRAILS_TESTGUIDE' },
+      { label: 'Supply Chain Security', file: 'README_SECURITY_SUPPLY_CHAIN' },
     ],
   },
   {
