@@ -42,6 +42,40 @@ The attack runs in three stages:
    ("System Telemetry Service") that polls `checkmarx.zone/raw` every 50 minutes and executes
    downloaded binaries.
 
+### Additional Details (Sonatype Analysis, March 24 2026)
+
+The Sonatype Security Research team independently analysed the same attack and added several
+details not covered by the Endor Labs report:
+
+**Active credential use (not just collection)**
+The harvester doesn't only *collect* credentials — it actively *uses* them. It queries AWS APIs
+(Secrets Manager, SSM) using SigV4-signed requests, enumerates Kubernetes secrets via the K8s
+API, and deploys privileged pods. An attacker can therefore cause direct damage in AWS and K8s
+within seconds of the payload running, before any rotation is possible.
+
+**Additional harvester targets missed in initial analysis**
+- **Git credentials** — `.gitconfig`, credential helpers, stored GitHub/GitLab tokens
+- **Helm configurations** — `~/.helm/` chart repository credentials
+- **Webhook URLs** — any webhook endpoint found in config files or env vars
+
+**Anti-sandbox kill switch**
+The `checkmarx.zone/raw` C2 returns a link to an English remastering of *Bad Apple!!* (a
+Japanese meme song) when queried from sandbox/researcher IPs, causing automated analysis to
+conclude the endpoint is benign. The actual binary payload is only served to confirmed live
+victim machines. This means sandbox-based malware scanners may have classified the persistence
+dropper as clean.
+
+**Potential LAPSUS$ connection**
+Sonatype notes active speculation that TeamPCP is related to or affiliated with LAPSUS$. This
+remains under investigation and is not confirmed. If true, it would indicate a significantly
+more funded and sophisticated actor than the initial assessment suggested.
+
+**Scale**
+litellm has approximately 3 million daily downloads. Even with the packages available for only
+~2 hours before removal, the potential exposure window is substantial.
+
+---
+
 ### Attribution: TeamPCP
 
 TeamPCP is the threat actor behind a month-long campaign spanning five ecosystems:
@@ -99,6 +133,29 @@ require distinct defenses:
   reducing what the credential harvester would find
 - API keys are stored in the database encrypted, not as plain environment variables
 - The version pin at `1.74.9` is exact (`==`), not a range (`>=`)
+
+### Developer Machine Risk (separate from the deployed app)
+
+Even though the *deployed* Kasal app is safe, any **developer** who ran
+`pip install litellm==1.82.7` or `1.82.8` locally — e.g. to test a litellm bump — would have
+triggered the payload on their dev machine. The Sonatype analysis adds two targets directly
+relevant to Kasal developers:
+
+| At-risk credential | Where it lives on a dev machine | What the attacker gets |
+|---|---|---|
+| **Git credentials** | `~/.gitconfig`, `~/.git-credentials`, GitHub token in env | Push access to the Kasal repo |
+| **Webhook URLs** | `.env` files, shell history | HITL webhook endpoints, Slack webhooks |
+| **Databricks CLI token** | `~/.databrickscfg` | Full workspace API access |
+| **API keys** (OpenAI, Serper, etc.) | `.env.local`, shell history | Direct LLM provider billing abuse |
+
+The harvester **actively queries** any AWS/K8s credentials it finds — it doesn't just log them.
+A developer running litellm in a local venv with AWS credentials in their shell would have had
+those credentials actively used within seconds of install.
+
+**If any team member installed `1.82.7` or `1.82.8` at any point:**
+1. Rotate all credentials that were present on that machine
+2. Check for persistence artifacts (see IoCs section)
+3. Revoke and regenerate any GitHub tokens, Databricks PATs, API keys stored locally
 
 ---
 
@@ -233,6 +290,13 @@ would have been a complete stop.
 
 **Note:** This is the single highest-leverage mitigation for the whole class of PyPI supply chain
 attacks, not just litellm.
+
+**Concrete products that implement this today:**
+- **Sonatype Repository Firewall** — automatically detected and blocked `1.82.7` and `1.82.8`
+  *within seconds* of publication according to Sonatype's own disclosure. This is exactly the
+  automated defense that would have protected any environment using their proxy.
+- **Databricks' internal npm proxy** — already mandated for npm; the same architecture applied
+  to PyPI would close this gap internally.
 
 ---
 
