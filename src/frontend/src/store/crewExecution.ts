@@ -7,6 +7,7 @@ import { useFlowExecutionStore } from './flowExecutionStore';
 import { Tool } from '../types/tool';
 import { FlowService, FlowCheckpoint } from '../api/FlowService';
 import { assessTrifecta, TrifectaAssessment } from '../utils/toolCapabilityManifest';
+import { ToolService } from '../api/ToolService';
 
 interface RunHistoryItem {
   id: string;
@@ -847,7 +848,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     // Runs on every "Run" click unless the user has already acknowledged the
     // warning for this execution (trifectaAcknowledged is set by handleTrifectaProceed).
     if (!state.trifectaAcknowledged) {
-      // Collect all tool titles from agent + task nodes
+      // Collect all tool IDs from agent + task nodes
       const toolIdSet = new Set<string>();
       for (const node of resolvedNodes) {
         const data = node.data as Record<string, unknown>;
@@ -856,9 +857,19 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           for (const t of nodeTools) toolIdSet.add(String(t));
         }
       }
-      const toolTitles = state.tools
-        .filter(t => toolIdSet.has(String(t.id)))
-        .map(t => t.title);
+      // Fetch the authoritative tool list from the API to resolve IDs → titles
+      // (state.tools is local component state in CrewCanvas and not available here)
+      let toolTitles: string[] = [];
+      try {
+        const allTools = await ToolService.listEnabledTools();
+        toolTitles = allTools
+          .filter(t => toolIdSet.has(String(t.id)))
+          .map(t => t.title);
+      } catch {
+        // If the fetch fails, skip the check and proceed with execution
+        console.warn('[CrewExecution] Could not fetch tools for trifecta check — skipping');
+        set({ trifectaAcknowledged: false });
+      }
 
       const assessment = assessTrifecta(toolTitles);
       if (assessment.hasTrifecta) {
