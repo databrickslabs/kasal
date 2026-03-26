@@ -84,6 +84,7 @@ TOOL_CAPABILITIES: Dict[str, ToolCapability] = {
     "Power BI Semantic Model Fetcher":                _S | _E,   # fetches PBI model metadata via API
     "Power BI Semantic Model DAX Generator":          _S | _E,   # reads + executes DAX against PBI
     "Power BI Metadata Reducer":                      _S | _E,   # processes PBI semantic model data
+    "Power BI DAX Executor":                          _S | _E,   # executes DAX against PBI — reads sensitive data + external comm
 
     # DatabricksJobsTool runtime name (BaseTool.name differs from class name)
     "Databricks Jobs Manager":                        _S | _E | _D,

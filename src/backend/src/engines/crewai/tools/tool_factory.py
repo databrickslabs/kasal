@@ -139,6 +139,13 @@ except ImportError as e:
     PowerBIMetadataReducerTool = None
     logging.warning(f"Could not import PowerBIMetadataReducerTool: {e}")
 
+# Power BI DAX Executor Tool
+try:
+    from .custom.powerbi_dax_executor_tool import PowerBIDaxExecutorTool
+except Exception as e:
+    PowerBIDaxExecutorTool = None
+    logging.warning(f"Could not import PowerBIDaxExecutorTool: {e}")
+
 # Setup logger
 logger = logging.getLogger(__name__)
 
@@ -205,6 +212,8 @@ class ToolFactory:
             self._tool_implementations["Power BI Semantic Model DAX Generator"] = PowerBISemanticModelDaxTool
         if PowerBIMetadataReducerTool is not None:
             self._tool_implementations["Power BI Metadata Reducer"] = PowerBIMetadataReducerTool
+        if PowerBIDaxExecutorTool is not None:
+            self._tool_implementations["Power BI DAX Executor"] = PowerBIDaxExecutorTool
 
         # Initialize _initialized flag
         self._initialized = False
