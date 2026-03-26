@@ -70,6 +70,7 @@ import { CrewFlowSelectionDialog } from '../Crew/CrewFlowDialog';
 import SaveCrew from '../Crew/SaveCrew';
 import SaveFlow from '../Flow/SaveFlow';
 import CheckpointResumeDialog from '../Flow/CheckpointResumeDialog';
+import TrifectaWarningDialog from '../Crew/TrifectaWarningDialog';
 
 // Services & Utilities
 import { useAgentManager } from '../../hooks/workflow/useAgentManager';
@@ -530,7 +531,12 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     handleCheckpointStartFresh,
     handleCheckpointResume,
     handleCheckpointDelete,
-    refreshCheckpoints
+    refreshCheckpoints,
+    // Trifecta warning dialog state
+    showTrifectaDialog,
+    trifectaAssessment,
+    handleTrifectaProceed,
+    handleTrifectaCancel,
   } = useCrewExecutionStore();
 
   // Debug logging for running tab
@@ -1749,6 +1755,14 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           jobId={selectedExecutionJobId || ''}
           isConnecting={isConnectingLogs}
           connectionError={connectionError}
+        />
+
+        {/* Trifecta Security Warning Dialog */}
+        <TrifectaWarningDialog
+          open={showTrifectaDialog}
+          assessment={trifectaAssessment}
+          onProceed={handleTrifectaProceed}
+          onCancel={handleTrifectaCancel}
         />
 
         {/* Checkpoint Resume Dialog */}
