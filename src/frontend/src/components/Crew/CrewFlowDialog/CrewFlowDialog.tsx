@@ -991,10 +991,10 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
           try {
             await CrewService.saveCrew({
               name,
-              nodes: (normalized.nodes as unknown[]) || [],
-              edges: (normalized.edges as unknown[]) || [],
-              agent_ids: (normalized.agent_ids as number[]) || [],
-              task_ids: (normalized.task_ids as number[]) || []
+              nodes: (normalized.nodes as _Node[]) || [],
+              edges: (normalized.edges as _Edge[]) || [],
+              agent_ids: (normalized.agent_ids as string[]) || [],
+              task_ids: (normalized.task_ids as string[]) || []
             });
             importedCrews++;
             return;
