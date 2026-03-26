@@ -35,6 +35,7 @@ tools_data = [
     (79, "Power BI Semantic Model Fetcher", "Extracts and caches semantic model metadata (measures, tables, relationships, columns, sample data, default filters) from Power BI. Uses 3-tier fallback: Fabric TMDL API, Admin Scanner API, or DAX-based extraction. Output is JSON that can be fed directly into the 'Power BI Semantic Model DAX Generator' tool for multi-step workflows. Caches metadata for same-day reuse. Requires Service Principal with SemanticModel.ReadWrite.All permission or user OAuth token.", "database"),
     (80, "Power BI Semantic Model DAX Generator", "Generates and executes DAX queries from natural language questions using LLM with self-correction retry loop (up to N retries). Accepts model context JSON from the 'Power BI Semantic Model Fetcher' tool output, or reads from cache as fallback. Features business term mappings, field synonyms, active filter auto-application, and optional visual reference lookup. Requires Service Principal or user OAuth token for DAX execution, plus Databricks LLM endpoint for DAX generation.", "database"),
     (81, "Power BI Metadata Reducer", "Intelligently reduces semantic model metadata to only what's relevant for a specific question. Uses fuzzy matching, LLM-powered table/measure selection, and measure dependency resolution to filter the full model context from the Fetcher tool. Produces a focused, reduced JSON that dramatically improves DAX generation accuracy. Place between Fetcher and DAX Generator tools in multi-step workflows. Pass the Fetcher output as 'model_context_json' and the user's business question as 'user_question'.", "database"),
+    (82, "Power BI DAX Executor", "Executes a pre-configured DAX query directly against a Power BI semantic model via the Execute Queries API. Accepts workspace ID, dataset ID, authentication credentials, and a DAX EVALUATE statement. Returns results as a formatted markdown table or JSON. No LLM required — use when you already have a working DAX query and want to run it against Power BI.", "database"),
 ]
 
 def get_tool_configs():
@@ -306,6 +307,21 @@ def get_tool_configs():
             "workspace_id": "",
             "llm_model": "databricks-claude-sonnet-4",
         },  # Power BI Metadata Reducer
+        "82": {
+            "result_as_answer": True,
+            "workspace_id": "",
+            "dataset_id": "",
+            "dax_query": "",
+            "auth_method": None,
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
+            "username": "",
+            "password": "",
+            "access_token": "",
+            "output_format": "markdown",
+            "max_rows": 1000,
+        },  # Power BI DAX Executor
     }
 
 async def seed_async():
@@ -323,7 +339,7 @@ async def seed_async():
     tools_error = 0
 
     # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81]
+    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82]
 
     for tool_id, title, description, icon in tools_data:
         try:
@@ -386,7 +402,7 @@ def seed_sync():
     tools_error = 0
 
     # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81]
+    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82]
 
     for tool_id, title, description, icon in tools_data:
         try:

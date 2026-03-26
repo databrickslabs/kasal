@@ -55,6 +55,7 @@ import { PowerBIReportReferencesConfigSelector, PowerBIReportReferencesConfig } 
 import { PowerBIFetcherConfigSelector, PowerBIFetcherConfig } from '../Common/PowerBIFetcherConfigSelector';
 import { PowerBIDaxConfigSelector, PowerBIDaxConfig } from '../Common/PowerBIDaxConfigSelector';
 import { PowerBIMetadataReducerConfigSelector, PowerBIMetadataReducerConfig } from '../Common/PowerBIMetadataReducerConfigSelector';
+import { PowerBIDaxExecutorConfigSelector, PowerBIDaxExecutorConfig } from '../Common/PowerBIDaxExecutorConfigSelector';
 import { PerplexityConfig, SerperConfig } from '../../types/config';
 import { type LLMGuardrailConfig } from '../../types/task';
 import { ModelService } from '../../api/ModelService';
@@ -149,6 +150,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const [powerBIFetcherConfig, setPowerBIFetcherConfig] = useState<PowerBIFetcherConfig>({});
   const [powerBIDaxConfig, setPowerBIDaxConfig] = useState<PowerBIDaxConfig>({});
   const [powerBIReducerConfig, setPowerBIReducerConfig] = useState<PowerBIMetadataReducerConfig>({});
+  const [powerBIDaxExecutorConfig, setPowerBIDaxExecutorConfig] = useState<PowerBIDaxExecutorConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
   const [showBestPractices, setShowBestPractices] = useState(false);
@@ -259,6 +261,11 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       // Check for Power BI Metadata Reducer config
       if (initialData.tool_configs['Power BI Metadata Reducer']) {
         setPowerBIReducerConfig(initialData.tool_configs['Power BI Metadata Reducer'] as PowerBIMetadataReducerConfig);
+      }
+
+      // Check for Power BI DAX Executor config
+      if (initialData.tool_configs['Power BI DAX Executor']) {
+        setPowerBIDaxExecutorConfig(initialData.tool_configs['Power BI DAX Executor'] as PowerBIDaxExecutorConfig);
       }
 
       // Check for MCP_SERVERS config
@@ -776,6 +783,30 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           return tool?.title === 'Power BI Metadata Reducer';
         })) {
           delete updatedToolConfigs['Power BI Metadata Reducer'];
+        }
+
+        // Handle Power BI DAX Executor config
+        if (powerBIDaxExecutorConfig && Object.keys(powerBIDaxExecutorConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI DAX Executor';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            'Power BI DAX Executor': powerBIDaxExecutorConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI DAX Executor';
+        })) {
+          delete updatedToolConfigs['Power BI DAX Executor'];
         }
 
         // Handle Power BI Comprehensive Analysis Tool config
@@ -1768,6 +1799,39 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                       setToolConfigs(prev => ({
                         ...prev,
                         'Power BI Metadata Reducer': config
+                      }));
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+
+            {/* Power BI DAX Executor Configuration - Show only when tool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'Power BI DAX Executor';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  Power BI DAX Executor Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(25, 118, 210, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(25, 118, 210, 0.2)'
+                }}>
+                  <PowerBIDaxExecutorConfigSelector
+                    value={powerBIDaxExecutorConfig}
+                    onChange={(config) => {
+                      setPowerBIDaxExecutorConfig(config);
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'Power BI DAX Executor': config
                       }));
                     }}
                   />
