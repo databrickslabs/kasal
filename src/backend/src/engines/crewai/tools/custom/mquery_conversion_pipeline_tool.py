@@ -13,6 +13,9 @@ from concurrent.futures import ThreadPoolExecutor
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 
+from src.services.powerbi_semantic_model_cache_service import PowerBISemanticModelCacheService
+from src.db.session import async_session_factory
+
 logger = logging.getLogger(__name__)
 
 # Thread pool executor for running async operations from sync context
@@ -423,6 +426,18 @@ class MqueryConversionPipelineTool(BaseTool):
 
             logger.info(f"[TOOL CALL] Instance {instance_id} - Executing M-Query extraction for workspace: {workspace_id}")
 
+            # ── Same-day cache check ─────────────────────────────────────────
+            _cache_dataset_key = workspace_id + ("__" + dataset_id if dataset_id else "__all")
+            try:
+                cached_output = run_sync(self._get_mquery_cache(_cache_dataset_key, workspace_id))
+                if cached_output:
+                    logger.info(f"[CACHE HIT] M-Query conversion for workspace {workspace_id} — returning cached result")
+                    return cached_output
+                logger.info(f"[CACHE MISS] Running fresh M-Query conversion for workspace {workspace_id}")
+            except Exception as _cache_err:
+                logger.warning(f"[Cache] Cache check failed (continuing without cache): {_cache_err}")
+            # ────────────────────────────────────────────────────────────────
+
             # Import M-Query converter (lazy import to avoid circular dependencies)
             from src.converters.services.mquery import MQueryConnector, MQueryConversionConfig
 
@@ -514,12 +529,27 @@ class MqueryConversionPipelineTool(BaseTool):
                 return f"Error: Conversion failed - {result.get('error', 'Unknown error')}"
 
             # Format output
-            return self._format_output(
+            formatted_output = self._format_output(
                 result=result,
                 workspace_id=workspace_id,
                 dataset_id=dataset_id,
                 include_summary=include_summary
             )
+
+            # ── Save to same-day cache ───────────────────────────────────────
+            try:
+                run_sync(self._save_mquery_cache(_cache_dataset_key, workspace_id, {
+                    "formatted_output": formatted_output,
+                    "workspace_id": workspace_id,
+                    "dataset_id": dataset_id,
+                    "model_count": result.get("model_count", 0),
+                }))
+                logger.info(f"[CACHE SAVED] M-Query conversion cached for workspace {workspace_id}")
+            except Exception as _save_err:
+                logger.warning(f"[Cache] Failed to save M-Query cache: {_save_err}")
+            # ────────────────────────────────────────────────────────────────
+
+            return formatted_output
 
         except Exception as e:
             logger.error(f"M-Query Conversion Pipeline error: {str(e)}", exc_info=True)
@@ -569,6 +599,38 @@ class MqueryConversionPipelineTool(BaseTool):
                 "success": False,
                 "error": str(e)
             }
+
+    # ── Cache helpers ────────────────────────────────────────────────────────
+
+    _CACHE_GROUP = "mquery_conversion"
+
+    async def _get_mquery_cache(self, dataset_key: str, workspace_id: str) -> Optional[str]:
+        """Return today's cached formatted output, or None on miss."""
+        async with async_session_factory() as session:
+            svc = PowerBISemanticModelCacheService(session)
+            cached = await svc.get_cached_metadata(
+                group_id=self._CACHE_GROUP,
+                dataset_id=dataset_key,
+                workspace_id=workspace_id,
+                report_id=None,
+            )
+        if cached and "formatted_output" in cached:
+            return str(cached["formatted_output"])
+        return None
+
+    async def _save_mquery_cache(self, dataset_key: str, workspace_id: str, metadata: Dict[str, Any]) -> None:
+        """Persist the conversion result so same-day reruns are instant."""
+        async with async_session_factory() as session:
+            svc = PowerBISemanticModelCacheService(session)
+            await svc.save_metadata(
+                group_id=self._CACHE_GROUP,
+                dataset_id=dataset_key,
+                workspace_id=workspace_id,
+                metadata=metadata,
+                report_id=None,
+            )
+
+    # ─────────────────────────────────────────────────────────────────────────
 
     def _format_output(
         self,
