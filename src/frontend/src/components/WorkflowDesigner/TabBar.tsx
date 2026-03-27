@@ -348,10 +348,16 @@ const TabBar: React.FC<TabBarProps> = ({
     // Set the active tab before saving
     setActiveTab(tabId);
 
-    // Trigger save crew dialog
     setTimeout(() => {
-      const event = new CustomEvent('openSaveCrewDialog');
-      window.dispatchEvent(event);
+      const tab = tabs.find(t => t.id === tabId);
+      if (tab?.savedCrewId) {
+        // Overwrite existing crew directly
+        window.dispatchEvent(new CustomEvent('updateExistingCrew', {
+          detail: { crewId: tab.savedCrewId, tabId }
+        }));
+      } else {
+        window.dispatchEvent(new CustomEvent('openSaveCrewDialog'));
+      }
     }, 100);
 
     handleContextMenuClose();
@@ -361,10 +367,16 @@ const TabBar: React.FC<TabBarProps> = ({
     // Set the active tab before saving
     setActiveTab(tabId);
 
-    // Trigger save flow dialog
     setTimeout(() => {
-      const event = new CustomEvent('openSaveFlowDialog');
-      window.dispatchEvent(event);
+      const tab = tabs.find(t => t.id === tabId);
+      if (tab?.savedFlowId) {
+        // Overwrite existing flow directly
+        window.dispatchEvent(new CustomEvent('updateExistingFlow', {
+          detail: { flowId: tab.savedFlowId, tabId }
+        }));
+      } else {
+        window.dispatchEvent(new CustomEvent('openSaveFlowDialog'));
+      }
     }, 100);
 
     handleContextMenuClose();
