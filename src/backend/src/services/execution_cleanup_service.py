@@ -5,8 +5,11 @@ This service handles cleanup of orphaned/stale job executions
 that may occur when the service is restarted while jobs are running.
 """
 
+import json
 import logging
-from typing import List
+from typing import List, Optional
+
+from sqlalchemy import text
 
 from src.models.execution_status import ExecutionStatus
 from src.services.execution_status_service import ExecutionStatusService
@@ -74,6 +77,64 @@ class ExecutionCleanupService:
             logger.error(f"Error during startup job cleanup: {e}", exc_info=True)
             return 0
     
+    @staticmethod
+    async def cleanup_zombie_jobs() -> int:
+        """
+        Called every 2 minutes. For each RUNNING job, check whether a
+        crew_completed trace exists — if it does the crew finished but its
+        status update silently failed, so mark it COMPLETED and populate the
+        result. Jobs with no completion trace are still genuinely running and
+        are left untouched.
+
+        Returns number of jobs recovered.
+        """
+        recovered = 0
+        try:
+            async with async_session_factory() as db:
+                result = await db.execute(text(
+                    "SELECT job_id FROM executionhistory WHERE status = 'RUNNING'"
+                ))
+                running_job_ids = [row[0] for row in result.fetchall()]
+
+            for job_id in running_job_ids:
+                # Check whether the crew actually completed
+                async with async_session_factory() as db:
+                    trace = await db.execute(text(
+                        "SELECT output FROM execution_trace "
+                        "WHERE job_id = :job_id AND event_type = 'crew_completed' "
+                        "ORDER BY created_at DESC LIMIT 1"
+                    ), {"job_id": job_id})
+                    row = trace.fetchone()
+
+                if not row:
+                    continue  # No completion trace → still running, leave it
+
+                # Crew finished but status update failed — recover it
+                final_result: Optional[str] = None
+                if row[0]:
+                    raw = row[0]
+                    if isinstance(raw, dict):
+                        final_result = raw.get("content")
+                    else:
+                        try:
+                            final_result = json.loads(raw).get("content", raw)
+                        except Exception:
+                            final_result = str(raw)
+
+                await ExecutionStatusService.update_status(
+                    job_id=job_id,
+                    status=ExecutionStatus.COMPLETED.value,
+                    message="CrewAI execution completed successfully",
+                    result=final_result,
+                )
+                logger.info(f"[ZombieCleanup] Recovered stale job {job_id} → COMPLETED")
+                recovered += 1
+
+        except Exception as e:
+            logger.error(f"[ZombieCleanup] Error: {e}", exc_info=True)
+
+        return recovered
+
     @staticmethod
     async def get_stale_jobs() -> List[str]:
         """
