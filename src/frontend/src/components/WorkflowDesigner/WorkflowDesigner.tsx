@@ -1798,8 +1798,14 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               setIsCrewFlowDialogOpen(true);
             }}
             onSaveCrewClick={() => {
-              const event = new CustomEvent('openSaveCrewDialog');
-              window.dispatchEvent(event);
+              const activeTab = getActiveTab();
+              if (activeTab?.savedCrewId) {
+                window.dispatchEvent(new CustomEvent('updateExistingCrew', {
+                  detail: { crewId: activeTab.savedCrewId, tabId: activeTab.id }
+                }));
+              } else {
+                window.dispatchEvent(new CustomEvent('openSaveCrewDialog'));
+              }
             }}
             onSaveFlowClick={() => {
               const event = new CustomEvent('openSaveFlowDialog');
