@@ -21,18 +21,6 @@ from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
 
-# Also write critical execution-runner events to crew.log so status update
-# failures are visible alongside subprocess logs.
-def _get_crew_logger() -> logging.Logger:
-    """Return the 'crew' named logger (writes to logs/crew.log in parent process)."""
-    from src.core.logger import LoggerManager
-    try:
-        return LoggerManager.get_instance().crew
-    except Exception:
-        return logging.getLogger("crew")
-
-crew_logger = _get_crew_logger()
-
 async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_context: GroupContext = None, user_token: str = None, config: Dict[str, Any] = None) -> None:
     """
     Run the crew in a separate task, ensuring final status update
@@ -712,10 +700,11 @@ async def run_crew_in_process(
                 del running_jobs[execution_id]
                 logger.info(f"Removed job {execution_id} from running jobs list.")
 
-            # Log the final status that will be set — use crew_logger so it
-            # appears in crew.log alongside subprocess output.
-            crew_logger.info(f"[RUNNER] About to update final status for {execution_id}: {final_status}")
+            # Log the final status that will be set
             logger.info(f"[run_crew_in_process] About to update final status for {execution_id}:")
+            logger.info(f"  - final_status: {final_status}")
+            logger.info(f"  - final_message: {final_message}")
+            logger.info(f"  - has final_result: {final_result is not None}")
 
             # Update final status
             update_success = await update_execution_status_with_retry(
@@ -726,13 +715,10 @@ async def run_crew_in_process(
             )
 
             if update_success:
-                crew_logger.info(f"[RUNNER] Successfully updated status for {execution_id} to {final_status}")
                 logger.info(f"[run_crew_in_process] Successfully updated status for {execution_id} to {final_status}")
             else:
-                crew_logger.error(f"[RUNNER] FAILED to update status for {execution_id} to {final_status} — periodic cleanup will recover")
                 logger.error(f"[run_crew_in_process] Failed to update status for {execution_id} to {final_status}")
 
         except Exception as cleanup_error:
-            crew_logger.error(f"[RUNNER] Exception in finally block for {execution_id}: {cleanup_error}")
             logger.error(f"Error during cleanup for process execution {execution_id}: {str(cleanup_error)}")
             logger.error(f"Cleanup error traceback: {traceback.format_exc()}")
