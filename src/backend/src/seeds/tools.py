@@ -173,7 +173,11 @@ def get_tool_configs():
             "include_hidden_tables": False,
             "skip_static_tables": True,
             # Output Options
-            "include_summary": True
+            "include_summary": True,
+            # DBSQL Validation (optional — enables classify-first + DAX vs SQL comparison)
+            "databricks_sql_endpoint": "",  # e.g. https://workspace.cloud.databricks.com/api/2.0/mcp/sql
+            "databricks_pat": "",
+            "max_iterations": 10,
         },  # M-Query Conversion Pipeline
         "75": {
             "result_as_answer": True,

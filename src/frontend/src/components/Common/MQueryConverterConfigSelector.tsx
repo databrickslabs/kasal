@@ -55,6 +55,9 @@ export interface MQueryConverterConfig {
   llm_token?: string;
   llm_model?: string;
   use_llm?: boolean;
+  // Target Configuration
+  target_catalog?: string;
+  target_schema?: string;
   // Scan Options
   include_lineage?: boolean;
   include_datasource_details?: boolean;
@@ -65,6 +68,15 @@ export interface MQueryConverterConfig {
   // Output Options
   include_relationships?: boolean;
   include_summary?: boolean;
+  // Data Retrieval Credentials (for Execute Queries / EVALUATE — needs Dataset.ReadWrite.All)
+  exec_tenant_id?: string;
+  exec_client_id?: string;
+  exec_client_secret?: string;
+  exec_access_token?: string;
+  // DBSQL Validation (optional — enables classify-first + DAX vs SQL comparison)
+  databricks_sql_endpoint?: string;
+  databricks_pat?: string;
+  max_iterations?: string;
   // Index signature for compatibility
   [key: string]: string | boolean | undefined;
 }
@@ -515,6 +527,31 @@ export const MQueryConverterConfigSelector: React.FC<MQueryConverterConfigSelect
         </AccordionSummary>
         <AccordionDetails>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {/* Target Configuration */}
+            <Typography variant="subtitle2" color="secondary" sx={{ fontWeight: 600 }}>
+              Target Configuration
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              <TextField
+                label="Target Catalog"
+                value={value.target_catalog || 'main'}
+                onChange={(e) => handleFieldChange('target_catalog', e.target.value)}
+                disabled={disabled}
+                fullWidth
+                size="small"
+                helperText="Unity Catalog name (e.g. david_test_metrics)"
+              />
+              <TextField
+                label="Target Schema"
+                value={value.target_schema || 'default'}
+                onChange={(e) => handleFieldChange('target_schema', e.target.value)}
+                disabled={disabled}
+                fullWidth
+                size="small"
+                helperText="Schema for generated views"
+              />
+            </Box>
+
             {/* LLM Configuration */}
             <Typography variant="subtitle2" color="secondary" sx={{ fontWeight: 600 }}>
               LLM Conversion Settings
@@ -667,6 +704,109 @@ export const MQueryConverterConfigSelector: React.FC<MQueryConverterConfigSelect
                 label={<Typography variant="body2">Include summary report</Typography>}
               />
             </Box>
+          </Box>
+        </AccordionDetails>
+      </Accordion>
+
+      {/* DBSQL Validation */}
+      <Accordion sx={{ mt: 1 }}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Typography variant="subtitle2">DBSQL Validation (optional)</Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Alert severity="info" variant="outlined" sx={{ py: 0.5 }}>
+              <Typography variant="caption">
+                When configured, enables <strong>classify-first validation</strong>:
+                Requires two sets of credentials — the Admin API SP above for scanning,
+                and a <strong>Data Retrieval SP</strong> (workspace member with Dataset.ReadWrite.All)
+                for Execute Queries and EVALUATE. Databricks tables are
+                converted and their SQL output is compared against DAX (row-count comparison). Static tables
+                (Excel/JSON/Table.FromRows) are fetched from PBI and INSERTed into Delta. Other sources are
+                flagged as non-transpilable — no LLM calls wasted on them.
+              </Typography>
+            </Alert>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600, mt: 1 }}>
+              Data Retrieval Credentials
+            </Typography>
+            <Alert severity="warning" variant="outlined" sx={{ py: 0.5 }}>
+              <Typography variant="caption">
+                Must be a <strong>workspace member</strong> with <code>Dataset.ReadWrite.All</code> permission.
+                Used for DAX Execute Queries (COUNT comparison) and EVALUATE (static table extraction).
+              </Typography>
+            </Alert>
+            <TextField
+              label="Tenant ID"
+              value={value.exec_tenant_id || ''}
+              onChange={(e) => handleFieldChange('exec_tenant_id', e.target.value)}
+              disabled={disabled}
+              fullWidth
+              size="small"
+              helperText="Azure AD tenant ID (leave empty to reuse Admin API tenant)"
+            />
+            <TextField
+              label="Client ID"
+              value={value.exec_client_id || ''}
+              onChange={(e) => handleFieldChange('exec_client_id', e.target.value)}
+              disabled={disabled}
+              fullWidth
+              size="small"
+              helperText="SP or app Client ID with Dataset.ReadWrite.All"
+            />
+            <TextField
+              label="Client Secret"
+              value={value.exec_client_secret || ''}
+              onChange={(e) => handleFieldChange('exec_client_secret', e.target.value)}
+              disabled={disabled}
+              fullWidth
+              type="password"
+              size="small"
+              helperText="Client secret — OR paste a pre-obtained token below instead"
+            />
+            <TextField
+              label="Access Token (alternative)"
+              value={value.exec_access_token || ''}
+              onChange={(e) => handleFieldChange('exec_access_token', e.target.value)}
+              disabled={disabled}
+              fullWidth
+              type="password"
+              size="small"
+              helperText="Pre-obtained OAuth token with Dataset.ReadWrite.All (overrides SP credentials above)"
+            />
+
+            <Typography variant="subtitle2" sx={{ fontWeight: 600, mt: 1 }}>
+              DBSQL Connection
+            </Typography>
+            <TextField
+              label="Databricks SQL Endpoint"
+              value={value.databricks_sql_endpoint || ''}
+              onChange={(e) => handleFieldChange('databricks_sql_endpoint', e.target.value)}
+              disabled={disabled}
+              fullWidth
+              size="small"
+              helperText="e.g. https://your-workspace.cloud.databricks.com/api/2.0/mcp/sql — warehouse auto-detected"
+            />
+            <TextField
+              label="Databricks PAT"
+              value={value.databricks_pat || ''}
+              onChange={(e) => handleFieldChange('databricks_pat', e.target.value)}
+              disabled={disabled}
+              fullWidth
+              type="password"
+              size="small"
+              helperText="Personal Access Token for DBSQL — leave empty to skip validation"
+            />
+            <TextField
+              label="Max Correction Iterations"
+              value={value.max_iterations || '10'}
+              onChange={(e) => handleFieldChange('max_iterations', e.target.value)}
+              disabled={disabled}
+              type="number"
+              fullWidth
+              size="small"
+              helperText="Max LLM SQL correction attempts per table when SQL ≠ DAX row count"
+              inputProps={{ min: 1, max: 20 }}
+            />
           </Box>
         </AccordionDetails>
       </Accordion>
