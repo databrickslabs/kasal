@@ -187,23 +187,6 @@ async def lifespan(app: FastAPI):
             system_logger.error(f"Error cleaning up stale jobs: {e}")
             # Don't raise - allow app to start even if cleanup fails
 
-    # Start periodic zombie-job cleanup (every 5 minutes)
-    # Recovers RUNNING jobs whose status update silently failed mid-run.
-    if db_initialized:
-        async def _periodic_zombie_cleanup():
-            import asyncio as _asyncio
-            while True:
-                await _asyncio.sleep(300)  # 5 minutes
-                try:
-                    recovered = await ExecutionCleanupService.cleanup_zombie_jobs()
-                    if recovered:
-                        system_logger.info(f"[ZombieCleanup] Periodic cleanup recovered {recovered} job(s)")
-                except Exception as _e:
-                    system_logger.error(f"[ZombieCleanup] Periodic cleanup error: {_e}")
-
-        asyncio.create_task(_periodic_zombie_cleanup())
-        system_logger.info("[ZombieCleanup] Periodic zombie cleanup task started (interval: 5 min)")
-
     # Run database seeders after DB initialization
     if db_initialized:
         # Import needed for seeders
