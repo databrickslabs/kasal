@@ -278,14 +278,13 @@ fi
 # Create logs directory if it doesn't exist
 mkdir -p logs
 
-# Sync dependencies with uv (fast if already synced)
+# Sync dependencies with uv (best-effort — skips gracefully if offline)
 echo -e "${BLUE}Syncing dependencies...${NC}"
-uv sync --quiet
+uv sync --quiet 2>/dev/null || echo -e "${YELLOW}Dependency sync skipped (offline or up to date)${NC}"
 
 echo -e "${GREEN}Starting Kasal backend server...${NC}"
 echo -e "${BLUE}Logs will be written to ./logs/${NC}"
 echo -e "${YELLOW}Press Ctrl+C to stop the server${NC}\n"
 
-# Run the FastAPI application in development mode
-# Using exec to replace the shell process with uvicorn via uv
-exec uv run uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+# Run using the local venv directly (works offline, no uv resolution needed)
+exec .venv/bin/uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
