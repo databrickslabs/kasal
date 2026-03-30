@@ -1,0 +1,126 @@
+import { vi, Mock, beforeEach, afterEach, describe, it, test, expect } from 'vitest';
+import React from 'react';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { ThemeProvider } from '@mui/material/styles';
+import { createTheme } from '@mui/material/styles';
+import SecurityDisclaimer, { TOOL_SECURITY_INFO } from './SecurityDisclaimer';
+import type { Tool } from '../../types/tool';
+
+const theme = createTheme();
+
+describe('SecurityDisclaimer', () => {
+  const mockOnClose = vi.fn();
+  const mockOnConfirm = vi.fn();
+
+  const renderComponent = (tool: Tool | null = null) => {
+    return render(
+      <ThemeProvider theme={theme}>
+        <SecurityDisclaimer
+          open={true}
+          onClose={mockOnClose}
+          onConfirm={mockOnConfirm}
+          tool={tool}
+        />
+      </ThemeProvider>
+    );
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should render DatabricksJobsTool security information', () => {
+    const databricksJobsTool: Tool = {
+      id: '70',
+      title: 'DatabricksJobsTool',
+      description: 'Test description',
+      icon: 'database',
+      config: {},
+      category: 'Custom',
+    };
+
+    renderComponent(databricksJobsTool);
+
+    // Check that the tool name and warning are displayed
+    expect(screen.getByText(/DatabricksJobsTool/)).toBeInTheDocument();
+    expect(screen.getByText(/Security Warning/)).toBeInTheDocument();
+    // Check risk level chips are displayed
+    expect(screen.getByText(/Multi-Tenant: HIGH/)).toBeInTheDocument();
+  });
+
+  it('should display correct risks for DatabricksJobsTool', () => {
+    const databricksJobsTool: Tool = {
+      id: '70',
+      title: 'DatabricksJobsTool',
+      description: 'Test description',
+      icon: 'database',
+      config: {},
+      category: 'Custom',
+    };
+
+    renderComponent(databricksJobsTool);
+
+    // Click to show details
+    const showDetailsButton = screen.getByText(/Show Security Details/);
+    fireEvent.click(showDetailsButton);
+
+    // Check specific risks are displayed
+    expect(screen.getByText(/Creation of arbitrary compute jobs/)).toBeInTheDocument();
+    expect(screen.getByText(/Resource consumption through job execution/)).toBeInTheDocument();
+    expect(screen.getByText(/Access to job configurations and outputs/)).toBeInTheDocument();
+  });
+
+  it('should display correct mitigations for DatabricksJobsTool', () => {
+    const databricksJobsTool: Tool = {
+      id: '70',
+      title: 'DatabricksJobsTool',
+      description: 'Test description',
+      icon: 'database',
+      config: {},
+      category: 'Custom',
+    };
+
+    renderComponent(databricksJobsTool);
+
+    // Click to show details first
+    const showDetailsButton = screen.getByText(/Show Security Details/);
+    fireEvent.click(showDetailsButton);
+
+    // Check specific mitigations are displayed
+    expect(screen.getByText(/Validate job configurations before creation/)).toBeInTheDocument();
+    expect(screen.getByText(/Implement job resource limits and quotas/)).toBeInTheDocument();
+  });
+
+  it('should show single-tenant information for DatabricksJobsTool', () => {
+    const databricksJobsTool: Tool = {
+      id: '70',
+      title: 'DatabricksJobsTool',
+      description: 'Test description',
+      icon: 'database',
+      config: {},
+      category: 'Custom',
+    };
+
+    renderComponent(databricksJobsTool);
+
+    // Check single-tenant chip is displayed
+    expect(screen.getByText(/Single-Tenant: MEDIUM/)).toBeInTheDocument();
+
+    // Click to show details to see deployment context
+    const showDetailsButton = screen.getByText(/Show Security Details/);
+    fireEvent.click(showDetailsButton);
+
+    // Check single-tenant specific information
+    expect(screen.getByText(/Single-tenant with Databricks OBO security model/)).toBeInTheDocument();
+  });
+
+  it('should include DatabricksJobsTool in TOOL_SECURITY_INFO', () => {
+    expect(TOOL_SECURITY_INFO).toHaveProperty('DatabricksJobsTool');
+
+    const jobsToolInfo = TOOL_SECURITY_INFO['DatabricksJobsTool'];
+    expect(jobsToolInfo.riskLevel).toBe('HIGH');
+    expect(jobsToolInfo.singleTenantRiskLevel).toBe('MEDIUM');
+    expect(jobsToolInfo.description).toContain('Manages Databricks Jobs');
+    expect(jobsToolInfo.deploymentContext).toContain('Databricks OBO security model');
+  });
+});

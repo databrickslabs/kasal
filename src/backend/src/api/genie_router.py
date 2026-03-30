@@ -1,0 +1,221 @@
+"""
+Genie API Router
+
+Handles Genie-related API endpoints using proper service/repository architecture.
+"""
+
+import logging
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Request
+
+from src.core.exceptions import KasalError, NotFoundError
+
+from src.core.dependencies import GroupContextDep
+from src.schemas.genie import (
+    GenieAuthConfig,
+    GenieExecutionRequest,
+    GenieExecutionResponse,
+    GenieSendMessageRequest,
+    GenieSendMessageResponse,
+    GenieSpace,
+    GenieSpacesRequest,
+    GenieSpacesResponse,
+)
+from src.services.genie_service import GenieService
+from src.utils.databricks_auth import extract_user_token_from_request
+from src.utils.user_context import UserContext
+
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/api/genie", tags=["genie"])
+
+
+@router.get("/spaces", response_model=GenieSpacesResponse)
+async def get_genie_spaces(
+    request: Request,
+    page_token: Optional[str] = None,
+    page_size: int = 50,
+    group_context: GroupContextDep = None,
+) -> GenieSpacesResponse:
+    """
+    Fetch available Genie spaces from Databricks with pagination.
+
+    Args:
+        request: FastAPI request object
+        page_token: Token for fetching next page
+        page_size: Number of items per page (default 50, max 200)
+        group_context: Group context from dependency injection
+
+    Returns:
+        GenieSpacesResponse: List of available Genie spaces with pagination info
+    """
+    # Set group context for this request so get_auth_context() can access it
+    if group_context:
+        UserContext.set_group_context(group_context)
+
+    # Extract user token for OBO authentication if available
+    user_token = extract_user_token_from_request(request)
+
+    # Create auth config with user token for OBO
+    auth_config = GenieAuthConfig(use_obo=True, user_token=user_token)
+
+    # Create service with auth config
+    service = GenieService(auth_config)
+
+    # Create request with pagination parameters
+    spaces_request = GenieSpacesRequest(
+        page_token=page_token, page_size=min(page_size, 200)  # Cap at 200
+    )
+
+    # Get spaces with pagination
+    spaces_response = await service.get_spaces(spaces_request)
+
+    if not spaces_response.spaces and not page_token:
+        logger.warning("No Genie spaces found. User may not have access to any spaces.")
+
+    return spaces_response
+
+
+@router.post("/spaces/search", response_model=GenieSpacesResponse)
+async def search_genie_spaces(
+    request: Request,
+    spaces_request: GenieSpacesRequest,
+    group_context: GroupContextDep = None,
+) -> GenieSpacesResponse:
+    """
+    Search and filter Genie spaces from Databricks with pagination.
+
+    Args:
+        request: FastAPI request object
+        spaces_request: Request with search, filter, and pagination parameters
+        group_context: Group context from dependency injection
+
+    Returns:
+        GenieSpacesResponse: List of filtered Genie spaces with pagination info
+    """
+    # Set group context for this request so get_auth_context() can access it
+    if group_context:
+        UserContext.set_group_context(group_context)
+
+    # Extract user token for OBO authentication if available
+    user_token = extract_user_token_from_request(request)
+
+    # Create auth config with user token for OBO
+    auth_config = GenieAuthConfig(use_obo=True, user_token=user_token)
+
+    # Create service with auth config
+    service = GenieService(auth_config)
+
+    # Get spaces through service layer with all parameters including pagination
+    spaces_response = await service.get_spaces(spaces_request)
+
+    if not spaces_response.spaces and not spaces_request.page_token:
+        logger.warning("No Genie spaces found matching criteria.")
+
+    return spaces_response
+
+
+@router.get("/spaces/{space_id}", response_model=GenieSpace)
+async def get_genie_space_details(
+    space_id: str, request: Request, group_context: GroupContextDep = None
+) -> GenieSpace:
+    """
+    Get details for a specific Genie space.
+
+    Args:
+        space_id: The ID of the Genie space
+        request: FastAPI request object
+
+    Returns:
+        GenieSpace object with space details
+    """
+    # Extract user token for OBO authentication
+    user_token = extract_user_token_from_request(request)
+
+    # Create auth config
+    auth_config = GenieAuthConfig(use_obo=True, user_token=user_token)
+
+    # Create service with auth config
+    service = GenieService(auth_config)
+
+    # Get space details through service layer
+    space = await service.get_space_details(space_id)
+
+    if not space:
+        raise NotFoundError(f"Space {space_id} not found")
+
+    return space
+
+
+@router.post("/execute", response_model=GenieExecutionResponse)
+async def execute_genie_query(
+    request: Request,
+    execution_request: GenieExecutionRequest,
+    group_context: GroupContextDep = None,
+) -> GenieExecutionResponse:
+    """
+    Execute a Genie query in a specific space.
+
+    Args:
+        request: FastAPI request object
+        execution_request: Query execution request
+
+    Returns:
+        GenieExecutionResponse with query result
+    """
+    # Extract user token for OBO authentication
+    user_token = extract_user_token_from_request(request)
+
+    # Create auth config
+    auth_config = GenieAuthConfig(use_obo=True, user_token=user_token)
+
+    # Create service with auth config
+    service = GenieService(auth_config)
+
+    # Execute query through service layer
+    response = await service.execute_query(
+        space_id=execution_request.space_id,
+        question=execution_request.question,
+        conversation_id=execution_request.conversation_id,
+        timeout=execution_request.timeout or 120,
+    )
+
+    return response
+
+
+@router.post("/send-message", response_model=GenieSendMessageResponse)
+async def send_genie_message(
+    request: Request,
+    message_request: GenieSendMessageRequest,
+    group_context: GroupContextDep = None,
+) -> GenieSendMessageResponse:
+    """
+    Send a message to Genie.
+
+    Args:
+        request: FastAPI request object
+        message_request: Message request
+
+    Returns:
+        GenieSendMessageResponse with message details
+    """
+    # Extract user token for OBO authentication
+    user_token = extract_user_token_from_request(request)
+
+    # Create auth config
+    auth_config = GenieAuthConfig(use_obo=True, user_token=user_token)
+
+    # Create service with auth config
+    service = GenieService(auth_config)
+
+    # Send message through service layer
+    response = await service.send_message(
+        space_id=message_request.space_id,
+        message=message_request.message,
+        conversation_id=message_request.conversation_id,
+    )
+
+    if not response:
+        raise KasalError("Failed to send message")
+
+    return response

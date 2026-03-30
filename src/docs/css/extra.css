@@ -1,0 +1,66 @@
+/* Additional styling for Kasal documentation */
+
+/* Improve code block readability */
+.md-typeset code {
+  font-size: 0.9em;
+}
+
+/* Custom admonition styles */
+.md-typeset .admonition {
+  font-size: 0.9rem;
+}
+
+/* Custom heading styles */
+.md-typeset h1 {
+  font-weight: 700;
+  color: var(--md-primary-fg-color);
+}
+
+.md-typeset h2 {
+  font-weight: 600;
+}
+
+/* Style for API method names */
+.doc-method-name {
+  font-weight: bold;
+  color: var(--md-code-fg-color);
+}
+
+/* Better table styling */
+.md-typeset table:not([class]) {
+  font-size: 0.9rem;
+}
+
+.md-typeset table:not([class]) th {
+  background-color: var(--md-primary-fg-color--light);
+  color: var(--md-primary-bg-color);
+}
+
+/* Improve navigation sidebar */
+.md-nav__link--active {
+  font-weight: bold;
+  color: var(--md-primary-fg-color);
+}
+
+/* Custom footer styling */
+.md-footer-meta {
+  background-color: var(--md-primary-fg-color--dark);
+}
+
+/* Custom styling for tabs */
+.md-tabs {
+  background-color: var(--md-primary-fg-color--dark);
+}
+
+/* Improve mobile experience */
+@media screen and (max-width: 76.1875em) {
+  .md-nav--primary .md-nav__title {
+    background-color: var(--md-primary-fg-color);
+    color: var(--md-primary-bg-color);
+  }
+}
+
+/* Custom logo spacing */
+.md-header__button.md-logo {
+  padding: 0.2rem;
+} 

@@ -1,0 +1,889 @@
+import React, { useCallback, useState, useEffect } from 'react';
+import { Handle, Position, useReactFlow } from 'reactflow';
+import { Box, Typography, Dialog, DialogTitle, DialogContent, Tooltip, CircularProgress } from '@mui/material';
+import AddTaskIcon from '@mui/icons-material/AddTask';
+import DeleteIcon from '@mui/icons-material/Delete';
+import IconButton from '@mui/material/IconButton';
+import EditIcon from '@mui/icons-material/Edit';
+import CloseIcon from '@mui/icons-material/Close';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ErrorIcon from '@mui/icons-material/Error';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import { Task, TaskService } from '../../api/TaskService';
+import { ToolService, Tool } from '../../api/ToolService';
+import TaskForm from './TaskForm';
+import QuickToolSelectionDialog from './QuickToolSelectionDialog';
+import { Theme } from '@mui/material/styles';
+import { useTabDirtyState } from '../../hooks/workflow/useTabDirtyState';
+import { useTaskExecutionStore } from '../../store/taskExecutionStore';
+import { useUILayoutStore } from '../../store/uiLayout';
+import { findTaskStoreKey } from '../../utils/taskIdUtils';
+
+import { type LLMGuardrailConfig } from '../../types/task';
+
+export interface TaskNodeData {
+  label?: string;
+  name?: string;
+  taskId?: string;
+  tools?: string[];
+  tool_configs?: Record<string, unknown>;  // User-specific tool configuration overrides
+  context?: string[];
+  async_execution?: boolean;
+  config?: {
+    cache_response?: boolean;
+    cache_ttl?: number;
+    retry_on_fail?: boolean;
+    max_retries?: number;
+    timeout?: number | null;
+    priority?: number;
+    error_handling?: string;
+    output_file?: string | null;
+    output_json?: string | null;
+    output_pydantic?: string | null;
+    callback?: string | null;
+    human_input?: boolean;
+    condition?: string;
+    guardrail?: string;
+    llm_guardrail?: LLMGuardrailConfig | null;
+    markdown?: boolean;
+  };
+  description?: string;
+  expected_output?: string;
+  loading?: boolean;
+  error?: boolean;
+  errorMessage?: string;
+}
+
+interface TaskNodeProps {
+  data: {
+    label: string;
+    description?: string;
+    expected_output?: string;
+    tools?: string[];
+    tool_configs?: Record<string, unknown>;  // User-specific tool configuration overrides
+    icon?: string;
+    taskId: string;
+    onEdit?: (task: Task) => void;
+    async_execution?: boolean;
+    context?: string[];
+    callback?: string | null;
+    loading?: boolean;
+    error?: boolean;
+    errorMessage?: string;
+    config?: {
+      cache_response?: boolean;
+      cache_ttl?: number;
+      retry_on_fail?: boolean;
+      max_retries?: number;
+      timeout?: number | null;
+      priority?: number;
+      error_handling?: string;
+      output_file?: string | null;
+      output_json?: string | null;
+      output_pydantic?: string | null;
+      callback?: string | null;
+      human_input?: boolean;
+      condition?: string;
+      guardrail?: string | null;
+      llm_guardrail?: LLMGuardrailConfig | null;
+      markdown?: boolean;
+    };
+  };
+  id: string;
+}
+
+const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
+  const { setNodes, setEdges, getNodes, getEdges } = useReactFlow();
+  const [isEditing, setIsEditing] = useState(false);
+  const [isToolDialogOpen, setIsToolDialogOpen] = useState(false);
+  const [toolDialogInitialTab, setToolDialogInitialTab] = useState(0);
+  const [availableTools, setAvailableTools] = useState<Tool[]>([]);
+  const [editTooltipOpen, setEditTooltipOpen] = useState(false);
+  const [deleteTooltipOpen, setDeleteTooltipOpen] = useState(false);
+
+  // Local selection state
+  const [isSelected, setIsSelected] = useState(false);
+
+  // Tab dirty state management
+  const { markCurrentTabDirty } = useTabDirtyState();
+
+  // Get current layout orientation
+  const layoutOrientation = useUILayoutStore(state => state.layoutOrientation);
+
+  // Planning phase indicator — shown on all task nodes during crew planning
+  const isPlanningPhase = useTaskExecutionStore(state => state.isPlanningPhase);
+
+  // Deterministic task execution state lookup using shared utility
+  const taskStatus = useTaskExecutionStore(state => {
+    const key = findTaskStoreKey(state.taskStates, data.taskId, data.label);
+    return key ? state.taskStates.get(key) ?? null : null;
+  });
+
+  // Add debugging logs on component mount
+  useEffect(() => {
+    // Monitor edge connections
+    getEdges();
+  }, [id, data, getEdges]);
+
+  useEffect(() => {
+    if (isEditing) {
+      const fetchTools = async () => {
+        try {
+          const tools = await ToolService.listEnabledTools();
+          setAvailableTools(tools);
+        } catch (error) {
+          console.error('Error fetching tools:', error);
+        }
+      };
+      void fetchTools();
+    }
+  }, [isEditing]);
+
+  // Add a new useEffect that loads tools on component mount
+  useEffect(() => {
+    const fetchTools = async () => {
+      try {
+        const tools = await ToolService.listEnabledTools();
+        setAvailableTools(tools);
+      } catch (error) {
+        console.error('Error fetching tools:', error);
+      }
+    };
+    void fetchTools();
+  }, []);
+
+  // Simple toggle function for selection
+  const toggleSelection = useCallback(() => {
+    setIsSelected(prev => !prev);
+  }, []);
+
+  const handleDelete = useCallback(() => {
+    setEditTooltipOpen(false);
+    setDeleteTooltipOpen(false);
+    setNodes(nodes => nodes.filter(node => node.id !== id));
+    setEdges(edges => edges.filter(edge =>
+      edge.source !== id && edge.target !== id
+    ));
+  }, [id, setNodes, setEdges]);
+
+  const handleEditClick = useCallback(() => {
+    setEditTooltipOpen(false);
+    setDeleteTooltipOpen(false);
+    if (document.activeElement) { (document.activeElement as HTMLElement).blur(); }
+    setIsEditing(true);
+  }, []);
+
+  const handleRightHandleDoubleClick = useCallback(() => {
+    const nodes = getNodes();
+    const edges = getEdges();
+    const currentNode = nodes.find(node => node.id === id);
+
+
+    if (!currentNode) {
+      return;
+    }
+
+    // Get all task nodes
+    const taskNodes = nodes.filter(node => node.type === 'taskNode');
+
+    // Find the task node that's directly below this one
+    const taskNodeBelow = taskNodes.find(taskNode => {
+      // Check if the node is below (higher y value)
+      const isBelow = taskNode.position.y > currentNode.position.y;
+      // Check if the node is roughly in the same vertical line (within 100 pixels horizontally)
+      const isAligned = Math.abs(taskNode.position.x - currentNode.position.x) < 100;
+      // Check if this is the closest node that meets our criteria
+      const isClosest = !taskNodes.some(otherNode => {
+        const isOtherBelow = otherNode.position.y > currentNode.position.y;
+        const isOtherAligned = Math.abs(otherNode.position.x - currentNode.position.x) < 100;
+        const isOtherCloser = otherNode.position.y < taskNode.position.y;
+        return otherNode.id !== taskNode.id && isOtherBelow && isOtherAligned && isOtherCloser;
+      });
+
+      return isBelow && isAligned && isClosest;
+    });
+
+    // If we found a task node below, create a connection
+    if (taskNodeBelow) {
+
+      // Check if this connection already exists
+      const connectionExists = edges.some(
+        edge => edge.source === id && edge.target === taskNodeBelow.id
+      );
+
+      if (!connectionExists) {
+
+        const newEdge = {
+          id: `${id}-${taskNodeBelow.id}`,
+          source: id,
+          target: taskNodeBelow.id,
+          sourceHandle: 'right',
+          targetHandle: 'left',
+          type: 'default',
+          animated: true, // This will make it look different from agent-task connections
+        };
+
+        setEdges(edges => [...edges, newEdge]);
+      }
+    }
+  }, [id, getNodes, getEdges, setEdges]);
+
+  // Add effect to close tooltips when dialog opens/closes
+  useEffect(() => {
+    if (isEditing) {
+      setEditTooltipOpen(false);
+      setDeleteTooltipOpen(false);
+    }
+  }, [isEditing]);
+
+  // Enhanced click handler: left-click opens form, right-click enables dragging
+  const handleNodeClick = useCallback((event: React.MouseEvent) => {
+    // Completely stop event propagation
+    event.preventDefault();
+    event.stopPropagation();
+
+    // Check if the click was on an interactive element
+    const target = event.target as HTMLElement;
+    const isButton = !!target.closest('button');
+    const isActionButton = !!target.closest('.action-buttons');
+
+    if (!isButton && !isActionButton) {
+      if (event.button === 0) {
+        // Left-click: Open task form for editing
+        console.log(`TaskNode left-click on ${id} - opening edit form`);
+        handleEditClick();
+      } else if (event.button === 2) {
+        // Right-click: Enable dragging by selecting the node
+        console.log(`TaskNode right-click on ${id} - enabling drag mode`);
+        toggleSelection();
+      }
+    }
+  }, [id, toggleSelection, handleEditClick]);
+
+  // Handle context menu (right-click) to prevent browser default menu
+  const handleContextMenu = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+
+  // Handle click on tools section to open quick tool selector
+  const handleToolsClick = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setToolDialogInitialTab(0);
+    setIsToolDialogOpen(true);
+  }, []);
+
+  // Handle click on MCP section to open quick MCP selector
+  const handleMcpClick = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setToolDialogInitialTab(1);
+    setIsToolDialogOpen(true);
+  }, []);
+
+  // Handle combined tool + MCP selection from the quick dialog (single API call)
+  const handleQuickDialogApply = useCallback((selectedTools: string[], selectedMcpServers: string[]) => {
+    // Build updated tool_configs with MCP servers
+    const existingToolConfigs = (data.tool_configs || {}) as Record<string, unknown>;
+    const updatedToolConfigs = { ...existingToolConfigs };
+
+    if (selectedMcpServers.length > 0) {
+      updatedToolConfigs.MCP_SERVERS = { servers: selectedMcpServers };
+    } else {
+      delete updatedToolConfigs.MCP_SERVERS;
+    }
+
+    // Update the node data with both tools and MCP in one state update
+    setNodes(nodes => nodes.map(node => {
+      if (node.id === id) {
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            tools: selectedTools,
+            tool_configs: updatedToolConfigs,
+          }
+        };
+      }
+      return node;
+    }));
+
+    // Persist both tools and MCP in a single API call
+    if (data.taskId) {
+      TaskService.updateTask(data.taskId, {
+        tools: selectedTools,
+        tool_configs: Object.keys(updatedToolConfigs).length > 0 ? updatedToolConfigs : undefined,
+      }).catch(err => {
+        console.error('Failed to persist tool/MCP selection:', err);
+      });
+    }
+
+    // Mark tab as dirty since task was modified
+    markCurrentTabDirty();
+
+    setIsToolDialogOpen(false);
+  }, [id, data.taskId, data.tool_configs, setNodes, markCurrentTabDirty]);
+
+  const iconStyles = {
+    mr: 1.5,
+    color: (theme: Theme) => theme.palette.primary.main,
+    fontSize: '2rem',
+    padding: '4px',
+    borderRadius: '50%',
+    backgroundColor: 'rgba(25, 118, 210, 0.05)',
+  };
+
+  const getTaskIcon = () => {
+    if (data.icon) {
+      return <Box component="span" sx={iconStyles}>{data.icon}</Box>;
+    }
+
+    return <AddTaskIcon sx={iconStyles} />;
+  };
+
+  const getStatusIcon = () => {
+    // Show planning indicator when crew is in planning phase (before any task starts)
+    if (isPlanningPhase && !taskStatus) {
+      return (
+        <AutoAwesomeIcon
+          sx={{
+            fontSize: 16,
+            color: 'warning.main',
+            animation: 'planningPulse 1.5s ease-in-out infinite',
+            '@keyframes planningPulse': {
+              '0%, 100%': { opacity: 0.4, transform: 'scale(0.85)' },
+              '50%': { opacity: 1, transform: 'scale(1.1)' },
+            },
+          }}
+        />
+      );
+    }
+
+    if (!taskStatus) return null;
+
+    switch (taskStatus.status) {
+      case 'planning':
+        return (
+          <AutoAwesomeIcon
+            sx={{
+              fontSize: 16,
+              color: 'warning.main',
+              animation: 'planningPulse 1.5s ease-in-out infinite',
+              '@keyframes planningPulse': {
+                '0%, 100%': { opacity: 0.4, transform: 'scale(0.85)' },
+                '50%': { opacity: 1, transform: 'scale(1.1)' },
+              },
+            }}
+          />
+        );
+      case 'running':
+        return <CircularProgress size={14} sx={{ color: 'info.main' }} />;
+      case 'completed':
+        return <CheckCircleIcon sx={{ fontSize: 16, color: 'success.main' }} />;
+      case 'failed':
+        return <ErrorIcon sx={{ fontSize: 16, color: 'error.main' }} />;
+      default:
+        return null;
+    }
+  };
+
+  const getTaskStyles = () => {
+    const isPlanning = isPlanningPhase && !taskStatus;
+    const isRunning = taskStatus?.status === 'running';
+    const isCompleted = taskStatus?.status === 'completed';
+    const isFailed = taskStatus?.status === 'failed';
+
+    const baseStyles = {
+      minWidth: 160,
+      minHeight: 120,
+      display: 'flex',
+      flexDirection: 'column',
+      position: 'relative',
+      padding: 2,
+      cursor: 'pointer',
+      background: (theme: Theme) => theme.palette.background.paper,
+      borderRadius: '8px',
+      border: '1px solid',
+      borderColor: (theme: Theme) => {
+        if (data.error) return theme.palette.error.main;
+        if (isPlanning || taskStatus?.status === 'planning') return theme.palette.warning.main;
+        if (isRunning) return theme.palette.info.main;
+        if (isCompleted) return theme.palette.success.main;
+        if (isFailed) return theme.palette.error.main;
+        return isSelected
+          ? theme.palette.primary.main
+          : theme.palette.grey[300];
+      },
+      boxShadow: (theme: Theme) => isSelected
+        ? `0 0 0 2px ${theme.palette.primary.main}`
+        : `0 2px 4px ${theme.palette.mode === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(0, 0, 0, 0.2)'}`,
+      animation: data.loading
+        ? 'pulse 2s infinite'
+        : (isPlanning || taskStatus?.status === 'planning')
+          ? 'planningGlow 2.5s ease-in-out infinite'
+          : isRunning ? 'pulse 2s infinite' : 'none',
+      '@keyframes planningGlow': {
+        '0%': { boxShadow: '0 0 0 0 rgba(255, 167, 38, 0.3)' },
+        '50%': { boxShadow: '0 0 0 6px rgba(255, 167, 38, 0)' },
+        '100%': { boxShadow: '0 0 0 0 rgba(255, 167, 38, 0)' }
+      },
+      '@keyframes pulse': {
+        '0%': { boxShadow: '0 0 0 0 rgba(33, 150, 243, 0.4)' },
+        '70%': { boxShadow: '0 0 0 10px rgba(33, 150, 243, 0)' },
+        '100%': { boxShadow: '0 0 0 0 rgba(33, 150, 243, 0)' }
+      },
+      '&:hover': {
+        boxShadow: '0 4px 8px rgba(0, 0, 0, 0.15)',
+        '& .action-buttons': {
+          display: 'flex'
+        }
+      },
+      '& .action-buttons': {
+        display: 'none',
+        position: 'absolute',
+        top: 4,
+        right: 4,
+        zIndex: 10,
+        pointerEvents: 'all'
+      }
+    };
+
+    return baseStyles;
+  };
+
+  const handlePrepareTaskData = () => {
+    // Get llm_guardrail from top-level data first, then fallback to config
+    // The dispatcher stores it at top-level, but user edits may store it in config
+    const llmGuardrail = (data as unknown as { llm_guardrail?: LLMGuardrailConfig }).llm_guardrail
+      || data.config?.llm_guardrail
+      || null;
+
+    // Convert the node data to the format expected by TaskForm
+    const taskData = {
+      id: data.taskId,
+      name: data.label,
+      description: data.description || '',
+      expected_output: data.expected_output || '',
+      tools: data.tools || [],
+      tool_configs: data.tool_configs || {},  // Include tool_configs
+      agent_id: '',  // This will be set by TaskForm
+      async_execution: data.async_execution || false,
+      context: data.context || [],
+      markdown: data.config?.markdown || false,
+      // Include llm_guardrail at top level for TaskForm's suggestedGuardrail state
+      llm_guardrail: llmGuardrail,
+      config: {
+        cache_response: data.config?.cache_response || false,
+        cache_ttl: data.config?.cache_ttl || 3600,
+        retry_on_fail: data.config?.retry_on_fail || true,
+        max_retries: data.config?.max_retries || 3,
+        timeout: data.config?.timeout || null,
+        priority: data.config?.priority || 1,
+        error_handling: (data.config?.error_handling as 'default' | 'retry' | 'ignore' | 'fail') || 'default',
+        output_file: data.config?.output_file || null,
+        // output_json should be a string or null, not a boolean
+        output_json: data.config?.output_json || null,
+        // Ensure output_pydantic is properly retrieved from the config
+        output_pydantic: data.config?.output_pydantic || null,
+        callback: data.config?.callback || null,
+        human_input: data.config?.human_input || false,
+        condition: data.config?.condition,
+        // Use undefined instead of null for guardrail if it's not present
+        guardrail: data.config?.guardrail || undefined,
+        // Only include llm_guardrail in config if user explicitly enabled it (saved in config)
+        // Top-level llm_guardrail is for the suggestion - config.llm_guardrail is user's choice
+        llm_guardrail: data.config?.llm_guardrail ?? null,
+        markdown: data.config?.markdown || false
+      }
+    };
+
+    return taskData;
+  };
+
+  // Derive MCP server count from tool_configs
+  const mcpServerCount = (() => {
+    const mcpConfig = data.tool_configs?.MCP_SERVERS as { servers?: string[] } | undefined;
+    if (mcpConfig && Array.isArray(mcpConfig.servers)) {
+      return mcpConfig.servers.length;
+    }
+    return 0;
+  })();
+
+  // Extract current MCP server names for the dialog
+  const currentMcpServers = (() => {
+    const mcpConfig = data.tool_configs?.MCP_SERVERS as { servers?: string[] } | undefined;
+    if (mcpConfig && Array.isArray(mcpConfig.servers)) {
+      return mcpConfig.servers;
+    }
+    return [];
+  })();
+
+  // Check if task has DatabricksKnowledgeSearchTool
+  const hasKnowledgeSearchTool = data.tools?.includes('DatabricksKnowledgeSearchTool') ||
+                                  data.tools?.includes('36'); // Also check for tool ID
+
+  return (
+    <>
+      {/* Top handle - visible only in vertical layout */}
+      <Handle
+        type="target"
+        position={Position.Top}
+        id="top"
+        style={{
+          background: '#2196f3',
+          width: '7px',
+          height: '7px',
+          opacity: layoutOrientation === 'vertical' ? 1 : 0,
+          pointerEvents: layoutOrientation === 'vertical' ? 'all' : 'none'
+        }}
+      />
+
+      {/* Left handle - visible only in horizontal layout */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="left"
+        style={{
+          background: '#2196f3',
+          width: '7px',
+          height: '7px',
+          opacity: layoutOrientation === 'horizontal' ? 1 : 0,
+          pointerEvents: layoutOrientation === 'horizontal' ? 'all' : 'none'
+        }}
+      />
+      <Box
+        sx={getTaskStyles()}
+        onClick={handleNodeClick}
+        onContextMenu={handleContextMenu}
+        data-taskid={data.taskId}
+        data-label={data.label}
+        data-nodeid={id}
+        data-nodetype="task"
+        data-selected={isSelected ? 'true' : 'false'}
+      >
+        {/* Knowledge source indicator - shows when task has knowledge search tool */}
+        {hasKnowledgeSearchTool && (
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 4,
+              left: 4,
+              color: 'primary.main',
+              display: 'flex',
+              zIndex: 5
+            }}
+          >
+            <Tooltip
+              title="Task has knowledge search capability"
+              disableInteractive
+              placement="top"
+            >
+              <AttachFileIcon fontSize="small" />
+            </Tooltip>
+          </Box>
+        )}
+
+        {(taskStatus || isPlanningPhase) && (
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            {getStatusIcon()}
+          </Box>
+        )}
+        <div className="action-buttons">
+          <Tooltip title="Edit Task" open={editTooltipOpen} onOpen={() => setEditTooltipOpen(true)} onClose={() => setEditTooltipOpen(false)}>
+            <IconButton
+              size="small"
+              onClick={handleEditClick}
+              onMouseEnter={() => setEditTooltipOpen(true)}
+              onMouseLeave={() => setEditTooltipOpen(false)}
+              sx={{
+                mr: 0.5,
+                backgroundColor: 'rgba(255, 255, 255, 0.3)',
+                '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.5)' },
+                zIndex: 20
+              }}
+            >
+              <EditIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Delete Task" open={deleteTooltipOpen} onOpen={() => setDeleteTooltipOpen(true)} onClose={() => setDeleteTooltipOpen(false)}>
+            <IconButton
+              size="small"
+              onClick={handleDelete}
+              onMouseEnter={() => setDeleteTooltipOpen(true)}
+              onMouseLeave={() => setDeleteTooltipOpen(false)}
+              sx={{
+                backgroundColor: 'rgba(255, 255, 255, 0.3)',
+                '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.5)' },
+                zIndex: 20
+              }}
+            >
+              <DeleteIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </div>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, width: '100%', overflow: 'hidden' }}>
+          {getTaskIcon()}
+          <Tooltip title={data.label} placement="top" arrow>
+            <Typography variant="body2" sx={{
+              fontWeight: 500,
+              color: (theme: Theme) => {
+                // Match CrewNode's status-based text color
+                if (isPlanningPhase && !taskStatus) return theme.palette.warning.main;
+                if (taskStatus?.status === 'planning') return theme.palette.warning.main;
+                if (taskStatus?.status === 'running') return theme.palette.info.main;
+                if (taskStatus?.status === 'completed') return theme.palette.success.main;
+                if (taskStatus?.status === 'failed') return theme.palette.error.main;
+                return theme.palette.primary.main;
+              },
+              fontSize: '0.9rem',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              flex: 1,
+            }}>
+              {data.label}
+            </Typography>
+          </Tooltip>
+        </Box>
+
+        <Typography
+          variant="body2"
+          color="textSecondary"
+          sx={{
+            fontSize: '0.8rem',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical'
+          }}
+        >
+          {data.description}
+        </Typography>
+
+        <Box
+          sx={{
+            mt: 'auto',
+            pt: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            width: '100%'
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <Box
+              onClick={handleToolsClick}
+              sx={{
+                fontSize: '0.7rem',
+                color: 'text.secondary',
+                cursor: 'pointer',
+                padding: '2px 6px',
+                borderRadius: '4px',
+                transition: 'all 0.2s ease',
+                '&:hover': {
+                  backgroundColor: (theme: Theme) => `${theme.palette.primary.main}15`,
+                  color: (theme: Theme) => theme.palette.primary.main,
+                }
+              }}
+            >
+              Tools: {Array.isArray(data.tools) ? data.tools.length : 0}
+            </Box>
+            <Box
+              onClick={handleMcpClick}
+              sx={{
+                fontSize: '0.7rem',
+                color: mcpServerCount > 0 ? 'primary.main' : 'text.secondary',
+                cursor: 'pointer',
+                padding: '2px 6px',
+                borderRadius: '4px',
+                transition: 'all 0.2s ease',
+                fontWeight: mcpServerCount > 0 ? 500 : 400,
+                '&:hover': {
+                  backgroundColor: (theme: Theme) => `${theme.palette.primary.main}15`,
+                  color: (theme: Theme) => theme.palette.primary.main,
+                }
+              }}
+            >
+              MCP: {mcpServerCount}
+            </Box>
+          </Box>
+          {data.config?.human_input && (
+            <Typography variant="caption" sx={{ color: 'orange', fontSize: '0.7rem' }}>
+              Human Input
+            </Typography>
+          )}
+        </Box>
+
+        {data.loading && (
+          <Box
+            sx={{
+              position: 'absolute',
+              inset: 0,
+              borderRadius: '8px',
+              background: (theme: { palette: { mode: string } }) => theme.palette.mode === 'light'
+                ? 'linear-gradient(90deg, rgba(255,255,255,0.35) 25%, rgba(255,255,255,0.6) 37%, rgba(255,255,255,0.35) 63%)'
+                : 'linear-gradient(90deg, rgba(255,255,255,0.08) 25%, rgba(255,255,255,0.16) 37%, rgba(255,255,255,0.08) 63%)',
+              backgroundSize: '400% 100%',
+              animation: 'shimmer 1.6s linear infinite',
+              '@keyframes shimmer': {
+                '0%': { backgroundPosition: '-200% 0' },
+                '100%': { backgroundPosition: '200% 0' },
+              },
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 5,
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <CircularProgress size={16} sx={{ color: 'primary.main' }} />
+              <Typography variant="caption" color="textSecondary">Creating…</Typography>
+            </Box>
+          </Box>
+        )}
+
+        {data.error && (
+          <Box
+            sx={{
+              position: 'absolute',
+              inset: 0,
+              borderRadius: '8px',
+              border: '2px solid',
+              borderColor: 'error.main',
+              background: (theme: Theme) => theme.palette.mode === 'light'
+                ? 'rgba(211, 47, 47, 0.05)'
+                : 'rgba(211, 47, 47, 0.1)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 0.5,
+              zIndex: 5,
+            }}
+          >
+            <ErrorIcon sx={{ color: 'error.main', fontSize: '1.2rem' }} />
+            <Typography variant="caption" sx={{ color: 'error.main', textAlign: 'center', px: 1, fontSize: '0.65rem' }}>
+              {data.errorMessage || 'Generation failed'}
+            </Typography>
+          </Box>
+        )}
+      </Box>
+      <Handle
+        type="source"
+        position={Position.Right}
+        style={{ background: '#2196f3', width: '7px', height: '7px' }}
+        onDoubleClick={handleRightHandleDoubleClick}
+      />
+
+      {/* Edit Task Form Dialog */}
+      <Dialog
+        open={isEditing}
+        onClose={() => setIsEditing(false)}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: {
+            maxHeight: '80vh',
+            position: 'relative'
+          }
+        }}
+      >
+        <DialogTitle>
+          Edit Task
+          <IconButton
+            aria-label="close"
+            onClick={() => setIsEditing(false)}
+            sx={{
+              position: 'absolute',
+              right: 8,
+              top: 8
+            }}
+          >
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 2 }}>
+            <TaskForm
+              initialData={handlePrepareTaskData()}
+              onCancel={() => setIsEditing(false)}
+              onTaskSaved={(savedTask) => {
+                // Mark tab as dirty since task was modified
+                markCurrentTabDirty();
+
+                // Update the node with the saved task data
+                setNodes(nodes =>
+                  nodes.map(node => {
+                    if (node.id === id) {
+                      const updatedData = {
+                        ...node.data,
+                        taskId: savedTask.id,  // Sync taskId so future saves update instead of creating duplicates
+                        label: savedTask.name,
+                        description: savedTask.description,
+                        expected_output: savedTask.expected_output,
+                        tools: savedTask.tools,
+                        tool_configs: savedTask.tool_configs || {},  // Include tool_configs from saved task
+                        async_execution: savedTask.async_execution,
+                        context: savedTask.context,
+                        // Synchronize both markdown fields with the saved task - prioritize the saved task's top-level markdown
+                        markdown: savedTask.markdown !== undefined ? savedTask.markdown : (savedTask.config?.markdown || false),
+                        // Ensure all config values are preserved
+                        config: {
+                          ...node.data.config, // Preserve existing config structure
+                          ...savedTask.config, // Override with saved task config
+                          // Explicitly preserve these important fields
+                          output_pydantic: savedTask.config?.output_pydantic || null,
+                          output_json: savedTask.config?.output_json || null,
+                          output_file: savedTask.config?.output_file || null,
+                          callback: savedTask.config?.callback || null,
+                          guardrail: savedTask.config?.guardrail || undefined,
+                          // Include llm_guardrail for LLM-based validation
+                          llm_guardrail: savedTask.config?.llm_guardrail || null,
+                          // Force markdown to be included in config - use the same value as top-level
+                          markdown: savedTask.markdown !== undefined ? savedTask.markdown : (savedTask.config?.markdown || false)
+                        }
+                      };
+
+                      return {
+                        ...node,
+                        data: updatedData
+                      };
+                    }
+                    return node;
+                  })
+                );
+                setIsEditing(false);
+              }}
+              tools={availableTools}
+              hideTitle
+            />
+          </Box>
+        </DialogContent>
+      </Dialog>
+
+      {/* Quick Tool & MCP Selection Dialog */}
+      <QuickToolSelectionDialog
+        open={isToolDialogOpen}
+        onClose={() => setIsToolDialogOpen(false)}
+        onApply={handleQuickDialogApply}
+        currentTools={data.tools || []}
+        currentMcpServers={currentMcpServers}
+        initialTab={toolDialogInitialTab}
+      />
+    </>
+  );
+};
+
+export default React.memo(TaskNode);

@@ -1,0 +1,1595 @@
+"""Process-based flow executor for isolated AI flow execution.
+
+This module implements process-based execution for CrewAI flows, providing
+true isolation and reliable termination capabilities similar to crew execution.
+
+Process isolation ensures that:
+- Flow failures don't affect the main application
+- Resources are properly cleaned up on termination
+- Child processes (crews within flows) are tracked and terminated on stop requests
+- Memory and CPU usage are isolated per execution
+
+Key Features:
+    - True process isolation for flow execution
+    - Graceful and forceful termination support
+    - Child process tracking and cleanup (including crew processes)
+    - Subprocess logging configuration
+    - Signal handling for clean shutdown
+    - Multi-tenant support through group context
+
+Architecture:
+    The executor spawns flows in separate OS processes using multiprocessing,
+    allowing complete control over the execution lifecycle including the
+    ability to forcefully terminate stuck or runaway processes.
+
+Example:
+    >>> executor = ProcessFlowExecutor()
+    >>> task = await executor.execute_flow_async(
+    ...     execution_id="exec_123",
+    ...     flow_config=config,
+    ...     group_context=context
+    ... )
+    >>> # Later, if needed:
+    >>> await executor.stop_execution("exec_123")
+"""
+# Global hardening: disable CrewAI cloud tracing/telemetry and suppress interactive prompts at module import time
+try:
+    import os as _kasal_fe_env
+    _kasal_fe_env.environ["CREWAI_TRACING_ENABLED"] = "false"
+    _kasal_fe_env.environ["CREWAI_TELEMETRY_OPT_OUT"] = "1"
+    _kasal_fe_env.environ["CREWAI_ANALYTICS_OPT_OUT"] = "1"
+    _kasal_fe_env.environ["CREWAI_CLOUD_TRACING"] = "false"
+    _kasal_fe_env.environ["CREWAI_CLOUD_TRACING_ENABLED"] = "false"
+    _kasal_fe_env.environ["CREWAI_VERBOSE"] = "false"
+    _kasal_fe_env.environ["PYTHONUNBUFFERED"] = "0"
+except Exception:
+    pass
+
+# Suppress interactive prompts globally
+try:
+    import builtins as _kasal_builtins_mod
+    def _kasal_noinput_global(prompt=None):
+        try:
+            if prompt:
+                print(f"[FLOW_SUBPROCESS] Suppressed interactive prompt at import: {prompt}")
+        except Exception:
+            pass
+        return "n"
+    _kasal_builtins_mod.input = _kasal_noinput_global
+except Exception:
+    pass
+
+# Also disable common CLI confirm/prompt mechanisms if present (click)
+try:
+    import click as _kasal_click
+    _kasal_click.confirm = (lambda *a, **k: False)
+    _kasal_click.prompt = (lambda *a, **k: "")
+except Exception:
+    pass
+
+import asyncio
+import logging
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor
+from typing import Dict, Any, Optional
+import pickle
+import traceback
+import signal
+import os
+from datetime import datetime, timezone
+
+from src.core.logger import LoggerManager
+
+# Use the flow logger for all flow-related operations
+logger = LoggerManager.get_instance().flow
+
+
+def run_flow_in_process(
+    execution_id: str,
+    flow_config: Dict[str, Any],
+    inputs: Optional[Dict[str, Any]] = None,
+    group_context: Any = None,  # Group context for tenant isolation
+    log_queue: Optional[Any] = None  # Queue for sending logs to main process
+) -> Dict[str, Any]:
+    """Execute a CrewAI flow in an isolated subprocess.
+
+    This function runs in a completely separate OS process, providing
+    true isolation from the main application. It rebuilds the flow from
+    configuration, sets up logging, handles signals, and executes the flow.
+
+    The function is designed to be called via multiprocessing and includes
+    comprehensive error handling and cleanup logic.
+
+    Args:
+        execution_id: Unique identifier for tracking this execution.
+            Used for logging and trace correlation.
+        flow_config: Complete configuration dictionary to rebuild the flow,
+            including nodes, edges, flow_config, and settings.
+        inputs: Optional dictionary of inputs to pass to the flow.
+            These become available during flow execution.
+        group_context: Optional multi-tenant context for isolation.
+            Contains group_id, access_token, and other tenant info.
+        log_queue: Optional queue for sending logs to the main process.
+            Enables real-time log streaming to parent process.
+
+    Returns:
+        Dict[str, Any]: Execution results containing:
+            - output: The flow execution output
+            - status: Final execution status
+            - error: Error details if execution failed
+            - execution_time: Total execution duration
+
+    Note:
+        This function sets up signal handlers for SIGTERM and SIGINT
+        to ensure proper cleanup of child processes (including crew processes) on termination.
+
+    Environment Variables Set:
+        - FLOW_SUBPROCESS_MODE: Marks subprocess execution mode
+        - DATABASE_TYPE: Ensures correct database configuration
+        - CREWAI_VERBOSE: Controls CrewAI output verbosity
+    """
+    # Import necessary modules at the beginning
+    import os
+    import sys
+    import traceback
+    import logging
+
+    # Mark that we're in subprocess mode for logging purposes
+    os.environ['FLOW_SUBPROCESS_MODE'] = 'true'
+    # CRITICAL: Set CREW_SUBPROCESS_MODE for AgentTraceEventListener to write directly to DB
+    os.environ['CREW_SUBPROCESS_MODE'] = 'true'
+    # Set debug tracing flag (default to true for comprehensive logging)
+    os.environ['CREWAI_DEBUG_TRACING'] = 'true'
+    # CRITICAL: Store execution_id in environment for orphaned process detection
+    # This allows us to find and terminate this process even after server reloads
+    os.environ['KASAL_EXECUTION_ID'] = execution_id
+
+    # Ensure DATABASE_TYPE is set correctly in subprocess
+    if 'DATABASE_TYPE' not in os.environ:
+        from src.config.settings import settings
+        os.environ['DATABASE_TYPE'] = settings.DATABASE_TYPE or 'postgres'
+        print(f"[FLOW_SUBPROCESS] Set DATABASE_TYPE to: {os.environ['DATABASE_TYPE']}")
+
+    # Early validation of parameters
+    import json
+
+    try:
+        # Handle None or empty flow_config
+        if flow_config is None:
+            error_msg = "flow_config is None"
+            print(f"[FLOW_SUBPROCESS ERROR] {error_msg}", file=sys.stderr)
+            return {
+                "status": "FAILED",
+                "execution_id": execution_id,
+                "error": error_msg,
+                "process_id": os.getpid()
+            }
+
+        # Check if flow_config is a string (JSON) and parse it BEFORE validation
+        if isinstance(flow_config, str):
+            try:
+                flow_config = json.loads(flow_config)
+                print(f"[FLOW_SUBPROCESS] Parsed flow_config from JSON string", file=sys.stderr)
+            except json.JSONDecodeError as e:
+                error_msg = f"Failed to parse flow_config JSON: {e}"
+                print(f"[FLOW_SUBPROCESS ERROR] {error_msg}", file=sys.stderr)
+                return {
+                    "status": "FAILED",
+                    "execution_id": execution_id,
+                    "error": error_msg,
+                    "process_id": os.getpid()
+                }
+
+        # Now validate flow_config type
+        if not isinstance(flow_config, dict):
+            error_msg = f"flow_config must be a dict, got {type(flow_config)} with value: {repr(flow_config)[:100]}"
+            print(f"[FLOW_SUBPROCESS ERROR] {error_msg}", file=sys.stderr)
+            return {
+                "status": "FAILED",
+                "execution_id": execution_id,
+                "error": error_msg,
+                "process_id": os.getpid()
+            }
+    except Exception as validation_error:
+        return {
+            "status": "FAILED",
+            "execution_id": execution_id,
+            "error": f"Parameter validation error: {str(validation_error)}",
+            "process_id": os.getpid() if 'os' in locals() else 0
+        }
+
+    # Configure logging
+    from src.engines.crewai.logging_config import (
+        configure_subprocess_logging,
+        suppress_stdout_stderr,
+        restore_stdout_stderr
+    )
+
+    # Suppress all stdout/stderr output
+    original_stdout, original_stderr, captured_output = suppress_stdout_stderr()
+
+    # Set up signal handlers for graceful shutdown with child process cleanup
+    def signal_handler(signum, frame):
+        # Kill all child processes spawned by this subprocess (including crew processes)
+        try:
+            import psutil
+            parent = psutil.Process(os.getpid())
+            children = parent.children(recursive=True)
+
+            for child in children:
+                try:
+                    child.terminate()
+                except psutil.NoSuchProcess:
+                    pass
+
+            # Give them a moment to terminate gracefully
+            psutil.wait_procs(children, timeout=1)
+
+            # Force kill any remaining
+            for child in children:
+                try:
+                    if child.is_running():
+                        child.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+
+        except Exception as cleanup_error:
+            # Ignore cleanup errors in signal handler
+            pass
+
+        # Exit the process
+        import sys
+        sys.exit(1)
+
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+
+    try:
+        # Import CrewAI and dependencies here to avoid pickling issues
+        import asyncio
+        import os as _os_crewai_env
+        # Force-disable CrewAI cloud tracing/telemetry
+        _os_crewai_env.environ["CREWAI_TRACING_ENABLED"] = "false"
+        _os_crewai_env.environ["CREWAI_TELEMETRY_OPT_OUT"] = "1"
+        _os_crewai_env.environ["CREWAI_ANALYTICS_OPT_OUT"] = "1"
+        _os_crewai_env.environ["CREWAI_CLOUD_TRACING"] = "false"
+        _os_crewai_env.environ["CREWAI_CLOUD_TRACING_ENABLED"] = "false"
+        _os_crewai_env.environ["CREWAI_VERBOSE"] = "false"
+
+        # CRITICAL: Enable OTel SDK in subprocess.
+        # main.py sets OTEL_SDK_DISABLED=true to suppress CrewAI's default
+        # telemetry in the parent. Subprocess needs OTel enabled for both
+        # Kasal's own trace pipeline AND (optionally) MLflow tracing.
+        _os_crewai_env.environ["OTEL_SDK_DISABLED"] = "false"
+        # Keep CrewAI telemetry disabled to prevent HTTP requests to docs.crewai.com
+        _os_crewai_env.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
+
+        # Configure subprocess logging
+        async_logger = configure_subprocess_logging(execution_id, process_type="flow")
+
+        async_logger.info(
+            "[FLOW_SUBPROCESS] Set OTEL_SDK_DISABLED=false (enabling OTel trace pipeline)"
+        )
+        async_logger.info(f"[FLOW_SUBPROCESS] Starting flow execution in subprocess (PID: {os.getpid()})")
+
+        # Extract group_id from group_context for UserContext
+        group_id = None
+        if group_context:
+            if hasattr(group_context, 'primary_group_id'):
+                group_id = group_context.primary_group_id
+            elif hasattr(group_context, 'group_ids') and group_context.group_ids:
+                group_id = group_context.group_ids[0]
+
+        # Initialize UserContext in subprocess
+        if group_id:
+            try:
+                from src.utils.user_context import UserContext
+                # Set group context in subprocess (contextvars don't transfer across processes)
+                UserContext.set_group_context(group_context)
+                async_logger.info(f"[FLOW_SUBPROCESS] ✓ Set UserContext with group_id: {group_id}")
+
+                # Also set user token if available
+                user_token = flow_config.get('user_token')
+                if user_token:
+                    UserContext.set_user_token(user_token)
+                    async_logger.info(f"[FLOW_SUBPROCESS] ✓ UserContext set with OBO token")
+
+                # Verify
+                verify = UserContext.get_group_context()
+                if verify and verify.primary_group_id == group_id:
+                    async_logger.info(f"[FLOW_SUBPROCESS] ✓ UserContext verified: {group_id}")
+                else:
+                    async_logger.error(f"[FLOW_SUBPROCESS] ✗ UserContext verification failed: {verify}")
+            except Exception as e:
+                async_logger.error(f"[FLOW_SUBPROCESS] Failed to initialize UserContext: {e}")
+
+        # Run the flow execution asynchronously (with initialization in same loop)
+        async def run_async_flow():
+            """Execute the flow in an async context with TraceManager in same event loop"""
+
+            # Activate Lakebase on async_session_factory so ALL callers
+            # (FlowRunnerService, tools, etc.) automatically use Lakebase.
+            try:
+                from src.db.database_router import activate_lakebase_in_subprocess
+                lb_ok = await activate_lakebase_in_subprocess()
+                if lb_ok:
+                    async_logger.info("[FLOW_SUBPROCESS] Lakebase activated on async_session_factory")
+                else:
+                    async_logger.debug("[FLOW_SUBPROCESS] Lakebase not enabled, using local DB")
+            except Exception as lb_err:
+                async_logger.warning(f"[FLOW_SUBPROCESS] Lakebase activation error (non-fatal): {lb_err}")
+
+            # Initialize TraceManager and event listeners FIRST (in same loop as execution)
+            # This is CRITICAL - TraceManager must be started in the same loop that will call stop_writer()
+            try:
+                async_logger.info(f"[FLOW_SUBPROCESS] Initializing TraceManager and event listeners for {execution_id}")
+
+                from src.engines.crewai.trace_management import TraceManager
+                from src.engines.crewai.callbacks.logging_callbacks import (
+                    AgentTraceEventListener,
+                    TaskCompletionEventListener
+                )
+                from crewai.events import crewai_event_bus
+
+                # Start trace and logs writers
+                await TraceManager.ensure_writer_started()
+                async_logger.info(f"[FLOW_SUBPROCESS] TraceManager writer started for {execution_id}")
+
+                # Create and register event listeners
+                trace_listener = AgentTraceEventListener(
+                    job_id=execution_id,
+                    group_context=group_context,
+                )
+                trace_listener.setup_listeners(crewai_event_bus)
+                async_logger.info(f"[FLOW_SUBPROCESS] AgentTraceEventListener registered for {execution_id}")
+
+                # Log that subprocess mode is enabled for direct DB writes
+                async_logger.info(f"[FLOW_SUBPROCESS] CREW_SUBPROCESS_MODE={os.environ.get('CREW_SUBPROCESS_MODE')} - Direct DB writes enabled")
+
+                # Create task completion listener
+                task_listener = TaskCompletionEventListener(
+                    job_id=execution_id,
+                    group_context=group_context
+                )
+                task_listener.setup_listeners(crewai_event_bus)
+                async_logger.info(f"[FLOW_SUBPROCESS] TaskCompletionEventListener registered for {execution_id}")
+
+                # Initialize OTel tracing (always-on, sole trace source)
+                otel_provider = None
+                try:
+                    from src.services.otel_tracing import (
+                        create_kasal_tracer_provider,
+                    )
+                    from opentelemetry import trace as _otel_trace
+                    from opentelemetry.sdk.trace.export import (
+                        SimpleSpanProcessor,
+                    )
+
+                    otel_provider = create_kasal_tracer_provider(
+                        job_id=execution_id,
+                        service_name="kasal-flow-engine",
+                    )
+
+                    # DB exporter + SSE processor
+                    from src.services.otel_tracing.db_exporter import (
+                        KasalDBSpanExporter,
+                    )
+                    from src.services.otel_tracing.sse_processor import (
+                        KasalSSESpanProcessor,
+                    )
+                    otel_provider.add_span_processor(
+                        SimpleSpanProcessor(
+                            KasalDBSpanExporter(
+                                execution_id, group_context
+                            )
+                        )
+                    )
+                    otel_provider.add_span_processor(
+                        KasalSSESpanProcessor(execution_id)
+                    )
+
+                    _otel_trace.set_tracer_provider(otel_provider)
+
+                    # Instrument CrewAI if instrumentor available
+                    try:
+                        from openinference.instrumentation.crewai import (
+                            CrewAIInstrumentor,
+                        )
+                        CrewAIInstrumentor().instrument(
+                            tracer_provider=otel_provider
+                        )
+                        async_logger.info(
+                            f"[FLOW_SUBPROCESS] OTel tracing enabled with CrewAI instrumentation for {execution_id}"
+                        )
+                    except ImportError:
+                        async_logger.info(
+                            f"[FLOW_SUBPROCESS] OTel tracing enabled (no CrewAI instrumentor) for {execution_id}"
+                        )
+
+                    # Register OTel Event Bridge on the CrewAI event bus
+                    try:
+                        from src.services.otel_tracing.event_bridge import (
+                            OTelEventBridge,
+                        )
+
+                        _bridge_tracer = otel_provider.get_tracer(
+                            "kasal-event-bridge"
+                        )
+                        _otel_bridge = OTelEventBridge(
+                            _bridge_tracer, execution_id, group_context
+                        )
+                        _otel_bridge.register(crewai_event_bus)
+                        async_logger.info(
+                            f"[FLOW_SUBPROCESS] OTel Event Bridge registered on event bus for {execution_id}"
+                        )
+                    except Exception as bridge_err:
+                        async_logger.warning(
+                            f"[FLOW_SUBPROCESS] OTel Event Bridge registration failed (non-fatal): {bridge_err}"
+                        )
+
+                    # Route OTel tracing loggers to flow.log for visibility
+                    for otel_logger_name in [
+                        "src.services.otel_tracing",
+                        "src.services.otel_tracing.db_exporter",
+                        "src.services.otel_tracing.otel_config",
+                        "src.services.otel_tracing.sse_processor",
+                        "src.services.otel_tracing.mlflow_exporter",
+                    ]:
+                        _otel_logger = logging.getLogger(otel_logger_name)
+                        _otel_logger.handlers = []
+                        for h in async_logger.handlers:
+                            _otel_logger.addHandler(h)
+                        _otel_logger.setLevel(logging.INFO)
+                        _otel_logger.propagate = False
+
+                except ImportError:
+                    async_logger.debug(
+                        "[FLOW_SUBPROCESS] OTel packages not available, skipping"
+                    )
+                except Exception as otel_err:
+                    async_logger.warning(
+                        f"[FLOW_SUBPROCESS] OTel initialization error (non-fatal): {otel_err}"
+                    )
+
+                async_logger.info(f"[FLOW_SUBPROCESS] Successfully initialized tracing and event listeners")
+
+            except Exception as trace_init_error:
+                async_logger.error(f"[FLOW_SUBPROCESS] Failed to initialize TraceManager: {trace_init_error}", exc_info=True)
+                # Continue execution even if trace initialization fails
+
+            # Configure MLflow in subprocess (same as crew executor)
+            mlflow_result = None
+            try:
+                from src.db.database_router import get_smart_db_session
+                from src.services.databricks_service import DatabricksService
+
+                db_config = None
+                async for _db_session in get_smart_db_session():
+                    databricks_service = DatabricksService(
+                        _db_session, group_id=group_id
+                    )
+                    db_config = await databricks_service.get_databricks_config()
+
+                if db_config:
+                    from src.services.otel_tracing.mlflow_setup import (
+                        configure_mlflow_in_subprocess,
+                    )
+
+                    mlflow_result = await configure_mlflow_in_subprocess(
+                        db_config=db_config,
+                        job_id=execution_id,
+                        execution_id=execution_id,
+                        group_id=group_id,
+                        group_context=group_context,
+                        async_logger=async_logger,
+                    )
+                    if mlflow_result.tracing_ready:
+                        async_logger.info(
+                            f"[FLOW_SUBPROCESS] MLflow tracing ready "
+                            f"(experiment={mlflow_result.experiment_name})"
+                        )
+                    elif mlflow_result.error:
+                        async_logger.warning(
+                            f"[FLOW_SUBPROCESS] MLflow setup warning: {mlflow_result.error}"
+                        )
+            except Exception as mlflow_init_err:
+                async_logger.warning(
+                    f"[FLOW_SUBPROCESS] MLflow initialization failed (non-fatal): {mlflow_init_err}"
+                )
+
+            # Add MLflow exporter to OTel pipeline (after mlflow_result is available)
+            if otel_provider and mlflow_result and mlflow_result.tracing_ready:
+                try:
+                    from opentelemetry.sdk.trace.export import (
+                        SimpleSpanProcessor,
+                    )
+                    from src.services.otel_tracing.mlflow_exporter import (
+                        KasalMLflowSpanExporter,
+                    )
+                    otel_provider.add_span_processor(
+                        SimpleSpanProcessor(
+                            KasalMLflowSpanExporter(
+                                execution_id, mlflow_result, group_context
+                            )
+                        )
+                    )
+                    mlflow_result.otel_exporter_active = True
+                    async_logger.info(
+                        f"[FLOW_SUBPROCESS] MLflow span exporter added to OTel pipeline for {execution_id}"
+                    )
+                except Exception as mlflow_otel_err:
+                    async_logger.warning(
+                        f"[FLOW_SUBPROCESS] Could not add MLflow exporter to OTel pipeline: {mlflow_otel_err}"
+                    )
+
+            # Reset MCP warnings at the start of each flow execution
+            try:
+                from src.engines.crewai.tools.mcp_integration import MCPIntegration
+                MCPIntegration.reset_warnings()
+            except Exception:
+                pass
+
+            # Now run the actual flow execution
+            try:
+                from src.db.database_router import get_smart_db_session
+                from src.engines.crewai.flow.flow_runner_service import FlowRunnerService
+
+                async for session in get_smart_db_session():
+                    flow_runner = FlowRunnerService(session)
+
+                    # Extract flow parameters from config
+                    flow_id = flow_config.get('flow_id') or flow_config.get('inputs', {}).get('flow_id')
+                    run_name = flow_config.get('run_name')
+
+                    async_logger.info(f"[FLOW_SUBPROCESS] Starting flow execution")
+                    async_logger.info(f"  flow_id: {flow_id}")
+                    async_logger.info(f"  execution_id: {execution_id}")
+                    async_logger.info(f"  run_name: {run_name}")
+                    async_logger.info(f"  flow_config keys: {list(flow_config.keys())}")
+                    if 'inputs' in flow_config:
+                        async_logger.info(f"  flow_config['inputs'] keys: {list(flow_config.get('inputs', {}).keys())}")
+                        async_logger.info(f"  flow_config['inputs']['flow_id']: {flow_config.get('inputs', {}).get('flow_id')}")
+
+                    # Execute the flow (wrapped in MLflow root trace if tracing is ready)
+                    from src.services.otel_tracing.mlflow_setup import (
+                        execute_with_mlflow_trace_async,
+                        post_execution_mlflow_cleanup,
+                    )
+
+                    result = await execute_with_mlflow_trace_async(
+                        kickoff_coro_fn=flow_runner.run_flow,
+                        mlflow_result=mlflow_result,
+                        flow_config=flow_config,
+                        inputs=flow_config.get("inputs"),
+                        async_logger=async_logger,
+                        flow_id=flow_id,
+                        job_id=execution_id,
+                        run_name=run_name,
+                        config=flow_config,
+                    )
+
+                    async_logger.info(f"[FLOW_SUBPROCESS] Flow execution completed successfully")
+
+                    # CRITICAL: Flush the CrewAI event bus to ensure all event handlers
+                    # (agent execution started/completed, tool usage, etc.) complete their
+                    # work before we return.
+                    try:
+                        from crewai.events import crewai_event_bus as _event_bus
+                        async_logger.info("[FLOW_SUBPROCESS] Flushing CrewAI event bus to ensure all trace handlers complete...")
+                        flushed = _event_bus.flush(timeout=30.0)
+                        if flushed:
+                            async_logger.info("[FLOW_SUBPROCESS] Event bus flush completed - all handlers finished")
+                        else:
+                            async_logger.warning("[FLOW_SUBPROCESS] Event bus flush timed out - some handlers may not have completed")
+                    except Exception as flush_err:
+                        async_logger.warning(f"[FLOW_SUBPROCESS] Event bus flush error (non-fatal): {flush_err}")
+
+                    # Post-execution: MLflow flush → trace capture → stop writers
+                    await post_execution_mlflow_cleanup(
+                        mlflow_result=mlflow_result,
+                        execution_id=execution_id,
+                        group_id=group_id,
+                        async_logger=async_logger,
+                    )
+
+                    return result
+
+            except Exception as e:
+                async_logger.error(f"[FLOW_SUBPROCESS] Flow execution error: {e}", exc_info=True)
+                # Flush event bus even on error to capture partial traces
+                try:
+                    from crewai.events import crewai_event_bus as _event_bus
+                    _event_bus.flush(timeout=10.0)
+                except Exception:
+                    pass
+                # Flush MLflow on error too
+                try:
+                    from src.services.otel_tracing.mlflow_setup import (
+                        post_execution_mlflow_cleanup,
+                    )
+                    await post_execution_mlflow_cleanup(
+                        mlflow_result=mlflow_result,
+                        execution_id=execution_id,
+                        group_id=group_id,
+                        async_logger=async_logger,
+                    )
+                except Exception:
+                    pass
+                raise
+
+        # Create new event loop for subprocess
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            # Run the flow
+            result = loop.run_until_complete(run_async_flow())
+
+            # Check if the result indicates failure BEFORE logging success
+            flow_failed = False
+            flow_error = None
+            if isinstance(result, dict):
+                # Check for explicit failure indicators
+                if result.get('success') is False:
+                    flow_failed = True
+                    flow_error = result.get('error', 'Flow execution failed')
+                elif result.get('error'):
+                    flow_failed = True
+                    flow_error = result.get('error')
+                elif result.get('status') == 'FAILED':
+                    flow_failed = True
+                    flow_error = result.get('error', result.get('message', 'Flow execution failed'))
+
+            if flow_failed:
+                async_logger.error(f"[FLOW_SUBPROCESS] Flow execution failed: {flow_error}")
+            else:
+                async_logger.info(f"[FLOW_SUBPROCESS] Flow completed successfully")
+
+            # Process result - extract actual content like ProcessCrewExecutor does
+            processed_result = None
+            if result:
+                async_logger.info(f"[FLOW_SUBPROCESS] Processing result of type: {type(result)}")
+
+                # Check if result is a dict with 'result' key (from flow_runner_service)
+                if isinstance(result, dict):
+                    if 'result' in result:
+                        inner_result = result['result']
+                        # Extract raw content if available
+                        if hasattr(inner_result, 'raw') and inner_result.raw:
+                            processed_result = inner_result.raw
+                            async_logger.info(f"[FLOW_SUBPROCESS] Extracted raw from inner result, length: {len(str(processed_result))}")
+                        elif isinstance(inner_result, dict):
+                            # If inner result has 'content' key, extract it
+                            if 'content' in inner_result:
+                                processed_result = inner_result['content']
+                            else:
+                                processed_result = inner_result
+                        elif isinstance(inner_result, str):
+                            processed_result = inner_result
+                        else:
+                            processed_result = str(inner_result) if inner_result else None
+                    else:
+                        # Result is a dict but no 'result' key - might be error or status
+                        processed_result = result
+                # Check for raw attribute (CrewOutput)
+                elif hasattr(result, 'raw') and result.raw:
+                    processed_result = result.raw
+                    async_logger.info(f"[FLOW_SUBPROCESS] Extracted raw from result, length: {len(str(processed_result))}")
+                else:
+                    processed_result = str(result)
+            else:
+                processed_result = "Flow execution completed (no result returned)"
+
+            async_logger.info(f"[FLOW_SUBPROCESS] Final processed result type: {type(processed_result)}")
+
+            # Debug: Log result keys and hitl_paused value for HITL troubleshooting
+            if isinstance(result, dict):
+                async_logger.info(f"[FLOW_SUBPROCESS] Result keys: {list(result.keys())}")
+                async_logger.info(f"[FLOW_SUBPROCESS] hitl_paused value: {result.get('hitl_paused')}")
+                async_logger.info(f"[FLOW_SUBPROCESS] paused_for_approval value: {result.get('paused_for_approval')}")
+
+            # Check if flow was paused for HITL approval
+            # IMPORTANT: Check both hitl_paused AND paused_for_approval - the subprocess uses paused_for_approval
+            if isinstance(result, dict) and (result.get("hitl_paused") or result.get("paused_for_approval")):
+                async_logger.info(f"[FLOW_SUBPROCESS] 🚦 Flow paused for HITL approval")
+                return_dict = {
+                    "status": "WAITING_FOR_APPROVAL",
+                    "execution_id": execution_id,
+                    "result": result,  # Pass through the full HITL result
+                    "hitl_paused": True,
+                    "paused_for_approval": True,  # Pass through for flow_execution_runner
+                    "approval_id": result.get("approval_id"),
+                    "gate_node_id": result.get("gate_node_id"),
+                    "message": result.get("message"),
+                    "crew_sequence": result.get("crew_sequence"),
+                    "flow_uuid": result.get("flow_uuid"),
+                    "process_id": os.getpid()
+                }
+                return return_dict
+
+            # Build return dict with flow_uuid for checkpoint/resume functionality
+            # CRITICAL: Check if flow failed and set status accordingly
+            if flow_failed:
+                return_dict = {
+                    "status": "FAILED",
+                    "execution_id": execution_id,
+                    "error": flow_error,
+                    "result": processed_result,
+                    "process_id": os.getpid()
+                }
+                async_logger.info(f"[FLOW_SUBPROCESS] Returning FAILED status due to flow error: {flow_error}")
+            else:
+                # Collect MCP warnings to surface in the execution trace/UI
+                mcp_warnings = []
+                try:
+                    from src.engines.crewai.tools.mcp_integration import MCPIntegration
+                    mcp_warnings = MCPIntegration.get_warnings()
+                    if mcp_warnings:
+                        async_logger.warning(f"[FLOW_SUBPROCESS] [MCP_WARNINGS] {'; '.join(mcp_warnings)}")
+                except Exception:
+                    pass
+
+                return_dict = {
+                    "status": "COMPLETED",
+                    "execution_id": execution_id,
+                    "result": processed_result,
+                    "process_id": os.getpid(),
+                    "warnings": mcp_warnings,
+                }
+            # Include flow_uuid if available (from @persist)
+            if isinstance(result, dict) and result.get("flow_uuid"):
+                return_dict["flow_uuid"] = result.get("flow_uuid")
+                async_logger.info(f"[FLOW_SUBPROCESS] Including flow_uuid for checkpoint: {return_dict['flow_uuid']}")
+            return return_dict
+        finally:
+            # Cleanup async resources before closing loop
+            try:
+                # CRITICAL: Final flush of event bus to ensure all trace handlers complete
+                # This is essential for llm_request/llm_response traces that are written
+                # asynchronously by the event bus's thread pool
+                try:
+                    from crewai.events import crewai_event_bus as _cleanup_event_bus
+                    async_logger.info("[FLOW_SUBPROCESS] Final event bus flush before cleanup...")
+                    _cleanup_event_bus.flush(timeout=15.0)
+                    async_logger.info("[FLOW_SUBPROCESS] Event bus flush completed")
+                except Exception as eb_flush_err:
+                    async_logger.warning(f"[FLOW_SUBPROCESS] Event bus flush error: {eb_flush_err}")
+
+                # Shutdown OTel TracerProvider to flush remaining spans
+                try:
+                    from src.services.otel_tracing import shutdown_provider
+                    shutdown_provider()
+                except Exception as otel_shutdown_err:
+                    async_logger.debug(f"[FLOW_SUBPROCESS] OTel shutdown: {otel_shutdown_err}")
+
+                # CRITICAL: Stop TraceManager writer tasks first - these keep the subprocess alive
+                try:
+                    from src.engines.crewai.trace_management import TraceManager
+                    async_logger.info("[FLOW_SUBPROCESS] Stopping TraceManager writer tasks...")
+                    loop.run_until_complete(TraceManager.stop_writer())
+                    async_logger.info("[FLOW_SUBPROCESS] TraceManager writer tasks stopped")
+                except Exception as trace_cleanup_err:
+                    async_logger.warning(f"[FLOW_SUBPROCESS] TraceManager cleanup: {trace_cleanup_err}")
+
+                # Cleanup litellm's async HTTP clients
+                try:
+                    from litellm.llms.custom_httpx.async_client_cleanup import close_litellm_async_clients
+                    loop.run_until_complete(close_litellm_async_clients())
+                except ImportError:
+                    # Older litellm version, try alternative cleanup
+                    try:
+                        from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
+                        if hasattr(AsyncHTTPHandler, 'close_clients'):
+                            loop.run_until_complete(AsyncHTTPHandler.close_clients())
+                    except Exception:
+                        pass
+                except Exception:
+                    # Ignore cleanup errors
+                    pass
+
+                # Cancel any pending tasks
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
+
+                # Wait for cancelled tasks to finish
+                if pending:
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            except Exception as cleanup_err:
+                # Ignore cleanup errors, just log them
+                try:
+                    async_logger.debug(f"Async cleanup note: {cleanup_err}")
+                except:
+                    pass
+            finally:
+                # Suppress litellm's RuntimeWarning about unawaited coroutines during loop cleanup
+                # This warning is harmless - we've already cleaned up what we can above
+                # Apply filters globally since warnings come from litellm's internal event loop hooks
+                import warnings
+                warnings.filterwarnings("ignore", category=RuntimeWarning,
+                                      message=".*coroutine.*was never awaited")
+                warnings.filterwarnings("ignore", category=RuntimeWarning,
+                                      message=".*Enable tracemalloc.*")
+                warnings.filterwarnings("ignore", category=RuntimeWarning,
+                                      module=".*async_client_cleanup.*")
+                loop.close()
+
+    except Exception as e:
+        # Log error to flow.log with execution ID
+        error_logger = logging.getLogger('flow')
+        error_logger.error(f"Process {os.getpid()} error in flow execution for {execution_id}: {e}")
+        error_logger.error(f"Traceback: {traceback.format_exc()}")
+
+        return {
+            "status": "FAILED",
+            "execution_id": execution_id,
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+            "process_id": os.getpid()
+        }
+    finally:
+        # Capture any output that was written to stdout/stderr
+        try:
+            output = captured_output.getvalue()
+            if output:
+                # Log the captured output to flow.log with execution ID
+                # The database handler will automatically write to execution_logs
+                for line in output.split('\n'):
+                    line_stripped = line.strip()
+                    if line_stripped:
+                        async_logger.info(f"[STDOUT] {line_stripped}")
+        except Exception as capture_error:
+            # Log any errors in stdout capture (shouldn't happen normally)
+            try:
+                async_logger.error(f"Error capturing stdout: {capture_error}")
+            except:
+                pass
+
+        # Restore stdout/stderr before process ends
+        restore_stdout_stderr(original_stdout, original_stderr)
+
+        # Clean up database connections
+        try:
+            from src.services.mlflow_tracing_service import cleanup_async_db_connections as _cleanup_db
+            _cleanup_db()
+        except Exception as db_cleanup_error:
+            logger.debug(f"Database cleanup note: {db_cleanup_error}")
+
+        # Clean up any remaining child processes (including crew processes)
+        try:
+            import psutil
+            parent = psutil.Process(os.getpid())
+            children = parent.children(recursive=True)
+
+            if children:
+                logger.info(f"Cleaning up {len(children)} remaining child processes (including crews)")
+
+                for child in children:
+                    try:
+                        child.terminate()
+                    except psutil.NoSuchProcess:
+                        pass
+
+                # Give them a moment to terminate
+                _, alive = psutil.wait_procs(children, timeout=2)
+
+                # Force kill any that didn't terminate
+                for p in alive:
+                    try:
+                        p.kill()
+                    except psutil.NoSuchProcess:
+                        pass
+        except ImportError:
+            logger.warning("psutil not available for cleanup")
+        except Exception as cleanup_error:
+            logger.error(f"Error during final cleanup: {cleanup_error}")
+
+
+class ProcessFlowExecutor:
+    """High-performance process-based executor for isolated CrewAI flow execution.
+
+    This executor manages CrewAI flow executions in separate OS processes,
+    providing complete isolation, resource management, and the ability to
+    forcefully terminate stuck or runaway executions.
+
+    Unlike thread-based execution, process isolation guarantees:
+    - Complete memory separation between executions
+    - Ability to forcefully terminate without affecting other executions
+    - No resource leaks or zombie processes
+    - Protection of the main application from flow failures
+    - Proper cleanup of all child processes (including crew processes)
+
+    Features:
+        - One process per execution (no shared pool)
+        - Concurrent execution management with configurable limits
+        - Graceful and forceful termination support
+        - Child process tracking and cleanup (including crew subprocesses)
+        - Async/await interface for non-blocking operations
+        - Comprehensive error handling and recovery
+
+    Attributes:
+        _ctx: Multiprocessing context using 'spawn' for better isolation
+        _running_processes: Dictionary tracking active processes by execution ID
+        _running_futures: Dictionary of asyncio futures for execution results
+        _running_executors: Dictionary of process pool executors
+        _max_concurrent: Maximum number of concurrent flow executions
+        _metrics: Dictionary tracking execution statistics
+
+    Example:
+        >>> executor = ProcessFlowExecutor(max_concurrent=2)
+        >>> result = await executor.run_flow_isolated(
+        ...     execution_id="exec_123",
+        ...     flow_config=config
+        ... )
+        >>> # To stop an execution:
+        >>> stopped = await executor.terminate_execution("exec_123")
+    """
+
+    def __init__(self, max_concurrent: int = 2):
+        """Initialize the process executor with concurrency control.
+
+        Sets up the multiprocessing context, tracking structures, and
+        concurrency management primitives.
+
+        Args:
+            max_concurrent: Maximum number of concurrent flow executions.
+                Defaults to 2 to balance resource usage (flows can spawn multiple crews).
+
+        Note:
+            Uses 'spawn' context instead of 'fork' for better isolation
+            and to avoid shared memory issues between processes.
+        """
+        # Use spawn method for better isolation
+        self._ctx = mp.get_context('spawn')
+
+        # Configure subprocess to suppress output
+        os.environ['PYTHONUNBUFFERED'] = '0'
+        os.environ['CREWAI_VERBOSE'] = 'false'
+
+        # NO POOL - we create individual processes per execution
+        self._max_concurrent = max_concurrent
+
+        # Track running processes and their executors
+        self._running_processes: Dict[str, mp.Process] = {}
+        self._running_futures: Dict[str, Any] = {}
+        self._running_executors: Dict[str, ProcessPoolExecutor] = {}
+
+        # Metrics
+        self._metrics = {
+            'total_executions': 0,
+            'active_executions': 0,
+            'completed_executions': 0,
+            'failed_executions': 0,
+            'terminated_executions': 0
+        }
+
+        logger.info(f"ProcessFlowExecutor initialized for per-execution processes (max concurrent: {max_concurrent})")
+
+    @staticmethod
+    def _run_flow_wrapper(execution_id: str, flow_config: Dict[str, Any],
+                         inputs: Optional[Dict[str, Any]], group_context: Any,
+                         result_queue: mp.Queue, log_queue: mp.Queue):
+        """
+        Wrapper to run flow in subprocess and put result in queue.
+
+        This method runs in the subprocess and handles the flow execution.
+        """
+        try:
+            # Run the flow execution
+            result = run_flow_in_process(execution_id, flow_config, inputs, group_context, log_queue)
+            # Put result in the queue
+            result_queue.put(result)
+        except Exception as e:
+            # Put error result in the queue
+            result_queue.put({
+                "status": "FAILED",
+                "execution_id": execution_id,
+                "error": str(e)
+            })
+        finally:
+            # CRITICAL: Explicitly exit the subprocess after putting result in queue
+            # Without this, the process stays alive waiting for background threads/tasks
+            # This prevents zombie subprocess accumulation
+
+            # Flush and close all logging handlers to prevent blocking on I/O
+            import logging
+            logging.shutdown()
+
+            # Force exit the subprocess
+            import sys
+            import os
+
+            # Log that we're exiting (might not be written if handlers already closed)
+            try:
+                logger = logging.getLogger('flow')
+                logger.info(f"[SUBPROCESS EXIT] Process {os.getpid()} exiting for execution {execution_id}")
+            except:
+                pass
+
+            # CRITICAL: Use os._exit(0) instead of sys.exit(0)
+            # os._exit(0) forcefully terminates without waiting for non-daemon threads
+            # This is necessary because HITL flows leave background tasks running
+            # (TraceManager writers, event listeners) that prevent sys.exit(0) from completing
+            # Normal sys.exit(0) waits for all threads → process hangs as zombie
+            # os._exit(0) terminates immediately → process exits cleanly
+            os._exit(0)
+
+    async def run_flow_isolated(
+        self,
+        execution_id: str,
+        flow_config: Dict[str, Any],
+        group_context: Any,  # MANDATORY - for tenant isolation
+        inputs: Optional[Dict[str, Any]] = None,
+        timeout: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """
+        Run a flow in an isolated process using direct Process control.
+
+        Args:
+            execution_id: Unique identifier for the execution
+            flow_config: Configuration to build the flow
+            group_context: Group context for tenant isolation (MANDATORY)
+            inputs: Optional inputs for the flow
+            timeout: Optional timeout in seconds
+
+        Returns:
+            Dictionary with execution results
+        """
+        logger.info(f"[ProcessFlowExecutor] run_flow_isolated called for {execution_id}")
+
+        self._metrics['total_executions'] += 1
+        self._metrics['active_executions'] += 1
+
+        start_time = datetime.now()
+
+        # Use multiprocessing.Queue to get results from the subprocess
+        result_queue = self._ctx.Queue()
+        log_queue = self._ctx.Queue()
+
+        # Pass group_context data to flow_config for subprocess execution
+        if group_context:
+            if isinstance(flow_config, dict):
+                if hasattr(group_context, 'primary_group_id') and group_context.primary_group_id:
+                    flow_config['group_id'] = group_context.primary_group_id
+                    logger.info(f"[ProcessFlowExecutor] Added group_id to flow_config: {group_context.primary_group_id}")
+                else:
+                    logger.error("[ProcessFlowExecutor] SECURITY: No group_id in group_context - multi-tenant isolation may fail")
+
+                # Add user token if available
+                if hasattr(group_context, 'access_token') and group_context.access_token:
+                    flow_config['user_token'] = group_context.access_token
+                    logger.info("[ProcessFlowExecutor] Added user_token to flow_config for OBO authentication")
+
+                # Add execution_id for memory session scoping
+                # This is CRITICAL for short-term memory to only return results from the current run
+                flow_config['execution_id'] = execution_id
+                logger.info(f"[ProcessFlowExecutor] Added execution_id to flow_config: {execution_id}")
+
+        # Also add execution_id outside of group_context block to ensure it's always available
+        if isinstance(flow_config, dict) and 'execution_id' not in flow_config:
+            flow_config['execution_id'] = execution_id
+            logger.info(f"[ProcessFlowExecutor] Added execution_id to flow_config (fallback): {execution_id}")
+
+        # CRITICAL: Set KASAL_EXECUTION_ID in parent BEFORE spawning
+        # This ensures the child process inherits it and psutil can see it
+        # Store the old value to restore after spawning (to avoid polluting parent env)
+        old_kasal_exec_id = os.environ.get('KASAL_EXECUTION_ID')
+        os.environ['KASAL_EXECUTION_ID'] = execution_id
+        logger.info(f"[ProcessFlowExecutor] Set KASAL_EXECUTION_ID={execution_id} for subprocess inheritance")
+
+        # Propagate Lakebase config to subprocess so the OTel trace exporter
+        # writes traces to Lakebase instead of the local DB when Lakebase is active.
+        old_lakebase_active = os.environ.get("LAKEBASE_ACTIVE")
+        old_lakebase_instance = os.environ.get("LAKEBASE_INSTANCE_NAME")
+        try:
+            from src.db.database_router import is_lakebase_enabled, get_lakebase_config_from_db
+            lakebase_enabled = await is_lakebase_enabled()
+            if lakebase_enabled:
+                os.environ["LAKEBASE_ACTIVE"] = "true"
+                lakebase_config = await get_lakebase_config_from_db()
+                if lakebase_config:
+                    inst = lakebase_config.get("instance_name") or os.environ.get("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
+                    os.environ["LAKEBASE_INSTANCE_NAME"] = inst
+                logger.info(
+                    f"[ProcessFlowExecutor] Lakebase active — set LAKEBASE_ACTIVE=true, "
+                    f"LAKEBASE_INSTANCE_NAME={os.environ.get('LAKEBASE_INSTANCE_NAME')}"
+                )
+            else:
+                os.environ.pop("LAKEBASE_ACTIVE", None)
+        except Exception as e:
+            logger.debug(f"[ProcessFlowExecutor] Could not check Lakebase status: {e}")
+
+        try:
+            # Create and start the subprocess
+            process = self._ctx.Process(
+                target=self._run_flow_wrapper,
+                args=(execution_id, flow_config, inputs, group_context, result_queue, log_queue),
+                daemon=False  # Don't make daemon so it can spawn its own child processes (crews)
+            )
+
+            # Store the process
+            self._running_processes[execution_id] = process
+
+            # Start the process
+            process.start()
+            logger.info(f"[ProcessFlowExecutor] Started flow process {process.pid} for execution {execution_id}")
+        finally:
+            # Restore parent's environment
+            if old_kasal_exec_id is not None:
+                os.environ['KASAL_EXECUTION_ID'] = old_kasal_exec_id
+            else:
+                os.environ.pop('KASAL_EXECUTION_ID', None)
+            # Restore Lakebase env vars
+            if old_lakebase_active is not None:
+                os.environ["LAKEBASE_ACTIVE"] = old_lakebase_active
+            else:
+                os.environ.pop("LAKEBASE_ACTIVE", None)
+            if old_lakebase_instance is not None:
+                os.environ["LAKEBASE_INSTANCE_NAME"] = old_lakebase_instance
+
+        # Wait for result in background
+        loop = asyncio.get_event_loop()
+        future = loop.run_in_executor(None, self._wait_for_result, execution_id, process, result_queue, timeout)
+        self._running_futures[execution_id] = future
+
+        try:
+            result = await future
+
+            # Process logs from flow.log file and write to database
+            # This reads the flow.log file after execution to capture ALL logs
+            await self._process_log_queue(log_queue, execution_id, group_context)
+
+            # Update metrics
+            if result.get('status') == 'COMPLETED':
+                self._metrics['completed_executions'] += 1
+            else:
+                self._metrics['failed_executions'] += 1
+
+            return result
+
+        except asyncio.TimeoutError:
+            logger.error(f"Flow execution {execution_id} timed out after {timeout}s")
+            await self.terminate_execution(execution_id)
+            self._metrics['failed_executions'] += 1
+            return {
+                "status": "FAILED",
+                "execution_id": execution_id,
+                "error": f"Execution timed out after {timeout} seconds"
+            }
+        except Exception as e:
+            logger.error(f"Error waiting for flow execution {execution_id}: {e}")
+            self._metrics['failed_executions'] += 1
+            return {
+                "status": "FAILED",
+                "execution_id": execution_id,
+                "error": str(e)
+            }
+        finally:
+            self._metrics['active_executions'] -= 1
+            # Clean up tracking
+            self._running_processes.pop(execution_id, None)
+            self._running_futures.pop(execution_id, None)
+
+    def _wait_for_result(self, execution_id: str, process: mp.Process,
+                         result_queue: mp.Queue, timeout: Optional[float]) -> Dict[str, Any]:
+        """
+        Wait for process to complete and return result.
+
+        This runs in a thread pool executor.
+        """
+        try:
+            # Wait for process to finish
+            process.join(timeout=timeout)
+
+            if process.is_alive():
+                # Timeout occurred
+                logger.warning(f"Flow process {process.pid} for {execution_id} still running after timeout")
+                process.terminate()
+                process.join(timeout=5)
+                if process.is_alive():
+                    process.kill()
+                    process.join()
+                raise TimeoutError(f"Flow execution timed out after {timeout} seconds")
+
+            # Get result from queue
+            if not result_queue.empty():
+                result = result_queue.get(timeout=1)
+                return result
+            else:
+                # No result in queue - process ended without producing result
+                # This typically happens when the process was stopped/killed
+                exit_code = process.exitcode
+                logger.info(f"[_wait_for_result] Process {process.pid} ended without result. Exit code: {exit_code}. This is normal if the flow was stopped.")
+                return {
+                    "status": "FAILED",
+                    "execution_id": execution_id,
+                    "error": "Process ended without producing result (may have been stopped)",
+                    "exit_code": exit_code
+                }
+
+        except Exception as e:
+            logger.error(f"Error waiting for flow result: {e}")
+            return {
+                "status": "FAILED",
+                "execution_id": execution_id,
+                "error": str(e)
+            }
+
+    async def terminate_execution(self, execution_id: str, graceful: bool = False) -> bool:
+        """
+        Terminate a running flow execution.
+
+        This method handles termination in multiple ways:
+        1. First tries the in-memory process tracking (for non-reloaded servers)
+        2. Falls back to psutil to find orphaned processes by execution_id
+           (handles server reloads where tracking is lost)
+
+        Args:
+            execution_id: ID of the execution to terminate
+            graceful: If True, send SIGTERM first; if False, send SIGKILL directly
+
+        Returns:
+            True if termination successful, False otherwise
+        """
+        logger.info(f"[FLOW_STOP] ========== FLOW STOP REQUESTED ==========")
+        logger.info(f"[FLOW_STOP] execution_id: {execution_id}")
+        logger.info(f"[FLOW_STOP] graceful: {graceful}")
+        logger.info(f"[FLOW_STOP] Tracked processes: {list(self._running_processes.keys())}")
+        terminated = False
+
+        # First, try to terminate via in-memory tracking
+        process = self._running_processes.get(execution_id)
+        if process:
+            logger.info(f"[FLOW_STOP] Found process in tracking: PID={process.pid}, alive={process.is_alive()}")
+            try:
+                if process.is_alive():
+                    pid = process.pid
+                    logger.info(f"[FLOW_STOP] Process {pid} is alive, terminating...")
+
+                    if graceful:
+                        # Send SIGTERM for graceful shutdown
+                        process.terminate()
+                        logger.info(f"[FLOW_STOP] Sent SIGTERM to flow process {pid}")
+                        # Wait a bit for graceful shutdown
+                        process.join(timeout=5)
+
+                    # Force kill if still alive
+                    if process.is_alive():
+                        process.kill()
+                        logger.info(f"[FLOW_STOP] Sent SIGKILL to flow process {pid}")
+                        process.join(timeout=2)
+
+                    logger.info(f"[FLOW_STOP] ✅ Successfully terminated process {pid}")
+                    terminated = True
+                else:
+                    logger.info(f"[FLOW_STOP] Process {process.pid} already terminated")
+                    terminated = True
+
+            except Exception as e:
+                logger.error(f"[FLOW_STOP] Error terminating tracked process: {e}")
+                # Try psutil as fallback for the tracked process
+                try:
+                    import psutil
+                    if process.pid:
+                        psutil_proc = psutil.Process(process.pid)
+                        psutil_proc.kill()
+                        logger.info(f"[FLOW_STOP] ✅ Force killed process {process.pid} using psutil")
+                        terminated = True
+                except Exception as psutil_err:
+                    logger.warning(f"[FLOW_STOP] psutil fallback for tracked process failed: {psutil_err}")
+
+            # Clean up tracking
+            self._running_processes.pop(execution_id, None)
+            self._running_futures.pop(execution_id, None)
+        else:
+            logger.info(f"[FLOW_STOP] Process NOT found in tracking (server may have reloaded)")
+
+        # If not found in tracking (e.g., server reloaded), search ALL processes
+        if not terminated:
+            logger.info(f"[FLOW_STOP] Searching ALL processes for orphaned flow with execution_id {execution_id}...")
+            terminated = await self._terminate_orphaned_process(execution_id, graceful)
+
+        if terminated:
+            self._metrics['terminated_executions'] += 1
+            logger.info(f"[FLOW_STOP] ========== FLOW STOP SUCCESSFUL ==========")
+        else:
+            logger.warning(f"[FLOW_STOP] ========== FLOW STOP FAILED - NO PROCESS FOUND ==========")
+
+        return terminated
+
+    async def _terminate_orphaned_process(self, execution_id: str, graceful: bool = False) -> bool:
+        """
+        Find and terminate orphaned flow processes by searching all running processes.
+
+        This handles the case where the server was reloaded and we lost the process reference.
+        It searches for processes that have the execution_id in their command line or environment.
+
+        Args:
+            execution_id: The execution ID to search for
+            graceful: If True, try SIGTERM first
+
+        Returns:
+            True if a matching process was found and terminated
+        """
+        try:
+            import psutil
+
+            # Use short execution_id for matching (first 8 chars is common in logs)
+            exec_id_short = execution_id[:8]
+            killed_count = 0
+            python_processes_checked = 0
+
+            logger.info(f"[FLOW_STOP] Searching for orphaned processes with KASAL_EXECUTION_ID={exec_id_short}...")
+
+            # Search ALL processes, not just children of current process
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    # Skip non-Python processes for efficiency
+                    proc_name = proc.info.get('name', '').lower()
+                    if 'python' not in proc_name:
+                        continue
+
+                    python_processes_checked += 1
+
+                    # Check command line for execution_id
+                    cmdline = proc.info.get('cmdline', [])
+                    cmdline_str = ' '.join(cmdline) if cmdline else ''
+
+                    # Check environment variables for process identification
+                    kasal_exec_id = None
+                    is_flow_subprocess = False
+                    try:
+                        env = proc.environ()
+                        kasal_exec_id = env.get('KASAL_EXECUTION_ID', '')
+                        # Also check FLOW_SUBPROCESS_MODE for legacy processes (before KASAL_EXECUTION_ID was added)
+                        is_flow_subprocess = env.get('FLOW_SUBPROCESS_MODE', '') == 'true'
+                    except (psutil.AccessDenied, psutil.NoSuchProcess):
+                        pass
+
+                    # Check if this process matches our execution
+                    # Priority: KASAL_EXECUTION_ID env var > cmdline match
+                    is_match = False
+                    if kasal_exec_id:
+                        is_match = (kasal_exec_id == execution_id or kasal_exec_id.startswith(exec_id_short))
+                        if is_match:
+                            logger.info(f"[FLOW_STOP] Found process {proc.info['pid']} with matching KASAL_EXECUTION_ID={kasal_exec_id}")
+                    elif execution_id in cmdline_str or exec_id_short in cmdline_str:
+                        is_match = True
+                        logger.info(f"[FLOW_STOP] Found process {proc.info['pid']} with execution_id in cmdline")
+                    elif is_flow_subprocess and not kasal_exec_id:
+                        # Log legacy processes for visibility (but don't kill them - can't identify which execution)
+                        logger.warning(f"[FLOW_STOP] Found legacy flow subprocess {proc.info['pid']} without KASAL_EXECUTION_ID - cannot verify execution match")
+
+                    if is_match:
+                        pid = proc.info['pid']
+                        logger.info(f"[FLOW_STOP] Terminating orphaned process {pid}...")
+
+                        # Also kill all children of this process (crews spawned by flow)
+                        try:
+                            parent = psutil.Process(pid)
+                            children = parent.children(recursive=True)
+                            logger.info(f"[FLOW_STOP] Process {pid} has {len(children)} child processes")
+
+                            # Terminate children first
+                            for child in children:
+                                try:
+                                    if graceful:
+                                        child.terminate()
+                                    else:
+                                        child.kill()
+                                    logger.info(f"[FLOW_STOP] Terminated child process {child.pid}")
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    pass
+
+                            # Give children time to terminate
+                            if children:
+                                psutil.wait_procs(children, timeout=2)
+
+                            # Now terminate the parent
+                            if graceful:
+                                parent.terminate()
+                                try:
+                                    parent.wait(timeout=5)
+                                except psutil.TimeoutExpired:
+                                    parent.kill()
+                            else:
+                                parent.kill()
+
+                            logger.info(f"[FLOW_STOP] ✅ Successfully terminated orphaned process {pid}")
+                            killed_count += 1
+
+                        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                            logger.warning(f"[FLOW_STOP] Could not terminate process {pid}: {e}")
+
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+
+            logger.info(f"[FLOW_STOP] Checked {python_processes_checked} Python processes")
+            if killed_count > 0:
+                logger.info(f"[FLOW_STOP] ✅ Terminated {killed_count} orphaned processes for {execution_id}")
+                return True
+            else:
+                logger.warning(f"[FLOW_STOP] No orphaned processes found for {execution_id}")
+                return False
+
+        except ImportError:
+            logger.error("[ProcessFlowExecutor] psutil not available for orphaned process cleanup")
+            return False
+        except Exception as e:
+            logger.error(f"[ProcessFlowExecutor] Error searching for orphaned processes: {e}")
+            return False
+
+    async def _process_log_queue(self, log_queue, execution_id: str, group_context=None):
+        """
+        Process logs from flow.log file and write them to the execution_logs table.
+
+        This method reads the flow.log file, extracts logs for the specific execution,
+        and writes them to the database for persistent storage and later retrieval.
+
+        NOTE: This is a non-critical operation. If it fails, the flow execution is still
+        considered successful. Traces are captured separately by TraceManager.
+
+        Args:
+            log_queue: Not used anymore, kept for compatibility
+            execution_id: The execution ID for logging
+            group_context: Optional group context for multi-tenant isolation
+        """
+        logger.info(f"[ProcessFlowExecutor] Processing logs from flow.log for {execution_id}")
+
+        try:
+            import os
+            from datetime import datetime
+            # Get the flow.log path
+            log_dir = os.environ.get('LOG_DIR')
+            if not log_dir:
+                import pathlib
+                backend_root = pathlib.Path(__file__).parent.parent.parent
+                log_dir = backend_root / 'logs'
+
+            flow_log_path = os.path.join(log_dir, 'flow.log')
+
+            if not os.path.exists(flow_log_path):
+                logger.warning(f"flow.log file not found at {flow_log_path}")
+                return
+
+            # Extract logs for our execution ID
+            logs_to_write = []
+            exec_id_short = execution_id[:8]  # Use short ID for matching
+
+            # First, add a header log entry to mark the start
+            logs_to_write.append({
+                'execution_id': execution_id,
+                'content': f'[EXECUTION_START] ========== Execution {execution_id} Started ==========',
+                'timestamp': datetime.utcnow(),  # Use timezone-naive UTC datetime for database consistency
+                'group_id': getattr(group_context, 'primary_group_id', None) if group_context else None,
+                'group_email': getattr(group_context, 'group_email', None) if group_context else None
+            })
+
+            # Read flow.log and extract relevant logs
+            with open(flow_log_path, 'r') as f:
+                for line in f:
+                    if exec_id_short in line:
+                        # This log belongs to our execution
+                        logs_to_write.append({
+                            'execution_id': execution_id,
+                            'content': line.strip(),
+                            'timestamp': datetime.utcnow(),  # Use timezone-naive UTC datetime for database consistency
+                            'group_id': getattr(group_context, 'primary_group_id', None) if group_context else None,
+                            'group_email': getattr(group_context, 'group_email', None) if group_context else None
+                        })
+
+            if len(logs_to_write) <= 1:  # Only has header
+                logger.info(f"No logs found for execution {exec_id_short} in flow.log")
+                # Still write the header log
+            else:
+                logger.info(f"Found {len(logs_to_write)-1} logs for execution {exec_id_short} in flow.log")
+
+            # Route through get_smart_db_session so logs land in
+            # Lakebase when enabled (same path as API endpoints).
+            from src.db.database_router import get_smart_db_session
+            from src.repositories.execution_logs_repository import ExecutionLogsRepository
+
+            logger.info(
+                f"[ProcessFlowExecutor] Writing {len(logs_to_write)} logs via smart DB session"
+            )
+            async for session in get_smart_db_session():
+                repo = ExecutionLogsRepository(session)
+                for log_data in logs_to_write:
+                    await repo.create_log(
+                        execution_id=log_data["execution_id"],
+                        content=log_data["content"],
+                        timestamp=log_data["timestamp"],
+                        group_id=log_data.get("group_id"),
+                        group_email=log_data.get("group_email"),
+                    )
+                await session.commit()
+
+            logger.info(f"[ProcessFlowExecutor] Successfully wrote {len(logs_to_write)} logs to execution_logs table")
+
+        except Exception as e:
+            # Log the error but don't fail the execution - this is a non-critical operation
+            logger.warning(f"[ProcessFlowExecutor] Failed to write logs to database (non-critical): {e}")
+            logger.info(f"[ProcessFlowExecutor] Logs are still available in flow.log file")
+
+    async def _write_logs_sqlite_sync(self, logs_to_write: list, db_path: str):
+        """Write logs to SQLite using synchronous operations to avoid event loop issues."""
+        import sqlite3
+        from concurrent.futures import ThreadPoolExecutor
+
+        def sync_write():
+            try:
+                conn = sqlite3.connect(db_path)
+                cursor = conn.cursor()
+                for log_data in logs_to_write:
+                    cursor.execute("""
+                        INSERT INTO execution_logs (execution_id, content, timestamp, group_id, group_email)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (
+                        log_data['execution_id'],
+                        log_data['content'],
+                        log_data['timestamp'].isoformat() if log_data['timestamp'] else None,
+                        log_data['group_id'],
+                        log_data['group_email']
+                    ))
+                conn.commit()
+                conn.close()
+                return len(logs_to_write)
+            except Exception as e:
+                logger.warning(f"[ProcessFlowExecutor] SQLite sync write failed: {e}")
+                return 0
+
+        # Run in thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            count = await loop.run_in_executor(executor, sync_write)
+            if count > 0:
+                logger.info(f"[ProcessFlowExecutor] Successfully wrote {count} logs to SQLite execution_logs table")
+
+    async def _write_logs_postgres_async(self, logs_to_write: list, settings):
+        """Write logs to PostgreSQL using async with NullPool."""
+        from sqlalchemy.ext.asyncio import create_async_engine
+        from sqlalchemy import text
+        from sqlalchemy.pool import NullPool
+
+        postgres_user = settings.POSTGRES_USER or 'postgres'
+        postgres_password = settings.POSTGRES_PASSWORD
+        postgres_server = settings.POSTGRES_SERVER or 'localhost'
+        postgres_port = settings.POSTGRES_PORT or '5432'
+        postgres_db = settings.POSTGRES_DB or 'kasal'
+        db_url = f'postgresql+asyncpg://{postgres_user}:{postgres_password}@{postgres_server}:{postgres_port}/{postgres_db}'
+        logger.info(f"[ProcessFlowExecutor] Using PostgreSQL database: {postgres_server}:{postgres_port}/{postgres_db}")
+
+        # Use NullPool to avoid connection pooling issues in post-subprocess context
+        engine = create_async_engine(db_url, poolclass=NullPool)
+
+        try:
+            async with engine.begin() as conn:
+                for log_data in logs_to_write:
+                    await conn.execute(text("""
+                        INSERT INTO execution_logs (execution_id, content, timestamp, group_id, group_email)
+                        VALUES (:execution_id, :content, :timestamp, :group_id, :group_email)
+                    """), log_data)
+            logger.info(f"[ProcessFlowExecutor] Successfully wrote {len(logs_to_write)} logs to PostgreSQL execution_logs table")
+        finally:
+            await engine.dispose()
+
+    def get_execution_info(self, execution_id: str) -> Optional[Dict[str, Any]]:
+        """Get information about a running execution."""
+        process = self._running_processes.get(execution_id)
+        if not process:
+            return None
+
+        return {
+            "execution_id": execution_id,
+            "pid": process.pid,
+            "is_alive": process.is_alive(),
+            "exitcode": process.exitcode
+        }
+
+    def get_metrics(self) -> Dict[str, int]:
+        """Get executor metrics."""
+        return self._metrics.copy()
+
+
+# Global executor instance
+process_flow_executor = ProcessFlowExecutor(max_concurrent=2)
