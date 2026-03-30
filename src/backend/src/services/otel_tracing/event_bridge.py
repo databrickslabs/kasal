@@ -277,6 +277,10 @@ class OTelEventBridge:
 
     def _emit_span(self, span_name: str, event_type: str, event: Any) -> None:
         """Create and immediately end an OTel span for a point-in-time event."""
+        logger.info(
+            "[OTel-Bridge][%s] _emit_span called: %s / %s",
+            self._job_id, span_name, event_type,
+        )
         try:
             agent_name = _get_agent_name(event)
             task_name = _get_task_name(event)
@@ -290,6 +294,11 @@ class OTelEventBridge:
                 self._current_crew_name = str(event_crew_name)
 
             with self._tracer.start_as_current_span(span_name) as span:
+                if not span.is_recording():
+                    logger.warning(
+                        "[OTel-Bridge][%s] Span not recording for %s (NoOp tracer or not sampled)",
+                        self._job_id, span_name,
+                    )
                 # Core attributes picked up by db_exporter extractors
                 span.set_attribute("kasal.event_type", event_type)
                 if agent_name:

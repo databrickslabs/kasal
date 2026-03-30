@@ -47,6 +47,7 @@ pytest-cov
 psutil  # For process management and cleanup in ProcessCrewExecutor
 mlflow==3.4.0  # For LLM observability and tracking in Databricks
 azure-identity>=1.15.0  # For Power BI authentication (UsernamePasswordCredential)
+rapidfuzz>=3.0.0  # For fuzzy matching in Power BI metadata reduction
 protobuf>=5.29.0,<6.0.0  # mem0ai compatibility
 databricks-agents==1.4.0  # Pinned from uv.lock to prevent pip backtracking
 grpcio-status==1.70.0  # Pinned from uv.lock - compatible with protobuf <6.0.0

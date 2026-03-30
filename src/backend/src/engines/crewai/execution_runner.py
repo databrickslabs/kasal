@@ -347,8 +347,13 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
                         logger.info(f"Passing user inputs to crew.kickoff: {user_inputs}")
                     else:
                         logger.info("No user inputs found after filtering system inputs")
-                
-                
+
+                # SECURITY: Scan user inputs for prompt injection patterns (log-only, non-blocking)
+                from src.engines.crewai.security.scanner_pipeline import security_scanner
+                for _input_key, _input_val in user_inputs.items():
+                    if isinstance(_input_val, str):
+                        security_scanner.scan(_input_val, context=f"user_input:{_input_key}:{execution_id}")
+
                 # Call crew start callback
                 crew_callbacks['on_start']()
                 
@@ -601,7 +606,16 @@ async def run_crew_in_process(
                 logger.info(f"Passing user inputs to process execution: {user_inputs}")
             else:
                 logger.info("No user inputs found after filtering system inputs")
-        
+
+        # SECURITY: Scan user inputs for prompt injection patterns (log-only, non-blocking)
+        try:
+            from src.engines.crewai.security.scanner_pipeline import security_scanner
+            for _input_key, _input_val in user_inputs.items():
+                if isinstance(_input_val, str):
+                    security_scanner.scan(_input_val, context=f"user_input:{_input_key}:{execution_id}")
+        except Exception as _pi_err:
+            logger.warning("[SECURITY] Prompt injection scan failed: %s", _pi_err)
+
         # Use ProcessCrewExecutor for isolated execution
         logger.info(f"[run_crew_in_process] Starting process-based execution for {execution_id}")
 

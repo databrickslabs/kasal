@@ -70,6 +70,7 @@ import { CrewFlowSelectionDialog } from '../Crew/CrewFlowDialog';
 import SaveCrew from '../Crew/SaveCrew';
 import SaveFlow from '../Flow/SaveFlow';
 import CheckpointResumeDialog from '../Flow/CheckpointResumeDialog';
+import TrifectaWarningDialog from '../Crew/TrifectaWarningDialog';
 
 // Services & Utilities
 import { useAgentManager } from '../../hooks/workflow/useAgentManager';
@@ -530,7 +531,12 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     handleCheckpointStartFresh,
     handleCheckpointResume,
     handleCheckpointDelete,
-    refreshCheckpoints
+    refreshCheckpoints,
+    // Trifecta warning dialog state
+    showTrifectaDialog,
+    trifectaAssessment,
+    handleTrifectaProceed,
+    handleTrifectaCancel,
   } = useCrewExecutionStore();
 
   // Debug logging for running tab
@@ -1751,6 +1757,14 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           connectionError={connectionError}
         />
 
+        {/* Trifecta Security Warning Dialog */}
+        <TrifectaWarningDialog
+          open={showTrifectaDialog}
+          assessment={trifectaAssessment}
+          onProceed={handleTrifectaProceed}
+          onCancel={handleTrifectaCancel}
+        />
+
         {/* Checkpoint Resume Dialog */}
         <CheckpointResumeDialog
           open={showCheckpointDialog}
@@ -1784,8 +1798,14 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               setIsCrewFlowDialogOpen(true);
             }}
             onSaveCrewClick={() => {
-              const event = new CustomEvent('openSaveCrewDialog');
-              window.dispatchEvent(event);
+              const activeTab = getActiveTab();
+              if (activeTab?.savedCrewId) {
+                window.dispatchEvent(new CustomEvent('updateExistingCrew', {
+                  detail: { crewId: activeTab.savedCrewId, tabId: activeTab.id }
+                }));
+              } else {
+                window.dispatchEvent(new CustomEvent('openSaveCrewDialog'));
+              }
             }}
             onSaveFlowClick={() => {
               const event = new CustomEvent('openSaveFlowDialog');

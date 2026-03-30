@@ -15,6 +15,8 @@ from src.engines.crewai.guardrails.empty_data_processing_guardrail import EmptyD
 from src.engines.crewai.guardrails.data_processing_count_guardrail import DataProcessingCountGuardrail
 from src.engines.crewai.guardrails.company_name_not_null_guardrail import CompanyNameNotNullGuardrail
 from src.engines.crewai.guardrails.minimum_number_guardrail import MinimumNumberGuardrail
+from src.engines.crewai.guardrails.llm_injection_guardrail import LLMInjectionGuardrail
+from src.engines.crewai.guardrails.self_reflection_guardrail import SelfReflectionGuardrail
 
 # Use the centralized logger
 logger = LoggerManager.get_instance().guardrails
@@ -84,6 +86,14 @@ class GuardrailFactory:
                 logger.info("Creating MinimumNumberGuardrail...")
                 guardrail = MinimumNumberGuardrail(config_data)
                 logger.info(f"Successfully created MinimumNumberGuardrail: {guardrail}")
+            elif guardrail_type == "prompt_injection_check":
+                logger.info("Creating LLMInjectionGuardrail...")
+                guardrail = LLMInjectionGuardrail(config_data)
+                logger.info(f"Successfully created LLMInjectionGuardrail: {guardrail}")
+            elif guardrail_type == "self_reflection":
+                logger.info("Creating SelfReflectionGuardrail...")
+                guardrail = SelfReflectionGuardrail(config_data)
+                logger.info(f"Successfully created SelfReflectionGuardrail: {guardrail}")
             else:
                 logger.error(f"Unknown guardrail type: {guardrail_type}")
                 return None

@@ -22,7 +22,7 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
-import { renderWithLinks, MessageContent } from './MessageRenderer';
+import { renderWithLinks, MessageContent, sanitizeUrl } from './MessageRenderer';
 
 // Mock CodeBlock so fenced code block tests can inspect rendered output
 vi.mock('./CodeBlock', () => ({
@@ -710,6 +710,145 @@ describe('MessageRenderer', () => {
 
         // No chatCommandClick events from hover
         expect(chatCommandHandler).not.toHaveBeenCalled();
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Security hardening tests (Phase 1 — Databricks AI Security, Feb 2026)
+  // -------------------------------------------------------------------------
+  describe('security hardening', () => {
+    describe('sanitizeUrl()', () => {
+      it('blocks javascript: scheme', () => {
+        expect(sanitizeUrl('javascript:alert(1)')).toBe('');
+      });
+
+      it('blocks javascript: scheme with leading whitespace', () => {
+        expect(sanitizeUrl('  javascript:alert(1)')).toBe('');
+      });
+
+      it('blocks javascript: scheme in mixed-case', () => {
+        expect(sanitizeUrl('JavaScript:void(0)')).toBe('');
+      });
+
+      it('blocks data: scheme (potential XSS and exfiltration vector)', () => {
+        expect(sanitizeUrl('data:text/html,<script>alert(1)</script>')).toBe('');
+      });
+
+      it('blocks vbscript: scheme', () => {
+        expect(sanitizeUrl('vbscript:msgbox(1)')).toBe('');
+      });
+
+      it('allows https: scheme', () => {
+        const url = 'https://example.com/path?q=1';
+        expect(sanitizeUrl(url)).toBe(url);
+      });
+
+      it('allows http: scheme', () => {
+        const url = 'http://example.com';
+        expect(sanitizeUrl(url)).toBe(url);
+      });
+
+      it('returns empty string for undefined', () => {
+        expect(sanitizeUrl(undefined)).toBe('');
+      });
+
+      it('returns empty string for null', () => {
+        expect(sanitizeUrl(null)).toBe('');
+      });
+
+      it('returns empty string for empty string', () => {
+        expect(sanitizeUrl('')).toBe('');
+      });
+    });
+
+    describe('MessageContent — image rendering blocked', () => {
+      it('does not render an <img> tag from markdown image syntax', () => {
+        // Use a bold prefix so isMarkdown() returns true and we enter ReactMarkdown path
+        const { container } = render(
+          <MessageContent content={'**Note:** ![exfil](https://evil.com/track.gif)'} />
+        );
+        // No img elements should be in the DOM — disallowedElements drops them
+        expect(container.querySelector('img')).toBeNull();
+      });
+
+      it('does not render an <img> tag for data: URI images', () => {
+        const { container } = render(
+          <MessageContent content={'**Note:** ![x](data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==)'} />
+        );
+        expect(container.querySelector('img')).toBeNull();
+      });
+    });
+
+    describe('MessageContent — link sanitization', () => {
+      it('does not create a clickable javascript: link', () => {
+        const { container } = render(
+          <MessageContent content={'**Note:** [click me](javascript:alert(1))'} />
+        );
+        // The anchor (if rendered at all) must not have a javascript: href
+        const anchors = container.querySelectorAll('a');
+        anchors.forEach((a) => {
+          expect(a.getAttribute('href') ?? '').not.toContain('javascript:');
+        });
+      });
+
+      it('renders javascript: link text as plain text span, not a clickable anchor', () => {
+        const { container } = render(
+          <MessageContent content={'**Note:** [dangerous link](javascript:alert(1))'} />
+        );
+        // Text should be visible but no <a> element with a dangerous href
+        expect(container.textContent).toContain('dangerous link');
+        const anchors = Array.from(container.querySelectorAll('a'));
+        const dangerousAnchors = anchors.filter(
+          (a) => (a.getAttribute('href') ?? '').toLowerCase().startsWith('javascript:')
+        );
+        expect(dangerousAnchors).toHaveLength(0);
+      });
+
+      it('renders safe https: links as clickable anchors', () => {
+        const { container } = render(
+          <MessageContent content={'**Note:** [visit](https://example.com)'} />
+        );
+        const anchors = container.querySelectorAll('a');
+        expect(anchors.length).toBeGreaterThan(0);
+        const link = Array.from(anchors).find(
+          (a) => (a.getAttribute('href') ?? '').includes('example.com')
+        );
+        expect(link).toBeTruthy();
+        expect(link!.getAttribute('href')).toBe('https://example.com');
+      });
+
+      it('sets rel="noopener noreferrer" on all rendered links', () => {
+        const { container } = render(
+          <MessageContent content={'**Note:** [visit](https://example.com)'} />
+        );
+        const anchors = container.querySelectorAll('a');
+        anchors.forEach((a) => {
+          const rel = a.getAttribute('rel') ?? '';
+          expect(rel).toContain('noopener');
+          expect(rel).toContain('noreferrer');
+        });
+      });
+    });
+
+    describe('renderWithLinks — plain text link sanitization', () => {
+      it('renders a plain https URL as a clickable link', () => {
+        const { container } = render(
+          <>{renderWithLinks('Visit https://example.com for more.')}</>
+        );
+        const link = container.querySelector('a');
+        expect(link).not.toBeNull();
+        expect(link!.getAttribute('href')).toBe('https://example.com');
+      });
+
+      it('does not create a clickable link for javascript: URIs in plain text', () => {
+        const { container } = render(
+          <>{renderWithLinks('Click javascript:alert(1) please')}</>
+        );
+        const anchors = container.querySelectorAll('a');
+        anchors.forEach((a) => {
+          expect(a.getAttribute('href') ?? '').not.toContain('javascript:');
+        });
       });
     });
   });

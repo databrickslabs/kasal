@@ -29,7 +29,8 @@ class PowerBISemanticModelCacheService:
         group_id: str,
         dataset_id: str,
         workspace_id: str,
-        report_id: Optional[str] = None
+        report_id: Optional[str] = None,
+        any_report_id: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """
         Get cached metadata for today if available.
@@ -39,6 +40,7 @@ class PowerBISemanticModelCacheService:
             dataset_id: Power BI dataset/semantic model ID
             workspace_id: Power BI workspace ID
             report_id: Optional report ID
+            any_report_id: If True, match any report_id (ignore report_id filter)
 
         Returns:
             Cached metadata dictionary if found, None otherwise
@@ -47,7 +49,8 @@ class PowerBISemanticModelCacheService:
             group_id=group_id,
             dataset_id=dataset_id,
             workspace_id=workspace_id,
-            report_id=report_id
+            report_id=report_id,
+            any_report_id=any_report_id,
         )
 
         if cache and cache.is_valid_for_today():
@@ -115,7 +118,8 @@ class PowerBISemanticModelCacheService:
         relationships: list,
         schema: Dict[str, Any],
         sample_data: Dict[str, Any],
-        default_filters: Optional[Dict[str, Any]] = None
+        default_filters: Optional[Dict[str, Any]] = None,
+        slicers: Optional[list] = None
     ) -> Dict[str, Any]:
         """
         Build metadata dictionary for caching.
@@ -126,6 +130,7 @@ class PowerBISemanticModelCacheService:
             schema: Schema information (tables, columns)
             sample_data: Sample data values
             default_filters: Optional default filters from report
+            slicers: Optional list of slicer definitions from report
 
         Returns:
             Metadata dictionary ready for caching
@@ -139,5 +144,8 @@ class PowerBISemanticModelCacheService:
 
         if default_filters:
             metadata["default_filters"] = default_filters
+
+        if slicers:
+            metadata["slicers"] = slicers
 
         return metadata

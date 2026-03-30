@@ -926,7 +926,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
       }
 
       // Validate bulk data
-      if (!bulkData.crews && !bulkData.flows && !bulkData.agents && !bulkData.tasks) {
+      if (!bulkData.crews && !bulkData.flows && !bulkData.agents && !bulkData.tasks && !bulkData.crew) {
         throw new Error('Invalid import data: no valid data found');
       }
 
@@ -978,39 +978,44 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
         }
       }
 
-      // Import crews
+      // Import crews — auto-rename on 409 conflict instead of aborting
+      const importSingleCrew = async (normalized: Record<string, unknown>) => {
+        const baseName = (normalized.name as string)
+          || (normalized.title as string)
+          || (normalized.plan_name as string)
+          || (normalized.workflow_name as string)
+          || `Imported Crew ${new Date().toISOString().slice(0,19).replace('T',' ')}`;
+        let name = baseName;
+        let attempt = 0;
+        while (true) {
+          try {
+            await CrewService.saveCrew({
+              name,
+              nodes: (normalized.nodes as _Node[]) || [],
+              edges: (normalized.edges as _Edge[]) || [],
+              agent_ids: (normalized.agent_ids as string[]) || [],
+              task_ids: (normalized.task_ids as string[]) || []
+            });
+            importedCrews++;
+            return;
+          } catch (err: unknown) {
+            const status = (err as { response?: { status?: number } })?.response?.status;
+            if (status === 409) {
+              attempt++;
+              name = `${baseName} (${attempt})`;
+            } else {
+              throw err;
+            }
+          }
+        }
+      };
+
       if (Array.isArray(bulkData.crews)) {
         for (const c of bulkData.crews) {
-          const normalized = c?.crew ?? c;
-          const name = normalized.name
-            || normalized.title
-            || normalized.plan_name
-            || normalized.workflow_name
-            || `Imported Crew ${new Date().toISOString().slice(0,19).replace('T',' ')}`;
-          await CrewService.saveCrew({
-            name,
-            nodes: normalized.nodes || [],
-            edges: normalized.edges || [],
-            agent_ids: normalized.agent_ids || [],
-            task_ids: normalized.task_ids || []
-          });
-          importedCrews++;
+          await importSingleCrew(c?.crew ?? c);
         }
       } else if (bulkData.crew) {
-        const normalized = bulkData.crew;
-        const name = normalized.name
-          || normalized.title
-          || normalized.plan_name
-          || normalized.workflow_name
-          || `Imported Crew ${new Date().toISOString().slice(0,19).replace('T',' ')}`;
-        await CrewService.saveCrew({
-          name,
-          nodes: normalized.nodes || [],
-          edges: normalized.edges || [],
-          agent_ids: normalized.agent_ids || [],
-          task_ids: normalized.task_ids || []
-        });
-        importedCrews++;
+        await importSingleCrew(bulkData.crew);
       }
       
       // Import flows

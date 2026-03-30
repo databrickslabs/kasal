@@ -789,10 +789,18 @@ def run_crew_in_process(
                     async_logger.info(
                         f"[SUBPROCESS] OTel pipeline: provider has {proc_count} span processor(s) for {execution_id}"
                     )
-                except ImportError:
-                    async_logger.debug(
-                        "[SUBPROCESS] OTel packages not available, skipping"
-                    )
+                except ImportError as otel_import_err:
+                    if otel_provider is None:
+                        async_logger.debug(
+                            "[SUBPROCESS] OTel SDK packages not available, skipping"
+                        )
+                    else:
+                        async_logger.warning(
+                            "[SUBPROCESS] OTel processor setup ImportError "
+                            "(provider created but processors NOT attached — traces will be lost): %s",
+                            otel_import_err,
+                            exc_info=True,
+                        )
                 except Exception as otel_err:
                     async_logger.warning(
                         f"[SUBPROCESS] OTel initialization error (non-fatal): {otel_err}"
@@ -1079,6 +1087,7 @@ def run_crew_in_process(
                         logging.getLogger("src.services.otel_tracing.db_exporter"),
                         logging.getLogger("src.services.otel_tracing.otel_config"),
                         logging.getLogger("src.services.otel_tracing.sse_processor"),
+                        logging.getLogger("src.services.otel_tracing.event_bridge"),
                     ]
 
                     for logger_obj in loggers_to_configure:

@@ -29,7 +29,8 @@ class PowerBISemanticModelCacheRepository:
         group_id: str,
         dataset_id: str,
         workspace_id: str,
-        report_id: Optional[str] = None
+        report_id: Optional[str] = None,
+        any_report_id: bool = False,
     ) -> Optional[PowerBISemanticModelCache]:
         """
         Get cached metadata for today if it exists.
@@ -39,14 +40,27 @@ class PowerBISemanticModelCacheRepository:
             dataset_id: Power BI dataset/semantic model ID
             workspace_id: Power BI workspace ID
             report_id: Optional report ID (if filters are report-specific)
+            any_report_id: If True, match any report_id (ignore report_id filter)
 
         Returns:
             Cache object if found and valid for today, None otherwise
         """
         today = date.today()
 
-        # Build query based on whether report_id is provided
-        if report_id:
+        if any_report_id:
+            # Match any report_id except 'reduced' — used by tools that need
+            # the full model cache (e.g., Metadata Reducer). The 'reduced'
+            # report_id is a synthetic entry created by the Reducer itself.
+            query = select(PowerBISemanticModelCache).where(
+                and_(
+                    PowerBISemanticModelCache.group_id == group_id,
+                    PowerBISemanticModelCache.dataset_id == dataset_id,
+                    PowerBISemanticModelCache.workspace_id == workspace_id,
+                    PowerBISemanticModelCache.cached_date == today,
+                    PowerBISemanticModelCache.report_id != "reduced",
+                )
+            )
+        elif report_id:
             query = select(PowerBISemanticModelCache).where(
                 and_(
                     PowerBISemanticModelCache.group_id == group_id,
@@ -68,7 +82,7 @@ class PowerBISemanticModelCacheRepository:
             )
 
         result = await self.session.execute(query)
-        return result.scalar_one_or_none()
+        return result.scalars().first()
 
     async def create_cache(
         self,
