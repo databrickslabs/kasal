@@ -1,0 +1,143 @@
+###############################################################################
+# Kasal - Docker Compose for Local Development
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml up --build
+#   (or use the helper script: ./docker-dev.sh up)
+#
+# Services:
+#   - frontend : React dev server on http://localhost:3000
+#   - backend  : FastAPI server  on http://localhost:8000
+#   - postgres : PostgreSQL 16   on localhost:5432
+###############################################################################
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL Database
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: kasal-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-kasal}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - kasal_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-kasal}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kasal-network
+
+  # ---------------------------------------------------------------------------
+  # Backend – FastAPI / Python
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./src/backend
+      dockerfile: Dockerfile.dev
+    container_name: kasal-backend
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      # Mount ONLY the source code sub-directory (not tests, migrations, etc.)
+      # This reduces the number of files the watcher needs to scan
+      - ./src/backend/src:/app/src
+      # Mount config files needed at the top level
+      - ./src/backend/pyproject.toml:/app/pyproject.toml:ro
+      - ./src/backend/uv.lock:/app/uv.lock:ro
+      - ./src/backend/alembic.ini:/app/alembic.ini:ro
+      - ./src/backend/migrations:/app/migrations
+      # Named volume keeps .venv inside the container (not on host)
+      - kasal_backend_venv:/app/.venv
+      # Persist logs on host for easy inspection
+      - ./src/backend/logs:/app/logs
+    environment:
+      # Database
+      DATABASE_TYPE: postgres
+      POSTGRES_SERVER: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-kasal}
+      POSTGRES_PORT: "5432"
+      # Logging
+      KASAL_LOG_LEVEL: ${KASAL_LOG_LEVEL:-INFO}
+      KASAL_LOG_THIRD_PARTY: WARNING
+      # Telemetry
+      OTEL_SDK_DISABLED: "true"
+      CREWAI_DISABLE_TELEMETRY: "true"
+      # Engine
+      USE_NULLPOOL: "true"
+      # LLM API keys (pass through from host .env)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Databricks (optional)
+      DATABRICKS_HOST: ${DATABRICKS_HOST:-}
+      DATABRICKS_TOKEN: ${DATABRICKS_TOKEN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - kasal-network
+
+  # ---------------------------------------------------------------------------
+  # Frontend – React / Node
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./src/frontend
+      dockerfile: Dockerfile.dev
+    container_name: kasal-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    volumes:
+      # Mount ONLY the src/ and public/ directories (the code you edit)
+      # This avoids the watcher scanning node_modules, build artifacts, etc.
+      - ./src/frontend/src:/app/src
+      - ./src/frontend/public:/app/public
+      # Mount config files read-only
+      - ./src/frontend/package.json:/app/package.json:ro
+      - ./src/frontend/tsconfig.json:/app/tsconfig.json:ro
+      - ./src/frontend/craco.config.js:/app/craco.config.js:ro
+      # Named volume keeps node_modules inside the container (not on host)
+      - kasal_frontend_node_modules:/app/node_modules
+    environment:
+      # Tell React dev server to talk to the backend container
+      REACT_APP_API_URL: http://localhost:${BACKEND_PORT:-8000}/api/v1
+      # Disable browser auto-open inside container
+      BROWSER: none
+      # Allow enough heap for webpack compilation
+      NODE_OPTIONS: "--max-old-space-size=2048"
+      # Tell webpack to only watch src/ (not node_modules or other dirs)
+      FAST_REFRESH: "true"
+    depends_on:
+      - backend
+    networks:
+      - kasal-network
+
+# -----------------------------------------------------------------------------
+# Named Volumes – dependencies live here, NOT on the host
+# -----------------------------------------------------------------------------
+volumes:
+  kasal_postgres_data:
+    driver: local
+  kasal_backend_venv:
+    driver: local
+  kasal_frontend_node_modules:
+    driver: local
+
+# -----------------------------------------------------------------------------
+# Network
+# -----------------------------------------------------------------------------
+networks:
+  kasal-network:
+    driver: bridge
+

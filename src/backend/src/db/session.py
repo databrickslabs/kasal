@@ -619,10 +619,21 @@ async def init_db() -> None:
                     await conn.run_sync(Base.metadata.create_all)
                     logger.info("Tables created successfully")
             except Exception as table_error:
-                logger.error(f"Error creating tables: {table_error}")
-                import traceback
-                logger.error(traceback.format_exc())
-                raise
+                logger.warning(f"Error creating all tables at once (likely pgvector missing): {table_error}")
+                logger.info("Falling back to creating tables individually (skipping problematic ones)...")
+                # Fallback: create tables one by one, skipping any that fail
+                # (e.g. documentation_embeddings requires pgvector extension)
+                created = 0
+                skipped = []
+                for table in Base.metadata.sorted_tables:
+                    try:
+                        async with engine_for_init.begin() as conn:
+                            await conn.run_sync(table.create, checkfirst=True)
+                            created += 1
+                    except Exception as e:
+                        skipped.append(table.name)
+                        logger.warning(f"Skipped table '{table.name}': {e}")
+                logger.info(f"Created {created} tables, skipped {len(skipped)}: {skipped}")
 
             # Close the engine after use
             await engine_for_init.dispose()
