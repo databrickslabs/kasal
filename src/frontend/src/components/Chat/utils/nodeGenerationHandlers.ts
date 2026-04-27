@@ -497,6 +497,7 @@ export const createCrewGenerationHandler = (
             description: task.description,
             expected_output: task.expected_output,
             tools: task.tools || [],
+            tool_configs: task.tool_configs || {},
             human_input: task.config?.human_input || false,
             async_execution: task.async_execution || false,
             context: task.context || [],

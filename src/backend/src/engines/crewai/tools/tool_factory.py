@@ -118,6 +118,59 @@ except ImportError as e:
     PowerBIReportReferencesTool = None
     logging.warning(f"Could not import PowerBIReportReferencesTool: {e}")
 
+# Power BI Semantic Model Fetcher Tool
+try:
+    from .custom.powerbi_semantic_model_fetcher_tool import PowerBISemanticModelFetcherTool
+except ImportError as e:
+    PowerBISemanticModelFetcherTool = None
+    logging.warning(f"Could not import PowerBISemanticModelFetcherTool: {e}")
+
+# Power BI Semantic Model DAX Generator Tool
+try:
+    from .custom.powerbi_semantic_model_dax_tool import PowerBISemanticModelDaxTool
+except ImportError as e:
+    PowerBISemanticModelDaxTool = None
+    logging.warning(f"Could not import PowerBISemanticModelDaxTool: {e}")
+
+# Power BI Metadata Reducer Tool
+try:
+    from .custom.powerbi_metadata_reducer_tool import PowerBIMetadataReducerTool
+except ImportError as e:
+    PowerBIMetadataReducerTool = None
+    logging.warning(f"Could not import PowerBIMetadataReducerTool: {e}")
+
+# Power BI DAX Executor Tool
+try:
+    from .custom.powerbi_dax_executor_tool import PowerBIDaxExecutorTool
+except Exception as e:
+    PowerBIDaxExecutorTool = None
+    logging.warning(f"Could not import PowerBIDaxExecutorTool: {e}")
+
+# UC Metric View Tools
+try:
+    from .custom.dax_to_sql_translator_tool import DaxToSqlTranslatorTool
+except ImportError as e:
+    DaxToSqlTranslatorTool = None
+    logging.warning(f"Could not import DaxToSqlTranslatorTool: {e}")
+
+try:
+    from .custom.uc_metric_view_generator_tool import UCMetricViewGeneratorTool
+except ImportError as e:
+    UCMetricViewGeneratorTool = None
+    logging.warning(f"Could not import UCMetricViewGeneratorTool: {e}")
+
+try:
+    from .custom.pbi_measure_allocator_tool import PbiMeasureAllocatorTool
+except ImportError as e:
+    PbiMeasureAllocatorTool = None
+    logging.warning(f"Could not import PbiMeasureAllocatorTool: {e}")
+
+try:
+    from .custom.metric_view_deployer_tool import MetricViewDeployerTool
+except ImportError as e:
+    MetricViewDeployerTool = None
+    logging.warning(f"Could not import MetricViewDeployerTool: {e}")
+
 # Setup logger
 logger = logging.getLogger(__name__)
 
@@ -178,6 +231,24 @@ class ToolFactory:
             self._tool_implementations["Power BI Field Parameters & Calculation Groups Tool"] = PowerBIFieldParametersCalculationGroupsTool
         if PowerBIReportReferencesTool is not None:
             self._tool_implementations["Power BI Report References Tool"] = PowerBIReportReferencesTool
+        if PowerBISemanticModelFetcherTool is not None:
+            self._tool_implementations["Power BI Semantic Model Fetcher"] = PowerBISemanticModelFetcherTool
+        if PowerBISemanticModelDaxTool is not None:
+            self._tool_implementations["Power BI Semantic Model DAX Generator"] = PowerBISemanticModelDaxTool
+        if PowerBIMetadataReducerTool is not None:
+            self._tool_implementations["Power BI Metadata Reducer"] = PowerBIMetadataReducerTool
+        if PowerBIDaxExecutorTool is not None:
+            self._tool_implementations["Power BI DAX Executor"] = PowerBIDaxExecutorTool
+
+        # UC Metric View tools
+        if DaxToSqlTranslatorTool is not None:
+            self._tool_implementations["DAX to SQL Translator"] = DaxToSqlTranslatorTool
+        if UCMetricViewGeneratorTool is not None:
+            self._tool_implementations["UC Metric View Generator"] = UCMetricViewGeneratorTool
+        if PbiMeasureAllocatorTool is not None:
+            self._tool_implementations["PBI Measure Allocator"] = PbiMeasureAllocatorTool
+        if MetricViewDeployerTool is not None:
+            self._tool_implementations["Metric View Deployer"] = MetricViewDeployerTool
 
         # Initialize _initialized flag
         self._initialized = False
@@ -711,12 +782,33 @@ class ToolFactory:
                     if resolved_count > 0:
                         logger.info(f"[ToolFactory] ✓ Resolved {resolved_count} placeholders in {tool_name} config")
 
+                    # Inject key execution input values into tool_config if not already present.
+                    # This ensures tools like the DAX Generator get user_question reliably
+                    # instead of depending on the LLM agent to pass it at runtime.
+                    # Context enrichment fields are also injected so dynamic crew inputs
+                    # (active_filters, business_mappings, etc.) reach the LLM generation stage.
+                    _empty_values = (None, {}, [], "")
+                    for input_key in [
+                        'user_question',
+                        'active_filters', 'business_mappings', 'field_synonyms',
+                        'visible_tables', 'conversation_history',
+                        'context_knowledge', 'reference_dax',
+                    ]:
+                        if input_key in execution_inputs and (
+                            input_key not in tool_config or tool_config.get(input_key) in _empty_values
+                        ):
+                            tool_config[input_key] = execution_inputs[input_key]
+                            logger.info(
+                                f"[ToolFactory] Injected '{input_key}' from execution_inputs "
+                                f"into {tool_name} config"
+                            )
+
                     # Remove execution_inputs from tool_config after placeholder resolution
                     # Tool constructors don't accept this key and will raise TypeError
                     tool_config.pop('execution_inputs', None)
 
-            # Parse JSON strings for PowerBI Analysis Tool context enrichment fields
-            if "Power BI" in tool_name and "Analysis" in tool_name:
+            # Parse JSON strings for PowerBI context enrichment fields (DAX Generator + Analysis Tool)
+            if "Power BI" in tool_name and ("Analysis" in tool_name or "DAX" in tool_name):
                 import json
                 json_fields = ['business_mappings', 'field_synonyms', 'active_filters', 'visible_tables', 'conversation_history']
                 for field in json_fields:
@@ -1517,16 +1609,12 @@ class ToolFactory:
                 return tool_class(**tool_args)
 
             elif tool_name == "MCPTool":
-                # MCPTool might need special configuration
-                # Check if MCPTool exists and can be created
-                if MCPTool is None:
-                    logger.error("MCPTool is not available - MCP integration may not be installed")
-                    return None
-
-                # Create MCPTool with configuration
-                tool_config['result_as_answer'] = result_as_answer
-                logger.info(f"Creating MCPTool with config: {tool_config}")
-                return tool_class(**tool_config)
+                # MCPTool is a marker that signals MCP integration should be used.
+                # Actual MCP tools are created by MCPIntegration.create_mcp_tools_for_task
+                # in task_helpers.py using tool_configs.MCP_SERVERS — before this code runs.
+                # Return (True, []) so task_helpers treats this as an MCP marker (no-op).
+                logger.info("MCPTool selected - MCP tools are managed by MCPIntegration via tool_configs.MCP_SERVERS")
+                return (True, [])
 
             # Power BI Connector Tool
             elif tool_name == "PowerBIConnectorTool":
@@ -1709,15 +1797,15 @@ class ToolFactory:
                     logger.error(f"[ToolFactory] Traceback: {traceback.format_exc()}")
                     raise
 
-            # For all other tools (ScrapeWebsiteTool, DallETool), try to create with config parameters
+            # For all other tools (ScrapeWebsiteTool, DallETool, DAX Generator, etc.)
             else:
                 # Check if the config has any data
                 if tool_config and isinstance(tool_config, dict):
-                    # Add result_as_answer to tool configuration
-                    tool_config['result_as_answer'] = result_as_answer
+                    # Prefer result_as_answer from DB/merged config over the parameter default
+                    tool_config['result_as_answer'] = result_as_answer or tool_config.get('result_as_answer', False)
 
                     # Create the tool with the config as kwargs
-                    logger.info(f"Creating {tool_name} with config parameters: {tool_config}")
+                    logger.info(f"Creating {tool_name} with config parameters: {list(tool_config.keys())}")
                     return tool_class(**tool_config)
                 else:
                     # Create with default parameters if no config

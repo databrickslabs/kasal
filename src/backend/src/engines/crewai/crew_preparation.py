@@ -107,6 +107,10 @@ class CrewPreparation:
         if 'memory_backend_config' in config:
             logger.info(f"[CrewPreparation.__init__] Memory backend config found: {config['memory_backend_config']}")
 
+    def _apply_spotlighting_wrappers(self) -> None:
+        """Delegate to the shared security helper in tool_capability_manifest."""
+        pass  # Handled by _run_security_checks below via run_crew_security_checks
+
     def _needs_entity_extraction_fallback(self, model_name: str) -> bool:
         """
         Check if a model needs fallback for entity extraction.
@@ -859,6 +863,22 @@ class CrewPreparation:
             if not self.crew:
                 logger.error("Failed to create crew")
                 return False
+
+            # SECURITY: Run all assembly-time security checks via the shared helper.
+            # Covers: spotlighting wrappers, crew-wide trifecta, per-task trifecta,
+            # mixed-task anti-pattern, and destructive-tool detection.
+            # The same function is called by flow_methods.py so both execution paths
+            # get identical protection.
+            try:
+                from src.engines.crewai.security.tool_capability_manifest import (
+                    run_crew_security_checks as _run_security_checks,
+                )
+                _run_security_checks(
+                    self.crew,
+                    context=f"crew with {len(self.crew.tasks)} task(s)",
+                )
+            except Exception as _sec_err:
+                logger.debug("[SECURITY] Crew security checks skipped: %s", _sec_err)
 
             # 16. Set crew references and attach trace context
             memory_service.set_crew_reference_on_memory(self.crew)

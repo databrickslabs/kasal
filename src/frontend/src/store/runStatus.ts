@@ -102,6 +102,58 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
   // Note: Event listeners persist for the lifetime of the store (entire app lifecycle)
   setupEventListeners();
 
+  // ── Status reconciliation timer ──
+  // Periodically checks any "running" jobs against the REST API to catch
+  // cases where the SSE completion event was missed (network hiccup, proxy
+  // buffer, reconnection gap). This is a safety net — SSE remains primary.
+  const RECONCILIATION_INTERVAL_MS = 10_000; // 10 seconds
+  let reconciliationActive = false;
+
+  setInterval(async () => {
+    if (reconciliationActive) return; // prevent overlapping calls
+    const state = useRunStatusStore.getState();
+    const activeJobIds = Object.keys(state.activeRuns);
+    if (activeJobIds.length === 0) return;
+
+    reconciliationActive = true;
+    try {
+      for (const jobId of activeJobIds) {
+        try {
+          const run = await runService.getRunByJobId(jobId);
+          if (!run) continue;
+
+          const dbStatus = run.status?.toLowerCase();
+          const localStatus = state.activeRuns[jobId]?.status?.toLowerCase();
+
+          // If DB says terminal but local still says running, reconcile
+          if (
+            dbStatus &&
+            ['completed', 'failed', 'stopped', 'cancelled'].includes(dbStatus) &&
+            localStatus &&
+            !['completed', 'failed', 'stopped', 'cancelled'].includes(localStatus)
+          ) {
+            console.log(
+              `[RunStatus] Reconciliation: job ${jobId} is ${dbStatus} in DB but ${localStatus} locally — syncing`
+            );
+            state.handleSSEUpdate({
+              job_id: jobId,
+              status: run.status,
+              error: run.error,
+              result: run.result,
+              updated_at: run.updated_at,
+              completed_at: run.completed_at,
+              group_id: run.group_id,
+            });
+          }
+        } catch {
+          // Non-fatal — individual job check failed, continue with others
+        }
+      }
+    } finally {
+      reconciliationActive = false;
+    }
+  }, RECONCILIATION_INTERVAL_MS);
+
   // Return the actual store
   return {
     currentRun: null,

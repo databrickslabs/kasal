@@ -52,6 +52,10 @@ import { PowerBIRelationshipsConfigSelector, PowerBIRelationshipsConfig } from '
 import { PowerBIHierarchiesConfigSelector, PowerBIHierarchiesConfig } from '../Common/PowerBIHierarchiesConfigSelector';
 import { PowerBIFieldParametersConfigSelector, PowerBIFieldParametersConfig } from '../Common/PowerBIFieldParametersConfigSelector';
 import { PowerBIReportReferencesConfigSelector, PowerBIReportReferencesConfig } from '../Common/PowerBIReportReferencesConfigSelector';
+import { PowerBIFetcherConfigSelector, PowerBIFetcherConfig } from '../Common/PowerBIFetcherConfigSelector';
+import { PowerBIDaxConfigSelector, PowerBIDaxConfig } from '../Common/PowerBIDaxConfigSelector';
+import { PowerBIMetadataReducerConfigSelector, PowerBIMetadataReducerConfig } from '../Common/PowerBIMetadataReducerConfigSelector';
+import { PowerBIDaxExecutorConfigSelector, PowerBIDaxExecutorConfig } from '../Common/PowerBIDaxExecutorConfigSelector';
 import { PerplexityConfig, SerperConfig } from '../../types/config';
 import { type LLMGuardrailConfig } from '../../types/task';
 import { ModelService } from '../../api/ModelService';
@@ -143,6 +147,10 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const [powerBIHierarchiesConfig, setPowerBIHierarchiesConfig] = useState<PowerBIHierarchiesConfig>({});
   const [powerBIFieldParametersConfig, setPowerBIFieldParametersConfig] = useState<PowerBIFieldParametersConfig>({});
   const [powerBIReportReferencesConfig, setPowerBIReportReferencesConfig] = useState<PowerBIReportReferencesConfig>({});
+  const [powerBIFetcherConfig, setPowerBIFetcherConfig] = useState<PowerBIFetcherConfig>({});
+  const [powerBIDaxConfig, setPowerBIDaxConfig] = useState<PowerBIDaxConfig>({});
+  const [powerBIReducerConfig, setPowerBIReducerConfig] = useState<PowerBIMetadataReducerConfig>({});
+  const [powerBIDaxExecutorConfig, setPowerBIDaxExecutorConfig] = useState<PowerBIDaxExecutorConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
   const [showBestPractices, setShowBestPractices] = useState(false);
@@ -238,6 +246,26 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       // Check for Power BI Report References Tool config
       if (initialData.tool_configs['Power BI Report References Tool']) {
         setPowerBIReportReferencesConfig(initialData.tool_configs['Power BI Report References Tool'] as PowerBIReportReferencesConfig);
+      }
+
+      // Check for Power BI Semantic Model Fetcher config
+      if (initialData.tool_configs['Power BI Semantic Model Fetcher']) {
+        setPowerBIFetcherConfig(initialData.tool_configs['Power BI Semantic Model Fetcher'] as PowerBIFetcherConfig);
+      }
+
+      // Check for Power BI Semantic Model DAX Generator config
+      if (initialData.tool_configs['Power BI Semantic Model DAX Generator']) {
+        setPowerBIDaxConfig(initialData.tool_configs['Power BI Semantic Model DAX Generator'] as PowerBIDaxConfig);
+      }
+
+      // Check for Power BI Metadata Reducer config
+      if (initialData.tool_configs['Power BI Metadata Reducer']) {
+        setPowerBIReducerConfig(initialData.tool_configs['Power BI Metadata Reducer'] as PowerBIMetadataReducerConfig);
+      }
+
+      // Check for Power BI DAX Executor config
+      if (initialData.tool_configs['Power BI DAX Executor']) {
+        setPowerBIDaxExecutorConfig(initialData.tool_configs['Power BI DAX Executor'] as PowerBIDaxExecutorConfig);
       }
 
       // Check for MCP_SERVERS config
@@ -683,6 +711,102 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
         })) {
           // Remove Power BI Report References Tool config if tool not selected
           delete updatedToolConfigs['Power BI Report References Tool'];
+        }
+
+        // Handle Power BI Semantic Model Fetcher config
+        if (powerBIFetcherConfig && Object.keys(powerBIFetcherConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Semantic Model Fetcher';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            'Power BI Semantic Model Fetcher': powerBIFetcherConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Semantic Model Fetcher';
+        })) {
+          delete updatedToolConfigs['Power BI Semantic Model Fetcher'];
+        }
+
+        // Handle Power BI Semantic Model DAX Generator config
+        if (powerBIDaxConfig && Object.keys(powerBIDaxConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Semantic Model DAX Generator';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            'Power BI Semantic Model DAX Generator': powerBIDaxConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Semantic Model DAX Generator';
+        })) {
+          delete updatedToolConfigs['Power BI Semantic Model DAX Generator'];
+        }
+
+        // Handle Power BI Metadata Reducer config
+        if (powerBIReducerConfig && Object.keys(powerBIReducerConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Metadata Reducer';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            'Power BI Metadata Reducer': powerBIReducerConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI Metadata Reducer';
+        })) {
+          delete updatedToolConfigs['Power BI Metadata Reducer'];
+        }
+
+        // Handle Power BI DAX Executor config
+        if (powerBIDaxExecutorConfig && Object.keys(powerBIDaxExecutorConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI DAX Executor';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            'Power BI DAX Executor': powerBIDaxExecutorConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Power BI DAX Executor';
+        })) {
+          delete updatedToolConfigs['Power BI DAX Executor'];
         }
 
         // Handle Power BI Comprehensive Analysis Tool config
@@ -1576,6 +1700,138 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                       setToolConfigs(prev => ({
                         ...prev,
                         'Power BI Report References Tool': config
+                      }));
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+
+            {/* Power BI Semantic Model Fetcher Configuration - Show only when tool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'Power BI Semantic Model Fetcher';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  Power BI Semantic Model Fetcher Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(255, 152, 0, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(255, 152, 0, 0.2)'
+                }}>
+                  <PowerBIFetcherConfigSelector
+                    value={powerBIFetcherConfig}
+                    onChange={(config) => {
+                      setPowerBIFetcherConfig(config);
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'Power BI Semantic Model Fetcher': config
+                      }));
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+
+            {/* Power BI Semantic Model DAX Generator Configuration - Show only when tool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'Power BI Semantic Model DAX Generator';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  Power BI Semantic Model DAX Generator Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(0, 121, 107, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(0, 121, 107, 0.2)'
+                }}>
+                  <PowerBIDaxConfigSelector
+                    value={powerBIDaxConfig}
+                    onChange={(config) => {
+                      setPowerBIDaxConfig(config);
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'Power BI Semantic Model DAX Generator': config
+                      }));
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+
+            {/* Power BI Metadata Reducer Configuration - Show only when tool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'Power BI Metadata Reducer';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  Power BI Metadata Reducer Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(156, 39, 176, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(156, 39, 176, 0.2)'
+                }}>
+                  <PowerBIMetadataReducerConfigSelector
+                    value={powerBIReducerConfig}
+                    onChange={(config) => {
+                      setPowerBIReducerConfig(config);
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'Power BI Metadata Reducer': config
+                      }));
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+
+            {/* Power BI DAX Executor Configuration - Show only when tool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'Power BI DAX Executor';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  Power BI DAX Executor Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(25, 118, 210, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(25, 118, 210, 0.2)'
+                }}>
+                  <PowerBIDaxExecutorConfigSelector
+                    value={powerBIDaxExecutorConfig}
+                    onChange={(config) => {
+                      setPowerBIDaxExecutorConfig(config);
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'Power BI DAX Executor': config
                       }));
                     }}
                   />

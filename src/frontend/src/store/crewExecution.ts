@@ -6,6 +6,8 @@ import { useTabManagerStore } from './tabManager';
 import { useFlowExecutionStore } from './flowExecutionStore';
 import { Tool } from '../types/tool';
 import { FlowService, FlowCheckpoint } from '../api/FlowService';
+import { assessTrifecta, TrifectaAssessment } from '../utils/toolCapabilityManifest';
+import { ToolService } from '../api/ToolService';
 
 interface RunHistoryItem {
   id: string;
@@ -51,6 +53,12 @@ interface CrewExecutionState {
   successMessage: string;
   showSuccess: boolean;
 
+  // Trifecta warning dialog state
+  showTrifectaDialog: boolean;
+  trifectaAssessment: TrifectaAssessment | null;
+  trifectaAcknowledged: boolean;
+  pendingTrifectaExecution: { nodes: Node[]; edges: Edge[]; type: 'crew' | 'flow' } | null;
+
   // Checkpoint dialog state
   showCheckpointDialog: boolean;
   checkpoints: FlowCheckpoint[];
@@ -94,6 +102,11 @@ interface CrewExecutionState {
   setRunHistory: (history: RunHistoryItem[]) => void;
   setUserActive: (active: boolean) => void;
   cleanup: () => void;
+
+  // Trifecta warning dialog methods
+  setShowTrifectaDialog: (show: boolean) => void;
+  handleTrifectaProceed: () => void;
+  handleTrifectaCancel: () => void;
 
   // Checkpoint dialog methods
   setShowCheckpointDialog: (show: boolean) => void;
@@ -148,6 +161,12 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   showError: false,
   successMessage: '',
   showSuccess: false,
+
+  // Trifecta warning dialog state
+  showTrifectaDialog: false,
+  trifectaAssessment: null,
+  trifectaAcknowledged: false,
+  pendingTrifectaExecution: null,
 
   // Checkpoint dialog state
   showCheckpointDialog: false,
@@ -213,6 +232,19 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     successMessage: '',
     showSuccess: false
   }),
+
+  // Trifecta warning dialog methods
+  setShowTrifectaDialog: (show) => set({ showTrifectaDialog: show }),
+  handleTrifectaProceed: () => {
+    const { pendingTrifectaExecution } = get();
+    set({ showTrifectaDialog: false, trifectaAcknowledged: true, pendingTrifectaExecution: null });
+    if (pendingTrifectaExecution) {
+      void get().handleRunClick(pendingTrifectaExecution.type);
+    }
+  },
+  handleTrifectaCancel: () => {
+    set({ showTrifectaDialog: false, trifectaAssessment: null, pendingTrifectaExecution: null, trifectaAcknowledged: false });
+  },
 
   // Checkpoint dialog setters
   setShowCheckpointDialog: (show) => set({ showCheckpointDialog: show }),
@@ -812,6 +844,48 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     }
     console.log('[CrewExecution] Resolved nodes for', type, ':', resolvedNodes.length);
 
+    // ── Trifecta pre-flight security check ──────────────────────────────────
+    // Runs on every "Run" click unless the user has already acknowledged the
+    // warning for this execution (trifectaAcknowledged is set by handleTrifectaProceed).
+    if (!state.trifectaAcknowledged) {
+      // Collect all tool IDs from agent + task nodes
+      const toolIdSet = new Set<string>();
+      for (const node of resolvedNodes) {
+        const data = node.data as Record<string, unknown>;
+        const nodeTools = data.tools;
+        if (Array.isArray(nodeTools)) {
+          for (const t of nodeTools) toolIdSet.add(String(t));
+        }
+      }
+      // Fetch the authoritative tool list from the API to resolve IDs → titles
+      // (state.tools is local component state in CrewCanvas and not available here)
+      let toolTitles: string[] = [];
+      try {
+        const allTools = await ToolService.listEnabledTools();
+        toolTitles = allTools
+          .filter(t => toolIdSet.has(String(t.id)))
+          .map(t => t.title);
+      } catch {
+        // If the fetch fails, skip the check and proceed with execution
+        console.warn('[CrewExecution] Could not fetch tools for trifecta check — skipping');
+        set({ trifectaAcknowledged: false });
+      }
+
+      const assessment = assessTrifecta(toolTitles);
+      if (assessment.hasTrifecta) {
+        console.warn('[CrewExecution] Lethal trifecta detected — showing pre-flight warning');
+        set({
+          showTrifectaDialog: true,
+          trifectaAssessment: assessment,
+          pendingTrifectaExecution: { nodes: resolvedNodes, edges: resolvedEdges, type: type as 'crew' | 'flow' },
+        });
+        return; // wait for user choice in TrifectaWarningDialog
+      }
+    }
+    // Reset acknowledgment so the next independent run will check again
+    set({ trifectaAcknowledged: false });
+    // ────────────────────────────────────────────────────────────────────────
+
     // Helper function to check for checkpoints and handle flow execution
     const checkForCheckpointsAndExecuteFlow = async (nodes: Node[], edges: Edge[]) => {
       console.log('[CrewExecution] Checking for checkpoints before flow execution');
@@ -885,12 +959,24 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           data.label
         ];
 
+        // Also collect string values from tool_configs (e.g. {user_question} in Reducer config)
+        const toolConfigs = (data.tool_configs || (data.task as Record<string, unknown>)?.tool_configs) as Record<string, Record<string, unknown>> | undefined;
+        if (toolConfigs && typeof toolConfigs === 'object') {
+          Object.values(toolConfigs).forEach(toolCfg => {
+            if (toolCfg && typeof toolCfg === 'object') {
+              Object.values(toolCfg).forEach(val => {
+                if (val && typeof val === 'string') {
+                  fieldsToCheck.push(val);
+                }
+              });
+            }
+          });
+        }
+
         console.log('[CrewExecution] Checking node:', node.id, 'type:', node.type);
-        console.log('[CrewExecution] Node data:', data);
 
         const hasVar = fieldsToCheck.some(field => {
           if (field && typeof field === 'string') {
-            console.log('[CrewExecution] Checking field:', field);
             // Reset regex lastIndex to ensure proper matching
             variablePattern.lastIndex = 0;
             const matches = variablePattern.test(field);

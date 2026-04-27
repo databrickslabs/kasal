@@ -1218,6 +1218,15 @@ class FlowBuilder:
                             )
                             logger.info(f"Crew instance '{route_crew_name}' created for route")
 
+                            # SECURITY: Same assembly-time checks as all other crew creation paths.
+                            try:
+                                from src.engines.crewai.security.tool_capability_manifest import (
+                                    run_crew_security_checks as _run_security_checks,
+                                )
+                                _run_security_checks(crew, context=f"flow router crew '{route_crew_name}'")
+                            except Exception as _sec_err:
+                                logger.debug("[SECURITY] Flow router crew security checks skipped: %s", _sec_err)
+
                             # CRITICAL: Set up execution callbacks like regular crew execution
                             # Extract job_id directly from callbacks dict
                             job_id = None

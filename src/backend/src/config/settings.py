@@ -81,6 +81,11 @@ class Settings(BaseSettings):
     SERVER_PORT: int = 8000
     DEBUG_MODE: bool = False
 
+    # Local development fallback user.
+    # Set this in your .env file when running outside Databricks Apps.
+    # Leave empty (the default) in production — the platform provides X-Forwarded-Email.
+    LOCAL_DEV_USER_EMAIL: str = os.getenv("LOCAL_DEV_USER_EMAIL", "")
+
     # Add the following setting to control database seeding
     AUTO_SEED_DATABASE: bool = True
 
