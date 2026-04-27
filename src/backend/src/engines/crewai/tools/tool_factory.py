@@ -146,6 +146,31 @@ except Exception as e:
     PowerBIDaxExecutorTool = None
     logging.warning(f"Could not import PowerBIDaxExecutorTool: {e}")
 
+# UC Metric View Tools
+try:
+    from .custom.dax_to_sql_translator_tool import DaxToSqlTranslatorTool
+except ImportError as e:
+    DaxToSqlTranslatorTool = None
+    logging.warning(f"Could not import DaxToSqlTranslatorTool: {e}")
+
+try:
+    from .custom.uc_metric_view_generator_tool import UCMetricViewGeneratorTool
+except ImportError as e:
+    UCMetricViewGeneratorTool = None
+    logging.warning(f"Could not import UCMetricViewGeneratorTool: {e}")
+
+try:
+    from .custom.pbi_measure_allocator_tool import PbiMeasureAllocatorTool
+except ImportError as e:
+    PbiMeasureAllocatorTool = None
+    logging.warning(f"Could not import PbiMeasureAllocatorTool: {e}")
+
+try:
+    from .custom.metric_view_deployer_tool import MetricViewDeployerTool
+except ImportError as e:
+    MetricViewDeployerTool = None
+    logging.warning(f"Could not import MetricViewDeployerTool: {e}")
+
 # Setup logger
 logger = logging.getLogger(__name__)
 
@@ -214,6 +239,16 @@ class ToolFactory:
             self._tool_implementations["Power BI Metadata Reducer"] = PowerBIMetadataReducerTool
         if PowerBIDaxExecutorTool is not None:
             self._tool_implementations["Power BI DAX Executor"] = PowerBIDaxExecutorTool
+
+        # UC Metric View tools
+        if DaxToSqlTranslatorTool is not None:
+            self._tool_implementations["DAX to SQL Translator"] = DaxToSqlTranslatorTool
+        if UCMetricViewGeneratorTool is not None:
+            self._tool_implementations["UC Metric View Generator"] = UCMetricViewGeneratorTool
+        if PbiMeasureAllocatorTool is not None:
+            self._tool_implementations["PBI Measure Allocator"] = PbiMeasureAllocatorTool
+        if MetricViewDeployerTool is not None:
+            self._tool_implementations["Metric View Deployer"] = MetricViewDeployerTool
 
         # Initialize _initialized flag
         self._initialized = False
