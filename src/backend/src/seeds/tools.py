@@ -36,6 +36,10 @@ tools_data = [
     (80, "Power BI Semantic Model DAX Generator", "Generates and executes DAX queries from natural language questions using LLM with self-correction retry loop (up to N retries). Accepts model context JSON from the 'Power BI Semantic Model Fetcher' tool output, or reads from cache as fallback. Features business term mappings, field synonyms, active filter auto-application, and optional visual reference lookup. Requires Service Principal or user OAuth token for DAX execution, plus Databricks LLM endpoint for DAX generation.", "database"),
     (81, "Power BI Metadata Reducer", "Intelligently reduces semantic model metadata to only what's relevant for a specific question. Uses fuzzy matching, LLM-powered table/measure selection, and measure dependency resolution to filter the full model context from the Fetcher tool. Produces a focused, reduced JSON that dramatically improves DAX generation accuracy. Place between Fetcher and DAX Generator tools in multi-step workflows. Pass the Fetcher output as 'model_context_json' and the user's business question as 'user_question'.", "database"),
     (82, "Power BI DAX Executor", "Executes a pre-configured DAX query directly against a Power BI semantic model via the Execute Queries API. Accepts workspace ID, dataset ID, authentication credentials, and a DAX EVALUATE statement. Returns results as a formatted markdown table or JSON. No LLM required — use when you already have a working DAX query and want to run it against Power BI.", "database"),
+    (85, "DAX to SQL Translator", "Translate Power BI DAX measure expressions to Databricks Spark SQL using pattern-based rules. Supports 14+ DAX patterns including SUM, SUMX+FILTER, CALCULATE, DIVIDE, COUNTX, AVERAGEX, SAMEPERIODLASTYEAR, and SELECTEDVALUE+SWITCH detection. Input: JSON array of measures with dax_expression fields. Output: JSON array with sql_expr, confidence, and skip_reason per measure. Can be used standalone or as part of the UC Metric View Generator pipeline.", "transform"),
+    (86, "UC Metric View Generator", "Full pipeline: takes PBI measures JSON (from tool 73) + MQuery transpilation JSON (from tool 74) and generates UC Metric View YAML definitions and deploy SQL per discovered fact table. Combines MQuery parsing, DAX translation (14 patterns), join detection (dim + fact-to-fact), scan data enrichment, and YAML/SQL emission. Optionally accepts PBI relationships JSON (tool 75) for auto-detected enrichment joins and scan data for inline SQL source generation. Output: JSON with YAML + SQL per fact table, plus generation statistics.", "transform"),
+    (87, "PBI Measure Allocator", "Groups Power BI measures into fact tables with confidence scores based on DAX table column references (Table[Column] patterns). Analyzes DAX expressions to determine which table each measure belongs to. Input: raw measures JSON (from Power BI Connector/Fetcher) + mquery_transpilation JSON (from tool 74). Output: JSON mapping of measure → fact table allocation with confidence (high/medium/low/none). Use before the UC Metric View Generator when measures don't have proposed_allocation fields.", "transform"),
+    (88, "Metric View Deployer", "Deploy UC Metric View definitions to a Databricks workspace. Accepts YAML specs and deploy SQL from the UC Metric View Generator tool (86). Supports dry_run mode (default) for validation without actual deployment. When dry_run=False, executes CREATE METRIC VIEW SQL via the Databricks SQL Statement API. Input: yaml_specs_json + sql_specs_json from tool 86. Output: deployment status per metric view.", "transform"),
 ]
 
 def get_tool_configs():
@@ -326,6 +330,30 @@ def get_tool_configs():
             "output_format": "markdown",
             "max_rows": 1000,
         },  # Power BI DAX Executor
+        "85": {
+            "result_as_answer": True,
+            "config_json": "{}",
+        },  # DAX to SQL Translator
+        "86": {
+            "result_as_answer": True,
+            "catalog": "main",
+            "schema_name": "default",
+            "config_json": "{}",
+            "inner_dim_joins": False,
+            "unflatten_tables": False,
+        },  # UC Metric View Generator
+        "87": {
+            "result_as_answer": True,
+            "config_json": "{}",
+        },  # PBI Measure Allocator
+        "88": {
+            "result_as_answer": True,
+            "dry_run": True,
+            "catalog": "main",
+            "schema_name": "default",
+            "databricks_host": "",
+            "databricks_token": "",
+        },  # Metric View Deployer
     }
 
 async def seed_async():
@@ -343,7 +371,7 @@ async def seed_async():
     tools_error = 0
 
     # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82]
+    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82, 85, 86, 87, 88]
 
     for tool_id, title, description, icon in tools_data:
         try:
@@ -406,7 +434,7 @@ def seed_sync():
     tools_error = 0
 
     # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82]
+    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82, 85, 86, 87, 88]
 
     for tool_id, title, description, icon in tools_data:
         try:
