@@ -17,5 +17,9 @@
       "WebFetch(domain:kylejmassey.com)",
       "mcp__plugin_databricks-ai-dev-kit_databricks__get_lakebase_database"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "claude-flow"
+  ],
+  "enableAllProjectMcpServers": true
 }
