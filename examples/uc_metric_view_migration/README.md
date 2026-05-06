@@ -163,6 +163,50 @@ This reduces the human step from "build config from scratch" (3-4 hours) to "rev
 - Source SQL quality (suboptimal JOINs, redundant WHERE clauses)
 - Business logic encoded in SWITCH branches that only domain experts understand
 
+## Effort Estimate
+
+Based on the SC Reporting project (26 sources, 470 measures, 2 weeks with 1.5 people using the monolith script):
+
+### Without Tool 89 (today)
+
+The bottleneck is building `pipeline_config.json` from scratch:
+
+| Phase | Effort | What |
+|-------|--------|------|
+| Understanding the PBI model | 1-2 days | Identify fact/dim tables, join patterns, measure categories |
+| Building join_key_map | 1 day | Map 6+ dimension joins with keys and columns |
+| Building fact_join_map | 2 days | Cross-table DIVIDE patterns (the hard part) |
+| Building switch_decompositions | 2 days | Decompose 45 SELECTEDVALUE+SWITCH measures |
+| Building enrichment_joins | 1 day | Extra dimension lookups not in DAX |
+| Debugging + iterating | 2-3 days | Run pipeline, fix config, re-run |
+| Testing + validation | 1-2 days | Verify output against PBI |
+| **Total** | **~120 hours** | **~4.6 hours per source** |
+
+### With Tool 89 + automated validation (target)
+
+Config generator proposes 80%+ of the config. Automated validation catches errors. Human reviews only flagged issues:
+
+| Phase | Effort | What |
+|-------|--------|------|
+| Extract + generate config proposal | 1 hour | Tools 73/74/75 + Tool 89 (automatic) |
+| Review proposed config | 2-3 hours | Approve/reject/edit proposals (one pass over all sources) |
+| Generate all UCMVs | 30 seconds | Tool 86 (automatic) |
+| Automated validation | 1-2 hours | Run checks, review failures (automatic) |
+| Human review of flagged issues | 5-10 hours | ~20% of sources need attention |
+| Fix + re-iterate rejected UCMVs | 2-3 hours | Update config, re-run failed sources |
+| Final testing | 1-2 hours | Spot check deployed views |
+| **Total** | **~40-50 hours** | **~1.8 hours per source** |
+
+### Scaling estimate
+
+| Dashboard size | Today (manual config) | With Tool 89 + validation | Improvement |
+|---------------|----------------------|--------------------------|-------------|
+| 10 sources | ~45 hours (1 week) | ~18 hours (2-3 days) | 60% faster |
+| 26 sources | ~120 hours (2.5 weeks) | ~47 hours (1 week) | 60% faster |
+| 50 sources | ~230 hours (5 weeks) | ~90 hours (2 weeks) | 60% faster |
+
+The improvement compounds over customers: config patterns accumulate into a reusable library, validation rules get smarter, and the 80% automation creeps toward 95%.
+
 ## Example Files
 
 | File | Size | Description |
@@ -175,7 +219,13 @@ This reduces the human step from "build config from scratch" (3-4 hours) to "rev
 | `pbi_relationships.json` | 64K | PBI relationships for auto-join detection |
 | `scan_result_debug.json` | — | PBI scan data for inline SQL enrichment |
 
-## Quick Run
+## Demo: run_locally.py
+
+`run_locally.py` demonstrates the **JSON mode** of Tool 86. It loads the pre-extracted JSON files from this directory (measures, MQuery, relationships, scan data, pipeline config) and runs the full pipeline locally — no PBI API access needed, no Kasal server needed.
+
+This is the same pipeline that produced the verified reference output at `~/workspace/demos/uc_metrics/sc_reporting_project/output/`. The 23 generated metric views match that reference with cosmetic-only differences (parenthesization, SQL formatting).
+
+**How to run:**
 
 ```bash
 cd src/backend
@@ -183,15 +233,28 @@ source .venv/bin/activate
 python ../../examples/uc_metric_view_migration/run_locally.py
 ```
 
-Output: `~/Downloads/ucmv_example_output/` — 26 YAML + 26 SQL + migration report.
+**What it does:**
+1. Loads `measure_table_mapping.json` (470 DAX measures)
+2. Loads `mquery_transpilation.json` (60 MQuery table definitions)
+3. Loads `pbi_relationships.json` (relationship graph for auto-join detection)
+4. Loads `scan_result_debug.json` (PBI Admin API scan for inline SQL enrichment)
+5. Loads `pipeline_config.json` (customer-specific join maps, SWITCH decompositions, etc.)
+6. Runs the full pipeline: parse → dependency graph → translate → detect joins → UNION injection → YAML/SQL emission
+7. Saves output to `~/Downloads/ucmv_example_output/`
 
-## Expected Output
+**Output:**
+- 26 YAML files (UC Metric View definitions)
+- 26 SQL files (deployment reference instructions)
+- 1 migration report (markdown with executive summary, per-table stats, join map)
 
-- **23 metric views** matching the verified reference output
-- **3 bonus views** (C_Banner, C_Dim_calendar, FT_SKU_Performance)
-- **~366 measures translated** across all tables
-- **Migration report** (markdown) with executive summary, per-table stats, join map, untranslatable measures
-- Diffs vs reference are cosmetic only (parenthesization, SQL formatting)
+**Verification against reference:**
+```bash
+# Compare against the verified SC Reporting project output
+diff ~/Downloads/ucmv_example_output/Fact_HR_A_uc_metric_view.yml \
+     ~/workspace/demos/uc_metrics/sc_reporting_project/output/Fact_HR_A_uc_metric_view.yml
+```
+
+Expected: 23/23 original views present, 0 missing, cosmetic diffs only (parenthesization in DIVIDE expressions, SQL formatting). 3 bonus views (C_Banner, C_Dim_calendar, FT_SKU_Performance) are artifact-only tables the original monolith filtered out.
 
 ## Pipeline Config Reference
 
