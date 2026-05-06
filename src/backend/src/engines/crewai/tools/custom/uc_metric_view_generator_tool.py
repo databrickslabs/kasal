@@ -1,6 +1,7 @@
 """UC Metric View Generator Tool for CrewAI — full pipeline."""
 import json
 import logging
+import os
 from typing import Any, Optional, Type
 
 from crewai.tools import BaseTool
@@ -25,17 +26,33 @@ class UCMetricViewGeneratorSchema(BaseModel):
     schema_name: Optional[str] = Field(None, description="Target UC schema name")
     inner_dim_joins: bool = Field(False, description="Use INNER JOIN for dimensions")
     unflatten_tables: bool = Field(False, description="Unflatten __-separated table names")
+    use_llm_fallback: bool = Field(False, description="Enable LLM fallback for unmatched DAX patterns (opt-in)")
+    llm_model: Optional[str] = Field(None, description="LLM model for fallback (default: databricks-claude-sonnet-4)")
+    llm_workspace_url: Optional[str] = Field(None, description="Databricks workspace URL for LLM endpoint")
+    llm_token: Optional[str] = Field(None, description="Databricks token for LLM endpoint")
+
+    # ===== PBI API EXTRACTION (optional — alternative to providing pre-extracted JSON) =====
+    workspace_id: Optional[str] = Field(None, description="Power BI workspace/group ID. When provided with credentials, extracts data from PBI API instead of requiring pre-extracted JSON.")
+    dataset_id: Optional[str] = Field(None, description="Power BI dataset/semantic model ID")
+    tenant_id: Optional[str] = Field(None, description="Azure AD tenant ID for Service Principal auth")
+    client_id: Optional[str] = Field(None, description="Azure AD application/client ID")
+    client_secret: Optional[str] = Field(None, description="Client secret for Service Principal auth")
+    username: Optional[str] = Field(None, description="Service account username (alternative to SP)")
+    password: Optional[str] = Field(None, description="Service account password")
+    auth_method: Optional[str] = Field(None, description="Auth method: 'service_principal', 'service_account', or auto-detect")
+    access_token: Optional[str] = Field(None, description="Pre-obtained OAuth access token (alternative to SP/SA)")
 
 
 class UCMetricViewGeneratorTool(BaseTool):
     """Generate UC Metric View YAML + deploy SQL from PBI measures and MQuery data."""
     name: str = "UC Metric View Generator"
     description: str = (
-        "Full pipeline: takes PBI measures JSON + MQuery transpilation JSON and generates "
-        "UC Metric View YAML definitions and deploy SQL per discovered fact table. "
-        "Combines MQuery parsing, DAX translation, join detection, and YAML/SQL emission. "
-        "Input: measures_json (from tool 73) + mquery_json (from tool 74). "
-        "Output: JSON with YAML + SQL per fact table, plus generation stats."
+        "Full pipeline: generates UC Metric View YAML + deploy SQL per fact table. "
+        "TWO MODES: (1) API mode — provide workspace_id + dataset_id + PBI credentials, "
+        "and the tool extracts measures, MQuery, and relationships from the PBI API automatically. "
+        "(2) JSON mode — provide pre-extracted measures_json + mquery_json from upstream tools. "
+        "Combines MQuery parsing, DAX translation (14+ patterns + LLM fallback), "
+        "Kahn's dependency graph, join detection, and YAML/SQL emission."
     )
     args_schema: Type[BaseModel] = UCMetricViewGeneratorSchema
     _default_config: dict = PrivateAttr(default_factory=dict)
@@ -45,7 +62,11 @@ class UCMetricViewGeneratorTool(BaseTool):
     def __init__(self, **kwargs: Any) -> None:
         config_keys = ('measures_json', 'mquery_json', 'relationships_json',
                        'scan_data_json', 'config_json', 'catalog', 'schema_name',
-                       'inner_dim_joins', 'unflatten_tables')
+                       'inner_dim_joins', 'unflatten_tables',
+                       'use_llm_fallback', 'llm_model', 'llm_workspace_url', 'llm_token',
+                       'workspace_id', 'dataset_id', 'tenant_id', 'client_id',
+                       'client_secret', 'username', 'password', 'auth_method',
+                       'access_token')
         default_config = {}
         for key in config_keys:
             val = kwargs.pop(key, None)
@@ -72,6 +93,48 @@ class UCMetricViewGeneratorTool(BaseTool):
         schema = _get('schema_name') or 'default'
         inner_joins = _get('inner_dim_joins') or False
         unflatten = _get('unflatten_tables') or False
+
+        # Check if API extraction mode (PBI credentials provided)
+        workspace_id = _get('workspace_id')
+        dataset_id = _get('dataset_id')
+
+        if workspace_id and dataset_id:
+            logger.info(f"[UCMV] API extraction mode: workspace={workspace_id}, dataset={dataset_id}")
+            try:
+                extracted = self._extract_from_pbi_api(
+                    workspace_id=workspace_id,
+                    dataset_id=dataset_id,
+                    tenant_id=_get('tenant_id') or '',
+                    client_id=_get('client_id') or '',
+                    client_secret=_get('client_secret') or '',
+                    username=_get('username') or '',
+                    password=_get('password') or '',
+                    auth_method=_get('auth_method'),
+                    access_token=_get('access_token') or '',
+                )
+                # Use extracted data (override only when manually provided JSON is empty/default)
+                if extracted.get('measures') and measures_raw == '[]':
+                    measures_raw = json.dumps(extracted['measures'])
+                if extracted.get('mquery') and mquery_raw == '[]':
+                    mquery_raw = json.dumps(extracted['mquery'])
+                if extracted.get('relationships') and not relationships_raw:
+                    relationships_raw = json.dumps(extracted['relationships'])
+                if extracted.get('scan_data') and not scan_raw:
+                    scan_raw = json.dumps(extracted['scan_data'])
+            except Exception as e:
+                logger.error(f"[UCMV] API extraction failed: {e}")
+                return json.dumps({"error": f"PBI API extraction failed: {e}"})
+
+        # Build LLM config if fallback enabled
+        llm_config = None
+        use_llm = _get('use_llm_fallback') or False
+        if use_llm:
+            llm_config = {
+                'use_llm_fallback': True,
+                'llm_model': _get('llm_model') or 'databricks-claude-sonnet-4',
+                'llm_workspace_url': _get('llm_workspace_url') or os.environ.get('DATABRICKS_HOST', ''),
+                'llm_token': _get('llm_token') or os.environ.get('DATABRICKS_TOKEN', ''),
+            }
 
         try:
             measures = json.loads(measures_raw) if isinstance(measures_raw, str) else measures_raw
@@ -114,6 +177,7 @@ class UCMetricViewGeneratorTool(BaseTool):
             scan_data=scan_data,
             unflatten_tables=unflatten or bool(scan_data),
             relationships_enrichment=relationships_enrichment,
+            llm_config=llm_config,
         )
         pipeline.run()
 
@@ -136,3 +200,170 @@ class UCMetricViewGeneratorTool(BaseTool):
             },
         }
         return json.dumps(output, indent=2)
+
+    # ------------------------------------------------------------------
+    # PBI API extraction helpers
+    # ------------------------------------------------------------------
+
+    def _extract_from_pbi_api(
+        self,
+        workspace_id: str,
+        dataset_id: str,
+        tenant_id: str,
+        client_id: str,
+        client_secret: str,
+        username: str,
+        password: str,
+        auth_method: Optional[str],
+        access_token: str,
+    ) -> dict:
+        """Extract measures, MQuery, relationships, and scan data from PBI API.
+
+        Returns dict with keys: measures, mquery, relationships, scan_data
+        """
+        import asyncio
+
+        auth_config = {
+            'tenant_id': tenant_id,
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'username': username,
+            'password': password,
+            'auth_method': auth_method,
+            'access_token': access_token,
+        }
+
+        result: dict = {}
+
+        # Obtain an OAuth token (unless a pre-obtained one was supplied)
+        token = access_token
+        if not token:
+            from src.engines.crewai.tools.custom.powerbi_auth_utils import (
+                get_powerbi_access_token_from_config,
+            )
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    token = pool.submit(
+                        asyncio.run,
+                        get_powerbi_access_token_from_config(auth_config),
+                    ).result()
+            else:
+                token = asyncio.run(
+                    get_powerbi_access_token_from_config(auth_config)
+                )
+
+        # 1. Extract measures via Execute Queries API
+        try:
+            from src.converters.services.powerbi.connector import PowerBIConnector
+
+            connector = PowerBIConnector(
+                semantic_model_id=dataset_id,
+                group_id=workspace_id,
+                access_token=token,
+            )
+            kpis = connector.extract_measures(include_hidden=True)
+
+            measures = []
+            for kpi in kpis:
+                measures.append({
+                    'measure_name': kpi.description,
+                    'original_name': kpi.description,
+                    'dax_expression': kpi.formula or '',
+                    'proposed_allocation': kpi.source_table or '__unassigned__',
+                    'table_refs': [],
+                })
+            result['measures'] = measures
+            logger.info(f"[UCMV] Extracted {len(measures)} measures from PBI API")
+        except Exception as e:
+            logger.warning(f"[UCMV] Measure extraction failed: {e}")
+
+        # 2. Extract MQuery via Admin API scan
+        try:
+            from src.converters.services.mquery.scanner import PowerBIAdminScanner
+
+            scanner = PowerBIAdminScanner(access_token=token)
+
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    scan_result, raw_scan = pool.submit(
+                        asyncio.run,
+                        scanner.scan_workspace(workspace_id, dataset_id=dataset_id),
+                    ).result()
+            else:
+                scan_result, raw_scan = asyncio.run(
+                    scanner.scan_workspace(workspace_id, dataset_id=dataset_id)
+                )
+
+            if raw_scan:
+                result['scan_data'] = raw_scan
+
+            mquery_entries = []
+            for model in scan_result:
+                for table in model.tables:
+                    for expr in table.source_expressions:
+                        mquery_entries.append({
+                            'table_name': table.name,
+                            'transpiled_sql': expr.embedded_sql or expr.raw_expression or '',
+                            'validation_passed': 'Yes' if expr.embedded_sql else 'No',
+                        })
+            result['mquery'] = mquery_entries
+            logger.info(f"[UCMV] Extracted {len(mquery_entries)} MQuery tables from PBI Admin API")
+        except Exception as e:
+            logger.warning(f"[UCMV] MQuery extraction failed: {e}")
+
+        # 3. Extract relationships via Execute Queries API
+        try:
+            import requests as req_lib
+
+            url = (
+                f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}"
+                f"/datasets/{dataset_id}/executeQueries"
+            )
+            headers = {
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/json',
+            }
+            payload = {
+                "queries": [{"query": "EVALUATE INFO.VIEW.RELATIONSHIPS()"}],
+                "serializerSettings": {"includeNulls": True},
+            }
+
+            resp = req_lib.post(url, headers=headers, json=payload, timeout=60)
+            if resp.status_code == 200:
+                raw = resp.json()
+                rows = (
+                    raw.get('results', [{}])[0]
+                    .get('tables', [{}])[0]
+                    .get('rows', [])
+                )
+                relationships = []
+                for row in rows:
+                    relationships.append({
+                        'from_table': row.get('[FromTable]', ''),
+                        'from_column': row.get('[FromColumn]', ''),
+                        'from_cardinality': row.get('[FromCardinality]', 'Many'),
+                        'to_table': row.get('[ToTable]', ''),
+                        'to_column': row.get('[ToColumn]', ''),
+                        'to_cardinality': row.get('[ToCardinality]', 'One'),
+                        'is_active': row.get('[IsActive]', True),
+                    })
+                result['relationships'] = relationships
+                logger.info(f"[UCMV] Extracted {len(relationships)} relationships from PBI API")
+            else:
+                logger.warning(f"[UCMV] Relationships API returned {resp.status_code}")
+        except Exception as e:
+            logger.warning(f"[UCMV] Relationship extraction failed: {e}")
+
+        return result
