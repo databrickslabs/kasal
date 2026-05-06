@@ -1,231 +1,8 @@
 # UC Metric View Migration
 
-Migrate Power BI semantic models to Databricks Unity Catalog Metric Views. One tool, two modes: live API extraction or pre-extracted JSON.
+Migrate Power BI semantic models to Databricks Unity Catalog Metric Views — deterministically, from a live API, with human review where it matters.
 
-**No commercial tool does this.** Microsoft's migration path keeps DAX (goes to Fabric). Consulting firms do manual rewrites. UC Metric Views (v1.1, DBR 17.2+) are too new for anyone else to have built migration tooling.
-
-## How It Works
-
-```
-                    ┌─────────────────────────────────────────┐
-                    │         Tool 86: UC Metric View         │
-                    │              Generator                   │
-                    ├─────────────────────────────────────────┤
-                    │                                         │
-   API MODE         │   JSON MODE                             │
-   (automatic)      │   (pre-extracted)                       │
-                    │                                         │
-   PBI credentials ─┤── OR ── measures_json ──┐              │
-   workspace_id     │         mquery_json     │              │
-   dataset_id       │         relationships   │              │
-                    │         scan_data        │              │
-                    │         config_json ─────┘              │
-                    │              │                          │
-                    │              ▼                          │
-                    │   ┌─────────────────────┐              │
-                    │   │ MQuery Parser       │              │
-                    │   │ DAX Translator (14p) │              │
-                    │   │ Kahn's Dependency    │              │
-                    │   │ Join Detector        │              │
-                    │   │ YAML Emitter         │              │
-                    │   │ Migration Report     │              │
-                    │   └─────────────────────┘              │
-                    │              │                          │
-                    │              ▼                          │
-                    │   YAML + SQL + Report per fact table    │
-                    └─────────────────────────────────────────┘
-```
-
-## Workflow Options
-
-### Option A: Fully Automatic (API Mode)
-
-One tool call. Provide PBI credentials, get metric views back.
-
-```
-Tool 86 config:
-  workspace_id:  bcb084ed-...
-  dataset_id:    9340689f-...
-  tenant_id:     9f37a392-...
-  client_id:     7b597aac-...
-  client_secret: ***
-  auth_method:   service_principal
-  catalog:       my_catalog
-  schema_name:   my_schema
-  config_json:   {pipeline_config.json contents}
-```
-
-Tool 86 automatically:
-1. Authenticates via Service Principal
-2. Extracts measures (Execute Queries API)
-3. Extracts MQuery table definitions (Admin API scan)
-4. Extracts relationships (Execute Queries API)
-5. Extracts scan data (Admin API)
-6. Runs the full pipeline (parse → translate → detect joins → emit YAML/SQL)
-7. Returns YAML + SQL + migration report per fact table
-
-### Option B: Two-Phase (Extract → Review → Migrate)
-
-For customers who want to review metadata before migration:
-
-**Phase 1: Extract metadata** (use tools 73, 74, 75 individually or as a crew)
-```
-Tool 74 (MQuery Converter)     → mquery_transpilation.json
-Tool 73 (Measure Converter)    → measure_table_mapping.json
-Tool 75 (Relationships Tool)   → pbi_relationships.json
-```
-
-**Review step**: Customer inspects the JSONs, adjusts allocations, builds `pipeline_config.json` with join maps and SWITCH decompositions.
-
-**Phase 2: Generate metric views** (Tool 86 in JSON mode)
-```
-Tool 86 config:
-  measures_json:      {Phase 1 output}
-  mquery_json:        {Phase 1 output}
-  relationships_json: {Phase 1 output}
-  config_json:        {customer-reviewed config}
-  catalog:            my_catalog
-  schema_name:        my_schema
-```
-
-This is the workflow used in the example files below — the JSONs were extracted once, reviewed, then fed to the pipeline.
-
-### Option C: Multi-Task Crew (Agent Orchestrated)
-
-Create a Kasal crew where the agent chains tools automatically:
-
-```
-Task 1: "Extract MQuery table definitions"
-  → Tool 74, PBI credentials in config
-
-Task 2: "Extract DAX measures"
-  → Tool 73, PBI credentials in config
-
-Task 3: "Extract relationships"
-  → Tool 75, PBI credentials in config
-
-Task 4: "Generate UC Metric Views from the extracted data"
-  → Tool 86, catalog + schema + config_json in config
-  → Agent passes Task 1-3 outputs automatically
-```
-
-### Future: Option D — Config Generator + Review Loop (Next Iteration)
-
-The biggest bottleneck today isn't the pipeline — it's authoring `pipeline_config.json`. A 400-measure model takes 30 seconds to translate but 3-4 hours to configure. The next iteration flips this with **Tool 89: Config Generator** that auto-proposes the config from extraction output.
-
-**What can be auto-extracted deterministically:**
-
-| Config Key | Source | How |
-|-----------|--------|-----|
-| `join_key_map` | Relationships API (Tool 75) | Convert `from_table, from_column, to_table, to_column, cardinality` → join_key_map format. Already 80% done in `RelationshipsLoader`. |
-| `fact_join_map` | Measure Allocator (Tool 87) | Cross-table references (measures referencing multiple facts) = fact_join_map candidates. |
-| `switch_decompositions` | DAX quick-reject output | SELECTEDVALUE+SWITCH measures are already identified and skipped. Parse the SWITCH branches from the DAX to propose decompositions. Deterministic for 80% of patterns. |
-| `enrichment_joins` | Relationships API | Already auto-generated. Done. |
-| `measure_resolutions` | Pipeline untranslatable list | Measures failing with "Cannot resolve [MeasureName]" — look up the referenced measure's DAX, propose resolution. |
-| `column_overrides` | MQuery transpilation vs DAX | Diff physical column names (MQuery) against PBI column names (DAX) = overrides. |
-| `mapping_only_tables` | Admin API scan | Tables with measures in PBI but no MQuery SQL entry — auto-detect from scan data. |
-
-**Proposed workflow:**
-
-```
-Phase 1: Extract (automatic)
-  Tool 74 → mquery_json
-  Tool 73 → measures_json
-  Tool 75 → relationships_json
-
-Phase 2: Generate config proposal (automatic — Tool 89)
-  Tool 89 takes extraction output →
-    proposes pipeline_config.json with:
-    - join_key_map (from relationships)
-    - switch_decompositions (from SWITCH DAX patterns)
-    - measure_resolutions (from untranslatable refs)
-    - column_overrides (from name mismatches)
-    - enrichment_joins (from relationships)
-
-Phase 3: Human review (30 min instead of 3-4 hours)
-  Customer reviews proposed config in UI →
-    approves/rejects/edits each section →
-    saves final pipeline_config.json
-
-Phase 4: Generate metric views (automatic)
-  Tool 86 with approved config → YAML + SQL + report
-
-Phase 5: Validate (automatic — colleague's tool)
-  Deploy dry-run → compare query results vs PBI →
-    flag semantic mismatches
-```
-
-This reduces the human step from "build config from scratch" (3-4 hours) to "review and approve proposals" (30 minutes). Combined with the validation step in Phase 5, the end-to-end automation rate goes from 70-80% to effectively 90%+ with human oversight at the right points.
-
-**What will always need human judgment:**
-- Semantic correctness (does `revenue` mean gross or net?)
-- Complex DAX patterns the LLM can't translate deterministically
-- Source SQL quality (suboptimal JOINs, redundant WHERE clauses)
-- Business logic encoded in SWITCH branches that only domain experts understand
-
-## Effort Estimate
-
-Based on the SC Reporting project (26 sources, 470 measures, 2 weeks with 1.5 people using the monolith script):
-
-### Without Tool 89 (today)
-
-The bottleneck is building `pipeline_config.json` from scratch:
-
-| Phase | Effort | What |
-|-------|--------|------|
-| Understanding the PBI model | 1-2 days | Identify fact/dim tables, join patterns, measure categories |
-| Building join_key_map | 1 day | Map 6+ dimension joins with keys and columns |
-| Building fact_join_map | 2 days | Cross-table DIVIDE patterns (the hard part) |
-| Building switch_decompositions | 2 days | Decompose 45 SELECTEDVALUE+SWITCH measures |
-| Building enrichment_joins | 1 day | Extra dimension lookups not in DAX |
-| Debugging + iterating | 2-3 days | Run pipeline, fix config, re-run |
-| Testing + validation | 1-2 days | Verify output against PBI |
-| **Total** | **~120 hours** | **~4.6 hours per source** |
-
-### With Tool 89 + automated validation (target)
-
-Config generator proposes 80%+ of the config. Automated validation catches errors. Human reviews only flagged issues:
-
-| Phase | Effort | What |
-|-------|--------|------|
-| Extract + generate config proposal | 1 hour | Tools 73/74/75 + Tool 89 (automatic) |
-| Review proposed config | 2-3 hours | Approve/reject/edit proposals (one pass over all sources) |
-| Generate all UCMVs | 30 seconds | Tool 86 (automatic) |
-| Automated validation | 1-2 hours | Run checks, review failures (automatic) |
-| Human review of flagged issues | 5-10 hours | ~20% of sources need attention |
-| Fix + re-iterate rejected UCMVs | 2-3 hours | Update config, re-run failed sources |
-| Final testing | 1-2 hours | Spot check deployed views |
-| **Total** | **~40-50 hours** | **~1.8 hours per source** |
-
-### Scaling estimate
-
-| Dashboard size | Today (manual config) | With Tool 89 + validation | Improvement |
-|---------------|----------------------|--------------------------|-------------|
-| 10 sources | ~45 hours (1 week) | ~18 hours (2-3 days) | 60% faster |
-| 26 sources | ~120 hours (2.5 weeks) | ~47 hours (1 week) | 60% faster |
-| 50 sources | ~230 hours (5 weeks) | ~90 hours (2 weeks) | 60% faster |
-
-The improvement compounds over customers: config patterns accumulate into a reusable library, validation rules get smarter, and the 80% automation creeps toward 95%.
-
-## Example Files
-
-| File | Size | Description |
-|------|------|-------------|
-| `run_locally.py` | — | Run the pipeline locally (same output as original monolith) |
-| `crew_ucmv_generator.json` | 4K | Importable Kasal crew config |
-| `pipeline_config.json` | 43K | Customer-specific config (join maps, filter sets, SWITCH decompositions) |
-| `measure_table_mapping.json` | 569K | 470 DAX measures with table allocations |
-| `mquery_transpilation.json` | 202K | 60 MQuery table transpilations |
-| `pbi_relationships.json` | 64K | PBI relationships for auto-join detection |
-| `scan_result_debug.json` | — | PBI scan data for inline SQL enrichment |
-
-## Demo: run_locally.py
-
-`run_locally.py` demonstrates the **JSON mode** of Tool 86. It loads the pre-extracted JSON files from this directory (measures, MQuery, relationships, scan data, pipeline config) and runs the full pipeline locally — no PBI API access needed, no Kasal server needed.
-
-This is the same pipeline that produced the verified reference output at `~/workspace/demos/uc_metrics/sc_reporting_project/output/`. The 23 generated metric views match that reference with cosmetic-only differences (parenthesization, SQL formatting).
-
-**How to run:**
+## Try It Now
 
 ```bash
 cd src/backend
@@ -233,32 +10,190 @@ source .venv/bin/activate
 python ../../examples/uc_metric_view_migration/run_locally.py
 ```
 
-**What it does:**
-1. Loads `measure_table_mapping.json` (470 DAX measures)
-2. Loads `mquery_transpilation.json` (60 MQuery table definitions)
-3. Loads `pbi_relationships.json` (relationship graph for auto-join detection)
-4. Loads `scan_result_debug.json` (PBI Admin API scan for inline SQL enrichment)
-5. Loads `pipeline_config.json` (customer-specific join maps, SWITCH decompositions, etc.)
-6. Runs the full pipeline: parse → dependency graph → translate → detect joins → UNION injection → YAML/SQL emission
-7. Saves output to `~/Downloads/ucmv_example_output/`
+This runs the full pipeline against the SC Reporting project (26 sources, 470 measures) and produces 26 UC Metric View YAML files in `~/Downloads/ucmv_example_output/`. The 23 core views match the verified reference output at `~/workspace/demos/uc_metrics/sc_reporting_project/output/` with cosmetic-only differences.
 
-**Output:**
+No PBI API access needed. No Kasal server needed. Just the pre-extracted JSONs in this directory.
+
+## Why This Matters
+
+The only tool that does live PBI API extraction → deterministic DAX translation → automated UC REST API deployment in one pipeline. Others:
+
+- **Databricks product team** (`powerbi-migrate`): File-based input only, LLM-driven (non-deterministic), no deployment. Actively developing — will improve.
+- **Microsoft**: Migration path goes to Fabric (keeps DAX), not to UC Metric Views.
+- **Consulting firms**: Manual rewrites. Weeks of effort per dashboard.
+- **Metric layer vendors** (dbt, Looker): Own constructs, no PBI migration tooling.
+
+The moat isn't "no one does this" — it's the approach: deterministic translation (14 regex patterns, reproducible output) + live API access (no file exports) + human review at the right points (not blanket LLM).
+
+## Migration Workflow
+
+Migrations are never 100% automatic. The target is 70-80% automation with human review where it matters. The workflow is **iterative, not linear** — Phase 4-5 failures loop back to Phase 3.
+
+```
+  Phase 1: EXTRACT (automatic)
+  Tools 73/74/75/86 → JSON files from PBI API
+                │
+                ▼
+  Phase 2: PROPOSE CONFIG (automatic — Tool 89, planned)
+  Auto-generate pipeline_config.json from extraction output
+                │
+                ▼
+  ┌─────────────────────────────────────────────────────┐
+  │                                                     │
+  │  Phase 3: HUMAN REVIEW                              │
+  │  Review/edit proposed config                        │
+  │  First customer: 2-3 hours                          │
+  │  Repeat customer (similar model): 30 min            │
+  │                                                     │
+  └───────────────────┬─────────────────────────────────┘
+                      │
+                      ▼
+  Phase 4: GENERATE (automatic — Tool 86)
+  MQuery Parser → DAX Translator → Dependency Graph →
+  Join Detector → YAML Emitter → Migration Report
+                      │
+                      ▼
+  Phase 5: VALIDATE + DEPLOY (planned)
+  Deterministic checks → compare vs PBI → human approval → deploy
+         │
+         │ failures loop back
+         └──────────► Phase 3 (adjust config, re-run)
+```
+
+### What exists today
+
+| Phase | Status | Detail |
+|-------|--------|--------|
+| Phase 1: Extract | **Done** | Tools 73, 74, 75, 86 (API mode). 3 auth methods. |
+| Phase 2: Propose config | **Planned** | Tool 89 — config generator. Not yet built. |
+| Phase 3: Human review | **Manual** | Customer edits pipeline_config.json by hand. |
+| Phase 4: Generate | **Done** | Tool 86. 459 tests, 21/21 module coverage. |
+| Phase 5: Validate | **Planned** | Deterministic check framework (separate project, no timeline yet). Tool 88 deployer exists for dry-run + live deploy. |
+
+### The iteration loop
+
+Real migrations are iterative. A typical flow:
+
+1. **First run** with empty config → migration report shows 40-50% translated (base measures only)
+2. **Add join_key_map** → re-run → 55-65% translated (dimension joins added)
+3. **Add switch_decompositions** → re-run → 70-75% translated
+4. **Add measure_resolutions** → re-run → 80%+ translated
+5. **Enable LLM fallback** for remaining complex DAX → 85%+
+6. **Validate against PBI source** → fix mismatches → final config
+
+Each iteration takes minutes (Tool 86 runs in 30 seconds). The human time is in reviewing the migration report and adjusting the config.
+
+## What Tool 89 (Config Generator) Will Auto-Propose
+
+The biggest bottleneck today is authoring `pipeline_config.json`. Tool 89 will propose 80%+ of it deterministically:
+
+| Config Key | Source | How |
+|-----------|--------|-----|
+| `join_key_map` | Relationships API (Tool 75) | Convert relationship records → join_key_map format. 80% done in `RelationshipsLoader`. |
+| `fact_join_map` | Measure Allocator (Tool 87) | Cross-table references = fact_join_map candidates. Grain/pivot/embed decisions still need human review. |
+| `switch_decompositions` | DAX quick-reject output | SELECTEDVALUE+SWITCH measures already identified. Parse SWITCH branches from DAX. Deterministic for 80% of patterns. |
+| `enrichment_joins` | Relationships API | Already auto-generated. Done. |
+| `measure_resolutions` | Pipeline untranslatable list | Measures failing with "Cannot resolve [ref]" — look up referenced DAX, propose resolution. |
+| `column_overrides` | MQuery transpilation vs DAX | Diff physical vs PBI column names = overrides. |
+| `mapping_only_tables` | Admin API scan | Tables with measures but no MQuery SQL. |
+
+**What Tool 89 won't get right:** `fact_join_map` entries with pivot/union/embed modes. These encode grain-level business decisions (e.g., "scorecard table has one row per KBI per workcenter, but the fact table has one row per workcenter — need to pivot before joining"). A human must review these.
+
+### What will always need human judgment
+
+- Semantic correctness (does `revenue` mean gross or net?)
+- Grain decisions for cross-table joins (pivot vs union vs embed)
+- Complex DAX patterns the LLM can't translate deterministically
+- Source SQL quality (suboptimal JOINs, redundant WHERE clauses)
+- Business logic encoded in SWITCH branches that only domain experts understand
+
+## Effort Estimate
+
+Based on the SC Reporting project (26 sources, 470 measures, 2 weeks with 1.5 people).
+
+### Three tiers
+
+| Approach | Per-source effort | 26 sources | 50 sources |
+|----------|------------------|-----------|-----------|
+| **Monolith script** (original, before Kasal) | ~4.6 hours | ~120 hours (2.5 weeks) | ~230 hours (5 weeks) |
+| **Tool 86 today** (automatic extraction, manual config) | ~3 hours | ~80 hours (2 weeks) | ~150 hours (3.5 weeks) |
+| **Tool 86 + Tool 89 + validation** (target) | ~1.8 hours | ~47 hours (1 week) | ~90 hours (2 weeks) |
+
+**Why Tool 86 today is already faster than the monolith:** Extraction is automatic (was manual), migration report shows what's missing (was trial-and-error), dependency graph resolves measure chains (was manual ordering).
+
+**Why per-source cost drops within a dashboard:** Sources share dimensions, relationships overlap, SWITCH patterns repeat. A 50-source dashboard has ~10 distinct patterns. After the first 10 sources are configured, the remaining 40 are mostly covered. The marginal cost curve:
+
+| Sources configured | Cumulative coverage | Marginal effort per new source |
+|-------------------|--------------------|-----------------------------|
+| 1-5 | ~40% | 3-4 hours (building core config) |
+| 6-15 | ~75% | 1-2 hours (adding variations) |
+| 16-50 | ~95% | 15-30 min (already covered by existing config) |
+
+## Implementation Details
+
+### Tool 86: UC Metric View Generator
+
+The core pipeline. Two input modes — both feed into the same deterministic engine:
+
+- **API mode**: Provide PBI credentials → tool extracts everything via PBI Admin API + Execute Queries API
+- **JSON mode**: Provide pre-extracted JSON files → tool runs the pipeline directly (testing/offline)
+
+Pipeline internals: MQuery Parser → DAX Translator (14 patterns + LLM fallback) → Kahn's Dependency Graph → Join Detector (pivot/union/embed modes) → YAML Emitter (5-pass MEASURE() cascade validation) → Migration Report.
+
+### Extraction Tools (Phase 1)
+
+| Tool | What it extracts | API |
+|------|-----------------|-----|
+| Tool 74 (MQuery Converter) | Table definitions + transpiled SQL | PBI Admin API |
+| Tool 73 (Measure Converter) | DAX measures with metadata | PBI Execute Queries API |
+| Tool 75 (Relationships Tool) | Table relationships + cardinality | PBI Execute Queries API |
+| Tool 86 (API mode) | Scan data for inline SQL enrichment | PBI Admin API |
+
+All tools support 3 auth methods: Service Principal, Service Account, User OAuth.
+
+### Tool 88: Metric View Deployer
+
+Deploys YAML to Databricks via UC Metric View REST API. Supports dry-run (validation without deployment) and auto-update on conflict (PUT on 409).
+
+## Demo Details: run_locally.py
+
+Demonstrates Phase 4 (generation) using pre-extracted JSONs from the SC Reporting project.
+
+**What it loads:**
+1. `measure_table_mapping.json` — 470 DAX measures with table allocations
+2. `mquery_transpilation.json` — 60 MQuery table definitions
+3. `pbi_relationships.json` — relationship graph for auto-join detection
+4. `scan_result_debug.json` — PBI Admin API scan for inline SQL enrichment
+5. `pipeline_config.json` — customer-specific join maps, SWITCH decompositions, etc.
+
+**What it produces:**
 - 26 YAML files (UC Metric View definitions)
 - 26 SQL files (deployment reference instructions)
 - 1 migration report (markdown with executive summary, per-table stats, join map)
 
-**Verification against reference:**
+**Verification:**
 ```bash
-# Compare against the verified SC Reporting project output
 diff ~/Downloads/ucmv_example_output/Fact_HR_A_uc_metric_view.yml \
      ~/workspace/demos/uc_metrics/sc_reporting_project/output/Fact_HR_A_uc_metric_view.yml
 ```
 
-Expected: 23/23 original views present, 0 missing, cosmetic diffs only (parenthesization in DIVIDE expressions, SQL formatting). 3 bonus views (C_Banner, C_Dim_calendar, FT_SKU_Performance) are artifact-only tables the original monolith filtered out.
+23/23 original views present, 0 missing, cosmetic diffs only.
+
+## Example Files
+
+| File | Size | Description |
+|------|------|-------------|
+| `run_locally.py` | — | Demo script — run pipeline against pre-extracted JSONs |
+| `crew_ucmv_generator.json` | 4K | Importable Kasal crew config |
+| `pipeline_config.json` | 43K | Customer config (SC Reporting — 26 sources) |
+| `measure_table_mapping.json` | 569K | 470 DAX measures |
+| `mquery_transpilation.json` | 202K | 60 MQuery tables |
+| `pbi_relationships.json` | 64K | PBI relationships |
+| `scan_result_debug.json` | — | PBI scan data |
 
 ## Pipeline Config Reference
 
-The `pipeline_config.json` drives all customer-specific behavior. Empty defaults work for basic models; populated values are needed for complex PBI patterns.
+The `pipeline_config.json` drives all customer-specific behavior. Empty defaults work for basic models; populated values are needed for complex PBI patterns. Today built manually; Tool 89 will auto-propose most of it.
 
 ### Core Config (structure)
 
@@ -280,26 +215,26 @@ The `pipeline_config.json` drives all customer-specific behavior. Empty defaults
 | `dimension_exclusions` | Per-table dimensions to hide from output |
 | `measure_metadata` | Per-table display names, synonyms, comments |
 | `comment_overrides` | Per-table metric view comment overrides |
-| `name_prefixes_to_strip` | Prefixes to strip for display names (e.g. `["bic_", "khr"]`) |
+| `name_prefixes_to_strip` | Prefixes to strip for display names |
 | `percentage_multiplier_patterns` | Regex for measures needing 100* multiplier |
 
 ### Behavior Config (tuning)
 
 | Key | Default | When Needed |
 |-----|---------|-------------|
-| `dim_alias_map` | `{}` | PBI dimension table → SQL join alias mapping |
-| `parameter_defaults` | `{}` | PBI parameter values (`CurrencyFilter`, `RE_Version_ranges`) |
+| `dim_alias_map` | `{}` | PBI dimension → SQL join alias mapping |
+| `parameter_defaults` | `{}` | PBI parameter values |
 | `period_dim_priority` | `["fiscper", "fiscal_year_period", "date_key"]` | Custom period dimension ordering |
 | `int_period_dims` | `["fiscper", "fiscal_year_period"]` | Period dimensions with integer type |
-| `budget_suffix` | `"_bp"` | Suffix identifying budget measure variants |
-| `cwc_filter_column` | `"bic_cwc_type"` | Physical column for CWC filter expansion |
-| `switch_join_alias` | `"dim_wkctr"` | Default join alias for SWITCH measures |
-| `switch_join_col` | `"bic_cwc_type"` | Default join column for SWITCH FILTER |
+| `budget_suffix` | `"_bp"` | Budget measure variant suffix |
+| `cwc_filter_column` | `"bic_cwc_type"` | CWC filter expansion column |
+| `switch_join_alias` | `"dim_wkctr"` | SWITCH decomposition join alias |
+| `switch_join_col` | `"bic_cwc_type"` | SWITCH decomposition join column |
 
 ### Starting From Scratch
 
-For a new customer with no config:
-1. Run Tool 86 in API mode with `config_json: {}` — this produces a baseline with auto-detected joins and base measures only
-2. Review the migration report — it shows what was translated and what was skipped
-3. Build `pipeline_config.json` incrementally: add `join_key_map` entries for skipped dimensions, `switch_decompositions` for SELECTEDVALUE+SWITCH measures, `measure_resolutions` for CALCULATE([ref]) patterns
-4. Re-run with the config — each iteration translates more measures
+1. Run Phase 1 (extract) to get JSON files
+2. Run Tool 86 with `config_json: {}` → baseline with base measures only
+3. Review migration report → see what's missing and why
+4. Add config entries incrementally → re-run → each iteration translates more
+5. Repeat until migration report is green
