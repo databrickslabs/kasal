@@ -526,12 +526,13 @@ class DaxTranslator:
             return ''
         filter_table = part.get('filter_table', '')
         alias, col_map = self._resolve_table_alias(filter_table, table_key)
-        # Check filter_sets for known patterns
+        # Check filter_sets for known patterns (only if dict-style config)
         for set_name, set_config in self.filter_sets.items():
-            pattern = set_config.get('pattern', '')
-            if pattern and re.search(pattern, condition, re.IGNORECASE):
-                sql_parts = set_config.get('sql_parts', [])
-                return ' AND '.join(f'{alias}.{p}' for p in sql_parts) if sql_parts else ''
+            if isinstance(set_config, dict):
+                pattern = set_config.get('pattern', '')
+                if pattern and re.search(pattern, condition, re.IGNORECASE):
+                    sql_parts = set_config.get('sql_parts', [])
+                    return ' AND '.join(f'{alias}.{p}' for p in sql_parts) if sql_parts else ''
         # Generic condition translation
         return self._dax_condition_to_sql(condition, table_key)
 
