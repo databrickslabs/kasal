@@ -25,6 +25,7 @@ from .relationships_loader import RelationshipsLoader
 from .utils import to_snake_case, spark_sql_compat, col_to_readable
 from .yaml_emitter import emit_yaml
 from .sql_emitter import emit_deploy_sql
+from .dependency_graph import build_dependency_graph, _find_measure_refs
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,7 @@ class MetricViewPipeline:
         scan_data: dict | None = None,
         unflatten_tables: bool = False,
         relationships_enrichment: dict | None = None,
+        llm_config: dict | None = None,
     ):
         self.mapping = mapping
         self.mquery_tables = mquery_tables
@@ -70,6 +72,7 @@ class MetricViewPipeline:
         self.inner_dim_joins = inner_dim_joins
         self.scan_data = scan_data or {}
         self.unflatten_tables = unflatten_tables
+        self.llm_config = llm_config or {}
         self.translator = DaxTranslator(config=self.config)
         self.join_detector = JoinDetector(mquery_tables, config=self.config)
 
@@ -428,10 +431,30 @@ class MetricViewPipeline:
         original_to_snake: dict[str, str] = {}
         for m in base_measures + translated:
             original_to_snake[m.original_name] = m.measure_name
+
+        # Build dependency graph for topological ordering of untranslatable measures
+        _all_untranslatable_names = {m.original_name for m in untranslatable}
+        dep_graph = build_dependency_graph(
+            [{'measure_name': m.original_name, 'dax_expression': m.dax_expression} for m in untranslatable]
+        )
+        # Mark cyclic measures as untranslatable with specific reason
+        for cycle_group in dep_graph.get('cycles', []):
+            cycle_names = set(cycle_group)
+            for m in untranslatable:
+                if m.original_name in cycle_names:
+                    m.skip_reason = f"Circular dependency: {' ↔ '.join(sorted(cycle_group)[:3])}"
+        # Build topo order lookup for processing priority
+        _topo_priority = {name: i for i, name in enumerate(dep_graph.get('topo_order', []))}
+
         for _pass2_iter in range(5):
             pass2_resolved: list[TranslationResult] = []
             still_untranslatable: list[TranslationResult] = []
-            for m in untranslatable:
+            # Process in topological order (leaves first, composed measures later)
+            sorted_untranslatable = sorted(
+                untranslatable,
+                key=lambda m: _topo_priority.get(m.original_name, 999)
+            )
+            for m in sorted_untranslatable:
                 dax_expr = m.dax_expression
                 # Pre-clean: strip comment lines and date var lines BEFORE ref extraction
                 dax_clean_lines = []
@@ -546,6 +569,53 @@ class MetricViewPipeline:
                 base_names.add(m.measure_name)
             translated.extend(pass2_resolved)
             untranslatable = still_untranslatable
+
+        # ── Step 5d: LLM fallback for remaining untranslatable measures (opt-in) ──
+        if self.llm_config and self.llm_config.get('use_llm_fallback'):
+            from .dax_llm_fallback import translate_batch_with_llm
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                        llm_results = pool.submit(
+                            asyncio.run,
+                            translate_batch_with_llm(
+                                measures=untranslatable,
+                                table_key=table_key,
+                                base_names=base_names,
+                                original_to_snake=original_to_snake,
+                                model=self.llm_config.get('llm_model', 'databricks-claude-sonnet-4'),
+                                workspace_url=self.llm_config.get('llm_workspace_url', ''),
+                                token=self.llm_config.get('llm_token', ''),
+                            )
+                        ).result()
+                else:
+                    llm_results = asyncio.run(
+                        translate_batch_with_llm(
+                            measures=untranslatable,
+                            table_key=table_key,
+                            base_names=base_names,
+                            original_to_snake=original_to_snake,
+                            model=self.llm_config.get('llm_model', 'databricks-claude-sonnet-4'),
+                            workspace_url=self.llm_config.get('llm_workspace_url', ''),
+                            token=self.llm_config.get('llm_token', ''),
+                        )
+                    )
+                llm_translated = []
+                for m in llm_results:
+                    if m.is_translatable:
+                        llm_translated.append(m)
+                        base_names.add(m.measure_name)
+                        original_to_snake[m.original_name] = m.measure_name
+                if llm_translated:
+                    translated.extend(llm_translated)
+                    untranslatable = [m for m in untranslatable if m.measure_name not in {t.measure_name for t in llm_translated}]
+                    logger.info(f"[DAX_LLM] {len(llm_translated)} measures translated via LLM fallback for {table_key}")
+            except Exception as e:
+                logger.warning(f"[DAX_LLM] LLM fallback failed for {table_key}: {e}")
+                # Fail-open: LLM errors never block measures
 
         # ── Step 5c: Multi-pass cascade — reclassify DIVIDE/SAMEPERIODLASTYEAR/No-match
         for _cascade_pass in range(5):
