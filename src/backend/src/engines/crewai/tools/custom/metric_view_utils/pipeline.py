@@ -24,7 +24,7 @@ from .scan_data_parser import ScanDataParser
 from .sql_post_processor import SqlPostProcessor
 from .m_transform_folder import MTransformFolder
 from .relationships_loader import RelationshipsLoader
-from .utils import to_snake_case, spark_sql_compat, col_to_readable
+from .utils import to_snake_case, spark_sql_compat, col_to_readable, run_async
 from .yaml_emitter import emit_yaml
 from .sql_emitter import emit_deploy_sql
 from .report_emitter import emit_migration_report
@@ -32,21 +32,6 @@ from .dependency_graph import build_dependency_graph, _find_measure_refs
 
 logger = logging.getLogger(__name__)
 
-
-def _run_async(coro):
-    """Safely run async code from sync context."""
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-
-    if loop and loop.is_running():
-        # Inside a running event loop — must use a separate thread
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(asyncio.run, coro)
-            return future.result(timeout=300)
-    else:
-        return asyncio.run(coro)
 
 
 # Keywords that classify a measure as a PBI UI artifact (not a real business measure)
@@ -603,7 +588,7 @@ class MetricViewPipeline:
         if self.llm_config and self.llm_config.get('use_llm_fallback'):
             from .dax_llm_fallback import translate_batch_with_llm
             try:
-                llm_results = _run_async(
+                llm_results = run_async(
                     translate_batch_with_llm(
                         measures=untranslatable,
                         table_key=table_key,

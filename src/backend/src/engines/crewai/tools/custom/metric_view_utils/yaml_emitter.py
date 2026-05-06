@@ -29,13 +29,15 @@ def _check_dangerous_sql(expr: str) -> bool:
         return True
     # Check for SQL injection patterns
     _DANGEROUS_PATTERNS = re.compile(
-        r'\b(DROP\s+TABLE|DROP\s+VIEW|DROP\s+SCHEMA|DROP\s+DATABASE|'
+        r'(?:'
+        r'\b(?:DROP\s+TABLE|DROP\s+VIEW|DROP\s+SCHEMA|DROP\s+DATABASE|'
         r'DELETE\s+FROM|TRUNCATE\s+TABLE|ALTER\s+TABLE|'
         r'INSERT\s+INTO|UPDATE\s+\w+\s+SET|'
-        r'GRANT\s+|REVOKE\s+|CREATE\s+USER|'
-        r'EXEC\s*\(|EXECUTE\s*\(|xp_cmdshell|'
-        r';\s*DROP|;\s*DELETE|;\s*INSERT|;\s*UPDATE|'
-        r'UNION\s+SELECT\s+.*\bFROM\s+information_schema)\b',
+        r'GRANT\s+|REVOKE\s+|CREATE\s+USER|xp_cmdshell)\b'
+        r'|\bEXEC\s*\(|\bEXECUTE\s*\('
+        r'|;\s*(?:DROP|DELETE|INSERT|UPDATE)\b'
+        r'|\bUNION\s+SELECT\s+.*\bFROM\s+information_schema\b'
+        r')',
         re.IGNORECASE,
     )
     return not _DANGEROUS_PATTERNS.search(expr)
