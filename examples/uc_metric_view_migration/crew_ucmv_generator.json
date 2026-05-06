@@ -1,6 +1,6 @@
 {
-  "id": "ucmv-migration-example-001",
-  "name": "UC Metric View Migration",
+  "id": "ucmv-migration-001",
+  "name": "UC Metric View Generator (SC Reporting)",
   "agent_ids": [
     "ucmv-agent-001"
   ],
@@ -16,7 +16,7 @@
         "y": 68
       },
       "data": {
-        "label": "Generate UC Metric Views from PBI Data",
+        "label": "Generate UC Metric Views",
         "role": null,
         "goal": null,
         "backstory": null,
@@ -28,7 +28,7 @@
             "catalog": "david_test_metrics",
             "schema_name": "test_schema",
             "inner_dim_joins": false,
-            "unflatten_tables": false
+            "unflatten_tables": true
           }
         },
         "agentId": null,
@@ -52,8 +52,23 @@
         "use_system_prompt": null,
         "respect_context_window": null,
         "type": "task",
-        "description": "Generate UC Metric View YAML definitions and deploy SQL for all fact tables.\n\nYou have been provided with:\n1. measures_json: 470 DAX measures with table allocations\n2. mquery_json: 60 MQuery table transpilations\n3. relationships_json: PBI relationships for auto-join detection\n4. config_json: Customer-specific pipeline config (join maps, filter sets, SWITCH decompositions)\n\nCall the UC Metric View Generator tool with these inputs.\nSet catalog='david_test_metrics' and schema_name='test_schema'.\n\nReturn the full output including:\n- Number of metric views generated\n- Per-table translation statistics\n- The YAML content for each metric view",
-        "expected_output": "JSON output containing:\n- yaml: dict of table_key → YAML string per metric view\n- sql: dict of table_key → deploy SQL per metric view\n- stats: per-table translation statistics (translated, untranslatable, base, dax, switch)\n\nExpected: ~20 metric views, ~349/422 measures translated (82%)"
+        "description": "Generate UC Metric View YAML definitions and deploy SQL for all fact tables.\n\nYou have the following data available in execution inputs:\n- measures_json: DAX measures with table allocations (from Measure Conversion Pipeline)\n- mquery_json: MQuery table transpilations (from MQuery Conversion Pipeline)\n- relationships_json: PBI relationships for join detection (from Relationships Tool)\n- scan_data_json: PBI scan data for inline SQL enrichment\n- config_json: Customer-specific pipeline config (join maps, filter sets, SWITCH decompositions)\n\nCall the UC Metric View Generator tool with ALL of these inputs.\nSet catalog='david_test_metrics' and schema_name='test_schema'.\nSet unflatten_tables=true.\n\nReturn the full output including number of metric views generated and per-table statistics.",
+        "expected_output": "JSON containing:\n- yaml: dict of table_key → YAML string per metric view\n- sql: dict of table_key → deploy SQL per metric view\n- stats: per-table translation statistics\n\nExpected: ~23 metric views from the SC Reporting dataset.",
+        "icon": null,
+        "advanced_config": null,
+        "config": {
+          "cache_response": false,
+          "cache_ttl": 3600,
+          "retry_on_fail": true,
+          "max_retries": 3,
+          "timeout": null,
+          "priority": 1,
+          "condition": null,
+          "markdown_output": false,
+          "output_json": true,
+          "guardrails": [],
+          "human_input": false
+        }
       }
     },
     {
@@ -67,7 +82,7 @@
         "label": "UCMV Migration Agent",
         "role": "UC Metric View Generator",
         "goal": "Generate UC Metric View YAML and deploy SQL from Power BI measures and MQuery transpilation data",
-        "backstory": "You are a data engineering agent specializing in Power BI to Databricks migration. Your job is to convert Power BI DAX measures into Databricks Unity Catalog Metric View definitions using the UC Metric View Generator tool.",
+        "backstory": "You are a data engineering agent specializing in Power BI to Databricks migration. Your job is to convert Power BI DAX measures into Databricks Unity Catalog Metric View definitions using the UC Metric View Generator tool. Call the tool immediately with the provided execution inputs — do not ask for additional information.",
         "tools": [
           "86"
         ],
@@ -86,10 +101,11 @@
       "type": "default"
     }
   ],
-  "execution_inputs": {
-    "measures_json": "{{LOAD_FROM_FILE:examples/uc_metric_view_migration/measure_table_mapping.json}}",
-    "mquery_json": "{{LOAD_FROM_FILE:examples/uc_metric_view_migration/mquery_transpilation.json}}",
-    "relationships_json": "{{LOAD_FROM_FILE:examples/uc_metric_view_migration/pbi_relationships.json}}",
-    "config_json": "{{LOAD_FROM_FILE:examples/uc_metric_view_migration/pipeline_config.json}}"
+  "inputs": {
+    "measures_json": "{measures_json}",
+    "mquery_json": "{mquery_json}",
+    "relationships_json": "{relationships_json}",
+    "scan_data_json": "{scan_data_json}",
+    "config_json": "{config_json}"
   }
 }

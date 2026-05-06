@@ -520,33 +520,187 @@ class DaxTranslator:
         return alias, col_map
 
     def _build_filter_clause(self, part: dict, table_key: str, dax: str) -> str:
-        """Convert DAX FILTER condition to SQL WHERE clause."""
+        """Build SQL FILTER clause from a parsed SUMX part.
+
+        Handles variable references, CWC_Filter=1 patterns, cross-table facts,
+        qualified dim refs, and generic conditions.
+        """
         condition = part.get('condition', '')
+        filter_table = part.get('filter_table', '')
         if not condition:
             return ''
-        filter_table = part.get('filter_table', '')
-        alias, col_map = self._resolve_table_alias(filter_table, table_key)
-        # Check filter_sets for known patterns (only if dict-style config)
-        for set_name, set_config in self.filter_sets.items():
-            if isinstance(set_config, dict):
-                pattern = set_config.get('pattern', '')
-                if pattern and re.search(pattern, condition, re.IGNORECASE):
-                    sql_parts = set_config.get('sql_parts', [])
-                    return ' AND '.join(f'{alias}.{p}' for p in sql_parts) if sql_parts else ''
-        # Generic condition translation
+
+        # Check for variable reference: Table[col] in varName
+        var_ref_match = re.search(r'(\w+)\[(\w+)\]\s+in\s+(\w+)\s*$', condition, re.IGNORECASE)
+        if var_ref_match:
+            dim_table = var_ref_match.group(1)
+            dim_col = var_ref_match.group(2)
+            var_name = var_ref_match.group(3)
+            values = self._resolve_var_filter_set(var_name, dax)
+            if values:
+                alias, phys_col = self._resolve_filter_alias(dim_table, dim_col)
+                in_list = ', '.join(f"'{v}'" for v in values)
+                return f"{alias}.{phys_col} IN ({in_list})"
+
+        # Check for CWC_Filter=1 pattern
+        cwc_match = re.search(r'(\w+)\[CWC_Filter\]\s*=\s*1', condition, re.IGNORECASE)
+        if cwc_match:
+            dim_table = cwc_match.group(1)
+            alias = self._dim_table_to_alias(dim_table)
+            cwc_values = self.filter_sets.get('CWC_FILTER', [])
+            if cwc_values:
+                in_list = ', '.join(f"'{v}'" for v in cwc_values)
+                return f"{alias}.bic_cwc_type IN ({in_list})"
+
+        # Cross-table fact filter
+        if filter_table and filter_table in self._fact_join_map_cfg:
+            return self._dax_condition_to_sql_cross_table(condition, filter_table)
+
+        # Qualified dim reference (different table than the fact)
+        if filter_table and filter_table.lower() != table_key.lower():
+            return self._dax_condition_to_sql_qualified(condition, filter_table, table_key)
+
         return self._dax_condition_to_sql(condition, table_key)
 
+    def _resolve_var_filter_set(self, var_name: str, dax: str) -> list[str] | None:
+        """Resolve a variable reference to a list of filter values."""
+        m = re.search(
+            rf'var\s+{re.escape(var_name)}\s*=\s*\{{([^}}]+)\}}',
+            dax, re.IGNORECASE,
+        )
+        if m:
+            vals = re.findall(r'"([^"]*)"', m.group(1))
+            if vals:
+                return vals
+        # Check named filter sets
+        for set_name, values in self.filter_sets.items():
+            if isinstance(values, list) and var_name.lower() == set_name.lower():
+                return values
+        return None
+
+    def _dim_table_to_alias(self, dim_table: str) -> str:
+        """Map a PBI dimension table name to its SQL join alias."""
+        name_lower = dim_table.lower()
+        if 'wkctr' in name_lower or 'workcenter' in name_lower:
+            return 'dim_wkctr'
+        return dim_table.lower()
+
+    def _resolve_filter_alias(self, dax_table: str, dax_col: str) -> tuple[str, str]:
+        """Resolve a filter column reference that may target a cross-table fact.
+
+        Returns (alias, physical_col).
+        """
+        if dax_table in self._fact_join_map_cfg:
+            for fj in self._fact_joins:
+                if fj.get('_pbi_name') == dax_table:
+                    cfg = fj['_fact_join_config']
+                    fc = cfg.get('filter_columns', {})
+                    if dax_col in fc:
+                        return fj['name'], fc[dax_col]
+        return self._dim_table_to_alias(dax_table), dax_col
+
     def _dax_condition_to_sql(self, condition: str, table_key: str) -> str:
-        """Translate a DAX filter condition to SQL."""
-        if not condition:
+        """Translate a DAX filter condition to SQL with proper formatting."""
+        if not condition or not condition.strip():
             return ''
-        # table[col] = "val" → source.col = 'val'
-        condition = re.sub(r'(\w+)\[(\w+)\]', r'source.\2', condition)
-        # Double quotes → single quotes for values
-        condition = re.sub(r'"([^"]*)"', r"'\1'", condition)
-        # && → AND, || → OR
-        condition = condition.replace('&&', 'AND').replace('||', 'OR')
-        return condition
+        condition = condition.strip()
+        parts = self._split_conditions(condition)
+        sql_parts = []
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            sql_part = self._translate_single_condition(part, table_key)
+            if sql_part:
+                sql_parts.append(sql_part)
+        return ' AND '.join(sql_parts) if sql_parts else ''
+
+    def _dax_condition_to_sql_cross_table(self, condition: str, filter_table: str) -> str:
+        """Translate DAX conditions that reference a cross-table fact's columns."""
+        parts = self._split_conditions(condition)
+        sql_parts = []
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            m = re.match(r'(\w+)\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*"([^"]*)"', part)
+            if m:
+                alias, phys_col = self._resolve_filter_alias(m.group(1), m.group(2))
+                sql_parts.append(f"{alias}.{phys_col} {m.group(3)} '{m.group(4)}'")
+                continue
+            m = re.match(r'(\w+)\[(\w+)\]\s+in\s+\{([^}]+)\}', part, re.IGNORECASE)
+            if m:
+                alias, phys_col = self._resolve_filter_alias(m.group(1), m.group(2))
+                vals = re.findall(r'"([^"]*)"', m.group(3))
+                in_list = ', '.join(f"'{v}'" for v in vals)
+                sql_parts.append(f"{alias}.{phys_col} IN ({in_list})")
+                continue
+            m = re.match(r'(\w+)\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*(\d+(?:\.\d+)?)', part)
+            if m:
+                alias, phys_col = self._resolve_filter_alias(m.group(1), m.group(2))
+                sql_parts.append(f"{alias}.{phys_col} {m.group(3)} {m.group(4)}")
+                continue
+        return ' AND '.join(sql_parts) if sql_parts else ''
+
+    def _dax_condition_to_sql_qualified(self, condition: str, filter_table: str, table_key: str) -> str:
+        """Translate DAX conditions with qualified dim table references."""
+        parts = self._split_conditions(condition)
+        sql_parts = []
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            m = re.match(r'(\w+)\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*"([^"]*)"', part)
+            if m:
+                alias = self._dim_table_to_alias(m.group(1))
+                sql_parts.append(f"{alias}.{m.group(2)} {m.group(3)} '{m.group(4)}'")
+                continue
+            m = re.match(r'(\w+)\[(\w+)\]\s+in\s+\{([^}]+)\}', part, re.IGNORECASE)
+            if m:
+                alias = self._dim_table_to_alias(m.group(1))
+                vals = re.findall(r'"([^"]*)"', m.group(3))
+                in_list = ', '.join(f"'{v}'" for v in vals)
+                sql_parts.append(f"{alias}.{m.group(2)} IN ({in_list})")
+                continue
+            m = re.match(r'(\w+)\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*(\d+(?:\.\d+)?)', part)
+            if m:
+                alias = self._dim_table_to_alias(m.group(1))
+                sql_parts.append(f"{alias}.{m.group(2)} {m.group(3)} {m.group(4)}")
+                continue
+        return ' AND '.join(sql_parts) if sql_parts else ''
+
+    @staticmethod
+    def _split_conditions(condition: str) -> list[str]:
+        """Split DAX condition on && (AND)."""
+        return re.split(r'\s*&&\s*', condition)
+
+    def _translate_single_condition(self, cond: str, table_key: str) -> str | None:
+        """Translate a single DAX condition to SQL."""
+        # Table[col] = "val"
+        m = re.match(r'(\w+)\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*"([^"]*)"', cond)
+        if m:
+            col = self._resolve_column(m.group(1), m.group(2), table_key)
+            return f"source.{col} {m.group(3)} '{m.group(4)}'"
+        # Table[col] in {"a","b","c"}
+        m = re.match(r'(\w+)\[(\w+)\]\s+in\s+\{([^}]+)\}', cond, re.IGNORECASE)
+        if m:
+            col = self._resolve_column(m.group(1), m.group(2), table_key)
+            vals = re.findall(r'"([^"]*)"', m.group(3))
+            in_list = ', '.join(f"'{v}'" for v in vals)
+            return f"source.{col} IN ({in_list})"
+        # Table[col] = 123
+        m = re.match(r'(\w+)\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*(\d+(?:\.\d+)?)', cond)
+        if m:
+            col = self._resolve_column(m.group(1), m.group(2), table_key)
+            return f"source.{col} {m.group(3)} {m.group(4)}"
+        return None
+
+    def _resolve_column(self, pbi_table: str, pbi_col: str, table_key: str) -> str:
+        """Resolve a PBI column name to physical column (with overrides)."""
+        override_key = f'{pbi_table}.{pbi_col}'
+        if override_key in self.column_overrides:
+            return self.column_overrides[override_key]
+        return pbi_col
 
     def _extend_with_implicit_filters(self, filter_parts: list[str], alias: str):
         """Add MQuery implicit filters for a fact join alias."""
