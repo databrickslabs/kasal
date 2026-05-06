@@ -1,6 +1,4 @@
 """UC Metric View Generator Tool for CrewAI — full pipeline."""
-import asyncio
-import concurrent.futures
 import json
 import logging
 import os
@@ -14,20 +12,7 @@ from pydantic import BaseModel, Field, PrivateAttr
 logger = logging.getLogger(__name__)
 
 
-def _run_async(coro):
-    """Safely run async code from sync context."""
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-
-    if loop and loop.is_running():
-        # Inside a running event loop — must use a separate thread
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(asyncio.run, coro)
-            return future.result(timeout=300)
-    else:
-        return asyncio.run(coro)
+from src.engines.crewai.tools.custom.metric_view_utils.utils import run_async as _run_async
 
 
 class UCMetricViewGeneratorSchema(BaseModel):

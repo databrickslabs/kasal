@@ -1,8 +1,29 @@
 """Shared utility functions for metric-view generation."""
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import json
 import re
+
+
+def run_async(coro):
+    """Safely run async code from sync context, handling existing event loops.
+
+    Used by pipeline.py and uc_metric_view_generator_tool.py to bridge
+    async PBI API calls from sync CrewAI tool execution.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(asyncio.run, coro)
+            return future.result(timeout=300)
+    else:
+        return asyncio.run(coro)
 
 
 def to_snake_case(name: str) -> str:

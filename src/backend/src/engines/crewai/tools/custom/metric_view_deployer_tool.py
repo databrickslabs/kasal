@@ -165,7 +165,9 @@ class MetricViewDeployerTool(BaseTool):
 
                     # Validate metric view name (prevent injection via PBI table names)
                     safe_table_key = _re.sub(r'[^a-zA-Z0-9_]', '_', table_key.lower())
-                    view_name = f"{catalog}.{schema}.{safe_table_key}_uc_metric_view"
+                    safe_catalog = _re.sub(r'[^a-zA-Z0-9_]', '_', catalog)
+                    safe_schema = _re.sub(r'[^a-zA-Z0-9_]', '_', schema)
+                    view_name = f"{safe_catalog}.{safe_schema}.{safe_table_key}_uc_metric_view"
 
                     payload = {
                         "name": view_name,

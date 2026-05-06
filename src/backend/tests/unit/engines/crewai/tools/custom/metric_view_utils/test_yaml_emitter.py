@@ -322,21 +322,18 @@ class TestCheckDangerousSql:
     def test_exec_parens_limitation(self):
         """EXEC(...) is not caught due to trailing \\b in regex after '(' — known limitation.
 
-        The regex pattern ``EXEC\\s*\\(`` is inside a group ending with ``\\b``.
-        Since ``(`` is not a word character, the word boundary never fires after it.
-        This is documented as a design trade-off to avoid false positives on
-        function names like ``EXECUTE_PLAN``.
+        EXEC without parens (e.g. EXEC sp_executesql) is not caught
+        because it could be a legitimate identifier prefix.
         """
         assert _check_dangerous_sql("EXEC sp_executesql") is True
 
-    def test_exec_parens_not_caught(self):
-        """EXEC('cmd') is not caught by the current regex (trailing \\b after paren)."""
-        # This is a known limitation of the regex; kept as documentation
-        assert _check_dangerous_sql("EXEC('cmd')") is True
+    def test_exec_parens_caught(self):
+        """EXEC('cmd') is caught — dangerous stored procedure execution."""
+        assert _check_dangerous_sql("EXEC('cmd')") is False
 
-    def test_execute_parens_not_caught(self):
-        """EXECUTE('...') is not caught for the same trailing \\b reason."""
-        assert _check_dangerous_sql("EXECUTE('SELECT 1')") is True
+    def test_execute_parens_caught(self):
+        """EXECUTE('...') is caught — dangerous dynamic SQL execution."""
+        assert _check_dangerous_sql("EXECUTE('SELECT 1')") is False
 
     def test_dangerous_xp_cmdshell(self):
         assert _check_dangerous_sql("xp_cmdshell 'dir'") is False
