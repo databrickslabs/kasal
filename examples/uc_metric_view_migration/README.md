@@ -132,12 +132,75 @@ Workarounds (require human decision):
 
 Both limitations are flagged in the migration report when detected. Neither produces silently wrong output — the measures are marked untranslatable with specific reasons.
 
+**Calculation Groups (TIME_INTELLIGENCE)**
+
+PBI Calculation Groups apply transformations (YTD, PY, QTD) to ANY measure dynamically via `SELECTEDMEASURE()`. Today:
+- Tool 77 extracts calculation groups from TMDL
+- They don't flow into Tool 86 — not part of the pipeline
+
+The problem: a "Time Intelligence" calculation group that applies YTD/PY/QoQ to 50 base measures creates 150 implicit measures. Our pipeline doesn't see them because they're not DAX measures — they're dynamic modifiers. Fix: a generator that expands calculation group × base measure combinations into explicit UCMV measures. Planned for Tool 89.
+
+**Row-Level Security (RLS)**
+
+PBI models often have RLS rules (`[Region] = USERPRINCIPALNAME()`). Today: completely ignored. UC Metric Views don't have RLS — the equivalent is Databricks row filters on source tables. **Silent gap if the customer assumes security carries over.** The migration report should flag RLS-enabled tables.
+
+**Aggregation tables (dual storage mode)** ⚠️ Can cause silently wrong output
+
+PBI composite models have Import-mode aggregation tables over DirectQuery detail tables. Our MQuery parser sees both but doesn't understand the agg→detail mapping. If the pipeline picks the aggregation table as the source, the UCMV would reference pre-aggregated data at the wrong grain — producing correct-looking but wrong numbers when sliced by a dimension not in the agg table. Fix: detect agg tables via the Admin API scan (they have `StorageMode: Import` alongside `StorageMode: DirectQuery` detail tables) and always prefer the detail table.
+
+**Field Parameters**
+
+PBI Field Parameters let users dynamically switch which measure or column is displayed (`NAMEOF()` DAX function). Today:
+- Tool 77 extracts them from TMDL
+- No UC equivalent — UCMVs are static definitions
+
+These need to become either separate metric views per parameter value, or a Genie space configuration that presents the options. Flagged in migration report as "requires manual decomposition."
+
+**Conditional formatting with business logic** ⚠️ Can cause silently wrong output
+
+We quick-reject all Color/FORMAT measures — correct for pure display formatting. But some conditional formatting measures contain actual business logic:
+```dax
+Status = IF([Margin] < 0.1, "At Risk", IF([Margin] < 0.2, "Warning", "Healthy"))
+```
+Our binary reject discards this as a "Color measure" even though the threshold logic (0.1, 0.2) is business-meaningful. Fix: the quick-reject should check if the IF/SWITCH body contains aggregation references — if yes, translate the expression; if no (pure string output), reject.
+
+**Incremental refresh policies**
+
+PBI tables with incremental refresh have date-based partition policies (e.g., "keep 3 years, refresh last 30 days"). Our pipeline generates UCMVs that query the full source table with no date filter. For large tables (billions of rows) this could be a performance problem. Fix: detect incremental refresh policies from the Admin API scan and add a `filter:` to the UCMV matching the refresh window.
+
+**Perspectives**
+
+PBI perspectives control which tables/measures are visible to different user groups (e.g., "Sales" perspective shows only sales-related tables). No UC equivalent. Our pipeline migrates everything — the perspective-based access control is lost. Fix: generate separate UCMV sets per perspective, or document in migration report for manual Databricks permission setup.
+
+**Default summarization** ⚠️ Can cause silently wrong output
+
+PBI columns have default summarization settings (Sum, Count, Average, None, Min, Max). A column marked "Don't Summarize" in PBI (e.g., an ID column) would still get `SUM(source.id)` in the UCMV if it appears in the MQuery aggregate columns. Fix: extract summarization metadata from the Admin API scan and skip columns with `SummarizeBy: None`.
+
+### Risk summary
+
+| Limitation | Silent wrong output? | Detection | Fix path |
+|-----------|---------------------|-----------|----------|
+| USERELATIONSHIP | No (flagged as untranslatable) | Inactive relationships in Tool 75 output | Auto-detect in Tool 89 |
+| M:N relationships | No (skipped with reason) | Cardinality in Tool 75 output | Manual bridge table |
+| Calculation Groups | No (not migrated) | Tool 77 extraction | Expand in Tool 89 |
+| RLS | **Yes — security gap** | Admin API scan | Flag in migration report |
+| Aggregation tables | **Yes — wrong grain** | StorageMode in Admin API | Prefer detail tables |
+| Field Parameters | No (not migrated) | Tool 77 extraction | Manual decomposition |
+| Conditional formatting | **Yes — business logic lost** | IF/SWITCH with aggregation refs | Smarter quick-reject |
+| Incremental refresh | No (perf issue, not wrong data) | Admin API scan | Add filter to UCMV |
+| Perspectives | No (over-migration, not wrong) | Admin API scan | Per-perspective UCMV sets |
+| Default summarization | **Yes — wrong aggregation** | Admin API scan | Skip SummarizeBy:None |
+
+**4 of 10 limitations can cause silently wrong output.** These should be priority fixes — the other 6 are either flagged or cosmetic.
+
 ### What will always need human judgment
 
 - Semantic correctness (does `revenue` mean gross or net?)
 - Grain decisions for cross-table joins (pivot vs union vs embed)
 - USERELATIONSHIP join alias decisions (which alternative join to use)
 - M:N relationship resolution strategy (bridge table vs pre-joined SQL)
+- Calculation group × measure expansion decisions
+- RLS → Databricks row filter mapping
 - Complex DAX patterns the LLM can't translate deterministically
 - Source SQL quality (suboptimal JOINs, redundant WHERE clauses)
 - Business logic encoded in SWITCH branches that only domain experts understand
