@@ -109,13 +109,59 @@ Task 4: "Generate UC Metric Views from the extracted data"
   → Agent passes Task 1-3 outputs automatically
 ```
 
-### Future: Option D (Planned)
+### Future: Option D — Config Generator + Review Loop (Next Iteration)
 
-An extraction agent that auto-exports metadata to a staging area for review:
+The biggest bottleneck today isn't the pipeline — it's authoring `pipeline_config.json`. A 400-measure model takes 30 seconds to translate but 3-4 hours to configure. The next iteration flips this with **Tool 89: Config Generator** that auto-proposes the config from extraction output.
+
+**What can be auto-extracted deterministically:**
+
+| Config Key | Source | How |
+|-----------|--------|-----|
+| `join_key_map` | Relationships API (Tool 75) | Convert `from_table, from_column, to_table, to_column, cardinality` → join_key_map format. Already 80% done in `RelationshipsLoader`. |
+| `fact_join_map` | Measure Allocator (Tool 87) | Cross-table references (measures referencing multiple facts) = fact_join_map candidates. |
+| `switch_decompositions` | DAX quick-reject output | SELECTEDVALUE+SWITCH measures are already identified and skipped. Parse the SWITCH branches from the DAX to propose decompositions. Deterministic for 80% of patterns. |
+| `enrichment_joins` | Relationships API | Already auto-generated. Done. |
+| `measure_resolutions` | Pipeline untranslatable list | Measures failing with "Cannot resolve [MeasureName]" — look up the referenced measure's DAX, propose resolution. |
+| `column_overrides` | MQuery transpilation vs DAX | Diff physical column names (MQuery) against PBI column names (DAX) = overrides. |
+| `mapping_only_tables` | Admin API scan | Tables with measures in PBI but no MQuery SQL entry — auto-detect from scan data. |
+
+**Proposed workflow:**
+
 ```
-Agent extracts → saves to workspace files → user reviews in UI → triggers migration
+Phase 1: Extract (automatic)
+  Tool 74 → mquery_json
+  Tool 73 → measures_json
+  Tool 75 → relationships_json
+
+Phase 2: Generate config proposal (automatic — Tool 89)
+  Tool 89 takes extraction output →
+    proposes pipeline_config.json with:
+    - join_key_map (from relationships)
+    - switch_decompositions (from SWITCH DAX patterns)
+    - measure_resolutions (from untranslatable refs)
+    - column_overrides (from name mismatches)
+    - enrichment_joins (from relationships)
+
+Phase 3: Human review (30 min instead of 3-4 hours)
+  Customer reviews proposed config in UI →
+    approves/rejects/edits each section →
+    saves final pipeline_config.json
+
+Phase 4: Generate metric views (automatic)
+  Tool 86 with approved config → YAML + SQL + report
+
+Phase 5: Validate (automatic — colleague's tool)
+  Deploy dry-run → compare query results vs PBI →
+    flag semantic mismatches
 ```
-This separates the extraction from the migration, letting customers inspect and edit the metadata (especially `pipeline_config.json`) before committing to a migration run.
+
+This reduces the human step from "build config from scratch" (3-4 hours) to "review and approve proposals" (30 minutes). Combined with the validation step in Phase 5, the end-to-end automation rate goes from 70-80% to effectively 90%+ with human oversight at the right points.
+
+**What will always need human judgment:**
+- Semantic correctness (does `revenue` mean gross or net?)
+- Complex DAX patterns the LLM can't translate deterministically
+- Source SQL quality (suboptimal JOINs, redundant WHERE clauses)
+- Business logic encoded in SWITCH branches that only domain experts understand
 
 ## Example Files
 
