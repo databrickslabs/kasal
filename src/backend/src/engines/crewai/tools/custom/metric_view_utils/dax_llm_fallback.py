@@ -18,9 +18,7 @@ from .utils import to_snake_case
 
 logger = logging.getLogger(__name__)
 
-# SHA-256 cache for identical DAX expressions (avoid LLM retries)
-_CACHE: OrderedDict[str, dict] = OrderedDict()
-_CACHE_MAX = 128
+_RUN_CACHE_MAX = 128
 
 _SYSTEM_PROMPT = """You are an expert DAX-to-Spark-SQL translator for Databricks Unity Catalog Metric Views.
 
@@ -167,17 +165,24 @@ async def translate_with_llm(
     model: str = 'databricks-claude-sonnet-4',
     workspace_url: str = '',
     token: str = '',
+    cache: OrderedDict | None = None,
 ) -> TranslationResult:
     """Attempt LLM translation of a single untranslatable measure.
 
     Returns the measure with updated sql_expr/is_translatable if successful,
     or unchanged if LLM fails (fail-open).
+
+    Args:
+        cache: Run-scoped cache to prevent cross-tenant leakage.
+               Falls back to a local (non-shared) OrderedDict if not provided.
     """
+    _cache = cache if cache is not None else OrderedDict()
+
     # Check cache
     cache_key = _content_hash(measure.dax_expression)
-    if cache_key in _CACHE:
-        _CACHE.move_to_end(cache_key)
-        cached = _CACHE[cache_key]
+    if cache_key in _cache:
+        _cache.move_to_end(cache_key)
+        cached = _cache[cache_key]
         if cached.get('success'):
             measure.sql_expr = cached['sql_expr']
             measure.is_translatable = True
@@ -204,10 +209,10 @@ async def translate_with_llm(
     # Parse response
     parsed = _parse_response(response['content'])
 
-    # Cache result
-    if len(_CACHE) >= _CACHE_MAX:
-        _CACHE.popitem(last=False)
-    _CACHE[cache_key] = parsed
+    # Cache result (run-scoped)
+    if len(_cache) >= _RUN_CACHE_MAX:
+        _cache.popitem(last=False)
+    _cache[cache_key] = parsed
 
     if parsed.get('success') and parsed.get('sql_expr'):
         sql_expr = parsed['sql_expr']
@@ -273,11 +278,15 @@ async def translate_batch_with_llm(
 
     logger.info(f"[DAX_LLM] Attempting LLM fallback for {len(candidates)} measures in {table_key}")
 
+    # Run-scoped cache — prevents cross-tenant leakage between pipeline runs
+    run_cache: OrderedDict[str, dict] = OrderedDict()
+
     translated_count = 0
     for m in candidates:
         await translate_with_llm(
             m, table_key, base_names, original_to_snake,
             model=model, workspace_url=workspace_url, token=token,
+            cache=run_cache,
         )
         if m.is_translatable:
             translated_count += 1

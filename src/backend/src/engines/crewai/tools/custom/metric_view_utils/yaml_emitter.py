@@ -6,12 +6,64 @@ _yaml_needs_quoting, _clean_filter_prefixes).
 """
 from __future__ import annotations
 
+import copy
+import logging
 import re
 from typing import Any
 
 from .data_classes import MetricViewSpec, TranslationResult
 from .metadata_generator import MetadataGenerator
 from .utils import col_to_readable, spark_sql_compat
+
+logger = logging.getLogger(__name__)
+
+
+# ─── SQL injection prevention ────────────────────────────────────────────────
+
+def _check_dangerous_sql(expr: str) -> bool:
+    """Check if a SQL expression contains dangerous patterns.
+
+    Returns True if the expression is SAFE, False if dangerous.
+    """
+    if not expr:
+        return True
+    # Check for SQL injection patterns
+    _DANGEROUS_PATTERNS = re.compile(
+        r'\b(DROP\s+TABLE|DROP\s+VIEW|DROP\s+SCHEMA|DROP\s+DATABASE|'
+        r'DELETE\s+FROM|TRUNCATE\s+TABLE|ALTER\s+TABLE|'
+        r'INSERT\s+INTO|UPDATE\s+\w+\s+SET|'
+        r'GRANT\s+|REVOKE\s+|CREATE\s+USER|'
+        r'EXEC\s*\(|EXECUTE\s*\(|xp_cmdshell|'
+        r';\s*DROP|;\s*DELETE|;\s*INSERT|;\s*UPDATE|'
+        r'UNION\s+SELECT\s+.*\bFROM\s+information_schema)\b',
+        re.IGNORECASE,
+    )
+    return not _DANGEROUS_PATTERNS.search(expr)
+
+
+# ─── Metadata limits check ───────────────────────────────────────────────────
+
+def _check_metadata_limits(spec: MetricViewSpec) -> list[str]:
+    """Check UC Metric View metadata limits. Returns list of warnings."""
+    warnings: list[str] = []
+    MAX_MEASURES = 500
+    MAX_DIMENSIONS = 200
+    MAX_JOINS = 50
+    MAX_COMMENT_LENGTH = 4000
+    MAX_EXPR_LENGTH = 4000
+
+    if len(spec.measures) > MAX_MEASURES:
+        warnings.append(f"Too many measures: {len(spec.measures)} > {MAX_MEASURES}")
+    if len(spec.dimensions) > MAX_DIMENSIONS:
+        warnings.append(f"Too many dimensions: {len(spec.dimensions)} > {MAX_DIMENSIONS}")
+    if len(spec.joins) > MAX_JOINS:
+        warnings.append(f"Too many joins: {len(spec.joins)} > {MAX_JOINS}")
+    if spec.comment and len(spec.comment) > MAX_COMMENT_LENGTH:
+        warnings.append(f"Comment too long: {len(spec.comment)} > {MAX_COMMENT_LENGTH}")
+    for m in spec.measures:
+        if m.sql_expr and len(m.sql_expr) > MAX_EXPR_LENGTH:
+            warnings.append(f"Expression too long for {m.measure_name}: {len(m.sql_expr)} > {MAX_EXPR_LENGTH}")
+    return warnings
 
 
 # ─── YAML formatting helpers ─────────────────────────────────────────────────
@@ -123,8 +175,18 @@ def emit_yaml(spec: MetricViewSpec,
               dimension_order: list[str] | None = None,
               column_alias_map: dict | None = None,
               known_missing_tables: set | None = None,
-              fact_join_map: dict | None = None) -> str:
-    """Emit UC Metric View YAML matching the hand-crafted pe002 format."""
+              fact_join_map: dict | None = None,
+              percentage_multiplier_patterns: list[str] | None = None,
+              budget_suffix: str | None = None) -> str:
+    """Emit UC Metric View YAML from a MetricViewSpec."""
+    spec = copy.deepcopy(spec)
+
+    # Check metadata limits (warn, don't block)
+    limit_warnings = _check_metadata_limits(spec)
+    for w in limit_warnings:
+        logger.warning(f"[UCMV] Metadata limit exceeded: {w}")
+
+    budget_suffix = budget_suffix or '_bp'
     _COLUMN_ALIAS_MAP = column_alias_map or {}
     _KNOWN_MISSING_TABLES = known_missing_tables or set()
     _FACT_JOIN_MAP = fact_join_map or {}
@@ -212,7 +274,7 @@ def emit_yaml(spec: MetricViewSpec,
                 rf'\bsource\.{re.escape(alias_name)}\b', f'source.{phys_name}', d['expr'])
 
     # Rewrite measure-name-as-column refs: source.{measure_name} -> source.{physical_col}
-    # DAX uses SUM(source.nsr_bev) where nsr_bev is a measure alias, not a physical column.
+    # DAX may use SUM(source.<alias>) where alias is a measure name, not a physical column.
     _measure_to_phys: dict[str, str] = {}
     for m in base_measures:
         if m.sql_expr:
@@ -267,6 +329,25 @@ def emit_yaml(spec: MetricViewSpec,
         if m.sql_expr:
             m.sql_expr = spark_sql_compat(m.sql_expr, _cat, _sch)
 
+    # Security: reject measures with dangerous SQL patterns
+    for measure_list in (base_measures, dax_measures, switch_measures):
+        drop_idx = []
+        for i, m in enumerate(measure_list):
+            if m.sql_expr and not _check_dangerous_sql(m.sql_expr):
+                logger.warning(f"[SECURITY] Dangerous SQL detected in {m.measure_name}: {m.sql_expr[:100]}")
+                m.is_translatable = False
+                m.skip_reason = 'Blocked: dangerous SQL pattern detected'
+                m.sql_expr = None
+                spec.untranslatable.append(m)
+                drop_idx.append(i)
+        for i in reversed(drop_idx):
+            measure_list.pop(i)
+
+    # Security: validate source_filter and source_sql
+    if spec.source_filter and not _check_dangerous_sql(spec.source_filter):
+        logger.warning(f"[SECURITY] Dangerous SQL in source_filter: {spec.source_filter[:100]}")
+        spec.source_filter = ''
+
     # Validate join-alias references: drop measures referencing undeclared join aliases.
     # e.g. hr_a.col when no hr_a join exists, or dim_wkctr.col when dim_wkctr not joined.
     _declared_aliases = {j['name'] for j in spec.joins} if spec.joins else set()
@@ -302,7 +383,7 @@ def emit_yaml(spec: MetricViewSpec,
             _known_source_cols.update(re.findall(r'\bsource\.(\w+)', m.sql_expr))
     for d in spec.dimensions:
         _known_source_cols.update(re.findall(r'\bsource\.(\w+)', d['expr']))
-    # Also pull columns from FILTER clauses in switch measures (bic_csubkbi, bic_chversion, etc.)
+    # Also pull columns from FILTER clauses in switch measures
     for m in switch_measures:
         if m.sql_expr:
             for fc_m in re.finditer(r'FILTER\s*\(WHERE\s+([^)]+)\)', m.sql_expr):
@@ -517,11 +598,12 @@ def emit_yaml(spec: MetricViewSpec,
                 continue  # safety: skip measures with no SQL
             lines.append(f'  - name: {m.measure_name}')
             expr = m.sql_expr
-            # Add 100* multiplier for turnover/rate ratio measures (actuals only, not BP)
-            if ('turnover' in m.measure_name.lower()
-                    and not m.measure_name.lower().endswith('_bp')
-                    and '/' in expr):
-                expr = f'100*{expr}'
+            # Apply percentage multiplier only if explicitly configured via patterns
+            if percentage_multiplier_patterns and '/' in expr:
+                for _pmp in percentage_multiplier_patterns:
+                    if re.search(_pmp, m.measure_name, re.IGNORECASE):
+                        expr = f'100*{expr}'
+                        break
             if any(c in expr for c in ("'", '"', ':', '#', '{', '}', '[', ']')) or 'FILTER' in expr:
                 if len(expr) > 120 or '\n' in expr or ('"' in expr and "'" in expr):
                     lines.append('    expr: >-')
@@ -536,7 +618,7 @@ def emit_yaml(spec: MetricViewSpec,
                 lines.append('    window:')
                 lines.append(f"      - order: {m.window_spec['order']}")
                 lines.append(f"        range: {m.window_spec['range']}")
-                lines.append(f"        semiadditive: {m.window_spec['semiadditive']}")
+                lines.append(f"        semiadditive: {m.window_spec.get('semiadditive', 'last')}")
             # Comment and metadata from per-table overrides or auto-generated
             m_override = _mm.get(m.measure_name, {})
             dax_comment = m_override.get('comment', '')
@@ -550,11 +632,11 @@ def emit_yaml(spec: MetricViewSpec,
             if not dax_display:
                 dax_display = m_meta.get('display_name', '')
                 if dax_display:
-                    if m.measure_name.endswith('_bp'):
+                    if m.measure_name.endswith(budget_suffix):
                         dax_display += ' (Budget)'
                     elif any(
-                        m.measure_name.replace('_bp', '') == m2.measure_name
-                        for m2 in dax_measures if m2.measure_name.endswith('_bp')
+                        m.measure_name.replace(budget_suffix, '') == m2.measure_name
+                        for m2 in dax_measures if m2.measure_name.endswith(budget_suffix)
                     ):
                         dax_display += ' (Actual)'
             if dax_display:

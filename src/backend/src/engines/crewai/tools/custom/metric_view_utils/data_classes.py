@@ -21,7 +21,7 @@ class TranslationResult:
 @dataclass
 class TableInfo:
     """Structure extracted from a single MQuery transpiled SQL."""
-    table_name: str                          # PBI table name (e.g. "fact_pe002")
+    table_name: str                          # PBI table name
     source_table: str                        # Databricks 3-level name from FROM clause
     aggregate_columns: list[dict]            # [{name, source_col}]
     group_by_columns: list[str]             # column names from GROUP BY

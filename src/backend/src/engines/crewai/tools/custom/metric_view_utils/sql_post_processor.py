@@ -9,13 +9,15 @@ from .m_transform_folder import MTransformFolder
 class SqlPostProcessor:
     """Post-process inline SQL: strip aliases, fix keywords, normalize formatting."""
 
-    def __init__(self, unflatten_tables: bool = False):
+    def __init__(self, unflatten_tables: bool = False, expand_re_version: bool = False):
         self.unflatten_tables = unflatten_tables
+        self.expand_re_version = expand_re_version
 
     def process(self, sql: str) -> str:
         """Apply all post-processing passes to SQL."""
         sql = self._strip_aliases(sql)
-        sql = self._expand_nested_re_version_case(sql)
+        if self.expand_re_version:
+            sql = self._expand_nested_re_version_case(sql)
         sql = self._remove_dead_branches(sql)
         sql = self._fix_sql_keywords(sql)
         sql = self._remove_pbi_comments(sql)

@@ -16,13 +16,15 @@ class MetadataGenerator:
                  dimension_metadata: dict | None = None,
                  comment_overrides: dict | None = None,
                  dimension_exclusions: dict | None = None,
-                 dimension_order: dict | None = None):
+                 dimension_order: dict | None = None,
+                 name_prefixes_to_strip: tuple | None = None):
         self._column_metadata = column_metadata or {}
         self._measure_metadata = measure_metadata or {}
         self._dimension_metadata = dimension_metadata or {}
         self._comment_overrides = comment_overrides or {}
         self._dimension_exclusions = dimension_exclusions or {}
         self._dimension_order = dimension_order or {}
+        self._name_prefixes = name_prefixes_to_strip or ()
 
     def get_dimension_meta(self, col_name: str, table_key: str = '') -> dict:
         """Get metadata for a dimension column."""
@@ -75,10 +77,9 @@ class MetadataGenerator:
         """Get per-table dimension ordering."""
         return self._dimension_order.get(table_key, [])
 
-    @staticmethod
-    def _humanize(name: str) -> str:
+    def _humanize(self, name: str) -> str:
         """Convert snake_case/technical name to human-readable display name."""
-        for prefix in ('bic_', 'khr', 'kco', 'kpe', 'kfx'):
+        for prefix in self._name_prefixes:
             if name.lower().startswith(prefix) and len(name) > len(prefix) + 3:
                 name = name[len(prefix):]
         name = re.sub(r'^\d{3,6}_?', '', name)

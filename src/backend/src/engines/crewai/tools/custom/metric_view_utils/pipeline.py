@@ -7,6 +7,8 @@ for use as a Kasal tool.
 """
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import json
 import logging
 import re
@@ -25,9 +27,27 @@ from .relationships_loader import RelationshipsLoader
 from .utils import to_snake_case, spark_sql_compat, col_to_readable
 from .yaml_emitter import emit_yaml
 from .sql_emitter import emit_deploy_sql
+from .report_emitter import emit_migration_report
 from .dependency_graph import build_dependency_graph, _find_measure_refs
 
 logger = logging.getLogger(__name__)
+
+
+def _run_async(coro):
+    """Safely run async code from sync context."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        # Inside a running event loop — must use a separate thread
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(asyncio.run, coro)
+            return future.result(timeout=300)
+    else:
+        return asyncio.run(coro)
+
 
 # Keywords that classify a measure as a PBI UI artifact (not a real business measure)
 _ARTIFACT_SKIP_KEYWORDS = (
@@ -128,10 +148,16 @@ class MetricViewPipeline:
             comment_overrides=self._comment_overrides,
             dimension_exclusions=self._dimension_exclusions,
             dimension_order=self._dimension_order,
+            name_prefixes_to_strip=tuple(self.config.get('name_prefixes_to_strip', ())),
         )
-        self.sql_post_processor = SqlPostProcessor(unflatten_tables=unflatten_tables)
+        self.sql_post_processor = SqlPostProcessor(
+            unflatten_tables=unflatten_tables,
+            expand_re_version=bool(self.config.get('parameter_defaults', {}).get('RE_Version_ranges')),
+        )
         self.m_transform_folder = MTransformFolder()
-        self.pbi_parameter_resolver = PbiParameterResolver()
+        self.pbi_parameter_resolver = PbiParameterResolver(
+            parameter_defaults=self.config.get('parameter_defaults'),
+        )
 
     # ── run() — full pipeline ─────────────────────────────────────────────
 
@@ -248,7 +274,8 @@ class MetricViewPipeline:
             d_order = self._dimension_order.get(table_key)
             yaml_content = emit_yaml(spec, measure_metadata=m_meta,
                                      dimension_metadata=d_meta,
-                                     dimension_order=d_order)
+                                     dimension_order=d_order,
+                                     percentage_multiplier_patterns=self.config.get('percentage_multiplier_patterns'))
 
             if not yaml_content:
                 self.stats[table_key] = {
@@ -403,7 +430,8 @@ class MetricViewPipeline:
 
         # 5a-fix. Resolve window.order: replace hardcoded 'date_key' with actual
         # period dimension from the table's GROUP BY columns.
-        _PERIOD_DIM_PRIORITY = ['fiscper', 'fiscal_year_period', 'date_key']
+        _PERIOD_DIM_PRIORITY = self.config.get(
+            'period_dim_priority', ['fiscper', 'fiscal_year_period', 'date_key'])
         period_dim = next(
             (d for d in _PERIOD_DIM_PRIORITY if d in table_info.group_by_columns),
             'date_key',
@@ -412,8 +440,9 @@ class MetricViewPipeline:
             if m.window_spec and m.window_spec.get('order') == 'date_key' and period_dim != 'date_key':
                 m.window_spec['order'] = period_dim
 
-        # 5a-fix2. Drop window measures on INT period columns (e.g. fiscper).
-        _INT_PERIOD_DIMS = {'fiscper', 'fiscal_year_period'}
+        # 5a-fix2. Drop window measures on INT period columns (configurable).
+        _INT_PERIOD_DIMS = set(self.config.get(
+            'int_period_dims', ['fiscper', 'fiscal_year_period']))
         if period_dim in _INT_PERIOD_DIMS:
             win_translated = []
             for m in translated:
@@ -573,36 +602,18 @@ class MetricViewPipeline:
         # ── Step 5d: LLM fallback for remaining untranslatable measures (opt-in) ──
         if self.llm_config and self.llm_config.get('use_llm_fallback'):
             from .dax_llm_fallback import translate_batch_with_llm
-            import asyncio
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as pool:
-                        llm_results = pool.submit(
-                            asyncio.run,
-                            translate_batch_with_llm(
-                                measures=untranslatable,
-                                table_key=table_key,
-                                base_names=base_names,
-                                original_to_snake=original_to_snake,
-                                model=self.llm_config.get('llm_model', 'databricks-claude-sonnet-4'),
-                                workspace_url=self.llm_config.get('llm_workspace_url', ''),
-                                token=self.llm_config.get('llm_token', ''),
-                            )
-                        ).result()
-                else:
-                    llm_results = asyncio.run(
-                        translate_batch_with_llm(
-                            measures=untranslatable,
-                            table_key=table_key,
-                            base_names=base_names,
-                            original_to_snake=original_to_snake,
-                            model=self.llm_config.get('llm_model', 'databricks-claude-sonnet-4'),
-                            workspace_url=self.llm_config.get('llm_workspace_url', ''),
-                            token=self.llm_config.get('llm_token', ''),
-                        )
+                llm_results = _run_async(
+                    translate_batch_with_llm(
+                        measures=untranslatable,
+                        table_key=table_key,
+                        base_names=base_names,
+                        original_to_snake=original_to_snake,
+                        model=self.llm_config.get('llm_model', 'databricks-claude-sonnet-4'),
+                        workspace_url=self.llm_config.get('llm_workspace_url', ''),
+                        token=self.llm_config.get('llm_token', ''),
                     )
+                )
                 llm_translated = []
                 for m in llm_results:
                     if m.is_translatable:
@@ -718,7 +729,7 @@ class MetricViewPipeline:
             val_col = fj_cfg.get('value_col', 'val')
             _cm = fj_cfg.get('column_map', {})
             val_col = _cm.get(val_col, val_col)
-            kbi_col = fj_cfg.get('pivot_col', 'bic_csubkbi')
+            kbi_col = fj_cfg.get('pivot_col', 'kbi_col')
 
             _filter_start = re.compile(
                 rf'SUM\({re.escape(alias)}\.{re.escape(val_col)}\)\s*FILTER\s*\(WHERE\s+'
@@ -821,7 +832,9 @@ class MetricViewPipeline:
                 candidate = raw[as_match.end():].strip()
                 first_kw = candidate.lstrip().split()[0].upper() if candidate.strip() else ''
                 if first_kw in ('SELECT', 'WITH'):
-                    resolver = PbiParameterResolver()
+                    resolver = PbiParameterResolver(
+                        parameter_defaults=self.config.get('parameter_defaults'),
+                    )
                     candidate = resolver.resolve(candidate)
                     source_sql = candidate
                     source_filter = ''
@@ -842,9 +855,14 @@ class MetricViewPipeline:
             if not base_sql:
                 base_sql = scan_info.native_sql
 
-            resolver = PbiParameterResolver()
+            resolver = PbiParameterResolver(
+                parameter_defaults=self.config.get('parameter_defaults'),
+            )
             folder = MTransformFolder()
-            post_processor = SqlPostProcessor(unflatten_tables=self.unflatten_tables)
+            post_processor = SqlPostProcessor(
+                unflatten_tables=self.unflatten_tables,
+                expand_re_version=bool(self.config.get('parameter_defaults', {}).get('RE_Version_ranges')),
+            )
             resolved_sql = resolver.resolve(base_sql)
             resolved_sql = spark_sql_compat(resolved_sql)
             final_sql = folder.fold(resolved_sql, scan_info.m_steps, scan_info.pbi_columns)
@@ -1270,11 +1288,12 @@ class MetricViewPipeline:
                 )
         return warnings
 
-    @staticmethod
-    def _build_switch_measure(defn: dict, join_alias: str = 'dim_wkctr',
-                              join_col: str = 'bic_cwc_type',
+    def _build_switch_measure(self, defn: dict, join_alias: str | None = None,
+                              join_col: str | None = None,
                               filter_sets: dict | None = None) -> TranslationResult:
         """Build a TranslationResult from a SWITCH decomposition definition."""
+        join_alias = join_alias or self.config.get('switch_join_alias', 'dim_wkctr')
+        join_col = join_col or self.config.get('switch_join_col', 'bic_cwc_type')
         _fs = filter_sets or {}
 
         def _filter_clause(fs_key: str) -> str:
@@ -1449,6 +1468,8 @@ class MetricViewPipeline:
                     for m in spec.untranslatable
                 ],
             }
+        results['migration_report'] = emit_migration_report(
+            self.all_specs, self.stats, self.config)
         return results
 
     def emit_all_yaml(self, catalog: str = 'main', schema: str = 'default') -> dict[str, str]:
@@ -1466,6 +1487,8 @@ class MetricViewPipeline:
                 column_alias_map=getattr(self, '_column_alias_map', {}),
                 known_missing_tables=getattr(self, '_known_missing_tables', set()),
                 fact_join_map=getattr(self, '_fact_join_map', {}),
+                percentage_multiplier_patterns=self.config.get('percentage_multiplier_patterns'),
+                budget_suffix=self.config.get('budget_suffix'),
             )
         return result
 

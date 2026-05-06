@@ -35,6 +35,7 @@ from .dax_translator import DaxTranslator
 from .dax_llm_fallback import translate_with_llm, translate_batch_with_llm
 from .yaml_emitter import emit_yaml
 from .sql_emitter import emit_deploy_sql
+from .report_emitter import emit_migration_report
 from .pipeline import MetricViewPipeline
 
 __all__ = [
@@ -56,5 +57,6 @@ __all__ = [
     "translate_batch_with_llm",
     "emit_yaml",
     "emit_deploy_sql",
+    "emit_migration_report",
     "MetricViewPipeline",
 ]

@@ -1,11 +1,23 @@
 """Join Detector — auto-detect joins from DAX dimension references."""
 from __future__ import annotations
 
+import logging
 import re
 
 from .constants import RE_DAX_DIM_REF
 from .data_classes import TableInfo
 from .utils import col_to_readable
+
+logger = logging.getLogger(__name__)
+
+_RE_SAFE_ALIAS = re.compile(r'^[a-zA-Z_]\w*$')
+
+
+def _sanitize_alias(alias: str) -> str:
+    """Sanitize a SQL alias to prevent injection. Only allow alphanumeric + underscore."""
+    if not _RE_SAFE_ALIAS.match(alias):
+        raise ValueError(f"Invalid SQL alias: {alias}")
+    return alias
 
 
 class JoinDetector:
@@ -84,7 +96,7 @@ class JoinDetector:
             fact_table_info = self.mquery_tables.get(fact_name)
             if not fact_table_info or not fact_table_info.source_table:
                 continue
-            alias = fj['alias']
+            alias = _sanitize_alias(fj['alias'])
 
             # Build join ON clause
             if 'join_on_expr' in fj:
@@ -101,12 +113,11 @@ class JoinDetector:
                                 join_on = join_on.replace(f'source.{src_ref}', calc_expr)
                                 break
                         else:
-                            if src_ref == 'plant_workcenter_key' and \
-                               'plant' in fact_info.group_by_columns and \
-                               'workcenter' in fact_info.group_by_columns:
-                                join_on = join_on.replace(
-                                    f'source.{src_ref}',
-                                    "CONCAT(source.plant, '/', source.workcenter)")
+                            logger.warning(
+                                "[JOIN] source.%s referenced in join_on_expr but "
+                                "not found in group_by_columns or calculated_columns",
+                                src_ref,
+                            )
             elif 'join_key' in fj:
                 join_keys = fj['join_key'] if isinstance(fj['join_key'], list) else [fj['join_key']]
                 if not all(k in fact_info.group_by_columns for k in join_keys):
@@ -138,8 +149,9 @@ class JoinDetector:
 
                 if kbi_codes:
                     pivot_kbi_map = {code: f'sc_{code.lower()}' for code in kbi_codes}
+                    _empty_alias = ''  # no alias needed for pivot subquery
                     implicit = [
-                        f.format(alias='').lstrip('.')
+                        f.format(alias=_empty_alias).lstrip('.')
                         for f in fj.get('implicit_filters', [])
                     ]
                     where_clause = ('WHERE ' + ' AND '.join(implicit)) if implicit else ''
@@ -151,7 +163,13 @@ class JoinDetector:
                     grain_str = ', '.join(grain_cols)
 
                     if fj.get('union_mode'):
-                        key_expr = fj.get('union_key_expr', "CONCAT(plant, '/', workcenter) AS plant_workcenter_key")
+                        key_expr = fj.get('union_key_expr', '')
+                        if not key_expr:
+                            logger.warning(
+                                "[JOIN] union_key_expr not configured for %s — skipping union join",
+                                fact_name,
+                            )
+                            continue
                         null_pivot_cols = ', '.join(
                             f"CAST(NULL AS DOUBLE) AS sc_{code.lower()}"
                             for code in sorted(kbi_codes)

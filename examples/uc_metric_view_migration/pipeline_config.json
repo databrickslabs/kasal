@@ -1248,5 +1248,28 @@
     "nr_of_invoices_final": "nr_of_invoices",
     "nr_of_credit_memos_final": "nr_of_credit_memos",
     "nr_of_overdue_deliveries_excl_pickup_final": "nr_of_overdue_deliveries_excl_pickup"
-  }
+  },
+  "name_prefixes_to_strip": [
+    "bic_",
+    "khr",
+    "kco",
+    "kpe",
+    "kfx"
+  ],
+  "parameter_defaults": {
+    "CurrencyFilter": "30"
+  },
+  "percentage_multiplier_patterns": [
+    "turnover(?!.*_bp$)"
+  ],
+  "dim_alias_map": {
+    "Dim_wkctr": "dim_wkctr",
+    "dim_wkctr": "dim_wkctr"
+  },
+  "period_dim_priority": ["fiscper", "fiscal_year_period", "date_key"],
+  "int_period_dims": ["fiscper", "fiscal_year_period"],
+  "budget_suffix": "_bp",
+  "cwc_filter_column": "bic_cwc_type",
+  "switch_join_alias": "dim_wkctr",
+  "switch_join_col": "bic_cwc_type"
 }

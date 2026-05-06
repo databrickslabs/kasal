@@ -355,6 +355,7 @@ def get_tool_configs():
             "password": "",
             "auth_method": None,
             "access_token": "",
+            "pbi_api_base_url": "",
         },  # UC Metric View Generator
         "87": {
             "result_as_answer": True,

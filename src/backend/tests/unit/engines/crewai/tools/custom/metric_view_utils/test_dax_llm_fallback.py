@@ -1,6 +1,7 @@
 """Tests for DAX LLM fallback module."""
 import json
 import pytest
+from collections import OrderedDict
 from unittest.mock import AsyncMock, patch, MagicMock
 from src.engines.crewai.tools.custom.metric_view_utils.dax_llm_fallback import (
     _content_hash,
@@ -9,16 +10,8 @@ from src.engines.crewai.tools.custom.metric_view_utils.dax_llm_fallback import (
     _validate_sql,
     translate_with_llm,
     translate_batch_with_llm,
-    _CACHE,
 )
 from src.engines.crewai.tools.custom.metric_view_utils.data_classes import TranslationResult
-
-
-@pytest.fixture(autouse=True)
-def clear_cache():
-    _CACHE.clear()
-    yield
-    _CACHE.clear()
 
 
 class TestHelpers:
@@ -145,13 +138,15 @@ class TestTranslateWithLLM:
             dax_expression="SUM(T[x])",
             confidence="none", category="unassigned",
         )
-        # Pre-populate cache
+        # Pre-populate a run-scoped cache
+        run_cache: OrderedDict[str, dict] = OrderedDict()
         cache_key = _content_hash("SUM(T[x])")
-        _CACHE[cache_key] = {"success": True, "sql_expr": "SUM(source.x)", "confidence": "high"}
+        run_cache[cache_key] = {"success": True, "sql_expr": "SUM(source.x)", "confidence": "high"}
 
         result = await translate_with_llm(
             m, "fact_test", set(), {},
             workspace_url="https://example.com", token="token123",
+            cache=run_cache,
         )
         assert result.is_translatable is True
         assert result.sql_expr == "SUM(source.x)"

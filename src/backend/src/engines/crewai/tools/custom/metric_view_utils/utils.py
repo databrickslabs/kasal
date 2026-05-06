@@ -20,7 +20,8 @@ def col_to_readable(col_name: str) -> str:
     return col_name.replace('_', ' ').strip().capitalize()
 
 
-def spark_sql_compat(expr: str, catalog: str = '', schema: str = '') -> str:
+def spark_sql_compat(expr: str, catalog: str = '', schema: str = '',
+                     rewrite_2part_tables: bool = False) -> str:
     """Rewrite T-SQL patterns to Spark SQL equivalents."""
     # Strip SQL block comments
     expr = re.sub(r'/\*.*?\*/', '', expr, flags=re.DOTALL).strip()
@@ -49,13 +50,13 @@ def spark_sql_compat(expr: str, catalog: str = '', schema: str = '') -> str:
     )
     # ISNULL(a, b) → COALESCE(a, b)
     expr = re.sub(r'\bISNULL\s*\(', 'COALESCE(', expr, flags=re.IGNORECASE)
-    # Rewrite 2-part table names to 3-part
-    if catalog and schema:
+    # Rewrite 2-part table names to 3-part (only when explicitly enabled)
+    if rewrite_2part_tables and catalog and schema:
         def _rewrite_2part(m: re.Match) -> str:
             prefix = m.group(1)
             tbl_schema = m.group(2)
             tbl_name = m.group(3)
-            return f'{prefix}{catalog}.{schema}.dc_datalake_prod_001__{tbl_schema}__{tbl_name}'
+            return f'{prefix}{catalog}.{schema}.{tbl_schema}__{tbl_name}'
         expr = re.sub(
             r'(FROM\s+|JOIN\s+)(\w+)\.(\w+)(?!\.\w)',
             _rewrite_2part, expr, flags=re.IGNORECASE,
