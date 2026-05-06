@@ -128,8 +128,8 @@ class MetricViewPipeline:
                 table_info = TableInfo(
                     table_name=table_key,
                     source_table=mot.get('source_table', ''),
-                    aggregate_columns=[],
-                    group_by_columns=mot.get('group_by_columns', []),
+                    aggregate_columns=mot.get('aggregate_columns', []),
+                    group_by_columns=mot.get('dimensions', mot.get('group_by_columns', [])),
                     calculated_columns=[],
                     is_fact=True,
                     full_sql='',
@@ -378,28 +378,102 @@ class MetricViewPipeline:
         measures: list[dict],
         table_info: TableInfo,
     ) -> list[TranslationResult]:
-        """Process SWITCH decomposition config for this table."""
+        """Process SWITCH decomposition config for this table.
+
+        Supports two config formats:
+        - Original monolith: {table_key: [list of {name, raw_expr/num/den, comment}]}
+        - Kasal structured: {table_key: {parent: {branch: {sql_expr, ...}}}}
+        """
         switch_config = self.config.get('switch_decompositions', {})
         if table_key not in switch_config:
             return []
 
+        filter_sets = self.config.get('filter_sets', {})
+        entries = switch_config[table_key]
         results = []
-        for parent_name, branches in switch_config[table_key].items():
-            for branch_name, branch_config in branches.items():
-                snake = to_snake_case(branch_name)
-                sql_expr = branch_config.get('sql_expr', '')
-                if sql_expr:
+
+        # Original monolith format: list of dicts
+        if isinstance(entries, list):
+            for defn in entries:
+                name = defn.get('name', '')
+                # raw_expr: pre-built SQL expression
+                if 'raw_expr' in defn:
                     results.append(TranslationResult(
-                        measure_name=snake,
-                        original_name=branch_name,
+                        measure_name=name,
+                        original_name=name,
+                        sql_expr=defn['raw_expr'],
+                        is_translatable=True,
+                        skip_reason='',
+                        dax_expression='SWITCH decomposition',
+                        confidence='high',
+                        category='switch_decomposition',
+                        window_spec=defn.get('window'),
+                    ))
+                elif 'num' in defn and 'den' in defn:
+                    # Build from num/den + filter_sets
+                    sql_expr = self._build_switch_sql(defn, filter_sets)
+                    results.append(TranslationResult(
+                        measure_name=name,
+                        original_name=name,
                         sql_expr=sql_expr,
                         is_translatable=True,
                         skip_reason='',
-                        dax_expression=f'SWITCH branch of [{parent_name}]',
+                        dax_expression='SWITCH decomposition',
                         confidence='high',
                         category='switch_decomposition',
                     ))
+        # Kasal structured format: dict of dicts
+        elif isinstance(entries, dict):
+            for parent_name, branches in entries.items():
+                if not isinstance(branches, dict):
+                    continue
+                for branch_name, branch_config in branches.items():
+                    snake = to_snake_case(branch_name)
+                    sql_expr = branch_config.get('sql_expr', '')
+                    if sql_expr:
+                        results.append(TranslationResult(
+                            measure_name=snake,
+                            original_name=branch_name,
+                            sql_expr=sql_expr,
+                            is_translatable=True,
+                            skip_reason='',
+                            dax_expression=f'SWITCH branch of [{parent_name}]',
+                            confidence='high',
+                            category='switch_decomposition',
+                        ))
         return results
+
+    @staticmethod
+    def _build_switch_sql(defn: dict, filter_sets: dict,
+                          join_alias: str = 'dim_wkctr',
+                          join_col: str = 'bic_cwc_type') -> str:
+        """Build SQL from a SWITCH decomposition definition with num/den + filter_sets."""
+        def _filter_clause(fs_key: str) -> str:
+            values = filter_sets.get(fs_key, [])
+            quoted = ', '.join(f"'{v}'" for v in values)
+            return f"FILTER (WHERE {join_alias}.{join_col} IN ({quoted}))"
+
+        num = defn['num']
+        den = defn['den']
+        num_fs = defn.get('num_fs')
+        den_fs = defn.get('den_fs')
+
+        if num_fs is None:
+            # Complex expression with filter placeholders
+            for fs_key, fs_vals in filter_sets.items():
+                if isinstance(fs_vals, list):
+                    quoted = ', '.join(f"'{v}'" for v in fs_vals)
+                    placeholder = '{' + fs_key.lower() + '}'
+                    fc = f"(WHERE {join_alias}.{join_col} IN ({quoted}))"
+                    num = num.replace(placeholder, fc)
+            num_expr = num
+        else:
+            num_expr = f"SUM(source.{num}) {_filter_clause(num_fs)}"
+
+        den_expr = den if den_fs is None else f"SUM(source.{den}) {_filter_clause(den_fs)}"
+
+        num_wrapped = f'({num_expr})' if '+' in num_expr or '-' in num_expr else num_expr
+        return f"{num_wrapped} / NULLIF({den_expr}, 0)"
 
     @staticmethod
     def _validate_filter_consistency(measures: list[TranslationResult]) -> list[str]:
