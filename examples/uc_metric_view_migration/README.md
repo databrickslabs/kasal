@@ -80,3 +80,13 @@ The `pipeline_config.json` contains customer-specific configuration. Empty defau
 | `dimension_exclusions` | Per-table dimensions to hide |
 | `measure_metadata` | Per-table display names, synonyms, comments |
 | `comment_overrides` | Per-table metric view comment overrides |
+| `name_prefixes_to_strip` | Prefixes to strip from measure/dimension names for display (e.g. `["bic_", "khr"]`) |
+| `parameter_defaults` | PBI parameter defaults: `{"CurrencyFilter": "30", "RE_Version_ranges": {...}}` |
+| `percentage_multiplier_patterns` | Regex patterns for measures that need 100* multiplier (e.g. `["turnover(?!.*_bp$)"]`) |
+| `dim_alias_map` | PBI dimension table -> SQL join alias mapping (e.g. `{"Dim_wkctr": "dim_wkctr"}`) |
+| `period_dim_priority` | Ordered list of period dimension names to try for window ordering (default: `["fiscper", "fiscal_year_period", "date_key"]`) |
+| `int_period_dims` | Period dimensions with integer type (windows dropped on these) (default: `["fiscper", "fiscal_year_period"]`) |
+| `budget_suffix` | Measure name suffix identifying budget variants for display labels (default: `"_bp"`) |
+| `cwc_filter_column` | Physical column name for CWC filter expansion in DAX translator (default: `"bic_cwc_type"`) |
+| `switch_join_alias` | Default join alias for SWITCH decomposition measures (default: `"dim_wkctr"`) |
+| `switch_join_col` | Default join column for SWITCH decomposition FILTER clauses (default: `"bic_cwc_type"`) |

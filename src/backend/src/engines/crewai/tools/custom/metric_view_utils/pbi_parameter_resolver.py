@@ -8,6 +8,9 @@ class PbiParameterResolver:
     """Resolve Power BI parameters (FiscperFilter, RE_Version, CurrencyFilter)
     in native SQL extracted from scan data or MQuery transpiled SQL."""
 
+    def __init__(self, parameter_defaults: dict | None = None):
+        self._defaults = parameter_defaults or {}
+
     _RE_VERSION_CASE = (
         "CASE "
         "WHEN MONTH(CURRENT_DATE()) >= 10 THEN 'R100' "
@@ -23,6 +26,11 @@ class PbiParameterResolver:
         'R100': 'MONTH(CURRENT_DATE()) >= 10',
     }
 
+    @property
+    def _re_version_case(self):
+        """RE_Version CASE expression — overridable via config."""
+        return self._defaults.get('RE_Version_CASE', self._RE_VERSION_CASE)
+
     def resolve(self, sql: str) -> str:
         """Apply all PBI parameter resolutions to SQL."""
         sql = self._resolve_fiscper_filter(sql)
@@ -31,7 +39,14 @@ class PbiParameterResolver:
         return sql
 
     def _resolve_fiscper_filter(self, sql: str) -> str:
-        """Collapse FiscperFilter CASE expressions."""
+        """Collapse FiscperFilter CASE expressions.
+
+        Only applied when ``resolve_fiscper_filter`` is True (default) in the
+        parameter defaults.  Non-SAP deployments that lack FiscperFilter can
+        set this to False and their SQL will pass through unchanged.
+        """
+        if not self._defaults.get('resolve_fiscper_filter', True):
+            return sql
         param_ref = r"""(?:['"]+\s*&\s*FiscperFilter\s*&\s*['"]+|'\$\{FiscperFilter\}')"""
         pattern = re.compile(
             r"""\(?\s*CASE\s+WHEN\s+""" + param_ref + r"""\s*=\s*'Sample'\s*THEN\s+"""
@@ -46,8 +61,16 @@ class PbiParameterResolver:
         return pattern.sub(_replace, sql)
 
     def _resolve_re_version(self, sql: str) -> str:
-        """Resolve RE_Version parameter in two contexts."""
-        for version_code, month_range in self._RE_VERSION_RANGES.items():
+        """Resolve RE_Version parameter in two contexts.
+
+        If ``RE_Version_ranges`` is not configured, RE_Version references are
+        left as-is so non-SAP deployments are not affected.
+        """
+        re_version_ranges = self._defaults.get('RE_Version_ranges')
+        if not re_version_ranges:
+            return sql  # Not configured — leave RE_Version references as-is
+        re_version_case = self._re_version_case
+        for version_code, month_range in re_version_ranges.items():
             sql = re.sub(
                 r"""'\$\{RE_Version\}'\s*=\s*'""" + version_code + r"""'""",
                 month_range, sql,
@@ -63,12 +86,19 @@ class PbiParameterResolver:
                 r"""ELSE\s+'R000'\s*END\s*=\s*'""" + version_code + r"""'""",
                 month_range, sql, flags=re.IGNORECASE,
             )
-        sql = re.sub(r"""'\$\{RE_Version\}'""", self._RE_VERSION_CASE, sql)
-        sql = re.sub(r"""['"]+\s*&\s*RE_Version\s*&\s*['"]+""", self._RE_VERSION_CASE, sql)
+        sql = re.sub(r"""'\$\{RE_Version\}'""", re_version_case, sql)
+        sql = re.sub(r"""['"]+\s*&\s*RE_Version\s*&\s*['"]+""", re_version_case, sql)
         return sql
 
     def _resolve_currency_filter(self, sql: str) -> str:
-        """Resolve CurrencyFilter parameter → '30'."""
-        sql = re.sub(r"""'\$\{CurrencyFilter\}'""", "'30'", sql)
-        sql = re.sub(r"""['"]+\s*&\s*CurrencyFilter\s*&\s*['"]+""", "'30'", sql)
+        """Resolve CurrencyFilter parameter to configured default.
+
+        If ``CurrencyFilter`` is not present in the defaults, references are
+        left as-is.
+        """
+        currency_val = self._defaults.get('CurrencyFilter')
+        if currency_val is None:
+            return sql  # Not configured — leave CurrencyFilter references as-is
+        sql = re.sub(r"""'\$\{CurrencyFilter\}'""", f"'{currency_val}'", sql)
+        sql = re.sub(r"""['"]+\s*&\s*CurrencyFilter\s*&\s*['"]+""", f"'{currency_val}'", sql)
         return sql

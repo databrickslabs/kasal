@@ -12,17 +12,8 @@ from .constants import (
     RE_SUMX_FILTER,
 )
 from .data_classes import TranslationResult
+from .join_detector import _sanitize_alias
 from .utils import to_snake_case
-
-
-# Resolvable measure references (populated from config at runtime)
-_MEASURE_RESOLUTIONS: dict[str, dict] = {}
-
-# Filter set mappings (populated from config at runtime)
-_FILTER_SETS: dict[str, dict] = {}
-
-# Column override mappings (populated from config at runtime)
-_COLUMN_OVERRIDES: dict[str, dict] = {}
 
 
 class DaxTranslator:
@@ -34,6 +25,8 @@ class DaxTranslator:
         self.column_overrides = cfg.get('column_overrides', {})
         self._fact_join_map_cfg = cfg.get('fact_join_map', {})
         self._measure_resolutions = cfg.get('measure_resolutions', {})
+        self._dim_alias_map: dict[str, str] = cfg.get('dim_alias_map', {})
+        self._cwc_filter_column: str = cfg.get('cwc_filter_column', 'bic_cwc_type')
         self._fact_joins: list[dict] = []
         self._patterns: list[tuple[str, Callable, Callable]] = []
         self._register_patterns()
@@ -79,6 +72,7 @@ class DaxTranslator:
                     window_spec = {
                         'order': 'fiscper',
                         'range': 'trailing 12 month',
+                        'semiadditive': 'last',
                     }
                 return TranslationResult(
                     measure_name=snake,
@@ -515,7 +509,7 @@ class DaxTranslator:
         if table_ref == table_key or table_ref not in self._fact_join_map_cfg:
             return 'source', {}
         fj = self._fact_join_map_cfg[table_ref]
-        alias = fj.get('alias', table_ref.lower())
+        alias = _sanitize_alias(fj.get('alias', table_ref.lower()))
         col_map = fj.get('column_map', {})
         return alias, col_map
 
@@ -542,15 +536,15 @@ class DaxTranslator:
                 in_list = ', '.join(f"'{v}'" for v in values)
                 return f"{alias}.{phys_col} IN ({in_list})"
 
-        # Check for CWC_Filter=1 pattern
-        cwc_match = re.search(r'(\w+)\[CWC_Filter\]\s*=\s*1', condition, re.IGNORECASE)
-        if cwc_match:
-            dim_table = cwc_match.group(1)
-            alias = self._dim_table_to_alias(dim_table)
-            cwc_values = self.filter_sets.get('CWC_FILTER', [])
-            if cwc_values:
+        # Check for CWC_Filter=1 pattern (only if CWC_FILTER filter set is configured)
+        if self.filter_sets.get('CWC_FILTER'):
+            cwc_match = re.search(r'(\w+)\[CWC_Filter\]\s*=\s*1', condition, re.IGNORECASE)
+            if cwc_match:
+                dim_table = cwc_match.group(1)
+                alias = self._dim_table_to_alias(dim_table)
+                cwc_values = self.filter_sets['CWC_FILTER']
                 in_list = ', '.join(f"'{v}'" for v in cwc_values)
-                return f"{alias}.bic_cwc_type IN ({in_list})"
+                return f"{alias}.{self._cwc_filter_column} IN ({in_list})"
 
         # Cross-table fact filter
         if filter_table and filter_table in self._fact_join_map_cfg:
@@ -580,9 +574,8 @@ class DaxTranslator:
 
     def _dim_table_to_alias(self, dim_table: str) -> str:
         """Map a PBI dimension table name to its SQL join alias."""
-        name_lower = dim_table.lower()
-        if 'wkctr' in name_lower or 'workcenter' in name_lower:
-            return 'dim_wkctr'
+        if dim_table in self._dim_alias_map:
+            return self._dim_alias_map[dim_table]
         return dim_table.lower()
 
     def _resolve_filter_alias(self, dax_table: str, dax_col: str) -> tuple[str, str]:
@@ -704,11 +697,12 @@ class DaxTranslator:
 
     def _extend_with_implicit_filters(self, filter_parts: list[str], alias: str):
         """Add MQuery implicit filters for a fact join alias."""
+        safe_alias = _sanitize_alias(alias)
         for fj in self._fact_joins:
-            if fj.get('name') == alias:
+            if fj.get('name') == safe_alias:
                 fj_cfg = fj.get('_fact_join_config', {})
                 for impl in fj_cfg.get('implicit_filters', []):
-                    impl_sql = impl.format(alias=alias)
+                    impl_sql = impl.format(alias=safe_alias)
                     if impl_sql not in ' AND '.join(filter_parts):
                         filter_parts.append(impl_sql)
 

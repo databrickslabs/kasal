@@ -88,6 +88,15 @@ for k, s in sql_out.items():
     with open(os.path.join(OUTPUT_DIR, f'deploy_{k}.sql'), 'w') as f:
         f.write(s)
 
+# ── Migration Report ──
+results = pipeline.get_results()
+report = results.get('migration_report', '')
+if report:
+    report_path = os.path.join(OUTPUT_DIR, 'migration_report.md')
+    with open(report_path, 'w') as f:
+        f.write(report)
+    print(f'Migration report: {report_path}')
+
 # ── Summary ──
 print(f'\n{"="*60}')
 print(f'RESULTS')

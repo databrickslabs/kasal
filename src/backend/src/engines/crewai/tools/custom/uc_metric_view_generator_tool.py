@@ -1,13 +1,33 @@
 """UC Metric View Generator Tool for CrewAI — full pipeline."""
+import asyncio
+import concurrent.futures
 import json
 import logging
 import os
+import re
+import urllib.parse
 from typing import Any, Optional, Type
 
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 
 logger = logging.getLogger(__name__)
+
+
+def _run_async(coro):
+    """Safely run async code from sync context."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        # Inside a running event loop — must use a separate thread
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(asyncio.run, coro)
+            return future.result(timeout=300)
+    else:
+        return asyncio.run(coro)
 
 
 class UCMetricViewGeneratorSchema(BaseModel):
@@ -36,11 +56,12 @@ class UCMetricViewGeneratorSchema(BaseModel):
     dataset_id: Optional[str] = Field(None, description="Power BI dataset/semantic model ID")
     tenant_id: Optional[str] = Field(None, description="Azure AD tenant ID for Service Principal auth")
     client_id: Optional[str] = Field(None, description="Azure AD application/client ID")
-    client_secret: Optional[str] = Field(None, description="Client secret for Service Principal auth")
+    client_secret: Optional[str] = Field(None, description="Client secret for Service Principal auth", repr=False)
     username: Optional[str] = Field(None, description="Service account username (alternative to SP)")
-    password: Optional[str] = Field(None, description="Service account password")
+    password: Optional[str] = Field(None, description="Service account password", repr=False)
     auth_method: Optional[str] = Field(None, description="Auth method: 'service_principal', 'service_account', or auto-detect")
-    access_token: Optional[str] = Field(None, description="Pre-obtained OAuth access token (alternative to SP/SA)")
+    access_token: Optional[str] = Field(None, description="Pre-obtained OAuth access token (alternative to SP/SA)", repr=False)
+    pbi_api_base_url: Optional[str] = Field(None, description="Power BI API base URL. Defaults to commercial cloud. Use 'https://api.powerbigov.us/v1.0/myorg' for GCC, 'https://api.powerbi.cn/v1.0/myorg' for China cloud.")
 
 
 class UCMetricViewGeneratorTool(BaseTool):
@@ -59,6 +80,15 @@ class UCMetricViewGeneratorTool(BaseTool):
 
     model_config = {"arbitrary_types_allowed": True, "extra": "allow"}
 
+    @staticmethod
+    def _mask_secret(value: str | None) -> str:
+        """Mask a secret value for logging."""
+        if not value:
+            return 'none'
+        if len(value) <= 8:
+            return '***'
+        return f'{value[:4]}...{value[-4:]}'
+
     def __init__(self, **kwargs: Any) -> None:
         config_keys = ('measures_json', 'mquery_json', 'relationships_json',
                        'scan_data_json', 'config_json', 'catalog', 'schema_name',
@@ -66,7 +96,7 @@ class UCMetricViewGeneratorTool(BaseTool):
                        'use_llm_fallback', 'llm_model', 'llm_workspace_url', 'llm_token',
                        'workspace_id', 'dataset_id', 'tenant_id', 'client_id',
                        'client_secret', 'username', 'password', 'auth_method',
-                       'access_token')
+                       'access_token', 'pbi_api_base_url')
         default_config = {}
         for key in config_keys:
             val = kwargs.pop(key, None)
@@ -99,7 +129,11 @@ class UCMetricViewGeneratorTool(BaseTool):
         dataset_id = _get('dataset_id')
 
         if workspace_id and dataset_id:
-            logger.info(f"[UCMV] API extraction mode: workspace={workspace_id}, dataset={dataset_id}")
+            pbi_api_base_url = _get('pbi_api_base_url') or ''
+            valid, err_msg = self._validate_pbi_inputs(workspace_id, dataset_id, pbi_api_base_url)
+            if not valid:
+                return json.dumps({"error": f"PBI input validation failed: {err_msg}"})
+            logger.info(f"[UCMV] API extraction mode: workspace={workspace_id}, dataset={dataset_id}, token={self._mask_secret(_get('access_token'))}")
             try:
                 extracted = self._extract_from_pbi_api(
                     workspace_id=workspace_id,
@@ -111,6 +145,7 @@ class UCMetricViewGeneratorTool(BaseTool):
                     password=_get('password') or '',
                     auth_method=_get('auth_method'),
                     access_token=_get('access_token') or '',
+                    pbi_api_base_url=_get('pbi_api_base_url') or '',
                 )
                 # Use extracted data (override only when manually provided JSON is empty/default)
                 if extracted.get('measures') and measures_raw == '[]':
@@ -202,6 +237,27 @@ class UCMetricViewGeneratorTool(BaseTool):
         return json.dumps(output, indent=2)
 
     # ------------------------------------------------------------------
+    # PBI API input validation (SSRF prevention)
+    # ------------------------------------------------------------------
+
+    _UUID_PATTERN = re.compile(r'^[a-fA-F0-9\-]{8,50}$')
+    _ALLOWED_PBI_DOMAINS = frozenset({
+        'api.powerbi.com', 'api.powerbigov.us', 'api.powerbi.cn',
+        'api.powerbi.de', 'api.microsoftcloud.de',
+    })
+
+    def _validate_pbi_inputs(self, workspace_id: str, dataset_id: str, pbi_api_base_url: str) -> tuple[bool, str]:
+        """Validate PBI API inputs to prevent SSRF."""
+        if not self._UUID_PATTERN.match(workspace_id):
+            return False, f"Invalid workspace_id format: {workspace_id}"
+        if not self._UUID_PATTERN.match(dataset_id):
+            return False, f"Invalid dataset_id format: {dataset_id}"
+        parsed = urllib.parse.urlparse(pbi_api_base_url or 'https://api.powerbi.com')
+        if parsed.hostname not in self._ALLOWED_PBI_DOMAINS:
+            return False, f"Untrusted PBI API domain: {parsed.hostname}"
+        return True, ""
+
+    # ------------------------------------------------------------------
     # PBI API extraction helpers
     # ------------------------------------------------------------------
 
@@ -216,13 +272,12 @@ class UCMetricViewGeneratorTool(BaseTool):
         password: str,
         auth_method: Optional[str],
         access_token: str,
+        pbi_api_base_url: str = '',
     ) -> dict:
         """Extract measures, MQuery, relationships, and scan data from PBI API.
 
         Returns dict with keys: measures, mquery, relationships, scan_data
         """
-        import asyncio
-
         auth_config = {
             'tenant_id': tenant_id,
             'client_id': client_id,
@@ -241,22 +296,7 @@ class UCMetricViewGeneratorTool(BaseTool):
             from src.engines.crewai.tools.custom.powerbi_auth_utils import (
                 get_powerbi_access_token_from_config,
             )
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
-
-            if loop and loop.is_running():
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    token = pool.submit(
-                        asyncio.run,
-                        get_powerbi_access_token_from_config(auth_config),
-                    ).result()
-            else:
-                token = asyncio.run(
-                    get_powerbi_access_token_from_config(auth_config)
-                )
+            token = _run_async(get_powerbi_access_token_from_config(auth_config))
 
         # 1. Extract measures via Execute Queries API
         try:
@@ -271,9 +311,12 @@ class UCMetricViewGeneratorTool(BaseTool):
 
             measures = []
             for kpi in kpis:
+                # kpi.technical_name is derived from the actual PBI measure name (snake_cased).
+                # kpi.description may contain a textual description, not the measure name.
+                measure_name = kpi.technical_name or kpi.description
                 measures.append({
-                    'measure_name': kpi.description,
-                    'original_name': kpi.description,
+                    'measure_name': measure_name,
+                    'original_name': measure_name,
                     'dax_expression': kpi.formula or '',
                     'proposed_allocation': kpi.source_table or '__unassigned__',
                     'table_refs': [],
@@ -289,22 +332,9 @@ class UCMetricViewGeneratorTool(BaseTool):
 
             scanner = PowerBIAdminScanner(access_token=token)
 
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
-
-            if loop and loop.is_running():
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    scan_result, raw_scan = pool.submit(
-                        asyncio.run,
-                        scanner.scan_workspace(workspace_id, dataset_id=dataset_id),
-                    ).result()
-            else:
-                scan_result, raw_scan = asyncio.run(
-                    scanner.scan_workspace(workspace_id, dataset_id=dataset_id)
-                )
+            scan_result, raw_scan = _run_async(
+                scanner.scan_workspace(workspace_id, dataset_id=dataset_id)
+            )
 
             if raw_scan:
                 result['scan_data'] = raw_scan
@@ -327,10 +357,8 @@ class UCMetricViewGeneratorTool(BaseTool):
         try:
             import requests as req_lib
 
-            url = (
-                f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}"
-                f"/datasets/{dataset_id}/executeQueries"
-            )
+            pbi_api_base = pbi_api_base_url or 'https://api.powerbi.com/v1.0/myorg'
+            url = f"{pbi_api_base}/groups/{workspace_id}/datasets/{dataset_id}/executeQueries"
             headers = {
                 'Authorization': f'Bearer {token}',
                 'Content-Type': 'application/json',
