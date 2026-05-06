@@ -99,10 +99,45 @@ The biggest bottleneck today is authoring `pipeline_config.json`. Tool 89 will p
 
 **What Tool 89 won't get right:** `fact_join_map` entries with pivot/union/embed modes. These encode grain-level business decisions (e.g., "scorecard table has one row per KBI per workcenter, but the fact table has one row per workcenter — need to pivot before joining"). A human must review these.
 
+### Known Limitations
+
+**USERELATIONSHIP (inactive relationships)**
+
+DAX uses `USERELATIONSHIP(Table[Column], Dim[Column])` to activate an inactive relationship for a specific calculation (e.g., using ShipDate instead of the default OrderDate join to a calendar dimension). Today:
+- The Relationships API (Tool 75) extracts inactive relationships (`is_active: false`)
+- `RelationshipsLoader` skips them — they're extracted but discarded
+
+The fix: UC Metric Views support multiple joins to the same dimension with different aliases. A `USERELATIONSHIP` measure becomes a second join entry:
+```yaml
+joins:
+  - name: dim_calendar           # default (OrderDate)
+    source: calendar_table
+    on: source.order_date = dim_calendar.date
+  - name: dim_calendar_ship      # USERELATIONSHIP alternative
+    source: calendar_table
+    on: source.ship_date = dim_calendar_ship.date
+```
+Then the measure references `dim_calendar_ship` instead of `dim_calendar`. This can be auto-detected from the inactive relationships we already extract — planned for Tool 89.
+
+**M:N relationships (many-to-many)**
+
+PBI supports many-to-many through bridging tables or bidirectional cross-filtering. Today:
+- `RelationshipsLoader` explicitly skips them (`from_card == 'Many' and to_card == 'Many': continue`)
+- UC Metric Views don't natively support M:N joins
+
+Workarounds (require human decision):
+1. **Bridge table** — create a Databricks view that resolves the M:N into two 1:N joins, reference it in `enrichment_joins` config
+2. **Pre-joined source SQL** — use inline `source: |-` SQL in the YAML that bakes in the M:N resolution
+3. **Skip and flag** — document in migration report for manual handling
+
+Both limitations are flagged in the migration report when detected. Neither produces silently wrong output — the measures are marked untranslatable with specific reasons.
+
 ### What will always need human judgment
 
 - Semantic correctness (does `revenue` mean gross or net?)
 - Grain decisions for cross-table joins (pivot vs union vs embed)
+- USERELATIONSHIP join alias decisions (which alternative join to use)
+- M:N relationship resolution strategy (bridge table vs pre-joined SQL)
 - Complex DAX patterns the LLM can't translate deterministically
 - Source SQL quality (suboptimal JOINs, redundant WHERE clauses)
 - Business logic encoded in SWITCH branches that only domain experts understand
