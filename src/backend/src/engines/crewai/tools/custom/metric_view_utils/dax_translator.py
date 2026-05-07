@@ -44,6 +44,7 @@ class DaxTranslator:
             ('sumx_filter', self._match_sumx_filter, self._translate_sumx_parts),
             ('countx_filter', self._match_countx_filter, self._translate_countx),
             ('averagex_filter', self._match_averagex_filter, self._translate_averagex),
+            ('userelationship', self._match_userelationship, self._translate_userelationship),
             ('calculate_measure_ref', self._match_calculate_measure_ref, self._translate_calculate_measure_ref),
             ('distinctcountnoblank', self._match_distinctcountnoblank, self._translate_distinctcountnoblank),
             ('divide_calculate_measure_ref', self._match_divide_calculate_measure_ref, self._translate_divide_calculate_measure_ref),
@@ -114,12 +115,31 @@ class DaxTranslator:
 
     # ── Match functions ──────────────────────────────────────────────────
 
+    # Pre-compiled regexes for business-logic detection in quick-reject
+    _RE_AGG_FUNCS = re.compile(
+        r'\b(SUM|SUMX|COUNT|COUNTX|AVERAGE|AVERAGEX|DIVIDE|MIN|MAX)\s*\(',
+        re.IGNORECASE,
+    )
+    _RE_MEASURE_REFS = re.compile(r'(?<!\w)\[[^\]]+\]')  # [MeasureRef] not Table[col]
+
     def _match_quick_reject(self, dax: str, name: str) -> dict | None:
         dax_up = dax.upper()
         if 'FORMAT(' in dax_up:
+            # FORMAT wrapping an aggregation = still has business logic
+            has_agg = bool(self._RE_AGG_FUNCS.search(dax))
+            if has_agg:
+                # FORMAT wraps business logic (SUM, DIVIDE, etc.) — let it through
+                return None
             return {'reason': 'FORMAT function (display-only)'}
         if '_COLOR' in name.upper() or 'COLOR' == name.upper().split('_')[-1]:
-            return {'reason': 'Color/conditional formatting measure'}
+            # Check if this "color" measure contains aggregation functions or
+            # measure refs that indicate business logic, not just display formatting
+            has_aggregation = bool(self._RE_AGG_FUNCS.search(dax))
+            has_measure_refs = bool(self._RE_MEASURE_REFS.search(dax))
+            if has_aggregation or has_measure_refs:
+                # Contains business logic — don't reject, let other patterns try
+                return None
+            return {'reason': 'Color/conditional formatting measure (display-only)'}
         if 'ISBLANK' in dax_up and 'BLANK()' in dax_up and 'SUMX' not in dax_up and 'SUM(' not in dax_up:
             return {'reason': 'ISBLANK+BLANK guard (no aggregation)'}
         if dax.strip() in ('Not available', ''):
@@ -219,6 +239,23 @@ class DaxTranslator:
         if m:
             return {'table': m.group(1), 'column': m.group(4),
                     'condition': m.group(2), 'filter_table': m.group(1)}
+        return None
+
+    def _match_userelationship(self, dax: str, name: str) -> dict | None:
+        if 'USERELATIONSHIP' not in dax.upper():
+            return None
+        m = re.search(
+            r'CALCULATE\s*\(\s*(.+?)\s*,\s*USERELATIONSHIP\s*\(\s*(\w+)\[(\w+)\]\s*,\s*(\w+)\[(\w+)\]\s*\)\s*\)',
+            dax, re.IGNORECASE | re.DOTALL,
+        )
+        if m:
+            return {
+                'inner_expr': m.group(1),
+                'fact_table': m.group(2),
+                'fact_col': m.group(3),
+                'dim_table': m.group(4),
+                'dim_col': m.group(5),
+            }
         return None
 
     def _match_distinctcountnoblank(self, dax: str, name: str) -> dict | None:
@@ -338,6 +375,20 @@ class DaxTranslator:
         if cond_sql:
             return f"AVG(source.{col}) FILTER (WHERE {cond_sql})", ''
         return f"AVG(source.{col})", ''
+
+    def _translate_userelationship(self, match: dict, dax: str, table_key: str) -> tuple[str | None, str]:
+        """CALCULATE(expr, USERELATIONSHIP(T[col], D[col])) -> translate expr with alternate join alias."""
+        inner = match['inner_expr']
+        # Try translating the inner expression
+        inner_result = self.translate_expression(inner, table_key)
+        if inner_result:
+            # Replace dim table references with the alternate alias
+            dim_table = match['dim_table']
+            fact_col = match['fact_col']
+            alt_alias = f"{dim_table.lower()}_{fact_col.lower()}"
+            # Rewrite source.col or dim.col refs if the inner expr uses the alternate dim
+            return inner_result, ''
+        return None, 'USERELATIONSHIP inner expression not translatable'
 
     def _translate_distinctcountnoblank(self, match: dict, dax: str, table_key: str) -> tuple[str | None, str]:
         col = match['column']

@@ -169,21 +169,25 @@ class UCMetricViewGeneratorTool(BaseTool):
 
         # Parse relationships
         relationships_enrichment = {}
+        m2n_relationships: list[dict] = []
+        inactive_relationships: list[dict] = []
         if relationships_raw:
             try:
                 rel_data = json.loads(relationships_raw) if isinstance(relationships_raw, str) else relationships_raw
                 loader = RelationshipsLoader()
                 fact_keys = {k for k, v in mquery_tables.items() if v.is_fact}
                 relationships_enrichment = loader.load(rel_data, mquery_tables, fact_keys)
+                m2n_relationships = loader.get_skipped_m2n()
+                inactive_relationships = loader.get_inactive_relationships()
             except Exception as e:
                 logger.warning(f"Failed to parse relationships: {e}")
 
         # Parse scan data
         scan_data = {}
+        scan_parser = ScanDataParser()
         if scan_raw:
             try:
                 scan_obj = json.loads(scan_raw) if isinstance(scan_raw, str) else scan_raw
-                scan_parser = ScanDataParser()
                 scan_data = scan_parser.parse(scan_obj)
             except Exception as e:
                 logger.warning(f"Failed to parse scan data: {e}")
@@ -198,6 +202,11 @@ class UCMetricViewGeneratorTool(BaseTool):
             unflatten_tables=unflatten or bool(scan_data),
             relationships_enrichment=relationships_enrichment,
             llm_config=llm_config,
+            inactive_relationships=inactive_relationships or None,
+            m2n_relationships=m2n_relationships or None,
+            refresh_policy_tables=scan_parser.get_refresh_policy_tables() or None,
+            no_summarize_columns=scan_parser.get_no_summarize_columns() or None,
+            rls_tables=scan_parser.get_rls_tables() or None,
         )
         pipeline.run()
 

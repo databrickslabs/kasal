@@ -16,6 +16,10 @@ class RelationshipsLoader:
 
     _SYSTEM_TABLE_PREFIXES = ('LocalDateTable', 'DateTableTemplate')
 
+    def __init__(self):
+        self._inactive_rels: list[dict] = []
+        self._skipped_m2n: list[dict] = []
+
     def load(
         self,
         source: str | list | dict,
@@ -42,10 +46,16 @@ class RelationshipsLoader:
         enrichment: dict[str, list[dict]] = {}
 
         for rel in relationships:
-            if not rel.get('is_active', True):
-                continue
             from_tbl = rel.get('from_table', '')
             to_tbl = rel.get('to_table', '')
+            if not rel.get('is_active', True):
+                self._inactive_rels.append({
+                    'from_table': from_tbl,
+                    'from_column': rel.get('from_column', ''),
+                    'to_table': to_tbl,
+                    'to_column': rel.get('to_column', ''),
+                })
+                continue  # still skip from active joins
             if any(from_tbl.startswith(p) or to_tbl.startswith(p)
                    for p in self._SYSTEM_TABLE_PREFIXES):
                 continue
@@ -54,7 +64,13 @@ class RelationshipsLoader:
             to_card = rel.get('to_cardinality', 'One')
 
             if from_card == 'Many' and to_card == 'Many':
-                continue
+                self._skipped_m2n.append({
+                    'from_table': from_tbl,
+                    'from_column': rel.get('from_column', ''),
+                    'to_table': to_tbl,
+                    'to_column': rel.get('to_column', ''),
+                })
+                continue  # M:N — tracked for reporting
             elif from_card == 'One' and to_card == 'Many':
                 from_tbl, to_tbl = to_tbl, from_tbl
                 rel['from_column'], rel['to_column'] = (
@@ -97,6 +113,14 @@ class RelationshipsLoader:
             enrichment.setdefault(fact_key, []).append(join_entry)
 
         return enrichment
+
+    def get_inactive_relationships(self) -> list[dict]:
+        """Return inactive relationships detected during load()."""
+        return self._inactive_rels
+
+    def get_skipped_m2n(self) -> list[dict]:
+        """Return M:N relationships that were skipped during load()."""
+        return self._skipped_m2n
 
     @staticmethod
     def _parse_format(raw: object) -> list[dict]:

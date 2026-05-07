@@ -294,3 +294,71 @@ class TestRelationshipsLoaderMultipleJoins:
         assert 'col_a' in join_entry['dim_columns']
         assert 'col_b' in join_entry['dim_columns']
         assert join_entry['_auto'] is True
+
+
+class TestM2NTracking:
+    def test_m2n_tracked_not_silently_dropped(self):
+        """M:N relationships are tracked via get_skipped_m2n(), not silently dropped."""
+        loader = RelationshipsLoader()
+        tables = {
+            'A': _make_table('A', 's_a', ['k']),
+            'B': _make_table('B', 's_b', ['k'], agg=[], is_fact=False),
+        }
+        rels = [
+            {'from_table': 'A', 'from_column': 'k', 'from_cardinality': 'Many',
+             'to_table': 'B', 'to_column': 'k', 'to_cardinality': 'Many',
+             'is_active': True}
+        ]
+        result = loader.load(rels, tables, {'A'})
+        assert result == {}  # Still not included as a join
+        m2n = loader.get_skipped_m2n()
+        assert len(m2n) == 1
+        assert m2n[0]['from_table'] == 'A'
+        assert m2n[0]['to_table'] == 'B'
+        assert m2n[0]['from_column'] == 'k'
+        assert m2n[0]['to_column'] == 'k'
+
+    def test_no_m2n_returns_empty(self):
+        """When no M:N relationships exist, get_skipped_m2n() returns empty list."""
+        loader = RelationshipsLoader()
+        tables = {
+            'fact': _make_table('fact', 'cat.sch.fact', ['k']),
+            'dim': _make_table('dim', 'cat.sch.dim', ['k', 'label'],
+                               agg=[], is_fact=False),
+        }
+        rels = [
+            {'from_table': 'fact', 'from_column': 'k', 'from_cardinality': 'Many',
+             'to_table': 'dim', 'to_column': 'k', 'to_cardinality': 'One',
+             'is_active': True}
+        ]
+        loader.load(rels, tables, {'fact'})
+        assert loader.get_skipped_m2n() == []
+
+    def test_m2n_initial_state_empty(self):
+        """Before load() is called, get_skipped_m2n() returns empty list."""
+        loader = RelationshipsLoader()
+        assert loader.get_skipped_m2n() == []
+
+    def test_multiple_m2n_tracked(self):
+        """Multiple M:N relationships are all tracked."""
+        loader = RelationshipsLoader()
+        tables = {
+            'A': _make_table('A', 's_a', ['k1', 'k2']),
+            'B': _make_table('B', 's_b', ['k1'], agg=[], is_fact=False),
+            'C': _make_table('C', 's_c', ['k2'], agg=[], is_fact=False),
+        }
+        rels = [
+            {'from_table': 'A', 'from_column': 'k1', 'from_cardinality': 'Many',
+             'to_table': 'B', 'to_column': 'k1', 'to_cardinality': 'Many',
+             'is_active': True},
+            {'from_table': 'A', 'from_column': 'k2', 'from_cardinality': 'Many',
+             'to_table': 'C', 'to_column': 'k2', 'to_cardinality': 'Many',
+             'is_active': True},
+        ]
+        loader.load(rels, tables, {'A'})
+        m2n = loader.get_skipped_m2n()
+        assert len(m2n) == 2
+        from_tables = {r['from_table'] for r in m2n}
+        to_tables = {r['to_table'] for r in m2n}
+        assert from_tables == {'A'}
+        assert to_tables == {'B', 'C'}

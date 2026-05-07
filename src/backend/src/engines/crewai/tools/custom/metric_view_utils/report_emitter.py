@@ -11,6 +11,7 @@ def emit_migration_report(
     all_specs: dict[str, MetricViewSpec],
     stats: dict[str, dict],
     config: dict | None = None,
+    limitations: dict | None = None,
 ) -> str:
     """Generate a markdown migration report.
 
@@ -19,6 +20,7 @@ def emit_migration_report(
     - Per-table breakdown (translated, untranslatable, artifacts, confidence)
     - Join map (which dimensions are joined to which facts)
     - Untranslatable DAX measures with explanations
+    - M:N relationships (if any were skipped)
     - Recommendations
     """
     lines: list[str] = []
@@ -105,6 +107,23 @@ def emit_migration_report(
                 f'| {table_key} | {j["name"]} | `{source}` | `{on_clause}` |')
     lines.append('')
 
+    # ── Inactive Relationships (USERELATIONSHIP) ────────────────────────
+    _lim = limitations or {}
+    if _lim.get('inactive_relationships'):
+        lines.append('## Inactive Relationships (USERELATIONSHIP)')
+        lines.append('')
+        lines.append('These PBI inactive relationships were detected. Measures using USERELATIONSHIP')
+        lines.append('get alternate join aliases in the metric view.')
+        lines.append('')
+        lines.append('| From Table | From Column | To Table | To Column | Alias |')
+        lines.append('|-----------|-------------|----------|----------|-------|')
+        for irel in _lim['inactive_relationships']:
+            alias = f"{irel['to_table'].lower()}_{irel['from_column'].lower()}"
+            lines.append(
+                f"| {irel['from_table']} | {irel['from_column']} "
+                f"| {irel['to_table']} | {irel['to_column']} | {alias} |")
+        lines.append('')
+
     # ── Untranslatable Measures ────────────────────────────────────────────
 
     lines.append('## Untranslatable Measures')
@@ -116,6 +135,150 @@ def emit_migration_report(
             reason = m.skip_reason[:80] if m.skip_reason else 'Unknown'
             lines.append(
                 f'| {table_key} | {m.original_name} | {reason} |')
+    lines.append('')
+
+    # ── M:N Relationships ─────────────────────────────────────────────────
+
+    if _lim.get('m2n_relationships'):
+        lines.append('## M:N Relationships (Not Migrated)')
+        lines.append('')
+        lines.append(
+            'These many-to-many relationships cannot be directly represented '
+            'as UC Metric View joins.')
+        lines.append(
+            'Workarounds: (1) Create a bridge table view in Databricks, '
+            '(2) Use pre-joined inline SQL, (3) Skip and handle manually.')
+        lines.append('')
+        lines.append('| From Table | From Column | To Table | To Column |')
+        lines.append('|-----------|-------------|----------|----------|')
+        for rel in _lim['m2n_relationships']:
+            lines.append(
+                f"| {rel['from_table']} | {rel['from_column']} "
+                f"| {rel['to_table']} | {rel['to_column']} |")
+        lines.append('')
+
+    # ── Incremental Refresh Policies ─────────────────────────────────────
+
+    if _lim.get('refresh_policies'):
+        lines.append('## Incremental Refresh Policies')
+        lines.append('')
+        lines.append('These tables have incremental refresh policies in PBI.')
+        lines.append('Consider adding a date filter to the UC Metric View for performance.')
+        lines.append('')
+        for rp in _lim['refresh_policies']:
+            lines.append(f"- **{rp['table_name']}**")
+        lines.append('')
+
+    # ── Summarization Override Warnings ───────────────────────────────────
+
+    if _lim.get('summarization_warnings'):
+        lines.append('## Summarization Override Warnings')
+        lines.append('')
+        lines.append('These columns have SummarizeBy=None in PBI (should not be aggregated).')
+        lines.append('Verify they are not included as SUM measures in the metric view.')
+        lines.append('')
+        lines.append('| Table | Column |')
+        lines.append('|-------|--------|')
+        for sw in _lim['summarization_warnings']:
+            lines.append(f"| {sw['table_name']} | {sw['column_name']} |")
+        lines.append('')
+
+    # ── Row-Level Security Warning ────────────────────────────────────────
+
+    if _lim.get('rls_tables'):
+        lines.append('## Row-Level Security Warning')
+        lines.append('')
+        lines.append('These tables have RLS in PBI. UC Metric Views do not enforce RLS.')
+        lines.append('Configure Databricks row filters separately.')
+        lines.append('')
+        for t in sorted(_lim['rls_tables']):
+            lines.append(f'- {t}')
+        lines.append('')
+
+    # ── Aggregation Table Warnings ─────────────────────────────────────────
+
+    if _lim.get('aggregation_warnings'):
+        lines.append('## Aggregation Table Warnings')
+        lines.append('')
+        lines.append('These tables use Import storage mode and may be aggregation tables.')
+        lines.append('Verify the source grain matches your metric view expectations.')
+        lines.append('')
+        for w in _lim['aggregation_warnings']:
+            lines.append(f"- **{w['table']}**: {w['warning']}")
+        lines.append('')
+
+    # ── Perspectives (Agent 9) ────────────────────────────────────────────
+
+    if _lim.get('perspectives'):
+        lines.append('## Perspectives (Not Migrated)')
+        lines.append('')
+        lines.append('PBI perspectives control table/measure visibility per user group.')
+        lines.append('UC Metric Views do not support perspectives. Consider separate UCMV sets or Databricks permissions.')
+        lines.append('')
+        for p in _lim['perspectives']:
+            name = p.get('name', p) if isinstance(p, dict) else str(p)
+            lines.append(f'- {name}')
+        lines.append('')
+
+    # ── Field Parameters (Agent 9) ────────────────────────────────────────
+
+    if _lim.get('field_parameters'):
+        lines.append('## Field Parameters (Not Migrated)')
+        lines.append('')
+        lines.append('PBI field parameters let users dynamically switch displayed measures.')
+        lines.append('No UC equivalent. Consider separate metric views or Genie space configuration.')
+        lines.append('')
+        for fp in _lim['field_parameters']:
+            name = fp.get('name', fp) if isinstance(fp, dict) else str(fp)
+            lines.append(f'- {name}')
+        lines.append('')
+
+    # ── PBI Native Features — Migration Status (Agent 10) ────────────────
+    lines.append('## PBI Native Features — Migration Status')
+    lines.append('')
+    lines.append('| Feature | Status | Count | Details |')
+    lines.append('|---------|--------|-------|---------|')
+
+    # Inactive relationships
+    inactive = _lim.get('inactive_relationships', [])
+    lines.append(f"| USERELATIONSHIP | {'Migrated' if inactive else 'N/A'} | {len(inactive)} | Alternate join aliases generated |")
+
+    # M:N
+    m2n = _lim.get('m2n_relationships', [])
+    lines.append(f"| M:N Relationships | {'Flagged' if m2n else 'N/A'} | {len(m2n)} | Requires bridge table |")
+
+    # RLS
+    rls = _lim.get('rls_tables', set())
+    lines.append(f"| Row-Level Security | {'Flagged' if rls else 'N/A'} | {len(rls)} | Configure Databricks row filters |")
+
+    # Aggregation
+    agg = _lim.get('aggregation_warnings', [])
+    lines.append(f"| Aggregation Tables | {'Flagged' if agg else 'N/A'} | {len(agg)} | Verify source grain |")
+
+    # Refresh policies
+    rp = _lim.get('refresh_policies', [])
+    lines.append(f"| Incremental Refresh | {'Flagged' if rp else 'N/A'} | {len(rp)} | Add date filter for performance |")
+
+    # Summarization
+    sw = _lim.get('summarization_warnings', [])
+    lines.append(f"| Default Summarization | {'Flagged' if sw else 'N/A'} | {len(sw)} | SummarizeBy=None columns |")
+
+    # Calc groups
+    cg = _lim.get('calculation_groups_expanded', [])
+    cg_count = sum(c.get('expanded_count', 0) for c in cg)
+    lines.append(f"| Calculation Groups | {'Expanded' if cg else 'N/A'} | {cg_count} | Measures auto-generated |")
+
+    # Perspectives
+    persp = _lim.get('perspectives', [])
+    lines.append(f"| Perspectives | {'Flagged' if persp else 'N/A'} | {len(persp)} | Not migrated |")
+
+    # Field parameters
+    fp_list = _lim.get('field_parameters', [])
+    lines.append(f"| Field Parameters | {'Flagged' if fp_list else 'N/A'} | {len(fp_list)} | Not migrated |")
+
+    # Conditional formatting
+    lines.append(f"| Conditional Formatting | Improved | — | Business logic now detected |")
+
     lines.append('')
 
     # ── Recommendations ────────────────────────────────────────────────────

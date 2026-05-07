@@ -70,6 +70,11 @@ class MetricViewPipeline:
         unflatten_tables: bool = False,
         relationships_enrichment: dict | None = None,
         llm_config: dict | None = None,
+        inactive_relationships: list[dict] | None = None,
+        m2n_relationships: list[dict] | None = None,
+        refresh_policy_tables: list[dict] | None = None,
+        no_summarize_columns: list[dict] | None = None,
+        rls_tables: set[str] | None = None,
     ):
         self.mapping = mapping
         self.mquery_tables = mquery_tables
@@ -78,6 +83,31 @@ class MetricViewPipeline:
         self.scan_data = scan_data or {}
         self.unflatten_tables = unflatten_tables
         self.llm_config = llm_config or {}
+        self._inactive_rels: list[dict] = inactive_relationships or []
+        self._limitations: dict[str, list] = {}
+        if self._inactive_rels:
+            self._limitations['inactive_relationships'] = self._inactive_rels
+        if m2n_relationships:
+            self._limitations['m2n_relationships'] = m2n_relationships
+        if refresh_policy_tables:
+            self._limitations['refresh_policies'] = refresh_policy_tables
+        if no_summarize_columns:
+            self._limitations['summarization_warnings'] = no_summarize_columns
+        if rls_tables:
+            self._limitations['rls_tables'] = sorted(rls_tables)
+
+        # Calculation groups (Agent 8)
+        self._calc_groups = self.config.get('calculation_groups', [])
+
+        # Perspectives & field parameters (Agent 9)
+        perspectives = self.config.get('perspectives', [])
+        if perspectives:
+            self._limitations['perspectives'] = perspectives
+
+        field_parameters = self.config.get('field_parameters', [])
+        if field_parameters:
+            self._limitations['field_parameters'] = field_parameters
+
         self.translator = DaxTranslator(config=self.config)
         self.join_detector = JoinDetector(mquery_tables, config=self.config)
 
@@ -143,6 +173,40 @@ class MetricViewPipeline:
         self.pbi_parameter_resolver = PbiParameterResolver(
             parameter_defaults=self.config.get('parameter_defaults'),
         )
+
+    # ── Calculation group expansion (Agent 8) ──────────────────────────
+
+    def _expand_calculation_groups(self, base_measures: list[TranslationResult]) -> list[TranslationResult]:
+        """Expand calculation groups x base measures into explicit UCMV measures."""
+        if not self._calc_groups:
+            return []
+        expanded: list[TranslationResult] = []
+        for cg in self._calc_groups:
+            cg_name = cg.get('name', 'unknown')
+            for item in cg.get('items', []):
+                item_name = item.get('name', '')
+                item_expr_template = item.get('expression', 'SELECTEDMEASURE()')
+                for base in base_measures:
+                    expanded_name = f"{base.measure_name}_{to_snake_case(item_name)}"
+                    # Replace SELECTEDMEASURE() with MEASURE(base)
+                    expanded_expr = item_expr_template.replace(
+                        'SELECTEDMEASURE()', f'MEASURE({base.measure_name})')
+                    expanded.append(TranslationResult(
+                        measure_name=expanded_name,
+                        original_name=f"{base.original_name} ({item_name})",
+                        sql_expr=expanded_expr,
+                        is_translatable=True,
+                        skip_reason=f'Expanded from calculation group: {cg_name}',
+                        dax_expression=f'SELECTEDMEASURE() from {cg_name}/{item_name}',
+                        confidence='medium',
+                        category='calculation_group',
+                    ))
+        if expanded:
+            self._limitations.setdefault('calculation_groups_expanded', []).append({
+                'group_count': len(self._calc_groups),
+                'expanded_count': len(expanded),
+            })
+        return expanded
 
     # ── run() — full pipeline ─────────────────────────────────────────────
 
@@ -267,7 +331,7 @@ class MetricViewPipeline:
                     'total': len(spec.untranslatable),
                     'translated': 0, 'untranslatable': len(spec.untranslatable),
                     'artifacts': self._count_artifacts(spec.untranslatable),
-                    'cross_table': 0, 'base': 0, 'dax': 0, 'switch': 0,
+                    'cross_table': 0, 'base': 0, 'dax': 0, 'switch': 0, 'manual_override': 0,
                     'skipped': True,
                     'skip_reason': 'All measures dropped by validation (no deployable measures)',
                 }
@@ -282,6 +346,7 @@ class MetricViewPipeline:
                 'base': spec.base_measure_count,
                 'dax': spec.dax_measure_count,
                 'switch': spec.switch_measure_count,
+                'manual_override': sum(1 for m in spec.measures if getattr(m, 'category', '') == 'manual_override'),
                 'skipped': False,
             }
 
@@ -375,6 +440,36 @@ class MetricViewPipeline:
                     'comment': f"{col_to_readable(dim_name)} from {ej['name']}",
                 })
 
+        # 3d. Detect USERELATIONSHIP measures and generate alternate join aliases
+        userel_pattern = re.compile(
+            r'USERELATIONSHIP\s*\(\s*(\w+)\[(\w+)\]\s*,\s*(\w+)\[(\w+)\]\s*\)',
+            re.IGNORECASE,
+        )
+        inactive_rels = self._inactive_rels
+        for m in dax_measures:
+            dax = m.get('dax_expression', '')
+            for match in userel_pattern.finditer(dax):
+                fact_col = match.group(2)   # e.g. ShipDate
+                dim_table = match.group(3)  # e.g. Calendar
+                dim_col = match.group(4)    # e.g. Date
+                # Find matching inactive relationship
+                for irel in inactive_rels:
+                    if (irel['from_column'].lower() == fact_col.lower()
+                            and irel['to_table'].lower() == dim_table.lower()):
+                        # Generate alternate join alias
+                        base_alias = dim_table.lower()
+                        alt_alias = f"{base_alias}_{fact_col.lower()}"
+                        # Check if this join already exists
+                        if not any(j['name'] == alt_alias for j in joins):
+                            dim_info = self.mquery_tables.get(irel['to_table'])
+                            if dim_info and dim_info.source_table:
+                                joins.append({
+                                    'name': alt_alias,
+                                    'source': dim_info.source_table,
+                                    'join_on': f'source.{fact_col.lower()} = {alt_alias}.{dim_col.lower()}',
+                                    '_userelationship': True,
+                                })
+
         # ── Step 4: Add dimension columns from joined tables ──────────────
         dim_dims = self.join_detector.get_dim_dimensions(joins, table_info)
         dimensions.extend(dim_dims)
@@ -440,6 +535,31 @@ class MetricViewPipeline:
                 else:
                     win_translated.append(m)
             translated = win_translated
+
+        # ── Step 5a-override: inject manual overrides ──
+        manual_overrides = self.config.get('manual_overrides', {}).get(table_key, [])
+        _untranslatable_names = {m.measure_name for m in untranslatable}
+        for override in manual_overrides:
+            override_name = override['name']
+            # Skip if already translated AND not still untranslatable
+            # (duplicate measure entries can appear in both lists)
+            if override_name in base_names and override_name not in _untranslatable_names:
+                continue
+            result = TranslationResult(
+                measure_name=override_name,
+                original_name=override.get('original_name', override_name),
+                sql_expr=override['expr'],
+                is_translatable=True,
+                skip_reason=override.get('comment', 'Manual override'),
+                dax_expression='manual override',
+                confidence='high',
+                category='manual_override',
+                window_spec=override.get('window'),
+            )
+            translated.append(result)
+            base_names.add(override_name)
+            # Remove from untranslatable if it was there
+            untranslatable = [m for m in untranslatable if m.measure_name != override_name]
 
         # ── Step 5b: Pass 2 — measure arithmetic: [A]-[B] -> MEASURE() refs
         original_to_snake: dict[str, str] = {}
@@ -704,6 +824,11 @@ class MetricViewPipeline:
         # ── Step 7: Merge: base + DAX translated + SWITCH decomposed ──────
         all_measures = base_measures + translated + switch_measures
 
+        # Expand calculation groups if configured (Agent 8)
+        calc_expanded = self._expand_calculation_groups(base_measures)
+        if calc_expanded:
+            all_measures.extend(calc_expanded)
+
         # ── Step 7a: Rewrite cross-fact FILTER expressions for pivoted joins.
         for fj in fact_joins:
             pivot_kbi_map = fj.get('_pivot_kbi_map')
@@ -860,6 +985,14 @@ class MetricViewPipeline:
             final_sql = re.sub(r'\bAS\s+(\w+)', _lc_alias, final_sql)
             source_sql = final_sql
             source_filter = ''  # folded into the inline SQL
+
+            # Flag aggregation tables (Import mode alongside DirectQuery tables)
+            if scan_info.storage_mode == 'Import':
+                self._limitations.setdefault('aggregation_warnings', []).append({
+                    'table': table_key,
+                    'storage_mode': scan_info.storage_mode,
+                    'warning': 'Import-mode table may be an aggregation table. Verify source grain.',
+                })
 
             # Add dimensions for columns created by M transforms (not in native SQL)
             existing_dim_names = {d['name'] for d in dimensions}
@@ -1453,8 +1586,10 @@ class MetricViewPipeline:
                     for m in spec.untranslatable
                 ],
             }
+        results['limitations'] = self._limitations
         results['migration_report'] = emit_migration_report(
-            self.all_specs, self.stats, self.config)
+            self.all_specs, self.stats, self.config,
+            limitations=self._limitations)
         return results
 
     def emit_all_yaml(self, catalog: str = 'main', schema: str = 'default') -> dict[str, str]:
