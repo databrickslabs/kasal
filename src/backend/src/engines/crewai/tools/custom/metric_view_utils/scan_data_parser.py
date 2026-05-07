@@ -53,6 +53,37 @@ class ScanDataParser:
                 if 'NativeQuery' in str(s.get('expression', ''))
             ))
 
+        # Extract RLS roles if present
+        rls_tables: set[str] = set()
+        for role in ds.get('roles', []):
+            for table_permission in role.get('tablePermissions', []):
+                tbl_name = table_permission.get('name', '')
+                if tbl_name:
+                    rls_tables.add(tbl_name)
+        self._rls_tables = rls_tables
+
+        # Track tables with refresh policies
+        self._refresh_policy_tables: list[dict] = []
+        for table in ds.get('tables', []):
+            refresh_policy = table.get('refreshPolicy')
+            if refresh_policy:
+                self._refresh_policy_tables.append({
+                    'table_name': table['name'],
+                    'policy': str(refresh_policy),
+                })
+
+        # Track columns with SummarizeBy = None (should not be aggregated)
+        self._no_summarize_columns: list[dict] = []
+        for table in ds.get('tables', []):
+            for col in table.get('columns', []):
+                summarize_by = col.get('summarizeBy', '')
+                if summarize_by and summarize_by.lower() == 'none':
+                    self._no_summarize_columns.append({
+                        'table_name': table['name'],
+                        'column_name': col.get('name', ''),
+                        'summarize_by': summarize_by,
+                    })
+
         result: dict[str, ScanTableInfo] = {}
         for table in ds.get('tables', []):
             sources = table.get('source', [])
@@ -70,6 +101,7 @@ class ScanDataParser:
             m_steps = self._parse_m_steps(expr)
             has_union = 'union' in native_sql.lower()
             pbi_columns = table.get('columns', [])
+            storage_mode = table.get('storageMode', '')
 
             result[pbi_name] = ScanTableInfo(
                 pbi_table_name=pbi_name,
@@ -78,9 +110,14 @@ class ScanDataParser:
                 m_steps=m_steps,
                 has_union=has_union,
                 pbi_columns=pbi_columns,
+                storage_mode=storage_mode,
             )
 
         return result
+
+    def get_rls_tables(self) -> set[str]:
+        """Return the set of table names that have RLS roles defined."""
+        return getattr(self, '_rls_tables', set())
 
     def _extract_native_sql(self, m_expr: str) -> str:
         """Extract the SQL string from Value.NativeQuery(conn, "SQL", ...)."""
@@ -124,3 +161,11 @@ class ScanDataParser:
                 steps.append(MStep(step_type=step_type, raw_expression=line))
 
         return steps
+
+    def get_refresh_policy_tables(self) -> list[dict]:
+        """Return tables that have incremental refresh policies in PBI."""
+        return getattr(self, '_refresh_policy_tables', [])
+
+    def get_no_summarize_columns(self) -> list[dict]:
+        """Return columns with SummarizeBy=None (should not be aggregated)."""
+        return getattr(self, '_no_summarize_columns', [])

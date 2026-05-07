@@ -51,15 +51,18 @@ fact_tables = {k for k, v in mquery_tables.items() if v.is_fact}
 print(f'  Parsed: {len(mquery_tables)} tables, {len(fact_tables)} fact tables')
 
 # ── Parse relationships ──
-rel_enrich = RelationshipsLoader().load(rels_raw, mquery_tables, fact_tables)
+rel_loader = RelationshipsLoader()
+rel_enrich = rel_loader.load(rels_raw, mquery_tables, fact_tables)
+inactive_rels = rel_loader.get_inactive_relationships()
 total_auto = sum(len(v) for v in rel_enrich.values())
-print(f'  Relationships: {total_auto} enrichment joins')
+print(f'  Relationships: {total_auto} enrichment joins, {len(inactive_rels)} inactive')
 
 # ── Parse scan data ──
 scan_path = os.path.join(script_dir, 'scan_result_debug.json')
 scan_data = {}
+scan_parser = ScanDataParser()
 if os.path.exists(scan_path):
-    scan_data = ScanDataParser().parse(scan_path)
+    scan_data = scan_parser.parse(scan_path)
     print(f'  Scan data: {len(scan_data)} tables')
 else:
     print('  Scan data: not found (skipping)')
@@ -71,8 +74,12 @@ pipeline = MetricViewPipeline(
     mquery_tables=mquery_tables,
     config=config,
     relationships_enrichment=rel_enrich,
+    inactive_relationships=inactive_rels or None,
     scan_data=scan_data,
     unflatten_tables=True,
+    refresh_policy_tables=scan_parser.get_refresh_policy_tables() or None,
+    no_summarize_columns=scan_parser.get_no_summarize_columns() or None,
+    rls_tables=scan_parser.get_rls_tables() or None,
 )
 specs = pipeline.run()
 
@@ -116,4 +123,6 @@ for k in sorted(specs.keys()):
     base = s.get('base', 0)
     dax = s.get('dax', 0)
     sw = s.get('switch', 0)
-    print(f'  {k}: {s["translated"]}/{s["total"]} (base={base} dax={dax} switch={sw})')
+    mo = s.get('manual_override', 0)
+    mo_str = f' manual={mo}' if mo else ''
+    print(f'  {k}: {s["translated"]}/{s["total"]} (base={base} dax={dax} switch={sw}{mo_str})')

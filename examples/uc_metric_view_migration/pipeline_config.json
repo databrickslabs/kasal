@@ -343,6 +343,21 @@
         "den": "paid_hours",
         "den_fs": "WCT_SLE",
         "comment": "SLE Waterfall: System Line Efficiency = Total_SLE_Actual"
+      },
+      {
+        "name": "cip_actual",
+        "raw_expr": "((SUM(source.co_and_cip) FILTER (WHERE dim_wkctr.bic_cwc_type IN ('APET', 'CAN', 'HDPE FG', 'JUICE-BRICK', 'NRGB', 'PET', 'PMX', 'RGB', 'TNK')))) / NULLIF((SUM(source.paid_hours) FILTER (WHERE dim_wkctr.bic_cwc_type IN ('APET', 'CAN', 'HDPE FG', 'JUICE-BRICK', 'NRGB', 'PET', 'PMX', 'RGB', 'TNK'))), 0)",
+        "comment": "CIP Actual"
+      },
+      {
+        "name": "epl_actual",
+        "raw_expr": "((SUM(source.epl) FILTER (WHERE dim_wkctr.bic_cwc_type IN ('APET', 'CAN', 'HDPE FG', 'JUICE-BRICK', 'NRGB', 'PET', 'PMX', 'RGB', 'TNK')))) / NULLIF((SUM(source.paid_hours) FILTER (WHERE dim_wkctr.bic_cwc_type IN ('APET', 'CAN', 'HDPE FG', 'JUICE-BRICK', 'NRGB', 'PET', 'PMX', 'RGB', 'TNK'))), 0)",
+        "comment": "EPL Actual"
+      },
+      {
+        "name": "opl_actual",
+        "raw_expr": "((SUM(source.epl) FILTER (WHERE dim_wkctr.bic_cwc_type IN ('APET', 'CAN', 'HDPE FG', 'JUICE-BRICK', 'NRGB', 'PET', 'PMX', 'RGB', 'TNK')))) / NULLIF((SUM(source.paid_hours) FILTER (WHERE dim_wkctr.bic_cwc_type IN ('APET', 'CAN', 'HDPE FG', 'JUICE-BRICK', 'NRGB', 'PET', 'PMX', 'RGB', 'TNK'))), 0)",
+        "comment": "OPL Actual"
       }
     ],
     "fact_scorecard_BP_wc": [
@@ -542,6 +557,76 @@
         "comment": "Material contribution in primary pack glass (SUMX\u2192pre-aggregated)"
       },
       {
+        "name": "wa_rpet_chip_pct",
+        "raw_expr": "SUM(source.rpet_chip_pct_hidden) / NULLIF(SUM(source.sales_pet_hidden), 0)",
+        "comment": "WA rPET chip %"
+      },
+      {
+        "name": "wa_rpet_flake_pct",
+        "raw_expr": "SUM(source.rpet_flake_pct_hidden) / NULLIF(SUM(source.sales_pet_hidden), 0)",
+        "comment": "WA rPET flake %"
+      },
+      {
+        "name": "wa_pet_meltin_ob_oil_based_pct",
+        "raw_expr": "SUM(source.pet_meltin_ob_oil_based_pct_hidden) / NULLIF(SUM(source.sales_pet_hidden), 0)",
+        "comment": "WA PET Meltin OB Oil-Based %"
+      },
+      {
+        "name": "wa_recycled_content_glass_pct",
+        "raw_expr": "SUM(source.recycle_content_avg_sales_glass_hidden) / NULLIF(SUM(source.sales_glass_hidden), 0)",
+        "comment": "WA Recycled Content Glass %"
+      },
+      {
+        "name": "wa_recycled_content_metal_pct",
+        "raw_expr": "SUM(source.recycle_content_avg_sales_metal_hidden) / NULLIF(SUM(source.sales_metal_hidden), 0)",
+        "comment": "WA Recycled Content Metal %"
+      },
+      {
+        "name": "wa_raw_material_weight_g",
+        "raw_expr": "SUM(source.weight_g_sales_hidden) / NULLIF(SUM(source.sales_volume_in_bottles_number_in_millions), 0)",
+        "comment": "WA Raw Material Weight (g)"
+      },
+      {
+        "name": "rpet_chip_gram_per_one_preform",
+        "raw_expr": "MEASURE(wa_rpet_chip_pct) * MEASURE(wa_raw_material_weight_g)",
+        "comment": "rPET Chip gram per one preform"
+      },
+      {
+        "name": "rpet_flake_gram_per_one_preform",
+        "raw_expr": "MEASURE(wa_rpet_flake_pct) * MEASURE(wa_raw_material_weight_g)",
+        "comment": "rPET Flake gram per one preform"
+      },
+      {
+        "name": "pet_meltin_oil_based",
+        "raw_expr": "MEASURE(wa_pet_meltin_ob_oil_based_pct) * MEASURE(wa_raw_material_weight_g)",
+        "comment": "PET Meltin Oil-Based"
+      },
+      {
+        "name": "mat_contr_in_prim_pack_glass",
+        "raw_expr": "MEASURE(wa_recycled_content_glass_pct)*SUM(source.weight_glass_hidden) / NULLIF(SUM(source.sales_glass_hidden) * 100, 0)",
+        "comment": "Mat. contr in prim pack glass"
+      },
+      {
+        "name": "mat_contr_in_prim_pack_met",
+        "raw_expr": "MEASURE(wa_recycled_content_metal_pct)*SUM(source.weight_metal_hidden) / NULLIF(SUM(source.sales_metal_hidden) * 100, 0)",
+        "comment": "Mat. contr in prim pack metal"
+      },
+      {
+        "name": "mat_cont_in_primary_pack_pet_meltin_ob",
+        "raw_expr": "MEASURE(pet_meltin_oil_based)*SUM(source.sales_pet_hidden) / NULLIF(1000000, 0)",
+        "comment": "Mat Cont primary pack PET Meltin OB"
+      },
+      {
+        "name": "mat_cont_in_primary_pack_rpet_chip",
+        "raw_expr": "MEASURE(rpet_chip_gram_per_one_preform)*SUM(source.sales_pet_hidden) / NULLIF(1000000, 0)",
+        "comment": "Mat Cont primary pack rPET Chip"
+      },
+      {
+        "name": "mat_cont_in_primary_pack_rpet_flake",
+        "raw_expr": "MEASURE(rpet_flake_gram_per_one_preform)*SUM(source.sales_pet_hidden) / NULLIF(1000000, 0)",
+        "comment": "Mat Cont primary pack rPET Flake"
+      },
+      {
         "name": "recyclable_content_on_market_tons",
         "raw_expr": "MEASURE(contrib_in_primary_pack_glass) + MEASURE(contrib_in_primary_pack_metal) + MEASURE(mat_cont_in_primary_pack_pet_meltin_ob) + MEASURE(mat_cont_in_primary_pack_rpet_chip) + MEASURE(mat_cont_in_primary_pack_rpet_flake)",
         "comment": "Recyclable content on market (Tons) = sum of all material contributions"
@@ -584,6 +669,13 @@
         "name": "sc_prod_actual_bp",
         "raw_expr": "SUM(source.volume_in_uc) FILTER (WHERE source.bic_chversion = 'B000') / NULLIF(SUM(hr_a.khr004001_fte_total) FILTER (WHERE hr_a.bic_chversion = 'B000' AND hr_a.func_area IN ('Z320', 'Z110', 'Z120', 'Z310')) / NULLIF(1, 0), 0)",
         "comment": "SC Productivity BP: volume_in_uc / FTE (cross-table via hr_a)"
+      }
+    ],
+    "Fact_CO012_Actuals": [
+      {
+        "name": "sc_prod_actual",
+        "raw_expr": "(SUM(source.volume_in_uc) FILTER (WHERE bic_chversion = '0000')) / NULLIF((SUM(hr_a.khr004001_fte_total) FILTER (WHERE hr_a.bic_chversion = '0000' AND hr_a.func_area IN ('Z320', 'Z110', 'Z120', 'Z310'))) / NULLIF(1, 0), 0)",
+        "comment": "SC Productivity Actual: volume/FTE cross-table"
       }
     ]
   },
@@ -1271,5 +1363,65 @@
   "budget_suffix": "_bp",
   "cwc_filter_column": "bic_cwc_type",
   "switch_join_alias": "dim_wkctr",
-  "switch_join_col": "bic_cwc_type"
+  "switch_join_col": "bic_cwc_type",
+  "manual_overrides": {
+    "fact_scorecard_BP_wc": [
+      {"name": "cip_bp", "expr": "SUM(source.fltp) FILTER (WHERE source.bic_csubkbi = 'KPE00252' AND dim_wkctr.bic_cwc_type IN ('PET','APET','RGB','JUICE-BRICK','CAN','HDPE FG','NRGB','CHIPS FG')) / NULLIF(SUM(source.fltp) FILTER (WHERE source.bic_csubkbi IN ('KPE00262', 'KPE00214') AND dim_wkctr.bic_cwc_type IN ('PET','APET','RGB','JUICE-BRICK','CAN','HDPE FG','NRGB','CHIPS FG')), 0)", "comment": "CIP BP: KPE00252 / (KPE00262 + KPE00214)"},
+      {"name": "epl_bp", "expr": "SUM(source.fltp) FILTER (WHERE source.bic_csubkbi = 'KPE00246' AND dim_wkctr.bic_cwc_type IN ('PET','APET','RGB','JUICE-BRICK','CAN','HDPE FG','NRGB','CHIPS FG')) / NULLIF(SUM(source.fltp) FILTER (WHERE source.bic_csubkbi IN ('KPE00262', 'KPE00214') AND dim_wkctr.bic_cwc_type IN ('PET','APET','RGB','JUICE-BRICK','CAN','HDPE FG','NRGB','CHIPS FG')), 0)", "comment": "EPL BP"},
+      {"name": "opl_bp", "expr": "SUM(source.fltp) FILTER (WHERE source.bic_csubkbi = 'KPE00240' AND dim_wkctr.bic_cwc_type IN ('PET','APET','RGB','JUICE-BRICK','CAN','HDPE FG','NRGB','CHIPS FG')) / NULLIF(SUM(source.fltp) FILTER (WHERE source.bic_csubkbi IN ('KPE00262', 'KPE00214') AND dim_wkctr.bic_cwc_type IN ('PET','APET','RGB','JUICE-BRICK','CAN','HDPE FG','NRGB','CHIPS FG')), 0)", "comment": "OPL BP"},
+      {"name": "total_sle_bp", "expr": "SUM(source.fltp) FILTER (WHERE source.bic_csubkbi = 'KPE00261' AND dim_wkctr.bic_cwc_type IN ('PET','APET','RGB','JUICE-BRICK','CAN','HDPE FG','NRGB','CHIPS FG')) / NULLIF(SUM(source.fltp) FILTER (WHERE source.bic_csubkbi IN ('KPE00262', 'KPE00214') AND dim_wkctr.bic_cwc_type IN ('PET','APET','RGB','JUICE-BRICK','CAN','HDPE FG','NRGB','CHIPS FG')), 0)", "comment": "Total SLE BP"},
+      {"name": "asset_capacity_bp", "expr": "SUM(source.fltp) FILTER (WHERE source.bic_csubkbi = 'KPE00262' AND dim_wkctr.bic_cwc_type IN ('PET','APET','RGB','JUICE-BRICK','CAN','HDPE FG','NRGB','CHIPS FG')) / NULLIF(SUM(source.fltp) FILTER (WHERE source.bic_csubkbi = 'KPE00214' AND dim_wkctr.bic_cwc_type IN ('PET','APET','RGB','JUICE-BRICK','CAN','HDPE FG','NRGB','CHIPS FG')), 0)", "comment": "Asset Capacity BP"},
+      {"name": "sle_waterfall_sle", "expr": "SUM(source.fltp) FILTER (WHERE source.bic_csubkbi = 'KPE00261' AND dim_wkctr.bic_cwc_type IN ('PET','APET','RGB','JUICE-BRICK','CAN','HDPE FG','NRGB','CHIPS FG'))", "comment": "SLE Waterfall: SLE"},
+      {"name": "sle_waterfall_epl", "expr": "SUM(source.fltp) FILTER (WHERE source.bic_csubkbi = 'KPE00246' AND dim_wkctr.bic_cwc_type IN ('PET','APET','RGB','JUICE-BRICK','CAN','HDPE FG','NRGB','CHIPS FG'))", "comment": "SLE Waterfall: EPL"},
+      {"name": "sle_waterfall_opl", "expr": "SUM(source.fltp) FILTER (WHERE source.bic_csubkbi = 'KPE00240' AND dim_wkctr.bic_cwc_type IN ('PET','APET','RGB','JUICE-BRICK','CAN','HDPE FG','NRGB','CHIPS FG'))", "comment": "SLE Waterfall: OPL"},
+      {"name": "sle_waterfall_cip", "expr": "SUM(source.fltp) FILTER (WHERE source.bic_csubkbi = 'KPE00252' AND dim_wkctr.bic_cwc_type IN ('PET','APET','RGB','JUICE-BRICK','CAN','HDPE FG','NRGB','CHIPS FG'))", "comment": "SLE Waterfall: CIP"},
+      {"name": "sle_waterfall_speed_losses", "expr": "SUM(source.fltp) FILTER (WHERE source.bic_csubkbi = 'KPE00443' AND dim_wkctr.bic_cwc_type IN ('PET','APET','RGB','JUICE-BRICK','CAN','HDPE FG','NRGB','CHIPS FG'))", "comment": "SLE Waterfall: Speed Losses"},
+      {"name": "sle_waterfall_minor_stoppages", "expr": "SUM(source.fltp) FILTER (WHERE source.bic_csubkbi = 'KPE00442' AND dim_wkctr.bic_cwc_type IN ('PET','APET','RGB','JUICE-BRICK','CAN','HDPE FG','NRGB','CHIPS FG'))", "comment": "SLE Waterfall: Minor Stoppages"}
+    ],
+    "fact_iom06_detailed": [
+      {"name": "ot_actual", "expr": "(COUNT(DISTINCT source.nr_of_deliveries_final) - COUNT(DISTINCT source.nr_of_overdue_deliveries_excl_pickup_final)) / NULLIF(COUNT(DISTINCT source.nr_of_deliveries_final), 0)", "comment": "On-Time delivery"},
+      {"name": "ai_actual", "expr": "(COUNT(DISTINCT source.nr_of_invoices_final) - COUNT(DISTINCT source.nr_of_credit_memos_final)) / NULLIF(COUNT(DISTINCT source.nr_of_invoices_final), 0)", "comment": "Accuracy of Invoicing"},
+      {"name": "ot_actual_test", "expr": "(SUM(source.kbi_value) FILTER (WHERE source.bic_csubkbi = 'KIOM00605' AND source.bic_chversion = '0000') - SUM(source.kbi_value) FILTER (WHERE source.bic_csubkbi = 'KIOM00606' AND source.bic_chversion = '0000')) / NULLIF(SUM(source.kbi_value) FILTER (WHERE source.bic_csubkbi = 'KIOM00605' AND source.bic_chversion = '0000'), 0)", "comment": "OT Actual test"},
+      {"name": "ot_actual_py", "expr": "MEASURE(ot_actual)", "comment": "OT Actual PY", "window": {"order": "fiscper", "range": "trailing 12 month", "semiadditive": "last"}},
+      {"name": "ai_actual_py", "expr": "MEASURE(ai_actual)", "comment": "AI Actual PY", "window": {"order": "fiscper", "range": "trailing 12 month", "semiadditive": "last"}},
+      {"name": "ot_vs_py", "expr": "(MEASURE(ot_actual) - MEASURE(ot_actual_py)) * 100", "comment": "OT vs PY"},
+      {"name": "ai_vs_py", "expr": "(MEASURE(ai_actual) - MEASURE(ai_actual_py)) * 100", "comment": "AI vs PY"}
+    ],
+    "FT_Planning": [
+      {"name": "dif_actual", "expr": "MEASURE(cfr_actual)", "comment": "DIF Actual = CFR Actual"},
+      {"name": "ot_actual", "expr": "(SUM(source.kbi_value) FILTER (WHERE source.bic_csubkbi = 'KIOM00603' AND source.bic_chversion = '0000') - SUM(source.kbi_value) FILTER (WHERE source.bic_csubkbi = 'KIOM00604' AND source.bic_chversion = '0000')) / NULLIF(SUM(source.kbi_value) FILTER (WHERE source.bic_csubkbi = 'KIOM00603' AND source.bic_chversion = '0000'), 0)", "comment": "OT via KBI codes"},
+      {"name": "ai_actual", "expr": "(SUM(source.kbi_value) FILTER (WHERE source.bic_csubkbi = 'KIOM00605' AND source.bic_chversion = '0000') - SUM(source.kbi_value) FILTER (WHERE source.bic_csubkbi = 'KIOM00606' AND source.bic_chversion = '0000')) / NULLIF(SUM(source.kbi_value) FILTER (WHERE source.bic_csubkbi = 'KIOM00605' AND source.bic_chversion = '0000'), 0)", "comment": "AI via KBI codes"},
+      {"name": "ot_actual_test", "expr": "(SUM(source.kbi_value) FILTER (WHERE source.bic_csubkbi = 'KIOM00605' AND source.bic_chversion = '0000') - SUM(source.kbi_value) FILTER (WHERE source.bic_csubkbi = 'KIOM00606' AND source.bic_chversion = '0000')) / NULLIF(SUM(source.kbi_value) FILTER (WHERE source.bic_csubkbi = 'KIOM00605' AND source.bic_chversion = '0000'), 0)", "comment": "OT test variant"},
+      {"name": "difotai_l_py", "expr": "MEASURE(difotai_l_actual)", "comment": "DIFOTAI_L PY", "window": {"order": "fiscper", "range": "trailing 12 month", "semiadditive": "last"}},
+      {"name": "difot_actual_py", "expr": "MEASURE(difot_actual)", "comment": "DIFOT Actual PY", "window": {"order": "fiscper", "range": "trailing 12 month", "semiadditive": "last"}},
+      {"name": "dif_actual_py", "expr": "MEASURE(dif_actual)", "comment": "DIF Actual PY", "window": {"order": "fiscper", "range": "trailing 12 month", "semiadditive": "last"}},
+      {"name": "ot_actual_py", "expr": "MEASURE(ot_actual)", "comment": "OT Actual PY", "window": {"order": "fiscper", "range": "trailing 12 month", "semiadditive": "last"}},
+      {"name": "ai_actual_py", "expr": "MEASURE(ai_actual)", "comment": "AI Actual PY", "window": {"order": "fiscper", "range": "trailing 12 month", "semiadditive": "last"}},
+      {"name": "difotai_vs_py", "expr": "(MEASURE(difotai_l_actual) - MEASURE(difotai_l_py)) * 100", "comment": "DIFOTAI vs PY"},
+      {"name": "difot_vs_py", "expr": "(MEASURE(difot_actual) - MEASURE(difot_actual_py)) * 100", "comment": "DIFOT vs PY"},
+      {"name": "dif_vs_py", "expr": "(MEASURE(dif_actual) - MEASURE(dif_actual_py)) * 100", "comment": "DIF vs PY"},
+      {"name": "ot_vs_py", "expr": "(MEASURE(ot_actual) - MEASURE(ot_actual_py)) * 100", "comment": "OT vs PY"},
+      {"name": "ai_vs_py", "expr": "(MEASURE(ai_actual) - MEASURE(ai_actual_py)) * 100", "comment": "AI vs PY"},
+      {"name": "wc_ytd_inventory_days_py", "expr": "SUM(source.runningtotal) FILTER (WHERE source.bic_csubkbi = 'total_inventory_report' AND source.bic_chversion = '0000') / NULLIF(SUM(source.runningtotal) FILTER (WHERE source.bic_csubkbi = 'denomfor_inventory_days' AND source.bic_chversion = '0000'), 0)", "comment": "YTD Inventory days PY", "window": {"order": "fiscper", "range": "trailing 12 month", "semiadditive": "last"}}
+    ],
+    "FT_PE009": [
+      {"name": "contrib_in_primary_pack_metal", "expr": "SUM(source.recycle_content_avg_sales_metal_hidden) * SUM(source.weight_metal_hidden) / NULLIF(SUM(source.sales_metal_hidden) * 100, 0) * SUM(source.sales_metal_hidden) / NULLIF(1000000, 0)", "comment": "Material contribution primary pack metal"},
+      {"name": "contrib_in_primary_pack_glass", "expr": "SUM(source.recycle_content_avg_sales_glass_hidden) * SUM(source.weight_glass_hidden) / NULLIF(SUM(source.sales_glass_hidden) * 100, 0) * SUM(source.sales_glass_hidden) / NULLIF(1000000, 0)", "comment": "Material contribution primary pack glass"},
+      {"name": "recyclable_content_on_market_tons", "expr": "MEASURE(contrib_in_primary_pack_glass) + MEASURE(contrib_in_primary_pack_metal) + MEASURE(mat_cont_in_primary_pack_pet_meltin_ob) + MEASURE(mat_cont_in_primary_pack_rpet_chip) + MEASURE(mat_cont_in_primary_pack_rpet_flake)", "comment": "Recyclable content on market (Tons)"}
+    ],
+    "FT_BPC003": [
+      {"name": "cost_supply_per_uc_actual", "expr": "SUM(source.value) FILTER (WHERE source.bic_chversion = '0000' AND source.fis_code_parent IN ('DCD2','DHF2')) / NULLIF(SUM(co012.volume_in_uc), 0)", "comment": "Cost to Supply per UC (Actuals)"},
+      {"name": "cost_supply_pct_nsr_actual", "expr": "SUM(source.value) FILTER (WHERE source.bic_chversion = '0000' AND source.fis_code_parent IN ('DCD2','DHF2')) / NULLIF(SUM(co012.net_sales_revenue), 0)", "comment": "Cost to Supply % NSR (Actuals)"},
+      {"name": "prod_oh_per_uc_actual", "expr": "SUM(source.value) FILTER (WHERE source.bic_chversion = '0000' AND source.fis_code IN ('DCC3','DCC1','DCCE','DCCN','DCCY','DCEJ','DCEZ','DCEK')) / NULLIF(SUM(co012.volume_in_uc), 0)", "comment": "Production Overhead per UC (Actuals)"},
+      {"name": "prod_oh_pct_nsr_actual", "expr": "SUM(source.value) FILTER (WHERE source.bic_chversion = '0000' AND source.fis_code IN ('DCC3','DCC1','DCCE','DCCN','DCCY','DCEJ','DCEZ','DCEK')) / NULLIF(SUM(co012.net_sales_revenue), 0)", "comment": "Production Overhead % NSR (Actuals)"},
+      {"name": "sc_cost_per_uc_actual", "expr": "SUM(source.value) FILTER (WHERE source.bic_chversion = '0000' AND source.fis_code IN ('DCC3','DCC1','DCCE','DCCN','DCCY','DCEJ','DCEZ','DCEK','DCD2','DHG2','DHH2')) / NULLIF(SUM(co012.volume_in_uc), 0)", "comment": "SC Cost per UC (Actuals)"},
+      {"name": "sc_cost_pct_nsr_actual", "expr": "SUM(source.value) FILTER (WHERE source.bic_chversion = '0000' AND source.fis_code IN ('DCC3','DCC1','DCCE','DCCN','DCCY','DCEJ','DCEZ','DCEK','DCD2','DHG2','DHH2')) / NULLIF(SUM(co012.net_sales_revenue), 0)", "comment": "SC Cost % NSR (Actuals)"}
+    ],
+    "Fact_CO012_REBP": [
+      {"name": "sc_prod_actual_bp", "expr": "SUM(source.volume_in_uc) FILTER (WHERE source.bic_chversion = 'B000') / NULLIF(SUM(hr_a.khr004001_fte_total) FILTER (WHERE hr_a.bic_chversion = 'B000' AND hr_a.func_area IN ('Z320', 'Z110', 'Z120', 'Z310')) / NULLIF(1, 0), 0)", "comment": "SC Productivity BP"}
+    ],
+    "Fact_CO012_Actuals": [
+      {"name": "sc_prod_actual", "expr": "(SUM(source.volume_in_uc) FILTER (WHERE bic_chversion = '0000')) / NULLIF((SUM(hr_a.khr004001_fte_total) FILTER (WHERE hr_a.bic_chversion = '0000' AND hr_a.func_area IN ('Z320', 'Z110', 'Z120', 'Z310'))) / NULLIF(1, 0), 0)", "comment": "SC Productivity Actual"}
+    ]
+  }
 }

@@ -67,3 +67,4 @@ class ScanTableInfo:
     m_steps: list            # list[MStep]
     has_union: bool
     pbi_columns: list        # columns from scan (name, dataType, columnType, expression)
+    storage_mode: str = ''   # 'Import', 'DirectQuery', 'Dual', etc.

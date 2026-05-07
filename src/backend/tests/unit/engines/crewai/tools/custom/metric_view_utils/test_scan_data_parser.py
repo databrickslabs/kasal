@@ -211,3 +211,115 @@ class TestScanDataParserMSteps:
         result = parser.parse(data)
         assert len(result["with_cols"].pbi_columns) == 2
         assert result["with_cols"].pbi_columns[0]["name"] == "id"
+
+
+class TestRLSDetection:
+    def test_rls_tables_detected(self):
+        parser = ScanDataParser()
+        data = {
+            "workspaces": [{"datasets": [{
+                "name": "test",
+                "roles": [{"name": "RegionRole", "tablePermissions": [{"name": "Sales"}]}],
+                "tables": [{
+                    "name": "Sales",
+                    "source": [{"expression": (
+                        'Value.NativeQuery(c, "SELECT 1", null, [EnableFolding=true])'
+                    )}]
+                }]
+            }]}]
+        }
+        parser.parse(data)
+        assert 'Sales' in parser.get_rls_tables()
+
+    def test_no_rls(self):
+        parser = ScanDataParser()
+        data = {"workspaces": [{"datasets": [{"name": "test", "tables": []}]}]}
+        parser.parse(data)
+        assert parser.get_rls_tables() == set()
+
+    def test_rls_multiple_roles(self):
+        """Multiple roles with different table permissions are all collected."""
+        parser = ScanDataParser()
+        data = {
+            "workspaces": [{"datasets": [{
+                "name": "test",
+                "roles": [
+                    {"name": "Role1", "tablePermissions": [{"name": "Sales"}]},
+                    {"name": "Role2", "tablePermissions": [
+                        {"name": "Sales"}, {"name": "Budget"}
+                    ]},
+                ],
+                "tables": []
+            }]}]
+        }
+        parser.parse(data)
+        rls = parser.get_rls_tables()
+        assert 'Sales' in rls
+        assert 'Budget' in rls
+
+    def test_rls_empty_name_ignored(self):
+        """Table permissions with empty name are not added."""
+        parser = ScanDataParser()
+        data = {
+            "workspaces": [{"datasets": [{
+                "name": "test",
+                "roles": [{"name": "R1", "tablePermissions": [{"name": ""}]}],
+                "tables": []
+            }]}]
+        }
+        parser.parse(data)
+        assert parser.get_rls_tables() == set()
+
+    def test_get_rls_tables_before_parse(self):
+        """get_rls_tables returns empty set before parse is called."""
+        parser = ScanDataParser()
+        assert parser.get_rls_tables() == set()
+
+
+class TestStorageMode:
+    def test_storage_mode_extracted(self):
+        parser = ScanDataParser()
+        data = _make_scan_data([{
+            "name": "fact",
+            "storageMode": "Import",
+            "source": [{"expression": (
+                'Value.NativeQuery(c, "SELECT 1", null, [EnableFolding=true])'
+            )}]
+        }])
+        result = parser.parse(data)
+        assert result['fact'].storage_mode == 'Import'
+
+    def test_storage_mode_default_empty(self):
+        parser = ScanDataParser()
+        data = _make_scan_data([{
+            "name": "fact",
+            "source": [{"expression": (
+                'Value.NativeQuery(c, "SELECT 1", null, [EnableFolding=true])'
+            )}]
+        }])
+        result = parser.parse(data)
+        assert result['fact'].storage_mode == ''
+
+    def test_storage_mode_direct_query(self):
+        parser = ScanDataParser()
+        data = _make_scan_data([{
+            "name": "fact",
+            "storageMode": "DirectQuery",
+            "source": [{"expression": (
+                'Value.NativeQuery(c, "SELECT 1", null, [EnableFolding=true])'
+            )}]
+        }])
+        result = parser.parse(data)
+        assert result['fact'].storage_mode == 'DirectQuery'
+
+    def test_storage_mode_dual(self):
+        parser = ScanDataParser()
+        data = _make_scan_data([{
+            "name": "fact",
+            "storageMode": "Dual",
+            "source": [{"expression": (
+                'Value.NativeQuery(c, "SELECT 1", null, [EnableFolding=true])'
+            )}]
+        }])
+        result = parser.parse(data)
+        assert result['fact'].storage_mode == 'Dual'
