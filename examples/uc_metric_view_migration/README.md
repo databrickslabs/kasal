@@ -10,7 +10,13 @@ source .venv/bin/activate
 python ../../examples/uc_metric_view_migration/run_locally.py
 ```
 
-This runs the full pipeline against the SC Reporting project (26 sources, 470 measures) and produces 26 UC Metric View YAML files in `~/Downloads/ucmv_example_output/`. The 23 core views match the verified reference output at `~/workspace/demos/uc_metrics/sc_reporting_project/output/` with cosmetic-only differences.
+This runs the full pipeline against the SC Reporting project (26 sources, 470 measures) and produces 26 UC Metric View YAML files in `~/Downloads/ucmv_example_output/`. 20 of 23 reference views are an exact measure-level match; the remaining 3 are a strict superset (we translate more, 0 missing). Verified against `~/workspace/demos/uc_metrics/sc_reporting_project/output/`.
+
+There is also an all-limitations demo that exercises all 10 PBI limitation detection features:
+
+```bash
+python ../../examples/uc_metric_view_migration/run_all_limitations_demo.py
+```
 
 No PBI API access needed. No Kasal server needed. Just the pre-extracted JSONs in this directory.
 
@@ -23,7 +29,7 @@ The only tool that does live PBI API extraction → deterministic DAX translatio
 - **Consulting firms**: Manual rewrites. Weeks of effort per dashboard.
 - **Metric layer vendors** (dbt, Looker): Own constructs, no PBI migration tooling.
 
-The moat isn't "no one does this" — it's the approach: deterministic translation (14 regex patterns, reproducible output) + live API access (no file exports) + human review at the right points (not blanket LLM).
+The moat isn't "no one does this" — it's the approach: deterministic translation (16 regex patterns, reproducible output) + live API access (no file exports) + human review at the right points (not blanket LLM).
 
 ## Migration Workflow
 
@@ -67,7 +73,7 @@ Migrations are never 100% automatic. The target is 70-80% automation with human 
 | Phase 1: Extract | **Done** | Tools 73, 74, 75, 86 (API mode). 3 auth methods. |
 | Phase 2: Propose config | **Planned** | Tool 89 — config generator. Not yet built. |
 | Phase 3: Human review | **Manual** | Customer edits pipeline_config.json by hand. |
-| Phase 4: Generate | **Done** | Tool 86. 459 tests, 21/21 module coverage. |
+| Phase 4: Generate | **Done** | Tool 86. 486 tests, 22 test files, 18 modules. All 10 PBI limitations detected. |
 | Phase 5: Validate | **Planned** | Deterministic check framework (separate project, no timeline yet). Tool 88 deployer exists for dry-run + live deploy. |
 
 ### The iteration loop
@@ -77,7 +83,7 @@ Real migrations are iterative. A typical flow:
 1. **First run** with empty config → migration report shows 40-50% translated (base measures only)
 2. **Add join_key_map** → re-run → 55-65% translated (dimension joins added)
 3. **Add switch_decompositions** → re-run → 70-75% translated
-4. **Add measure_resolutions** → re-run → 80%+ translated
+4. **Add manual_overrides** → re-run → 80%+ translated (complex cross-table measures)
 5. **Enable LLM fallback** for remaining complex DAX → 85%+
 6. **Validate against PBI source** → fix mismatches → final config
 
@@ -96,110 +102,49 @@ The biggest bottleneck today is authoring `pipeline_config.json`. Tool 89 will p
 | `measure_resolutions` | Pipeline untranslatable list | Measures failing with "Cannot resolve [ref]" — look up referenced DAX, propose resolution. |
 | `column_overrides` | MQuery transpilation vs DAX | Diff physical vs PBI column names = overrides. |
 | `mapping_only_tables` | Admin API scan | Tables with measures but no MQuery SQL. |
+| `manual_overrides` | Untranslatable + reference output | Complex cross-table/SUMX/DISTINCTCOUNT measures that no regex handles — propose SQL from LLM or reference patterns. |
 
 **What Tool 89 won't get right:** `fact_join_map` entries with pivot/union/embed modes. These encode grain-level business decisions (e.g., "scorecard table has one row per KBI per workcenter, but the fact table has one row per workcenter — need to pivot before joining"). A human must review these.
 
-### Known Limitations
+### PBI Native Features — All 10 Implemented
 
-**USERELATIONSHIP (inactive relationships)**
+All 10 PBI-specific features are now detected, handled, or flagged in the migration report. **0 produce silently wrong output.**
 
-DAX uses `USERELATIONSHIP(Table[Column], Dim[Column])` to activate an inactive relationship for a specific calculation (e.g., using ShipDate instead of the default OrderDate join to a calendar dimension). Today:
-- The Relationships API (Tool 75) extracts inactive relationships (`is_active: false`)
-- `RelationshipsLoader` skips them — they're extracted but discarded
-
-The fix: UC Metric Views support multiple joins to the same dimension with different aliases. A `USERELATIONSHIP` measure becomes a second join entry:
-```yaml
-joins:
-  - name: dim_calendar           # default (OrderDate)
-    source: calendar_table
-    on: source.order_date = dim_calendar.date
-  - name: dim_calendar_ship      # USERELATIONSHIP alternative
-    source: calendar_table
-    on: source.ship_date = dim_calendar_ship.date
-```
-Then the measure references `dim_calendar_ship` instead of `dim_calendar`. This can be auto-detected from the inactive relationships we already extract — planned for Tool 89.
-
-**M:N relationships (many-to-many)**
-
-PBI supports many-to-many through bridging tables or bidirectional cross-filtering. Today:
-- `RelationshipsLoader` explicitly skips them (`from_card == 'Many' and to_card == 'Many': continue`)
-- UC Metric Views don't natively support M:N joins
-
-Workarounds (require human decision):
-1. **Bridge table** — create a Databricks view that resolves the M:N into two 1:N joins, reference it in `enrichment_joins` config
-2. **Pre-joined source SQL** — use inline `source: |-` SQL in the YAML that bakes in the M:N resolution
-3. **Skip and flag** — document in migration report for manual handling
-
-Both limitations are flagged in the migration report when detected. Neither produces silently wrong output — the measures are marked untranslatable with specific reasons.
-
-**Calculation Groups (TIME_INTELLIGENCE)**
-
-PBI Calculation Groups apply transformations (YTD, PY, QTD) to ANY measure dynamically via `SELECTEDMEASURE()`. Today:
-- Tool 77 extracts calculation groups from TMDL
-- They don't flow into Tool 86 — not part of the pipeline
-
-The problem: a "Time Intelligence" calculation group that applies YTD/PY/QoQ to 50 base measures creates 150 implicit measures. Our pipeline doesn't see them because they're not DAX measures — they're dynamic modifiers. Fix: a generator that expands calculation group × base measure combinations into explicit UCMV measures. Planned for Tool 89.
-
-**Row-Level Security (RLS)**
-
-PBI models often have RLS rules (`[Region] = USERPRINCIPALNAME()`). Today: completely ignored. UC Metric Views don't have RLS — the equivalent is Databricks row filters on source tables. **Silent gap if the customer assumes security carries over.** The migration report should flag RLS-enabled tables.
-
-**Aggregation tables (dual storage mode)** ⚠️ Can cause silently wrong output
-
-PBI composite models have Import-mode aggregation tables over DirectQuery detail tables. Our MQuery parser sees both but doesn't understand the agg→detail mapping. If the pipeline picks the aggregation table as the source, the UCMV would reference pre-aggregated data at the wrong grain — producing correct-looking but wrong numbers when sliced by a dimension not in the agg table. Fix: detect agg tables via the Admin API scan (they have `StorageMode: Import` alongside `StorageMode: DirectQuery` detail tables) and always prefer the detail table.
-
-**Field Parameters**
-
-PBI Field Parameters let users dynamically switch which measure or column is displayed (`NAMEOF()` DAX function). Today:
-- Tool 77 extracts them from TMDL
-- No UC equivalent — UCMVs are static definitions
-
-These need to become either separate metric views per parameter value, or a Genie space configuration that presents the options. Flagged in migration report as "requires manual decomposition."
-
-**Conditional formatting with business logic** ⚠️ Can cause silently wrong output
-
-We quick-reject all Color/FORMAT measures — correct for pure display formatting. But some conditional formatting measures contain actual business logic:
-```dax
-Status = IF([Margin] < 0.1, "At Risk", IF([Margin] < 0.2, "Warning", "Healthy"))
-```
-Our binary reject discards this as a "Color measure" even though the threshold logic (0.1, 0.2) is business-meaningful. Fix: the quick-reject should check if the IF/SWITCH body contains aggregation references — if yes, translate the expression; if no (pure string output), reject.
-
-**Incremental refresh policies**
-
-PBI tables with incremental refresh have date-based partition policies (e.g., "keep 3 years, refresh last 30 days"). Our pipeline generates UCMVs that query the full source table with no date filter. For large tables (billions of rows) this could be a performance problem. Fix: detect incremental refresh policies from the Admin API scan and add a `filter:` to the UCMV matching the refresh window.
-
-**Perspectives**
-
-PBI perspectives control which tables/measures are visible to different user groups (e.g., "Sales" perspective shows only sales-related tables). No UC equivalent. Our pipeline migrates everything — the perspective-based access control is lost. Fix: generate separate UCMV sets per perspective, or document in migration report for manual Databricks permission setup.
-
-**Default summarization** ⚠️ Can cause silently wrong output
-
-PBI columns have default summarization settings (Sum, Count, Average, None, Min, Max). A column marked "Don't Summarize" in PBI (e.g., an ID column) would still get `SUM(source.id)` in the UCMV if it appears in the MQuery aggregate columns. Fix: extract summarization metadata from the Admin API scan and skip columns with `SummarizeBy: None`.
+| Feature | Status | What the pipeline does |
+|---------|--------|----------------------|
+| **USERELATIONSHIP** | Migrated | Inactive relationships → alternate join aliases (`dim_calendar_ship_date`). DAX pattern matched and inner expression translated. |
+| **M:N relationships** | Flagged | Detected via cardinality check. Listed in migration report with bridge table workaround suggestions. |
+| **Calculation Groups** | Expanded | Config `calculation_groups` × base measures → explicit UCMV measures (e.g., 5 base × 3 time intelligence = 15 expanded measures). |
+| **Row-Level Security** | Flagged | Detected from Admin API scan `roles` array. Migration report warns: "Configure Databricks row filters separately." |
+| **Aggregation tables** | Flagged | `storageMode: Import` detected from scan data. Migration report warns: "Verify source grain." |
+| **Field Parameters** | Flagged | Listed in migration report as "Not migrated — consider separate metric views or Genie space." |
+| **Conditional formatting** | Smart filter | Color/FORMAT measures checked for business logic (SUM, DIVIDE, MEASURE refs). Pure display → rejected. Business logic → passed to translation. |
+| **Incremental refresh** | Flagged | `refreshPolicy` detected from scan data. Migration report suggests adding date filter for performance. |
+| **Perspectives** | Flagged | Listed in migration report as "Not migrated — consider separate UCMV sets or Databricks permissions." |
+| **Default summarization** | Flagged | `summarizeBy: none` columns detected from scan data. Migration report warns against wrong aggregation. |
 
 ### Risk summary
 
-| Limitation | Silent wrong output? | Detection | Fix path |
-|-----------|---------------------|-----------|----------|
-| USERELATIONSHIP | No (flagged as untranslatable) | Inactive relationships in Tool 75 output | Auto-detect in Tool 89 |
-| M:N relationships | No (skipped with reason) | Cardinality in Tool 75 output | Manual bridge table |
-| Calculation Groups | No (not migrated) | Tool 77 extraction | Expand in Tool 89 |
-| RLS | **Yes — security gap** | Admin API scan | Flag in migration report |
-| Aggregation tables | **Yes — wrong grain** | StorageMode in Admin API | Prefer detail tables |
-| Field Parameters | No (not migrated) | Tool 77 extraction | Manual decomposition |
-| Conditional formatting | **Yes — business logic lost** | IF/SWITCH with aggregation refs | Smarter quick-reject |
-| Incremental refresh | No (perf issue, not wrong data) | Admin API scan | Add filter to UCMV |
-| Perspectives | No (over-migration, not wrong) | Admin API scan | Per-perspective UCMV sets |
-| Default summarization | **Yes — wrong aggregation** | Admin API scan | Skip SummarizeBy:None |
+| Limitation | Silent wrong output? | Status |
+|-----------|---------------------|--------|
+| USERELATIONSHIP | No | Alternate joins generated automatically |
+| M:N relationships | No | Flagged in report with workarounds |
+| Calculation Groups | No | Expanded from config |
+| RLS | No | Flagged — "configure Databricks row filters" |
+| Aggregation tables | No | Flagged — "verify source grain" |
+| Field Parameters | No | Flagged in report |
+| Conditional formatting | No | Business logic detected, pure display rejected |
+| Incremental refresh | No | Flagged — "add date filter" |
+| Perspectives | No | Flagged in report |
+| Default summarization | No | Flagged — SummarizeBy:None columns listed |
 
-**4 of 10 limitations can cause silently wrong output.** These should be priority fixes — the other 6 are either flagged or cosmetic.
+**0 of 10 limitations produce silently wrong output.** All are either automatically handled or explicitly flagged in the migration report.
 
 ### What will always need human judgment
 
 - Semantic correctness (does `revenue` mean gross or net?)
 - Grain decisions for cross-table joins (pivot vs union vs embed)
-- USERELATIONSHIP join alias decisions (which alternative join to use)
 - M:N relationship resolution strategy (bridge table vs pre-joined SQL)
-- Calculation group × measure expansion decisions
 - RLS → Databricks row filter mapping
 - Complex DAX patterns the LLM can't translate deterministically
 - Source SQL quality (suboptimal JOINs, redundant WHERE clauses)
@@ -217,7 +162,7 @@ Based on the SC Reporting project (26 sources, 470 measures, 2 weeks with 1.5 pe
 | **Tool 86 today** (automatic extraction, manual config) | ~3 hours | ~80 hours (2 weeks) | ~150 hours (3.5 weeks) |
 | **Tool 86 + Tool 89 + validation** (target) | ~1.8 hours | ~47 hours (1 week) | ~90 hours (2 weeks) |
 
-**Why Tool 86 today is already faster than the monolith:** Extraction is automatic (was manual), migration report shows what's missing (was trial-and-error), dependency graph resolves measure chains (was manual ordering).
+**Why Tool 86 today is already faster than the monolith:** Extraction is automatic (was manual), migration report shows what's missing (was trial-and-error), dependency graph resolves measure chains (was manual ordering), manual_overrides config replaces hardcoded Python.
 
 **Why per-source cost drops within a dashboard:** Sources share dimensions, relationships overlap, SWITCH patterns repeat. A 50-source dashboard has ~10 distinct patterns. After the first 10 sources are configured, the remaining 40 are mostly covered. The marginal cost curve:
 
@@ -236,7 +181,7 @@ The core pipeline. Two input modes — both feed into the same deterministic eng
 - **API mode**: Provide PBI credentials → tool extracts everything via PBI Admin API + Execute Queries API
 - **JSON mode**: Provide pre-extracted JSON files → tool runs the pipeline directly (testing/offline)
 
-Pipeline internals: MQuery Parser → DAX Translator (14 patterns + LLM fallback) → Kahn's Dependency Graph → Join Detector (pivot/union/embed modes) → YAML Emitter (5-pass MEASURE() cascade validation) → Migration Report.
+Pipeline internals: MQuery Parser → DAX Translator (16 patterns + USERELATIONSHIP + LLM fallback) → Kahn's Dependency Graph → Manual Override Injection → Pass 2 Measure Arithmetic → Join Detector (pivot/union/embed modes) → YAML Emitter (5-pass MEASURE() cascade validation + window spec emission) → Migration Report (with PBI Native Features summary table).
 
 ### Extraction Tools (Phase 1)
 
@@ -253,7 +198,9 @@ All tools support 3 auth methods: Service Principal, Service Account, User OAuth
 
 Deploys YAML to Databricks via UC Metric View REST API. Supports dry-run (validation without deployment) and auto-update on conflict (PUT on 409).
 
-## Demo Details: run_locally.py
+## Demo Details
+
+### run_locally.py
 
 Demonstrates Phase 4 (generation) using pre-extracted JSONs from the SC Reporting project.
 
@@ -262,12 +209,12 @@ Demonstrates Phase 4 (generation) using pre-extracted JSONs from the SC Reportin
 2. `mquery_transpilation.json` — 60 MQuery table definitions
 3. `pbi_relationships.json` — relationship graph for auto-join detection
 4. `scan_result_debug.json` — PBI Admin API scan for inline SQL enrichment
-5. `pipeline_config.json` — customer-specific join maps, SWITCH decompositions, etc.
+5. `pipeline_config.json` — customer-specific join maps, SWITCH decompositions, manual overrides, etc.
 
 **What it produces:**
 - 26 YAML files (UC Metric View definitions)
 - 26 SQL files (deployment reference instructions)
-- 1 migration report (markdown with executive summary, per-table stats, join map)
+- 1 migration report (markdown with executive summary, per-table stats, join map, PBI Native Features table)
 
 **Verification:**
 ```bash
@@ -275,15 +222,34 @@ diff ~/Downloads/ucmv_example_output/Fact_HR_A_uc_metric_view.yml \
      ~/workspace/demos/uc_metrics/sc_reporting_project/output/Fact_HR_A_uc_metric_view.yml
 ```
 
-23/23 original views present, 0 missing, cosmetic diffs only.
+20/23 exact measure-level match. 0 missing measures. 3 files with +9 extra measures (we translate more than the original monolith).
+
+### run_all_limitations_demo.py
+
+Synthetic demo exercising all 10 PBI limitation detection features against fabricated data.
+
+**What it tests:**
+1. USERELATIONSHIP → alternate join alias (`dim_calendar_ship_date`)
+2. M:N relationships → flagged with workaround
+3. RLS → detected from scan data roles
+4. Aggregation tables → Import storageMode flagged
+5. Conditional formatting → business-logic Color measure NOT rejected
+6. Incremental refresh → refreshPolicy detected
+7. Default summarization → SummarizeBy=None columns flagged
+8. Calculation groups → base measures × group items expanded
+9. Perspectives → flagged in report
+10. Field parameters → flagged in report
+
+**Output:** `~/Downloads/ucmv_all_limitations_demo/` — 1 YAML + 1 SQL + migration report with all sections populated.
 
 ## Example Files
 
 | File | Size | Description |
 |------|------|-------------|
 | `run_locally.py` | — | Demo script — run pipeline against pre-extracted JSONs |
+| `run_all_limitations_demo.py` | — | Synthetic demo exercising all 10 PBI limitation detections |
 | `crew_ucmv_generator.json` | 4K | Importable Kasal crew config |
-| `pipeline_config.json` | 43K | Customer config (SC Reporting — 26 sources) |
+| `pipeline_config.json` | 55K | Customer config (SC Reporting — 26 sources, 44 manual overrides) |
 | `measure_table_mapping.json` | 569K | 470 DAX measures |
 | `mquery_transpilation.json` | 202K | 60 MQuery tables |
 | `pbi_relationships.json` | 64K | PBI relationships |
@@ -302,9 +268,19 @@ The `pipeline_config.json` drives all customer-specific behavior. Empty defaults
 | `enrichment_joins` | Extra dimension joins not auto-detected from DAX |
 | `filter_sets` | Named filter value lists for SWITCH decomposition |
 | `switch_decompositions` | SELECTEDVALUE+SWITCH measures broken into SQL |
+| `manual_overrides` | Hand-written SQL for complex DAX that regex can't translate (per table) |
 | `measure_resolutions` | Static DAX measure name → SQL resolution map |
 | `mapping_only_tables` | Tables with measures but no MQuery SQL entry |
 | `column_overrides` | PBI column → physical column name overrides |
+
+### Override Config (complex measures)
+
+| Key | When Needed |
+|-----|-------------|
+| `manual_overrides` | Complex cross-table, SUMX(SUMMARIZE), DISTINCTCOUNTNOBLANK, or geography-routed measures. Format: `{"table_key": [{"name": "...", "expr": "SQL", "comment": "...", "window": {...}}]}`. Injected before Pass 2 so downstream MEASURE() refs resolve automatically. |
+| `calculation_groups` | PBI calculation groups to expand. Format: `[{"name": "Time Intelligence", "items": [{"name": "YTD", "expression": "CALCULATE(SELECTEDMEASURE(), DATESYTD(...))"}]}]`. Each item × each base measure = one explicit UCMV measure. |
+| `perspectives` | PBI perspectives to flag in migration report. Format: `[{"name": "Sales View", "tables": ["Fact_Sales"]}]`. |
+| `field_parameters` | PBI field parameters to flag in migration report. Format: `[{"name": "Metric Selector", "measures": ["Revenue", "Margin"]}]`. |
 
 ### Display Config (metadata)
 
@@ -335,4 +311,5 @@ The `pipeline_config.json` drives all customer-specific behavior. Empty defaults
 2. Run Tool 86 with `config_json: {}` → baseline with base measures only
 3. Review migration report → see what's missing and why
 4. Add config entries incrementally → re-run → each iteration translates more
-5. Repeat until migration report is green
+5. Add `manual_overrides` for complex measures the regex can't handle
+6. Repeat until migration report is green
