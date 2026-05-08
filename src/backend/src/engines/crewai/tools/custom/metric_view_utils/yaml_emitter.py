@@ -673,6 +673,11 @@ def emit_yaml(spec: MetricViewSpec,
                 lines.append(f'      {expr}')
             else:
                 lines.append(f'    expr: {expr}')
+            if m.window_spec:
+                lines.append('    window:')
+                lines.append(f"      - order: {m.window_spec['order']}")
+                lines.append(f"        range: {m.window_spec['range']}")
+                lines.append(f"        semiadditive: {m.window_spec.get('semiadditive', 'last')}")
             lines.append(f'    comment: "{m.skip_reason}"')
             lines.append('')
 
