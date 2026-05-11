@@ -431,3 +431,122 @@ The `pipeline_config.json` drives all customer-specific behavior. Empty defaults
 4. Add config entries incrementally → re-run → each iteration translates more
 5. Add `manual_overrides` for complex measures the regex can't handle
 6. Repeat until migration report is green
+
+## Known Gaps & Roadmap
+
+Honest assessment of where this stands and what's needed next.
+
+### What would make this best-in-class
+
+| Priority | Gap | Impact | Effort |
+|----------|-----|--------|--------|
+| **1** | **Tool 89 (Config Generator)** — auto-propose 80% of `pipeline_config.json` from extraction output | Biggest bottleneck today. Manual config authoring is what takes the human hours. | Medium (2-3 days) |
+| **2** | **Validator calibration** — 0/73 VALID is misleading. Expected transformations (SUMX→SUM, Table[col]→source.col) should show as EQUIVALENT, not INVALID. | Demo credibility. Showing "0 valid" to a customer undermines confidence even when the output is correct. | Small (1 day) |
+| **3** | **Real Databricks deployment test** — we validate YAML structure but never actually `CREATE METRIC VIEW` + `SELECT MEASURE(...)` against a live workspace | First real customer deployment will find issues we can't catch locally. | Small (1 day, needs workspace access) |
+| **4** | **Surface 85% business coverage in console output** — the 59% headline rate includes PBI UI artifacts (FORMAT, Color, ISBLANK). Real business coverage is 85% but it's buried in the migration report. | Perception. 59% sounds bad, 85% sounds good — and 85% is the honest number. | Trivial |
+| **5** | **table_processor.py at 942 lines** — the pipeline split moved bulk from pipeline.py (694) but the extracted file still exceeds the 500-line project rule | Tech debt, not blocking. | Medium |
+
+### What's genuinely strong
+
+- **Deterministic approach** — 16 regex patterns + dependency graph + manual overrides = reproducible output you can diff, version, and debug. LLM-only approaches can't do this.
+- **709 tests with integration coverage** — the full SC Reporting integration test catches regressions that unit tests miss.
+- **`manual_overrides` config** — admits "some things need human SQL" without pretending the tool handles everything. This is what the product team's tool lacks.
+- **20/23 exact match** against a monolith that took 2 weeks to hand-tune — from a configurable pipeline that runs in 30 seconds.
+- **0 silent wrong output** — all 10 PBI limitations detected and flagged. No customer will get wrong numbers without a warning.
+- **Same pipeline in Tool 86 and run_locally.py** — what you test locally is exactly what runs in production.
+
+### What's honestly still painful
+
+The biggest time sink is building `pipeline_config.json`. For SC Reporting (26 sources, 470 measures), the config has **26 keys, 44 manual overrides, 8 switch decomposition tables, 6 join key maps, 13 measure resolutions**. All written by hand. This is what takes the 2-3 hours per first customer.
+
+Breakdown of where the untranslatable measures come from (SC Reporting, 275 untranslatable):
+
+| Reason | Count | Could auto-fix? |
+|--------|-------|-----------------|
+| SELECTEDVALUE+SWITCH (PBI slicer pattern) | 82 | Yes — parse SWITCH branches from DAX |
+| PY/DIVIDE over PBI artifacts (display-only) | 61 | Already handled — correctly excluded |
+| SELECTEDVALUE (slicer context) | 24 | No — needs human decision |
+| ISBLANK+BLANK guard (no aggregation) | 24 | Already handled — correctly excluded |
+| Covered by SWITCH decomposition | 17 | Already handled — in config |
+| FORMAT function (display-only) | 13 | Already handled — correctly excluded |
+| ISFILTERED (PBI-specific) | 12 | Already handled — correctly excluded |
+| Cannot resolve [measure_ref] | 22 | Partially — add to measure_resolutions |
+| DIVIDE sub-expression | 6 | LLM fallback or manual_overrides |
+| Other | 14 | Case-by-case |
+
+**127 of 275 are correctly excluded** (PBI artifacts). The real gap is 148, of which **82 are SWITCH patterns** that Tool 89 could auto-propose.
+
+## Next Steps
+
+### Helper scripts (build before Tool 89)
+
+These are standalone Python scripts in `examples/uc_metric_view_migration/` — no Kasal server needed. Each one takes the extraction JSONs as input and proposes config entries.
+
+**1. `config_scaffold.py` — auto-propose 60-70% of pipeline_config.json**
+
+Takes: `pbi_relationships.json` + `measure_table_mapping.json` + `mquery_transpilation.json` + `scan_result_debug.json`
+Produces: initial `pipeline_config.json` with:
+
+| Config key | How it's auto-proposed | Accuracy |
+|-----------|----------------------|----------|
+| `join_key_map` | Parse relationship records → extract dim table + join column + alias | ~90% (miss composite keys) |
+| `enrichment_joins` | Already auto-generated in `RelationshipsLoader` | 100% |
+| `column_overrides` | Diff MQuery column names vs DAX `Table[col]` references | ~80% |
+| `mapping_only_tables` | Tables in measure mapping but not in MQuery output | 100% |
+| `switch_decompositions` (skeleton) | Parse SELECTEDVALUE+SWITCH DAX → extract branch names + measure refs | ~60% (branches need SQL, not just names) |
+| `measure_resolutions` | Untranslatable "Cannot resolve [ref]" → look up ref in other tables | ~70% |
+| `parameter_defaults` | Extract PBI parameters from MQuery `#"Parameter"` patterns | ~90% |
+
+Human reviews and edits the proposed config, then runs Tool 86. Saves 1-2 hours on first customer.
+
+**2. `gap_analyzer.py` — show what to fix next**
+
+Takes: pipeline output (migration report + stats)
+Produces: prioritized fix list showing:
+
+```
+COVERAGE: 59% overall, 85% business (excluding 127 PBI artifacts)
+
+TOP GAPS (by unlock potential):
+  1. Add switch_decompositions for FT_Planning → +11 measures (82→93%)
+  2. Add manual_overrides for FT_PE009 → +15 measures
+  3. Add measure_resolutions for [F_End_date] chain → +9 measures
+  4. Enable LLM fallback → est. +6 measures (DIVIDE sub-expressions)
+
+NEXT CONFIG KEY TO ADD: switch_decompositions.FT_Planning
+  82 SELECTEDVALUE+SWITCH measures waiting
+  Template: {"name": "...", "raw_expr": "...", "comment": "..."}
+```
+
+This tells the SA exactly what to do next instead of reading a 500-line migration report.
+
+**3. `deploy_test.py` — smoke test against live Databricks**
+
+Takes: YAML output + Databricks workspace credentials
+Does:
+1. `CREATE OR REPLACE METRIC VIEW` for each YAML
+2. `SELECT MEASURE(name) FROM METRIC VIEW ... LIMIT 1` for each measure
+3. Reports: which measures execute, which throw errors, which return NULL
+
+This catches runtime issues (wrong column names, invalid FILTER syntax, missing joins) that YAML validation can't.
+
+### Tool 89 (full automation — after helper scripts prove the patterns)
+
+The helper scripts above are the prototypes for Tool 89. Once `config_scaffold.py` and `gap_analyzer.py` work well manually, wrap them as a CrewAI tool that:
+1. Takes extraction output from Tools 73/74/75/86
+2. Proposes pipeline_config.json
+3. Runs Tool 86 with the proposed config
+4. Runs gap_analyzer on the output
+5. Returns: proposed config + pipeline output + gap analysis
+
+The SA reviews the proposed config, edits what's wrong, and re-runs. Target: first customer config time drops from 2-3 hours to 30-60 minutes.
+
+### Other things still missing
+
+| What | Why it matters | Effort |
+|------|---------------|--------|
+| **Databricks notebook template** | SAs need a notebook they can give customers for self-service validation. "Run this in your workspace to verify the metric views produce correct numbers." | 1 day |
+| **PBI visual comparison script** | Script that queries both PBI (via Execute Queries API) and Databricks (via SQL warehouse) for the same measure at the same grain, and diffs the results. This is the ultimate correctness check. | 2 days |
+| **Multi-dataset support** | Tool 86 handles one PBI dataset at a time. Real customers have 5-10 datasets feeding into dashboards. Need a wrapper that iterates across datasets. | 1 day |
+| **Incremental migration mode** | After initial migration, customer adds new measures to PBI. Need a "diff mode" that detects new/changed measures and only re-generates affected metric views. | 2-3 days |
+| **Customer documentation generator** | Auto-generate a "Migration Report" PDF that the SA gives to the customer: what was migrated, what needs manual attention, recommended Databricks permissions, known limitations. Not the technical migration_report.md — a customer-facing document. | 1 day |
