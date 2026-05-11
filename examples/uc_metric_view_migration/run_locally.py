@@ -126,3 +126,37 @@ for k in sorted(specs.keys()):
     mo = s.get('manual_override', 0)
     mo_str = f' manual={mo}' if mo else ''
     print(f'  {k}: {s["translated"]}/{s["total"]} (base={base} dax={dax} switch={sw}{mo_str})')
+
+# ── Optional Validation (Phase 5) ──
+try:
+    from src.engines.crewai.tools.custom.metric_view_validation_utils.pipeline import (
+        MetricExpressionValidatorPipeline,
+    )
+    print(f'\n{"="*60}')
+    print('VALIDATION (DAX vs UCMV expression comparison)')
+    print(f'{"="*60}')
+    mapping_path = os.path.join(script_dir, 'measure_table_mapping.json')
+    total_valid = 0
+    total_evaluated = 0
+    for k, y in yaml_out.items():
+        ucmv_path = os.path.join(OUTPUT_DIR, f'{k}_uc_metric_view.yml')
+        validator = MetricExpressionValidatorPipeline(table_mappings={k: 'source'})
+        result_dict = validator.run(
+            metrics_view_yaml_path=ucmv_path,
+            table_mapping_json_path=mapping_path,
+        )
+        # Save validation JSON
+        with open(os.path.join(OUTPUT_DIR, f'validation_{k}.json'), 'w') as f:
+            json.dump(result_dict, f, indent=2, default=str)
+        evaluated = result_dict.get('evaluated', [])
+        valid_count = sum(
+            1 for m in evaluated
+            if m.get('measure_eval_result', {}).get('status') == 'VALID'
+        )
+        total_evaluated += len(evaluated)
+        total_valid += valid_count
+        if evaluated:
+            print(f'  {k}: {valid_count}/{len(evaluated)} VALID')
+    print(f'\nTotal: {total_valid}/{total_evaluated} measures validated')
+except ImportError:
+    pass  # Validation package not available — skip silently

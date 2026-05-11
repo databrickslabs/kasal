@@ -3,6 +3,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Set
 
+from .constants import DAX_TO_DB_AGG_MAP
 from .databricks_parser import UCMetricsViewParser
 from .dax_expression_parser import DAXExpressionParser
 from .data_input_handler import DataInputHandler
@@ -54,7 +55,15 @@ class ExpressionValidator:
 
         simple_pattern = r"^(\w+)\(([^\)]*\.)([^\)]*)\)$"
         for measure in self.data_handler.mv_parser.measures:
-            if re.search(simple_pattern, measure["expr"], re.IGNORECASE):
+            expr = measure.get("expr") or ""
+            if not expr:
+                simple_measures.append({
+                    "measure_eval": "simple",
+                    "measure_name": measure.get('name', ''),
+                    "measure_expression": "",
+                })
+                continue
+            if re.search(simple_pattern, expr, re.IGNORECASE):
                 simple_measures.append(
                     {
                         "measure_eval": "simple",
@@ -62,7 +71,7 @@ class ExpressionValidator:
                         "measure_expression": measure['expr']
                     }
                 )
-            elif self.data_handler.get_dax_measure(measure["name"]):
+            elif self.data_handler.get_dax_measure(measure.get("name", "")):
                 matched_measures.append(
                     {
                         "measure_eval": "matched",
@@ -294,7 +303,7 @@ class ExpressionValidator:
         - SUMX(table1.column1) in DAX matches SUM(table1.column1) in DB
         - SUMX(table1.column2) in DAX does NOT match SUM(table1.column1) in DB
         """
-        from .constants import DAX_TO_DB_AGG_MAP
+        # DAX_TO_DB_AGG_MAP imported at module level
         
         matches = []
         mismatches = []
