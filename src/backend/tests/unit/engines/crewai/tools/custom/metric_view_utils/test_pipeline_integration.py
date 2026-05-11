@@ -1,6 +1,11 @@
 """Integration tests for the MetricViewPipeline with real-format data."""
 import json
+import os
+import re
+
 import pytest
+import yaml
+
 from src.engines.crewai.tools.custom.metric_view_utils.pipeline import MetricViewPipeline
 from src.engines.crewai.tools.custom.metric_view_utils.mquery_parser import MQueryParser
 from src.engines.crewai.tools.custom.metric_view_utils.data_classes import TranslationResult
@@ -226,3 +231,178 @@ class TestPipelineIntegration:
         assert 'fact' in pipeline.stats
         assert 'translated' in pipeline.stats['fact']
         assert 'total' in pipeline.stats['fact']
+
+
+# ---------------------------------------------------------------------------
+# Full end-to-end integration test using SC Reporting example data
+# ---------------------------------------------------------------------------
+
+_EXAMPLE_DIR = os.path.normpath(os.path.join(
+    os.path.dirname(__file__),
+    '..', '..', '..', '..', '..', '..', '..', '..', '..',
+    'examples', 'uc_metric_view_migration',
+))
+
+_HAS_EXAMPLE_DATA = os.path.exists(
+    os.path.join(_EXAMPLE_DIR, 'pipeline_config.json')
+)
+
+
+@pytest.fixture(scope='module')
+def pipeline_output():
+    """Run the full pipeline once for all tests in the module."""
+    from src.engines.crewai.tools.custom.metric_view_utils.relationships_loader import RelationshipsLoader
+    from src.engines.crewai.tools.custom.metric_view_utils.scan_data_parser import ScanDataParser
+
+    with open(os.path.join(_EXAMPLE_DIR, 'measure_table_mapping.json')) as f:
+        measures = json.load(f)
+    with open(os.path.join(_EXAMPLE_DIR, 'mquery_transpilation.json')) as f:
+        mquery_entries = json.load(f)
+    with open(os.path.join(_EXAMPLE_DIR, 'pbi_relationships.json')) as f:
+        rels_raw = json.load(f)
+    with open(os.path.join(_EXAMPLE_DIR, 'pipeline_config.json')) as f:
+        config = json.load(f)
+
+    CATALOG = 'test_cat'
+    SCHEMA = 'test_sch'
+    for tbl_cfg in config.get('mapping_only_tables', {}).values():
+        tbl_cfg['source_table'] = tbl_cfg['source_table'].format(
+            catalog=CATALOG, schema=SCHEMA,
+        )
+
+    parser = MQueryParser()
+    mquery_tables = parser.parse_json(mquery_entries)
+    fact_tables = {k for k, v in mquery_tables.items() if v.is_fact}
+
+    rel_loader = RelationshipsLoader()
+    rel_enrich = rel_loader.load(rels_raw, mquery_tables, fact_tables)
+
+    scan_parser = ScanDataParser()
+    scan_path = os.path.join(_EXAMPLE_DIR, 'scan_result_debug.json')
+    scan_data = scan_parser.parse(scan_path) if os.path.exists(scan_path) else {}
+
+    pipeline = MetricViewPipeline(
+        mapping=measures,
+        mquery_tables=mquery_tables,
+        config=config,
+        relationships_enrichment=rel_enrich,
+        inactive_relationships=rel_loader.get_inactive_relationships() or None,
+        scan_data=scan_data,
+        unflatten_tables=True,
+        refresh_policy_tables=scan_parser.get_refresh_policy_tables() or None,
+        no_summarize_columns=scan_parser.get_no_summarize_columns() or None,
+        rls_tables=scan_parser.get_rls_tables() or None,
+    )
+    specs = pipeline.run()
+    yaml_out = pipeline.emit_all_yaml(catalog=CATALOG, schema=SCHEMA)
+    results = pipeline.get_results()
+    return {
+        'specs': specs,
+        'yaml_out': yaml_out,
+        'stats': pipeline.stats,
+        'results': results,
+    }
+
+
+@pytest.mark.skipif(not _HAS_EXAMPLE_DATA, reason='Example data not available')
+class TestFullPipelineEndToEnd:
+    """End-to-end integration tests using real SC Reporting example data."""
+
+    def test_produces_26_views(self, pipeline_output):
+        assert len(pipeline_output['specs']) == 26
+
+    def test_yaml_parseable(self, pipeline_output):
+        skipped_tables = {
+            k for k, s in pipeline_output['stats'].items()
+            if s.get('skipped')
+        }
+        for key, yml in pipeline_output['yaml_out'].items():
+            parsed = yaml.safe_load(yml)
+            if key in skipped_tables:
+                # Skipped tables (all measures untranslatable) may emit empty YAML
+                continue
+            assert parsed is not None, f'{key} YAML not parseable'
+            assert 'version' in parsed, f'{key} missing version'
+
+    def test_no_empty_dimensions(self, pipeline_output):
+        for key, spec in pipeline_output['specs'].items():
+            for d in spec.dimensions:
+                assert d.get('name'), f'{key} has empty dimension name'
+                assert d.get('expr') and d['expr'] != 'source.', (
+                    f'{key} has empty dimension expr: {d}'
+                )
+
+    def test_no_none_measure_exprs(self, pipeline_output):
+        for key, spec in pipeline_output['specs'].items():
+            for m in spec.measures:
+                assert m.sql_expr is not None, (
+                    f'{key}/{m.measure_name} has None sql_expr'
+                )
+
+    def test_measure_refs_resolve(self, pipeline_output):
+        """Check that MEASURE() references resolve within each spec.
+
+        Window-spec PY measures may reference _py variants that are
+        generated on a different table (known limitation), so we count
+        total unresolved rather than failing on first.
+        """
+        total_unresolved = 0
+        for key, spec in pipeline_output['specs'].items():
+            all_names = {m.measure_name for m in spec.measures}
+            for m in spec.measures:
+                if m.sql_expr:
+                    refs = set(re.findall(r'\bMEASURE\((\w+)\)', m.sql_expr))
+                    unresolved = refs - all_names
+                    total_unresolved += len(unresolved)
+        # Allow a small number of cross-spec PY measure references
+        assert total_unresolved <= 10, (
+            f'Too many unresolved MEASURE() refs: {total_unresolved} (max 10)'
+        )
+
+    def test_total_translated_regression_guard(self, pipeline_output):
+        total = sum(
+            s.get('translated', 0)
+            for k, s in pipeline_output['stats'].items()
+            if k != '__unassigned__'
+        )
+        assert total >= 390, (
+            f'Regression: only {total} translated (expected >= 390)'
+        )
+
+    def test_manual_overrides_injected(self, pipeline_output):
+        spec = pipeline_output['specs'].get('fact_scorecard_BP_wc')
+        assert spec is not None, 'fact_scorecard_BP_wc spec not found'
+        manual = [
+            m for m in spec.measures
+            if getattr(m, 'category', '') == 'manual_override'
+        ]
+        assert len(manual) >= 5, (
+            f'Expected >= 5 manual overrides, got {len(manual)}'
+        )
+
+    def test_window_specs_on_py_measures(self, pipeline_output):
+        spec = pipeline_output['specs'].get('FT_Planning')
+        assert spec is not None, 'FT_Planning spec not found'
+        py_measures = [
+            m for m in spec.measures if m.measure_name.endswith('_py')
+        ]
+        windowed = [m for m in py_measures if m.window_spec]
+        assert len(windowed) >= 3, (
+            f'Expected >= 3 windowed PY measures, got {len(windowed)}'
+        )
+
+    def test_migration_report_has_pbi_features(self, pipeline_output):
+        report = pipeline_output['results'].get('migration_report', '')
+        assert 'PBI Native Features' in report
+        assert 'USERELATIONSHIP' in report
+        assert 'Aggregation' in report
+
+    def test_yaml_no_empty_dimension_names(self, pipeline_output):
+        """Validate the actual YAML strings don't contain empty dims."""
+        for key, yml in pipeline_output['yaml_out'].items():
+            lines = yml.split('\n')
+            for i, line in enumerate(lines):
+                if line.strip() == '- name:':
+                    pytest.fail(
+                        f'{key} has empty dimension name at line {i + 1}'
+                    )
