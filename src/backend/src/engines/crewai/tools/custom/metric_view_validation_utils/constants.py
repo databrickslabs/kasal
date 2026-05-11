@@ -49,7 +49,7 @@ SQL_FUNCTIONS = {
     'TRANSFORM', 'AGGREGATE', 'FLATTEN', 'ZIP_WITH',
     'HASH', 'MD5', 'SHA1', 'SHA2', 'CRC32', 'XXHASH64',
     'UUID', 'MONOTONICALLY_INCREASING_ID',
-    'GREATEST', 'LEAST', 'TYPEOF', 'TYPEOF',
+    'GREATEST', 'LEAST', 'TYPEOF',
 }
 
 # Combined exclusion set used when scanning for bare column identifiers

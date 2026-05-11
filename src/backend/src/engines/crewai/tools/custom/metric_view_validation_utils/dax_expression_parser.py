@@ -98,7 +98,7 @@ class DAXExpressionParser:
     
     def check_variable_usage(self, variable_name: str, dax_expr: str) -> bool:
         """Check if a variable is used in an expression."""
-        variable_pattern = r'[^\w](%s)[^\w]' % re.escape(variable_name)
+        variable_pattern = r'(?<!\w)(%s)(?!\w)' % re.escape(variable_name)
         matches = list(re.finditer(variable_pattern, dax_expr, re.IGNORECASE | re.DOTALL))
         return bool(matches)
     
@@ -153,13 +153,13 @@ class DAXExpressionParser:
         """
         # Use word boundaries to match the variable name as a whole word.
         # re.escape() prevents metacharacters in var_name from breaking the pattern.
-        variable_pattern = r'([^\w])(%s)([^\w])' % re.escape(var_name)
-        
+        variable_pattern = r'(?<!\w)(%s)(?!\w)' % re.escape(var_name)
+
         # Check if the variable exists in the expression
         if not re.search(variable_pattern, expression, re.IGNORECASE):
             return expression
-        
-        replacement = r"\1%s\3" % (var_expr)
+
+        replacement = var_expr
         result = re.sub(variable_pattern, replacement, expression, flags=re.IGNORECASE)
         
         return result
