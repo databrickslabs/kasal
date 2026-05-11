@@ -215,10 +215,51 @@ class UCMetricViewGeneratorTool(BaseTool):
         sql_output = pipeline.emit_all_sql(catalog=catalog, schema=schema)
         results = pipeline.get_results()
 
+        # Run validation (optional — compares DAX structure vs generated SQL)
+        validation_results = {}
+        try:
+            from src.engines.crewai.tools.custom.metric_view_validation_utils.pipeline import (
+                MetricExpressionValidatorPipeline,
+            )
+            if measures_raw and measures_raw != '[]':
+                mapping_for_val = json.loads(measures_raw) if isinstance(measures_raw, str) else measures_raw
+                import tempfile, os
+                for table_key, yml in yaml_output.items():
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False) as yf:
+                        yf.write(yml)
+                        yf_path = yf.name
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as mf:
+                        json.dump(mapping_for_val, mf)
+                        mf_path = mf.name
+                    try:
+                        validator = MetricExpressionValidatorPipeline(
+                            table_mappings={table_key: 'source'})
+                        vr = validator.run(
+                            metrics_view_yaml_path=yf_path,
+                            table_mapping_json_path=mf_path)
+                        evaluated = vr.get('evaluated', [])
+                        if evaluated:
+                            valid = sum(1 for m in evaluated
+                                        if m.get('measure_eval_result', {}).get('status') == 'VALID')
+                            validation_results[table_key] = {
+                                'evaluated': len(evaluated),
+                                'valid': valid,
+                            }
+                    finally:
+                        os.unlink(yf_path)
+                        os.unlink(mf_path)
+        except ImportError:
+            pass  # Validation package not available
+        except Exception as e:
+            logger.warning(f"Validation failed: {e}")
+
         output = {
             'yaml': yaml_output,
             'sql': sql_output,
             'stats': results['stats'],
+            'migration_report': results.get('migration_report', ''),
+            'limitations': results.get('limitations', {}),
+            'validation': validation_results,
             'specs_summary': {
                 k: {
                     'view_name': v.get('view_name'),
