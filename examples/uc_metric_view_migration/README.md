@@ -59,8 +59,8 @@ Migrations are never 100% automatic. The target is 70-80% automation with human 
   Join Detector → YAML Emitter → Migration Report
                       │
                       ▼
-  Phase 5: VALIDATE + DEPLOY (planned)
-  Deterministic checks → compare vs PBI → human approval → deploy
+  Phase 5: VALIDATE + DEPLOY (done)
+  DAX-vs-UCMV structural validation → human approval → deploy via REST API
          │
          │ failures loop back
          └──────────► Phase 3 (adjust config, re-run)
@@ -73,8 +73,8 @@ Migrations are never 100% automatic. The target is 70-80% automation with human 
 | Phase 1: Extract | **Done** | Tools 73, 74, 75, 86 (API mode). 3 auth methods. |
 | Phase 2: Propose config | **Planned** | Tool 89 — config generator. Not yet built. |
 | Phase 3: Human review | **Manual** | Customer edits pipeline_config.json by hand. |
-| Phase 4: Generate | **Done** | Tool 86. 486 tests, 22 test files, 18 modules. All 10 PBI limitations detected. |
-| Phase 5: Validate | **Planned** | Deterministic check framework (separate project, no timeline yet). Tool 88 deployer exists for dry-run + live deploy. |
+| Phase 4: Generate | **Done** | Tool 86. 709 tests, 30 test files, 20 modules. All 10 PBI limitations detected. |
+| Phase 5: Validate + Deploy | **Done** | Validation framework compares DAX structure vs generated UCMV SQL. Tool 88 deployer for dry-run + live deploy via UC REST API. |
 
 ### The iteration loop
 
@@ -198,6 +198,51 @@ All tools support 3 auth methods: Service Principal, Service Account, User OAuth
 
 Deploys YAML to Databricks via UC Metric View REST API. Supports dry-run (validation without deployment) and auto-update on conflict (PUT on 409).
 
+### Validation Framework (Phase 5)
+
+Structural validation comparing the original DAX expression against the generated UCMV SQL — per measure.
+
+**Modules** (`metric_view_validation_utils/`):
+- `DAXExpressionParser` — hierarchical DAX parse tree with recursive VAR substitution
+- `UCMetricsViewParser` — parses Databricks metric view YAML expressions
+- `ExpressionValidator` — compares aggregation types, filter conditions, column references
+- `MetricExpressionValidatorPipeline` — orchestrator with direct + file-based modes
+
+**Output per measure:** status (VALID/INVALID/SKIPPED), confidence score, differences, similarities, recommendations.
+
+213 unit tests covering all validation modules.
+
+### run_locally.py vs Tool 86 — Same Pipeline
+
+`run_locally.py` is a convenience wrapper for offline testing. Tool 86 is the real CrewAI tool. Both use the **exact same modules**:
+
+| Module | run_locally.py | Tool 86 |
+|--------|---------------|---------|
+| `MetricViewPipeline` | top-level import | lazy import inside `_run()` |
+| `MQueryParser` | top-level import | lazy import inside `_run()` |
+| `RelationshipsLoader` | top-level import | lazy import inside `_run()` |
+| `ScanDataParser` | top-level import | lazy import inside `_run()` |
+| Validation | try/except at bottom | try/except after generation |
+| Migration report | via `pipeline.get_results()` | included in JSON output |
+
+Tool 86 has 3 additional imports for **API mode only** (not used in JSON mode):
+- `run_async` — bridges async PBI API calls from sync CrewAI context
+- `powerbi_auth_utils` — PBI OAuth/SPN authentication
+- `PowerBIConnector` / `PowerBIAdminScanner` — live PBI API extraction
+
+**Tool 86 JSON output includes everything:**
+```json
+{
+  "yaml": {"table_key": "version: '1.1'..."},
+  "sql": {"table_key": "-- Deploy reference..."},
+  "stats": {"table_key": {"translated": 28, "total": 32}},
+  "migration_report": "# UC Metric View Migration Report...",
+  "limitations": {"rls_tables": [...], "aggregation_warnings": [...]},
+  "validation": {"table_key": {"evaluated": 5, "valid": 0}},
+  "specs_summary": {"table_key": {"view_name": "mv_sales"}}
+}
+```
+
 ## Demo Details
 
 ### run_locally.py
@@ -214,6 +259,7 @@ Demonstrates Phase 4 (generation) using pre-extracted JSONs from the SC Reportin
 **What it produces:**
 - 26 YAML files (UC Metric View definitions)
 - 26 SQL files (deployment reference instructions)
+- 26 validation JSONs (DAX-vs-UCMV structural comparison per table)
 - 1 migration report (markdown with executive summary, per-table stats, join map, PBI Native Features table)
 
 **Verification:**
