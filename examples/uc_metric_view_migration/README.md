@@ -242,6 +242,78 @@ Synthetic demo exercising all 10 PBI limitation detection features against fabri
 
 **Output:** `~/Downloads/ucmv_all_limitations_demo/` — 1 YAML + 1 SQL + migration report with all sections populated.
 
+## How to Test In Practice
+
+### Quick smoke test (2 minutes)
+
+```bash
+cd src/backend
+source .venv/bin/activate
+python ../../examples/uc_metric_view_migration/run_locally.py
+```
+
+**What you should see:**
+- `Metric views: 26` — all 26 tables processed
+- `Total: 396/671 measures translated (59%)` — overall translation rate
+- `VALIDATION` section at the bottom — per-table DAX-vs-UCMV comparison
+- Output in `~/Downloads/ucmv_example_output/`
+
+**What "good" looks like:**
+- 26 YAML files + 26 SQL files + 1 migration report
+- No empty dimensions (the pipeline now filters these)
+- The migration report has a "PBI Native Features — Migration Status" table with all 10 rows
+- `fact_scorecard_BP_wc` shows `manual=6` (manual overrides injected)
+- FT_Planning PY measures have `window:` blocks with `semiadditive: last`
+
+### Validation output (what the 0/73 VALID means)
+
+The validation section compares the **structure** of the original DAX expression against the generated UCMV SQL expression. It reports INVALID when it finds structural differences — but most of these are **expected translation changes**, not bugs:
+
+| Validator says | What actually happened | Is it a bug? |
+|---|---|---|
+| "Aggregation mismatch: SUMX → SUM" | DAX `SUMX(table, col)` → SQL `SUM(source.col)` | No — correct translation |
+| "Filter mismatch: IN DAX but not UCMV" | DAX inline FILTER → SQL FILTER (WHERE ...) | No — different syntax, same logic |
+| "Column reference mismatch" | DAX `Table[col]` → SQL `source.col` | No — alias rewriting |
+
+The validation JSON files (e.g., `validation_FT_Planning.json`) contain per-measure details: differences, similarities, and recommendations. Use these for **manual review** of complex measures — the validator catches real issues alongside expected transformations.
+
+**When validation IS useful:** If a measure shows "Filter content mismatch" with unexpected filter conditions, or "Aggregation mismatch" where the function type changed (e.g., SUM→COUNT), that's a real translation bug worth investigating.
+
+### Unit tests (30 seconds)
+
+```bash
+python -m pytest tests/unit/engines/crewai/tools/custom/metric_view_utils/ \
+  tests/unit/engines/crewai/tools/custom/metric_view_validation_utils/ -q
+```
+
+**Expected:** 709 passed. This includes:
+- 486 generation pipeline tests (16 DAX patterns, YAML emitter, joins, dependencies, etc.)
+- 213 validation framework tests (DAX parser, expression comparison, pipeline modes)
+- 10 end-to-end integration tests (runs full pipeline against SC Reporting data)
+
+### All-limitations demo (1 minute)
+
+```bash
+python ../../examples/uc_metric_view_migration/run_all_limitations_demo.py
+```
+
+**Expected:** `ALL 10 LIMITATIONS VERIFIED ✓` — each of the 10 PBI limitation detections triggered on synthetic data.
+
+### Deploying to Databricks (Phase 5)
+
+After reviewing the YAML output, deploy with Tool 88:
+1. **Dry run** (default): validates YAML without deploying → check for errors
+2. **Live deploy**: `dry_run=False` + provide `databricks_host`, `databricks_token`, `warehouse_id`
+3. Tool 88 uses the UC Metric View REST API (POST for create, PUT on 409 for update)
+
+### What to check after deployment
+
+Once deployed to a Databricks workspace:
+1. `DESCRIBE METRIC VIEW catalog.schema.view_name` — verify dimensions + measures match
+2. `SELECT MEASURE(revenue) FROM METRIC VIEW catalog.schema.view_name GROUP BY region` — verify query works
+3. Compare against original PBI visual: same numbers at same grain = success
+4. Check `window:` measures separately: `SELECT MEASURE(revenue_py) ...` — verify trailing 12 month logic
+
 ## Example Files
 
 | File | Size | Description |
@@ -301,9 +373,9 @@ The `pipeline_config.json` drives all customer-specific behavior. Empty defaults
 | `period_dim_priority` | `["fiscper", "fiscal_year_period", "date_key"]` | Custom period dimension ordering |
 | `int_period_dims` | `["fiscper", "fiscal_year_period"]` | Period dimensions with integer type |
 | `budget_suffix` | `"_bp"` | Budget measure variant suffix |
-| `cwc_filter_column` | `"bic_cwc_type"` | CWC filter expansion column |
-| `switch_join_alias` | `"dim_wkctr"` | SWITCH decomposition join alias |
-| `switch_join_col` | `"bic_cwc_type"` | SWITCH decomposition join column |
+| `cwc_filter_column` | `""` | CWC filter expansion column (set per customer) |
+| `switch_join_alias` | `""` | SWITCH decomposition join alias (set per customer) |
+| `switch_join_col` | `""` | SWITCH decomposition join column (set per customer) |
 
 ### Starting From Scratch
 
