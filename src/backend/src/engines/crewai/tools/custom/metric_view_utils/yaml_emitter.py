@@ -531,6 +531,9 @@ def emit_yaml(spec: MetricViewSpec,
         order_map = {name: i for i, name in enumerate(dimension_order)}
         spec.dimensions.sort(key=lambda d: order_map.get(d['name'], 999))
 
+    # Filter out empty/phantom dimensions before emission
+    spec.dimensions = [d for d in spec.dimensions if d.get('name') and d.get('expr') and d['expr'] != 'source.']
+
     # Dimensions
     if spec.dimensions:
         lines.append('')
@@ -540,10 +543,7 @@ def emit_yaml(spec: MetricViewSpec,
         for d in spec.dimensions:
             lines.append(f'  - name: {d["name"]}')
             expr = d['expr']
-            if any(c in expr for c in ('"', "'", '(', ',')):
-                lines.append(f'    expr: "{expr}"')
-            else:
-                lines.append(f'    expr: {expr}')
+            lines.append(f'    expr: {_yaml_scalar(expr, indent=4)}')
             if d.get('comment'):
                 lines.append(f'    comment: {_yaml_val(d["comment"])}')
             if d.get('display_name'):
@@ -579,6 +579,8 @@ def emit_yaml(spec: MetricViewSpec,
                 fmt = m_meta['format']
                 lines.append('    format:')
                 lines.append(f'      type: {fmt["type"]}')
+                if 'currency_code' in fmt:
+                    lines.append(f'      currency_code: {fmt["currency_code"]}')
                 if 'decimal_places' in fmt:
                     lines.append('      decimal_places:')
                     lines.append('        type: exact')
@@ -648,6 +650,8 @@ def emit_yaml(spec: MetricViewSpec,
                 fmt = m_meta['format']
                 lines.append('    format:')
                 lines.append(f'      type: {fmt["type"]}')
+                if 'currency_code' in fmt:
+                    lines.append(f'      currency_code: {fmt["currency_code"]}')
                 if 'decimal_places' in fmt:
                     lines.append('      decimal_places:')
                     lines.append('        type: exact')

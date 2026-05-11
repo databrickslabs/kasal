@@ -26,7 +26,7 @@ class DaxTranslator:
         self._fact_join_map_cfg = cfg.get('fact_join_map', {})
         self._measure_resolutions = cfg.get('measure_resolutions', {})
         self._dim_alias_map: dict[str, str] = cfg.get('dim_alias_map', {})
-        self._cwc_filter_column: str = cfg.get('cwc_filter_column', 'bic_cwc_type')
+        self._cwc_filter_column: str = cfg.get('cwc_filter_column', '')
         self._fact_joins: list[dict] = []
         self._patterns: list[tuple[str, Callable, Callable]] = []
         self._register_patterns()

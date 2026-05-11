@@ -37,6 +37,8 @@ from .yaml_emitter import emit_yaml
 from .sql_emitter import emit_deploy_sql
 from .report_emitter import emit_migration_report
 from .pipeline import MetricViewPipeline
+from .table_processor import process_table
+from .artifact_cascade import cross_table_artifact_cascade
 
 __all__ = [
     "TranslationResult",
@@ -59,4 +61,6 @@ __all__ = [
     "emit_deploy_sql",
     "emit_migration_report",
     "MetricViewPipeline",
+    "process_table",
+    "cross_table_artifact_cascade",
 ]

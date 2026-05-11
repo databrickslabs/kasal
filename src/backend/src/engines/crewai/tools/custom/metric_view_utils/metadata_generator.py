@@ -60,7 +60,8 @@ class MetadataGenerator:
             }
         elif _CURRENCY_MEASURE_PATTERNS.search(measure_name):
             result['format'] = {
-                'type': 'number',
+                'type': 'currency',
+                'currency_code': 'USD',  # Default; override via measure_metadata config
                 'decimal_places': {'type': 'exact', 'places': 2},
             }
         return result

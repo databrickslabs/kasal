@@ -60,22 +60,26 @@ class TestMetadataGeneratorFormats:
         gen = MetadataGenerator()
         meta = gen.get_measure_meta("total_cost")
         assert 'format' in meta
-        assert meta['format']['type'] == 'number'
+        assert meta['format']['type'] == 'currency'
+        assert meta['format']['currency_code'] == 'USD'
 
     def test_currency_detection_revenue(self):
         gen = MetadataGenerator()
         meta = gen.get_measure_meta("net_revenue")
-        assert meta['format']['type'] == 'number'
+        assert meta['format']['type'] == 'currency'
+        assert meta['format']['currency_code'] == 'USD'
 
     def test_currency_detection_amount(self):
         gen = MetadataGenerator()
         meta = gen.get_measure_meta("order_amount")
-        assert meta['format']['type'] == 'number'
+        assert meta['format']['type'] == 'currency'
+        assert meta['format']['currency_code'] == 'USD'
 
     def test_currency_detection_budget(self):
         gen = MetadataGenerator()
         meta = gen.get_measure_meta("annual_budget")
-        assert meta['format']['type'] == 'number'
+        assert meta['format']['type'] == 'currency'
+        assert meta['format']['currency_code'] == 'USD'
 
     def test_no_format_for_count(self):
         gen = MetadataGenerator()
