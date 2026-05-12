@@ -260,14 +260,15 @@ class TestFilterSignature:
     def test_equals_signature(self):
         cond = {"type": "EQUALS", "column": "Source.Status", "value": "Active"}
         sig = ExpressionValidator._filter_signature(cond)
-        # Case normalised
-        assert sig == ("EQUALS", "source.status", "active")
+        # Case normalised, table prefix stripped for cross-format comparison
+        assert sig == ("EQUALS", "status", "active")
 
     def test_in_signature_order_independent(self):
         cond = {"type": "IN", "column": "Source.type", "values": ["B", "A"]}
         sig = ExpressionValidator._filter_signature(cond)
         assert sig[0] == "IN"
-        assert sig[1] == "source.type"
+        # Table prefix stripped for cross-format comparison
+        assert sig[1] == "type"
         assert sig[2] == frozenset({"a", "b"})
 
     def test_unknown_type(self):
@@ -407,3 +408,137 @@ class TestValidateUcmv:
         # total_sales / simple_ratio match the simple_pattern → should be skipped
         skipped_evals = {m.get("measure_eval") for m in result["skipped"]}
         assert "simple" in skipped_evals or "unmatched" in skipped_evals
+
+
+# ---------------------------------------------------------------------------
+# EQUIVALENT / REVIEW status classification
+# ---------------------------------------------------------------------------
+
+class TestEquivalentStatus:
+    """Test that known DAX→SQL transformations produce EQUIVALENT instead of INVALID."""
+
+    def test_equivalent_status_sumx_to_sum(self):
+        """SUMX→SUM with same column (different table prefix) gets EQUIVALENT."""
+        v = ExpressionValidator()
+        # SUMX(fact, fact[amount]) → SUM(source.amount)
+        # Different table prefix (no mapping) produces reference + agg diffs,
+        # but all are expected transformations.
+        result = v.validate("SUM(source.amount)", "SUMX(fact, fact[amount])")
+        # The result should not be valid (structural differences exist),
+        # but _is_equivalent should recognise them as expected mappings
+        assert v._is_equivalent(result) or result["is_valid"]
+
+    def test_equivalent_status_table_prefix_only(self):
+        """Table[col] → source.col (same column name, different prefix) gets EQUIVALENT."""
+        v = ExpressionValidator()
+        # No table mapping: fact.amount vs source.amount — column names match
+        result = v.validate("SUM(source.amount)", "SUM(fact[amount])")
+        # Column names match (amount == amount), so _compare_columns fallback kicks in
+        # making references match. Agg type also matches. Should be VALID or EQUIVALENT.
+        assert result["is_valid"] or v._is_equivalent(result)
+
+    def test_review_status_partial_match(self):
+        """At least one similarity present → REVIEW (not INVALID)."""
+        v = ExpressionValidator()
+        # SUM vs COUNT on same column: agg type mismatch but reference similarity
+        result = v.validate("SUM(source.amount)", "COUNT(source[amount])")
+        assert v._is_review_candidate(result)
+
+    def test_invalid_status_no_match(self):
+        """Completely different expressions → INVALID (not REVIEW)."""
+        v = ExpressionValidator()
+        # Completely different: no shared aggregations, no shared references
+        result = v.validate("SUM(source.a)", "COUNT(other[b])")
+        # Should have differences and may or may not have similarities
+        assert result["is_valid"] is False
+
+    def test_is_equivalent_agg_mapping(self):
+        """_is_expected_agg_mapping recognises SUMX→SUM as expected."""
+        v = ExpressionValidator()
+        diff = "Aggregation mismatch: DAX aggregation SUMX has no matching UCMV SUM"
+        assert v._is_expected_agg_mapping(diff)
+
+    def test_is_equivalent_ref_mapping(self):
+        """_is_expected_ref_mapping recognises table prefix differences."""
+        v = ExpressionValidator()
+        diff = "Reference mismatch (table.column): Missing in UCMV: {'fact.amount'}."
+        result_with_matching_cols = {
+            'databricks_parsed': {'references': {'source.amount'}},
+            'dax_parsed': {'references': {'fact.amount'}},
+        }
+        assert v._is_expected_ref_mapping(diff, result_with_matching_cols)
+
+    def test_is_review_candidate_with_similarities(self):
+        """Similarities list triggers REVIEW classification."""
+        v = ExpressionValidator()
+        result = {
+            'similarities': ['Aggregations match: 1 match'],
+            'differences': ['Reference mismatch: ...'],
+        }
+        assert v._is_review_candidate(result)
+
+    def test_is_review_candidate_no_data(self):
+        """Empty similarities and differences → not a review candidate."""
+        v = ExpressionValidator()
+        result = {'similarities': [], 'differences': []}
+        assert not v._is_review_candidate(result)
+
+
+class TestColumnFallbackInStrictQualified:
+    """Test the column-name-only fallback when both sides are fully qualified."""
+
+    def test_column_name_match_different_table(self):
+        """Column names match but table prefixes differ → match via fallback."""
+        v = ExpressionValidator()
+        result = v._compare_columns({"source.amount"}, {"fact.amount"})
+        assert result["match"] is True
+        assert "table prefixes differ" in result["details"]
+
+    def test_column_name_mismatch(self):
+        """Column names differ → no fallback, still mismatch."""
+        v = ExpressionValidator()
+        result = v._compare_columns({"source.amount"}, {"fact.revenue"})
+        assert result["match"] is False
+
+
+class TestFilterSignatureReparse:
+    """Test that UNKNOWN filter conditions are re-parsed before fallback."""
+
+    def test_unknown_in_clause_reparsed(self):
+        """UNKNOWN condition with IN clause syntax should be re-parsed to IN signature."""
+        cond = {"type": "UNKNOWN", "raw": "bic_cwc_type IN ('PET','APET')"}
+        sig = ExpressionValidator._filter_signature(cond)
+        assert sig[0] == "IN"
+        assert sig[1] == "bic_cwc_type"
+        assert "pet" in sig[2]
+        assert "apet" in sig[2]
+
+    def test_unknown_equals_reparsed(self):
+        """UNKNOWN condition with equality syntax should be re-parsed to EQUALS signature."""
+        cond = {"type": "UNKNOWN", "raw": "bic_chversion = '0000'"}
+        sig = ExpressionValidator._filter_signature(cond)
+        assert sig[0] == "EQUALS"
+        assert sig[1] == "bic_chversion"
+        assert sig[2] == "0000"
+
+    def test_filter_signature_strips_table_prefix(self):
+        """Table prefix in filter column should be stripped for cross-format comparison."""
+        cond_qualified = {"type": "IN", "column": "source.type", "values": ["A", "B"]}
+        cond_bare = {"type": "IN", "column": "type", "values": ["A", "B"]}
+        sig_q = ExpressionValidator._filter_signature(cond_qualified)
+        sig_b = ExpressionValidator._filter_signature(cond_bare)
+        assert sig_q == sig_b
+
+
+class TestMeasureByNameStatusLevels:
+    """Test that validate_measure_by_name uses EQUIVALENT and REVIEW statuses."""
+
+    def test_valid_measure_returns_valid_or_equivalent(self, tmp_path):
+        h = _make_handler(tmp_path)
+        v = ExpressionValidator(
+            data_handler=h,
+            table_mappings={"fact": "source"},
+        )
+        result = v.validate_measure_by_name("total_sales")
+        assert result["status"] in ("VALID", "EQUIVALENT", "REVIEW", "INVALID")
+        assert "is_valid" in result

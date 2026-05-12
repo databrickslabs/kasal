@@ -91,6 +91,8 @@ STATUS_VALID = "VALID"
 STATUS_INVALID = "INVALID"
 STATUS_SKIPPED = "SKIPPED"
 STATUS_ERROR = "ERROR"
+STATUS_EQUIVALENT = "EQUIVALENT"  # Structurally different but semantically correct translation
+STATUS_REVIEW = "REVIEW"          # Partial match, needs human verification
 
 # Confidence levels
 CONFIDENCE_HIGH = "high"

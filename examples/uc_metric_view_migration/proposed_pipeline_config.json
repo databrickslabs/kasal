@@ -1,0 +1,1040 @@
+{
+  "join_key_map": {
+    "C_Dim_Geography": {
+      "alias": "dim_geography",
+      "join_key": "comp_code",
+      "dim_columns": []
+    },
+    "C_Dim_calendar": {
+      "alias": "dim_calendar",
+      "join_key": "date_key",
+      "dim_columns": [],
+      "dim_key": "date_id"
+    },
+    "C_Dim_Plant": {
+      "alias": "dim_plant",
+      "join_key": "plant",
+      "dim_columns": []
+    },
+    "C_Dim_CE": {
+      "alias": "dim_ce",
+      "join_key": "gl_account",
+      "dim_columns": [],
+      "dim_key": "gl_account_range"
+    },
+    "Dim_wkctr": {
+      "alias": "dim_wkctr",
+      "join_key": "Plant_workcenter_key",
+      "dim_columns": [],
+      "dim_key": "plant_workcenter_key"
+    }
+  },
+  "enrichment_joins": {
+    "Fact_CO012_Actuals": [
+      {
+        "name": "dim_geography",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_company",
+        "join_on": "source.comp_code = dim_geography.comp_code",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_calendar",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_faccal_calendar",
+        "join_on": "source.date_key = dim_calendar.date_id",
+        "dim_columns": []
+      }
+    ],
+    "Fact_CO012_REBP": [
+      {
+        "name": "dim_geography",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_company",
+        "join_on": "source.comp_code = dim_geography.comp_code",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_calendar",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_faccal_calendar",
+        "join_on": "source.date_key = dim_calendar.date_id",
+        "dim_columns": []
+      }
+    ],
+    "Fact_HR_A": [
+      {
+        "name": "dim_geography",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_company",
+        "join_on": "source.comp_code = dim_geography.comp_code",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_calendar",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_faccal_calendar",
+        "join_on": "source.date_key = dim_calendar.date_id",
+        "dim_columns": []
+      }
+    ],
+    "Fact_Fxn_Actuals": [
+      {
+        "name": "dim_geography",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_company",
+        "join_on": "source.comp_code = dim_geography.comp_code",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_calendar",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_faccal_calendar",
+        "join_on": "source.date_key = dim_calendar.date_id",
+        "dim_columns": []
+      }
+    ],
+    "Fact_Fxn_REBP": [
+      {
+        "name": "dim_geography",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_company",
+        "join_on": "source.comp_code = dim_geography.comp_code",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_calendar",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_faccal_calendar",
+        "join_on": "source.date_key = dim_calendar.date_id",
+        "dim_columns": []
+      }
+    ],
+    "FT_QSE": [
+      {
+        "name": "dim_plant",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_plant",
+        "join_on": "source.plant = dim_plant.plant",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_geography",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_company",
+        "join_on": "source.comp_code = dim_geography.comp_code",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_plant",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_plant",
+        "join_on": "source.plant = dim_plant.plant",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_calendar",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_faccal_calendar",
+        "join_on": "source.FormatedDate = dim_calendar.date_id",
+        "dim_columns": []
+      }
+    ],
+    "FT_PE009": [
+      {
+        "name": "dim_calendar",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_faccal_calendar",
+        "join_on": "source.fiscper = dim_calendar.fiscper",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_geography",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_company",
+        "join_on": "source.comp_code = dim_geography.comp_code",
+        "dim_columns": []
+      }
+    ],
+    "FT_BPC003": [
+      {
+        "name": "dim_geography",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_company",
+        "join_on": "source.comp_code = dim_geography.comp_code",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_calendar",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_faccal_calendar",
+        "join_on": "source.date_key = dim_calendar.date_id",
+        "dim_columns": []
+      }
+    ],
+    "FT_bpc003_losses": [
+      {
+        "name": "dim_geography",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_company",
+        "join_on": "source.comp_code = dim_geography.comp_code",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_ce",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__curated_theedge_user_input_ca__opex_detailed_mapping",
+        "join_on": "source.gl_account = dim_ce.gl_account_range",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_calendar",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_faccal_calendar",
+        "join_on": "source.date_key = dim_calendar.date_id",
+        "dim_columns": []
+      }
+    ],
+    "FT_Planning": [
+      {
+        "name": "dim_geography",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_company",
+        "join_on": "source.comp_code = dim_geography.comp_code",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_calendar",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_faccal_calendar",
+        "join_on": "source.FormatedDate = dim_calendar.date_id",
+        "dim_columns": []
+      }
+    ],
+    "fact_iom06_detailed": [
+      {
+        "name": "dim_geography",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_company",
+        "join_on": "source.comp_code = dim_geography.comp_code",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_calendar",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_faccal_calendar",
+        "join_on": "source.date_key = dim_calendar.date_id",
+        "dim_columns": []
+      }
+    ],
+    "fact_iom05": [
+      {
+        "name": "dim_geography",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_company",
+        "join_on": "source.comp_code = dim_geography.comp_code",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_calendar",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_faccal_calendar",
+        "join_on": "source.date_key = dim_calendar.date_id",
+        "dim_columns": []
+      }
+    ],
+    "fact_iom06": [
+      {
+        "name": "dim_geography",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_company",
+        "join_on": "source.comp_code = dim_geography.comp_code",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_calendar",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_faccal_calendar",
+        "join_on": "source.date_key = dim_calendar.date_id",
+        "dim_columns": []
+      }
+    ],
+    "fact_pe005": [
+      {
+        "name": "dim_geography",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_company",
+        "join_on": "source.comp_code = dim_geography.comp_code",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_wkctr",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_workcenter",
+        "join_on": "source.Plant_workcenter_key = dim_wkctr.plant_workcenter_key",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_plant",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_plant",
+        "join_on": "source.plant = dim_plant.plant",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_calendar",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_faccal_calendar",
+        "join_on": "source.date_key = dim_calendar.date_id",
+        "dim_columns": []
+      }
+    ],
+    "fact_pe004": [
+      {
+        "name": "dim_geography",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_company",
+        "join_on": "source.comp_code = dim_geography.comp_code",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_wkctr",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_workcenter",
+        "join_on": "source.Plant_workcenter_key = dim_wkctr.plant_workcenter_key",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_plant",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_plant",
+        "join_on": "source.plant = dim_plant.plant",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_calendar",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_faccal_calendar",
+        "join_on": "source.date_key = dim_calendar.date_id",
+        "dim_columns": []
+      }
+    ],
+    "fact_pe002": [
+      {
+        "name": "dim_geography",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_company",
+        "join_on": "source.comp_code = dim_geography.comp_code",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_wkctr",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_workcenter",
+        "join_on": "source.Plant_workcenter_key = dim_wkctr.plant_workcenter_key",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_plant",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_plant",
+        "join_on": "source.plant = dim_plant.plant",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_calendar",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_faccal_calendar",
+        "join_on": "source.date_key = dim_calendar.date_id",
+        "dim_columns": []
+      }
+    ],
+    "fact_scorecard_BP_wc": [
+      {
+        "name": "dim_plant",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_plant",
+        "join_on": "source.plant = dim_plant.plant",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_geography",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_company",
+        "join_on": "source.comp_code = dim_geography.comp_code",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_wkctr",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_workcenter",
+        "join_on": "source.Plant_workcenter_key = dim_wkctr.plant_workcenter_key",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_calendar",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_faccal_calendar",
+        "join_on": "source.date_key = dim_calendar.date_id",
+        "dim_columns": []
+      }
+    ],
+    "FT_bpc003_losses_RE": [
+      {
+        "name": "dim_geography",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_company",
+        "join_on": "source.comp_code = dim_geography.comp_code",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_calendar",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_faccal_calendar",
+        "join_on": "source.FormatedDate = dim_calendar.date_id",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_ce",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__curated_theedge_user_input_ca__opex_detailed_mapping",
+        "join_on": "source.gl_account = dim_ce.gl_account_range",
+        "dim_columns": []
+      }
+    ],
+    "fact_scorecard_Actuals_wc": [
+      {
+        "name": "dim_plant",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_plant",
+        "join_on": "source.plant = dim_plant.plant",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_wkctr",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_workcenter",
+        "join_on": "source.Plant_workcenter_key = dim_wkctr.plant_workcenter_key",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_calendar",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_faccal_calendar",
+        "join_on": "source.date_key = dim_calendar.date_id",
+        "dim_columns": []
+      },
+      {
+        "name": "dim_geography",
+        "source": "david_test_metrics.test_schema.dc_datalake_prod_001__udm_cchbc_md__ca_dim_company",
+        "join_on": "source.comp_code = dim_geography.comp_code",
+        "dim_columns": []
+      }
+    ]
+  },
+  "column_overrides": {},
+  "mapping_only_tables": {
+    "C_Last Refreshed": {
+      "source_table": "{catalog}.{schema}.c_last_refreshed",
+      "dimensions": []
+    },
+    "__unassigned__": {
+      "source_table": "{catalog}.{schema}.unassigned",
+      "dimensions": []
+    }
+  },
+  "switch_decompositions": {
+    "C_Banner": [
+      {
+        "name": "f_start_date",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from F_Start_date"
+      },
+      {
+        "name": "f_end_date",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from F_End_date"
+      },
+      {
+        "name": "py_start_date",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from PY_Start_date"
+      },
+      {
+        "name": "py_end_date",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from PY_End_date"
+      },
+      {
+        "name": "avg_kbi_div_factor",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from AVG_KBI_Div_Factor"
+      },
+      {
+        "name": "qse_maturity_index_actual",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from QSE_Maturity_Index_Actual"
+      },
+      {
+        "name": "qse_maturity_index_bp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from QSE_Maturity_Index_BP"
+      }
+    ],
+    "fact_pe002": [
+      {
+        "name": "sle_waterfall_capacity_actual",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from SLE_Waterfall_Capacity_Actual"
+      },
+      {
+        "name": "sle_waterfall_capacity_actual_2",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from SLE_Waterfall_Capacity_Actual _2"
+      },
+      {
+        "name": "prod_exec_kbi_wrapper_actual",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(8 branches): Actual Production PHC, Asset Utilization (core lines), Total SLE (%), OPL, EPL"
+      },
+      {
+        "name": "prod_exec_line_item_wrapper_actual",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(12 branches): Production Performance to Plan, Volume Produced (PhC), Total SLE (%), Asset Utilization (core lines),  Asset Utilization (core lines)"
+      },
+      {
+        "name": "prod_exec_line_item_actual",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from Prod_Exec_Line_Item_Actual"
+      }
+    ],
+    "FT_PE009": [
+      {
+        "name": "qse_trend_py",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): Absolute, Variance, Variance %"
+      },
+      {
+        "name": "qse_trend_cy",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): Absolute, Variance, Variance %"
+      },
+      {
+        "name": "qse_kbi_wrapper_actual",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(14 branches): Employee Lost Time Accident Rate, Total Fatalities Employees & Contractors, Consumer Complaints, Manufacturing Water Ratio, Manufacturing Energy Ratio"
+      },
+      {
+        "name": "qse_kbi_wrapper_py",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(1 branches): Total Energy Ratio"
+      },
+      {
+        "name": "qse_vs_bp_dynamic_color",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from QSE_VS_BP_Dynamic_Color"
+      },
+      {
+        "name": "qse_vs_bp_dynamic_fe",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from QSE_VS_BP_Dynamic_FE"
+      },
+      {
+        "name": "qse_kbi_vs_pct",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(1 branches): RE"
+      },
+      {
+        "name": "qse_kbi_wrapper_actual_fe",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(2 branches): Total Energy Ratio, Total Water Ratio"
+      },
+      {
+        "name": "qse_vs_py_dynamic_fe",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from QSE_VS_PY_Dynamic_FE"
+      },
+      {
+        "name": "qse_kbi_vs_trend",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): PY, BP, RE"
+      },
+      {
+        "name": "qse_kbi_vs_pp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): PY, BP, RE"
+      },
+      {
+        "name": "qse_kbi_vs_w_f",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(1 branches): RE"
+      },
+      {
+        "name": "qse_vs_py_dynamic_color",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from QSE_VS_PY_Dynamic_Color"
+      },
+      {
+        "name": "qse_kbi_wrapper_bp_benchmark",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(13 branches): Employee Lost Time Accident Rate, Total Fatalities Employees & Contractors, Consumer Complaints, Manufacturing Water Ratio, Manufacturing Energy Ratio"
+      }
+    ],
+    "FT_QSE": [
+      {
+        "name": "qse_trend_bp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): Absolute, Variance, Variance %"
+      },
+      {
+        "name": "qse_kbi_wrapper_bp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(13 branches): Employee Lost Time Accident Rate, Total Fatalities Employees & Contractors, Consumer Complaints, Manufacturing Water Ratio, Manufacturing Energy Ratio"
+      },
+      {
+        "name": "dpmo_actual",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from DPMO_Actual"
+      }
+    ],
+    "FT_BPC003": [
+      {
+        "name": "cf_kbi_wrapper_actual",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(5 branches): Total SC Cost (exc. fees and taxes), Production Overhead (exc. fees and taxes), Cost to Supply, Total Input Cost, SC Losses"
+      },
+      {
+        "name": "cf_kbi_wrapper_bp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(5 branches): Total SC Cost (exc. fees and taxes), Production Overhead (exc. fees and taxes), Cost to Supply, Total Input Cost, SC Losses"
+      },
+      {
+        "name": "cf_kbi_wrapper_re",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(5 branches): Total SC Cost (exc. fees and taxes), Production Overhead (exc. fees and taxes), Cost to Supply, Total Input Cost, SC Losses"
+      },
+      {
+        "name": "cf_line_item_wrapper_actual",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(7 branches): Actual, Unit Case, Volume in UC, Total NSR, %age"
+      },
+      {
+        "name": "cf_line_item_wrapper_bp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(7 branches): Actual, Unit Case, Volume in UC, Total NSR, %age"
+      },
+      {
+        "name": "cf_line_item_wrapper_py",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(7 branches): Actual, Unit Case, Volume in UC, Total NSR, %age"
+      },
+      {
+        "name": "cf_line_item_wrapper_re",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(7 branches): Actual, Unit Case, Volume in UC, Total NSR, %age"
+      },
+      {
+        "name": "cf_kbi_vs_pct",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from CF_KBI_VS_%"
+      },
+      {
+        "name": "cf_kbi_vs_dynamic",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(1 branches): Input Cost"
+      },
+      {
+        "name": "cf_kbi_vs_dynamic_fe",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(1 branches): Input Cost"
+      },
+      {
+        "name": "cf_kbi_vs_pp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(2 branches): PY, BP"
+      },
+      {
+        "name": "cf_line_item_actual",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(2 branches): Unit Case, %age"
+      },
+      {
+        "name": "cf_mega_vs",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): PY, BP, RE"
+      },
+      {
+        "name": "cf_mega_vs_color",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(2 branches): PY, BP"
+      },
+      {
+        "name": "cf_mega_vs_dynamic",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(1 branches): Input Cost"
+      },
+      {
+        "name": "cf_trend_bp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): Absolute, Variance, Variance %"
+      },
+      {
+        "name": "cf_trend_cy",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): Absolute, Variance, Variance %"
+      },
+      {
+        "name": "cf_trend_py",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): Absolute, Variance, Variance %"
+      },
+      {
+        "name": "cf_actual",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from CF_Actual"
+      },
+      {
+        "name": "cf_bp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from CF_BP"
+      },
+      {
+        "name": "cf_re",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from CF_RE"
+      },
+      {
+        "name": "sc_cost_actual_fe",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from SC_Cost_Actual_FE"
+      },
+      {
+        "name": "prod_oh_actual_fe",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from Prod_OH_Actual_FE"
+      },
+      {
+        "name": "cost_supply_actual_fe",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from Cost_Supply_Actual_FE"
+      },
+      {
+        "name": "cf_actual_py",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from CF_Actual PY"
+      },
+      {
+        "name": "prod_oh_actual",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(1 branches): Actual"
+      },
+      {
+        "name": "cost_supply_actual",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(1 branches): Actual"
+      },
+      {
+        "name": "sc_cost_actual",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(1 branches): Actual"
+      },
+      {
+        "name": "sc_cost_bp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(1 branches): Actual"
+      },
+      {
+        "name": "prod_oh_bp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(1 branches): Actual"
+      },
+      {
+        "name": "prod_oh_re",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(1 branches): Actual"
+      },
+      {
+        "name": "sc_cost_re",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(1 branches): Actual"
+      },
+      {
+        "name": "cost_supply_bp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(1 branches): Actual"
+      },
+      {
+        "name": "cost_supply_re",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(1 branches): Actual"
+      }
+    ],
+    "__unassigned__": [
+      {
+        "name": "cf_trend_kbi_wrapper_re",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(1 branches): SC Losses"
+      },
+      {
+        "name": "sl_trend_py",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): Absolute, Variance, Variance %"
+      },
+      {
+        "name": "wdays_inv",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from WDays_Inv"
+      },
+      {
+        "name": "prod_exec_mega_vs",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): PY, BP, RE"
+      },
+      {
+        "name": "prod_exec_mega_vs_pct",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(1 branches): RE"
+      },
+      {
+        "name": "prod_exec_trend_bp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): Absolute, Variance, Variance %"
+      },
+      {
+        "name": "prod_exec_trend_py",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): Absolute, Variance, Variance %"
+      }
+    ],
+    "C_Dim_calendar": [
+      {
+        "name": "cf_trend_line_item_re",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(1 branches): %age"
+      },
+      {
+        "name": "cf_trend_re",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(2 branches): Variance, Variance %"
+      },
+      {
+        "name": "prod_exec_trend_cy",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): Absolute, Variance, Variance %"
+      }
+    ],
+    "fact_pe004": [
+      {
+        "name": "cl_va_kbi_wrapper_actual",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(10 branches): Vol Sold (UC), NSR, Production OH excl Env Fee, Haulage Cost, Distribution Cost"
+      },
+      {
+        "name": "cl_va_kbi_wrapper_bp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(10 branches): Vol Sold (UC), NSR, Production OH excl Env Fee, Haulage Cost, Distribution Cost"
+      },
+      {
+        "name": "cl_va_kbi_wrapper_re",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(10 branches): Vol Sold (UC), NSR, Production OH excl Env Fee, Haulage Cost, Distribution Cost"
+      }
+    ],
+    "FT_HR_B": [
+      {
+        "name": "eng_tal_kbi_wrapper_actual",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(7 branches): Total SC FTEs, Leased FTE, SC People Cost, Turnover, Total SC Productivity (UC Sold/FTE)"
+      },
+      {
+        "name": "eng_tal_kbi_wrapper_bp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(7 branches): Total SC FTEs, Leased FTE, SC People Cost, Turnover, Total SC Productivity (UC Sold/FTE)"
+      },
+      {
+        "name": "eng_tal_kbi_vs",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): PY, BP, RE"
+      },
+      {
+        "name": "eng_tal_kbi_vs_pct",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(1 branches): RE"
+      },
+      {
+        "name": "eng_tal_kbi_vs_pp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): PY, BP, RE"
+      },
+      {
+        "name": "eng_tal_kbi_vs_trend",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): PY, BP, RE"
+      },
+      {
+        "name": "eng_tal_trend_bp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): Absolute, Variance, Variance %"
+      },
+      {
+        "name": "eng_tal_trend_cy1",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): Absolute, Variance, Variance %"
+      },
+      {
+        "name": "eng_tal_trend_py",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): Absolute, Variance, Variance %"
+      },
+      {
+        "name": "eng_tal_vs_dynamic",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(4 branches): Total SC FTE, Leased FTE, SC People Cost, Overtime Cost"
+      },
+      {
+        "name": "eng_tal_kbi_wrapper_bp_benchmark",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(7 branches): Total SC FTEs, Leased FTE, SC People Cost, Turnover, Total SC Productivity (UC Sold/FTE)"
+      }
+    ],
+    "FT_Planning": [
+      {
+        "name": "fa_weekly_actual",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from FA_Weekly_ACTUAL"
+      },
+      {
+        "name": "sl_kbi_wrapper_actual",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(5 branches): DIF (Case Fill Rate), DIFOTAI, Total Inventory Days, Out of Stock (OOS) (%), Operational Demand Variability %"
+      },
+      {
+        "name": "sl_kbi_wrapper_bp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(4 branches): DIF (Case Fill Rate), DIFOTAI, Total Inventory Days, Out of Stock (OOS) (%)"
+      },
+      {
+        "name": "sl_kbi_wrapper_py",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from SL_KBI_Wrapper_PY"
+      },
+      {
+        "name": "sl_line_item_wrapper_actual",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(20 branches): ATP B + WHS, ATP A, Out of Stock (OOS) (%), Other Reasons, Financial Reasons"
+      },
+      {
+        "name": "sl_line_item_wrapper_bp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(14 branches): ATP B + WHS, ATP A, Commercial Reasons, Ordered (PhC), DIFOTAI"
+      },
+      {
+        "name": "sl_kbi_vs_d",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): PY, BP, RE"
+      },
+      {
+        "name": "sl_kbi_vs_pp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): PY, BP, RE"
+      },
+      {
+        "name": "sl_line_item_actual",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(5 branches): Billed, Total Inventory Days, Concentrate Inventory Days, R&PM Inventory Days, Finished Good Inventory Days"
+      },
+      {
+        "name": "sl_line_item_cfr_actual",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(8 branches): ATPB + WH(Not in Shipped), ATP A, Other Reasons, Rejected Other Reasons, Financial Reasons"
+      },
+      {
+        "name": "sl_mega_vs",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): PY, BP, RE"
+      },
+      {
+        "name": "sl_mega_vs_pct",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(1 branches): RE"
+      },
+      {
+        "name": "sl_mega_vs_pct_color",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from SL_Mega_VS_%_Color"
+      },
+      {
+        "name": "sl_mega_vs_color",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(2 branches): PY, BP"
+      },
+      {
+        "name": "sl_trend_bp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): Absolute, Variance, Variance %"
+      },
+      {
+        "name": "sl_trend_cy",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): Absolute, Variance, Variance %"
+      },
+      {
+        "name": "difot_vs_pp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(3 branches): PY, BP, RE"
+      },
+      {
+        "name": "prod_exec_kbi_wrapper_bp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(8 branches): Actual Production PHC, Asset Utilization (core lines), Total SLE (%), OPL, EPL"
+      },
+      {
+        "name": "prod_exec_kbi_vs",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(1 branches): RE"
+      },
+      {
+        "name": "prod_exec_kbi_vs_pct",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(1 branches): RE"
+      },
+      {
+        "name": "prod_exec_kbi_vs_pp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(1 branches): RE"
+      },
+      {
+        "name": "prod_exec_kbi_vs_pct",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(1 branches): RE"
+      }
+    ],
+    "FT_SKU_Performance": [
+      {
+        "name": "cri_actual",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH measure from CRI_Actual"
+      }
+    ],
+    "fact_scorecard_BP_wc": [
+      {
+        "name": "prod_exec_line_item_wrapper_bp",
+        "raw_expr": "TODO: human fills SQL",
+        "comment": "SWITCH(14 branches): Production Performance to Plan, Volume Produced (PhC), Total SLE (%), Asset Utilization (core lines),  Asset Utilization (core lines)"
+      }
+    ]
+  },
+  "parameter_defaults": {
+    "CurrencyFilter": "TODO: set default value",
+    "FiscperFilter": "TODO: set default value",
+    "RE_Version": "TODO: set default value"
+  },
+  "filter_sets": {
+    "X": [
+      "Actual Production PHC",
+      "Asset Utilization (core lines)",
+      "CIP & C/O",
+      "EPL",
+      "OPL",
+      "Production Performance to Plan",
+      "TTL Yields (%)",
+      "Total SLE (%)"
+    ],
+    "Z": [
+      "%age",
+      "Actual",
+      "Total NSR",
+      "Unit Case",
+      "Volume in UC"
+    ],
+    "B": [
+      "Leased FTE",
+      "Overtime Cost",
+      "SC People Cost",
+      "Total SC FTE"
+    ]
+  },
+  "measure_resolutions": {
+    "CF_Line_Item_Wrapper_BP": {
+      "base_expr": "TODO: fill SQL expression",
+      "base_filters": []
+    },
+    "CF_Line_Item_Wrapper_PY": {
+      "base_expr": "TODO: fill SQL expression",
+      "base_filters": []
+    },
+    "Plant_Comp KBI_Value_Actual": {
+      "base_expr": "TODO: fill SQL expression",
+      "base_filters": []
+    },
+    "Plant_Comp KBI_Value_BP": {
+      "base_expr": "TODO: fill SQL expression",
+      "base_filters": []
+    },
+    "Total_KBI_ BP": {
+      "base_expr": "TODO: fill SQL expression",
+      "base_filters": []
+    },
+    "Total KBI_Value": {
+      "base_expr": "TODO: fill SQL expression",
+      "base_filters": []
+    },
+    "F_End_date": {
+      "base_expr": "TODO: fill SQL expression",
+      "base_filters": []
+    },
+    "FA_Weekly_ACTUAL": {
+      "base_expr": "TODO: fill SQL expression",
+      "base_filters": []
+    }
+  }
+}

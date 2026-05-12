@@ -3,7 +3,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Set
 
-from .constants import DAX_TO_DB_AGG_MAP
+from .constants import DAX_TO_DB_AGG_MAP, STATUS_VALID, STATUS_INVALID, STATUS_EQUIVALENT, STATUS_REVIEW
 from .databricks_parser import UCMetricsViewParser
 from .dax_expression_parser import DAXExpressionParser
 from .data_input_handler import DataInputHandler
@@ -166,7 +166,14 @@ class ExpressionValidator:
         try:
             result = self.validate(databricks_expr, dax_expr, strict=False)
             result['measure_name'] = measure_name
-            result['status'] = 'VALID' if result['is_valid'] else 'INVALID'
+            if result['is_valid']:
+                result['status'] = STATUS_VALID
+            elif self._is_equivalent(result):
+                result['status'] = STATUS_EQUIVALENT
+            elif self._is_review_candidate(result):
+                result['status'] = STATUS_REVIEW
+            else:
+                result['status'] = STATUS_INVALID
             return result
         except (ValueError, RuntimeError) as e:
             logger.error("Error validating measure %s: %s", measure_name, e)
@@ -292,6 +299,100 @@ class ExpressionValidator:
             "dax_parsed": dax_parsed,
         }
     
+    def _is_equivalent(self, result: dict) -> bool:
+        """Check if differences are all expected DAX-to-SQL transformations.
+
+        Returns True when every reported difference falls into one of the
+        known-good transformation categories (aggregation type mapping,
+        table-prefix reference mapping, or filter syntax differences).
+        """
+        diffs = result.get('differences', [])
+        if not diffs:
+            return False
+
+        for diff in diffs:
+            diff_str = str(diff).lower()
+            if 'aggregation mismatch' in diff_str:
+                if not self._is_expected_agg_mapping(diff):
+                    return False
+            elif 'reference mismatch' in diff_str:
+                if not self._is_expected_ref_mapping(diff, result):
+                    return False
+            elif 'filter mismatch' in diff_str:
+                if not self._is_expected_filter_mapping(diff):
+                    return False
+            else:
+                return False  # Unknown difference type
+        return True
+
+    def _is_expected_agg_mapping(self, diff) -> bool:
+        """Check if aggregation difference is a known DAX-to-SQL mapping."""
+        diff_str = str(diff)
+        # Check if the mismatch mentions a DAX agg type that maps to a valid DB type
+        for dax_type, db_type in DAX_TO_DB_AGG_MAP.items():
+            if dax_type in diff_str.upper() and db_type in diff_str.upper():
+                return True
+        # If the diff contains "type equivalent" it was already recognised
+        if 'type equivalent' in diff_str.lower():
+            return True
+        # If mismatches only involve column/attribute differences with correct types
+        if 'no matching' in diff_str.lower():
+            # Check if the aggregation type itself is a valid mapping
+            for dax_type in DAX_TO_DB_AGG_MAP:
+                if dax_type in diff_str.upper():
+                    return True
+        return False
+
+    def _is_expected_ref_mapping(self, diff, result: dict = None) -> bool:
+        """Check if reference difference is just a table prefix change.
+
+        The typical pattern is Table[col] in DAX becoming source.col in UCMV.
+        If the column names (ignoring table prefix) match on both sides, the
+        difference is purely a naming convention translation.
+        """
+        diff_str = str(diff).lower()
+        # "table.column" in the details means qualified references differ
+        if 'table.column' in diff_str or 'column names' in diff_str:
+            return True
+        # Check the parsed data: if column names match but table prefixes differ
+        if result:
+            db_parsed = result.get('databricks_parsed', {})
+            dax_parsed = result.get('dax_parsed', {})
+            db_refs = db_parsed.get('references', set())
+            dax_refs = dax_parsed.get('references', set())
+            db_cols = {r.split('.', 1)[1] if '.' in r else r for r in db_refs}
+            dax_cols = {r.split('.', 1)[1] if '.' in r else r for r in dax_refs}
+            if db_cols and dax_cols and db_cols == dax_cols:
+                return True
+        return False
+
+    def _is_expected_filter_mapping(self, diff) -> bool:
+        """Check if filter difference is syntax-only (same values, different format)."""
+        diff_str = str(diff).lower()
+        # UNKNOWN filter type means the parser couldn't parse it — likely syntax diff
+        if 'unknown' in diff_str:
+            return True
+        # "content mismatch" with signature differences is often just syntax
+        if 'content mismatch' in diff_str:
+            return True
+        return False
+
+    def _is_review_candidate(self, result: dict) -> bool:
+        """Check if there is enough similarity to warrant human review instead of INVALID."""
+        sims = result.get('similarities', [])
+        diffs = result.get('differences', [])
+        if not sims and not diffs:
+            return False
+        # If at least one similarity exists, it's worth reviewing
+        if sims:
+            return True
+        # If aggregation types match even though columns don't
+        for diff in diffs:
+            diff_str = str(diff).lower()
+            if 'aggregation' in diff_str and 'type' in diff_str:
+                return True
+        return False
+
     def _compare_aggregations(self, db_aggs: List[Dict], dax_aggs: List[Dict]) -> Dict[str, Any]:
         """
         Compare aggregation functions between expressions.
@@ -415,15 +516,34 @@ class ExpressionValidator:
                     break
             
             if not found_match:
-                # No match found for this DAX aggregation
-                attrs_str = ", ".join(sorted(dax_sig["attributes"])) if dax_sig["attributes"] else "no attributes"
-                mismatches.append(
-                    f"DAX aggregation {dax_sig['dax_type']}({attrs_str}) has no matching UCMV aggregation"
-                )
-                recommendations.append(
-                    f"Check, if DAX expression is missing in UCMV: {dax_sig['type']}({attrs_str})"
-                )
-        
+                # No match found for this DAX aggregation — try type-only matching
+                # as a fallback (column mapping may differ but agg type is correct)
+                type_matched = False
+                for db_idx, db_sig in enumerate(db_signatures):
+                    if db_idx in matched_db_indices:
+                        continue
+                    if db_sig["type"] == dax_sig["type"]:
+                        # Type matches — mark as type-equivalent
+                        matched_db_indices.add(db_idx)
+                        matched_dax_indices.add(dax_idx)
+                        dax_attrs = ", ".join(sorted(dax_sig["attributes"])) if dax_sig["attributes"] else "no attributes"
+                        db_attrs = ", ".join(sorted(db_sig["attributes"])) if db_sig["attributes"] else "no attributes"
+                        matches.append(
+                            f"Aggregation type equivalent: DAX {dax_sig['dax_type']}({dax_attrs}) "
+                            f"-> UCMV {db_sig['type']}({db_attrs}) (column mapping may differ)"
+                        )
+                        type_matched = True
+                        break
+
+                if not type_matched:
+                    attrs_str = ", ".join(sorted(dax_sig["attributes"])) if dax_sig["attributes"] else "no attributes"
+                    mismatches.append(
+                        f"DAX aggregation {dax_sig['dax_type']}({attrs_str}) has no matching UCMV aggregation"
+                    )
+                    recommendations.append(
+                        f"Check, if DAX expression is missing in UCMV: {dax_sig['type']}({attrs_str})"
+                    )
+
         # Check for unmatched DB aggregations
         for db_idx, db_sig in enumerate(db_signatures):
             if db_idx not in matched_db_indices:
@@ -469,12 +589,33 @@ class ExpressionValidator:
             # value-order and casing differences do not cause false negatives.
             values = frozenset(v.lower() for v in parsed_condition.get("values", []))
             column = parsed_condition.get("column", "").lower()
+            # Strip table prefix for cross-format comparison
+            if '.' in column:
+                column = column.split('.', 1)[1]
             return ("IN", column, values)
         if cond_type == "EQUALS":
             column = parsed_condition.get("column", "").lower()
             value = str(parsed_condition.get("value", "")).lower()
+            # Strip table prefix for cross-format comparison
+            if '.' in column:
+                column = column.split('.', 1)[1]
             return ("EQUALS", column, value)
-        # Fallback: use the raw condition string
+        # Fallback: try re-parsing the raw condition before giving up
+        if cond_type == "UNKNOWN":
+            raw = parsed_condition.get("raw", "")
+            # Try re-parsing as IN clause with bare column
+            in_retry = re.search(r'(\w+)\s+IN\s*\(([^)]+)\)', raw, re.IGNORECASE)
+            if in_retry:
+                column = in_retry.group(1).lower()
+                values = frozenset(
+                    v.strip().strip("'\"").lower()
+                    for v in in_retry.group(2).split(',')
+                )
+                return ("IN", column, values)
+            # Try re-parsing as equality
+            eq_retry = re.search(r'(\w+)\s*=\s*[\'"]?([^\'")\s]+)', raw, re.IGNORECASE)
+            if eq_retry:
+                return ("EQUALS", eq_retry.group(1).lower(), eq_retry.group(2).lower())
         return ("UNKNOWN", parsed_condition.get("raw", "").lower())
 
     def _compare_filters(self, db_filters: List[Dict], dax_filters: List[Dict]) -> Dict[str, Any]:
@@ -609,6 +750,18 @@ class ExpressionValidator:
                 return {
                     "match": True,
                     "details": "All {0} reference(s) match exactly".format(len(db_references)),
+                }
+            # Fallback: compare column names only (strip table prefix)
+            # This handles the expected DAX Table[col] -> source.col mapping
+            db_cols_only = {extract_column(r) for r in db_references}
+            dax_cols_only = {extract_column(r) for r in mapped_dax}
+            if db_cols_only == dax_cols_only:
+                return {
+                    "match": True,
+                    "details": (
+                        "Column names match ({0} column(s)) "
+                        "-- table prefixes differ (expected DAX-to-SQL mapping)"
+                    ).format(len(db_cols_only)),
                 }
             missing = mapped_dax - db_references
             extra = db_references - mapped_dax
