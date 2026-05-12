@@ -406,3 +406,10 @@ class TestFullPipelineEndToEnd:
                     pytest.fail(
                         f'{key} has empty dimension name at line {i + 1}'
                     )
+
+    def test_business_coverage_in_results(self, pipeline_output):
+        bc = pipeline_output['results'].get('business_coverage')
+        assert bc is not None
+        assert bc['business_pct'] > bc['overall_pct']
+        assert bc['artifacts_excluded'] > 0
+        assert bc['business_pct'] >= 80  # SC Reporting should be ~85%

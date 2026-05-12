@@ -115,7 +115,12 @@ print()
 
 total_t = sum(s.get('translated', 0) for k, s in pipeline.stats.items() if k != '__unassigned__')
 total_m = sum(s.get('total', 0) for k, s in pipeline.stats.items() if k != '__unassigned__')
-print(f'Total: {total_t}/{total_m} measures translated ({total_t * 100 // total_m if total_m else 0}%)')
+total_art = sum(s.get('artifacts', 0) for k, s in pipeline.stats.items() if k != '__unassigned__')
+overall_pct = total_t * 100 // total_m if total_m else 0
+business_scope = total_m - total_art
+business_pct = total_t * 100 // business_scope if business_scope > 0 else 0
+print(f'Total: {total_t}/{total_m} measures translated ({overall_pct}% overall, {business_pct}% business coverage)')
+print(f'  PBI artifacts excluded: {total_art} (FORMAT, Color, ISBLANK, SELECTEDVALUE)')
 print()
 
 for k in sorted(specs.keys()):
@@ -153,10 +158,31 @@ try:
             1 for m in evaluated
             if m.get('measure_eval_result', {}).get('status') == 'VALID'
         )
+        equivalent_count = sum(
+            1 for m in evaluated
+            if m.get('measure_eval_result', {}).get('status') == 'EQUIVALENT'
+        )
+        review_count = sum(
+            1 for m in evaluated
+            if m.get('measure_eval_result', {}).get('status') == 'REVIEW'
+        )
+        invalid_count = sum(
+            1 for m in evaluated
+            if m.get('measure_eval_result', {}).get('status') == 'INVALID'
+        )
         total_evaluated += len(evaluated)
         total_valid += valid_count
         if evaluated:
-            print(f'  {k}: {valid_count}/{len(evaluated)} VALID')
+            parts = []
+            if valid_count:
+                parts.append(f'{valid_count} VALID')
+            if equivalent_count:
+                parts.append(f'{equivalent_count} EQUIVALENT')
+            if review_count:
+                parts.append(f'{review_count} REVIEW')
+            if invalid_count:
+                parts.append(f'{invalid_count} INVALID')
+            print(f'  {k}: {" | ".join(parts) if parts else f"{len(evaluated)} evaluated"}')
     print(f'\nTotal: {total_valid}/{total_evaluated} measures validated')
 except ImportError:
     pass  # Validation package not available — skip silently

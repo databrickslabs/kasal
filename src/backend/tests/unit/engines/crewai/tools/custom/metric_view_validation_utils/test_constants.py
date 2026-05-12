@@ -15,6 +15,8 @@ from src.engines.crewai.tools.custom.metric_view_validation_utils.constants impo
     STATUS_INVALID,
     STATUS_SKIPPED,
     STATUS_ERROR,
+    STATUS_EQUIVALENT,
+    STATUS_REVIEW,
     CONFIDENCE_HIGH,
     CONFIDENCE_MEDIUM,
     CONFIDENCE_LOW,
@@ -99,6 +101,12 @@ class TestStatusAndConfidenceConstants:
         assert STATUS_INVALID == "INVALID"
         assert STATUS_SKIPPED == "SKIPPED"
         assert STATUS_ERROR == "ERROR"
+
+    def test_equivalent_status_exists(self):
+        assert STATUS_EQUIVALENT == "EQUIVALENT"
+
+    def test_review_status_exists(self):
+        assert STATUS_REVIEW == "REVIEW"
 
     def test_confidence_values(self):
         assert CONFIDENCE_HIGH == "high"

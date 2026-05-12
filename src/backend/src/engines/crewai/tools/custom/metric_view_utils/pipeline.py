@@ -660,6 +660,18 @@ class MetricViewPipeline:
                     for m in spec.untranslatable
                 ],
             }
+        total_measures = sum(s.get('total', 0) for k, s in self.stats.items() if k != '__unassigned__')
+        total_translated = sum(s.get('translated', 0) for k, s in self.stats.items() if k != '__unassigned__')
+        total_artifacts = sum(s.get('artifacts', 0) for k, s in self.stats.items() if k != '__unassigned__')
+        business_scope = total_measures - total_artifacts
+        results['business_coverage'] = {
+            'total_measures': total_measures,
+            'translated': total_translated,
+            'artifacts_excluded': total_artifacts,
+            'business_scope': business_scope,
+            'overall_pct': total_translated * 100 // total_measures if total_measures else 0,
+            'business_pct': total_translated * 100 // business_scope if business_scope > 0 else 0,
+        }
         results['limitations'] = self._limitations
         results['migration_report'] = emit_migration_report(
             self.all_specs, self.stats, self.config,

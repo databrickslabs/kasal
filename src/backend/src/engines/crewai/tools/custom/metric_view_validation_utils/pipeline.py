@@ -13,6 +13,7 @@ import logging
 import yaml
 from typing import Any, Dict, Optional
 
+from .constants import STATUS_VALID, STATUS_INVALID, STATUS_EQUIVALENT, STATUS_REVIEW
 from .data_input_handler import DataInputHandler
 from .expression_validator import ExpressionValidator
 
@@ -207,7 +208,14 @@ class MetricExpressionValidatorPipeline:
             )
             result = validator.validate(databricks_expr, dax_expr, strict=strict_mode)
             result["measure_name"] = measure_name
-            result["status"] = "VALID" if result["is_valid"] else "INVALID"
+            if result["is_valid"]:
+                result["status"] = STATUS_VALID
+            elif validator._is_equivalent(result):
+                result["status"] = STATUS_EQUIVALENT
+            elif validator._is_review_candidate(result):
+                result["status"] = STATUS_REVIEW
+            else:
+                result["status"] = STATUS_INVALID
             return result
         except (ValueError, RuntimeError) as exc:
             logger.error(

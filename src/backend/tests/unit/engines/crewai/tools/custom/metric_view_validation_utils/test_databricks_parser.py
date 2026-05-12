@@ -280,6 +280,17 @@ class TestExtractFilters:
         cond = filters[0]["parsed_condition"]
         assert cond["type"] == "IN"
 
+    def test_in_clause_bare_column(self):
+        """Bare column (no table prefix) IN clause should be parseable."""
+        expr = "SUM(source.amount) FILTER (WHERE bic_cwc_type IN ('PET', 'APET'))"
+        filters = self._p()._extract_filters(expr)
+        assert len(filters) == 1
+        cond = filters[0]["parsed_condition"]
+        assert cond["type"] == "IN"
+        assert cond["column"] == "bic_cwc_type"
+        assert "PET" in cond["values"]
+        assert "APET" in cond["values"]
+
 
 # ---------------------------------------------------------------------------
 # _extract_references()
@@ -360,3 +371,41 @@ class TestExtractBalancedParens:
     def test_out_of_bounds(self):
         content = self._p()._extract_balanced_parens("abc", 100)
         assert content == ""
+
+
+# ---------------------------------------------------------------------------
+# _parse_condition() — bare column support
+# ---------------------------------------------------------------------------
+
+class TestParseCondition:
+    def _p(self):
+        return UCMetricsViewParser.create_headless()
+
+    def test_parse_condition_bare_column_in(self):
+        """Bare column (no table prefix) IN clause should parse correctly."""
+        cond = self._p()._parse_condition("bic_cwc_type IN ('PET','APET')")
+        assert cond["type"] == "IN"
+        assert cond["column"] == "bic_cwc_type"
+        assert "PET" in cond["values"]
+        assert "APET" in cond["values"]
+
+    def test_parse_condition_qualified_column_in(self):
+        """Qualified column (with table prefix) IN clause should still work."""
+        cond = self._p()._parse_condition("source.bic_cwc_type IN ('PET','APET')")
+        assert cond["type"] == "IN"
+        assert cond["column"] == "source.bic_cwc_type"
+        assert "PET" in cond["values"]
+
+    def test_parse_condition_bare_column_equals(self):
+        """Bare column (no table prefix) equality should parse correctly."""
+        cond = self._p()._parse_condition("bic_chversion = '0000'")
+        assert cond["type"] == "EQUALS"
+        assert cond["column"] == "bic_chversion"
+        assert cond["value"] == "0000"
+
+    def test_parse_condition_qualified_column_equals(self):
+        """Qualified column equality should still work."""
+        cond = self._p()._parse_condition("source.status = 'active'")
+        assert cond["type"] == "EQUALS"
+        assert cond["column"] == "source.status"
+        assert cond["value"] == "active"

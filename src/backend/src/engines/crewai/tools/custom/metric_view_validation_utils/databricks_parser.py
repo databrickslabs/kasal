@@ -18,8 +18,8 @@ _FILTER_PATTERN = re.compile(r'FILTER\s*\(\s*WHERE\s+([^)]+)\)', re.IGNORECASE)
 _TABLE_COLUMN_PATTERN = re.compile(r'(\w+)\.(\w+)')
 _STRING_LITERAL_PATTERN = re.compile(r"['\"].*?['\"]")
 _IDENTIFIER_PATTERN = re.compile(r'\b(\w+)\b')
-_IN_CLAUSE_PATTERN = re.compile(r'(\w+\.\w+)\s+IN\s*\(([^)]+)', re.IGNORECASE)
-_EQUALS_PATTERN = re.compile(r'(\w+\.\w+)\s*=\s*(.+)')
+_IN_CLAUSE_PATTERN = re.compile(r'((?:\w+\.)?\w+)\s+IN\s*\(([^)]+)', re.IGNORECASE)
+_EQUALS_PATTERN = re.compile(r'((?:\w+\.)?\w+)\s*=\s*(.+)')
 
 
 class UCMetricsViewParser:
