@@ -40,6 +40,7 @@ tools_data = [
     (86, "UC Metric View Generator", "Full pipeline: generates UC Metric View YAML + deploy SQL per fact table. TWO MODES: (1) API mode — provide workspace_id + dataset_id + PBI credentials, and the tool extracts measures, MQuery, and relationships from the PBI API automatically. (2) JSON mode — provide pre-extracted measures_json (from tool 73) + mquery_json (from tool 74). Combines MQuery parsing, DAX translation (14+ patterns + LLM fallback), Kahn's dependency graph, join detection (dim + fact-to-fact), scan data enrichment, and YAML/SQL emission. Optionally accepts PBI relationships JSON (tool 75) for auto-detected enrichment joins and scan data for inline SQL source generation. Output: JSON with YAML + SQL per fact table, plus generation statistics.", "transform"),
     (87, "PBI Measure Allocator", "Groups Power BI measures into fact tables with confidence scores based on DAX table column references (Table[Column] patterns). Analyzes DAX expressions to determine which table each measure belongs to. Input: raw measures JSON (from Power BI Connector/Fetcher) + mquery_transpilation JSON (from tool 74). Output: JSON mapping of measure → fact table allocation with confidence (high/medium/low/none). Use before the UC Metric View Generator when measures don't have proposed_allocation fields.", "transform"),
     (88, "Metric View Deployer", "Deploy UC Metric View definitions to a Databricks workspace. Accepts YAML specs and deploy SQL from the UC Metric View Generator tool (86). Supports dry_run mode (default) for validation without actual deployment. When dry_run=False, executes CREATE METRIC VIEW SQL via the Databricks SQL Statement API. Input: yaml_specs_json + sql_specs_json from tool 86. Output: deployment status per metric view.", "transform"),
+    (89, "Config Generator", "Auto-propose pipeline_config.json from PBI extraction output. Takes measures_json, mquery_json, relationships_json, scan_data_json and returns a proposed config with join_key_map, enrichment_joins, switch_decompositions, etc.", "transform"),
 ]
 
 def get_tool_configs():
@@ -369,6 +370,15 @@ def get_tool_configs():
             "databricks_host": "",
             "databricks_token": "",
         },  # Metric View Deployer
+        "89": {
+            "result_as_answer": True,
+            "measures_json": None,
+            "mquery_json": None,
+            "relationships_json": None,
+            "scan_data_json": None,
+            "catalog": None,
+            "schema_name": None,
+        },  # Config Generator
     }
 
 async def seed_async():
@@ -386,7 +396,7 @@ async def seed_async():
     tools_error = 0
 
     # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82, 85, 86, 87, 88]
+    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82, 85, 86, 87, 88, 89]
 
     for tool_id, title, description, icon in tools_data:
         try:
@@ -449,7 +459,7 @@ def seed_sync():
     tools_error = 0
 
     # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82, 85, 86, 87, 88]
+    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82, 85, 86, 87, 88, 89]
 
     for tool_id, title, description, icon in tools_data:
         try:

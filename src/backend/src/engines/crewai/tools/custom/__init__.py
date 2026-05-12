@@ -13,6 +13,7 @@ from src.engines.crewai.tools.custom.dax_to_sql_translator_tool import DaxToSqlT
 from src.engines.crewai.tools.custom.uc_metric_view_generator_tool import UCMetricViewGeneratorTool
 from src.engines.crewai.tools.custom.pbi_measure_allocator_tool import PbiMeasureAllocatorTool
 from src.engines.crewai.tools.custom.metric_view_deployer_tool import MetricViewDeployerTool
+from src.engines.crewai.tools.custom.config_generator_tool import ConfigGeneratorTool
 
 # Export all custom tools
 __all__ = [
@@ -23,4 +24,5 @@ __all__ = [
     'UCMetricViewGeneratorTool',
     'PbiMeasureAllocatorTool',
     'MetricViewDeployerTool',
+    'ConfigGeneratorTool',
 ]

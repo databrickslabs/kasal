@@ -171,6 +171,13 @@ except ImportError as e:
     MetricViewDeployerTool = None
     logging.warning(f"Could not import MetricViewDeployerTool: {e}")
 
+# Config Generator Tool
+try:
+    from .custom.config_generator_tool import ConfigGeneratorTool
+except ImportError as e:
+    ConfigGeneratorTool = None
+    logging.warning(f"Could not import ConfigGeneratorTool: {e}")
+
 # Setup logger
 logger = logging.getLogger(__name__)
 
@@ -249,6 +256,8 @@ class ToolFactory:
             self._tool_implementations["PBI Measure Allocator"] = PbiMeasureAllocatorTool
         if MetricViewDeployerTool is not None:
             self._tool_implementations["Metric View Deployer"] = MetricViewDeployerTool
+        if ConfigGeneratorTool is not None:
+            self._tool_implementations["Config Generator"] = ConfigGeneratorTool
 
         # Initialize _initialized flag
         self._initialized = False
