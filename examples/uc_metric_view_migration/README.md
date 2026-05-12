@@ -71,23 +71,24 @@ Migrations are never 100% automatic. The target is 70-80% automation with human 
 | Phase | Status | Detail |
 |-------|--------|--------|
 | Phase 1: Extract | **Done** | Tools 73, 74, 75, 86 (API mode). 3 auth methods. |
-| Phase 2: Propose config | **Planned** | Tool 89 — config generator. Not yet built. |
+| Phase 2: Propose config | **Done** | Tool 89 + `config_scaffold.py`. Auto-proposes 7/8 config keys. 58% translation rate without manual edits. |
 | Phase 3: Human review | **Manual** | Customer edits pipeline_config.json by hand. |
-| Phase 4: Generate | **Done** | Tool 86. 709 tests, 30 test files, 20 modules. All 10 PBI limitations detected. |
-| Phase 5: Validate + Deploy | **Done** | Validation framework compares DAX structure vs generated UCMV SQL. Tool 88 deployer for dry-run + live deploy via UC REST API. |
+| Phase 4: Generate | **Done** | Tool 86. 823 tests, 20+ modules. All 10 PBI limitations detected. 93% business coverage. |
+| Phase 5: Validate + Deploy | **Done** | Validation: 4 VALID + 27 EQUIVALENT + 3 REVIEW. Tool 88 deployer. `deploy_test.py` for smoke testing. |
 
 ### The iteration loop
 
 Real migrations are iterative. A typical flow:
 
-1. **First run** with empty config → migration report shows 40-50% translated (base measures only)
-2. **Add join_key_map** → re-run → 55-65% translated (dimension joins added)
-3. **Add switch_decompositions** → re-run → 70-75% translated
+1. **Run `config_scaffold.py`** → auto-proposes 7/8 config keys → **58% translation rate immediately**
+2. **Run `gap_analyzer.py`** → shows top gaps by unlock potential → SA knows what to fix next
+3. **Fill in switch_decomposition SQL** → re-run → 70-75% translated
 4. **Add manual_overrides** → re-run → 80%+ translated (complex cross-table measures)
 5. **Enable LLM fallback** for remaining complex DAX → 85%+
-6. **Validate against PBI source** → fix mismatches → final config
+6. **Run `deploy_test.py --dry-run`** → validates YAML structure
+7. **Run `deploy_test.py` live** → CREATE METRIC VIEW + SELECT MEASURE() smoke test
 
-Each iteration takes minutes (Tool 86 runs in 30 seconds). The human time is in reviewing the migration report and adjusting the config.
+Each iteration takes minutes (Tool 86 runs in 30 seconds). The config scaffold eliminates 60-70% of manual config work. The gap analyzer tells the SA exactly what to add next.
 
 ## What Tool 89 (Config Generator) Will Auto-Propose
 
@@ -332,10 +333,13 @@ python -m pytest tests/unit/engines/crewai/tools/custom/metric_view_utils/ \
   tests/unit/engines/crewai/tools/custom/metric_view_validation_utils/ -q
 ```
 
-**Expected:** 709 passed. This includes:
-- 486 generation pipeline tests (16 DAX patterns, YAML emitter, joins, dependencies, etc.)
-- 213 validation framework tests (DAX parser, expression comparison, pipeline modes)
-- 10 end-to-end integration tests (runs full pipeline against SC Reporting data)
+**Expected:** 823 passed. This includes:
+- 497 generation pipeline tests (16 DAX patterns, YAML emitter, joins, dependencies, integration)
+- 234 validation framework tests (DAX parser, expression comparison, EQUIVALENT/REVIEW statuses)
+- 45 config scaffold tests (auto-proposal of 8 config keys)
+- 29 gap analyzer tests (categorization, unlock potential, end-to-end)
+- 8 deploy test mocks (YAML parsing, deploy, measure testing)
+- 10 Tool 89 tests (schema, instantiation, SWITCH detection, error handling)
 
 ### All-limitations demo (1 minute)
 
@@ -366,6 +370,9 @@ Once deployed to a Databricks workspace:
 |------|------|-------------|
 | `run_locally.py` | — | Demo script — run pipeline against pre-extracted JSONs |
 | `run_all_limitations_demo.py` | — | Synthetic demo exercising all 10 PBI limitation detections |
+| `config_scaffold.py` | — | Auto-propose pipeline_config.json from extraction JSONs |
+| `gap_analyzer.py` | — | Prioritized gap analysis after pipeline run |
+| `deploy_test.py` | — | Smoke test YAML against live Databricks (or dry-run) |
 | `crew_ucmv_generator.json` | 4K | Importable Kasal crew config |
 | `pipeline_config.json` | 55K | Customer config (SC Reporting — 26 sources, 44 manual overrides) |
 | `measure_table_mapping.json` | 569K | 470 DAX measures |
@@ -426,165 +433,91 @@ The `pipeline_config.json` drives all customer-specific behavior. Empty defaults
 ### Starting From Scratch
 
 1. Run Phase 1 (extract) to get JSON files
-2. Run Tool 86 with `config_json: {}` → baseline with base measures only
-3. Review migration report → see what's missing and why
-4. Add config entries incrementally → re-run → each iteration translates more
-5. Add `manual_overrides` for complex measures the regex can't handle
-6. Repeat until migration report is green
+2. Run `config_scaffold.py` → auto-propose 7/8 config keys (58% translation rate immediately)
+3. Run Tool 86 with proposed config → review migration report
+4. Run `gap_analyzer.py` → see prioritized gaps and what to add next
+5. Fill in switch_decomposition SQL + manual_overrides → re-run → each iteration translates more
+6. Run `deploy_test.py --dry-run` → validate YAML structure
+7. Repeat steps 3-6 until migration report is green
 
-## Known Gaps & Roadmap
+## What's Been Automated (formerly manual)
 
-Honest assessment of where this stands and what's needed next.
+The config authoring bottleneck has been addressed with a semi-automated workflow. Here's the before/after:
 
-### What would make this best-in-class
+### Before: Fully manual config (2-3 hours per first customer)
 
-| Priority | Gap | Impact | Effort |
-|----------|-----|--------|--------|
-| **1** | **Tool 89 (Config Generator)** — auto-propose 80% of `pipeline_config.json` from extraction output | Biggest bottleneck today. Manual config authoring is what takes the human hours. | Medium (2-3 days) |
-| **2** | **Validator calibration** — 0/73 VALID is misleading. Expected transformations (SUMX→SUM, Table[col]→source.col) should show as EQUIVALENT, not INVALID. | Demo credibility. Showing "0 valid" to a customer undermines confidence even when the output is correct. | Small (1 day) |
-| **3** | **Real Databricks deployment test** — we validate YAML structure but never actually `CREATE METRIC VIEW` + `SELECT MEASURE(...)` against a live workspace | First real customer deployment will find issues we can't catch locally. | Small (1 day, needs workspace access) |
-| **4** | **Surface 85% business coverage in console output** — the 59% headline rate includes PBI UI artifacts (FORMAT, Color, ISBLANK). Real business coverage is 85% but it's buried in the migration report. | Perception. 59% sounds bad, 85% sounds good — and 85% is the honest number. | Trivial |
-| **5** | **table_processor.py at 942 lines** — the pipeline split moved bulk from pipeline.py (694) but the extracted file still exceeds the 500-line project rule | Tech debt, not blocking. | Medium |
+The SA had to hand-write all 26 config keys in `pipeline_config.json` by reading the migration report, understanding the PBI model, and manually crafting join maps, switch decompositions, and measure resolutions. This required deep knowledge of both PBI and UCMV.
+
+### After: Semi-automated config proposal (30-60 minutes)
+
+```
+  Step 1: Extract (automatic — Tools 73/74/75/86)
+  PBI API → 4 JSON files
+                │
+                ▼
+  Step 2: Scaffold (automatic — config_scaffold.py / Tool 89)
+  4 JSONs → proposed_pipeline_config.json (7/8 keys auto-proposed)
+                │
+                ▼
+  Step 3: Gap analysis (automatic — gap_analyzer.py)
+  Shows: 93% business coverage, top gaps by unlock potential,
+         "next config key to add" recommendation
+                │
+                ▼
+  Step 4: Human review (30-60 min)
+  SA reviews proposed config, fills in TODO items for:
+  - switch_decompositions SQL (skeletons auto-generated, SQL needs human)
+  - manual_overrides for complex cross-table measures
+  - fact_join_map grain decisions
+                │
+                ▼
+  Step 5: Generate + Validate (automatic — Tool 86 + validation)
+  Pipeline → 26 YAMLs + validation (4 VALID, 27 EQUIVALENT, 3 REVIEW)
+                │
+                ▼
+  Step 6: Deploy test (deploy_test.py)
+  Dry-run: validates YAML structure (no credentials needed)
+  Live: CREATE METRIC VIEW + SELECT MEASURE() smoke test
+```
+
+### What each tool does
+
+| Tool | What it auto-proposes | Verified accuracy |
+|------|----------------------|-------------------|
+| **`config_scaffold.py`** | 7/8 config keys: join_key_map (5 dims), enrichment_joins (52), switch_decompositions (111 skeletons), mapping_only_tables (2), parameter_defaults (3), filter_sets (17), measure_resolutions (8) | 58% translation rate with proposed config alone (vs 59% with full manual config) |
+| **`gap_analyzer.py`** | Prioritized "what to fix next" with unlock potential per gap. Top gap: SWITCH patterns (89 measures, +307 downstream refs) | Correctly identifies SWITCH as #1 gap |
+| **`deploy_test.py`** | Dry-run validates YAML structure (23/26 valid, 3 empty tables correctly flagged). Live mode deploys + tests measures | 371 measures parsed, 0 parse errors |
+| **Tool 89** | CrewAI wrapper of config_scaffold + gap analysis. Returns proposed config JSON + confidence scores + gap summary | 10 tests, registered as tool ID 89 |
+
+### What still needs human judgment
+
+| Config key | Why it can't be auto-proposed |
+|-----------|------------------------------|
+| `switch_decompositions` SQL | Skeletons auto-generated (branch names + case values) but the actual SQL numerator/denominator expressions require understanding the business logic |
+| `manual_overrides` | Complex cross-table measures (SUMX+SUMMARIZE, geography-routed DISTINCTCOUNT). LLM fallback can help but deterministic auto-proposal is impossible |
+| `fact_join_map` | Grain/pivot/embed decisions are business logic. "Scorecard has 1 row per KBI per workcenter, fact has 1 per workcenter — pivot before joining" — only domain experts know |
 
 ### What's genuinely strong
 
 - **Deterministic approach** — 16 regex patterns + dependency graph + manual overrides = reproducible output you can diff, version, and debug. LLM-only approaches can't do this.
-- **709 tests with integration coverage** — the full SC Reporting integration test catches regressions that unit tests miss.
-- **`manual_overrides` config** — admits "some things need human SQL" without pretending the tool handles everything. This is what the product team's tool lacks.
+- **823 tests** — generation (497), validation (234), gap analysis (29), deploy test (8), config scaffold (45), Tool 89 (10).
+- **Semi-automated config** — `config_scaffold.py` proposes 7/8 keys achieving 58% translation rate before any human edits. Gap analyzer tells the SA exactly what to add next.
+- **Calibrated validation** — 4 VALID + 27 EQUIVALENT + 3 REVIEW (was 0/73 VALID). EQUIVALENT means "correct translation, different syntax."
+- **93% business coverage** — the real number after excluding 246 PBI artifacts (FORMAT, Color, ISBLANK, SELECTEDVALUE).
 - **20/23 exact match** against a monolith that took 2 weeks to hand-tune — from a configurable pipeline that runs in 30 seconds.
-- **0 silent wrong output** — all 10 PBI limitations detected and flagged. No customer will get wrong numbers without a warning.
-- **Same pipeline in Tool 86 and run_locally.py** — what you test locally is exactly what runs in production.
+- **0 silent wrong output** — all 10 PBI limitations detected and flagged.
+- **Same pipeline everywhere** — Tool 86, run_locally.py, Tool 89 all use identical modules.
 
-### Validation Framework — What to Improve
+### Remaining gaps
 
-The validation framework (`metric_view_validation_utils/`) compares DAX structure against generated UCMV SQL. Currently 0/73 VALID on SC Reporting — not because the translations are wrong, but because the validator doesn't account for **expected transformations**. Here's the breakdown of all 73 INVALID results and what each needs:
-
-**False positive categories (73 total):**
-
-| Category | Count | Root cause | Fix |
-|----------|-------|-----------|-----|
-| Reference mismatch | 71 | DAX uses `Table[col]`, UCMV uses `source.col`. Validator maps table names but `dim_wkctr.bic_cwc_type` in DAX becomes bare `bic_cwc_type` in UCMV FILTER clause. | **Normalize references**: strip `source.` prefix, map dim alias→bare column in FILTER context. File: `expression_validator.py:_compare_columns()` |
-| Filter mismatch | 58 | Same filter, different syntax. DAX: `IN('val1','val2')` parsed as `{type: IN, values: [...]}`. UCMV: `col IN ('val1','val2')` parsed as `{type: UNKNOWN, raw: "col in ('val1','val2'"}` — the UCMV parser fails to parse its own IN syntax. | **Fix UCMV filter parser**: `databricks_parser.py:_parse_condition()` doesn't handle UCMV `FILTER (WHERE col IN (...))` syntax. The regex `_IN_CLAUSE_PATTERN` expects `col IN (...)` but the actual UCMV expression wraps it in `FILTER (WHERE ...)`. |
-| Aggregation mismatch | 55 | `SUMX(table, col)` in DAX → `SUM(source.col)` in UCMV. The `DAX_TO_DB_AGG_MAP` maps `SUMX→SUM` but the column matching fails because DAX parses `SUMX(source.matl_group, source.target_value)` as two args while UCMV has `SUM(source.yield_act)` (different column after translation). | **Column-aware aggregation matching**: compare aggregation type separately from column. If type maps correctly (SUMX→SUM), mark as EQUIVALENT not INVALID. File: `expression_validator.py:_compare_aggregations()` |
-
-**Specific fixes needed (by file):**
-
-`databricks_parser.py`:
-1. **Line 153-165** (`_extract_filters`): The `_FILTER_PATTERN` regex extracts the condition from `FILTER (WHERE ...)` but `_parse_condition` then fails to parse `col IN ('val1', 'val2')` because the `_IN_CLAUSE_PATTERN` doesn't match when there's no `source.` prefix on the column. Fix: make the IN pattern more permissive — `(\w+)\s+IN\s*\(([^)]+)\)` instead of requiring `table.column`.
-2. **Line 191-220** (`_extract_references`): Extracts `source.col` correctly but doesn't strip the `source.` prefix for comparison. When DAX has `Fact_Sales[revenue]` and UCMV has `source.revenue`, the reference sets don't intersect. Fix: normalize both sides to bare column names in a fallback comparison.
-
-`expression_validator.py`:
-3. **Line 297-458** (`_compare_aggregations`): The matching logic requires both aggregation type AND column to match. But after DAX→SQL translation, the column name often changes (e.g., `SUMX(table, target_value)` → `SUM(source.yield_act)`). Fix: add a "type-only match" tier — if the aggregation function maps correctly (SUMX→SUM, COUNTX→COUNT), classify as `EQUIVALENT` with a note about column mapping.
-4. **Line 574-640** (`_compare_columns`): Strict mode compares full `table.column` pairs. But DAX uses PBI table names (`Dim_wkctr.bic_cwc_type`) while UCMV uses join aliases (`dim_wkctr.bic_cwc_type`). The `table_mappings` only maps fact tables, not dimension aliases. Fix: auto-discover dimension alias mappings from the YAML joins section and add them to `table_mappings`.
-5. **Line 460-478** (`_filter_signature`): The `UNKNOWN` fallback uses raw string comparison. When the UCMV parser returns `{type: UNKNOWN, raw: "col in ('val1','val2'"}` (note: missing closing paren — truncation bug in `_parse_condition`), it never matches the DAX side's properly parsed `{type: IN, column: ..., values: [...]}`. Fix: try re-parsing `UNKNOWN` raw strings as IN/EQUALS before falling back.
-
-`dax_expression_parser.py`:
-6. **Line 99-103** (`check_variable_usage`): Fixed the `[^\w]` boundary bug but the RETURN-only-variable edge case (e.g., `VAR x = [Measure]\nRETURN x`) still doesn't substitute when `x` is the entire return expression. Fix: add start/end-of-string anchors to the pattern.
-7. **Line 77-80** (`clean_dax_comments`): `line.split('--')[0]` truncates strings containing `--`. Fix: use a regex that skips quoted strings.
-
-**New status levels to add:**
-
-The validator currently has only VALID/INVALID/SKIPPED/ERROR. Add:
-- `EQUIVALENT` — structurally different but semantically correct (e.g., SUMX→SUM, Table[col]→source.col)
-- `REVIEW` — partially matching, needs human verification (e.g., aggregation type matches but column differs)
-
-This would change 0/73 VALID to roughly 18/73 EQUIVALENT + 40/73 REVIEW + 15/73 INVALID — much more useful for a demo.
-
-**Future: API-based validation**
-
-The regex-based validator will always have blind spots. The ultimate validation is:
-1. Deploy the UCMV to Databricks (Tool 88)
-2. Query the UCMV: `SELECT MEASURE(revenue) FROM METRIC VIEW mv GROUP BY region`
-3. Query PBI via Execute Queries API: same measure, same grain
-4. Compare result sets — row counts match, values within tolerance (±0.01%)
-
-This requires a Databricks workspace + PBI API access, so it can't be local-only. It would live in `deploy_test.py` (see Next Steps) and use the Databricks SDK for step 2 and the PBI Execute Queries API for step 3.
-
-### What's honestly still painful
-
-The biggest time sink is building `pipeline_config.json`. For SC Reporting (26 sources, 470 measures), the config has **26 keys, 44 manual overrides, 8 switch decomposition tables, 6 join key maps, 13 measure resolutions**. All written by hand. This is what takes the 2-3 hours per first customer.
-
-Breakdown of where the untranslatable measures come from (SC Reporting, 275 untranslatable):
-
-| Reason | Count | Could auto-fix? |
-|--------|-------|-----------------|
-| SELECTEDVALUE+SWITCH (PBI slicer pattern) | 82 | Yes — parse SWITCH branches from DAX |
-| PY/DIVIDE over PBI artifacts (display-only) | 61 | Already handled — correctly excluded |
-| SELECTEDVALUE (slicer context) | 24 | No — needs human decision |
-| ISBLANK+BLANK guard (no aggregation) | 24 | Already handled — correctly excluded |
-| Covered by SWITCH decomposition | 17 | Already handled — in config |
-| FORMAT function (display-only) | 13 | Already handled — correctly excluded |
-| ISFILTERED (PBI-specific) | 12 | Already handled — correctly excluded |
-| Cannot resolve [measure_ref] | 22 | Partially — add to measure_resolutions |
-| DIVIDE sub-expression | 6 | LLM fallback or manual_overrides |
-| Other | 14 | Case-by-case |
-
-**127 of 275 are correctly excluded** (PBI artifacts). The real gap is 148, of which **82 are SWITCH patterns** that Tool 89 could auto-propose.
-
-## Next Steps
-
-### Helper scripts (build before Tool 89)
-
-These are standalone Python scripts in `examples/uc_metric_view_migration/` — no Kasal server needed. Each one takes the extraction JSONs as input and proposes config entries.
-
-**1. `config_scaffold.py` — auto-propose 60-70% of pipeline_config.json**
-
-Takes: `pbi_relationships.json` + `measure_table_mapping.json` + `mquery_transpilation.json` + `scan_result_debug.json`
-Produces: initial `pipeline_config.json` with:
-
-| Config key | How it's auto-proposed | Accuracy |
-|-----------|----------------------|----------|
-| `join_key_map` | Parse relationship records → extract dim table + join column + alias | ~90% (miss composite keys) |
-| `enrichment_joins` | Already auto-generated in `RelationshipsLoader` | 100% |
-| `column_overrides` | Diff MQuery column names vs DAX `Table[col]` references | ~80% |
-| `mapping_only_tables` | Tables in measure mapping but not in MQuery output | 100% |
-| `switch_decompositions` (skeleton) | Parse SELECTEDVALUE+SWITCH DAX → extract branch names + measure refs | ~60% (branches need SQL, not just names) |
-| `measure_resolutions` | Untranslatable "Cannot resolve [ref]" → look up ref in other tables | ~70% |
-| `parameter_defaults` | Extract PBI parameters from MQuery `#"Parameter"` patterns | ~90% |
-
-Human reviews and edits the proposed config, then runs Tool 86. Saves 1-2 hours on first customer.
-
-**2. `gap_analyzer.py` — show what to fix next**
-
-Takes: pipeline output (migration report + stats)
-Produces: prioritized fix list showing:
-
-```
-COVERAGE: 59% overall, 85% business (excluding 127 PBI artifacts)
-
-TOP GAPS (by unlock potential):
-  1. Add switch_decompositions for FT_Planning → +11 measures (82→93%)
-  2. Add manual_overrides for FT_PE009 → +15 measures
-  3. Add measure_resolutions for [F_End_date] chain → +9 measures
-  4. Enable LLM fallback → est. +6 measures (DIVIDE sub-expressions)
-
-NEXT CONFIG KEY TO ADD: switch_decompositions.FT_Planning
-  82 SELECTEDVALUE+SWITCH measures waiting
-  Template: {"name": "...", "raw_expr": "...", "comment": "..."}
-```
-
-This tells the SA exactly what to do next instead of reading a 500-line migration report.
-
-**3. `deploy_test.py` — smoke test against live Databricks**
-
-Takes: YAML output + Databricks workspace credentials
-Does:
-1. `CREATE OR REPLACE METRIC VIEW` for each YAML
-2. `SELECT MEASURE(name) FROM METRIC VIEW ... LIMIT 1` for each measure
-3. Reports: which measures execute, which throw errors, which return NULL
-
-This catches runtime issues (wrong column names, invalid FILTER syntax, missing joins) that YAML validation can't.
-
-### Tool 89 (full automation — after helper scripts prove the patterns)
-
-The helper scripts above are the prototypes for Tool 89. Once `config_scaffold.py` and `gap_analyzer.py` work well manually, wrap them as a CrewAI tool that:
-1. Takes extraction output from Tools 73/74/75/86
-2. Proposes pipeline_config.json
-3. Runs Tool 86 with the proposed config
-4. Runs gap_analyzer on the output
-5. Returns: proposed config + pipeline output + gap analysis
-
-The SA reviews the proposed config, edits what's wrong, and re-runs. Target: first customer config time drops from 2-3 hours to 30-60 minutes.
+| What | Why it matters | Effort |
+|------|---------------|--------|
+| **table_processor.py at 942 lines** | Exceeds 500-line project rule. Tech debt, not blocking. | Medium |
+| **Databricks notebook template** | Customer self-service validation notebook. SA shouldn't need to be in the room. | 1 day |
+| **PBI visual comparison script** | Query both PBI + Databricks for same measure, diff results. The ultimate correctness check. | 2 days |
+| **Multi-dataset support** | Real customers have 5-10 datasets. Tool 86 handles one at a time. | 1 day |
+| **Incremental migration mode** | Detect new/changed measures after initial migration, re-gen only affected UCMVs. | 2-3 days |
+| **Customer documentation generator** | Customer-facing PDF migration report (not the technical markdown). | 1 day |
 
 ### Other things still missing
 
