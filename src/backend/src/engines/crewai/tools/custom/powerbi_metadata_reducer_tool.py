@@ -811,7 +811,7 @@ class PowerBIMetadataReducerTool(BaseTool):
         # without relying on the agent to pass model_context_json.
         dataset_id = config.get("dataset_id")
         workspace_id = config.get("workspace_id")
-        group_id = config.get("group_id", "default")
+        group_id = config.get("group_id") or (getattr(self, "trace_context", None) or {}).get("group_context", {}).get("primary_group_id") or "default"
         cache_saved = False
         if dataset_id and workspace_id:
             try:
@@ -913,7 +913,7 @@ class PowerBIMetadataReducerTool(BaseTool):
         workspace_id = config.get("workspace_id")
 
         if dataset_id and workspace_id:
-            group_id = config.get("group_id", "default")
+            group_id = config.get("group_id") or (getattr(self, "trace_context", None) or {}).get("group_context", {}).get("primary_group_id") or "default"
             logger.info(
                 f"[MetadataReducer] Cache lookup: group_id={group_id}, "
                 f"dataset={dataset_id}, workspace={workspace_id}"

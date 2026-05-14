@@ -749,7 +749,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
         dataset_id = config.get("dataset_id")
         workspace_id = config.get("workspace_id")
         report_id = config.get("report_id")
-        group_id = config.get("group_id", "default")
+        group_id = config.get("group_id") or (getattr(self, "trace_context", None) or {}).get("group_context", {}).get("primary_group_id") or "default"
 
         # ── Priority 1: model_context_json provided directly ──
         model_context_json = config.get("model_context_json")
@@ -851,7 +851,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
         Returns dict with 'tables', 'relationships', 'sample_data' for the
         requested tables only.
         """
-        group_id = config.get("group_id", "default")
+        group_id = config.get("group_id") or (getattr(self, "trace_context", None) or {}).get("group_context", {}).get("primary_group_id") or "default"
         dataset_id = config.get("dataset_id")
         workspace_id = config.get("workspace_id")
         if not dataset_id or not workspace_id:

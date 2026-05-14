@@ -6,7 +6,7 @@ Handles database operations for semantic model metadata caching.
 
 from datetime import date
 from typing import Optional, Dict, Any
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.powerbi_semantic_model_cache import PowerBISemanticModelCache
@@ -57,7 +57,10 @@ class PowerBISemanticModelCacheRepository:
                     PowerBISemanticModelCache.dataset_id == dataset_id,
                     PowerBISemanticModelCache.workspace_id == workspace_id,
                     PowerBISemanticModelCache.cached_date == today,
-                    PowerBISemanticModelCache.report_id != "reduced",
+                    or_(
+                        PowerBISemanticModelCache.report_id.is_(None),
+                        PowerBISemanticModelCache.report_id != "reduced",
+                    ),
                 )
             )
         elif report_id:

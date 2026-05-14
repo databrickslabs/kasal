@@ -1,13 +1,12 @@
 {
   "id": "ucmv-extract-001",
-  "name": "UCMV Migration — Phase 1: Extract & Propose Config",
-  "description": "Extracts PBI metadata via Semantic Model Fetcher + MQuery + Relationships tools, then auto-proposes a pipeline_config.json.",
+  "name": "UCMV Migration — Extract & Propose Config",
+  "description": "Single-task crew: extracts PBI metadata via Semantic Model Fetcher, then auto-proposes pipeline_config.json.",
   "agent_ids": [
     "extract-agent-001"
   ],
   "task_ids": [
-    "extract-task-001",
-    "propose-task-001"
+    "extract-propose-task-001"
   ],
   "nodes": [
     {
@@ -17,9 +16,9 @@
       "data": {
         "label": "PBI Migration Planner",
         "role": "Power BI Migration Specialist",
-        "goal": "Extract PBI metadata and propose an optimal pipeline configuration for UC Metric View migration",
-        "backstory": "You are a data engineering agent specializing in Power BI to Databricks migration. Your first task is to extract all metadata from the PBI workspace using the available tools. Your second task is to analyze the extraction and propose a pipeline_config.json using the Config Generator tool. Call each tool immediately with NO arguments — all credentials are pre-configured. Do not ask for additional information.",
-        "tools": ["79", "74", "75", "89"],
+        "goal": "Extract PBI metadata and propose a pipeline configuration for UC Metric View migration",
+        "backstory": "You are a data engineering agent. Your job is simple: call Tool 79 to extract PBI metadata, then immediately call Tool 89 with that output to propose a config. Call each tool exactly once. Do not ask questions.",
+        "tools": ["79", "89"],
         "agentId": "extract-agent-001",
         "llm": "databricks-claude-sonnet-4",
         "verbose": true,
@@ -27,12 +26,12 @@
       }
     },
     {
-      "id": "task-extract-task-001",
+      "id": "task-extract-propose-task-001",
       "type": "taskNode",
-      "position": { "x": 300, "y": 50 },
+      "position": { "x": 300, "y": 120 },
       "data": {
-        "label": "Extract PBI Metadata",
-        "tools": ["79", "74", "75"],
+        "label": "Extract Metadata & Propose Config",
+        "tools": ["79", "89"],
         "tool_configs": {
           "Power BI Semantic Model Fetcher": {
             "workspace_id": "{workspace_id}",
@@ -42,54 +41,16 @@
             "client_id": "{client_id}",
             "client_secret": "{client_secret}"
           },
-          "M-Query Conversion Pipeline": {
-            "workspace_id": "{workspace_id}",
-            "dataset_id": "{dataset_id}",
-            "auth_method": "service_principal",
-            "tenant_id": "{tenant_id}",
-            "client_id": "{client_id}",
-            "client_secret": "{client_secret}"
-          },
-          "Power BI Relationships Tool": {
-            "workspace_id": "{workspace_id}",
-            "dataset_id": "{dataset_id}",
-            "auth_method": "service_principal",
-            "tenant_id": "{tenant_id}",
-            "client_id": "{client_id}",
-            "client_secret": "{client_secret}"
-          }
-        },
-        "agentId": null,
-        "taskId": "extract-task-001",
-        "type": "task",
-        "description": "Extract all Power BI metadata by calling each tool with NO arguments. All credentials are pre-configured.\n\n1. Call the Power BI Semantic Model Fetcher (Tool 79) — extracts measures, tables, columns, relationships, sample data as raw JSON. This is the PRIMARY extraction tool.\n2. Call the M-Query Conversion Pipeline (Tool 74) — extracts MQuery table transpilations.\n3. Call the Power BI Relationships Tool (Tool 75) — extracts table relationships with cardinality.\n\nIMPORTANT: Do NOT pass any parameters. Credentials are pre-configured.\n\nReturn ALL three outputs:\n- measures_json: the measures and model context from Tool 79\n- mquery_json: the MQuery transpilation output from Tool 74\n- relationships_json: the relationships output from Tool 75",
-        "expected_output": "Three JSON outputs:\n- measures_json: Full model context with measures, tables, columns, relationships, sample data (from Tool 79)\n- mquery_json: Array of MQuery table transpilations (from Tool 74)\n- relationships_json: Array of PBI relationship records (from Tool 75)\n\nAll must be valid JSON.",
-        "config": {
-          "output_json": true,
-          "retry_on_fail": true,
-          "max_retries": 2,
-          "human_input": false
-        }
-      }
-    },
-    {
-      "id": "task-propose-task-001",
-      "type": "taskNode",
-      "position": { "x": 300, "y": 220 },
-      "data": {
-        "label": "Propose Pipeline Config",
-        "tools": ["89"],
-        "tool_configs": {
           "Config Generator": {
             "catalog": "{catalog}",
             "schema_name": "{schema_name}"
           }
         },
         "agentId": null,
-        "taskId": "propose-task-001",
+        "taskId": "extract-propose-task-001",
         "type": "task",
-        "description": "Using the extraction outputs from the previous task, call the Config Generator (Tool 89) to auto-propose a pipeline_config.json.\n\nPass the measures_json, mquery_json, and relationships_json from the previous task output as inputs to Tool 89. The catalog and schema_name are already pre-configured.\n\nThe tool will return a proposed config with:\n- join_key_map (dimension join mappings)\n- enrichment_joins (auto-detected joins)\n- switch_decompositions (SWITCH measure skeletons)\n- mapping_only_tables\n- parameter_defaults\n- filter_sets\n- measure_resolutions\n\nReturn the FULL proposed config JSON and the confidence scores.",
-        "expected_output": "JSON containing:\n- proposed_config: the full pipeline_config.json to review\n- confidence: per-key confidence scores (high/medium/low)\n- gap_analysis: summary of remaining gaps\n- summary: keys_proposed count and todo_count",
+        "description": "Do these two steps in order:\n\nSTEP 1: Call the Power BI Semantic Model Fetcher tool with NO arguments (credentials are pre-configured). It will return a JSON with measures, tables, columns, relationships, and sample data. Save this entire output — you need it for Step 2.\n\nSTEP 2: Call the Config Generator tool and pass the ENTIRE output from Step 1 as the measures_json parameter. Set mquery_json to '[]' and relationships_json to '[]'. The tool will analyze the metadata and propose a pipeline_config.json.\n\nIMPORTANT:\n- Call Tool 79 first with NO arguments\n- Then call Tool 89 with measures_json set to the FULL JSON string output from Tool 79\n- Do NOT summarize or truncate the Tool 79 output — pass the complete JSON string",
+        "expected_output": "The proposed pipeline_config.json from Tool 89, containing:\n- proposed_config with join_key_map, enrichment_joins, switch_decompositions, etc.\n- confidence scores per key\n- gap_analysis summary",
         "config": {
           "output_json": true,
           "retry_on_fail": true,
@@ -101,15 +62,9 @@
   ],
   "edges": [
     {
-      "id": "edge-agent-extract",
+      "id": "edge-agent-task",
       "source": "agent-extract-agent-001",
-      "target": "task-extract-task-001",
-      "type": "default"
-    },
-    {
-      "id": "edge-extract-propose",
-      "source": "task-extract-task-001",
-      "target": "task-propose-task-001",
+      "target": "task-extract-propose-task-001",
       "type": "default"
     }
   ],
