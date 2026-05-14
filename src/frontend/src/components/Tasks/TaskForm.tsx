@@ -56,6 +56,8 @@ import { PowerBIFetcherConfigSelector, PowerBIFetcherConfig } from '../Common/Po
 import { PowerBIDaxConfigSelector, PowerBIDaxConfig } from '../Common/PowerBIDaxConfigSelector';
 import { PowerBIMetadataReducerConfigSelector, PowerBIMetadataReducerConfig } from '../Common/PowerBIMetadataReducerConfigSelector';
 import { PowerBIDaxExecutorConfigSelector, PowerBIDaxExecutorConfig } from '../Common/PowerBIDaxExecutorConfigSelector';
+import { UCMetricViewGeneratorConfigSelector, UCMetricViewGeneratorConfig } from '../Common/UCMetricViewGeneratorConfigSelector';
+import { ConfigGeneratorConfigSelector, ConfigGeneratorConfig } from '../Common/ConfigGeneratorConfigSelector';
 import { PerplexityConfig, SerperConfig } from '../../types/config';
 import { type LLMGuardrailConfig } from '../../types/task';
 import { ModelService } from '../../api/ModelService';
@@ -151,6 +153,8 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const [powerBIDaxConfig, setPowerBIDaxConfig] = useState<PowerBIDaxConfig>({});
   const [powerBIReducerConfig, setPowerBIReducerConfig] = useState<PowerBIMetadataReducerConfig>({});
   const [powerBIDaxExecutorConfig, setPowerBIDaxExecutorConfig] = useState<PowerBIDaxExecutorConfig>({});
+  const [ucMetricViewConfig, setUcMetricViewConfig] = useState<UCMetricViewGeneratorConfig>({});
+  const [configGeneratorConfig, setConfigGeneratorConfig] = useState<ConfigGeneratorConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
   const [showBestPractices, setShowBestPractices] = useState(false);
@@ -266,6 +270,16 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       // Check for Power BI DAX Executor config
       if (initialData.tool_configs['Power BI DAX Executor']) {
         setPowerBIDaxExecutorConfig(initialData.tool_configs['Power BI DAX Executor'] as PowerBIDaxExecutorConfig);
+      }
+
+      // Check for UC Metric View Generator config
+      if (initialData.tool_configs['UC Metric View Generator']) {
+        setUcMetricViewConfig(initialData.tool_configs['UC Metric View Generator'] as UCMetricViewGeneratorConfig);
+      }
+
+      // Check for Config Generator config
+      if (initialData.tool_configs['Config Generator']) {
+        setConfigGeneratorConfig(initialData.tool_configs['Config Generator'] as ConfigGeneratorConfig);
       }
 
       // Check for MCP_SERVERS config
@@ -807,6 +821,54 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           return tool?.title === 'Power BI DAX Executor';
         })) {
           delete updatedToolConfigs['Power BI DAX Executor'];
+        }
+
+        // Handle UC Metric View Generator config
+        if (ucMetricViewConfig && Object.keys(ucMetricViewConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'UC Metric View Generator';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            'UC Metric View Generator': ucMetricViewConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'UC Metric View Generator';
+        })) {
+          delete updatedToolConfigs['UC Metric View Generator'];
+        }
+
+        // Handle Config Generator config
+        if (configGeneratorConfig && Object.keys(configGeneratorConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Config Generator';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            'Config Generator': configGeneratorConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Config Generator';
+        })) {
+          delete updatedToolConfigs['Config Generator'];
         }
 
         // Handle Power BI Comprehensive Analysis Tool config
@@ -1832,6 +1894,72 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                       setToolConfigs(prev => ({
                         ...prev,
                         'Power BI DAX Executor': config
+                      }));
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+
+            {/* UC Metric View Generator Configuration - Show only when tool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'UC Metric View Generator';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  UC Metric View Generator Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(156, 39, 176, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(156, 39, 176, 0.2)'
+                }}>
+                  <UCMetricViewGeneratorConfigSelector
+                    value={ucMetricViewConfig}
+                    onChange={(config) => {
+                      setUcMetricViewConfig(config);
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'UC Metric View Generator': config
+                      }));
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+
+            {/* Config Generator Configuration - Show only when tool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'Config Generator';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  Config Generator (Tool 89) Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(76, 175, 80, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(76, 175, 80, 0.2)'
+                }}>
+                  <ConfigGeneratorConfigSelector
+                    value={configGeneratorConfig}
+                    onChange={(config) => {
+                      setConfigGeneratorConfig(config);
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'Config Generator': config
                       }));
                     }}
                   />
