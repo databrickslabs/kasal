@@ -1,6 +1,7 @@
 {
   "id": "ucmv-migration-001",
-  "name": "UC Metric View Generator (SC Reporting)",
+  "name": "UC Metric View Generator — JSON Mode (SC Reporting)",
+  "description": "Single-crew version for JSON mode (pre-extracted data). For the full two-crew API workflow, use crew_extract_propose.json + crew_generate_validate.json.",
   "agent_ids": [
     "ucmv-agent-001"
   ],
