@@ -538,7 +538,7 @@ class PowerBIAnalysisTool(BaseTool):
         # User inputs (business_mappings, field_synonyms, active_filters) are always fresh from config
         cache_hit = False
         cached_metadata = None
-        group_id = config.get("group_id", "default")
+        group_id = config.get("group_id") or (getattr(self, "trace_context", None) or {}).get("group_context", {}).get("primary_group_id") or "default"
         report_id = config.get("report_id")
 
         # Initialize model_context (will be populated from cache or fresh fetch)

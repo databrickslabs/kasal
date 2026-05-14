@@ -12,8 +12,12 @@ logger = logging.getLogger(__name__)
 
 class ConfigGeneratorSchema(BaseModel):
     """Input schema for ConfigGeneratorTool."""
+    workspace_id: Optional[str] = Field(
+        None, description="PBI workspace ID — used to auto-load metadata from Tool 79 cache")
+    dataset_id: Optional[str] = Field(
+        None, description="PBI dataset ID — used to auto-load metadata from Tool 79 cache")
     measures_json: Optional[str] = Field(
-        None, description="JSON string of measure_table_mapping (from Tool 73)")
+        None, description="JSON string of measure_table_mapping (from Tool 73/79). If not provided, reads from Tool 79 cache.")
     mquery_json: Optional[str] = Field(
         None, description="JSON string of mquery_transpilation (from Tool 74)")
     relationships_json: Optional[str] = Field(
@@ -42,8 +46,8 @@ class ConfigGeneratorTool(BaseTool):
     model_config = {"arbitrary_types_allowed": True, "extra": "allow"}
 
     def __init__(self, **kwargs: Any) -> None:
-        config_keys = ('measures_json', 'mquery_json', 'relationships_json',
-                       'scan_data_json', 'catalog', 'schema_name')
+        config_keys = ('workspace_id', 'dataset_id', 'measures_json', 'mquery_json',
+                       'relationships_json', 'scan_data_json', 'catalog', 'schema_name')
         default_config = {}
         for key in config_keys:
             val = kwargs.pop(key, None)
@@ -65,6 +69,8 @@ class ConfigGeneratorTool(BaseTool):
         scan_raw = _get('scan_data_json')
         catalog = _get('catalog') or 'main'
         schema = _get('schema_name') or 'default'
+        workspace_id = _get('workspace_id')
+        dataset_id = _get('dataset_id')
 
         try:
             # Lazy imports (same pattern as Tool 86)
@@ -73,6 +79,61 @@ class ConfigGeneratorTool(BaseTool):
             from src.engines.crewai.tools.custom.metric_view_utils.scan_data_parser import ScanDataParser
             from src.engines.crewai.tools.custom.metric_view_utils.pipeline import MetricViewPipeline
             from src.engines.crewai.tools.custom.metric_view_utils.utils import to_snake_case
+
+            # Auto-load from Tool 79 cache if measures_json not provided
+            if measures_raw == '[]' and workspace_id and dataset_id:
+                logger.info(f"[ConfigGenerator] No measures_json provided, trying Tool 79 cache for workspace={workspace_id}, dataset={dataset_id}")
+                try:
+                    import asyncio
+                    from src.services.powerbi_semantic_model_cache_service import PowerBISemanticModelCacheService
+                    from src.db.session import async_session_factory
+                    from src.utils.user_context import UserContext
+
+                    group_id = (
+                        (getattr(self, 'trace_context', None) or {})
+                        .get('group_context', {}).get('primary_group_id')
+                    ) or getattr(UserContext, '_group_id', None) or 'default'
+                    logger.info(f"[ConfigGenerator] Using group_id={group_id} for cache lookup")
+
+                    async def _load_cache():
+                        async with async_session_factory() as session:
+                            svc = PowerBISemanticModelCacheService(session)
+                            return await svc.get_cached_metadata(
+                                group_id=group_id,
+                                dataset_id=dataset_id,
+                                workspace_id=workspace_id,
+                                any_report_id=True,
+                            )
+
+                    from src.engines.crewai.tools.custom.metric_view_utils.utils import run_async
+                    cached = run_async(_load_cache())
+
+                    if cached:
+                        logger.info(f"[ConfigGenerator] Loaded metadata from Tool 79 cache: {len(str(cached))} chars")
+                        # Extract measures from cached metadata
+                        cached_measures = cached.get('measures', [])
+                        cached_tables = cached.get('tables', [])
+                        cached_relationships = cached.get('relationships', [])
+
+                        if cached_measures:
+                            # Convert to measure_table_mapping format
+                            measures_raw = json.dumps([{
+                                'measure_name': m.get('name', ''),
+                                'dax_expression': m.get('expression', m.get('dax_expression', '')),
+                                'table_name': m.get('table', m.get('table_name', '')),
+                                'proposed_allocation': m.get('table', m.get('table_name', '')),
+                                'description': m.get('description', ''),
+                                'is_hidden': m.get('isHidden', False),
+                            } for m in cached_measures])
+                            logger.info(f"[ConfigGenerator] Extracted {len(cached_measures)} measures from cache")
+
+                        if cached_relationships:
+                            relationships_raw = json.dumps(cached_relationships)
+                            logger.info(f"[ConfigGenerator] Extracted {len(cached_relationships)} relationships from cache")
+                    else:
+                        logger.warning("[ConfigGenerator] No cached metadata found for this workspace/dataset")
+                except Exception as e:
+                    logger.warning(f"[ConfigGenerator] Cache lookup failed: {e}")
 
             # Parse inputs
             measures = json.loads(measures_raw) if isinstance(measures_raw, str) else measures_raw

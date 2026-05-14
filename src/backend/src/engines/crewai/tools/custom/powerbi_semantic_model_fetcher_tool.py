@@ -287,7 +287,12 @@ class PowerBISemanticModelFetcherTool(BaseTool):
             return json.dumps({"error": f"Authentication error: {str(e)}"})
 
         # Step 1.5: Check cache
-        group_id = config.get("group_id", "default")
+        # Get group_id from trace_context (set by crew execution), fall back to config, then default
+        group_id = (
+            config.get("group_id")
+            or (getattr(self, "trace_context", None) or {}).get("group_context", {}).get("primary_group_id")
+            or "default"
+        )
         model_context = {
             "measures": [],
             "relationships": [],

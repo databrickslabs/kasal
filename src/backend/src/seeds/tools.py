@@ -271,7 +271,7 @@ def get_tool_configs():
             "group_by": "page"  # Group results by: "page", "measure", or "table"
         },   # Power BI Report References Tool
         "79": {
-            "result_as_answer": True,
+            "result_as_answer": False,
             "tenant_id": "",
             "client_id": "",
             "client_secret": "",
@@ -372,6 +372,8 @@ def get_tool_configs():
         },  # Metric View Deployer
         "89": {
             "result_as_answer": True,
+            "workspace_id": None,
+            "dataset_id": None,
             "measures_json": None,
             "mquery_json": None,
             "relationships_json": None,
