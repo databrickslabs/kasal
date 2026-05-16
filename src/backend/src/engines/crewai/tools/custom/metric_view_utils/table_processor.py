@@ -421,6 +421,7 @@ def process_table(
                 # Convert bare Table[col] refs -> source.col
                 expr = re.sub(r'\b\w+\[(\w+)\]', r'source.\1', expr)
                 # Validation gate: reject if DAX-only functions/keywords remain
+                # Strip MEASURE(...) wrappers before checking — MEASURE() is valid SQL
                 _DAX_ONLY = re.compile(
                     r'\b(SELECTEDVALUE|ISFILTERED|HASONEVALUE|FORMAT|CONTAINSSTRING|'
                     r'SWITCH|CALCULATE\s*\(|SAMEPERIODLASTYEAR|DATEADD|'
@@ -428,7 +429,8 @@ def process_table(
                     r'var\s+\w+\s*=|return\s)\b',
                     re.IGNORECASE,
                 )
-                if _DAX_ONLY.search(expr):
+                _check_str = re.sub(r'MEASURE\s*\([^)]*\)', '', expr)
+                if _DAX_ONLY.search(_check_str):
                     still_untranslatable.append(m)
                     continue
                 m.sql_expr = expr
@@ -718,7 +720,20 @@ def process_table(
         )
         resolved_sql = resolver.resolve(base_sql)
         resolved_sql = spark_sql_compat(resolved_sql)
+
+        # Count UNION arms before folding to detect arm loss
+        _pre_fold_arms = len(folder._split_union(resolved_sql))
         final_sql = folder.fold(resolved_sql, scan_info.m_steps, scan_info.pbi_columns)
+        _post_fold_arms = len(re.split(
+            r'\bUNION\s+ALL\b|\bUNION\b', final_sql, flags=re.IGNORECASE,
+        ))
+        if _pre_fold_arms > 1 and _post_fold_arms < _pre_fold_arms:
+            logger.warning(
+                f"[{table_key}] UNION arm loss during fold: {_pre_fold_arms} → {_post_fold_arms}. "
+                f"Falling back to unfolded SQL."
+            )
+            final_sql = resolved_sql
+
         final_sql = post_processor.process(final_sql)
 
         # Normalize mixed-case column aliases to lowercase

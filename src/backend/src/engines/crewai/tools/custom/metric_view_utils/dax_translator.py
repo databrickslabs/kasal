@@ -457,6 +457,9 @@ class DaxTranslator:
             filter_sql = self._build_filter_clause(p, table_key, dax)
             if filter_sql:
                 filter_parts.append(filter_sql)
+            elif p.get('condition'):
+                # Filter condition exists in DAX but could not be translated
+                return None, f"Untranslatable FILTER condition: {p['condition']}"
             self._extend_with_implicit_filters(filter_parts, alias)
             combined = ' AND '.join(filter_parts) if filter_parts else None
             if combined:
@@ -473,6 +476,8 @@ class DaxTranslator:
             filter_sql = self._build_filter_clause(p, table_key, dax)
             if filter_sql:
                 filter_parts.append(filter_sql)
+            elif p.get('condition'):
+                return None, f"Untranslatable FILTER condition: {p['condition']}"
             self._extend_with_implicit_filters(filter_parts, alias)
             combined = ' AND '.join(filter_parts) if filter_parts else None
             if combined:
@@ -497,6 +502,8 @@ class DaxTranslator:
             inner_filter = self._build_filter_clause(p, table_key, dax)
             if inner_filter:
                 filter_parts.append(inner_filter)
+            elif p.get('condition'):
+                return None, f"Untranslatable FILTER condition: {p['condition']}"
             outer_cond = p.get('outer_filter_condition')
             outer_table = p.get('outer_filter_table')
             if outer_cond and outer_table:
@@ -504,6 +511,8 @@ class DaxTranslator:
                     {'condition': outer_cond, 'filter_table': outer_table}, table_key, dax)
                 if outer_filter:
                     filter_parts.append(outer_filter)
+                elif outer_cond:
+                    return None, f"Untranslatable outer FILTER condition: {outer_cond}"
             self._extend_with_implicit_filters(filter_parts, alias)
             combined_filter = ' AND '.join(filter_parts) if filter_parts else None
             if combined_filter:
@@ -720,8 +729,34 @@ class DaxTranslator:
 
     def _translate_single_condition(self, cond: str, table_key: str) -> str | None:
         """Translate a single DAX condition to SQL."""
+        cond = cond.strip()
+
+        # Handle OR conditions (|| → OR): split, translate each side, join with OR
+        if '||' in cond:
+            or_parts = re.split(r'\s*\|\|\s*', cond)
+            sql_or_parts = []
+            for op in or_parts:
+                sql_op = self._translate_single_condition(op.strip(), table_key)
+                if sql_op is None:
+                    return None
+                sql_or_parts.append(sql_op)
+            return '(' + ' OR '.join(sql_or_parts) + ')'
+
+        # NOT Table[col] IN {…}
+        m = re.match(r'NOT\s+(\w+)\[(\w+)\]\s+in\s+\{([^}]+)\}', cond, re.IGNORECASE)
+        if m:
+            col = self._resolve_column(m.group(1), m.group(2), table_key)
+            vals = re.findall(r'"([^"]*)"', m.group(3))
+            in_list = ', '.join(f"'{v}'" for v in vals)
+            return f"source.{col} NOT IN ({in_list})"
+
         # Table[col] = "val"
         m = re.match(r'(\w+)\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*"([^"]*)"', cond)
+        if m:
+            col = self._resolve_column(m.group(1), m.group(2), table_key)
+            return f"source.{col} {m.group(3)} '{m.group(4)}'"
+        # Table[col] = 'val' (single-quoted)
+        m = re.match(r"(\w+)\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*'([^']*)'", cond)
         if m:
             col = self._resolve_column(m.group(1), m.group(2), table_key)
             return f"source.{col} {m.group(3)} '{m.group(4)}'"
@@ -730,6 +765,8 @@ class DaxTranslator:
         if m:
             col = self._resolve_column(m.group(1), m.group(2), table_key)
             vals = re.findall(r'"([^"]*)"', m.group(3))
+            if not vals:
+                vals = re.findall(r"'([^']*)'", m.group(3))
             in_list = ', '.join(f"'{v}'" for v in vals)
             return f"source.{col} IN ({in_list})"
         # Table[col] = 123
@@ -737,6 +774,36 @@ class DaxTranslator:
         if m:
             col = self._resolve_column(m.group(1), m.group(2), table_key)
             return f"source.{col} {m.group(3)} {m.group(4)}"
+
+        # ── Bare column patterns (no Table prefix): [col] = "val" ──
+        m = re.match(r'\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*"([^"]*)"', cond)
+        if m:
+            return f"source.{m.group(1)} {m.group(2)} '{m.group(3)}'"
+        # [col] = 'val' (single-quoted)
+        m = re.match(r"\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*'([^']*)'", cond)
+        if m:
+            return f"source.{m.group(1)} {m.group(2)} '{m.group(3)}'"
+        # [col] IN {"a","b"}
+        m = re.match(r'\[(\w+)\]\s+in\s+\{([^}]+)\}', cond, re.IGNORECASE)
+        if m:
+            vals = re.findall(r'"([^"]*)"', m.group(2))
+            if not vals:
+                vals = re.findall(r"'([^']*)'", m.group(2))
+            in_list = ', '.join(f"'{v}'" for v in vals)
+            return f"source.{m.group(1)} IN ({in_list})"
+        # NOT [col] IN {…}
+        m = re.match(r'NOT\s+\[(\w+)\]\s+in\s+\{([^}]+)\}', cond, re.IGNORECASE)
+        if m:
+            vals = re.findall(r'"([^"]*)"', m.group(2))
+            if not vals:
+                vals = re.findall(r"'([^']*)'", m.group(2))
+            in_list = ', '.join(f"'{v}'" for v in vals)
+            return f"source.{m.group(1)} NOT IN ({in_list})"
+        # [col] = 123
+        m = re.match(r'\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*(\d+(?:\.\d+)?)', cond)
+        if m:
+            return f"source.{m.group(1)} {m.group(2)} {m.group(3)}"
+
         return None
 
     def _resolve_column(self, pbi_table: str, pbi_col: str, table_key: str) -> str:
