@@ -238,6 +238,7 @@ class MetricViewValidatorTool(BaseTool):
                 "total_invalid": total_invalid,
             },
             "per_table": results,
+            "yaml": yaml_tables,
         }
 
         logger.info(
