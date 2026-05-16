@@ -253,6 +253,11 @@ class UCMetricViewGeneratorTool(BaseTool):
         except Exception as e:
             logger.warning(f"Validation failed: {e}")
 
+        # Store measures with DAX for downstream validation
+        _measures_for_validation = []
+        if isinstance(measures, list):
+            _measures_for_validation = measures
+
         output = {
             'yaml': yaml_output,
             'sql': sql_output,
@@ -260,6 +265,7 @@ class UCMetricViewGeneratorTool(BaseTool):
             'migration_report': results.get('migration_report', ''),
             'limitations': results.get('limitations', {}),
             'validation': validation_results,
+            'measures_with_dax': _measures_for_validation,
             'specs_summary': {
                 k: {
                     'view_name': v.get('view_name'),
