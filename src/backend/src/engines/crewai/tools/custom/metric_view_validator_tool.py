@@ -91,15 +91,62 @@ class MetricViewValidatorTool(BaseTool):
         if not yaml_tables:
             logger.info("[Validator] No YAML in args — attempting to fetch from latest UCMV execution trace")
             try:
-                yaml_tables = self._fetch_latest_ucmv_from_db()
+                _db_result = self._fetch_latest_ucmv_from_db()
+                if isinstance(_db_result, dict) and 'yaml' in _db_result:
+                    # Full UCMV output — extract yaml and keep the rest for validation
+                    yaml_tables = _db_result['yaml']
+                    ucmv_raw = json.dumps(_db_result)  # Store full output for built-in validation
+                    logger.info(f"[Validator] Fetched full UCMV output from DB: {len(yaml_tables)} tables")
+                elif isinstance(_db_result, dict):
+                    yaml_tables = _db_result
             except Exception as db_err:
                 logger.warning(f"[Validator] DB fallback failed: {db_err}")
+
+        # Fallback: if no measures, fetch from the latest UCMV Generator execution
+        if not measures or measures == []:
+            logger.info("[Validator] No measures in args — fetching from latest UCMV execution trace")
+            try:
+                measures = self._fetch_measures_from_db()
+                logger.info(f"[Validator] Fetched {len(measures)} measures from DB")
+            except Exception as db_err:
+                logger.warning(f"[Validator] Measures DB fallback failed: {db_err}")
 
         if not yaml_tables:
             return json.dumps({
                 "error": "No YAML content provided. Pass ucmv_output (raw UCMV Generator output) "
                 "or yaml_content (JSON dict of table_key → YAML string)."
             })
+
+        # Extract measures from the UCMV Generator output if available
+        # The UCMV tool stores the measures it used internally — we can
+        # reconstruct them from the execution trace
+        _builtin_stats = None
+        if ucmv_raw:
+            try:
+                ucmv_full = json.loads(ucmv_raw) if isinstance(ucmv_raw, str) else ucmv_raw
+                if isinstance(ucmv_full, dict):
+                    _builtin_stats = ucmv_full.get('stats', {})
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # If no measures, try extracting from the UCMV output (measures_with_dax key)
+        if not measures or measures == []:
+            if ucmv_raw:
+                try:
+                    ucmv_full = json.loads(ucmv_raw) if isinstance(ucmv_raw, str) else ucmv_raw
+                    if isinstance(ucmv_full, dict) and 'measures_with_dax' in ucmv_full:
+                        measures = ucmv_full['measures_with_dax']
+                        logger.info(f"[Validator] Extracted {len(measures)} measures from UCMV measures_with_dax")
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+        if not measures or measures == []:
+            logger.info("[Validator] No measures — fetching from latest UCMV execution")
+            try:
+                measures = self._fetch_measures_from_db()
+                logger.info(f"[Validator] Fetched {len(measures)} measures from DB")
+            except Exception as db_err:
+                logger.warning(f"[Validator] Measures DB fallback failed: {db_err}")
 
         # Build table→mapping lookup from measures
         table_mapping = {}
@@ -200,6 +247,48 @@ class MetricViewValidatorTool(BaseTool):
         return json.dumps(output, indent=2, default=str)
 
     @staticmethod
+    def _fetch_measures_from_db() -> list:
+        """Fetch measures from the latest UCMV Generator execution's stats/migration_report."""
+        import asyncio
+        from sqlalchemy import text
+
+        async def _query():
+            from src.db.session import async_session_factory
+            async with async_session_factory() as session:
+                # The UCMV tool output contains the full result with yaml/sql/stats
+                # The stats section has per-table measure info, but we need the raw
+                # DAX measures. Try fetching from the UCMV tool's input (execution inputs).
+                result = await session.execute(text(
+                    "SELECT et.output::text "
+                    "FROM execution_trace et "
+                    "WHERE et.span_name LIKE 'UC Metric View Generator%run' "
+                    "ORDER BY et.created_at DESC LIMIT 1"
+                ))
+                row = result.fetchone()
+                if not row:
+                    return []
+                data = json.loads(row[0])
+                content = data.get('content', '')
+                inner = json.loads(content) if isinstance(content, str) else content
+                if not isinstance(inner, dict):
+                    return []
+                # Extract measures from the migration_report or stats
+                # First try measures_with_dax (added by UCMV Generator)
+                if 'measures_with_dax' in inner and inner['measures_with_dax']:
+                    return inner['measures_with_dax']
+                return []
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    return pool.submit(lambda: asyncio.run(_query())).result(timeout=10)
+            return loop.run_until_complete(_query())
+        except Exception:
+            return asyncio.run(_query())
+
+    @staticmethod
     def _fetch_latest_ucmv_from_db() -> dict:
         """Fetch YAML from the latest UCMV Generator execution trace in the DB."""
         import asyncio
@@ -220,7 +309,8 @@ class MetricViewValidatorTool(BaseTool):
                 data = json.loads(row[0])
                 content = data.get('content', '')
                 inner = json.loads(content) if isinstance(content, str) else content
-                return inner.get('yaml', {}) if isinstance(inner, dict) else {}
+                # Return full UCMV output (has yaml, sql, stats, validation keys)
+                return inner if isinstance(inner, dict) else {}
 
         try:
             loop = asyncio.get_event_loop()
