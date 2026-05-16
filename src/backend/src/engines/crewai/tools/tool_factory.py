@@ -178,6 +178,13 @@ except ImportError as e:
     ConfigGeneratorTool = None
     logging.warning(f"Could not import ConfigGeneratorTool: {e}")
 
+# Pipeline Config Generator Tool (API-direct, no LLM)
+try:
+    from .custom.pipeline_config_generator_tool import PipelineConfigGeneratorTool
+except ImportError as e:
+    PipelineConfigGeneratorTool = None
+    logging.warning(f"Could not import PipelineConfigGeneratorTool: {e}")
+
 # Setup logger
 logger = logging.getLogger(__name__)
 
@@ -258,6 +265,8 @@ class ToolFactory:
             self._tool_implementations["Metric View Deployer"] = MetricViewDeployerTool
         if ConfigGeneratorTool is not None:
             self._tool_implementations["Config Generator"] = ConfigGeneratorTool
+        if PipelineConfigGeneratorTool is not None:
+            self._tool_implementations["Pipeline Config Generator"] = PipelineConfigGeneratorTool
 
         # Initialize _initialized flag
         self._initialized = False

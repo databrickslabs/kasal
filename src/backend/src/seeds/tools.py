@@ -41,6 +41,7 @@ tools_data = [
     (87, "PBI Measure Allocator", "Groups Power BI measures into fact tables with confidence scores based on DAX table column references (Table[Column] patterns). Analyzes DAX expressions to determine which table each measure belongs to. Input: raw measures JSON (from Power BI Connector/Fetcher) + mquery_transpilation JSON (from tool 74). Output: JSON mapping of measure → fact table allocation with confidence (high/medium/low/none). Use before the UC Metric View Generator when measures don't have proposed_allocation fields.", "transform"),
     (88, "Metric View Deployer", "Deploy UC Metric View definitions to a Databricks workspace. Accepts YAML specs and deploy SQL from the UC Metric View Generator tool (86). Supports dry_run mode (default) for validation without actual deployment. When dry_run=False, executes CREATE METRIC VIEW SQL via the Databricks SQL Statement API. Input: yaml_specs_json + sql_specs_json from tool 86. Output: deployment status per metric view.", "transform"),
     (89, "Config Generator", "Auto-propose pipeline_config.json from PBI extraction output. Takes measures_json, mquery_json, relationships_json, scan_data_json and returns a proposed config with join_key_map, enrichment_joins, switch_decompositions, etc.", "transform"),
+    (90, "Pipeline Config Generator", "Generate pipeline_config.json by calling 4 PBI APIs directly — no LLM intermediation. Produces all 26 config keys with auto-fill + TODO markers. Requires two Service Principals: non-admin (Execute Queries API, workspace member) and admin (Admin Scanner API, Tenant.Read.All). Output is ready for the UC Metric View Generator (Tool 86).", "transform"),
 ]
 
 def get_tool_configs():
@@ -381,6 +382,19 @@ def get_tool_configs():
             "catalog": None,
             "schema_name": None,
         },  # Config Generator
+        "90": {
+            "result_as_answer": True,
+            "workspace_id": "",
+            "dataset_id": "",
+            "report_id": "",
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
+            "admin_client_id": "",
+            "admin_client_secret": "",
+            "catalog": "main",
+            "schema_name": "default",
+        },  # Pipeline Config Generator
     }
 
 async def seed_async():
@@ -398,7 +412,7 @@ async def seed_async():
     tools_error = 0
 
     # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82, 85, 86, 87, 88, 89]
+    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82, 85, 86, 87, 88, 89, 90]
 
     for tool_id, title, description, icon in tools_data:
         try:
@@ -461,7 +475,7 @@ def seed_sync():
     tools_error = 0
 
     # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82, 85, 86, 87, 88, 89]
+    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82, 85, 86, 87, 88, 89, 90]
 
     for tool_id, title, description, icon in tools_data:
         try:

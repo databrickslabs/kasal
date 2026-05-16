@@ -40,8 +40,8 @@ Migrations are never 100% automatic. The target is 70-80% automation with human 
   Tools 73/74/75/86 → JSON files from PBI API
                 │
                 ▼
-  Phase 2: PROPOSE CONFIG (automatic — Tool 89, planned)
-  Auto-generate pipeline_config.json from extraction output
+  Phase 2: PROPOSE CONFIG (automatic — generate_config.py or Tool 89)
+  Auto-generate pipeline_config.json from PBI APIs directly
                 │
                 ▼
   ┌─────────────────────────────────────────────────────┐
@@ -71,7 +71,7 @@ Migrations are never 100% automatic. The target is 70-80% automation with human 
 | Phase | Status | Detail |
 |-------|--------|--------|
 | Phase 1: Extract | **Done** | Tools 73, 74, 75, 86 (API mode). 3 auth methods. |
-| Phase 2: Propose config | **Done** | Tool 89 + `config_scaffold.py`. Auto-proposes 7/8 config keys. 58% translation rate without manual edits. |
+| Phase 2: Propose config | **Done** | `generate_config.py` (standalone, recommended) or Tool 89 + `config_scaffold.py`. Auto-proposes all 26 config keys from 4 PBI APIs. |
 | Phase 3: Human review | **Manual** | Customer edits pipeline_config.json by hand. |
 | Phase 4: Generate | **Done** | Tool 86. 823 tests, 20+ modules. All 10 PBI limitations detected. 93% business coverage. |
 | Phase 5: Validate + Deploy | **Done** | Validation: 4 VALID + 27 EQUIVALENT + 3 REVIEW. Tool 88 deployer. `deploy_test.py` for smoke testing. |
@@ -80,7 +80,7 @@ Migrations are never 100% automatic. The target is 70-80% automation with human 
 
 Real migrations are iterative. A typical flow:
 
-1. **Run `config_scaffold.py`** → auto-proposes 7/8 config keys → **58% translation rate immediately**
+1. **Run `generate_config.py`** (or `config_scaffold.py` from JSONs) → auto-proposes all 26 config keys with TODO markers
 2. **Run `gap_analyzer.py`** → shows top gaps by unlock potential → SA knows what to fix next
 3. **Fill in switch_decomposition SQL** → re-run → 70-75% translated
 4. **Add manual_overrides** → re-run → 80%+ translated (complex cross-table measures)
@@ -90,22 +90,96 @@ Real migrations are iterative. A typical flow:
 
 Each iteration takes minutes (Tool 86 runs in 30 seconds). The config scaffold eliminates 60-70% of manual config work. The gap analyzer tells the SA exactly what to add next.
 
-## What Tool 89 (Config Generator) Will Auto-Propose
+## Phase 2: Config Generation — Two Approaches
 
-The biggest bottleneck today is authoring `pipeline_config.json`. Tool 89 will propose 80%+ of it deterministically:
+The biggest bottleneck is authoring `pipeline_config.json` (26 keys, complex business logic). There are two ways to auto-propose it:
 
-| Config Key | Source | How |
-|-----------|--------|-----|
-| `join_key_map` | Relationships API (Tool 75) | Convert relationship records → join_key_map format. 80% done in `RelationshipsLoader`. |
-| `fact_join_map` | Measure Allocator (Tool 87) | Cross-table references = fact_join_map candidates. Grain/pivot/embed decisions still need human review. |
-| `switch_decompositions` | DAX quick-reject output | SELECTEDVALUE+SWITCH measures already identified. Parse SWITCH branches from DAX. Deterministic for 80% of patterns. |
-| `enrichment_joins` | Relationships API | Already auto-generated. Done. |
-| `measure_resolutions` | Pipeline untranslatable list | Measures failing with "Cannot resolve [ref]" — look up referenced DAX, propose resolution. |
-| `column_overrides` | MQuery transpilation vs DAX | Diff physical vs PBI column names = overrides. |
-| `mapping_only_tables` | Admin API scan | Tables with measures but no MQuery SQL. |
-| `manual_overrides` | Untranslatable + reference output | Complex cross-table/SUMX/DISTINCTCOUNT measures that no regex handles — propose SQL from LLM or reference patterns. |
+### Option A: `generate_config.py` (Recommended)
 
-**What Tool 89 won't get right:** `fact_join_map` entries with pivot/union/embed modes. These encode grain-level business decisions (e.g., "scorecard table has one row per KBI per workcenter, but the fact table has one row per workcenter — need to pivot before joining"). A human must review these.
+Standalone Python script that calls 4 PBI APIs directly — no CrewAI, no LLM, no database. Produces the full `pipeline_config.json` with auto-filled keys and `TODO` markers where human input is needed.
+
+```bash
+pip install requests  # only dependency
+
+python generate_config.py \
+  --workspace-id ac0fa11c-... \
+  --dataset-id ecdd57ae-... \
+  --tenant-id 9f37a392-... \
+  --client-id 7b597aac-... \
+  --client-secret "U5b8Q~..." \
+  --admin-client-id 8d8aa6ee-... \
+  --admin-client-secret "RXm8Q~..." \
+  --catalog david_test_metrics \
+  --schema cchbc \
+  --output proposed_pipeline_config.json
+```
+
+Two service principals because the APIs require different permissions:
+- **Non-admin SP** (workspace member): Execute Queries API for relationships + measures
+- **Admin SP**: Admin Scanner API for columns, M-Query, hidden flags, types
+
+Optional: `--report-id` for report-layer metadata (PBIR visual display names).
+
+#### What it calls
+
+| API | Endpoint | What it extracts |
+|-----|----------|-----------------|
+| **1** | `INFO.VIEW.RELATIONSHIPS()` | Table relationships → `join_key_map`, `enrichment_joins`, `dim_alias_map` |
+| **2** | `$SYSTEM.MDSCHEMA_MEASURES` | DAX measures → `switch_decompositions`, `filter_sets`, `measure_resolutions`, `column_overrides`, `mapping_only_tables`, `manual_overrides` skeletons |
+| **3** | Admin Scanner (workspace scan) | Full schema → `column_metadata`, `column_alias_map`, `parameter_defaults`, `name_prefixes_to_strip`, `dimension_exclusions`, `period_dim_priority`, `int_period_dims` |
+| **4** | Report Definition (optional) | PBIR visuals → `measure_metadata`, `dimension_metadata` |
+
+#### What you CAN expect
+
+- All 26 config keys present in output
+- ~12 keys auto-filled with real data from PBI APIs
+- ~8 keys with `TODO` markers that include helpful context (e.g., `"TODO: grain decision — FactSales connects to dims [DimDate, DimProduct], has measures [Total Sales, Revenue]"`)
+- ~6 keys with heuristic proposals (may need tweaking)
+- Valid JSON loadable by `MetricViewPipeline` (Tool 86)
+- Budget suffix auto-detected from measure names/DAX (`_bp`, `_re`, `_fc`)
+- CWC filter column auto-detected from DAX patterns
+- Hidden columns auto-excluded from dimensions
+
+#### What you CANNOT expect
+
+- `fact_join_map` grain decisions (pivot/union/embed modes) — these encode business logic
+- `switch_decompositions` SQL expressions — skeletons auto-generated with branch names, but the actual SQL numerator/denominator needs a human who understands the KPIs
+- `manual_overrides` SQL — complex cross-table measures flagged with DAX snippets, but SQL must be hand-written
+- `percentage_multiplier_patterns` — regex patterns for measures needing `*100` are domain-specific
+- Report-layer metadata without `--report-id` (measure display names, dimension ordering)
+
+#### Why standalone instead of the crew
+
+| | `generate_config.py` | Crew (Tool 79 → Tool 89) |
+|---|---|---|
+| **Data fidelity** | APIs called directly, no truncation | LLM agent passes data between tools — truncates large datasets |
+| **Dependencies** | `requests` only | Full Kasal backend + CrewAI + LLM endpoint |
+| **Reliability** | Deterministic, no LLM variance | LLM may summarize/lose fields |
+| **Speed** | ~30s (API calls + polling) | ~2-5 min (LLM reasoning overhead) |
+| **Where to run** | Any machine with Python + `requests` | Kasal backend with configured crew |
+| **Config keys** | All 26 | 7-8 (fewer APIs accessible via Tool 79) |
+
+### Option B: Crew (Tool 79 → Tool 89) — via Kasal UI
+
+Use `crew_extract_propose.json` in the Kasal UI. The crew runs Tool 79 (extraction) then Tool 89 (config proposal). This works but has known limitations:
+
+- Tool 79 returns a **summary** (not raw data) to keep LLM context small — so Tool 89 works with less data
+- Data passing between tools relies on the LLM agent, which may truncate or lose fields
+- The crew only proposes 7-8 config keys (no admin scan data available through Tool 79)
+- Cache lookup may have group_id mismatches between Tool 79 and Tool 89
+
+**When to use the crew:** When the SA doesn't have direct API access or admin SP credentials, or when running from the Kasal UI is required.
+
+### Option C: `config_scaffold.py` — From Pre-Extracted JSONs
+
+If you already have the 4 extraction JSONs from a previous Phase 1 run (via `run_locally.py` or the extraction crew), use `config_scaffold.py`:
+
+```bash
+cd src/backend && source .venv/bin/activate
+python ../../examples/uc_metric_view_migration/config_scaffold.py
+```
+
+This proposes 7/8 config keys from local JSON files. No API calls needed. Produces `proposed_pipeline_config.json` in the same directory.
 
 ### PBI Native Features — All 10 Implemented
 
@@ -370,7 +444,8 @@ Once deployed to a Databricks workspace:
 |------|------|-------------|
 | `run_locally.py` | — | Demo script — run pipeline against pre-extracted JSONs |
 | `run_all_limitations_demo.py` | — | Synthetic demo exercising all 10 PBI limitation detections |
-| `config_scaffold.py` | — | Auto-propose pipeline_config.json from extraction JSONs |
+| `generate_config.py` | — | **Standalone** config generator — calls 4 PBI APIs directly, produces all 26 config keys. Recommended. |
+| `config_scaffold.py` | — | Auto-propose pipeline_config.json from pre-extracted JSONs (offline mode) |
 | `gap_analyzer.py` | — | Prioritized gap analysis after pipeline run |
 | `deploy_test.py` | — | Smoke test YAML against live Databricks (or dry-run) |
 | `crew_ucmv_generator.json` | 4K | Importable Kasal crew config |
@@ -382,7 +457,7 @@ Once deployed to a Databricks workspace:
 
 ## Pipeline Config Reference
 
-The `pipeline_config.json` drives all customer-specific behavior. Empty defaults work for basic models; populated values are needed for complex PBI patterns. Today built manually; Tool 89 will auto-propose most of it.
+The `pipeline_config.json` drives all customer-specific behavior. Empty defaults work for basic models; populated values are needed for complex PBI patterns. Auto-proposed by `generate_config.py` (all 26 keys) or `config_scaffold.py` (7/8 keys from JSONs). Human review still needed for grain decisions and complex SQL expressions.
 
 ### Core Config (structure)
 
@@ -432,8 +507,8 @@ The `pipeline_config.json` drives all customer-specific behavior. Empty defaults
 
 ### Starting From Scratch
 
-1. Run Phase 1 (extract) to get JSON files
-2. Run `config_scaffold.py` → auto-propose 7/8 config keys (58% translation rate immediately)
+1. Run `generate_config.py` with PBI credentials → auto-proposes all 26 config keys (or: Phase 1 extract → `config_scaffold.py` from JSONs)
+2. Review the `proposed_pipeline_config.json` — fill in TODO markers
 3. Run Tool 86 with proposed config → review migration report
 4. Run `gap_analyzer.py` → see prioritized gaps and what to add next
 5. Fill in switch_decomposition SQL + manual_overrides → re-run → each iteration translates more
@@ -455,8 +530,8 @@ The SA had to hand-write all 26 config keys in `pipeline_config.json` by reading
   PBI API → 4 JSON files
                 │
                 ▼
-  Step 2: Scaffold (automatic — config_scaffold.py / Tool 89)
-  4 JSONs → proposed_pipeline_config.json (7/8 keys auto-proposed)
+  Step 2: Propose config (automatic — generate_config.py / config_scaffold.py / Tool 89)
+  PBI APIs → proposed_pipeline_config.json (26 keys, TODO markers where human needed)
                 │
                 ▼
   Step 3: Gap analysis (automatic — gap_analyzer.py)
@@ -484,10 +559,11 @@ The SA had to hand-write all 26 config keys in `pipeline_config.json` by reading
 
 | Tool | What it auto-proposes | Verified accuracy |
 |------|----------------------|-------------------|
-| **`config_scaffold.py`** | 7/8 config keys: join_key_map (5 dims), enrichment_joins (52), switch_decompositions (111 skeletons), mapping_only_tables (2), parameter_defaults (3), filter_sets (17), measure_resolutions (8) | 58% translation rate with proposed config alone (vs 59% with full manual config) |
+| **`generate_config.py`** | All 26 config keys from 4 PBI APIs. Auto-fills ~12 keys, TODO markers for ~8 human-input keys, heuristic proposals for ~6 mixed keys. Standalone — no CrewAI/LLM dependency. | Pending live test (SC Reporting dataset) |
+| **`config_scaffold.py`** | 7/8 config keys from pre-extracted JSONs: join_key_map (5 dims), enrichment_joins (52), switch_decompositions (111 skeletons), mapping_only_tables (2), parameter_defaults (3), filter_sets (17), measure_resolutions (8) | 58% translation rate with proposed config alone (vs 59% with full manual config) |
 | **`gap_analyzer.py`** | Prioritized "what to fix next" with unlock potential per gap. Top gap: SWITCH patterns (89 measures, +307 downstream refs) | Correctly identifies SWITCH as #1 gap |
 | **`deploy_test.py`** | Dry-run validates YAML structure (23/26 valid, 3 empty tables correctly flagged). Live mode deploys + tests measures | 371 measures parsed, 0 parse errors |
-| **Tool 89** | CrewAI wrapper of config_scaffold + gap analysis. Returns proposed config JSON + confidence scores + gap summary | 10 tests, registered as tool ID 89 |
+| **Tool 89** | CrewAI wrapper of config_scaffold + gap analysis. Returns proposed config JSON + confidence scores + gap summary. Known limitation: LLM truncation of data between tools. | 10 tests, registered as tool ID 89 |
 
 ### What still needs human judgment
 
@@ -543,7 +619,7 @@ The SA had to hand-write all 26 config keys in `pipeline_config.json` by reading
 
 ### What would make this a clear #1
 
-1. **Tool 89 (auto-propose config)** — This is the #1 gap vs BrickShift (theirs auto-configures). Our biggest time sink is manual `pipeline_config.json` authoring. Auto-proposing 80% of the config from extraction output drops first-customer effort from 2-3 hours to 30-60 minutes.
+1. **Auto-propose config** — ~~This was the #1 gap.~~ Now addressed: `generate_config.py` calls 4 PBI APIs directly and proposes all 26 config keys with TODO markers. Drops first-customer config effort from 2-3 hours to 30-60 minutes. Next: validate against real customer datasets to calibrate heuristics.
 
 2. **Validator calibration** — 0/73 VALID kills demo credibility. Adding `EQUIVALENT` status for known-correct transformations (SUMX→SUM, Table[col]→source.col) would show ~18 EQUIVALENT + 40 REVIEW + 15 INVALID instead of 73 INVALID.
 
@@ -579,7 +655,7 @@ The SA had to hand-write all 26 config keys in `pipeline_config.json` by reading
 
 **The one-liner:** The most capable PBI → UC Metric View migration tool that exists, and it's not close. But the best at something the market hasn't demanded at scale yet.
 
-**The path to #1 isn't more regex patterns** — it's Tool 89 + Lakeview dashboard generation + a 30-minute customer workflow that an SA can run without touching Python.
+**The path to #1 isn't more regex patterns** — it's `generate_config.py` (done) + Lakeview dashboard generation + a 30-minute customer workflow that an SA can run without touching Python.
 
 ### Market threats to watch
 

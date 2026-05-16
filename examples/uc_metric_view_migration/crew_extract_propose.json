@@ -1,7 +1,7 @@
 {
   "id": "ucmv-extract-001",
   "name": "UCMV Migration — Extract & Propose Config",
-  "description": "Single-task crew: extracts PBI metadata via Semantic Model Fetcher, then auto-proposes pipeline_config.json.",
+  "description": "Single-task crew: extracts PBI metadata via Semantic Model Fetcher, then auto-proposes pipeline_config.json.\n\nNOTE: For reliable config generation, prefer the standalone script generate_config.py which calls PBI APIs directly without LLM intermediation. This crew relies on LLM agents to pass data between Tools 79→89, which can truncate large datasets. The standalone script produces identical output format with no data loss.",
   "agent_ids": [
     "extract-agent-001"
   ],
