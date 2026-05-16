@@ -26,6 +26,16 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import VerifiedIcon from '@mui/icons-material/Verified';
+import DownloadIcon from '@mui/icons-material/Download';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import CloseIcon from '@mui/icons-material/Close';
+import Button from '@mui/material/Button';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
+import Dialog from '@mui/material/Dialog';
+import DialogTitle from '@mui/material/DialogTitle';
+import DialogContent from '@mui/material/DialogContent';
+import DialogActions from '@mui/material/DialogActions';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -70,6 +80,7 @@ interface ValidatorSummary {
 export interface ValidatorResult {
   summary: ValidatorSummary;
   per_table: Record<string, ValidatorPerTable>;
+  yaml?: Record<string, string>;
   stats?: Record<string, {
     total?: number;
     translated?: number;
@@ -135,8 +146,36 @@ function getStatusColor(status: string): 'success' | 'warning' | 'error' | 'defa
 
 const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }) => {
   const [expandedTable, setExpandedTable] = useState<string | null>(null);
+  const [viewYamlTable, setViewYamlTable] = useState<string | null>(null);
 
-  const { summary, per_table: perTable, stats } = result;
+  const { summary, per_table: perTable, stats, yaml: yamlData } = result;
+  const hasYaml = yamlData && Object.keys(yamlData).length > 0;
+
+  const handleDownloadYaml = (tableName: string) => {
+    if (!yamlData?.[tableName]) return;
+    const blob = new Blob([yamlData[tableName]], { type: 'text/yaml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${tableName}_uc_metric_view.yml`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadAllYamls = () => {
+    if (!yamlData) return;
+    const combined = Object.entries(yamlData)
+      .filter(([, v]) => v && v.trim())
+      .map(([k, v]) => `# === ${k} ===\n${v}`)
+      .join('\n\n---\n\n');
+    const blob = new Blob([combined], { type: 'text/yaml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'uc_metric_views_all.yml';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   // Calculate aggregate stats
   const tableEntries = useMemo(() => {
@@ -169,6 +208,18 @@ const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }
         </Typography>
         {summary.source && (
           <Chip size="small" label={summary.source} variant="outlined" />
+        )}
+        {hasYaml && (
+          <Box sx={{ ml: 'auto' }}>
+            <Button
+              size="small"
+              variant="contained"
+              startIcon={<DownloadIcon />}
+              onClick={handleDownloadAllYamls}
+            >
+              Download All YAMLs
+            </Button>
+          </Box>
         )}
       </Box>
 
@@ -247,6 +298,7 @@ const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }
             <TableCell sx={{ fontWeight: 600, width: 80 }} align="center">Evaluated</TableCell>
             <TableCell sx={{ fontWeight: 600, width: 80 }} align="center">Valid</TableCell>
             <TableCell sx={{ fontWeight: 600, width: 100 }} align="center">Breakdown</TableCell>
+            {hasYaml && <TableCell sx={{ fontWeight: 600, width: 80 }} align="center">YAML</TableCell>}
           </TableRow>
         </TableHead>
         <TableBody>
@@ -298,6 +350,24 @@ const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }
                       </Box>
                     )}
                   </TableCell>
+                  {hasYaml && (
+                    <TableCell align="center">
+                      {yamlData?.[name] ? (
+                        <Box display="flex" gap={0.5} justifyContent="center">
+                          <Tooltip title="View YAML">
+                            <IconButton size="small" onClick={(e) => { e.stopPropagation(); setViewYamlTable(name); }}>
+                              <VisibilityIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Download YAML">
+                            <IconButton size="small" onClick={(e) => { e.stopPropagation(); handleDownloadYaml(name); }}>
+                              <DownloadIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+                      ) : '—'}
+                    </TableCell>
+                  )}
                 </TableRow>
                 {expandedTable === name && data.details && (
                   <TableRow>
@@ -354,6 +424,49 @@ const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }
           })}
         </TableBody>
       </Table>
+
+      {/* YAML Viewer Dialog */}
+      <Dialog
+        open={viewYamlTable !== null}
+        onClose={() => setViewYamlTable(null)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Typography variant="h6" sx={{ fontFamily: 'monospace' }}>
+            {viewYamlTable}_uc_metric_view.yml
+          </Typography>
+          <IconButton onClick={() => setViewYamlTable(null)} size="small">
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          <pre style={{
+            fontFamily: 'monospace',
+            fontSize: '0.8rem',
+            lineHeight: 1.5,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            margin: 0,
+            padding: 16,
+            backgroundColor: '#f5f5f5',
+            borderRadius: 4,
+            maxHeight: '60vh',
+            overflow: 'auto',
+          }}>
+            {viewYamlTable && yamlData?.[viewYamlTable] || ''}
+          </pre>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            startIcon={<DownloadIcon />}
+            onClick={() => viewYamlTable && handleDownloadYaml(viewYamlTable)}
+          >
+            Download
+          </Button>
+          <Button onClick={() => setViewYamlTable(null)}>Close</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };
