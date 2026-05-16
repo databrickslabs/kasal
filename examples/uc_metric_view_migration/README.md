@@ -148,18 +148,55 @@ Optional: `--report-id` for report-layer metadata (PBIR visual display names).
 - `percentage_multiplier_patterns` — regex patterns for measures needing `*100` are domain-specific
 - Report-layer metadata without `--report-id` (measure display names, dimension ordering)
 
-#### Why standalone instead of the crew
+#### All 26 keys: what's auto-generated vs what needs manual curation
 
-| | `generate_config.py` | Crew (Tool 79 → Tool 89) |
-|---|---|---|
-| **Data fidelity** | APIs called directly, no truncation | LLM agent passes data between tools — truncates large datasets |
-| **Dependencies** | `requests` only | Full Kasal backend + CrewAI + LLM endpoint |
-| **Reliability** | Deterministic, no LLM variance | LLM may summarize/lose fields |
-| **Speed** | ~30s (API calls + polling) | ~2-5 min (LLM reasoning overhead) |
-| **Where to run** | Any machine with Python + `requests` | Kasal backend with configured crew |
-| **Config keys** | All 26 | 7-8 (fewer APIs accessible via Tool 79) |
+Verified against SC Reporting (471 measures, 81 relationships, 66 tables):
 
-### Option B: Crew (Tool 79 → Tool 89) — via Kasal UI
+| Key | Auto | Manual | What the tool does | What the SA does |
+|-----|:----:|:------:|-------------------|-----------------|
+| `join_key_map` | **yes** | review | Derives alias, join_key, dim_columns from relationships + admin scan | Verify join keys are correct, add alt_join_keys for composite keys |
+| `fact_join_map` | skeleton | **yes** | Lists fact tables with connected dims and measure names | Fill in grain, pivot_col, value_col, implicit_filters, union_mode |
+| `enrichment_joins` | **yes** | review | Builds fact→dim join entries from one-to-many relationships | Verify join_on expressions, add custom SQL sources if needed |
+| `filter_sets` | partial | **yes** | Extracts IN({...}) value lists from DAX and SWITCH branches | Name the filter sets, verify completeness, add domain-specific sets |
+| `switch_decompositions` | skeleton | **yes** | Detects SELECTEDVALUE+SWITCH measures, extracts branch names | Write the actual SQL num/den expressions for each branch |
+| `column_overrides` | **yes** | review | Diffs DAX Table[Column] refs vs admin schema column names | Verify overrides, add any missed mismatches |
+| `measure_resolutions` | **yes** | review | Detects [MeasureRef] patterns in DAX, maps to known measures | Fill in base_expr and base_filters for each resolution |
+| `mapping_only_tables` | **yes** | **yes** | Identifies tables with measures but no MQuery SQL | Specify source_table, dimensions, aggregate_columns |
+| `dimension_exclusions` | **yes** | - | Hidden columns from admin scan → auto-excluded | - |
+| `measure_metadata` | optional | **yes** | From report definition (API 4, needs --report-id) | Add display_name, comment, synonyms per measure |
+| `comment_overrides` | - | **yes** | Empty — no API source for metric view comments | Write per-table metric view descriptions |
+| `dimension_metadata` | optional | **yes** | From report definition (API 4) | Add comment, display_name, synonyms per dimension |
+| `dimension_order` | - | **yes** | Empty — no API source for column ordering | Specify preferred dimension ordering per table |
+| `column_metadata` | **yes** | review | Humanized display names + heuristic synonyms from column names | Improve synonyms, fix display names for domain terms |
+| `column_alias_map` | **yes** | - | Parses M-Query Table.RenameColumns steps | - |
+| `name_prefixes_to_strip` | **yes** | review | Detects common prefixes (bic_, khr, kpe...) across columns | Add/remove prefixes based on domain convention |
+| `parameter_defaults` | **yes** | **yes** | Extracts ${Param} and #"Param" from M-Query expressions | Set actual default values (e.g., CurrencyFilter → "30") |
+| `dim_alias_map` | **yes** | - | Dim table name → alias convention from relationships | - |
+| `period_dim_priority` | **yes** | review | Date/period columns sorted by heuristic priority | Verify ordering matches business fiscal calendar |
+| `int_period_dims` | **yes** | - | Period columns with integer data type | - |
+| `percentage_multiplier_patterns` | - | **yes** | TODO marker | Write regex for measures needing *100 (e.g., turnover rates) |
+| `budget_suffix` | heuristic | review | Auto-detects _bp/_re/_fc from measure names and DAX | Verify the detected suffix is correct |
+| `cwc_filter_column` | heuristic | review | Detects CWC/work-center-type patterns in DAX | Verify the column name |
+| `switch_join_alias` | - | **yes** | TODO marker (only if switch_decompositions exist) | Set the dim table alias used in SWITCH filter joins |
+| `switch_join_col` | - | **yes** | TODO marker (only if switch_decompositions exist) | Set the column used for SWITCH filter matching |
+| `manual_overrides` | skeleton | **yes** | Flags complex DAX measures (CALCULATE+FILTER, SUMX, RANKX...) with DAX snippets | Write the actual SQL expressions for each override |
+
+**Summary: ~14 keys auto-filled, ~5 skeleton/TODO, ~7 need manual curation.** The manual work focuses on business-logic decisions (grain, SQL expressions, domain semantics) that no API can answer.
+
+#### Three ways to run it
+
+| | `generate_config.py` (CLI) | Tool 90 (Kasal UI) | Crew Tool 79 → 89 (legacy) |
+|---|---|---|---|
+| **Data fidelity** | Direct API calls | Direct API calls | LLM truncates data |
+| **Dependencies** | `requests` only | Kasal backend | Kasal + CrewAI + LLM |
+| **Config keys** | All 26 | All 26 | 7-8 |
+| **Speed** | ~30s | ~30s + LLM overhead | ~2-5 min |
+| **Where** | Any machine | Kasal UI | Kasal UI |
+| **Auth** | CLI args | UI form fields | UI + crew config |
+
+**Recommended: Tool 90 in Kasal UI** for demos and team use, `generate_config.py` for CLI/automation.
+
+### Option B: Crew (Tool 79 → Tool 89) — Legacy
 
 Use `crew_extract_propose.json` in the Kasal UI. The crew runs Tool 79 (extraction) then Tool 89 (config proposal). This works but has known limitations:
 
