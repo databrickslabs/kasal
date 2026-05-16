@@ -160,7 +160,10 @@ class PipelineConfigGeneratorTool(BaseTool):
             report_def = None
             if report_id:
                 logger.info("[PipelineConfigGen] API 4: Report Definition...")
-                report_def = gen.extract_report_definition(token, workspace_id, report_id)
+                report_def = gen.extract_report_definition(
+                    token, workspace_id, report_id,
+                    tenant_id=tenant_id, client_id=client_id, client_secret=client_secret,
+                )
 
             # Build config
             logger.info("[PipelineConfigGen] Building config...")

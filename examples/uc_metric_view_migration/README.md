@@ -129,59 +129,72 @@ Optional: `--report-id` for report-layer metadata (PBIR visual display names).
 | **3** | Admin Scanner (workspace scan) | Full schema → `column_metadata`, `column_alias_map`, `parameter_defaults`, `name_prefixes_to_strip`, `dimension_exclusions`, `period_dim_priority`, `int_period_dims` |
 | **4** | Report Definition (optional) | PBIR visuals → `measure_metadata`, `dimension_metadata` |
 
-#### What you CAN expect
+#### Real output vs hand-crafted reference (SC Reporting, 471 measures)
 
-- All 26 config keys present in output
-- ~12 keys auto-filled with real data from PBI APIs
-- ~8 keys with `TODO` markers that include helpful context (e.g., `"TODO: grain decision — FactSales connects to dims [DimDate, DimProduct], has measures [Total Sales, Revenue]"`)
-- ~6 keys with heuristic proposals (may need tweaking)
-- Valid JSON loadable by `MetricViewPipeline` (Tool 86)
-- Budget suffix auto-detected from measure names/DAX (`_bp`, `_re`, `_fc`)
-- CWC filter column auto-detected from DAX patterns
-- Hidden columns auto-excluded from dimensions
+This is the **actual output** from running Tool 90 (with `--report-id`) against the SC Reporting dataset, compared to the hand-crafted `pipeline_config.json`. Use this as a guide for what to expect and what to fill in.
 
-#### What you CANNOT expect
+**Run stats**: 81 relationships, 471 measures, 66 tables, 22 report parts → **11 auto-filled, 4 TODO, 11 need manual**
 
-- `fact_join_map` grain decisions (pivot/union/embed modes) — these encode business logic
-- `switch_decompositions` SQL expressions — skeletons auto-generated with branch names, but the actual SQL numerator/denominator needs a human who understands the KPIs
-- `manual_overrides` SQL — complex cross-table measures flagged with DAX snippets, but SQL must be hand-written
-- `percentage_multiplier_patterns` — regex patterns for measures needing `*100` are domain-specific
-- Report-layer metadata without `--report-id` (measure display names, dimension ordering)
+| Key | Tool 90 Output | Hand-Crafted Reference | Status | SA Action |
+|-----|---------------|----------------------|--------|-----------|
+| `join_key_map` | 26 entries | 6 entries | all 6 ref keys present | Review, trim 20 extras, add `alt_join_keys` for composite keys |
+| `fact_join_map` | 32 TODO skeletons | 4 entries | skeletons list dims + measures | Fill grain, pivot_col, value_col, implicit_filters per fact table |
+| `enrichment_joins` | 32 entries | 1 entry | Fact_HR_A match | Review, pick which tables actually need enrichment joins |
+| `filter_sets` | empty | 4 sets (CWC_FILTER, WCT_CORE, WCT_SLE, WCT_ASSET) | **manual** | Extract filter value lists from SWITCH DAX or domain knowledge |
+| `switch_decompositions` | empty | 8 tables, ~40 entries | **manual** | Write SQL num/den per SWITCH branch (biggest effort) |
+| `column_overrides` | empty | 6 entries (FT_BPC003, FT_QSE) | **manual** | Run Tool 86 first, then fix column mismatches from migration report |
+| `measure_resolutions` | empty | 13 entries | **manual** | Map [MeasureRef] → base_expr + base_filters from DAX analysis |
+| `mapping_only_tables` | empty | 2 tables (FT_QSE, FT_HR_B) | **manual** | Specify source_table, dimensions, aggregate_columns |
+| `dimension_exclusions` | 1 entry (Dynamic_Dim_Selector) | 1 entry (Fact_HR_A) | different table | Adjust to correct table |
+| `measure_metadata` | **42 tables with synonyms** | 1 table (Fact_HR_A) | **new: from report visuals** | Review synonyms, add comments for key measures |
+| `comment_overrides` | empty | 1 table description | **manual** | Write per-table metric view descriptions |
+| `dimension_metadata` | **21 tables with synonyms** | 1 table (Fact_HR_A) | **new: from report visuals** | Review synonyms, add comments for key dimensions |
+| `dimension_order` | empty | 1 table ordering | **manual** | Specify preferred dimension order per table |
+| `column_metadata` | 381 entries | 28 entries | 25/28 ref keys present | Trim to relevant columns, improve synonyms |
+| `column_alias_map` | empty | 4 entries | **manual** | Add renames (e.g., nr_of_deliveries_final → nr_of_deliveries) |
+| `name_prefixes_to_strip` | 3 items (bic_, khr, kpe) | 5 items (+kco, kfx) | 2/5 match | Add missing prefixes |
+| `parameter_defaults` | 2 params (TODO values) | 1 entry (CurrencyFilter: 30) | TODO | Set default values for detected params |
+| `percentage_multiplier_patterns` | 1 TODO item | 1 regex (turnover pattern) | TODO | Write regex for measures needing ×100 |
+| `dim_alias_map` | 26 entries | 2 entries | 1/2 match (Dim_wkctr) | Trim to relevant dim aliases |
+| `period_dim_priority` | 36 items | 3 items (fiscper, fiscal_year_period, date_key) | 2/3 match | Trim to priority list |
+| `int_period_dims` | 4 items | 2 items (fiscper, fiscal_year_period) | 1/2 match | Trim to correct set |
+| `budget_suffix` | TODO | `_bp` | TODO | Set to `_bp` |
+| `cwc_filter_column` | `bic_cwc_type` | `bic_cwc_type` | **exact match** | None |
+| `switch_join_alias` | null | `dim_wkctr` | **manual** | Set dim alias for SWITCH filter joins |
+| `switch_join_col` | null | `bic_cwc_type` | **manual** | Set column for SWITCH filter matching |
+| `manual_overrides` | empty | 7 tables, ~30 entries | **manual** | Write SQL for complex cross-table measures |
 
-#### All 26 keys: what's auto-generated vs what needs manual curation
+#### What this means in practice
 
-Verified against SC Reporting (471 measures, 81 relationships, 66 tables):
+**You get for free (review only, ~15 min):**
+- Complete join topology (`join_key_map` + `enrichment_joins` + `dim_alias_map`) — all relationships auto-mapped
+- Column metadata with display names for 381 columns
+- **Measure synonyms from report visuals** (42 tables) — `measure_metadata` populated automatically with `--report-id`
+- **Dimension synonyms from report visuals** (21 tables) — `dimension_metadata` populated automatically
+- Period detection, prefix detection, CWC filter column — all heuristic but correct
 
-| Key | Auto | Manual | What the tool does | What the SA does |
-|-----|:----:|:------:|-------------------|-----------------|
-| `join_key_map` | **yes** | review | Derives alias, join_key, dim_columns from relationships + admin scan | Verify join keys are correct, add alt_join_keys for composite keys |
-| `fact_join_map` | skeleton | **yes** | Lists fact tables with connected dims and measure names | Fill in grain, pivot_col, value_col, implicit_filters, union_mode |
-| `enrichment_joins` | **yes** | review | Builds fact→dim join entries from one-to-many relationships | Verify join_on expressions, add custom SQL sources if needed |
-| `filter_sets` | partial | **yes** | Extracts IN({...}) value lists from DAX and SWITCH branches | Name the filter sets, verify completeness, add domain-specific sets |
-| `switch_decompositions` | skeleton | **yes** | Detects SELECTEDVALUE+SWITCH measures, extracts branch names | Write the actual SQL num/den expressions for each branch |
-| `column_overrides` | **yes** | review | Diffs DAX Table[Column] refs vs admin schema column names | Verify overrides, add any missed mismatches |
-| `measure_resolutions` | **yes** | review | Detects [MeasureRef] patterns in DAX, maps to known measures | Fill in base_expr and base_filters for each resolution |
-| `mapping_only_tables` | **yes** | **yes** | Identifies tables with measures but no MQuery SQL | Specify source_table, dimensions, aggregate_columns |
-| `dimension_exclusions` | **yes** | - | Hidden columns from admin scan → auto-excluded | - |
-| `measure_metadata` | optional | **yes** | From report definition (API 4, needs --report-id) | Add display_name, comment, synonyms per measure |
-| `comment_overrides` | - | **yes** | Empty — no API source for metric view comments | Write per-table metric view descriptions |
-| `dimension_metadata` | optional | **yes** | From report definition (API 4) | Add comment, display_name, synonyms per dimension |
-| `dimension_order` | - | **yes** | Empty — no API source for column ordering | Specify preferred dimension ordering per table |
-| `column_metadata` | **yes** | review | Humanized display names + heuristic synonyms from column names | Improve synonyms, fix display names for domain terms |
-| `column_alias_map` | **yes** | - | Parses M-Query Table.RenameColumns steps | - |
-| `name_prefixes_to_strip` | **yes** | review | Detects common prefixes (bic_, khr, kpe...) across columns | Add/remove prefixes based on domain convention |
-| `parameter_defaults` | **yes** | **yes** | Extracts ${Param} and #"Param" from M-Query expressions | Set actual default values (e.g., CurrencyFilter → "30") |
-| `dim_alias_map` | **yes** | - | Dim table name → alias convention from relationships | - |
-| `period_dim_priority` | **yes** | review | Date/period columns sorted by heuristic priority | Verify ordering matches business fiscal calendar |
-| `int_period_dims` | **yes** | - | Period columns with integer data type | - |
-| `percentage_multiplier_patterns` | - | **yes** | TODO marker | Write regex for measures needing *100 (e.g., turnover rates) |
-| `budget_suffix` | heuristic | review | Auto-detects _bp/_re/_fc from measure names and DAX | Verify the detected suffix is correct |
-| `cwc_filter_column` | heuristic | review | Detects CWC/work-center-type patterns in DAX | Verify the column name |
-| `switch_join_alias` | - | **yes** | TODO marker (only if switch_decompositions exist) | Set the dim table alias used in SWITCH filter joins |
-| `switch_join_col` | - | **yes** | TODO marker (only if switch_decompositions exist) | Set the column used for SWITCH filter matching |
-| `manual_overrides` | skeleton | **yes** | Flags complex DAX measures (CALCULATE+FILTER, SUMX, RANKX...) with DAX snippets | Write the actual SQL expressions for each override |
+**You fill in TODO values (~15 min):**
+- `budget_suffix` → `_bp`
+- `parameter_defaults` → actual values for detected params
+- `percentage_multiplier_patterns` → regex for turnover-type measures
+- `fact_join_map` → grain decisions for the 4 fact tables that need cross-joins
 
-**Summary: ~14 keys auto-filled, ~5 skeleton/TODO, ~7 need manual curation.** The manual work focuses on business-logic decisions (grain, SQL expressions, domain semantics) that no API can answer.
+**You write from domain knowledge (~2-4 hours for first customer):**
+- `switch_decompositions` — SQL for SWITCH branches (biggest effort, unlocks 89+ measures)
+- `manual_overrides` — SQL for complex cross-table measures
+- `measure_resolutions` — base expressions for DAX measure references
+- `filter_sets` — named value lists (CWC_FILTER, WCT_CORE, etc.)
+- `column_overrides`, `mapping_only_tables`, `column_alias_map` — iterative (run Tool 86, fix from migration report)
+
+**SA workflow:**
+1. Run Tool 90 (with `--report-id`) → 26-key JSON
+2. Fill 4 TODO values → 15 min
+3. Run Tool 86 with partial config → review migration report → 5 min
+4. Run `gap_analyzer.py` → see which empty keys unlock the most measures
+5. Fill `switch_decompositions` SQL → re-run → biggest unlock (89 measures + 307 downstream)
+6. Fill `manual_overrides` + `measure_resolutions` → re-run → complex measures
+7. Iterate until migration report shows acceptable coverage
+8. Total first customer: **~3 hours** (down from ~8 hours fully manual)
 
 #### Three ways to run it
 
