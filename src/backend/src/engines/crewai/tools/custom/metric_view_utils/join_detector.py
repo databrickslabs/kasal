@@ -117,12 +117,19 @@ class JoinDetector:
 
         # Also add fact joins that target this fact table (union_mode, source_embed)
         # even without explicit DAX references — config declares the relationship
+        logger.info(
+            f"[{fact_table_key}] detect_fact_joins: {len(self._fact_join_map)} entries in fact_join_map, "
+            f"{len(referenced_facts)} from DAX refs"
+        )
         for fj_name, fj_cfg in self._fact_join_map.items():
             if fj_name in referenced_facts or fj_name == fact_table_key:
                 continue
             target = fj_cfg.get('target_fact', '')
             if target == fact_table_key:
                 referenced_facts.add(fj_name)
+                logger.info(f"[{fact_table_key}] Added fact join '{fj_name}' via target_fact config")
+
+        logger.info(f"[{fact_table_key}] Total referenced_facts after config scan: {referenced_facts}")
 
         joins = []
         for fact_name in sorted(referenced_facts):
@@ -131,9 +138,11 @@ class JoinDetector:
             source_table = ''
             if fact_table_info and fact_table_info.source_table:
                 source_table = fact_table_info.source_table
+                logger.info(f"[{fact_table_key}] Fact join '{fact_name}': source from mquery_tables = {source_table}")
             else:
                 # Fallback: use source_table from fact_join_map config
                 source_table = fj.get('source_table', '')
+                logger.info(f"[{fact_table_key}] Fact join '{fact_name}': source from config = {source_table}")
             if not source_table:
                 logger.warning(
                     f"[{fact_table_key}] Cannot add fact join '{fact_name}' — "
@@ -190,6 +199,16 @@ class JoinDetector:
                             kbi_codes.add(hit.group(1))
                         elif hit.group(2):
                             kbi_codes.update(re.findall(r'[A-Z0-9]+', hit.group(2)))
+
+                # Fallback: use kbi_codes from config if DAX extraction found none
+                if not kbi_codes:
+                    config_codes = fj.get('kbi_codes', [])
+                    if config_codes:
+                        kbi_codes.update(config_codes)
+                        logger.info(
+                            f"[{fact_table_key}] Using {len(config_codes)} kbi_codes from "
+                            f"fact_join_map config for {fact_name}"
+                        )
 
                 if kbi_codes:
                     pivot_kbi_map = {code: f'sc_{code.lower()}' for code in kbi_codes}
