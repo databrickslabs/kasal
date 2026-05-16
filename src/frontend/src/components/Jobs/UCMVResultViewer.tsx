@@ -43,6 +43,8 @@ import EditIcon from '@mui/icons-material/Edit';
 import EditOffIcon from '@mui/icons-material/EditOff';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import UndoIcon from '@mui/icons-material/Undo';
+import DownloadIcon from '@mui/icons-material/Download';
+import Button from '@mui/material/Button';
 import { Highlight, themes } from 'prism-react-renderer';
 import yaml from 'js-yaml';
 import ReactMarkdown from 'react-markdown';
@@ -410,6 +412,56 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
   const isEditing = selected in editingYaml;
   const hasEdits = Object.keys(editingYaml).length > 0 || removedViews.size > 0;
 
+  // Download a single YAML file
+  const handleDownloadYaml = useCallback((tableName: string) => {
+    const yamlContent = result.yaml[tableName];
+    if (!yamlContent) return;
+    const blob = new Blob([yamlContent], { type: 'text/yaml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${tableName}_uc_metric_view.yml`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [result.yaml]);
+
+  // Download all YAMLs as individual files (triggers multiple downloads)
+  // or as a combined file
+  const handleDownloadAllYamls = useCallback(() => {
+    const combined: string[] = [];
+    for (const name of viewNames) {
+      const yamlContent = result.yaml[name];
+      if (yamlContent && yamlContent.trim()) {
+        combined.push(`# === ${name} ===\n${yamlContent}`);
+      }
+    }
+    const blob = new Blob([combined.join('\n\n---\n\n')], { type: 'text/yaml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'uc_metric_views_all.yml';
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [result.yaml, viewNames]);
+
+  // Download all deploy SQL
+  const handleDownloadAllSql = useCallback(() => {
+    const combined: string[] = [];
+    for (const name of viewNames) {
+      const sqlContent = result.sql[name];
+      if (sqlContent && sqlContent.trim()) {
+        combined.push(`-- === ${name} ===\n${sqlContent}`);
+      }
+    }
+    const blob = new Blob([combined.join('\n\n')], { type: 'text/sql;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'deploy_metric_views_all.sql';
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [result.sql, viewNames]);
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 400 }}>
       {/* Header */}
@@ -424,6 +476,24 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
         {editable && hasEdits && (
           <Chip size="small" label="edited" color="warning" variant="filled" />
         )}
+        <Box sx={{ ml: 'auto', display: 'flex', gap: 1 }}>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<DownloadIcon />}
+            onClick={handleDownloadAllYamls}
+          >
+            Download YAMLs
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<DownloadIcon />}
+            onClick={handleDownloadAllSql}
+          >
+            Download SQL
+          </Button>
+        </Box>
       </Box>
 
       {/* Migration Report (collapsible) */}
@@ -515,12 +585,15 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
 
         {/* Detail pane */}
         <Box sx={{ flexGrow: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 1 }}>
-          {/* Per-view stats */}
-          {viewStats && (
-            <Box mb={0.5}>
-              <StatsChips stats={viewStats} />
-            </Box>
-          )}
+          {/* Per-view header with stats and download */}
+          <Box display="flex" alignItems="center" gap={1} mb={0.5}>
+            {viewStats && <StatsChips stats={viewStats} />}
+            <Tooltip title={`Download ${selected} YAML`}>
+              <IconButton size="small" onClick={() => handleDownloadYaml(selected)}>
+                <DownloadIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Box>
 
           {/* Source SQL */}
           {result.sql[selected] && (

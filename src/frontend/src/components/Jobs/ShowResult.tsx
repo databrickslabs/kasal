@@ -38,6 +38,7 @@ import { ResultValue } from '../../types/result';
 import { generateRunPDF } from '../../utils/pdfGenerator';
 import { DatabricksService } from '../../api/DatabricksService';
 import UCMVResultViewer, { isUCMVResult } from './UCMVResultViewer';
+import ValidatorResultViewer, { isValidatorResult } from './ValidatorResultViewer';
 // import { Run } from '../../api/ExecutionHistoryService';
 
 // eslint-disable-next-line react/prop-types
@@ -182,8 +183,30 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
   // Memoize the formatted result to prevent unnecessary re-processing
   const memoizedResult = useMemo(() => {
     if (!result) return {};
-    // Return the result directly if it's already an object
-    // Only clone if necessary for stability
+    // If result is a string (JSON-encoded), try to parse it
+    if (typeof result === 'string') {
+      try {
+        const trimmed = (result as string).trim();
+        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+          return JSON.parse(trimmed);
+        }
+      } catch { /* not valid JSON, return as-is */ }
+    }
+    // If result is an object with a single string value that's JSON, unwrap it
+    if (typeof result === 'object' && result !== null) {
+      const keys = Object.keys(result);
+      if (keys.length === 1) {
+        const val = (result as Record<string, unknown>)[keys[0]];
+        if (typeof val === 'string') {
+          try {
+            const trimmed = val.trim();
+            if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+              return JSON.parse(trimmed);
+            }
+          } catch { /* not JSON */ }
+        }
+      }
+    }
     return result;
   }, [result]);
 
@@ -660,9 +683,40 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
 
   const renderContent = (content: Record<string, ResultValue>) => {
     if (typeof content === 'object' && content !== null) {
+      // Try to parse string values that might be JSON-encoded results
+      let parsed = content;
+      if (typeof (content as unknown) === 'string') {
+        try {
+          const str = content as unknown as string;
+          if (str.trim().startsWith('{')) {
+            parsed = JSON.parse(str);
+          }
+        } catch { /* not JSON, continue */ }
+      }
+      // Also check if content has a single string value that's JSON
+      const contentEntries = Object.entries(content);
+      if (contentEntries.length === 1 && typeof contentEntries[0][1] === 'string') {
+        try {
+          const inner = JSON.parse(entries[0][1] as string);
+          if (typeof inner === 'object' && inner !== null) {
+            if (isUCMVResult(inner)) {
+              return <UCMVResultViewer result={inner as Parameters<typeof UCMVResultViewer>[0]['result']} />;
+            }
+            if (isValidatorResult(inner)) {
+              return <ValidatorResultViewer result={inner as Parameters<typeof ValidatorResultViewer>[0]['result']} />;
+            }
+          }
+        } catch { /* not JSON */ }
+      }
+
       // UCMV Builder result: structured metric-view display
-      if (isUCMVResult(content)) {
-        return <UCMVResultViewer result={content as Parameters<typeof UCMVResultViewer>[0]['result']} />;
+      if (isUCMVResult(parsed)) {
+        return <UCMVResultViewer result={parsed as Parameters<typeof UCMVResultViewer>[0]['result']} />;
+      }
+
+      // UCMV Quality Validator result: green/amber/red quality report
+      if (isValidatorResult(parsed)) {
+        return <ValidatorResultViewer result={parsed as Parameters<typeof ValidatorResultViewer>[0]['result']} />;
       }
 
       // If there's only one key called 'Value', render its content directly
