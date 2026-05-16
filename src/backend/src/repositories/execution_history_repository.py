@@ -691,6 +691,52 @@ class ExecutionHistoryRepository:
             logger.error(f"Error getting crew checkpoints for job {job_id}: {str(e)}", exc_info=True)
             return []
 
+    async def update_execution_result(
+        self, job_id: str, result_data: dict, group_ids: list[str] = None
+    ) -> bool:
+        """
+        Update the result field for an execution identified by job_id.
+
+        Args:
+            job_id: Job ID of the execution
+            result_data: New result data to store
+            group_ids: Optional list of group IDs for tenant filtering
+
+        Returns:
+            True if successful, False if execution not found
+        """
+        if not self.session:
+            raise RuntimeError("ExecutionHistoryRepository requires a session")
+
+        try:
+            filters = [ExecutionHistory.job_id == job_id]
+            if group_ids and len(group_ids) > 0:
+                filters.append(ExecutionHistory.group_id.in_(group_ids))
+
+            stmt = select(ExecutionHistory).where(*filters)
+            result = await self.session.execute(stmt)
+            execution = result.scalar_one_or_none()
+
+            if not execution:
+                logger.warning(f"No execution found with job_id: {job_id}")
+                return False
+
+            # Store in checkpoint_data.edited_config so the flow's final
+            # crew output cannot overwrite the user's edits.
+            checkpoint_data = execution.checkpoint_data or {}
+            checkpoint_data["edited_config"] = result_data
+            execution.checkpoint_data = checkpoint_data
+            await self.session.flush()
+            logger.info(f"Saved edited_config in checkpoint_data for job_id: {job_id}")
+            return True
+
+        except Exception as e:
+            logger.error(
+                f"Error updating result for job_id {job_id}: {str(e)}",
+                exc_info=True,
+            )
+            return False
+
     async def delete_older_than(self, cutoff: datetime) -> Dict[str, int]:
         """
         Delete execution history records older than a cutoff date, including

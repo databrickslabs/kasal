@@ -27,6 +27,7 @@ import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import HtmlIcon from '@mui/icons-material/Html';
 // import CloudIcon from '@mui/icons-material/Cloud';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import { useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
@@ -41,6 +42,7 @@ import { DatabricksService } from '../../api/DatabricksService';
 // eslint-disable-next-line react/prop-types
 const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
   const theme = useTheme();
+  const navigate = useNavigate();
   const [copied, setCopied] = useState(false);
   const [viewMode, setViewMode] = useState<'code' | 'html'>('code');
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -1172,6 +1174,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
         </Box>
       </DialogContent>
       <DialogActions sx={{ px: 3, py: 2, gap: 1 }}>
+        {/* Config Editor button removed — config editing is now exclusively via HITL flow */}
         {databricksVolumeInfo && (
           <Tooltip title="Open Databricks Volume Location">
             <Button

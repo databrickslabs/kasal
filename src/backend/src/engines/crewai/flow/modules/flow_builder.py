@@ -92,6 +92,14 @@ class FlowBuilder:
             # Log the flow configuration for debugging
             logger.info(f"Flow configuration for processing: {flow_config}")
 
+            # Inject top-level edges and nodes into flow_config so that
+            # downstream code (HITL gate detection, checkpoint checks) can find them.
+            # The flow JSON stores edges/nodes at the top level, not inside flow_config.
+            if 'edges' not in flow_config and flow_data.get('edges'):
+                flow_config['edges'] = flow_data['edges']
+            if 'nodes' not in flow_config and flow_data.get('nodes'):
+                flow_config['nodes'] = flow_data['nodes']
+
             # Check edges for checkpoint flag and enable persistence if any edge has checkpoint=true
             # This allows checkpoint/resume functionality when users enable checkpoints on edges
             edges = flow_data.get('edges', [])
