@@ -431,6 +431,7 @@ const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }
         onClose={() => setViewYamlTable(null)}
         maxWidth="md"
         fullWidth
+        sx={{ zIndex: 9999 }}
       >
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Typography variant="h6" sx={{ fontFamily: 'monospace' }}>
