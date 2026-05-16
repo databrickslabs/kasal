@@ -45,9 +45,20 @@ class JoinDetector:
         for dim_name in sorted(referenced_dims):
             jk = self._join_key_map[dim_name]
             dim_table_info = self.mquery_tables.get(dim_name)
+            source = ''
             if dim_table_info and dim_table_info.source_table:
                 source = dim_table_info.source_table
             else:
+                # Fallback: check fact table's dim_source_tables (from MQuery LEFT JOINs)
+                alias = jk.get('alias', dim_name.lower())
+                for fact_alias, fact_src in fact_info.dim_source_tables.items():
+                    if fact_alias.lower() == alias or dim_name.lower() in fact_alias.lower():
+                        source = fact_src
+                        break
+            if not source:
+                # Fallback: use source_table from join_key_map config
+                source = jk.get('source_table', '')
+            if not source:
                 continue
 
             alias = jk['alias']

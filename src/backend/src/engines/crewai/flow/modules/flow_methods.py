@@ -784,11 +784,18 @@ class FlowMethodFactory:
                                 for tool in (agent.tools or []):
                                     if hasattr(tool, '_default_config') and isinstance(tool._default_config, dict):
                                         # If previous output is a pipeline config and tool has config_json,
-                                        # inject the full config as config_json (overwriting the empty default)
+                                        # inject ONLY when user hasn't already provided a config override
                                         if is_pipeline_config and 'config_json' in tool._default_config:
-                                            tool._default_config['config_json'] = first_result_str
-                                            injected_count += 1
-                                            logger.info(f"📥 Injected pipeline config ({len(first_result_str):,} chars) into {type(tool).__name__}.config_json")
+                                            existing_config = tool._default_config.get('config_json') or ''
+                                            if existing_config and len(existing_config) > 10:
+                                                logger.info(
+                                                    f"⏭️ Skipping pipeline config injection into {type(tool).__name__}.config_json "
+                                                    f"— user-provided config already present ({len(existing_config):,} chars)"
+                                                )
+                                            else:
+                                                tool._default_config['config_json'] = first_result_str
+                                                injected_count += 1
+                                                logger.info(f"📥 Injected pipeline config ({len(first_result_str):,} chars) into {type(tool).__name__}.config_json")
                                         else:
                                             # Generic injection: inject matching keys
                                             for key, value in prev_data.items():
