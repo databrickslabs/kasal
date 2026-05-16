@@ -491,7 +491,7 @@ class TestReformatSourceSql:
     def test_multi_arm_union(self):
         sql = "SELECT a FROM t1 GROUP BY ALL UNION SELECT a FROM t2 GROUP BY ALL"
         result = MTransformFolder.reformat_source_sql(sql)
-        assert "UNION SELECT" in result
+        assert "UNION ALL SELECT" in result
         assert result.rstrip().endswith("GROUP BY ALL")
 
     def test_empty_returns_unchanged(self):

@@ -96,7 +96,7 @@ class MTransformFolder:
                 arm = self._inject_where_into_arm(arm, where_conditions)
             arm = self._clean_where_clause(arm)
             transformed_arms.append(arm)
-        return '\nUNION\n'.join(transformed_arms)
+        return '\nUNION ALL\n'.join(transformed_arms)
 
     @staticmethod
     def _inject_where_into_arm(arm_sql: str, where_conditions: list[str]) -> str:
@@ -152,7 +152,7 @@ class MTransformFolder:
     @staticmethod
     def reformat_source_sql(sql: str) -> str:
         """Reformat the full source SQL for clean, compact output."""
-        arms = re.split(r'\s*\bUNION\b\s*', sql, flags=re.IGNORECASE)
+        arms = re.split(r'\s*\bUNION\s+ALL\b\s*|\s*\bUNION\b\s*', sql, flags=re.IGNORECASE)
         formatted = [MTransformFolder._reformat_arm(a.strip()) for a in arms]
         if len(formatted) <= 1:
             return formatted[0] if formatted else sql
@@ -164,7 +164,7 @@ class MTransformFolder:
             else:
                 arm_body = re.sub(r'^SELECT\n', '', arm, flags=re.IGNORECASE)
                 parts.append(arm_body)
-        return '\nGROUP BY ALL UNION SELECT\n'.join(parts) + '\nGROUP BY ALL'
+        return '\nGROUP BY ALL UNION ALL SELECT\n'.join(parts) + '\nGROUP BY ALL'
 
     @staticmethod
     def _reformat_arm(arm_sql: str) -> str:
