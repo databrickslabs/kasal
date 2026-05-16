@@ -871,68 +871,381 @@ def derive_period_dims(
 # API 4: Report Definition (optional)
 # ═══════════════════════════════════════════════════════════════════════
 
+def get_fabric_token(tenant_id: str, client_id: str, client_secret: str) -> str:
+    """Acquire Fabric API token (different scope from PBI API)."""
+    url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    resp = requests.post(url, data={
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "scope": "https://api.fabric.microsoft.com/.default",
+    }, timeout=30)
+    _check_response(resp, "Auth (Fabric API)")
+    return resp.json()["access_token"]
+
+
 def extract_report_definition(
     token: str, workspace_id: str, report_id: str,
+    tenant_id: str | None = None,
+    client_id: str | None = None,
+    client_secret: str | None = None,
 ) -> dict | None:
     """Get PBIR report definition → visual bindings.
 
-    Returns None if the API is unavailable or fails.
+    The Fabric getDefinition API requires a Fabric-scoped token. If
+    tenant_id/client_id/client_secret are provided, acquires a separate
+    Fabric token. Otherwise tries with the PBI token (may fail).
+
+    Returns parsed report parts or None if unavailable.
     """
+    import base64
+
+    # Get Fabric token if credentials provided
+    fabric_token = token
+    if tenant_id and client_id and client_secret:
+        try:
+            fabric_token = get_fabric_token(tenant_id, client_id, client_secret)
+        except Exception as e:
+            print(f"  Fabric token failed ({e}), trying PBI token...")
+
     url = (
         f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}"
         f"/reports/{report_id}/getDefinition"
     )
     try:
-        resp = requests.post(url, headers=_headers(token), timeout=60)
-        _check_response(resp, "API 4 (Report Definition)")
-        return resp.json()
+        resp = requests.post(url, headers=_headers(fabric_token), timeout=120)
+
+        # Handle 202 Accepted — long-running operation with polling
+        if resp.status_code == 202:
+            location = resp.headers.get("Location")
+            if not location:
+                print("  Report definition: 202 but no Location header")
+                return None
+
+            print(f"  Report definition: polling (202 Accepted)...")
+            for attempt in range(60):
+                time.sleep(2)
+                poll_resp = requests.get(location, headers=_headers(fabric_token), timeout=30)
+                poll_data = poll_resp.json()
+                status = poll_data.get("status", "")
+                if status == "Succeeded":
+                    print(f"  Report definition: succeeded after {attempt + 1} poll(s)")
+                    result_url = location + "/result"
+                    result_resp = requests.get(
+                        result_url, headers=_headers(fabric_token), timeout=60
+                    )
+                    _check_response(result_resp, "API 4 (Report Definition result)")
+                    data = result_resp.json()
+                    break
+                elif status == "Failed":
+                    error = poll_data.get("error", {})
+                    print(f"  Report definition failed: {error}")
+                    return None
+            else:
+                print("  Report definition: timed out after 120s")
+                return None
+        elif resp.status_code == 200:
+            data = resp.json()
+        else:
+            _check_response(resp, "API 4 (Report Definition)")
+            return None
+
+        # Parse response: {definition: {parts: [{path, payload, payloadType}]}}
+        definition = data.get("definition", data)
+        parts = definition.get("parts", [])
+
+        if not parts:
+            print(f"  Report definition: no parts found (keys: {list(data.keys())})")
+            return data
+
+        # Decode base64 payloads into parsed JSON
+        decoded_parts = []
+        for part in parts:
+            path = part.get("path", "")
+            payload = part.get("payload", "")
+            payload_type = part.get("payloadType", "")
+
+            decoded = payload
+            if payload_type == "InlineBase64" and payload:
+                try:
+                    decoded = base64.b64decode(payload).decode("utf-8")
+                except Exception:
+                    decoded = payload
+
+            # Try to parse JSON payloads
+            parsed = decoded
+            if isinstance(decoded, str) and decoded.strip().startswith(("{", "[")):
+                try:
+                    parsed = json.loads(decoded)
+                except json.JSONDecodeError:
+                    parsed = decoded
+
+            decoded_parts.append({
+                "path": path,
+                "payload": parsed,
+            })
+
+        print(f"  Report definition: {len(decoded_parts)} parts")
+        paths = [p["path"] for p in decoded_parts[:10]]
+        print(f"  Parts: {paths}")
+
+        return {"definition": {"parts": decoded_parts}}
+
     except Exception as e:
         print(f"  Report definition unavailable: {e}")
         return None
 
 
-def derive_measure_metadata(report_def: dict | None) -> dict[str, dict]:
-    """Visual display names → measure_metadata (from report)."""
+def _extract_visual_synonym_map(report_def: dict | None) -> dict[str, dict]:
+    """Parse PBIR report definition → {queryName: displayName} synonym map.
+
+    Extracts displayName↔queryName pairs from visual configurations using the
+    same extraction patterns as Tool 78 (PowerBIReportReferencesTool):
+    - dataTransforms.selects[].displayName / queryName
+    - singleVisual.projections[role][].queryRef
+    - singleVisual.prototypeQuery.Select[].displayName / Name
+    - objects.title[].properties.text.expr.Literal.Value
+
+    Returns: {
+        "Table.Field": {
+            "display_name": "User-Facing Label",
+            "table": "Table",
+            "field": "Field",
+            "role": "Values|Category|...",
+            "visual_type": "barChart|...",
+        }
+    }
+    """
     if not report_def:
         return {}
 
-    metadata: dict[str, dict] = {}
-    # PBIR structure: definition.pages[].visuals[].config.singleVisual.projections
-    definition = report_def.get("definition", report_def)
-    pages = definition.get("pages", [])
+    synonym_map: dict[str, dict] = {}
 
-    for page in pages:
-        visuals = page.get("visuals", [])
-        for visual in visuals:
-            config = visual.get("config", {})
-            sv = config.get("singleVisual", {})
-            projections = sv.get("projections", {})
-            for _role, bindings in projections.items():
-                if not isinstance(bindings, list):
-                    continue
-                for binding in bindings:
-                    query_ref = binding.get("queryRef", "")
-                    if not query_ref:
-                        continue
-                    # queryRef format: "Table.Measure" or "Table.Column"
-                    parts = query_ref.split(".")
-                    if len(parts) == 2:
-                        table_name, col_or_measure = parts
-                        snake = to_snake_case(col_or_measure)
-                        if snake not in metadata:
-                            metadata[snake] = {
-                                "display_name": _humanize(snake),
-                                "from_table": table_name,
-                            }
+    # PBIR getDefinition returns {definition: {parts: [...]}} or flat parts
+    definition = report_def.get("definition", report_def)
+    parts = definition.get("parts", [])
+
+    if not parts:
+        # Try flat PBIR structure: pages[] → visuals[]
+        pages = definition.get("pages", [])
+        for page in pages:
+            for visual in page.get("visuals", []):
+                _extract_synonyms_from_visual(visual, synonym_map)
+        return synonym_map
+
+    # Parse PBIR parts structure (from getDefinition API)
+    for part in parts:
+        path = part.get("path", "")
+        payload = part.get("payload", "")
+
+        if not payload:
+            continue
+
+        # visual.json files contain the visual config
+        if "visual" in path.lower() and path.endswith(".json"):
+            try:
+                visual_data = json.loads(payload) if isinstance(payload, str) else payload
+                _extract_synonyms_from_visual(visual_data, synonym_map)
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+        # report.json may contain embedded visuals
+        if path.endswith("report.json") or path.endswith("definition.json"):
+            try:
+                report_data = json.loads(payload) if isinstance(payload, str) else payload
+                # Embedded visuals in pages
+                for section in report_data.get("sections", report_data.get("pages", [])):
+                    for vc in section.get("visualContainers", section.get("visuals", [])):
+                        config = vc.get("config", {})
+                        if isinstance(config, str):
+                            try:
+                                config = json.loads(config)
+                            except json.JSONDecodeError:
+                                continue
+                        _extract_synonyms_from_visual(config, synonym_map)
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+    return synonym_map
+
+
+def _extract_synonyms_from_visual(
+    visual: dict, synonym_map: dict[str, dict],
+) -> None:
+    """Extract displayName→queryName pairs from a single visual config."""
+    config = visual.get("config", visual)
+    if isinstance(config, str):
+        try:
+            config = json.loads(config)
+        except (json.JSONDecodeError, TypeError):
+            return
+
+    sv = config.get("singleVisual", config)
+    visual_type = sv.get("visualType", config.get("visualType", ""))
+
+    # ── Method 1: dataTransforms.selects[] (richest source) ──
+    data_transforms = sv.get("dataTransforms", {})
+    selects = data_transforms.get("selects", [])
+    for select in selects:
+        if not isinstance(select, dict):
+            continue
+        display_name = select.get("displayName", "")
+        query_name = select.get("queryName", "")
+        if query_name and "." in query_name:
+            table, field = query_name.split(".", 1)
+            key = query_name
+            if key not in synonym_map and display_name and display_name != field:
+                synonym_map[key] = {
+                    "display_name": display_name,
+                    "table": table,
+                    "field": field,
+                    "visual_type": visual_type,
+                }
+
+    # ── Method 2: projections[role][].queryRef ──
+    projections = sv.get("projections", {})
+    for role, bindings in projections.items():
+        if not isinstance(bindings, list):
+            continue
+        for binding in bindings:
+            if not isinstance(binding, dict):
+                continue
+            query_ref = binding.get("queryRef", "")
+            if query_ref and "." in query_ref:
+                table, field = query_ref.split(".", 1)
+                key = query_ref
+                if key not in synonym_map:
+                    synonym_map[key] = {
+                        "display_name": _humanize(field),
+                        "table": table,
+                        "field": field,
+                        "role": role,
+                        "visual_type": visual_type,
+                    }
+
+    # ── Method 3: prototypeQuery.Select[].Name / displayName ──
+    pq = sv.get("prototypeQuery", {})
+    from_clause = pq.get("From", [])
+    source_map: dict[str, str] = {}
+    for from_item in from_clause:
+        if isinstance(from_item, dict):
+            entity = from_item.get("Entity", "")
+            alias = from_item.get("Name", "")
+            if entity and alias:
+                source_map[alias] = entity
+
+    select_clause = pq.get("Select", [])
+    for item in select_clause:
+        if not isinstance(item, dict):
+            continue
+        sel_name = item.get("Name", "")
+        sel_display = item.get("displayName", "")
+
+        # Extract table.field from Measure or Column refs
+        for ref_type in ("Measure", "Column"):
+            ref = item.get(ref_type, {})
+            if not ref:
+                continue
+            prop = ref.get("Property", "")
+            expr = ref.get("Expression", {})
+            source_ref = expr.get("SourceRef", {})
+            entity = source_ref.get("Entity", "")
+            source = source_ref.get("Source", "")
+            table = entity or source_map.get(source, "")
+
+            if table and prop:
+                key = f"{table}.{prop}"
+                display = sel_display or sel_name or _humanize(prop)
+                if key not in synonym_map and display != prop:
+                    synonym_map[key] = {
+                        "display_name": display,
+                        "table": table,
+                        "field": prop,
+                        "visual_type": visual_type,
+                    }
+
+
+def derive_measure_metadata(report_def: dict | None) -> dict[str, dict]:
+    """Visual display names → measure_metadata per table.
+
+    Uses PBIR visual synonym extraction (same patterns as Tool 78)
+    to build display_name + synonyms from how measures appear in reports.
+    """
+    synonym_map = _extract_visual_synonym_map(report_def)
+    if not synonym_map:
+        return {}
+
+    # Group by table, collect measure synonyms
+    metadata: dict[str, dict] = {}
+    for query_name, info in synonym_map.items():
+        table = info["table"]
+        field = info["field"]
+        display = info.get("display_name", "")
+        snake = to_snake_case(field)
+
+        if table not in metadata:
+            metadata[table] = {}
+
+        if snake not in metadata[table]:
+            metadata[table][snake] = {
+                "display_name": display or _humanize(snake),
+                "synonyms": [],
+            }
+
+        # Add display_name as synonym if it differs
+        entry = metadata[table][snake]
+        if display and display != entry["display_name"] and display not in entry["synonyms"]:
+            entry["synonyms"].append(display)
+        # Also add the original PBI field name as synonym
+        if field != snake and field not in entry["synonyms"]:
+            entry["synonyms"].append(field)
+
     return metadata
 
 
 def derive_dimension_metadata(report_def: dict | None) -> dict[str, dict]:
-    """Visual column labels → dimension_metadata (from report)."""
-    if not report_def:
+    """Visual column labels → dimension_metadata per table.
+
+    Extracts dimension display names from report visual Axis/Category/Row
+    bindings using the PBIR synonym map.
+    """
+    synonym_map = _extract_visual_synonym_map(report_def)
+    if not synonym_map:
         return {}
-    # Same extraction logic but for Axis/Legend/Row/Column roles
-    return {}  # Simplified — real extraction would parse visual bindings
+
+    # Dimension roles in visuals (not Values/Y which are measures)
+    dim_roles = {"Category", "Series", "Rows", "Columns", "Row", "Column",
+                 "X", "Legend", "Tooltips", "Details"}
+
+    metadata: dict[str, dict] = {}
+    for query_name, info in synonym_map.items():
+        role = info.get("role", "")
+        # If role is known, use it to classify. If not, include all.
+        if role and role not in dim_roles and role in ("Values", "Y", "Y2"):
+            continue  # This is a measure, not a dimension
+
+        table = info["table"]
+        field = info["field"]
+        display = info.get("display_name", "")
+        snake = to_snake_case(field)
+
+        if table not in metadata:
+            metadata[table] = {}
+
+        if snake not in metadata[table]:
+            metadata[table][snake] = {
+                "display_name": display or _humanize(snake),
+                "comment": "",
+                "synonyms": [],
+            }
+
+        entry = metadata[table][snake]
+        if display and display != entry["display_name"] and display not in entry["synonyms"]:
+            entry["synonyms"].append(display)
+        if field != snake and field not in entry["synonyms"]:
+            entry["synonyms"].append(field)
+
+    return metadata
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1317,7 +1630,9 @@ def main():
     if args.report_id:
         print("  API 4: Report Definition...")
         report_def = extract_report_definition(
-            token, args.workspace_id, args.report_id
+            token, args.workspace_id, args.report_id,
+            tenant_id=args.tenant_id, client_id=args.client_id,
+            client_secret=args.client_secret,
         )
         if report_def:
             print("    → Report definition retrieved")
