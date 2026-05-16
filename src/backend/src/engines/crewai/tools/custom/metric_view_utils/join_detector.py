@@ -115,11 +115,30 @@ class JoinDetector:
                 if ref != fact_table_key and ref in self._fact_join_map:
                     referenced_facts.add(ref)
 
+        # Also add fact joins that target this fact table (union_mode, source_embed)
+        # even without explicit DAX references — config declares the relationship
+        for fj_name, fj_cfg in self._fact_join_map.items():
+            if fj_name in referenced_facts or fj_name == fact_table_key:
+                continue
+            target = fj_cfg.get('target_fact', '')
+            if target == fact_table_key:
+                referenced_facts.add(fj_name)
+
         joins = []
         for fact_name in sorted(referenced_facts):
             fj = self._fact_join_map[fact_name]
             fact_table_info = self.mquery_tables.get(fact_name)
-            if not fact_table_info or not fact_table_info.source_table:
+            source_table = ''
+            if fact_table_info and fact_table_info.source_table:
+                source_table = fact_table_info.source_table
+            else:
+                # Fallback: use source_table from fact_join_map config
+                source_table = fj.get('source_table', '')
+            if not source_table:
+                logger.warning(
+                    f"[{fact_table_key}] Cannot add fact join '{fact_name}' — "
+                    f"no source table. Add 'source_table' to fact_join_map['{fact_name}']."
+                )
                 continue
             alias = _sanitize_alias(fj['alias'])
 
@@ -201,7 +220,7 @@ class JoinDetector:
                         )
                         union_arm_sql = (
                             f"SELECT {key_expr}, {grain_str},\n    {pivot_select}\n"
-                            f"FROM {fact_table_info.source_table}\n"
+                            f"FROM {source_table}\n"
                             f"{where_clause}\n"
                             f"GROUP BY {grain_str}"
                         )
@@ -219,7 +238,7 @@ class JoinDetector:
 
                     join_source = (
                         f"SELECT {grain_str},\n    {pivot_select}\n"
-                        f"FROM {fact_table_info.source_table}\n"
+                        f"FROM {source_table}\n"
                         f"{where_clause}\n"
                         f"GROUP BY {grain_str}"
                     )
@@ -249,8 +268,8 @@ class JoinDetector:
                 })
                 continue
 
-            join_source = fj.get('inline_source') or fact_table_info.source_table
-            if not fj.get('inline_source') and fact_table_info.static_filters:
+            join_source = fj.get('inline_source') or source_table
+            if not fj.get('inline_source') and fact_table_info and fact_table_info.static_filters:
                 qualified = []
                 for f in fact_table_info.static_filters:
                     f = f.replace('source.', f'{alias}.')

@@ -68,6 +68,12 @@ const docSections: DocSection[] = [
     ],
   },
   {
+    label: 'UC Metric Views',
+    items: [
+      { label: 'Pipeline Config Guide', file: 'UCMV_PIPELINE_CONFIG_GUIDE' },
+    ],
+  },
+  {
     label: 'Power BI Tools',
     items: [
       { label: 'Comprehensive Analysis Tool', file: 'tool-comprehensive-analysis' },
