@@ -764,15 +764,48 @@ class FlowMethodFactory:
 
                 logger.info(f"📝 Listener tasks: {len(runtime_tasks)}")
 
-                # ── Inject edited_config from HITL into tool _default_config ──
-                # When the previous crew output was edited via Config Editor or
-                # UCMV Viewer, the full data is in the first result as JSON.
-                # Inject it directly into tools so they don't depend on the
-                # truncated task-description context.
+                # ── Inject previous crew output into tool _default_config ──
+                # Use the most recent previous crew output from flow state.
+                # When multiple crews are chained, `results` may contain stale
+                # output from an earlier crew (passed through HITL gates).
+                # The flow state stores each crew's output by name and by
+                # listener index — use the latest one.
+                _inject_source = None
                 if results:
+                    _inject_source = extract_final_answer(results)
+                # Also check flow state for a more recent output from the
+                # immediately preceding crew (stored at listener_N keys)
+                if hasattr(self, 'state') and isinstance(self.state, dict):
+                    # Find the highest listener_N key that has data
+                    _latest_listener = None
+                    for _sk, _sv in self.state.items():
+                        if _sk.startswith('listener_') and _sv:
+                            idx = _sk.replace('listener_', '')
+                            if idx.isdigit():
+                                if _latest_listener is None or int(idx) > _latest_listener[0]:
+                                    _latest_listener = (int(idx), str(_sv))
+                    if _latest_listener and _latest_listener[1]:
+                        _candidate = _latest_listener[1]
+                        # Extract raw string from CrewOutput if needed
+                        if hasattr(_candidate, 'raw'):
+                            _candidate = _candidate.raw
+                        _candidate = str(_candidate) if not isinstance(_candidate, str) else _candidate
+                        # Prefer the state output if it contains UCMV data (yaml key)
+                        # or is from a more recent crew than what results provided
+                        _is_ucmv_output = '"yaml"' in _candidate[:500] or "'yaml'" in _candidate[:500]
+                        _is_different = _inject_source is None or _candidate != _inject_source
+                        if _is_different and (_is_ucmv_output or len(_candidate) > len(_inject_source or '')):
+                            logger.info(
+                                f"📥 Using flow state listener_{_latest_listener[0]} output "
+                                f"({len(_candidate):,} chars, has_yaml={_is_ucmv_output}) "
+                                f"instead of results ({len(_inject_source or ''):,} chars)"
+                            )
+                            _inject_source = _candidate
+
+                if _inject_source:
                     try:
                         import json as _json
-                        first_result_str = extract_final_answer(results)
+                        first_result_str = _inject_source
                         prev_data = _json.loads(first_result_str) if first_result_str.strip().startswith('{') else None
                         if prev_data and isinstance(prev_data, dict):
                             # Detect pipeline config shape (from Config Proposer / Config Editor)
@@ -796,6 +829,11 @@ class FlowMethodFactory:
                                                 tool._default_config['config_json'] = first_result_str
                                                 injected_count += 1
                                                 logger.info(f"📥 Injected pipeline config ({len(first_result_str):,} chars) into {type(tool).__name__}.config_json")
+                                        elif 'ucmv_output' in tool._default_config and 'yaml' in prev_data:
+                                            # UCMV Generator output → Validator: inject full output as ucmv_output
+                                            tool._default_config['ucmv_output'] = first_result_str
+                                            injected_count += 1
+                                            logger.info(f"📥 Injected UCMV output ({len(first_result_str):,} chars) into {type(tool).__name__}.ucmv_output")
                                         else:
                                             # Generic injection: inject matching keys
                                             for key, value in prev_data.items():

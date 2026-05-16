@@ -19,8 +19,10 @@ logger = logging.getLogger(__name__)
 class MetricViewValidatorSchema(BaseModel):
     """Input schema for MetricViewValidatorTool."""
 
+    ucmv_output: Optional[str] = Field(
+        None, description="Raw UCMV Generator output JSON (contains yaml, sql, stats keys). Preferred input.")
     yaml_content: Optional[str] = Field(
-        None, description="JSON dict of table_key → YAML string (from UCMV Generator output)")
+        None, description="JSON dict of table_key → YAML string (alternative to ucmv_output)")
     measures_json: Optional[str] = Field(
         None, description="JSON string of measure_table_mapping (same input as UCMV Generator)")
 
@@ -41,7 +43,7 @@ class MetricViewValidatorTool(BaseTool):
     model_config = {"arbitrary_types_allowed": True, "extra": "allow"}
 
     def __init__(self, **kwargs: Any) -> None:
-        config_keys = ('yaml_content', 'measures_json')
+        config_keys = ('ucmv_output', 'yaml_content', 'measures_json')
         default_config = {}
         for key in config_keys:
             val = kwargs.pop(key, None)
@@ -62,17 +64,42 @@ class MetricViewValidatorTool(BaseTool):
                 return val
             return self._default_config.get(key)
 
+        # Try ucmv_output first (raw UCMV Generator output with yaml/sql/stats keys)
+        ucmv_raw = _get('ucmv_output')
         yaml_raw = _get('yaml_content') or '{}'
         measures_raw = _get('measures_json') or '[]'
 
         try:
+            # If ucmv_output is provided, extract yaml from it
+            if ucmv_raw:
+                ucmv_data = json.loads(ucmv_raw) if isinstance(ucmv_raw, str) else ucmv_raw
+                if isinstance(ucmv_data, dict):
+                    if 'yaml' in ucmv_data:
+                        yaml_raw = ucmv_data['yaml']
+                    elif 'proposed_config' in ucmv_data:
+                        pass  # Config Proposer output, not UCMV
+                    else:
+                        yaml_raw = ucmv_data
+                logger.info(f"[Validator] Extracted YAML from ucmv_output: {len(yaml_raw) if isinstance(yaml_raw, dict) else 'str'}")
+
             yaml_tables = json.loads(yaml_raw) if isinstance(yaml_raw, str) else yaml_raw
             measures = json.loads(measures_raw) if isinstance(measures_raw, str) else measures_raw
         except json.JSONDecodeError as e:
             return json.dumps({"error": f"Invalid JSON input: {e}"})
 
+        # Fallback: if no YAML provided, fetch from the latest UCMV Generator execution trace
         if not yaml_tables:
-            return json.dumps({"error": "No YAML content provided. Pass the UCMV Generator output."})
+            logger.info("[Validator] No YAML in args — attempting to fetch from latest UCMV execution trace")
+            try:
+                yaml_tables = self._fetch_latest_ucmv_from_db()
+            except Exception as db_err:
+                logger.warning(f"[Validator] DB fallback failed: {db_err}")
+
+        if not yaml_tables:
+            return json.dumps({
+                "error": "No YAML content provided. Pass ucmv_output (raw UCMV Generator output) "
+                "or yaml_content (JSON dict of table_key → YAML string)."
+            })
 
         # Build table→mapping lookup from measures
         table_mapping = {}
@@ -171,3 +198,36 @@ class MetricViewValidatorTool(BaseTool):
             f"{total_review} REVIEW, {total_invalid} INVALID out of {total_evaluated}"
         )
         return json.dumps(output, indent=2, default=str)
+
+    @staticmethod
+    def _fetch_latest_ucmv_from_db() -> dict:
+        """Fetch YAML from the latest UCMV Generator execution trace in the DB."""
+        import asyncio
+        from sqlalchemy import text
+
+        async def _query():
+            from src.db.session import async_session_factory
+            async with async_session_factory() as session:
+                result = await session.execute(text(
+                    "SELECT et.output::text "
+                    "FROM execution_trace et "
+                    "WHERE et.span_name LIKE 'UC Metric View Generator%run' "
+                    "ORDER BY et.created_at DESC LIMIT 1"
+                ))
+                row = result.fetchone()
+                if not row:
+                    return {}
+                data = json.loads(row[0])
+                content = data.get('content', '')
+                inner = json.loads(content) if isinstance(content, str) else content
+                return inner.get('yaml', {}) if isinstance(inner, dict) else {}
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    return pool.submit(lambda: asyncio.run(_query())).result(timeout=10)
+            return loop.run_until_complete(_query())
+        except Exception:
+            return asyncio.run(_query())
