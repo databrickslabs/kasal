@@ -538,34 +538,26 @@ class FlowMethodFactory:
             previous_output_context = ""
 
             if results:
-                # Get the first agent to determine context limits
-                first_agent = listener_tasks[0].agent if listener_tasks else None
-
-                # Get model's context window and max output tokens using ModelConfigService
-                context_window_tokens, max_output_tokens = await get_model_context_limits(first_agent, group_context) if first_agent else (128000, 16000)
-
-                # Calculate available input budget (subtract output reservation)
-                available_input_tokens = context_window_tokens - max_output_tokens
-
-                # Allocate 60% of available input for previous output
-                # This leaves 40% for system prompts, tools, conversation history, and safety buffer
-                max_context_tokens = int(available_input_tokens * 0.6)
-
-                # Convert tokens to characters (using 3.5 chars/token for safety)
-                # This conservative ratio accounts for code and structured data
-                max_context_length = int(max_context_tokens * 3.5)
-
-                logger.info(f"Model limits: context={context_window_tokens} tokens, max_output={max_output_tokens} tokens")
-                logger.info(f"Available input: {available_input_tokens} tokens, allocating {max_context_tokens} tokens ({max_context_length} chars) for previous output")
+                # Cap previous output context to avoid bloating the prompt.
+                # Crews that need the full data should access it via execution_inputs
+                # or tool parameters — the task-description injection is only for
+                # lightweight context/summaries so the LLM understands what happened.
+                MAX_CONTEXT_CHARS = 10_000  # ~3K tokens — enough for summary, not a data dump
 
                 # Create a concise context string to inject into task descriptions
                 # Use extract_final_answer to get only the final answer, not the full thinking process
                 previous_output_str = extract_final_answer(results)
-                if len(previous_output_str) > max_context_length:
-                    previous_output_context = f"\n\nContext from previous step:\n{previous_output_str[:max_context_length]}...\n(Output truncated for brevity)"
+                full_len = len(previous_output_str)
+
+                if full_len > MAX_CONTEXT_CHARS:
+                    previous_output_context = (
+                        f"\n\nContext from previous step (truncated — full data available via execution_inputs):\n"
+                        f"{previous_output_str[:MAX_CONTEXT_CHARS]}...\n"
+                        f"(Truncated from {full_len:,} chars)"
+                    )
                 else:
                     previous_output_context = f"\n\nContext from previous step:\n{previous_output_str}"
-                logger.info(f"📤 Injecting previous output context into task descriptions ({len(previous_output_context)} chars)")
+                logger.info(f"📤 Injecting previous output context into task descriptions ({len(previous_output_context)} chars, original: {full_len:,} chars)")
 
             # Create new Task objects with modified descriptions
             for task in listener_tasks:
@@ -773,6 +765,43 @@ class FlowMethodFactory:
                     logger.info(f"📊 Listener LLM Configuration: {llm_info}")
 
                 logger.info(f"📝 Listener tasks: {len(runtime_tasks)}")
+
+                # ── Inject edited_config from HITL into tool _default_config ──
+                # When the previous crew output was edited via Config Editor or
+                # UCMV Viewer, the full data is in the first result as JSON.
+                # Inject it directly into tools so they don't depend on the
+                # truncated task-description context.
+                if results:
+                    try:
+                        import json as _json
+                        first_result_str = extract_final_answer(results)
+                        prev_data = _json.loads(first_result_str) if first_result_str.strip().startswith('{') else None
+                        if prev_data and isinstance(prev_data, dict):
+                            # Detect pipeline config shape (from Config Proposer / Config Editor)
+                            is_pipeline_config = any(
+                                k in prev_data for k in ('join_key_map', 'enrichment_joins', 'filter_sets', 'measure_resolutions')
+                            )
+                            injected_count = 0
+                            for agent in agents:
+                                for tool in (agent.tools or []):
+                                    if hasattr(tool, '_default_config') and isinstance(tool._default_config, dict):
+                                        # If previous output is a pipeline config and tool has config_json,
+                                        # inject the full config as config_json (overwriting the empty default)
+                                        if is_pipeline_config and 'config_json' in tool._default_config:
+                                            tool._default_config['config_json'] = first_result_str
+                                            injected_count += 1
+                                            logger.info(f"📥 Injected pipeline config ({len(first_result_str):,} chars) into {type(tool).__name__}.config_json")
+                                        else:
+                                            # Generic injection: inject matching keys
+                                            for key, value in prev_data.items():
+                                                if key in tool._default_config:
+                                                    tool._default_config[key] = value if isinstance(value, str) else _json.dumps(value)
+                                                    injected_count += 1
+                            if injected_count > 0:
+                                logger.info(f"📥 Total: injected {injected_count} key(s) from previous output into tool _default_config(s)")
+                    except (_json.JSONDecodeError, Exception) as inject_err:
+                        logger.debug(f"Previous output is not injectable JSON (ok): {inject_err}")
+
                 logger.info("⏱️ Calling listener crew.kickoff_async() with 10 minute timeout...")
 
                 result = await asyncio.wait_for(crew.kickoff_async(), timeout=600.0)
@@ -1155,7 +1184,24 @@ class FlowMethodFactory:
                     logger.info(f"   Approved at: {approved_for_gate.responded_at}")
                     logger.info("   Passing through to next step...")
                     logger.info("="*80)
-                    # Return the previous output to continue the flow
+
+                    # Check if the user edited the config in the Config Editor.
+                    # If so, pass the edited version to the next crew instead of
+                    # the original crew output.
+                    try:
+                        from src.repositories.execution_history_repository import ExecutionHistoryRepository
+                        exec_repo = ExecutionHistoryRepository(session)
+                        execution = await exec_repo.get_execution_by_job_id(job_id)
+                        if execution and execution.checkpoint_data:
+                            edited_config = execution.checkpoint_data.get("edited_config")
+                            if edited_config:
+                                import json
+                                logger.info(f"   📝 Found edited_config in checkpoint_data — using user edits")
+                                return json.dumps(edited_config)
+                    except Exception as e:
+                        logger.warning(f"   Could not check for edited_config: {e}")
+
+                    # No edited config — pass original output
                     return previous_output
 
             # Get previous crew name and output

@@ -431,6 +431,73 @@ class DatabricksRetryLLM(LLM):
             ]
         )
 
+    def _is_auth_error(self, error_str: str) -> bool:
+        """Check if an error indicates an expired or invalid token.
+
+        Args:
+            error_str: Lowercase error string to check
+
+        Returns:
+            True if this is an authentication/token error
+        """
+        return any(
+            term in error_str
+            for term in [
+                "invalid token",
+                "invalid access token",
+                "token expired",
+                "token is expired",
+                "authenticationerror",
+                "401",
+                "unauthorized",
+            ]
+        )
+
+    def _try_refresh_token(self) -> bool:
+        """Attempt to refresh the api_key by falling back to PAT or SPN auth.
+
+        When the OBO token expires mid-execution, this method tries to obtain
+        a fresh token via the auth chain (PAT → SPN) and updates self.api_key.
+
+        Returns:
+            True if a new token was obtained and set, False otherwise.
+        """
+        crew_log = self._get_crew_logger()
+        try:
+            import asyncio
+            from src.utils.databricks_auth import get_auth_context
+
+            # get_auth_context is async; run it in a new event loop if needed
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                # We're inside an async context — use a thread to avoid nesting
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    auth_ctx = pool.submit(
+                        lambda: asyncio.run(get_auth_context(user_token=None))
+                    ).result(timeout=15)
+            else:
+                auth_ctx = asyncio.run(get_auth_context(user_token=None))
+
+            if auth_ctx and auth_ctx.token and auth_ctx.token != self.api_key:
+                old_method = "obo"  # the one that just failed
+                crew_log.info(
+                    f"[DatabricksRetryLLM] Token refresh: {old_method} → {auth_ctx.auth_method} "
+                    f"(token length: {len(auth_ctx.token)})"
+                )
+                self.api_key = auth_ctx.token
+                return True
+            else:
+                crew_log.warning("[DatabricksRetryLLM] Token refresh: no alternative token available")
+                return False
+        except Exception as refresh_err:
+            crew_log.warning(f"[DatabricksRetryLLM] Token refresh failed: {refresh_err}")
+            return False
+
     def _get_backoff_time(self, attempt: int, is_rate_limit: bool) -> float:
         """Calculate backoff time based on error type and attempt number.
 
@@ -785,6 +852,13 @@ class DatabricksRetryLLM(LLM):
                     attempt += 1
                     continue
                 else:
+                    # Auth errors: try refreshing token (OBO → PAT/SPN fallback)
+                    if self._is_auth_error(error_str) and self._try_refresh_token():
+                        crew_log.info(
+                            f"[DatabricksRetryLLM] Retrying after token refresh (attempt {attempt + 1})"
+                        )
+                        attempt += 1
+                        continue
                     crew_log.error(f"[DatabricksRetryLLM] Non-retryable error: {e}")
                     if attempt > 0:
                         self._record_retry_summary(attempt + 1, total_backoff, "call")
@@ -917,6 +991,13 @@ class DatabricksRetryLLM(LLM):
                     attempt += 1
                     continue
                 else:
+                    # Auth errors: try refreshing token (OBO → PAT/SPN fallback)
+                    if self._is_auth_error(error_str) and self._try_refresh_token():
+                        crew_log.info(
+                            f"[DatabricksRetryLLM] Retrying after token refresh in _handle_non_streaming (attempt {attempt + 1})"
+                        )
+                        attempt += 1
+                        continue
                     crew_log.error(
                         f"[DatabricksRetryLLM] Non-retryable error in _handle_non_streaming: {e}"
                     )

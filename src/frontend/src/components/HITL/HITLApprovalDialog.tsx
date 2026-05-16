@@ -5,7 +5,7 @@
  * Allows users to quickly approve or reject a pending HITL gate.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -41,6 +41,9 @@ import {
   HITLApprovalResponse,
   HITLRejectionAction,
 } from '../../api/HITLService';
+import UCMVResultViewer, { isUCMVResult, UCMVResult } from '../Jobs/UCMVResultViewer';
+import { runService } from '../../api/ExecutionHistoryService';
+import SaveIcon from '@mui/icons-material/Save';
 
 interface HITLApprovalDialogProps {
   /** Whether the dialog is open */
@@ -70,6 +73,9 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
     HITLRejectionAction.REJECT
   );
   const [actionLoading, setActionLoading] = useState(false);
+
+  // UCMV edit state
+  const [editedUCMV, setEditedUCMV] = useState<UCMVResult | null>(null);
 
   // Fetch approval for the execution
   const fetchApproval = useCallback(async () => {
@@ -102,6 +108,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
       setComment('');
       setRejectionReason('');
       setRejectionAction(HITLRejectionAction.REJECT);
+      setEditedUCMV(null);
     }
   }, [open, executionId, fetchApproval]);
 
@@ -137,6 +144,27 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reject');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Handle Save & Approve for edited UCMV output
+  const handleSaveAndApproveUCMV = async () => {
+    if (!approval || !editedUCMV) return;
+
+    setActionLoading(true);
+    try {
+      // Save edited UCMV result to checkpoint_data.edited_config
+      await runService.updateExecutionResult(approval.execution_id, editedUCMV as unknown as Record<string, unknown>);
+      // Approve the gate
+      await HITLService.approveGate(approval.id, {
+        comment: 'UCMV output reviewed and edited via UCMV Viewer',
+      });
+      onActionComplete?.('approve');
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save and approve');
     } finally {
       setActionLoading(false);
     }
@@ -314,22 +342,41 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
               <DescriptionIcon fontSize="small" />
               Previous Crew Output:
             </Typography>
-            <Paper
-              variant="outlined"
-              sx={{
-                p: 1.5,
-                maxHeight: 200,
-                overflow: 'auto',
-                bgcolor: 'background.default',
-              }}
-            >
-              <Typography
-                variant="body2"
-                sx={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: '0.85rem' }}
-              >
-                {approval.previous_crew_output}
-              </Typography>
-            </Paper>
+            {(() => {
+              // Try to detect UCMV result shape for structured rendering
+              try {
+                const parsed = JSON.parse(approval.previous_crew_output);
+                if (isUCMVResult(parsed)) {
+                  return (
+                    <Paper variant="outlined" sx={{ p: 1.5, maxHeight: 500, overflow: 'auto', bgcolor: 'background.default' }}>
+                      <UCMVResultViewer
+                        result={editedUCMV ?? parsed}
+                        editable
+                        onResultChange={setEditedUCMV}
+                      />
+                    </Paper>
+                  );
+                }
+              } catch { /* not JSON, fall through to raw display */ }
+              return (
+                <Paper
+                  variant="outlined"
+                  sx={{
+                    p: 1.5,
+                    maxHeight: 200,
+                    overflow: 'auto',
+                    bgcolor: 'background.default',
+                  }}
+                >
+                  <Typography
+                    variant="body2"
+                    sx={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: '0.85rem' }}
+                  >
+                    {approval.previous_crew_output}
+                  </Typography>
+                </Paper>
+              );
+            })()}
           </Box>
         )}
 
@@ -472,24 +519,44 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
         >
           Reject
         </Button>
-        <Button
-          variant="contained"
-          color="success"
-          startIcon={<ApproveIcon />}
-          onClick={() => setActionType('approve')}
-          disabled={approval.is_expired}
-        >
-          Approve
-        </Button>
+        {editedUCMV ? (
+          <Button
+            variant="contained"
+            color="success"
+            startIcon={actionLoading ? <CircularProgress size={16} /> : <SaveIcon />}
+            onClick={handleSaveAndApproveUCMV}
+            disabled={actionLoading || approval.is_expired}
+          >
+            Save &amp; Approve
+          </Button>
+        ) : (
+          <Button
+            variant="contained"
+            color="success"
+            startIcon={<ApproveIcon />}
+            onClick={() => setActionType('approve')}
+            disabled={approval.is_expired}
+          >
+            Approve
+          </Button>
+        )}
       </>
     );
   };
+
+  // Detect UCMV output to size dialog appropriately
+  const hasUCMVOutput = useMemo(() => {
+    if (!approval?.previous_crew_output) return false;
+    try {
+      return isUCMVResult(JSON.parse(approval.previous_crew_output));
+    } catch { return false; }
+  }, [approval?.previous_crew_output]);
 
   return (
     <Dialog
       open={open}
       onClose={onClose}
-      maxWidth="sm"
+      maxWidth={hasUCMVOutput ? 'lg' : 'sm'}
       fullWidth
       PaperProps={{
         sx: { minHeight: 300 },

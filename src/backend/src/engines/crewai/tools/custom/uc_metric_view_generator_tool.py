@@ -342,6 +342,7 @@ class UCMetricViewGeneratorTool(BaseTool):
                 group_id=workspace_id,
                 access_token=token,
             )
+            connector.connect()
             kpis = connector.extract_measures(include_hidden=True)
 
             measures = []

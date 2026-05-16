@@ -37,6 +37,7 @@ import { ShowResultProps } from '../../types/common';
 import { ResultValue } from '../../types/result';
 import { generateRunPDF } from '../../utils/pdfGenerator';
 import { DatabricksService } from '../../api/DatabricksService';
+import UCMVResultViewer, { isUCMVResult } from './UCMVResultViewer';
 // import { Run } from '../../api/ExecutionHistoryService';
 
 // eslint-disable-next-line react/prop-types
@@ -659,6 +660,11 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
 
   const renderContent = (content: Record<string, ResultValue>) => {
     if (typeof content === 'object' && content !== null) {
+      // UCMV Builder result: structured metric-view display
+      if (isUCMVResult(content)) {
+        return <UCMVResultViewer result={content as Parameters<typeof UCMVResultViewer>[0]['result']} />;
+      }
+
       // If there's only one key called 'Value', render its content directly
       const entries = Object.entries(content);
       if (entries.length === 1 && entries[0][0].toLowerCase() === 'value') {
