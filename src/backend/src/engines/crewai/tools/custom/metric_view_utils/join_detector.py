@@ -41,6 +41,20 @@ class JoinDetector:
                 if table_ref in self._join_key_map:
                     referenced_dims.add(table_ref)
 
+        # Also add dims where the join_key matches a GROUP BY column
+        # (these are natural joins even without DAX references)
+        for dim_name, jk_check in self._join_key_map.items():
+            if dim_name in referenced_dims:
+                continue
+            jk_key = jk_check.get('join_key', '')
+            if jk_key and jk_key in fact_info.group_by_columns:
+                referenced_dims.add(dim_name)
+            else:
+                for alt_k in jk_check.get('alt_join_keys', []):
+                    if alt_k in fact_info.group_by_columns:
+                        referenced_dims.add(dim_name)
+                        break
+
         joins = []
         for dim_name in sorted(referenced_dims):
             jk = self._join_key_map[dim_name]
