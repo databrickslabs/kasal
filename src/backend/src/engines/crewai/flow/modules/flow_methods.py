@@ -538,26 +538,24 @@ class FlowMethodFactory:
             previous_output_context = ""
 
             if results:
-                # Cap previous output context to avoid bloating the prompt.
-                # Crews that need the full data should access it via execution_inputs
-                # or tool parameters — the task-description injection is only for
-                # lightweight context/summaries so the LLM understands what happened.
-                MAX_CONTEXT_CHARS = 10_000  # ~3K tokens — enough for summary, not a data dump
-
-                # Create a concise context string to inject into task descriptions
-                # Use extract_final_answer to get only the final answer, not the full thinking process
                 previous_output_str = extract_final_answer(results)
                 full_len = len(previous_output_str)
 
+                # For large outputs (>2K chars), skip task-description injection entirely.
+                # The data is already injected directly into tool._default_config (below),
+                # so the LLM doesn't need to see it — it just needs to call the tool.
+                # Injecting large context causes LLM timeouts (297s) with no benefit.
+                MAX_CONTEXT_CHARS = 2_000
+
                 if full_len > MAX_CONTEXT_CHARS:
                     previous_output_context = (
-                        f"\n\nContext from previous step (truncated — full data available via execution_inputs):\n"
-                        f"{previous_output_str[:MAX_CONTEXT_CHARS]}...\n"
-                        f"(Truncated from {full_len:,} chars)"
+                        f"\n\nContext from previous step: {full_len:,} chars of data are "
+                        f"pre-loaded into your tool's config_json parameter. "
+                        f"Call the tool without passing config_json — it already has the data."
                     )
                 else:
                     previous_output_context = f"\n\nContext from previous step:\n{previous_output_str}"
-                logger.info(f"📤 Injecting previous output context into task descriptions ({len(previous_output_context)} chars, original: {full_len:,} chars)")
+                logger.info(f"📤 Context injection: {len(previous_output_context)} chars in task description (original: {full_len:,} chars)")
 
             # Create new Task objects with modified descriptions
             for task in listener_tasks:
