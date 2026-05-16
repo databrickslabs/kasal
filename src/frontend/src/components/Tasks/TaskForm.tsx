@@ -58,6 +58,7 @@ import { PowerBIMetadataReducerConfigSelector, PowerBIMetadataReducerConfig } fr
 import { PowerBIDaxExecutorConfigSelector, PowerBIDaxExecutorConfig } from '../Common/PowerBIDaxExecutorConfigSelector';
 import { UCMetricViewGeneratorConfigSelector, UCMetricViewGeneratorConfig } from '../Common/UCMetricViewGeneratorConfigSelector';
 import { ConfigGeneratorConfigSelector, ConfigGeneratorConfig } from '../Common/ConfigGeneratorConfigSelector';
+import { PipelineConfigGeneratorConfigSelector, PipelineConfigGeneratorConfig } from '../Common/PipelineConfigGeneratorConfigSelector';
 import { PerplexityConfig, SerperConfig } from '../../types/config';
 import { type LLMGuardrailConfig } from '../../types/task';
 import { ModelService } from '../../api/ModelService';
@@ -155,6 +156,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const [powerBIDaxExecutorConfig, setPowerBIDaxExecutorConfig] = useState<PowerBIDaxExecutorConfig>({});
   const [ucMetricViewConfig, setUcMetricViewConfig] = useState<UCMetricViewGeneratorConfig>({});
   const [configGeneratorConfig, setConfigGeneratorConfig] = useState<ConfigGeneratorConfig>({});
+  const [pipelineConfigGenConfig, setPipelineConfigGenConfig] = useState<PipelineConfigGeneratorConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
   const [showBestPractices, setShowBestPractices] = useState(false);
@@ -280,6 +282,11 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       // Check for Config Generator config
       if (initialData.tool_configs['Config Generator']) {
         setConfigGeneratorConfig(initialData.tool_configs['Config Generator'] as ConfigGeneratorConfig);
+      }
+
+      // Check for Pipeline Config Generator config
+      if (initialData.tool_configs['Pipeline Config Generator']) {
+        setPipelineConfigGenConfig(initialData.tool_configs['Pipeline Config Generator'] as PipelineConfigGeneratorConfig);
       }
 
       // Check for MCP_SERVERS config
@@ -869,6 +876,30 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           return tool?.title === 'Config Generator';
         })) {
           delete updatedToolConfigs['Config Generator'];
+        }
+
+        // Handle Pipeline Config Generator config
+        if (pipelineConfigGenConfig && Object.keys(pipelineConfigGenConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Pipeline Config Generator';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            'Pipeline Config Generator': pipelineConfigGenConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'Pipeline Config Generator';
+        })) {
+          delete updatedToolConfigs['Pipeline Config Generator'];
         }
 
         // Handle Power BI Comprehensive Analysis Tool config
@@ -1960,6 +1991,39 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                       setToolConfigs(prev => ({
                         ...prev,
                         'Config Generator': config
+                      }));
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+
+            {/* Pipeline Config Generator Configuration - Show only when tool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'Pipeline Config Generator';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  Pipeline Config Generator (Tool 90) Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(25, 118, 210, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(25, 118, 210, 0.2)'
+                }}>
+                  <PipelineConfigGeneratorConfigSelector
+                    value={pipelineConfigGenConfig}
+                    onChange={(config) => {
+                      setPipelineConfigGenConfig(config);
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'Pipeline Config Generator': config
                       }));
                     }}
                   />
