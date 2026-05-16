@@ -42,6 +42,7 @@ tools_data = [
     (88, "Metric View Deployer", "Deploy UC Metric View definitions to a Databricks workspace. Accepts YAML specs and deploy SQL from the UC Metric View Generator tool (86). Supports dry_run mode (default) for validation without actual deployment. When dry_run=False, executes CREATE METRIC VIEW SQL via the Databricks SQL Statement API. Input: yaml_specs_json + sql_specs_json from tool 86. Output: deployment status per metric view.", "transform"),
     (89, "Config Generator", "Auto-propose pipeline_config.json from PBI extraction output. Takes measures_json, mquery_json, relationships_json, scan_data_json and returns a proposed config with join_key_map, enrichment_joins, switch_decompositions, etc.", "transform"),
     (90, "Pipeline Config Generator", "Generate pipeline_config.json by calling 4 PBI APIs directly — no LLM intermediation. Produces all 26 config keys with auto-fill + TODO markers. Requires two Service Principals: non-admin (Execute Queries API, workspace member) and admin (Admin Scanner API, Tenant.Read.All). Output is ready for the UC Metric View Generator (Tool 86).", "transform"),
+    (91, "Metric View Validator", "Validate generated UC Metric View YAML definitions against original DAX expressions. Compares each translated measure's SQL with the source DAX to detect semantic mismatches, missing filters, or incorrect aggregations. Returns VALID/EQUIVALENT/REVIEW/INVALID per measure. Input: UCMV Generator output (yaml_content) + measures_json.", "transform"),
 ]
 
 def get_tool_configs():
@@ -395,6 +396,11 @@ def get_tool_configs():
             "catalog": "main",
             "schema_name": "default",
         },  # Pipeline Config Generator
+        "91": {
+            "result_as_answer": True,
+            "yaml_content": None,
+            "measures_json": None,
+        },  # Metric View Validator
     }
 
 async def seed_async():

@@ -1,0 +1,107 @@
+{
+  "id": "ucmv-validator-001",
+  "name": "UCMV Quality Validator",
+  "description": "Validates generated UC Metric View YAML definitions against original DAX expressions. Produces per-measure VALID/EQUIVALENT/REVIEW/INVALID quality status. Add as the final step in the UCMV migration flow.",
+  "agent_ids": [
+    "ucmv-validator-agent-001"
+  ],
+  "task_ids": [
+    "ucmv-validator-task-001"
+  ],
+  "nodes": [
+    {
+      "id": "agent-ucmv-validator-agent-001",
+      "type": "agentNode",
+      "position": {
+        "x": 118,
+        "y": 68
+      },
+      "data": {
+        "label": "UCMV Validation Agent",
+        "role": "Metric View Quality Validator",
+        "goal": "Validate generated UC Metric Views against original DAX expressions and produce a quality report with VALID/EQUIVALENT/REVIEW/INVALID status per measure.",
+        "backstory": "You are a data quality specialist that validates UC Metric View translations. You compare generated Spark SQL expressions against original DAX expressions to detect semantic mismatches, missing FILTER clauses, incorrect aggregations, or wrong column references. Call the Metric View Validator tool immediately with the provided inputs — do not ask for additional information.",
+        "tools": [
+          "91"
+        ],
+        "agentId": "ucmv-validator-agent-001",
+        "llm": "databricks-claude-sonnet-4",
+        "verbose": true,
+        "type": "agent"
+      }
+    },
+    {
+      "id": "task-ucmv-validator-task-001",
+      "type": "taskNode",
+      "position": {
+        "x": 368,
+        "y": 68
+      },
+      "data": {
+        "label": "Validate UC Metric Views",
+        "role": null,
+        "goal": null,
+        "backstory": null,
+        "tools": [
+          "91"
+        ],
+        "tool_configs": {
+          "Metric View Validator": {
+            "yaml_content": null,
+            "measures_json": null
+          }
+        },
+        "agentId": null,
+        "taskId": "ucmv-validator-task-001",
+        "llm": null,
+        "function_calling_llm": null,
+        "max_iter": null,
+        "max_rpm": null,
+        "max_execution_time": null,
+        "verbose": null,
+        "allow_delegation": null,
+        "cache": null,
+        "memory": true,
+        "embedder_config": null,
+        "system_template": null,
+        "prompt_template": null,
+        "response_template": null,
+        "allow_code_execution": null,
+        "code_execution_mode": null,
+        "max_retry_limit": null,
+        "use_system_prompt": null,
+        "respect_context_window": null,
+        "type": "task",
+        "description": "Validate the generated UC Metric View YAML definitions against the original DAX expressions.\n\nYou receive the UCMV Generator output containing YAML definitions for all metric views, and the measures_json containing original DAX expressions with table allocations.\n\nCall the Metric View Validator tool with:\n- yaml_content: the YAML dict from the previous crew's output (JSON dict of table_key → YAML string)\n- measures_json: the measures JSON used by the UCMV Generator\n\nReturn the full validation report with per-table and per-measure quality status.",
+        "expected_output": "JSON validation report containing:\n- summary: total evaluated, valid, equivalent, review, invalid counts\n- per_table: detailed per-table validation results with per-measure VALID/EQUIVALENT/REVIEW/INVALID status\n\nHighlight any INVALID or REVIEW measures that need human attention.",
+        "icon": null,
+        "advanced_config": null,
+        "config": {
+          "cache_response": false,
+          "cache_ttl": 3600,
+          "retry_on_fail": true,
+          "max_retries": 3,
+          "timeout": null,
+          "priority": 1,
+          "condition": null,
+          "markdown_output": false,
+          "output_json": true,
+          "guardrails": [],
+          "human_input": false
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-agent-task",
+      "source": "agent-ucmv-validator-agent-001",
+      "target": "task-ucmv-validator-task-001",
+      "type": "default"
+    }
+  ],
+  "inputs": {
+    "yaml_content": "{yaml_content}",
+    "measures_json": "{measures_json}"
+  }
+}
