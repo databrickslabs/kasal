@@ -565,6 +565,80 @@ def process_table(
                 reclassified_untranslatable.append(m)
             untranslatable = reclassified_untranslatable
 
+    # ── Step 6c: Auto-add joins referenced by SWITCH/DAX measures ──────
+    _all_translated_measures = translated + switch_measures
+    if _all_translated_measures:
+        existing_aliases = {j['name'] for j in joins}
+        join_key_map = ctx.config.get('join_key_map', {})
+        for sm in _all_translated_measures:
+            if not sm.sql_expr:
+                continue
+            for alias_match in re.finditer(r'\b(\w+)\.(\w+)', sm.sql_expr):
+                alias = alias_match.group(1)
+                if alias == 'source' or alias in existing_aliases:
+                    continue
+                # Find this alias in join_key_map
+                for dim_name, jk in join_key_map.items():
+                    if jk.get('alias') == alias:
+                        # Try mquery_tables first, then fact table's dim_source_tables
+                        dim_info = ctx.mquery_tables.get(dim_name)
+                        source_table = ''
+                        if dim_info and dim_info.source_table:
+                            source_table = dim_info.source_table
+                        else:
+                            # Fallback: check fact table's dim_source_tables (from MQuery JOINs)
+                            fact_dims = table_info.dim_source_tables
+                            for fact_alias, fact_src in fact_dims.items():
+                                if fact_alias.lower() == alias or dim_name.lower() in fact_alias.lower():
+                                    source_table = fact_src
+                                    break
+                        # Fallback 3: check scan_data for the dimension table
+                        if not source_table and ctx.scan_data:
+                            scan_entry = ctx.scan_data.get(dim_name)
+                            if scan_entry and hasattr(scan_entry, 'native_sql'):
+                                # Extract source table from native SQL
+                                from_m = re.search(
+                                    r'\bFROM\s+([\w.]+)',
+                                    scan_entry.native_sql, re.IGNORECASE,
+                                )
+                                if from_m:
+                                    source_table = from_m.group(1)
+                        # Fallback 4: use source_table from join_key_map config if provided
+                        if not source_table:
+                            source_table = jk.get('source_table', '')
+                        if not source_table:
+                            logger.warning(
+                                f"[{table_key}] Cannot auto-add join '{alias}' — "
+                                f"no source table found for {dim_name}. "
+                                f"Add 'source_table' to join_key_map['{dim_name}'] in config."
+                            )
+                            break
+                        join_key = jk.get('join_key', '')
+                        alt_on = jk.get('alt_join_on', '')
+                        join_on = alt_on if alt_on else f'source.{join_key} = {alias}.{jk.get("dim_key", join_key)}'
+                        joins.append({
+                            'name': alias,
+                            'source': source_table,
+                            'join_on': join_on,
+                        })
+                        existing_aliases.add(alias)
+                        logger.info(f"[{table_key}] Auto-added join '{alias}' → {source_table}")
+                        # Add curated dim columns as dimensions
+                        for dc in jk.get('dim_columns', []):
+                            if isinstance(dc, dict):
+                                d_name = dc['name']
+                                d_expr = f"{alias}.{dc['expr']}"
+                            else:
+                                d_name = dc
+                                d_expr = f"{alias}.{dc}"
+                            if d_name not in {d['name'] for d in dimensions}:
+                                dimensions.append({
+                                    'name': d_name,
+                                    'expr': d_expr,
+                                    'comment': f'{d_name.replace("_", " ").capitalize()} from {alias}',
+                                })
+                        break
+
     # ── Step 7: Merge: base + DAX translated + SWITCH decomposed ──────
     all_measures = base_measures + translated + switch_measures
 

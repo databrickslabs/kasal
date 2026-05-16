@@ -27,6 +27,8 @@ import LoginIcon from '@mui/icons-material/Login';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import SecurityIcon from '@mui/icons-material/Security';
 import PersonIcon from '@mui/icons-material/Person';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
+import ClearIcon from '@mui/icons-material/Clear';
 import { usePowerBIOAuth } from '../../hooks/usePowerBIOAuth';
 
 // Authentication method type
@@ -154,12 +156,32 @@ export const UCMetricViewGeneratorConfigSelector: React.FC<UCMetricViewGenerator
         updatedConfig.mquery_json = undefined;
         updatedConfig.relationships_json = undefined;
         updatedConfig.scan_data_json = undefined;
-        updatedConfig.config_json = undefined;
+        // Keep config_json — it's an override that works in both modes
         updatedConfig.auth_method = updatedConfig.auth_method || 'service_principal';
       }
 
       onChange(updatedConfig);
     }
+  };
+
+  const handleFileUpload = (field: keyof UCMetricViewGeneratorConfig) => (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      try {
+        // Validate it's valid JSON
+        JSON.parse(text);
+        handleFieldChange(field, text);
+      } catch {
+        // Still set it — user can fix later
+        handleFieldChange(field, text);
+      }
+    };
+    reader.readAsText(file);
+    // Reset the input so re-uploading the same file works
+    event.target.value = '';
   };
 
   const mode = value.mode || 'api';
@@ -516,20 +538,85 @@ export const UCMetricViewGeneratorConfigSelector: React.FC<UCMetricViewGenerator
               helperText="JSON string of scan/schema data"
               size="small"
             />
-            <TextField
-              label="Config JSON Override (Optional)"
-              value={value.config_json || ''}
-              onChange={(e) => handleFieldChange('config_json', e.target.value)}
-              disabled={disabled}
-              fullWidth
-              multiline
-              rows={3}
-              helperText="Override pipeline_config.json (leave empty to use auto-generated)"
-              size="small"
-            />
+            {/* Config JSON Override moved to dedicated accordion (visible in both modes) */}
           </Box>
         </>
       )}
+
+      {/* Pipeline Config Override — available in BOTH modes */}
+      <Accordion sx={{ mt: 1 }}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Typography variant="subtitle2">
+            Pipeline Config Override
+            {value.config_json ? ' (loaded)' : ''}
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Alert severity="info" variant="outlined" sx={{ mb: 2 }}>
+            <Typography variant="caption">
+              Upload or paste a reference <code>pipeline_config.json</code> to override auto-generated config.
+              This provides <strong>filter_sets</strong>, <strong>switch_decompositions</strong>, <strong>manual_overrides</strong>,
+              and other keys the UCMV generator needs for complex measures.
+            </Typography>
+          </Alert>
+          <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
+            <Button
+              variant="outlined"
+              component="label"
+              startIcon={<UploadFileIcon />}
+              disabled={disabled}
+              size="small"
+            >
+              Upload JSON
+              <input
+                type="file"
+                accept=".json,application/json"
+                hidden
+                onChange={handleFileUpload('config_json')}
+              />
+            </Button>
+            {value.config_json && (
+              <Button
+                variant="outlined"
+                color="error"
+                startIcon={<ClearIcon />}
+                onClick={() => handleFieldChange('config_json', '')}
+                disabled={disabled}
+                size="small"
+              >
+                Clear
+              </Button>
+            )}
+            {value.config_json && (
+              <Typography variant="caption" color="success.main" sx={{ alignSelf: 'center' }}>
+                {(() => {
+                  try {
+                    const parsed = JSON.parse(value.config_json);
+                    const keys = Object.keys(parsed);
+                    return `${keys.length} config keys loaded`;
+                  } catch {
+                    return 'Invalid JSON';
+                  }
+                })()}
+              </Typography>
+            )}
+          </Box>
+          <TextField
+            label="Config JSON"
+            value={value.config_json || ''}
+            onChange={(e) => handleFieldChange('config_json', e.target.value)}
+            disabled={disabled}
+            fullWidth
+            multiline
+            rows={6}
+            helperText="Pipeline config JSON (filter_sets, switch_decompositions, manual_overrides, etc.)"
+            size="small"
+            InputProps={{
+              sx: { fontFamily: 'monospace', fontSize: '0.75rem' }
+            }}
+          />
+        </AccordionDetails>
+      </Accordion>
 
       {/* Target Configuration */}
       <Accordion sx={{ mt: 1 }} defaultExpanded>
