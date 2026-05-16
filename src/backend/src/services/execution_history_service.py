@@ -738,6 +738,45 @@ class ExecutionHistoryService:
             logger.error(f"Error marking checkpoint {execution_id} as resumed: {str(e)}")
             raise
 
+    async def update_result(
+        self, job_id: str, result_data: dict, group_ids: list[str] = None
+    ) -> dict:
+        """
+        Update the result field for an execution.
+
+        Args:
+            job_id: Job ID of the execution
+            result_data: New result data to store
+            group_ids: Optional list of group IDs for tenant filtering
+
+        Returns:
+            Dictionary with success status, job_id, and updated_at
+        """
+        try:
+            from datetime import datetime, timezone
+
+            success = await self.history_repo.update_execution_result(
+                job_id=job_id,
+                result_data=result_data,
+                group_ids=group_ids,
+            )
+
+            if not success:
+                return {"success": False, "job_id": job_id, "updated_at": ""}
+
+            return {
+                "success": True,
+                "job_id": job_id,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+        except SQLAlchemyError as e:
+            logger.error(f"Database error updating result for job_id {job_id}: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error updating result for job_id {job_id}: {str(e)}")
+            raise
+
     async def get_execution_groups_with_counts(self) -> list[tuple[str, int]]:
         """
         Get all unique group_ids from execution_history with their execution counts.

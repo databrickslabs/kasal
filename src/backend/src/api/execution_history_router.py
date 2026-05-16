@@ -22,6 +22,8 @@ from src.schemas.execution_history import (
     ExecutionHistoryList,
     ExecutionOutputDebugList,
     ExecutionOutputList,
+    UpdateExecutionResultRequest,
+    UpdateExecutionResultResponse,
 )
 from src.services.execution_history_service import (
     ExecutionHistoryService,
@@ -279,6 +281,39 @@ async def get_execution_debug_outputs(
     if not debug_info:
         raise NotFoundError(f"Execution with ID {execution_id} not found")
     return debug_info
+
+
+@router.patch("/{job_id}/result", response_model=UpdateExecutionResultResponse)
+async def update_execution_result(
+    job_id: str,
+    request: UpdateExecutionResultRequest,
+    group_context: GroupContextDep,
+    service: ExecutionHistoryService = Depends(get_execution_history_service),
+):
+    """
+    Update the result data for an execution by job_id.
+
+    Used by the Config Editor to persist edited pipeline configs back to the DB.
+
+    Args:
+        job_id: String ID (UUID) of the execution
+        request: Contains the updated result dict
+        group_context: Group context for tenant filtering
+        service: ExecutionHistoryService instance
+
+    Returns:
+        UpdateExecutionResultResponse with success status
+    """
+    result = await service.update_result(
+        job_id=job_id,
+        result_data=request.result,
+        group_ids=group_context.group_ids,
+    )
+
+    if not result["success"]:
+        raise NotFoundError(f"Execution with job_id {job_id} not found")
+
+    return result
 
 
 @router.delete("/history", response_model=DeleteResponse)

@@ -33,7 +33,9 @@ import {
   AccessTime as TimeIcon,
   Description as DescriptionIcon,
   Refresh as RefreshIcon,
+  EditNote as EditNoteIcon,
 } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
 import {
   HITLService,
   HITLApprovalResponse,
@@ -57,6 +59,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
   onClose,
   onActionComplete,
 }) => {
+  const navigate = useNavigate();
   const [approval, setApproval] = useState<HITLApprovalResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -329,6 +332,47 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
             </Paper>
           </Box>
         )}
+
+        {/* Review in Config Editor — detect pipeline_config in previous_crew_output */}
+        {(() => {
+          if (!approval?.previous_crew_output) return null;
+          const configKeys = ['join_key_map', 'enrichment_joins', 'switch_decompositions', 'filter_sets', 'measure_resolutions'];
+          let configData: Record<string, unknown> | null = null;
+
+          // Try parsing previous_crew_output as JSON containing config keys
+          try {
+            const parsed = JSON.parse(approval.previous_crew_output);
+            if (parsed?.proposed_config) {
+              configData = parsed.proposed_config;
+            } else if (configKeys.some(k => k in (parsed || {}))) {
+              configData = parsed;
+            }
+          } catch { /* not JSON, skip */ }
+
+          if (!configData) return null;
+
+          return (
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<EditNoteIcon />}
+              onClick={() => {
+                onClose();
+                navigate('/config-editor', {
+                  state: {
+                    config: configData,
+                    source: `HITL Review: ${approval.previous_crew_name || 'Unknown crew'}`,
+                    jobId: approval.execution_id,
+                    approvalId: approval.id,
+                  },
+                });
+              }}
+              sx={{ mb: 2 }}
+            >
+              Review &amp; Edit in Config Editor
+            </Button>
+          );
+        })()}
 
         {/* Metadata */}
         <Box display="flex" flexWrap="wrap" gap={2} sx={{ fontSize: '0.85rem' }}>
