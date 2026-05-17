@@ -451,8 +451,15 @@ class TestDatabricksJobsTool(unittest.TestCase):
             return "Results"
         
         with patch.object(tool, '_list_jobs', new_callable=AsyncMock, return_value="Results"):
-            # Mock time.time to simulate > 2 second execution
-            with patch('time.time', side_effect=[0, 2.5]):
+            # Patch time.time in the tool module: first call returns 0 (start),
+            # all subsequent calls return 2.5 (simulates >2s elapsed).
+            _calls = [0]
+            def _mock_time():
+                val = _calls[0]
+                _calls[0] = 2.5
+                return val
+            with patch('src.engines.crewai.tools.custom.databricks_jobs_tool.time.time',
+                       side_effect=_mock_time):
                 result = tool._run(action="list")
                 self.assertIn("⏱️ Performance: Action took", result)
                 self.assertIn("Results", result)
