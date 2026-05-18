@@ -162,11 +162,12 @@ _BROKEN_IMPORT_FILES = {
     "test_base_tool_registry.py",
     "test_crew_config_builder.py",
     "test_company_name_not_null_guardrail.py",
-    "test_chromadb_databricks_storage.py",
-    "test_memory_backend_factory.py",
+    "test_chromadb_databricks_storage.py",  # Causes chromadb EmbeddingFunction conflicts in full suite
+    # "test_memory_backend_factory.py",  # Fixed by crewai.rag stubs in memory/conftest.py
     "test_crew_memory_service.py",
     "test_config_adapter.py",
-    "test_powerbi_analysis_tool.py",
+    # test_powerbi_analysis_tool.py — import errors resolved; re-enabled for
+    # full-suite coverage (was excluded causing ~5.9% coverage in full suite).
     "test_dspy_config.py",
     "test_dspy_config_repository.py",
     "test_agent.py",
@@ -191,12 +192,16 @@ _BROKEN_IMPORT_FILES = {
     "test_mlflow_evaluation_runner.py",
     "test_mlflow_scope_error_handler.py",
     "test_mlflow_tracing_service.py",
+    # Stale outbound-module references under legacy converters directories
+    # (not the services/ subdirectory which has working tests)
+    "test_context.py",
 }
 
 # Also skip converter test directories that have systemic import problems
-_BROKEN_IMPORT_DIRS = {
-    "converters",
-}
+# NOTE: "converters" was previously listed here due to stale import errors.
+# Those have been fixed; converter tests now import real source classes and
+# run with proper coverage.
+_BROKEN_IMPORT_DIRS: set = set()
 
 
 # Configure pytest to ignore certain files and patterns

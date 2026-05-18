@@ -17,11 +17,13 @@ class TestPowerBIConnector:
 
     @pytest.fixture
     def connector_with_token(self):
-        """Create PowerBIConnector with access token"""
+        """Create PowerBIConnector with access token using Info Table mode
+        so that [Name], [IsHidden] etc. bracketed columns are used."""
         return PowerBIConnector(
             semantic_model_id="model123",
             group_id="workspace456",
-            access_token="test_token"
+            access_token="test_token",
+            use_system_schema=False
         )
 
     @pytest.fixture
