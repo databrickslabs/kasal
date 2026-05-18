@@ -171,12 +171,12 @@ class TestAadService:
         token = service_with_service_account.get_access_token()
 
         assert token == "service_account_token_12345"
+        # Source code only adds client_secret to kwargs when it is not None (public client)
         mock_credential_class.assert_called_once_with(
             client_id="test_client_id",
             username="test_user@domain.com",
             password="test_password",
             tenant_id="test_tenant_id",
-            client_secret=None
         )
         mock_credential.get_token.assert_called_once_with(AadService.POWERBI_SCOPE)
 
@@ -518,10 +518,10 @@ class TestAadService:
         token = service.get_access_token()
 
         assert token == "env_token"
+        # Source code only adds client_secret to kwargs when it is not None (public client)
         mock_credential_class.assert_called_once_with(
             client_id="test_client",
             username="env_user@domain.com",
             password="env_password",
             tenant_id="test_tenant",
-            client_secret=None
         )

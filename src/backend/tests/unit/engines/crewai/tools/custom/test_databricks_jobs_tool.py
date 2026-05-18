@@ -2331,5 +2331,685 @@ spark.sql("SELECT * FROM table")
         self.assertIn("- monitor: 0/5", result)
 
 
-if __name__ == '__main__':
+class TestDatabricksJobsToolAdditionalCoverage(unittest.TestCase):
+    """Additional tests targeting uncovered lines."""
+
+    def setUp(self):
+        self.tool_config = {
+            "DATABRICKS_HOST": "test-workspace.cloud.databricks.com",
+            "DATABRICKS_API_KEY": "test-api-key",
+        }
+
+    # ── _run_async_in_sync_context: running-loop branch ──────────────────
+
+    def test_run_async_in_sync_context_no_running_loop(self):
+        """Executes normally when no event loop is running."""
+        from src.engines.crewai.tools.custom.databricks_jobs_tool import (
+            _run_async_in_sync_context,
+        )
+
+        async def coro():
+            return "result"
+
+        result = _run_async_in_sync_context(coro())
+        self.assertEqual(result, "result")
+
+    # ── Schema: submit action validation ─────────────────────────────────
+
+    def test_schema_submit_action_requires_tasks(self):
+        """submit action raises ValueError when tasks is None."""
+        with self.assertRaises(ValueError):
+            DatabricksJobsToolSchema(action="submit")
+
+    def test_schema_get_output_requires_run_id(self):
+        """get_output action raises ValueError when run_id is None."""
+        with self.assertRaises(ValueError):
+            DatabricksJobsToolSchema(action="get_output")
+
+    # ── _make_api_call: GET with data-as-params, query appending ─────────
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.aiohttp.ClientSession")
+    def test_make_api_call_get_data_as_params(self, mock_session_class):
+        """GET request with data but no params — data becomes query params."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value={"jobs": []})
+        mock_response.text = AsyncMock(return_value='{"jobs": []}')
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session = AsyncMock()
+        mock_session.request = MagicMock(return_value=mock_response)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=None)
+        mock_session_class.return_value = mock_session
+
+        result = asyncio.run(
+            tool._make_api_call("GET", "/api/2.2/jobs/list", data={"limit": 10})
+        )
+        self.assertEqual(result, {"jobs": []})
+        # Verify the URL contains the query string
+        call_args = mock_session.request.call_args
+        self.assertIn("limit=10", call_args[1]["url"])
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.aiohttp.ClientSession")
+    def test_make_api_call_url_already_has_query(self, mock_session_class):
+        """Query params are appended with & when URL already contains ?."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value={})
+        mock_response.text = AsyncMock(return_value="{}")
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session = AsyncMock()
+        mock_session.request = MagicMock(return_value=mock_response)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=None)
+        mock_session_class.return_value = mock_session
+
+        result = asyncio.run(
+            tool._make_api_call(
+                "GET", "/api/2.2/jobs/list?foo=bar", params={"limit": 5}
+            )
+        )
+        call_args = mock_session.request.call_args
+        self.assertIn("&limit=5", call_args[1]["url"])
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.aiohttp.ClientSession")
+    def test_make_api_call_401_error(self, mock_session_class):
+        """401 Unauthorized response raises with auth error message."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+
+        mock_response = AsyncMock()
+        mock_response.status = 401
+        mock_response.text = AsyncMock(return_value="Unauthorized")
+        mock_response.headers = {}
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session = AsyncMock()
+        mock_session.request = MagicMock(return_value=mock_response)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=None)
+        mock_session_class.return_value = mock_session
+
+        with self.assertRaises(Exception) as cm:
+            asyncio.run(tool._make_api_call("GET", "/api/2.2/jobs/list"))
+        self.assertIn("401", str(cm.exception))
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.aiohttp.ClientSession")
+    def test_make_api_call_403_error(self, mock_session_class):
+        """403 Forbidden response raises."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+
+        mock_response = AsyncMock()
+        mock_response.status = 403
+        mock_response.text = AsyncMock(return_value="Forbidden")
+        mock_response.headers = {}
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session = AsyncMock()
+        mock_session.request = MagicMock(return_value=mock_response)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=None)
+        mock_session_class.return_value = mock_session
+
+        with self.assertRaises(Exception) as cm:
+            asyncio.run(tool._make_api_call("GET", "/api/2.2/jobs/list"))
+        self.assertIn("403", str(cm.exception))
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.aiohttp.ClientSession")
+    def test_make_api_call_404_error(self, mock_session_class):
+        """404 Not Found response raises."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+
+        mock_response = AsyncMock()
+        mock_response.status = 404
+        mock_response.text = AsyncMock(return_value="Not Found")
+        mock_response.headers = {}
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session = AsyncMock()
+        mock_session.request = MagicMock(return_value=mock_response)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=None)
+        mock_session_class.return_value = mock_session
+
+        with self.assertRaises(Exception) as cm:
+            asyncio.run(tool._make_api_call("GET", "/api/2.2/jobs/list"))
+        self.assertIn("404", str(cm.exception))
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.aiohttp.ClientSession")
+    def test_make_api_call_json_parse_error(self, mock_session_class):
+        """200 response with invalid JSON raises."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.text = AsyncMock(return_value="not json at all")
+        mock_response.json = AsyncMock(side_effect=Exception("JSON decode error"))
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session = AsyncMock()
+        mock_session.request = MagicMock(return_value=mock_response)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=None)
+        mock_session_class.return_value = mock_session
+
+        with self.assertRaises(Exception):
+            asyncio.run(tool._make_api_call("GET", "/api/2.2/jobs/list"))
+
+    # ── list_jobs: pagination with has_more ───────────────────────────────
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_list_jobs_pagination(self, mock_api_call):
+        """List jobs follows pagination tokens until has_more=False."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+
+        page1_jobs = [
+            {
+                "job_id": i,
+                "settings": {"name": f"Job {i}", "tasks": []},
+                "creator_user_name": "user@example.com",
+            }
+            for i in range(1, 4)
+        ]
+        page2_jobs = [
+            {
+                "job_id": i,
+                "settings": {"name": f"Job {i}", "tasks": []},
+                "creator_user_name": "user@example.com",
+            }
+            for i in range(4, 6)
+        ]
+
+        mock_api_call.side_effect = [
+            {"jobs": page1_jobs, "has_more": True, "next_page_token": "tok1"},
+            {"jobs": page2_jobs, "has_more": False},
+        ]
+
+        result = asyncio.run(tool._list_jobs(limit=100))
+        self.assertIn("Found 5 jobs", result)
+
+    # ── list_my_jobs: pagination with has_more ────────────────────────────
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_list_my_jobs_pagination(self, mock_api_call):
+        """list_my_jobs follows pagination."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+
+        page1_jobs = [
+            {
+                "job_id": i,
+                "settings": {"name": f"Job {i}", "tasks": []},
+                "creator_user_name": "user@example.com",
+            }
+            for i in range(1, 4)
+        ]
+        page2_jobs = [
+            {
+                "job_id": i,
+                "settings": {"name": f"Job {i}", "tasks": []},
+                "creator_user_name": "user@example.com",
+            }
+            for i in range(4, 6)
+        ]
+
+        mock_api_call.side_effect = [
+            {"userName": "user@example.com"},
+            {"jobs": page1_jobs, "has_more": True, "next_page_token": "tok1"},
+            {"jobs": page2_jobs, "has_more": False},
+        ]
+
+        result = asyncio.run(tool._list_my_jobs(limit=100))
+        self.assertIn("Found 5 jobs created by user@example.com", result)
+
+    # ── _format_job_list: spark_jar, pipeline, dbt task types ────────────
+
+    def test_format_job_list_spark_jar_task(self):
+        """Spark JAR tasks are formatted with (Spark JAR: <class>)."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+        jobs = [
+            {
+                "job_id": 1,
+                "settings": {
+                    "name": "Spark Job",
+                    "tasks": [{"spark_jar_task": {"main_class_name": "com.example.Main"}}],
+                },
+                "creator_user_name": "u@ex.com",
+            }
+        ]
+        result = tool._format_job_list(jobs)
+        self.assertIn("Spark JAR", result)
+
+    def test_format_job_list_pipeline_task(self):
+        """Pipeline tasks are labelled Pipeline."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+        jobs = [
+            {
+                "job_id": 1,
+                "settings": {
+                    "name": "Pipeline Job",
+                    "tasks": [{"pipeline_task": {"pipeline_id": "p-123"}}],
+                },
+                "creator_user_name": "u@ex.com",
+            }
+        ]
+        result = tool._format_job_list(jobs)
+        self.assertIn("Pipeline", result)
+
+    def test_format_job_list_dbt_task(self):
+        """dbt tasks are labelled dbt."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+        jobs = [
+            {
+                "job_id": 1,
+                "settings": {
+                    "name": "dbt Job",
+                    "tasks": [{"dbt_task": {}}],
+                },
+                "creator_user_name": "u@ex.com",
+            }
+        ]
+        result = tool._format_job_list(jobs)
+        self.assertIn("dbt", result)
+
+    def test_format_job_list_without_creator(self):
+        """format_job_list with include_creator=False omits creator column."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+        jobs = [
+            {
+                "job_id": 1,
+                "settings": {"name": "Job", "tasks": []},
+                "creator_user_name": "u@ex.com",
+            }
+        ]
+        result = tool._format_job_list(jobs, include_creator=False)
+        self.assertNotIn("Creator:", result)
+        self.assertIn("ID: 1", result)
+
+    # ── _get_job: spark_jar, pipeline, dbt task type branches ────────────
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_get_job_spark_jar_pipeline_dbt_tasks(self, mock_api_call):
+        """Get job with spark_jar, pipeline, and dbt tasks reports them correctly."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+
+        mock_api_call.side_effect = [
+            {
+                "job_id": 1,
+                "settings": {
+                    "name": "Multi Task Job",
+                    "tasks": [
+                        {"task_key": "jar_task", "spark_jar_task": {"main_class_name": "Main"}},
+                        {"task_key": "pipe_task", "pipeline_task": {"pipeline_id": "p1"}},
+                        {"task_key": "dbt_task", "dbt_task": {}},
+                        {"task_key": "other_task"},  # unknown type
+                    ],
+                },
+                "creator_user_name": "u@ex.com",
+            },
+            {"runs": []},
+        ]
+
+        result = asyncio.run(tool._get_job(1))
+        self.assertIn("jar_task (Spark JAR: Main)", result)
+        self.assertIn("pipe_task (Pipeline: p1)", result)
+        self.assertIn("dbt_task (dbt)", result)
+        self.assertIn("other_task", result)
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_get_job_with_canceled_run(self, mock_api_call):
+        """Monitor run cancelled emoji is shown for CANCELED result_state."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+
+        mock_api_call.side_effect = [
+            {"job_id": 1, "settings": {"name": "Job"}, "creator_user_name": "u@ex.com"},
+            {
+                "runs": [
+                    {
+                        "run_id": 10,
+                        "state": {"life_cycle_state": "TERMINATED", "result_state": "CANCELED"},
+                        "start_time": 1640995200000,
+                    }
+                ]
+            },
+        ]
+
+        result = asyncio.run(tool._get_job(1))
+        # CANCELED result: emoji is 🟡 (not SUCCESS/FAILED)
+        self.assertIn("Run 10: TERMINATED (CANCELED)", result)
+
+    # ── _monitor_run: CANCELED state ─────────────────────────────────────
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_monitor_run_canceled(self, mock_api_call):
+        """Canceled run shows 🚫 emoji."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+
+        mock_api_call.return_value = {
+            "run_id": 456,
+            "job_id": 123,
+            "state": {
+                "life_cycle_state": "TERMINATED",
+                "result_state": "CANCELED",
+                "state_message": "",
+            },
+            "start_time": 1641081600000,
+            "end_time": 1641081700000,
+        }
+
+        result = asyncio.run(tool._monitor_run(456))
+        self.assertIn("🚫 Job ID: 123", result)
+        self.assertIn("CANCELED", result)
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_monitor_run_task_canceled(self, mock_api_call):
+        """Task with CANCELED result gets 🚫 emoji."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+
+        mock_api_call.return_value = {
+            "run_id": 456,
+            "job_id": 123,
+            "state": {"life_cycle_state": "TERMINATED", "result_state": "CANCELED"},
+            "tasks": [
+                {
+                    "task_key": "t1",
+                    "state": {"life_cycle_state": "TERMINATED", "result_state": "CANCELED"},
+                }
+            ],
+        }
+
+        result = asyncio.run(tool._monitor_run(456))
+        self.assertIn("🚫 t1: TERMINATED (CANCELED)", result)
+
+    # ── _run_job: list params ─────────────────────────────────────────────
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_run_job_with_list_params(self, mock_api_call):
+        """run_job with list params uses python_params key."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+
+        mock_api_call.side_effect = [
+            {"run_id": 789},
+            {"state": {"life_cycle_state": "RUNNING"}},
+        ]
+
+        result = asyncio.run(tool._run_job(1, ["--arg1", "val1"]))
+        self.assertIn("Successfully triggered job 1", result)
+        # python_params path
+        call_payload = mock_api_call.call_args_list[0][0][2]  # third positional arg
+        self.assertIn("python_params", call_payload)
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_run_job_with_result_state(self, mock_api_call):
+        """run_job shows result_state in output if returned."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+
+        mock_api_call.side_effect = [
+            {"run_id": 100},
+            {
+                "state": {
+                    "life_cycle_state": "TERMINATED",
+                    "result_state": "SUCCESS",
+                }
+            },
+        ]
+
+        result = asyncio.run(tool._run_job(1, {"key": "val"}))
+        self.assertIn("TERMINATED (SUCCESS)", result)
+        self.assertIn("Parameters passed:", result)
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_run_job_status_check_fails_with_params(self, mock_api_call):
+        """run_job status-check-failed path still shows params."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+
+        mock_api_call.side_effect = [
+            {"run_id": 100},
+            Exception("status check failed"),
+        ]
+
+        result = asyncio.run(tool._run_job(1, {"key": "val"}))
+        self.assertIn("Parameters passed:", result)
+
+    # ── _get_run_output ───────────────────────────────────────────────────
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_get_run_output_notebook_output(self, mock_api_call):
+        """get_run_output shows notebook result and truncation warning."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+
+        mock_api_call.return_value = {
+            "notebook_output": {"result": "my result", "truncated": True}
+        }
+
+        result = asyncio.run(tool._get_run_output(1))
+        self.assertIn("Notebook Output:", result)
+        self.assertIn("my result", result)
+        self.assertIn("truncated", result)
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_get_run_output_notebook_empty_result(self, mock_api_call):
+        """get_run_output shows (empty) when notebook result is empty string."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+
+        mock_api_call.return_value = {
+            "notebook_output": {"result": "", "truncated": False}
+        }
+
+        result = asyncio.run(tool._get_run_output(1))
+        self.assertIn("(empty)", result)
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_get_run_output_error_and_trace(self, mock_api_call):
+        """get_run_output shows error and truncated trace."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+
+        long_trace = "Traceback " + "x" * 2100
+        mock_api_call.return_value = {
+            "error": "Something went wrong",
+            "error_trace": long_trace,
+        }
+
+        result = asyncio.run(tool._get_run_output(1))
+        self.assertIn("Error: Something went wrong", result)
+        self.assertIn("Error Trace:", result)
+        self.assertIn("truncated", result)
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_get_run_output_sql_output(self, mock_api_call):
+        """get_run_output shows SQL output sections."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+
+        mock_api_call.return_value = {
+            "sql_output": {
+                "query_output": {
+                    "query_text": "SELECT 1",
+                    "warehouse_id": "wh-123",
+                    "output_link": "https://example.com",
+                },
+                "dashboard_output": {"widgets": [{"id": "w1"}]},
+                "alert_output": {"alert_state": "TRIGGERED"},
+            }
+        }
+
+        result = asyncio.run(tool._get_run_output(1))
+        self.assertIn("SQL Output:", result)
+        self.assertIn("SELECT 1", result)
+        self.assertIn("wh-123", result)
+        self.assertIn("https://example.com", result)
+        self.assertIn("Dashboard Widgets: 1", result)
+        self.assertIn("Alert State: TRIGGERED", result)
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_get_run_output_run_job_output(self, mock_api_call):
+        """get_run_output shows run_job_output section."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+
+        mock_api_call.return_value = {"run_job_output": {"run_id": 999}}
+
+        result = asyncio.run(tool._get_run_output(1))
+        self.assertIn("Run Job Output:", result)
+        self.assertIn("Triggered Run ID: 999", result)
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_get_run_output_metadata(self, mock_api_call):
+        """get_run_output shows metadata run state."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+
+        mock_api_call.return_value = {
+            "notebook_output": {"result": "ok"},
+            "metadata": {
+                "state": {
+                    "life_cycle_state": "TERMINATED",
+                    "result_state": "SUCCESS",
+                    "state_message": "All done",
+                }
+            },
+        }
+
+        result = asyncio.run(tool._get_run_output(1))
+        self.assertIn("Run State: TERMINATED (SUCCESS)", result)
+        self.assertIn("Message: All done", result)
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_get_run_output_no_output(self, mock_api_call):
+        """get_run_output shows 'No output data available' when empty."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+
+        mock_api_call.return_value = {}
+
+        result = asyncio.run(tool._get_run_output(1))
+        self.assertIn("No output data available", result)
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_get_run_output_error(self, mock_api_call):
+        """get_run_output handles API exception."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+        mock_api_call.side_effect = Exception("API Error")
+
+        result = asyncio.run(tool._get_run_output(1))
+        self.assertIn("Error getting run output: API Error", result)
+
+    # ── _submit_run ───────────────────────────────────────────────────────
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_submit_run_success_notebook(self, mock_api_call):
+        """submit_run with notebook task returns run info."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+        mock_api_call.return_value = {"run_id": 555}
+
+        tasks = [{"task_key": "t1", "notebook_task": {"notebook_path": "/test"}}]
+        result = asyncio.run(tool._submit_run(tasks, run_name="My Run"))
+
+        self.assertIn("Successfully submitted one-time run", result)
+        self.assertIn("'My Run'", result)
+        self.assertIn("Run ID: 555", result)
+        self.assertIn("t1: Notebook (/test)", result)
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_submit_run_python_task(self, mock_api_call):
+        """submit_run with python task."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+        mock_api_call.return_value = {"run_id": 555}
+
+        tasks = [{"task_key": "t1", "python_task": {"python_file": "script.py"}}]
+        result = asyncio.run(tool._submit_run(tasks))
+        self.assertIn("t1: Python (script.py)", result)
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_submit_run_sql_task(self, mock_api_call):
+        """submit_run with SQL task."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+        mock_api_call.return_value = {"run_id": 555}
+
+        tasks = [{"task_key": "t1", "sql_task": {}}]
+        result = asyncio.run(tool._submit_run(tasks))
+        self.assertIn("t1: SQL Task", result)
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_submit_run_other_task(self, mock_api_call):
+        """submit_run with unknown task type falls back to Other."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+        mock_api_call.return_value = {"run_id": 555}
+
+        tasks = [{"task_key": "t1"}]
+        result = asyncio.run(tool._submit_run(tasks))
+        self.assertIn("t1: Other", result)
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_submit_run_with_dict_params(self, mock_api_call):
+        """submit_run with dict params wraps as job_parameters."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+        mock_api_call.return_value = {"run_id": 555}
+
+        tasks = [{"task_key": "t1"}]
+        result = asyncio.run(tool._submit_run(tasks, job_params={"k": "v"}))
+        self.assertIn("Parameters passed:", result)
+        payload = mock_api_call.call_args[0][2]
+        self.assertIn("job_parameters", payload)
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_submit_run_with_list_params(self, mock_api_call):
+        """submit_run with list params uses python_params."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+        mock_api_call.return_value = {"run_id": 555}
+
+        tasks = [{"task_key": "t1"}]
+        result = asyncio.run(tool._submit_run(tasks, job_params=["--a", "b"]))
+        payload = mock_api_call.call_args[0][2]
+        self.assertIn("python_params", payload)
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_submit_run_no_run_id(self, mock_api_call):
+        """submit_run returns error when no run_id in response."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+        mock_api_call.return_value = {}
+
+        tasks = [{"task_key": "t1"}]
+        result = asyncio.run(tool._submit_run(tasks))
+        self.assertIn("Error: No run_id returned", result)
+
+    @patch("src.engines.crewai.tools.custom.databricks_jobs_tool.DatabricksJobsTool._make_api_call")
+    def test_submit_run_api_error(self, mock_api_call):
+        """submit_run handles API exception."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+        mock_api_call.side_effect = Exception("API Error")
+
+        tasks = [{"task_key": "t1"}]
+        result = asyncio.run(tool._submit_run(tasks))
+        self.assertIn("Error submitting one-time run: API Error", result)
+
+    # ── _run: submit action via _run dispatch ─────────────────────────────
+
+    def test_run_submit_action(self):
+        """_run with submit action dispatches to _submit_run."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+        tasks = [{"task_key": "t1", "notebook_task": {"notebook_path": "/p"}}]
+
+        with patch.object(tool, "_submit_run", return_value="submitted") as mock_submit:
+            result = tool._run(action="submit", tasks=tasks)
+            self.assertIn("submitted", result)
+            mock_submit.assert_called_once()
+
+    def test_run_get_output_action(self):
+        """_run with get_output action dispatches to _get_run_output."""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+
+        with patch.object(tool, "_get_run_output", return_value="output") as mock_output:
+            result = tool._run(action="get_output", run_id=42)
+            self.assertIn("output", result)
+            mock_output.assert_called_once_with(42)
+
+
+if __name__ == "__main__":
     unittest.main()
