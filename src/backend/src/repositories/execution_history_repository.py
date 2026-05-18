@@ -721,13 +721,20 @@ class ExecutionHistoryRepository:
                 logger.warning(f"No execution found with job_id: {job_id}")
                 return False
 
-            # Store in checkpoint_data.edited_config so the flow's final
-            # crew output cannot overwrite the user's edits.
+            import json as _json
+
+            # Update the result field directly so tools (e.g. UCMV Validator)
+            # that read from result see the user's edits.
+            execution.result = _json.dumps(result_data, ensure_ascii=False)
+
+            # Also keep a copy in checkpoint_data.edited_config so the flow's
+            # final crew output cannot overwrite the user's edits on re-run.
             checkpoint_data = execution.checkpoint_data or {}
             checkpoint_data["edited_config"] = result_data
             execution.checkpoint_data = checkpoint_data
+
             await self.session.flush()
-            logger.info(f"Saved edited_config in checkpoint_data for job_id: {job_id}")
+            logger.info(f"Saved edited result and edited_config for job_id: {job_id}")
             return True
 
         except Exception as e:

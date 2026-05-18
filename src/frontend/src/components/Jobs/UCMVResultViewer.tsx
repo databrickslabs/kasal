@@ -31,6 +31,7 @@ import {
   IconButton,
   Tooltip,
   Alert,
+  Snackbar,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import StorageIcon from '@mui/icons-material/Storage';
@@ -290,6 +291,7 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
   // Save state
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // The "live" YAML for the selected view — draft if editing, else original
   const currentYaml = editingYaml[selected] ?? result.yaml[selected] ?? '';
@@ -423,10 +425,13 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
     if (!onSave) return;
     setIsSaving(true);
     setSaveSuccess(false);
+    setSaveError(null);
     try {
       await onSave(buildEditedResult());
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Save failed');
     } finally {
       setIsSaving(false);
     }
@@ -744,6 +749,20 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
           </Box>
         </>
       )}
+
+      {/* Save feedback */}
+      <Snackbar open={saveSuccess} autoHideDuration={3000} onClose={() => setSaveSuccess(false)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+        <Alert severity="success" variant="filled" sx={{ width: '100%' }}>
+          Changes saved to database
+        </Alert>
+      </Snackbar>
+      <Snackbar open={!!saveError} autoHideDuration={5000} onClose={() => setSaveError(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+        <Alert severity="error" variant="filled" sx={{ width: '100%' }}>
+          Save failed: {saveError}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };
