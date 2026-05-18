@@ -44,6 +44,8 @@ import EditOffIcon from '@mui/icons-material/EditOff';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import UndoIcon from '@mui/icons-material/Undo';
 import DownloadIcon from '@mui/icons-material/Download';
+import SaveIcon from '@mui/icons-material/Save';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import Button from '@mui/material/Button';
 import { Highlight, themes } from 'prism-react-renderer';
 import yaml from 'js-yaml';
@@ -85,6 +87,8 @@ interface UCMVResultViewerProps {
   editable?: boolean;
   /** Called whenever the user edits YAML. Returns the full updated result. */
   onResultChange?: (updated: UCMVResult) => void;
+  /** Called when user clicks Save — persists current edits to the database. */
+  onSave?: (updated: UCMVResult) => Promise<void>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -273,7 +277,7 @@ const Section: React.FC<{
 /*  Main component                                                     */
 /* ------------------------------------------------------------------ */
 
-const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = false, onResultChange }) => {
+const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = false, onResultChange, onSave }) => {
   const viewNames = useMemo(() => Object.keys(result.yaml).sort(), [result.yaml]);
   const [selected, setSelected] = useState(viewNames[0] ?? '');
 
@@ -283,6 +287,9 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
   const [yamlErrors, setYamlErrors] = useState<Record<string, string>>({});
   // Track which views have been removed
   const [removedViews, setRemovedViews] = useState<Set<string>>(new Set());
+  // Save state
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   // The "live" YAML for the selected view — draft if editing, else original
   const currentYaml = editingYaml[selected] ?? result.yaml[selected] ?? '';
@@ -412,6 +419,19 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
   const isEditing = selected in editingYaml;
   const hasEdits = Object.keys(editingYaml).length > 0 || removedViews.size > 0;
 
+  const handleSave = useCallback(async () => {
+    if (!onSave) return;
+    setIsSaving(true);
+    setSaveSuccess(false);
+    try {
+      await onSave(buildEditedResult());
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [onSave, buildEditedResult]);
+
   // Download a single YAML file
   const handleDownloadYaml = useCallback((tableName: string) => {
     const yamlContent = result.yaml[tableName];
@@ -477,6 +497,18 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
           <Chip size="small" label="edited" color="warning" variant="filled" />
         )}
         <Box sx={{ ml: 'auto', display: 'flex', gap: 1 }}>
+          {editable && onSave && hasEdits && (
+            <Button
+              size="small"
+              variant="contained"
+              color={saveSuccess ? 'success' : 'primary'}
+              startIcon={saveSuccess ? <CheckCircleIcon /> : <SaveIcon />}
+              onClick={handleSave}
+              disabled={isSaving}
+            >
+              {isSaving ? 'Saving…' : saveSuccess ? 'Saved' : 'Save Changes'}
+            </Button>
+          )}
           <Button
             size="small"
             variant="outlined"

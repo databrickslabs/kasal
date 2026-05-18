@@ -37,9 +37,9 @@ import { ShowResultProps } from '../../types/common';
 import { ResultValue } from '../../types/result';
 import { generateRunPDF } from '../../utils/pdfGenerator';
 import { DatabricksService } from '../../api/DatabricksService';
-import UCMVResultViewer, { isUCMVResult } from './UCMVResultViewer';
+import UCMVResultViewer, { isUCMVResult, UCMVResult } from './UCMVResultViewer';
 import ValidatorResultViewer, { isValidatorResult } from './ValidatorResultViewer';
-// import { Run } from '../../api/ExecutionHistoryService';
+import { runService } from '../../api/ExecutionHistoryService';
 
 // eslint-disable-next-line react/prop-types
 const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
@@ -52,6 +52,19 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
   const dialogRef = useRef<HTMLDivElement>(null);
   // Track if the dialog has been opened at least once
   const hasOpenedRef = useRef(false);
+  // Track latest edited UCMV result for save
+  const editedUcmvResult = useRef<UCMVResult | null>(null);
+
+  // Save handler for UCMVResultViewer edits
+  const handleSaveUcmvResult = useCallback(async (updated: UCMVResult) => {
+    const jobId = run?.job_id;
+    if (!jobId) return;
+    editedUcmvResult.current = updated;
+    await runService.updateExecutionResult(
+      jobId,
+      updated as unknown as Record<string, unknown>
+    );
+  }, [run?.job_id]);
 
   // Function to check for Databricks volume information from configuration
   const checkForDatabricksVolumeInfo = useCallback(async (resultData: Record<string, unknown>) => {
@@ -700,7 +713,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
           const inner = JSON.parse(entries[0][1] as string);
           if (typeof inner === 'object' && inner !== null) {
             if (isUCMVResult(inner)) {
-              return <UCMVResultViewer result={inner as Parameters<typeof UCMVResultViewer>[0]['result']} />;
+              return <UCMVResultViewer result={inner as Parameters<typeof UCMVResultViewer>[0]['result']} editable={!!run?.job_id} onSave={run?.job_id ? handleSaveUcmvResult : undefined} />;
             }
             if (isValidatorResult(inner)) {
               return <ValidatorResultViewer result={inner as Parameters<typeof ValidatorResultViewer>[0]['result']} />;
@@ -711,7 +724,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
 
       // UCMV Builder result: structured metric-view display
       if (isUCMVResult(parsed)) {
-        return <UCMVResultViewer result={parsed as Parameters<typeof UCMVResultViewer>[0]['result']} />;
+        return <UCMVResultViewer result={parsed as Parameters<typeof UCMVResultViewer>[0]['result']} editable={!!run?.job_id} onSave={run?.job_id ? handleSaveUcmvResult : undefined} />;
       }
 
       // UCMV Quality Validator result: green/amber/red quality report
