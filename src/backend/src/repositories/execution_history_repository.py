@@ -723,18 +723,29 @@ class ExecutionHistoryRepository:
 
             import json as _json
 
-            # Update the result field directly so tools (e.g. UCMV Validator)
-            # that read from result see the user's edits.
-            execution.result = _json.dumps(result_data, ensure_ascii=False)
+            # Detect the type of result being saved so we use a dedicated
+            # checkpoint_data key and never collide with other tools.
+            is_ucmv = isinstance(result_data, dict) and 'yaml' in result_data and 'sql' in result_data
+            is_config = isinstance(result_data, dict) and 'join_key_map' in result_data
 
-            # Also keep a copy in checkpoint_data.edited_config so the flow's
-            # final crew output cannot overwrite the user's edits on re-run.
             checkpoint_data = execution.checkpoint_data or {}
-            checkpoint_data["edited_config"] = result_data
-            execution.checkpoint_data = checkpoint_data
 
+            if is_ucmv:
+                # UCMV Generator edit: use a dedicated key so Config Generator
+                # saves (which also use edited_config) never overwrite it.
+                checkpoint_data["ucmv_yaml_edits"] = result_data
+                logger.info(f"Saved UCMV yaml edits to checkpoint_data.ucmv_yaml_edits for job_id: {job_id}")
+            elif is_config:
+                # Config Generator edit: keep using edited_config (existing behaviour)
+                checkpoint_data["edited_config"] = result_data
+                logger.info(f"Saved config edits to checkpoint_data.edited_config for job_id: {job_id}")
+            else:
+                # Generic: store under edited_config as before
+                checkpoint_data["edited_config"] = result_data
+
+            execution.checkpoint_data = checkpoint_data
             await self.session.flush()
-            logger.info(f"Saved edited result and edited_config for job_id: {job_id}")
+            logger.info(f"Saved edited result for job_id: {job_id}")
             return True
 
         except Exception as e:

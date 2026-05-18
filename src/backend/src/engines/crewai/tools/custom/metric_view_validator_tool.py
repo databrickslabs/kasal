@@ -69,6 +69,18 @@ class MetricViewValidatorTool(BaseTool):
         yaml_raw = _get('yaml_content') or '{}'
         measures_raw = _get('measures_json') or '[]'
 
+        # Always check for user-saved edits in executionhistory first.
+        # If the user edited the UCMV output via the UI and saved it, the
+        # edited version is stored in checkpoint_data.edited_config and in
+        # the result field. Prefer that over whatever the flow passed in.
+        try:
+            saved = self._fetch_saved_ucmv_edits_from_db()
+            if saved and isinstance(saved, dict) and 'yaml' in saved:
+                logger.info("[Validator] Found user-saved UCMV edits — using edited YAML instead of flow-passed output")
+                ucmv_raw = json.dumps(saved)
+        except Exception as _e:
+            logger.debug(f"[Validator] Could not check for saved edits: {_e}")
+
         try:
             # If ucmv_output is provided, extract yaml from it
             if ucmv_raw:
@@ -288,6 +300,56 @@ class MetricViewValidatorTool(BaseTool):
             return loop.run_until_complete(_query())
         except Exception:
             return asyncio.run(_query())
+
+    @staticmethod
+    def _fetch_saved_ucmv_edits_from_db() -> dict:
+        """
+        Check executionhistory for the most recent UCMV Generator result that has
+        user-saved edits (stored in checkpoint_data.edited_config or result field).
+
+        Returns the edited UCMV result dict if found, otherwise empty dict.
+        """
+        import asyncio
+        from sqlalchemy import text
+
+        async def _query():
+            from src.db.session import async_session_factory
+            async with async_session_factory() as session:
+                # Look for the dedicated UCMV yaml edits key written by the
+                # save button in the UI (separate from Config Generator's
+                # edited_config to avoid collisions in a multi-step flow).
+                result = await session.execute(text("""
+                    SELECT checkpoint_data::text
+                    FROM executionhistory
+                    WHERE checkpoint_data::text LIKE '%ucmv_yaml_edits%'
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """))
+                row = result.fetchone()
+                if row and row[0]:
+                    try:
+                        cp = json.loads(row[0])
+                        edits = cp.get('ucmv_yaml_edits', {})
+                        if isinstance(edits, dict) and 'yaml' in edits:
+                            logger.info("[Validator] Using user-edited UCMV YAML from checkpoint_data.ucmv_yaml_edits")
+                            return edits
+                    except Exception:
+                        pass
+                return {}
+
+        try:
+            import asyncio as _asyncio
+            loop = _asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    return pool.submit(lambda: _asyncio.run(_query())).result(timeout=10)
+            return loop.run_until_complete(_query())
+        except Exception:
+            try:
+                return asyncio.run(_query())
+            except Exception:
+                return {}
 
     @staticmethod
     def _fetch_latest_ucmv_from_db() -> dict:
