@@ -71,17 +71,30 @@ class MetricViewValidatorTool(BaseTool):
         yaml_raw = _get('yaml_content') or '{}'
         measures_raw = _get('measures_json') or '[]'
 
-        # Always check for user-saved edits in executionhistory first.
-        # If the user edited the UCMV output via the UI and saved it, the
-        # edited version is stored in checkpoint_data.edited_config and in
-        # the result field. Prefer that over whatever the flow passed in.
+        # HIGHEST PRIORITY: check /tmp/ucmv_user_edits.json written by the API
+        # when the user saves edits from the UI. This file is accessible to the
+        # subprocess (shared /tmp in the container) unlike the DB.
         try:
-            saved = self._fetch_saved_ucmv_edits_from_db()
-            if saved and isinstance(saved, dict) and 'yaml' in saved:
-                logger.info("[Validator] Found user-saved UCMV edits — using edited YAML instead of flow-passed output")
-                ucmv_raw = json.dumps(saved)
-        except Exception as _e:
-            logger.debug(f"[Validator] Could not check for saved edits: {_e}")
+            _user_edits_path = '/tmp/ucmv_user_edits.json'
+            if os.path.exists(_user_edits_path):
+                with open(_user_edits_path) as _f:
+                    _user_edits = json.load(_f)
+                if isinstance(_user_edits, dict) and 'yaml' in _user_edits:
+                    logger.info(f"[Validator] Found user-saved UCMV edits in {_user_edits_path} — using over flow output")
+                    ucmv_raw = json.dumps(_user_edits)
+        except Exception as _ue:
+            logger.debug(f"[Validator] Could not read user edits from /tmp: {_ue}")
+
+        # Also check DB for user-saved edits (works locally, fails in deployed env).
+        # Only try DB if the /tmp user-edits file wasn't found.
+        if not os.path.exists('/tmp/ucmv_user_edits.json'):
+            try:
+                saved = self._fetch_saved_ucmv_edits_from_db()
+                if saved and isinstance(saved, dict) and 'yaml' in saved:
+                    logger.info("[Validator] Found user-saved UCMV edits in DB — using edited YAML instead of flow-passed output")
+                    ucmv_raw = json.dumps(saved)
+            except Exception as _e:
+                logger.debug(f"[Validator] Could not check for saved edits: {_e}")
 
         try:
             # If ucmv_output is provided, extract yaml from it

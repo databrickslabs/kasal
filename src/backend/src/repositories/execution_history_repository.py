@@ -735,6 +735,16 @@ class ExecutionHistoryRepository:
                 # saves (which also use edited_config) never overwrite it.
                 checkpoint_data["ucmv_yaml_edits"] = result_data
                 logger.info(f"Saved UCMV yaml edits to checkpoint_data.ucmv_yaml_edits for job_id: {job_id}")
+                # Also write to /tmp so the Validator subprocess can read the
+                # user's edits (subprocess can't connect to DB in deployed env).
+                try:
+                    import os as _os
+                    _tmp_path = '/tmp/ucmv_user_edits.json'
+                    with open(_tmp_path, 'w') as _f:
+                        _json.dump(result_data, _f)
+                    logger.info(f"[UCMV] Wrote user edits to {_tmp_path} for validator subprocess access")
+                except Exception as _tmp_err:
+                    logger.debug(f"[UCMV] Could not write user edits to /tmp: {_tmp_err}")
             elif is_config:
                 # Config Generator edit: keep using edited_config (existing behaviour)
                 checkpoint_data["edited_config"] = result_data
