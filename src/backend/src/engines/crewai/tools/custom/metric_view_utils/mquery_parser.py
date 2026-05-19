@@ -19,13 +19,19 @@ from .data_classes import TableInfo
 class MQueryParser:
     """Parse MQuery conversion report (JSON or Excel) and extract table structure per table."""
 
-    def parse_json(self, json_path: str | list[dict]) -> dict[str, TableInfo]:
-        """Parse mquery_transpilation JSON — accepts file path or raw list."""
-        if isinstance(json_path, list):
+    def parse_json(self, json_path) -> dict[str, TableInfo]:
+        """Parse mquery_transpilation JSON — accepts file path, raw list, or JSON string."""
+        if isinstance(json_path, (list, dict)):
             entries = json_path
+        elif isinstance(json_path, str):
+            stripped = json_path.strip()
+            if stripped.startswith(('{', '[')):
+                entries = json.loads(stripped)
+            else:
+                with open(json_path) as f:
+                    entries = json.load(f)
         else:
-            with open(json_path) as f:
-                entries = json.load(f)
+            entries = json_path
         tables: dict[str, TableInfo] = {}
         for entry in entries:
             table_name = entry.get('table_name', '')
