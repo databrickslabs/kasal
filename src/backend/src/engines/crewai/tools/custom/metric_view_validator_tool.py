@@ -44,7 +44,9 @@ class MetricViewValidatorTool(BaseTool):
 
     def __init__(self, **kwargs: Any) -> None:
         config_keys = ('ucmv_output', 'yaml_content', 'measures_json')
-        default_config = {}
+        # Always seed ucmv_output so flow_methods.py injection check
+        # (`'ucmv_output' in tool._default_config`) matches this tool.
+        default_config: dict = {'ucmv_output': None}
         for key in config_keys:
             val = kwargs.pop(key, None)
             if val is not None:
@@ -122,6 +124,28 @@ class MetricViewValidatorTool(BaseTool):
                 logger.info(f"[Validator] Fetched {len(measures)} measures from DB")
             except Exception as db_err:
                 logger.warning(f"[Validator] Measures DB fallback failed: {db_err}")
+
+        # Final fallback: read from /tmp file written by the UCMV Generator tool
+        # (covers the edge case where flow injection into _default_config failed)
+        if not yaml_tables:
+            logger.info("[Validator] No YAML after DB fallback — checking /tmp for Generator output")
+            try:
+                import glob as _glob
+                _tmp_files = sorted(
+                    _glob.glob('/tmp/ucmv_latest_*.json'),
+                    key=lambda p: os.path.getmtime(p),
+                    reverse=True,
+                )
+                if _tmp_files:
+                    with open(_tmp_files[0]) as _f:
+                        _tmp_data = json.load(_f)
+                    if isinstance(_tmp_data, dict) and 'yaml' in _tmp_data:
+                        yaml_tables = _tmp_data['yaml']
+                        if not ucmv_raw:
+                            ucmv_raw = json.dumps(_tmp_data)
+                        logger.info(f"[Validator] Loaded UCMV output from {_tmp_files[0]} ({len(yaml_tables)} tables)")
+            except Exception as _tmp_err:
+                logger.warning(f"[Validator] /tmp fallback failed: {_tmp_err}")
 
         if not yaml_tables:
             return json.dumps({
@@ -419,12 +443,24 @@ class MetricViewValidatorTool(BaseTool):
 
                 return {}
 
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    return pool.submit(lambda: asyncio.run(_query())).result(timeout=10)
-            return loop.run_until_complete(_query())
-        except Exception:
-            return asyncio.run(_query())
+        # Use create_and_run_loop — the only reliable pattern in subprocess context.
+        # asyncio.run() fails in subprocesses because it inherits the parent's event
+        # loop policy. create_and_run_loop creates a fully isolated fresh loop, the
+        # same pattern used successfully by OTel trace writes in subprocess mode.
+        from src.utils.asyncio_utils import create_and_run_loop
+        import time
+
+        for attempt in range(5):
+            try:
+                result = create_and_run_loop(_query())
+                if result and isinstance(result, dict) and 'yaml' in result:
+                    logger.info(f"[Validator] Found UCMV YAML in DB (attempt {attempt + 1})")
+                    return result
+                if attempt < 4:
+                    logger.info(f"[Validator] UCMV not in DB yet (attempt {attempt+1}/5), retrying in 3s...")
+                    time.sleep(3)
+            except Exception as e:
+                logger.warning(f"[Validator] DB query attempt {attempt+1} failed: {e}")
+                if attempt < 4:
+                    time.sleep(2)
+        return {}

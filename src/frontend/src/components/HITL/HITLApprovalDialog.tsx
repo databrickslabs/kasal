@@ -88,6 +88,19 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
       const status = await HITLService.getExecutionHITLStatus(executionId);
       if (status.pending_approval) {
         setApproval(status.pending_approval);
+        // Pre-persist UCMV output as soon as the dialog opens so the Validator
+        // can find it even if the user approves immediately without editing.
+        if (status.pending_approval.previous_crew_output) {
+          try {
+            const parsed = JSON.parse(status.pending_approval.previous_crew_output);
+            if (isUCMVResult(parsed)) {
+              runService.updateExecutionResult(
+                status.pending_approval.execution_id,
+                parsed as unknown as Record<string, unknown>
+              ).catch(() => { /* non-blocking */ });
+            }
+          } catch { /* not UCMV, skip */ }
+        }
       } else {
         setApproval(null);
         setError('No pending approval found for this execution');
@@ -118,6 +131,19 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
 
     setActionLoading(true);
     try {
+      // If the previous crew output is a UCMV result, persist it to ucmv_yaml_edits
+      // BEFORE approving so the UCMV Validator can find it in the next flow step.
+      if (approval.previous_crew_output) {
+        try {
+          const parsed = JSON.parse(approval.previous_crew_output);
+          if (isUCMVResult(parsed)) {
+            await runService.updateExecutionResult(
+              approval.execution_id,
+              (editedUCMV ?? parsed) as unknown as Record<string, unknown>
+            );
+          }
+        } catch { /* not UCMV, skip */ }
+      }
       await HITLService.approveGate(approval.id, {
         comment: comment || undefined,
       });
