@@ -15,11 +15,12 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:kylejmassey.com)",
-      "mcp__plugin_databricks-ai-dev-kit_databricks__get_lakebase_database"
+      "mcp__plugin_databricks-ai-dev-kit_databricks__get_lakebase_database",
+      "WebFetch(domain:kasal-dev-1444828305810485.aws.databricksapps.com)"
     ]
   },
+  "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "claude-flow"
-  ],
-  "enableAllProjectMcpServers": true
+  ]
 }

@@ -959,13 +959,19 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           data.label
         ];
 
-        // Also collect string values from tool_configs (e.g. {user_question} in Reducer config)
+        // Also collect string values from tool_configs (e.g. {user_question} in Reducer config).
+        // Skip keys that contain raw pipeline config / SQL / YAML content — those may contain
+        // {placeholder} patterns that are part of the config syntax, not Kasal execution variables.
+        const RAW_CONTENT_KEYS = new Set([
+          'config_json', 'measures_json', 'mquery_json', 'relationships_json',
+          'scan_data_json', 'yaml_specs_json', 'sql_specs_json', 'dax_measures_json',
+        ]);
         const toolConfigs = (data.tool_configs || (data.task as Record<string, unknown>)?.tool_configs) as Record<string, Record<string, unknown>> | undefined;
         if (toolConfigs && typeof toolConfigs === 'object') {
           Object.values(toolConfigs).forEach(toolCfg => {
             if (toolCfg && typeof toolCfg === 'object') {
-              Object.values(toolCfg).forEach(val => {
-                if (val && typeof val === 'string') {
+              Object.entries(toolCfg).forEach(([key, val]) => {
+                if (!RAW_CONTENT_KEYS.has(key) && val && typeof val === 'string') {
                   fieldsToCheck.push(val);
                 }
               });

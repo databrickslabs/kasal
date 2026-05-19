@@ -51,8 +51,13 @@ export const useTracePolling = () => {
       const isFlow = useFlowExecutionStore.getState().currentJobId === jobId;
 
       // Build requests — always poll status + new traces; add crew-node-states for flows
+      // Try /executions/{id} first; fall back to /executions/history?job_id={id} if it fails
+      // (the latter doesn't require group context, useful when OBO auth assigns different group IDs)
       const requests: Promise<any>[] = [
-        apiClient.get(`/executions/${jobId}`),
+        apiClient.get(`/executions/${jobId}`).catch(() =>
+          apiClient.get(`/executions/history`, { params: { job_id: jobId } })
+            .then(r => ({ data: Array.isArray(r.data) && r.data.length > 0 ? r.data[0] : r.data }))
+        ),
         apiClient.get(`/traces/job/${jobId}`, {
           params: { limit: 50, offset: seenTraceCountRef.current }
         }),
