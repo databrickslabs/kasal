@@ -174,9 +174,24 @@ class FlowProcessorManager:
                         agent_id = getattr(task_data, 'agent_id', None)
                         if agent_id:
                             logger.info(f"  Using agent {agent_id} from task.agent_id for task {task_id}")
-                        else:
-                            logger.warning(f"  Could not resolve agent for task {task_id}")
-                            continue
+
+                    # Last resort: if the crew has exactly one agentNode, use it.
+                    # This handles the case where the flow's taskId doesn't match the
+                    # crew's canvas task node ID (e.g. IDs diverged after re-creation).
+                    if not agent_id and crew_data.nodes:
+                        agent_nodes = [n for n in crew_data.nodes if n.get('type') == 'agentNode']
+                        if len(agent_nodes) == 1:
+                            agent_full_id = agent_nodes[0].get('id', '')
+                            agent_id = agent_full_id.split('-', 1)[1] if '-' in agent_full_id else agent_full_id
+                            if not agent_id:
+                                agent_id = agent_nodes[0].get('data', {}).get('id') or agent_nodes[0].get('data', {}).get('agentId')
+                            agent_node_data = agent_nodes[0].get('data', {})
+                            if agent_id:
+                                logger.info(f"  Using sole agentNode {agent_id} from crew as fallback for task {task_id}")
+
+                    if not agent_id:
+                        logger.warning(f"  Could not resolve agent for task {task_id}")
+                        continue
 
                     # Import necessary classes for building CrewAI objects
                     from src.engines.crewai.flow.modules.task_config import TaskConfig

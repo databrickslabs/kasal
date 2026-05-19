@@ -710,7 +710,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
       const contentEntries = Object.entries(content);
       if (contentEntries.length === 1 && typeof contentEntries[0][1] === 'string') {
         try {
-          const inner = JSON.parse(entries[0][1] as string);
+          const inner = JSON.parse(contentEntries[0][1] as string);
           if (typeof inner === 'object' && inner !== null) {
             if (isUCMVResult(inner)) {
               return <UCMVResultViewer result={inner as Parameters<typeof UCMVResultViewer>[0]['result']} editable={!!run?.job_id} onSave={run?.job_id ? handleSaveUcmvResult : undefined} />;

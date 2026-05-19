@@ -314,6 +314,7 @@ class CrewAIEngineService(BaseEngineService):
             
             # Create a task for process-based crew execution with exception handler
             async def run_with_exception_handler():
+                run_succeeded = False
                 try:
                     logger.info(f"[CrewAIEngineService] About to call run_crew_in_process for {execution_id}")
                     await run_crew_in_process(
@@ -323,6 +324,7 @@ class CrewAIEngineService(BaseEngineService):
                         group_context=group_context,
                         user_token=user_token
                     )
+                    run_succeeded = True
                     logger.info(f"[CrewAIEngineService] run_crew_in_process completed for {execution_id}")
                 except Exception as e:
                     logger.error(f"[CrewAIEngineService] CRITICAL: Exception in run_crew_in_process for {execution_id}: {e}", exc_info=True)
@@ -331,6 +333,41 @@ class CrewAIEngineService(BaseEngineService):
                     with open(f'/tmp/task_error_{execution_id[:8]}.log', 'w') as f:
                         f.write(f"Exception in background task: {e}\n")
                         f.write(traceback.format_exc())
+                finally:
+                    # SAFETY NET: if execution is still RUNNING after the task ends,
+                    # force-update to COMPLETED (run_crew_in_process already calls
+                    # update_execution_status_with_retry internally, but that can fail
+                    # silently in deployed environments like Databricks Apps).
+                    try:
+                        from src.services.execution_status_service import ExecutionStatusService
+                        from src.utils.asyncio_utils import execute_db_operation_with_fresh_engine
+                        from src.repositories.execution_history_repository import ExecutionHistoryRepository
+
+                        async def _check_and_fix(session):
+                            repo = ExecutionHistoryRepository(session)
+                            rec = await repo.get_execution_by_job_id(execution_id)
+                            if rec and rec.status and rec.status.upper() == 'RUNNING':
+                                final = 'COMPLETED' if run_succeeded else 'FAILED'
+                                logger.warning(
+                                    f"[CrewAIEngineService] SAFETY NET: execution {execution_id} "
+                                    f"still RUNNING after task ended — forcing to {final}"
+                                )
+                                await ExecutionStatusService.update_status(
+                                    job_id=execution_id,
+                                    status=final,
+                                    message=f'Crew execution {final.lower()} (safety-net update)',
+                                )
+                            else:
+                                logger.info(
+                                    f"[CrewAIEngineService] SAFETY NET: execution {execution_id} "
+                                    f"already has terminal status ({rec.status if rec else 'not found'}), no action needed"
+                                )
+
+                        await execute_db_operation_with_fresh_engine(_check_and_fix)
+                    except Exception as safety_err:
+                        logger.error(
+                            f"[CrewAIEngineService] SAFETY NET failed for {execution_id}: {safety_err}"
+                        )
             
             execution_task = asyncio.create_task(run_with_exception_handler())
             

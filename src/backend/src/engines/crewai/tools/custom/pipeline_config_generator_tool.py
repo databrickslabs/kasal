@@ -349,18 +349,34 @@ class PipelineConfigGeneratorTool(BaseTool):
 
     @staticmethod
     def _import_generate_config():
-        """Import the generate_config module from examples directory."""
-        # Find the generate_config.py relative to this file
-        # Path: src/backend/src/engines/crewai/tools/custom/ → 7 levels up → kasal/
+        """Import the generate_config module.
+
+        Search order:
+        1. Same directory as this tool file (bundled for deployed apps).
+        2. examples/uc_metric_view_migration/ relative to the repo root
+           (local dev convenience).
+        """
         this_dir = os.path.dirname(os.path.abspath(__file__))
+
+        # Priority 1: bundled alongside the tool (deployed app path)
+        candidates = [this_dir]
+
+        # Priority 2: examples directory (local dev)
         project_root = os.path.abspath(
             os.path.join(this_dir, "..", "..", "..", "..", "..", "..", "..")
         )
-        gen_config_dir = os.path.join(project_root, "examples", "uc_metric_view_migration")
+        candidates.append(os.path.join(project_root, "examples", "uc_metric_view_migration"))
 
-        if not os.path.isfile(os.path.join(gen_config_dir, "generate_config.py")):
+        gen_config_dir = None
+        for candidate in candidates:
+            if os.path.isfile(os.path.join(candidate, "generate_config.py")):
+                gen_config_dir = candidate
+                break
+
+        if gen_config_dir is None:
+            checked = ", ".join(candidates)
             raise ImportError(
-                f"generate_config.py not found at {gen_config_dir}. "
+                f"generate_config.py not found in any of: [{checked}]. "
                 f"Resolved from {this_dir} (project_root={project_root})"
             )
 
