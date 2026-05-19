@@ -66,6 +66,33 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
     );
   }, [run?.job_id]);
 
+  // Auto-save UCMV result when displayed (so UCMV Validator can find it in the flow).
+  // This mirrors what the Pipeline Config Generator does: persisting output so the
+  // next crew in the flow can pick it up from the DB without manual "Save Changes".
+  const autoSavedUcmvJobRef = useRef<string | null>(null);
+
+  const UCMVResultWithAutoSave: React.FC<{
+    result: Parameters<typeof UCMVResultViewer>[0]['result'];
+    jobId: string;
+  }> = useCallback(({ result, jobId }) => {
+    useEffect(() => {
+      if (!jobId || autoSavedUcmvJobRef.current === jobId) return;
+      autoSavedUcmvJobRef.current = jobId;
+      runService.updateExecutionResult(jobId, result as unknown as Record<string, unknown>)
+        .then(() => console.log('[ShowResult] Auto-saved UCMV result for validator'))
+        .catch(err => console.warn('[ShowResult] Auto-save UCMV failed:', err));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [jobId]);
+    return (
+      <UCMVResultViewer
+        result={result}
+        editable={!!jobId}
+        onSave={jobId ? handleSaveUcmvResult : undefined}
+      />
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handleSaveUcmvResult]);
+
   // Function to check for Databricks volume information from configuration
   const checkForDatabricksVolumeInfo = useCallback(async (resultData: Record<string, unknown>) => {
     try {
@@ -713,7 +740,9 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
           const inner = JSON.parse(contentEntries[0][1] as string);
           if (typeof inner === 'object' && inner !== null) {
             if (isUCMVResult(inner)) {
-              return <UCMVResultViewer result={inner as Parameters<typeof UCMVResultViewer>[0]['result']} editable={!!run?.job_id} onSave={run?.job_id ? handleSaveUcmvResult : undefined} />;
+              return run?.job_id
+                ? <UCMVResultWithAutoSave result={inner as Parameters<typeof UCMVResultViewer>[0]['result']} jobId={run.job_id} />
+                : <UCMVResultViewer result={inner as Parameters<typeof UCMVResultViewer>[0]['result']} />;
             }
             if (isValidatorResult(inner)) {
               return <ValidatorResultViewer result={inner as Parameters<typeof ValidatorResultViewer>[0]['result']} />;

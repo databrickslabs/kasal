@@ -291,15 +291,34 @@ class MetricViewValidatorTool(BaseTool):
                     return inner['measures_with_dax']
                 return []
 
+        import time
+
+        def _run_with_retry():
+            """Retry up to 5x to handle the race condition where the UCMV
+            Generator's DB write hasn't committed yet when the validator starts."""
+            for attempt in range(5):
+                try:
+                    result = asyncio.run(_query())
+                    if result and isinstance(result, dict) and 'yaml' in result:
+                        return result
+                    if attempt < 4:
+                        logger.info(f"[Validator] UCMV not in DB yet (attempt {attempt+1}/5), retrying in 3s...")
+                        time.sleep(3)
+                except Exception as e:
+                    logger.debug(f"[Validator] DB query attempt {attempt+1} failed: {e}")
+                    if attempt < 4:
+                        time.sleep(2)
+            return {}
+
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 import concurrent.futures
                 with concurrent.futures.ThreadPoolExecutor() as pool:
-                    return pool.submit(lambda: asyncio.run(_query())).result(timeout=10)
-            return loop.run_until_complete(_query())
+                    return pool.submit(_run_with_retry).result(timeout=60)
+            return _run_with_retry()
         except Exception:
-            return asyncio.run(_query())
+            return _run_with_retry()
 
     @staticmethod
     def _fetch_saved_ucmv_edits_from_db() -> dict:
@@ -360,6 +379,7 @@ class MetricViewValidatorTool(BaseTool):
         async def _query():
             from src.db.session import async_session_factory
             async with async_session_factory() as session:
+                # Strategy 1: Look in execution_trace for the latest UCMV Generator run span
                 result = await session.execute(text(
                     "SELECT et.output::text "
                     "FROM execution_trace et "
@@ -367,13 +387,37 @@ class MetricViewValidatorTool(BaseTool):
                     "ORDER BY et.created_at DESC LIMIT 1"
                 ))
                 row = result.fetchone()
-                if not row:
-                    return {}
-                data = json.loads(row[0])
-                content = data.get('content', '')
-                inner = json.loads(content) if isinstance(content, str) else content
-                # Return full UCMV output (has yaml, sql, stats, validation keys)
-                return inner if isinstance(inner, dict) else {}
+                if row and row[0]:
+                    try:
+                        data = json.loads(row[0])
+                        content = data.get('content', '')
+                        inner = json.loads(content) if isinstance(content, str) else content
+                        if isinstance(inner, dict) and 'yaml' in inner:
+                            logger.info("[Validator] Found UCMV output in execution_trace")
+                            return inner
+                    except Exception:
+                        pass
+
+                # Strategy 2: Look in executionhistory.result for the latest UCMV result
+                # (populated by the safety-net status update after queue-drain fix)
+                result2 = await session.execute(text(
+                    "SELECT result::text FROM executionhistory "
+                    "WHERE result::text LIKE '%\"yaml\"%' "
+                    "  AND result::text LIKE '%\"sql\"%' "
+                    "  AND result::text LIKE '%\"stats\"%' "
+                    "ORDER BY created_at DESC LIMIT 1"
+                ))
+                row2 = result2.fetchone()
+                if row2 and row2[0]:
+                    try:
+                        inner2 = json.loads(row2[0])
+                        if isinstance(inner2, dict) and 'yaml' in inner2:
+                            logger.info("[Validator] Found UCMV output in executionhistory.result")
+                            return inner2
+                    except Exception:
+                        pass
+
+                return {}
 
         try:
             loop = asyncio.get_event_loop()
