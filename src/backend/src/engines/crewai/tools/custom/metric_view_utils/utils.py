@@ -85,12 +85,19 @@ def spark_sql_compat(expr: str, catalog: str = '', schema: str = '',
     return expr
 
 
-def load_mapping(mapping_source: str | list[dict]) -> list[dict]:
-    """Load measure mapping from JSON path or raw list."""
-    if isinstance(mapping_source, list):
+def load_mapping(mapping_source) -> list | dict:
+    """Load measure mapping from JSON path, raw list, or raw dict."""
+    if isinstance(mapping_source, (list, dict)):
         return mapping_source
-    with open(mapping_source) as f:
-        return json.load(f)
+    if isinstance(mapping_source, str):
+        # Could be a JSON string or a file path
+        stripped = mapping_source.strip()
+        if stripped.startswith(('{', '[')):
+            return json.loads(stripped)
+        # Treat as a file path
+        with open(mapping_source) as f:
+            return json.load(f)
+    raise TypeError(f"load_mapping: unsupported type {type(mapping_source)}")
 
 
 def yaml_scalar(value: str, width: int = 100) -> str:
