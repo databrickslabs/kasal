@@ -70,6 +70,7 @@ const docSections: DocSection[] = [
   {
     label: 'Power BI - Analytics / Q&A',
     items: [
+      { label: '⭐ Analytics Q&A — Case Study', file: 'powerbi/powerbi-analytics-qa-case-study' },
       { label: 'Tool 72 — Comprehensive Analysis', file: 'powerbi/tool-72-comprehensive-analysis' },
       { label: 'Tool 79 — Semantic Model Fetcher', file: 'powerbi/tool-79-semantic-model-fetcher' },
       { label: 'Tool 80 — DAX Generator', file: 'powerbi/tool-80-dax-generator' },
