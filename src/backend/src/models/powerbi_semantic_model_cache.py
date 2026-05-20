@@ -77,10 +77,11 @@ class PowerBISemanticModelCache(Base):
         Index('idx_semantic_cache_date', 'cached_date'),
     )
 
-    # Cache TTL: how many days a cached entry stays valid before a re-fetch is needed
-    CACHE_TTL_DAYS = 7
+    def is_valid_for_today(self, cache_ttl_days: int = 1) -> bool:
+        """Check if cache is still valid within the given TTL window.
 
-    def is_valid_for_today(self) -> bool:
-        """Check if cache is still valid (written within the last CACHE_TTL_DAYS days)."""
-        cutoff = date.today() - timedelta(days=self.CACHE_TTL_DAYS)
+        Args:
+            cache_ttl_days: How many days back to accept a cached entry (default 1 = today only)
+        """
+        cutoff = date.today() - timedelta(days=cache_ttl_days - 1)
         return self.cached_date >= cutoff

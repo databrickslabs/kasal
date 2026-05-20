@@ -31,9 +31,10 @@ class PowerBISemanticModelCacheService:
         workspace_id: str,
         report_id: Optional[str] = None,
         any_report_id: bool = False,
+        cache_ttl_days: int = 1,
     ) -> Optional[Dict[str, Any]]:
         """
-        Get cached metadata for today if available.
+        Get cached metadata if a valid entry exists within the TTL window.
 
         Args:
             group_id: Multi-tenant group ID
@@ -41,6 +42,7 @@ class PowerBISemanticModelCacheService:
             workspace_id: Power BI workspace ID
             report_id: Optional report ID
             any_report_id: If True, match any report_id (ignore report_id filter)
+            cache_ttl_days: How many days back to accept a cached entry (default 1)
 
         Returns:
             Cached metadata dictionary if found, None otherwise
@@ -51,9 +53,10 @@ class PowerBISemanticModelCacheService:
             workspace_id=workspace_id,
             report_id=report_id,
             any_report_id=any_report_id,
+            cache_ttl_days=cache_ttl_days,
         )
 
-        if cache and cache.is_valid_for_today():
+        if cache and cache.is_valid_for_today(cache_ttl_days):
             return cache.cache_data
 
         return None

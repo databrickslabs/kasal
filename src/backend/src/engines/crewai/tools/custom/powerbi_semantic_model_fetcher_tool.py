@@ -123,6 +123,11 @@ class PowerBISemanticModelFetcherSchema(BaseModel):
         "json",
         description="[Output] Output format: 'json' (default, machine-parseable) or 'markdown'."
     )
+    cache_ttl_days: int = Field(
+        1,
+        description="[Cache] Number of days to keep the cached semantic model metadata before re-fetching. "
+                    "Default is 1 (refresh daily). Set to 7 for weekly refresh."
+    )
 
 
 class PowerBISemanticModelFetcherTool(BaseTool):
@@ -314,6 +319,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                     dataset_id=dataset_id,
                     workspace_id=workspace_id,
                     report_id=report_id,
+                    cache_ttl_days=config.get("cache_ttl_days", 1),
                 )
             if cached_metadata:
                 cache_hit = True
