@@ -128,6 +128,7 @@ Import-ready JSON definitions for the full UCMV migration pipeline.
 | [`crew_uc_metric_view_generator.json`](./examples/crew_uc_metric_view_generator.json) | **Crew 2** — Translates DAX → Spark SQL, generates UC Metric View YAML + SQL |
 | [`crew_ucmv_quality_validator.json`](./examples/crew_ucmv_quality_validator.json) | **Crew 3** — Validates every measure's translation (VALID/EQUIVALENT/REVIEW/INVALID) |
 | [`flow_ucmv_plus_validation.json`](./examples/flow_ucmv_plus_validation.json) | **Full flow** — Chains all 3 crews end-to-end |
+| [`crew_pbi_analyst_qa.json`](./examples/crew_pbi_analyst_qa.json) | **Analytics Q&A** — 3-agent crew: fetch → reduce → DAX (natural language questions against live PBI model) |
 
 **How to import**: Kasal UI → Crews (or Flows) → Import → select the JSON file.
 All credentials are placeholders — see the [examples README](./examples/README.md) for the full setup guide.

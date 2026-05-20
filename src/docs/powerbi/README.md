@@ -8,8 +8,8 @@ Kasal provides a complete toolkit for migrating Power BI semantic models to Data
 
 | Use Case | Tools | Guide |
 |----------|-------|-------|
+| **Answer business questions** from PBI with natural language | 72, 79, 80, 81 | [**Analytics Q&A Case Study**](./powerbi-analytics-qa-case-study.md) ← start here |
 | **Migrate measures** (DAX → SQL / UC Metrics) | 73, 74, 75, 86-90 | [UCMV Migration Guide](./ucmv-migration-guide.md) |
-| **Answer business questions** from PBI with natural language | 72, 79, 80, 81 | [Tool 72](./tool-72-comprehensive-analysis.md) |
 | **Execute a known DAX query** | 82 | [Tool 82](./tool-82-dax-executor.md) |
 | **Migrate Fabric hierarchies** | 76 | [Tool 76](./tool-76-hierarchies.md) |
 | **Migrate Fabric field parameters / calc groups** | 77 | [Tool 77](./tool-77-field-parameters.md) |
@@ -22,6 +22,11 @@ Kasal provides a complete toolkit for migrating Power BI semantic models to Data
 ### Setup
 - [Authentication & Service Principal Setup](./01-authentication-setup.md) ← **Start here**
 - [Simple Migration Story](./02-simple-migration-story.md)
+
+### Case Studies & Examples
+- [**Power BI Analytics Q&A — Full Case Study**](./powerbi-analytics-qa-case-study.md) — 3-agent crew, context enrichment, business_mappings, field_synonyms, active_filters
+- [Example Crew: `crew_pbi_analyst_qa.json`](../examples/crew_pbi_analyst_qa.json) — import-ready, credentials scrubbed
+- [Context Enrichment Config Example](../powerbi-context-enrichment-example.json) — copy-paste reference for all 6 enrichment fields
 
 ### Analytics / Q&A Tools
 - [Tool 72 - Comprehensive Analysis](./tool-72-comprehensive-analysis.md)
