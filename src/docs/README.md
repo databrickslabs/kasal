@@ -97,20 +97,63 @@ What Kasal provides out of the box to build, operate, and govern AI workflows.
 
 ---
 
+## Power BI → Unity Catalog Metric View Migration
+End-to-end automation of PBI semantic model translation to UC Metric Views.
+
+### [UCMV Pipeline Config Guide](./UCMV_PIPELINE_CONFIG_GUIDE.md)
+**For Data Engineers and Analytics Engineers**
+
+Explains every config key in the pipeline — what is auto-extracted from PBI APIs and what requires human domain knowledge.
+
+**Key Topics:**
+- Auto-extracted fields (`relationships`, `measures`, `mquery`, `scan_data`)
+- Manual fields (`join_key_map`, `filter_sets`, `switch_decompositions`, `measure_resolutions`)
+- When and why human review is needed
+
+### [PowerBI Tools Reference](./powerbi/README.md)
+**For Platform Engineers and Power BI Admins**
+
+Full reference for all 18 Power BI tools (Tools 72–90) and their configuration.
+
+---
+
+## Example Crews & Flows
+Import-ready JSON definitions for the full UCMV migration pipeline.
+
+### [Examples Folder](./examples/)
+
+| File | Description |
+|------|-------------|
+| [`crew_ucmv_pipeline_config_generator.json`](./examples/crew_ucmv_pipeline_config_generator.json) | **Crew 1** — Connects to PBI REST API, extracts metadata, proposes pipeline config |
+| [`crew_uc_metric_view_generator.json`](./examples/crew_uc_metric_view_generator.json) | **Crew 2** — Translates DAX → Spark SQL, generates UC Metric View YAML + SQL |
+| [`crew_ucmv_quality_validator.json`](./examples/crew_ucmv_quality_validator.json) | **Crew 3** — Validates every measure's translation (VALID/EQUIVALENT/REVIEW/INVALID) |
+| [`flow_ucmv_plus_validation.json`](./examples/flow_ucmv_plus_validation.json) | **Full flow** — Chains all 3 crews end-to-end |
+
+**How to import**: Kasal UI → Crews (or Flows) → Import → select the JSON file.
+All credentials are placeholders — see the [examples README](./examples/README.md) for the full setup guide.
+
+---
+
 ## Documentation Structure
 How this folder is organized and where to find topics.
 
 ```
 docs/
-├── README.md                    # This file - Documentation hub
-├── CODE_STRUCTURE_GUIDE.md      # Code structure documentation
-├── DEVELOPER_GUIDE.md           # Developer documentation
-├── ARCHITECTURE_GUIDE.md        # Architecture documentation
-├── API_REFERENCE.md             # API reference
-└── archive/                     # Legacy documentation
-    ├── technical/               # Technical deep-dives
-    ├── security/                # Security documentation
-    └── guides/                  # Various guides
+├── README.md                         # This file — Documentation hub
+├── UCMV_PIPELINE_CONFIG_GUIDE.md     # Pipeline config reference
+├── CODE_STRUCTURE_GUIDE.md           # Code structure documentation
+├── DEVELOPER_GUIDE.md                # Developer documentation
+├── ARCHITECTURE_GUIDE.md             # Architecture documentation
+├── examples/                         # Import-ready crew & flow JSONs
+│   ├── README.md                     # Setup guide for UCMV examples
+│   ├── crew_ucmv_pipeline_config_generator.json
+│   ├── crew_uc_metric_view_generator.json
+│   ├── crew_ucmv_quality_validator.json
+│   └── flow_ucmv_plus_validation.json
+└── archive/                          # Legacy documentation
+    ├── technical/
+    ├── security/
+    └── guides/
 ```
 
 ---
