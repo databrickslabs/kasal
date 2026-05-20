@@ -52,7 +52,8 @@ export interface PowerBIFetcherConfig {
   skip_system_tables?: boolean;
   enable_info_columns?: boolean;
   output_format?: string;
-  [key: string]: string | boolean | undefined;
+  cache_ttl_days?: number;
+  [key: string]: string | boolean | number | undefined;
 }
 
 interface PowerBIFetcherConfigSelectorProps {
@@ -547,6 +548,21 @@ export const PowerBIFetcherConfigSelector: React.FC<PowerBIFetcherConfigSelector
               >
                 <MenuItem value="json">JSON</MenuItem>
                 <MenuItem value="markdown">Markdown</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl fullWidth size="small" sx={{ mt: 1 }}>
+              <InputLabel>Cache TTL (days)</InputLabel>
+              <Select
+                value={value.cache_ttl_days ?? 1}
+                onChange={(e) => handleFieldChange('cache_ttl_days', Number(e.target.value))}
+                label="Cache TTL (days)"
+                disabled={disabled}
+              >
+                <MenuItem value={1}>1 day — refresh daily (default)</MenuItem>
+                <MenuItem value={3}>3 days</MenuItem>
+                <MenuItem value={7}>7 days — refresh weekly</MenuItem>
+                <MenuItem value={14}>14 days</MenuItem>
+                <MenuItem value={30}>30 days — refresh monthly</MenuItem>
               </Select>
             </FormControl>
           </Box>
