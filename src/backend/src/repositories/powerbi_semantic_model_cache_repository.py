@@ -31,6 +31,7 @@ class PowerBISemanticModelCacheRepository:
         workspace_id: str,
         report_id: Optional[str] = None,
         any_report_id: bool = False,
+        cache_ttl_days: int = 1,
     ) -> Optional[PowerBISemanticModelCache]:
         """
         Get cached metadata if a valid entry exists within the TTL window.
@@ -41,12 +42,12 @@ class PowerBISemanticModelCacheRepository:
             workspace_id: Power BI workspace ID
             report_id: Optional report ID (if filters are report-specific)
             any_report_id: If True, match any report_id (ignore report_id filter)
+            cache_ttl_days: Accept entries up to this many days old (default 1 = today only)
 
         Returns:
             Most recent cache object within TTL, None otherwise
         """
-        from src.models.powerbi_semantic_model_cache import PowerBISemanticModelCache as _M
-        cutoff = date.today() - timedelta(days=_M.CACHE_TTL_DAYS)
+        cutoff = date.today() - timedelta(days=cache_ttl_days - 1)
 
         if any_report_id:
             # Match any report_id except 'reduced' — used by tools that need

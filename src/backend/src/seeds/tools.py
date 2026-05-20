@@ -283,6 +283,7 @@ def get_tool_configs():
             "username": "",
             "password": "",
             "output_format": "json",
+            "cache_ttl_days": 1,  # Days to cache model metadata (1=daily, 7=weekly)
         },  # Power BI Semantic Model Fetcher
         "80": {
             "result_as_answer": False,
