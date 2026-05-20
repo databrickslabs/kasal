@@ -1224,7 +1224,10 @@ RULES:
 1. ONLY use tables from ALLOWED TABLES list. Any other table = error.
 2. ONLY use columns listed under each TABLE. Any other column = error.
 3. ONLY use measures listed under MEASURE. Do not invent measure names.
-4. Use EVALUATE + SUMMARIZECOLUMNS for all queries.
+4. Use EVALUATE + SUMMARIZECOLUMNS for grouping/breakdown queries. For scalar results (a single number) use EVALUATE ROW("Label", <expression>).
+4a. AVERAGE PATTERN — when the question asks for an average PER entity (e.g. "average sales per customer", "average order value per region"), use AVERAGEX over a SUMMARIZECOLUMNS sub-table:
+    EVALUATE ROW("Avg Per Entity", AVERAGEX(SUMMARIZECOLUMNS(Table[GroupCol], "Val", [Measure]), [Val]))
+4b. SIMPLE AVERAGE — when the question asks for the average of a column directly, use CALCULATE(AVERAGE(Table[Column])) or AVERAGEX(Table, Table[Column]).
 5. For cross-table filters use TREATAS. Single value: TREATAS({{"value"}}, 'Table Name'[column]). Multiple values: TREATAS({{"v1", "v2", "v3"}}, 'Table Name'[column]). NEVER put functions like MAX() inside TREATAS{{}} — use FILTER(ALL(...), ...) for computed filters.
 6. Grouping columns go FIRST in SUMMARIZECOLUMNS, then TREATAS filters, then measure expressions.
 7. NEVER use CALCULATETABLE with empty first argument.
