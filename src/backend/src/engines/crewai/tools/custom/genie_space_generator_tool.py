@@ -90,24 +90,38 @@ class GenieSpaceGeneratorTool(BaseTool):
     def _authenticate(self, host_override: Optional[str] = None):
         """Obtain an AuthContext synchronously. Override in tests for easy mocking.
 
+        Runs the async get_auth_context() in a dedicated thread so this method is
+        safe to call from within a running asyncio event loop (which CrewAI always
+        provides). Using asyncio.new_event_loop().run_until_complete() in the *same*
+        thread raises "Cannot run the event loop while another loop is running".
+
         Args:
             host_override: If provided, patches the returned AuthContext's workspace_url
                            so the tool targets a specific workspace rather than the one
                            resolved from Kasal Settings / env vars.
         """
+        import concurrent.futures
         from src.utils.databricks_auth import get_auth_context
-        loop = asyncio.new_event_loop()
-        try:
-            auth = loop.run_until_complete(get_auth_context())
-            if auth is not None and host_override:
-                # Normalise the override URL and inject it into the auth context
-                url = host_override.strip().rstrip('/')
-                if not url.startswith('https://'):
-                    url = f'https://{url}'
-                auth.workspace_url = url
-            return auth
-        finally:
-            loop.close()
+
+        def _run_in_thread():
+            """Run the coroutine in a fresh thread that owns its own event loop."""
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(get_auth_context())
+            finally:
+                loop.close()
+                asyncio.set_event_loop(None)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            auth = executor.submit(_run_in_thread).result(timeout=30)
+
+        if auth is not None and host_override:
+            url = host_override.strip().rstrip('/')
+            if not url.startswith('https://'):
+                url = f'https://{url}'
+            auth.workspace_url = url
+        return auth
 
     def _run(self, **kwargs: Any) -> str:  # noqa: C901
         def _get(key):
@@ -214,88 +228,115 @@ class GenieSpaceGeneratorTool(BaseTool):
             })
         actual_host = parsed_host.hostname
 
-        # ── 6. Build Genie space payload ─────────────────────────────────────────
+        # ── 6. Build serialized_space (version 2 — required by Genie REST API) ────
         import uuid
 
         def _new_id() -> str:
             return uuid.uuid4().hex
 
-        # data_sources
+        # ── data_sources ──────────────────────────────────────────────────────────
+        # metric views and plain tables are separate sections in the API.
+        # metric_view_tables come from ucmv_output; additional_tables are dimensions.
+        mv_data = [{"identifier": t} for t in metric_view_tables]
+        tbl_data = [{"identifier": t} for t in additional_tables]
+
+        # Fallback: if there was no ucmv_output, treat all tables as plain tables.
+        if not mv_data and not tbl_data:
+            tbl_data = [{"identifier": t} for t in all_tables]
+
         data_sources: dict = {}
-        if all_tables:
-            data_sources["tables"] = [{"name": t} for t in all_tables]
+        if tbl_data:
+            data_sources["tables"] = tbl_data
+        if mv_data:
+            data_sources["metric_views"] = mv_data
 
-        # instructions block
-        instructions: list[dict] = []
+        # ── sample questions (config section) — IDs sorted alphabetically ─────────
+        sample_question_list = sorted(
+            [{"id": _new_id(), "question": [q]} for q in sample_questions],
+            key=lambda x: x["id"],
+        )
+
+        # ── text instructions — max one block, ID sorted ───────────────────────────
+        text_instruction_list = []
         if text_instructions.strip():
-            instructions.append({
-                "id": _new_id(),
-                "content": text_instructions.strip(),
-            })
+            text_instruction_list = sorted(
+                [{"id": _new_id(), "content": [text_instructions.strip()]}],
+                key=lambda x: x["id"],
+            )
 
-        # join specs
-        join_spec_entries: list[dict] = []
+        # ── join specs — serialized_space format (left/right objects, sql list) ────
+        join_spec_entries = []
         for js in join_specs:
+            left = js.get("left_table", "")
+            right = js.get("right_table", "")
+            cond = js.get("join_condition", "")
+            left_alias = left.split(".")[-1] if left else ""
+            right_alias = right.split(".")[-1] if right else ""
             join_spec_entries.append({
                 "id": _new_id(),
-                "left_table": js.get("left_table", ""),
-                "right_table": js.get("right_table", ""),
-                "join_condition": js.get("join_condition", ""),
+                "left":  {"identifier": left,  "alias": left_alias},
+                "right": {"identifier": right, "alias": right_alias},
+                "sql": [cond, "--rt=FROM_RELATIONSHIP_TYPE_MANY_TO_ONE--"],
             })
+        join_spec_entries = sorted(join_spec_entries, key=lambda x: x["id"])
 
-        # SQL snippets
-        sql_snippets: list[dict] = []
-        for expr in sql_expressions:
-            sql_snippets.append({
-                "id": _new_id(),
-                "type": "EXPRESSION",
-                "title": expr.get("display_name", ""),
-                "content": expr.get("sql", ""),
-            })
-        for meas in sql_measures:
-            sql_snippets.append({
-                "id": _new_id(),
-                "type": "MEASURE",
-                "title": meas.get("display_name", ""),
-                "content": meas.get("sql", ""),
-                "description": meas.get("instruction", ""),
-            })
-        for filt in sql_filters:
-            sql_snippets.append({
-                "id": _new_id(),
-                "type": "FILTER",
-                "title": filt.get("display_name", ""),
-                "content": filt.get("sql", ""),
-            })
+        # ── SQL snippets — each list item has sql as a list, IDs sorted ───────────
+        expressions_list = sorted(
+            [{"id": _new_id(), "display_name": e.get("display_name", ""),
+              "sql": [e.get("sql", "")]}
+             for e in sql_expressions],
+            key=lambda x: x["id"],
+        )
+        measures_list = sorted(
+            [{"id": _new_id(), "display_name": m.get("display_name", ""),
+              "sql": [m.get("sql", "")],
+              "instruction": [m.get("instruction", "")]}
+             for m in sql_measures],
+            key=lambda x: x["id"],
+        )
+        filters_list = sorted(
+            [{"id": _new_id(), "display_name": f.get("display_name", ""),
+              "sql": [f.get("sql", "")]}
+             for f in sql_filters],
+            key=lambda x: x["id"],
+        )
 
-        # example question SQLs
-        example_question_sqls: list[dict] = []
-        for eq in example_sqls:
-            example_question_sqls.append({
-                "id": _new_id(),
-                "question": eq.get("question", ""),
-                "sql": eq.get("sql", ""),
-            })
+        # ── example question SQLs ─────────────────────────────────────────────────
+        example_question_sqls_list = sorted(
+            [{"id": _new_id(),
+              "question": [eq.get("question", "")],
+              "sql":      [eq.get("sql", "")]}
+             for eq in example_sqls],
+            key=lambda x: x["id"],
+        )
 
-        # sample questions list for the space
-        sample_question_list = [{"id": _new_id(), "question": q} for q in sample_questions]
-
-        space_payload: dict = {
-            "display_name": space_title,
-            "warehouse_id": warehouse_id,
+        # ── assemble serialized_space dict and JSON-encode it ─────────────────────
+        serialized_space_dict: dict = {
+            "version": 2,
+            "config": {
+                "sample_questions": sample_question_list,
+            },
+            "data_sources": data_sources,
+            "instructions": {
+                "text_instructions": text_instruction_list,
+                "join_specs": join_spec_entries,
+                "sql_snippets": {
+                    "expressions": expressions_list,
+                    "measures":    measures_list,
+                    "filters":     filters_list,
+                },
+                "example_question_sqls": example_question_sqls_list,
+            },
         }
-        if data_sources:
-            space_payload["data_sources"] = data_sources
-        if instructions:
-            space_payload["instructions"] = instructions
-        if join_spec_entries:
-            space_payload["join_specs"] = join_spec_entries
-        if sql_snippets:
-            space_payload["sql_snippets"] = sql_snippets
-        if example_question_sqls:
-            space_payload["example_question_sqls"] = example_question_sqls
-        if sample_question_list:
-            space_payload["sample_questions"] = sample_question_list
+        serialized_space_str = json.dumps(serialized_space_dict)
+
+        # ── outer request payload (title + warehouse_id + serialized_space) ───────
+        space_payload: dict = {
+            "title":            space_title,
+            "warehouse_id":     warehouse_id,
+            "description":      f"Genie Space for {space_title} — deployed by Kasal",
+            "serialized_space": serialized_space_str,
+        }
 
         # ── 7. Idempotent deploy (GET → find by title → PATCH; else POST) ────────
         try:
@@ -310,7 +351,7 @@ class GenieSpaceGeneratorTool(BaseTool):
                 spaces_data = list_resp.json()
                 spaces = spaces_data.get("spaces", spaces_data.get("items", []))
                 for sp in spaces:
-                    if sp.get("display_name") == space_title or sp.get("title") == space_title:
+                    if sp.get("title") == space_title or sp.get("display_name") == space_title:
                         existing_space_id = sp.get("space_id") or sp.get("id")
                         break
 
@@ -348,8 +389,8 @@ class GenieSpaceGeneratorTool(BaseTool):
                 "metric_view_count": len(metric_view_tables),
                 "additional_table_count": len(additional_tables),
                 "question_count": len(sample_questions),
-                "sql_snippet_count": len(sql_snippets),
-                "example_sql_count": len(example_question_sqls),
+                "sql_snippet_count": len(expressions_list) + len(measures_list) + len(filters_list),
+                "example_sql_count": len(example_question_sqls_list),
             }, indent=2)
 
         except Exception as e:
