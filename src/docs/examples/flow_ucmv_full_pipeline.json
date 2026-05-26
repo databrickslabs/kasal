@@ -1,0 +1,750 @@
+{
+  "id": "flow-ucmv-full-pipeline-001",
+  "name": "UCMV Full Pipeline — Config → Generator → Validator → Genie Space",
+  "crew_id": "fc63b178-13ff-4350-9be4-1f8471c20b99",
+  "nodes": [
+    {
+      "id": "crew-fc63b178-13ff-4350-9be4-1f8471c20b99-1",
+      "type": "crewNode",
+      "position": { "x": 60, "y": 150 },
+      "data": {
+        "label": "UCMV — Generate Pipeline Config (API-Direct)",
+        "crewName": "UCMV — Generate Pipeline Config (API-Direct)",
+        "type": null,
+        "decorator": null,
+        "listenTo": null,
+        "routerCondition": null,
+        "stateType": null,
+        "stateDefinition": null,
+        "listener": null,
+        "allTasks": [
+          {
+            "id": "task-config-gen-001",
+            "name": "Generate Pipeline Config from PBI APIs",
+            "description": "Call the Pipeline Config Generator tool with NO arguments — credentials and PBI IDs are pre-configured in tool_configs. The tool calls 4 PBI APIs directly and returns a JSON with all 26 pipeline_config keys. Return the full output without modification."
+          }
+        ],
+        "selectedTasks": [],
+        "order": 1,
+        "crewId": "fc63b178-13ff-4350-9be4-1f8471c20b99",
+        "flowConfig": {
+          "id": "flow-ucmv-full-pipeline-001",
+          "name": "UCMV Full Pipeline — Config → Generator → Validator → Genie Space",
+          "type": "default",
+          "listeners": [
+            {
+              "id": "listener-ucmv-gen",
+              "name": "UC Metric View Generator",
+              "crewId": "51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0",
+              "crewName": "UC Metric View Generator — JSON Mode",
+              "listenToTaskIds": ["task-config-gen-001"],
+              "listenToTaskNames": [],
+              "tasks": [
+                {
+                  "id": "task-ucmv-gen-001",
+                  "name": "Generate UC Metric Views",
+                  "description": "Generate UC Metric View YAML + deploy SQL for all fact tables. Use config_json from the Pipeline Config Generator output. Call the UC Metric View Generator tool and return the full output.",
+                  "expected_output": "",
+                  "tools": [],
+                  "context": [],
+                  "markdown": false
+                }
+              ],
+              "state": { "stateType": "unstructured", "stateDefinition": "", "stateData": {} },
+              "conditionType": "NONE"
+            },
+            {
+              "id": "listener-ucmv-validator",
+              "name": "UCMV Quality Validator",
+              "crewId": "b6d1647a-e2ba-4474-a530-4cc88dd7eae8",
+              "crewName": "UCMV Quality Validator",
+              "listenToTaskIds": ["task-ucmv-gen-001"],
+              "listenToTaskNames": [],
+              "tasks": [
+                {
+                  "id": "task-ucmv-validator-001",
+                  "name": "Validate UC Metric Views",
+                  "description": "Validate the generated UC Metric View YAML definitions against the original DAX expressions. Call the Metric View Validator tool with the ucmv_output from the previous step. Return the full validation report.",
+                  "expected_output": "",
+                  "tools": [],
+                  "context": [],
+                  "markdown": false
+                }
+              ],
+              "state": { "stateType": "unstructured", "stateDefinition": "", "stateData": {} },
+              "conditionType": "NONE"
+            },
+            {
+              "id": "listener-genie-space",
+              "name": "Genie Space Generator",
+              "crewId": "genie-space-gen-crew-001",
+              "crewName": "Genie Space Generator",
+              "listenToTaskIds": ["task-ucmv-validator-001"],
+              "listenToTaskNames": [],
+              "tasks": [
+                {
+                  "id": "genie-space-gen-task-001",
+                  "name": "Deploy Genie Space",
+                  "description": "Deploy a Databricks Genie Space on top of the UC Metric Views. The ucmv_output is auto-injected from the UCMV Generator output. Call the Genie Space Generator tool immediately with the pre-configured space_title, catalog, schema_name, warehouse_id, and sample questions. Return the full tool output including the Genie Space URL.",
+                  "expected_output": "",
+                  "tools": [],
+                  "context": [],
+                  "markdown": false
+                }
+              ],
+              "state": { "stateType": "unstructured", "stateDefinition": "", "stateData": {} },
+              "conditionType": "NONE"
+            }
+          ],
+          "actions": [
+            {
+              "id": "action-config-to-gen",
+              "crewId": "51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0",
+              "crewName": "UC Metric View Generator — JSON Mode",
+              "taskId": "task-ucmv-gen-001",
+              "taskName": "Generate UC Metric Views"
+            },
+            {
+              "id": "action-gen-to-validator",
+              "crewId": "b6d1647a-e2ba-4474-a530-4cc88dd7eae8",
+              "crewName": "UCMV Quality Validator",
+              "taskId": "task-ucmv-validator-001",
+              "taskName": "Validate UC Metric Views"
+            },
+            {
+              "id": "action-validator-to-genie",
+              "crewId": "genie-space-gen-crew-001",
+              "crewName": "Genie Space Generator",
+              "taskId": "genie-space-gen-task-001",
+              "taskName": "Deploy Genie Space"
+            }
+          ],
+          "startingPoints": [
+            {
+              "crewId": "fc63b178-13ff-4350-9be4-1f8471c20b99",
+              "crewName": "UCMV — Generate Pipeline Config (API-Direct)",
+              "taskId": "task-config-gen-001",
+              "taskName": "Generate Pipeline Config from PBI APIs",
+              "isStartPoint": true
+            }
+          ]
+        },
+        "id": "crew-fc63b178-13ff-4350-9be4-1f8471c20b99"
+      },
+      "width": null,
+      "height": null,
+      "selected": null,
+      "positionAbsolute": null,
+      "dragging": null,
+      "style": null,
+      "className": null,
+      "measured": null
+    },
+    {
+      "id": "crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0-2",
+      "type": "crewNode",
+      "position": { "x": 280, "y": 150 },
+      "data": {
+        "label": "UC Metric View Generator — JSON Mode",
+        "crewName": "UC Metric View Generator — JSON Mode",
+        "type": null,
+        "decorator": null,
+        "listenTo": null,
+        "routerCondition": null,
+        "stateType": null,
+        "stateDefinition": null,
+        "listener": null,
+        "allTasks": [
+          {
+            "id": "task-ucmv-gen-001",
+            "name": "Generate UC Metric Views",
+            "description": "Generate UC Metric View YAML + deploy SQL for all fact tables. Use config_json from the Pipeline Config Generator output. Call the UC Metric View Generator tool and return the full output."
+          }
+        ],
+        "selectedTasks": [],
+        "order": 2,
+        "crewId": "51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0",
+        "flowConfig": {
+          "id": "flow-ucmv-full-pipeline-001",
+          "name": "UCMV Full Pipeline — Config → Generator → Validator → Genie Space",
+          "type": "default",
+          "listeners": [
+            {
+              "id": "listener-ucmv-gen",
+              "name": "UC Metric View Generator",
+              "crewId": "51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0",
+              "crewName": "UC Metric View Generator — JSON Mode",
+              "listenToTaskIds": ["task-config-gen-001"],
+              "listenToTaskNames": [],
+              "tasks": [
+                {
+                  "id": "task-ucmv-gen-001",
+                  "name": "Generate UC Metric Views",
+                  "description": "Generate UC Metric View YAML + deploy SQL for all fact tables.",
+                  "expected_output": "",
+                  "tools": [],
+                  "context": [],
+                  "markdown": false
+                }
+              ],
+              "state": { "stateType": "unstructured", "stateDefinition": "", "stateData": {} },
+              "conditionType": "NONE"
+            },
+            {
+              "id": "listener-ucmv-validator",
+              "name": "UCMV Quality Validator",
+              "crewId": "b6d1647a-e2ba-4474-a530-4cc88dd7eae8",
+              "crewName": "UCMV Quality Validator",
+              "listenToTaskIds": ["task-ucmv-gen-001"],
+              "listenToTaskNames": [],
+              "tasks": [
+                {
+                  "id": "task-ucmv-validator-001",
+                  "name": "Validate UC Metric Views",
+                  "description": "Validate the UC Metric View YAML against DAX expressions.",
+                  "expected_output": "",
+                  "tools": [],
+                  "context": [],
+                  "markdown": false
+                }
+              ],
+              "state": { "stateType": "unstructured", "stateDefinition": "", "stateData": {} },
+              "conditionType": "NONE"
+            },
+            {
+              "id": "listener-genie-space",
+              "name": "Genie Space Generator",
+              "crewId": "genie-space-gen-crew-001",
+              "crewName": "Genie Space Generator",
+              "listenToTaskIds": ["task-ucmv-validator-001"],
+              "listenToTaskNames": [],
+              "tasks": [
+                {
+                  "id": "genie-space-gen-task-001",
+                  "name": "Deploy Genie Space",
+                  "description": "Deploy a Databricks Genie Space on top of the UC Metric Views.",
+                  "expected_output": "",
+                  "tools": [],
+                  "context": [],
+                  "markdown": false
+                }
+              ],
+              "state": { "stateType": "unstructured", "stateDefinition": "", "stateData": {} },
+              "conditionType": "NONE"
+            }
+          ],
+          "actions": [
+            {
+              "id": "action-config-to-gen",
+              "crewId": "51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0",
+              "crewName": "UC Metric View Generator — JSON Mode",
+              "taskId": "task-ucmv-gen-001",
+              "taskName": "Generate UC Metric Views"
+            },
+            {
+              "id": "action-gen-to-validator",
+              "crewId": "b6d1647a-e2ba-4474-a530-4cc88dd7eae8",
+              "crewName": "UCMV Quality Validator",
+              "taskId": "task-ucmv-validator-001",
+              "taskName": "Validate UC Metric Views"
+            },
+            {
+              "id": "action-validator-to-genie",
+              "crewId": "genie-space-gen-crew-001",
+              "crewName": "Genie Space Generator",
+              "taskId": "genie-space-gen-task-001",
+              "taskName": "Deploy Genie Space"
+            }
+          ],
+          "startingPoints": [
+            {
+              "crewId": "fc63b178-13ff-4350-9be4-1f8471c20b99",
+              "crewName": "UCMV — Generate Pipeline Config (API-Direct)",
+              "taskId": "task-config-gen-001",
+              "taskName": "Generate Pipeline Config from PBI APIs",
+              "isStartPoint": true
+            }
+          ]
+        },
+        "id": "crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0"
+      },
+      "width": null,
+      "height": null,
+      "selected": null,
+      "positionAbsolute": null,
+      "dragging": null,
+      "style": null,
+      "className": null,
+      "measured": null
+    },
+    {
+      "id": "crew-b6d1647a-e2ba-4474-a530-4cc88dd7eae8-3",
+      "type": "crewNode",
+      "position": { "x": 500, "y": 150 },
+      "data": {
+        "label": "UCMV Quality Validator",
+        "crewName": "UCMV Quality Validator",
+        "type": null,
+        "decorator": null,
+        "listenTo": null,
+        "routerCondition": null,
+        "stateType": null,
+        "stateDefinition": null,
+        "listener": null,
+        "allTasks": [
+          {
+            "id": "task-ucmv-validator-001",
+            "name": "Validate UC Metric Views",
+            "description": "Validate the generated UC Metric View YAML definitions against the original DAX expressions."
+          }
+        ],
+        "selectedTasks": [],
+        "order": 3,
+        "crewId": "b6d1647a-e2ba-4474-a530-4cc88dd7eae8",
+        "flowConfig": {
+          "id": "flow-ucmv-full-pipeline-001",
+          "name": "UCMV Full Pipeline — Config → Generator → Validator → Genie Space",
+          "type": "default",
+          "listeners": [
+            {
+              "id": "listener-ucmv-gen",
+              "name": "UC Metric View Generator",
+              "crewId": "51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0",
+              "crewName": "UC Metric View Generator — JSON Mode",
+              "listenToTaskIds": ["task-config-gen-001"],
+              "listenToTaskNames": [],
+              "tasks": [
+                {
+                  "id": "task-ucmv-gen-001",
+                  "name": "Generate UC Metric Views",
+                  "description": "Generate UC Metric View YAML + deploy SQL for all fact tables.",
+                  "expected_output": "",
+                  "tools": [],
+                  "context": [],
+                  "markdown": false
+                }
+              ],
+              "state": { "stateType": "unstructured", "stateDefinition": "", "stateData": {} },
+              "conditionType": "NONE"
+            },
+            {
+              "id": "listener-ucmv-validator",
+              "name": "UCMV Quality Validator",
+              "crewId": "b6d1647a-e2ba-4474-a530-4cc88dd7eae8",
+              "crewName": "UCMV Quality Validator",
+              "listenToTaskIds": ["task-ucmv-gen-001"],
+              "listenToTaskNames": [],
+              "tasks": [
+                {
+                  "id": "task-ucmv-validator-001",
+                  "name": "Validate UC Metric Views",
+                  "description": "Validate the UC Metric View YAML against DAX expressions.",
+                  "expected_output": "",
+                  "tools": [],
+                  "context": [],
+                  "markdown": false
+                }
+              ],
+              "state": { "stateType": "unstructured", "stateDefinition": "", "stateData": {} },
+              "conditionType": "NONE"
+            },
+            {
+              "id": "listener-genie-space",
+              "name": "Genie Space Generator",
+              "crewId": "genie-space-gen-crew-001",
+              "crewName": "Genie Space Generator",
+              "listenToTaskIds": ["task-ucmv-validator-001"],
+              "listenToTaskNames": [],
+              "tasks": [
+                {
+                  "id": "genie-space-gen-task-001",
+                  "name": "Deploy Genie Space",
+                  "description": "Deploy a Databricks Genie Space on top of the UC Metric Views.",
+                  "expected_output": "",
+                  "tools": [],
+                  "context": [],
+                  "markdown": false
+                }
+              ],
+              "state": { "stateType": "unstructured", "stateDefinition": "", "stateData": {} },
+              "conditionType": "NONE"
+            }
+          ],
+          "actions": [
+            {
+              "id": "action-config-to-gen",
+              "crewId": "51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0",
+              "crewName": "UC Metric View Generator — JSON Mode",
+              "taskId": "task-ucmv-gen-001",
+              "taskName": "Generate UC Metric Views"
+            },
+            {
+              "id": "action-gen-to-validator",
+              "crewId": "b6d1647a-e2ba-4474-a530-4cc88dd7eae8",
+              "crewName": "UCMV Quality Validator",
+              "taskId": "task-ucmv-validator-001",
+              "taskName": "Validate UC Metric Views"
+            },
+            {
+              "id": "action-validator-to-genie",
+              "crewId": "genie-space-gen-crew-001",
+              "crewName": "Genie Space Generator",
+              "taskId": "genie-space-gen-task-001",
+              "taskName": "Deploy Genie Space"
+            }
+          ],
+          "startingPoints": [
+            {
+              "crewId": "fc63b178-13ff-4350-9be4-1f8471c20b99",
+              "crewName": "UCMV — Generate Pipeline Config (API-Direct)",
+              "taskId": "task-config-gen-001",
+              "taskName": "Generate Pipeline Config from PBI APIs",
+              "isStartPoint": true
+            }
+          ]
+        },
+        "id": "crew-b6d1647a-e2ba-4474-a530-4cc88dd7eae8"
+      },
+      "width": null,
+      "height": null,
+      "selected": null,
+      "positionAbsolute": null,
+      "dragging": null,
+      "style": null,
+      "className": null,
+      "measured": null
+    },
+    {
+      "id": "crew-genie-space-gen-crew-001-4",
+      "type": "crewNode",
+      "position": { "x": 720, "y": 150 },
+      "data": {
+        "label": "Genie Space Generator",
+        "crewName": "Genie Space Generator",
+        "type": null,
+        "decorator": null,
+        "listenTo": null,
+        "routerCondition": null,
+        "stateType": null,
+        "stateDefinition": null,
+        "listener": null,
+        "allTasks": [
+          {
+            "id": "genie-space-gen-task-001",
+            "name": "Deploy Genie Space",
+            "description": "Deploy a Databricks Genie Space on top of the UC Metric Views. The ucmv_output is auto-injected from the UCMV Generator output. Call the Genie Space Generator tool immediately with the pre-configured space_title, catalog, schema_name, warehouse_id, and sample questions."
+          }
+        ],
+        "selectedTasks": [],
+        "order": 4,
+        "crewId": "genie-space-gen-crew-001",
+        "flowConfig": {
+          "id": "flow-ucmv-full-pipeline-001",
+          "name": "UCMV Full Pipeline — Config → Generator → Validator → Genie Space",
+          "type": "default",
+          "listeners": [
+            {
+              "id": "listener-ucmv-gen",
+              "name": "UC Metric View Generator",
+              "crewId": "51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0",
+              "crewName": "UC Metric View Generator — JSON Mode",
+              "listenToTaskIds": ["task-config-gen-001"],
+              "listenToTaskNames": [],
+              "tasks": [
+                {
+                  "id": "task-ucmv-gen-001",
+                  "name": "Generate UC Metric Views",
+                  "description": "Generate UC Metric View YAML + deploy SQL for all fact tables.",
+                  "expected_output": "",
+                  "tools": [],
+                  "context": [],
+                  "markdown": false
+                }
+              ],
+              "state": { "stateType": "unstructured", "stateDefinition": "", "stateData": {} },
+              "conditionType": "NONE"
+            },
+            {
+              "id": "listener-ucmv-validator",
+              "name": "UCMV Quality Validator",
+              "crewId": "b6d1647a-e2ba-4474-a530-4cc88dd7eae8",
+              "crewName": "UCMV Quality Validator",
+              "listenToTaskIds": ["task-ucmv-gen-001"],
+              "listenToTaskNames": [],
+              "tasks": [
+                {
+                  "id": "task-ucmv-validator-001",
+                  "name": "Validate UC Metric Views",
+                  "description": "Validate the UC Metric View YAML against DAX expressions.",
+                  "expected_output": "",
+                  "tools": [],
+                  "context": [],
+                  "markdown": false
+                }
+              ],
+              "state": { "stateType": "unstructured", "stateDefinition": "", "stateData": {} },
+              "conditionType": "NONE"
+            },
+            {
+              "id": "listener-genie-space",
+              "name": "Genie Space Generator",
+              "crewId": "genie-space-gen-crew-001",
+              "crewName": "Genie Space Generator",
+              "listenToTaskIds": ["task-ucmv-validator-001"],
+              "listenToTaskNames": [],
+              "tasks": [
+                {
+                  "id": "genie-space-gen-task-001",
+                  "name": "Deploy Genie Space",
+                  "description": "Deploy a Databricks Genie Space on top of the UC Metric Views.",
+                  "expected_output": "",
+                  "tools": [],
+                  "context": [],
+                  "markdown": false
+                }
+              ],
+              "state": { "stateType": "unstructured", "stateDefinition": "", "stateData": {} },
+              "conditionType": "NONE"
+            }
+          ],
+          "actions": [
+            {
+              "id": "action-config-to-gen",
+              "crewId": "51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0",
+              "crewName": "UC Metric View Generator — JSON Mode",
+              "taskId": "task-ucmv-gen-001",
+              "taskName": "Generate UC Metric Views"
+            },
+            {
+              "id": "action-gen-to-validator",
+              "crewId": "b6d1647a-e2ba-4474-a530-4cc88dd7eae8",
+              "crewName": "UCMV Quality Validator",
+              "taskId": "task-ucmv-validator-001",
+              "taskName": "Validate UC Metric Views"
+            },
+            {
+              "id": "action-validator-to-genie",
+              "crewId": "genie-space-gen-crew-001",
+              "crewName": "Genie Space Generator",
+              "taskId": "genie-space-gen-task-001",
+              "taskName": "Deploy Genie Space"
+            }
+          ],
+          "startingPoints": [
+            {
+              "crewId": "fc63b178-13ff-4350-9be4-1f8471c20b99",
+              "crewName": "UCMV — Generate Pipeline Config (API-Direct)",
+              "taskId": "task-config-gen-001",
+              "taskName": "Generate Pipeline Config from PBI APIs",
+              "isStartPoint": true
+            }
+          ]
+        },
+        "id": "crew-genie-space-gen-crew-001"
+      },
+      "width": null,
+      "height": null,
+      "selected": null,
+      "positionAbsolute": null,
+      "dragging": null,
+      "style": null,
+      "className": null,
+      "measured": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "crew-fc63b178-13ff-4350-9be4-1f8471c20b99-1",
+      "target": "crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0-2",
+      "id": "edge-config-to-gen",
+      "type": "crewEdge",
+      "sourceHandle": "right",
+      "targetHandle": "left",
+      "data": {
+        "listenToTaskIds": ["task-config-gen-001"],
+        "targetTaskIds": ["task-ucmv-gen-001"],
+        "logicType": "NONE",
+        "description": "",
+        "checkpoint": true,
+        "hitl": {
+          "enabled": false,
+          "message": "Review and approve to continue",
+          "timeout_seconds": 86400,
+          "timeout_action": "auto_approve",
+          "require_comment": false
+        }
+      },
+      "style": { "stroke": "#ff9800", "strokeWidth": 2 },
+      "animated": true,
+      "label": null,
+      "labelStyle": null,
+      "labelBgStyle": null,
+      "className": null
+    },
+    {
+      "source": "crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0-2",
+      "target": "crew-b6d1647a-e2ba-4474-a530-4cc88dd7eae8-3",
+      "id": "edge-gen-to-validator",
+      "type": "crewEdge",
+      "sourceHandle": "right",
+      "targetHandle": "left",
+      "data": {
+        "listenToTaskIds": ["task-ucmv-gen-001"],
+        "targetTaskIds": ["task-ucmv-validator-001"],
+        "logicType": "NONE",
+        "description": "",
+        "checkpoint": true,
+        "hitl": {
+          "enabled": true,
+          "message": "Review the generated UCMV YAML before validation",
+          "timeout_seconds": 86400,
+          "timeout_action": "auto_reject",
+          "require_comment": false
+        }
+      },
+      "style": { "stroke": "#ff9800", "strokeWidth": 2 },
+      "animated": true,
+      "label": null,
+      "labelStyle": null,
+      "labelBgStyle": null,
+      "className": null
+    },
+    {
+      "source": "crew-b6d1647a-e2ba-4474-a530-4cc88dd7eae8-3",
+      "target": "crew-genie-space-gen-crew-001-4",
+      "id": "edge-validator-to-genie",
+      "type": "crewEdge",
+      "sourceHandle": "right",
+      "targetHandle": "left",
+      "data": {
+        "listenToTaskIds": ["task-ucmv-validator-001"],
+        "targetTaskIds": ["genie-space-gen-task-001"],
+        "logicType": "NONE",
+        "description": "",
+        "checkpoint": true,
+        "hitl": {
+          "enabled": true,
+          "message": "Validation complete. Review the quality report and approve to deploy the Genie Space.",
+          "timeout_seconds": 86400,
+          "timeout_action": "auto_reject",
+          "require_comment": false
+        }
+      },
+      "style": { "stroke": "#009688", "strokeWidth": 2 },
+      "animated": true,
+      "label": null,
+      "labelStyle": null,
+      "labelBgStyle": null,
+      "className": null
+    }
+  ],
+  "flow_config": {
+    "id": "flow-ucmv-full-pipeline-001",
+    "name": "UCMV Full Pipeline — Config → Generator → Validator → Genie Space",
+    "type": "default",
+    "listeners": [
+      {
+        "id": "listener-ucmv-gen",
+        "name": "UC Metric View Generator",
+        "crewId": "51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0",
+        "crewName": "UC Metric View Generator — JSON Mode",
+        "listenToTaskIds": ["task-config-gen-001"],
+        "listenToTaskNames": [],
+        "tasks": [
+          {
+            "id": "task-ucmv-gen-001",
+            "name": "Generate UC Metric Views",
+            "description": "Generate UC Metric View YAML + deploy SQL for all fact tables. Use config_json from the Pipeline Config Generator output. Call the UC Metric View Generator tool and return the full output.",
+            "expected_output": "",
+            "tools": [],
+            "context": [],
+            "markdown": false
+          }
+        ],
+        "state": { "stateType": "unstructured", "stateDefinition": "", "stateData": {} },
+        "conditionType": "NONE"
+      },
+      {
+        "id": "listener-ucmv-validator",
+        "name": "UCMV Quality Validator",
+        "crewId": "b6d1647a-e2ba-4474-a530-4cc88dd7eae8",
+        "crewName": "UCMV Quality Validator",
+        "listenToTaskIds": ["task-ucmv-gen-001"],
+        "listenToTaskNames": [],
+        "tasks": [
+          {
+            "id": "task-ucmv-validator-001",
+            "name": "Validate UC Metric Views",
+            "description": "Validate the generated UC Metric View YAML definitions against the original DAX expressions. Call the Metric View Validator tool with the ucmv_output from the previous step. Return the full validation report.",
+            "expected_output": "",
+            "tools": [],
+            "context": [],
+            "markdown": false
+          }
+        ],
+        "state": { "stateType": "unstructured", "stateDefinition": "", "stateData": {} },
+        "conditionType": "NONE"
+      },
+      {
+        "id": "listener-genie-space",
+        "name": "Genie Space Generator",
+        "crewId": "genie-space-gen-crew-001",
+        "crewName": "Genie Space Generator",
+        "listenToTaskIds": ["task-ucmv-validator-001"],
+        "listenToTaskNames": [],
+        "tasks": [
+          {
+            "id": "genie-space-gen-task-001",
+            "name": "Deploy Genie Space",
+            "description": "Deploy a Databricks Genie Space on top of the UC Metric Views. The ucmv_output is auto-injected from the UCMV Generator output via the flow. Call the Genie Space Generator tool immediately — space_title, catalog, schema_name, warehouse_id, and sample questions are pre-configured in tool_configs. Return the full tool output including the Genie Space URL.",
+            "expected_output": "",
+            "tools": [],
+            "context": [],
+            "markdown": false
+          }
+        ],
+        "state": { "stateType": "unstructured", "stateDefinition": "", "stateData": {} },
+        "conditionType": "NONE"
+      }
+    ],
+    "actions": [
+      {
+        "id": "action-config-to-gen",
+        "crewId": "51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0",
+        "crewName": "UC Metric View Generator — JSON Mode",
+        "taskId": "task-ucmv-gen-001",
+        "taskName": "Generate UC Metric Views"
+      },
+      {
+        "id": "action-gen-to-validator",
+        "crewId": "b6d1647a-e2ba-4474-a530-4cc88dd7eae8",
+        "crewName": "UCMV Quality Validator",
+        "taskId": "task-ucmv-validator-001",
+        "taskName": "Validate UC Metric Views"
+      },
+      {
+        "id": "action-validator-to-genie",
+        "crewId": "genie-space-gen-crew-001",
+        "crewName": "Genie Space Generator",
+        "taskId": "genie-space-gen-task-001",
+        "taskName": "Deploy Genie Space"
+      }
+    ],
+    "startingPoints": [
+      {
+        "crewId": "fc63b178-13ff-4350-9be4-1f8471c20b99",
+        "crewName": "UCMV — Generate Pipeline Config (API-Direct)",
+        "taskId": "task-config-gen-001",
+        "taskName": "Generate Pipeline Config from PBI APIs",
+        "isStartPoint": true
+      }
+    ]
+  },
+  "created_at": "2026-05-26T00:00:00.000000",
+  "updated_at": "2026-05-26T00:00:00.000000",
+  "flowConfig": {
+    "id": "flow-ucmv-full-pipeline-001",
+    "name": "UCMV Full Pipeline — Config → Generator → Validator → Genie Space",
+    "type": "default"
+  }
+}

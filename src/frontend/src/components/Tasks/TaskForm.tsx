@@ -59,6 +59,7 @@ import { PowerBIDaxExecutorConfigSelector, PowerBIDaxExecutorConfig } from '../C
 import { UCMetricViewGeneratorConfigSelector, UCMetricViewGeneratorConfig } from '../Common/UCMetricViewGeneratorConfigSelector';
 import { ConfigGeneratorConfigSelector, ConfigGeneratorConfig } from '../Common/ConfigGeneratorConfigSelector';
 import { PipelineConfigGeneratorConfigSelector, PipelineConfigGeneratorConfig } from '../Common/PipelineConfigGeneratorConfigSelector';
+import { GenieSpaceConfigSelector, GenieSpaceConfig } from '../Common/GenieSpaceConfigSelector';
 import { PerplexityConfig, SerperConfig } from '../../types/config';
 import { type LLMGuardrailConfig } from '../../types/task';
 import { ModelService } from '../../api/ModelService';
@@ -157,6 +158,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const [ucMetricViewConfig, setUcMetricViewConfig] = useState<UCMetricViewGeneratorConfig>({});
   const [configGeneratorConfig, setConfigGeneratorConfig] = useState<ConfigGeneratorConfig>({});
   const [pipelineConfigGenConfig, setPipelineConfigGenConfig] = useState<PipelineConfigGeneratorConfig>({});
+  const [genieSpaceConfig, setGenieSpaceConfig] = useState<GenieSpaceConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
   const [showBestPractices, setShowBestPractices] = useState(false);
@@ -287,6 +289,11 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       // Check for Pipeline Config Generator config
       if (initialData.tool_configs['Pipeline Config Generator']) {
         setPipelineConfigGenConfig(initialData.tool_configs['Pipeline Config Generator'] as PipelineConfigGeneratorConfig);
+      }
+
+      // Check for Genie Space Generator config
+      if (initialData.tool_configs['Genie Space Generator']) {
+        setGenieSpaceConfig(initialData.tool_configs['Genie Space Generator'] as GenieSpaceConfig);
       }
 
       // Check for MCP_SERVERS config
@@ -2024,6 +2031,39 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                       setToolConfigs(prev => ({
                         ...prev,
                         'Pipeline Config Generator': config
+                      }));
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+
+            {/* Genie Space Generator Configuration - Show only when tool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'Genie Space Generator';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  Genie Space Generator (Tool 92) Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(0, 150, 136, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(0, 150, 136, 0.2)'
+                }}>
+                  <GenieSpaceConfigSelector
+                    value={genieSpaceConfig}
+                    onChange={(config) => {
+                      setGenieSpaceConfig(config);
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'Genie Space Generator': config
                       }));
                     }}
                   />

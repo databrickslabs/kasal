@@ -191,6 +191,13 @@ except ImportError as e:
     PipelineConfigGeneratorTool = None
     logging.warning(f"Could not import PipelineConfigGeneratorTool: {e}")
 
+# Genie Space Generator Tool
+try:
+    from .custom.genie_space_generator_tool import GenieSpaceGeneratorTool
+except ImportError as e:
+    GenieSpaceGeneratorTool = None
+    logging.warning(f"Could not import GenieSpaceGeneratorTool: {e}")
+
 # Setup logger
 logger = logging.getLogger(__name__)
 
@@ -275,6 +282,8 @@ class ToolFactory:
             self._tool_implementations["Config Generator"] = ConfigGeneratorTool
         if PipelineConfigGeneratorTool is not None:
             self._tool_implementations["Pipeline Config Generator"] = PipelineConfigGeneratorTool
+        if GenieSpaceGeneratorTool is not None:
+            self._tool_implementations["Genie Space Generator"] = GenieSpaceGeneratorTool
 
         # Initialize _initialized flag
         self._initialized = False
