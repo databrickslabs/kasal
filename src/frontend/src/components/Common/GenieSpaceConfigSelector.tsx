@@ -175,7 +175,7 @@ export const GenieSpaceConfigSelector: React.FC<GenieSpaceConfigSelectorProps> =
       'sql_filters_json', 'example_sqls_json',
     ];
     for (const f of jsonFields) {
-      if (f in parsed && typeof parsed[f] === 'string') {
+      if (f in parsed && typeof parsed[f] === 'string' && (parsed[f] as string) !== '') {
         merged[f] = parsed[f] as string;
       }
     }
