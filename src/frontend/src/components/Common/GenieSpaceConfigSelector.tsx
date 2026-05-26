@@ -94,6 +94,8 @@ export const GenieSpaceConfigSelector: React.FC<GenieSpaceConfigSelectorProps> =
   const [connectLoading, setConnectLoading] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
   const [schemaLoading, setSchemaLoading] = useState(false);
+  const [catalogSearch, setCatalogSearch] = useState('');
+  const [schemaSearch, setSchemaSearch] = useState('');
 
   // ── JSON load state ─────────────────────────────────────────────────────────
   const [jsonTab, setJsonTab] = useState(0);
@@ -373,13 +375,38 @@ export const GenieSpaceConfigSelector: React.FC<GenieSpaceConfigSelectorProps> =
                 value={value.catalog || ''}
                 onChange={(e) => handleCatalogChange(e.target.value)}
                 disabled={disabled}
+                onClose={() => setCatalogSearch('')}
+                MenuProps={{ autoFocus: false }}
               >
-                {catalogs.length === 0 && value.catalog && (
+                <MenuItem
+                  disableRipple
+                  onKeyDown={(e) => e.stopPropagation()}
+                  sx={{ p: 1, '&:hover': { background: 'transparent' }, cursor: 'default' }}
+                >
+                  <TextField
+                    size="small"
+                    fullWidth
+                    placeholder="Search catalogs…"
+                    value={catalogSearch}
+                    onChange={(e) => setCatalogSearch(e.target.value)}
+                    autoFocus
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </MenuItem>
+                {catalogs.length === 0 && value.catalog && !catalogSearch && (
                   <MenuItem value={value.catalog}>{value.catalog}</MenuItem>
                 )}
-                {catalogs.map((c) => (
+                {(catalogSearch
+                  ? catalogs.filter((c) => c.toLowerCase().includes(catalogSearch.toLowerCase()))
+                  : catalogs
+                ).map((c) => (
                   <MenuItem key={c} value={c}>{c}</MenuItem>
                 ))}
+                {catalogs.length > 0 &&
+                  catalogSearch &&
+                  catalogs.filter((c) => c.toLowerCase().includes(catalogSearch.toLowerCase())).length === 0 && (
+                  <MenuItem disabled>No matches</MenuItem>
+                )}
               </Select>
             </FormControl>
             <FormControl fullWidth size="small">
@@ -390,13 +417,38 @@ export const GenieSpaceConfigSelector: React.FC<GenieSpaceConfigSelectorProps> =
                 onChange={(e) => handleField('schema_name', e.target.value)}
                 disabled={disabled || schemaLoading}
                 startAdornment={schemaLoading ? <CircularProgress size={14} sx={{ mr: 1 }} /> : undefined}
+                onClose={() => setSchemaSearch('')}
+                MenuProps={{ autoFocus: false }}
               >
-                {schemas.length === 0 && value.schema_name && (
+                <MenuItem
+                  disableRipple
+                  onKeyDown={(e) => e.stopPropagation()}
+                  sx={{ p: 1, '&:hover': { background: 'transparent' }, cursor: 'default' }}
+                >
+                  <TextField
+                    size="small"
+                    fullWidth
+                    placeholder="Search schemas…"
+                    value={schemaSearch}
+                    onChange={(e) => setSchemaSearch(e.target.value)}
+                    autoFocus
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </MenuItem>
+                {schemas.length === 0 && value.schema_name && !schemaSearch && (
                   <MenuItem value={value.schema_name}>{value.schema_name}</MenuItem>
                 )}
-                {schemas.map((s) => (
+                {(schemaSearch
+                  ? schemas.filter((s) => s.toLowerCase().includes(schemaSearch.toLowerCase()))
+                  : schemas
+                ).map((s) => (
                   <MenuItem key={s} value={s}>{s}</MenuItem>
                 ))}
+                {schemas.length > 0 &&
+                  schemaSearch &&
+                  schemas.filter((s) => s.toLowerCase().includes(schemaSearch.toLowerCase())).length === 0 && (
+                  <MenuItem disabled>No matches</MenuItem>
+                )}
               </Select>
             </FormControl>
           </Box>
