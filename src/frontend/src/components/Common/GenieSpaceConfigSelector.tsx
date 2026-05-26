@@ -18,10 +18,18 @@ import {
   Button,
   IconButton,
   Alert,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  CircularProgress,
+  Tabs,
+  Tab,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
+import { DatabricksService } from '../../api/DatabricksService';
 
 export interface GenieSpaceConfig {
   space_title?: string;
@@ -62,6 +70,12 @@ interface ExampleSql {
   sql: string;
 }
 
+interface WarehouseOption {
+  id: string;
+  name: string;
+  state: string;
+}
+
 interface GenieSpaceConfigSelectorProps {
   value: GenieSpaceConfig;
   onChange: (config: GenieSpaceConfig) => void;
@@ -73,48 +87,145 @@ export const GenieSpaceConfigSelector: React.FC<GenieSpaceConfigSelectorProps> =
   onChange,
   disabled = false,
 }) => {
+  // ── Connection state ────────────────────────────────────────────────────────
+  const [warehouses, setWarehouses] = useState<WarehouseOption[]>([]);
+  const [catalogs, setCatalogs] = useState<string[]>([]);
+  const [schemas, setSchemas] = useState<string[]>([]);
+  const [connectLoading, setConnectLoading] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
+  const [schemaLoading, setSchemaLoading] = useState(false);
+
+  // ── JSON load state ─────────────────────────────────────────────────────────
+  const [jsonTab, setJsonTab] = useState(0);
+  const [jsonPasteText, setJsonPasteText] = useState('');
+  const [jsonError, setJsonError] = useState<string | null>(null);
+  const [jsonSuccess, setJsonSuccess] = useState<string | null>(null);
+
+  // ── Structured sub-state ────────────────────────────────────────────────────
   const [joinSpecs, setJoinSpecs] = useState<JoinSpec[]>(() => {
-    try {
-      return value.join_specs_json ? JSON.parse(value.join_specs_json) : [];
-    } catch {
-      return [];
-    }
+    try { return value.join_specs_json ? JSON.parse(value.join_specs_json) : []; } catch { return []; }
   });
-
   const [sqlExpressions, setSqlExpressions] = useState<SqlSnippet[]>(() => {
-    try {
-      return value.sql_expressions_json ? JSON.parse(value.sql_expressions_json) : [];
-    } catch {
-      return [];
-    }
+    try { return value.sql_expressions_json ? JSON.parse(value.sql_expressions_json) : []; } catch { return []; }
   });
-
   const [sqlMeasures, setSqlMeasures] = useState<SqlMeasure[]>(() => {
-    try {
-      return value.sql_measures_json ? JSON.parse(value.sql_measures_json) : [];
-    } catch {
-      return [];
-    }
+    try { return value.sql_measures_json ? JSON.parse(value.sql_measures_json) : []; } catch { return []; }
   });
-
   const [sqlFilters, setSqlFilters] = useState<SqlSnippet[]>(() => {
-    try {
-      return value.sql_filters_json ? JSON.parse(value.sql_filters_json) : [];
-    } catch {
-      return [];
-    }
+    try { return value.sql_filters_json ? JSON.parse(value.sql_filters_json) : []; } catch { return []; }
   });
-
   const [exampleSqls, setExampleSqls] = useState<ExampleSql[]>(() => {
-    try {
-      return value.example_sqls_json ? JSON.parse(value.example_sqls_json) : [];
-    } catch {
-      return [];
-    }
+    try { return value.example_sqls_json ? JSON.parse(value.example_sqls_json) : []; } catch { return []; }
   });
 
   const handleField = (field: keyof GenieSpaceConfig, fieldValue: string) => {
     onChange({ ...value, [field]: fieldValue });
+  };
+
+  // ── Connect button ──────────────────────────────────────────────────────────
+
+  const handleConnect = async () => {
+    setConnectLoading(true);
+    setConnectError(null);
+    const host = value.databricks_host || undefined;
+    try {
+      const [wh, cats] = await Promise.all([
+        DatabricksService.listWarehouses(host),
+        DatabricksService.listCatalogs(host),
+      ]);
+      setWarehouses(wh);
+      setCatalogs(cats);
+      setSchemas([]);
+    } catch (err) {
+      setConnectError(err instanceof Error ? err.message : 'Connection failed');
+    } finally {
+      setConnectLoading(false);
+    }
+  };
+
+  // ── Catalog change → fetch schemas ─────────────────────────────────────────
+
+  const handleCatalogChange = async (catalog: string) => {
+    handleField('catalog', catalog);
+    handleField('schema_name', '');
+    setSchemas([]);
+    if (!catalog) return;
+    setSchemaLoading(true);
+    try {
+      const host = value.databricks_host || undefined;
+      const schemalist = await DatabricksService.listSchemas(catalog, host);
+      setSchemas(schemalist);
+    } catch {
+      // Non-fatal: user can still type manually
+    } finally {
+      setSchemaLoading(false);
+    }
+  };
+
+  // ── JSON load (file or paste) ───────────────────────────────────────────────
+
+  const applyJsonConfig = (parsed: Record<string, unknown>) => {
+    const merged: GenieSpaceConfig = { ...value };
+    const jsonFields: (keyof GenieSpaceConfig)[] = [
+      'space_title', 'catalog', 'schema_name', 'warehouse_id', 'databricks_host',
+      'additional_tables', 'text_instructions', 'sample_questions',
+      'join_specs_json', 'sql_expressions_json', 'sql_measures_json',
+      'sql_filters_json', 'example_sqls_json',
+    ];
+    for (const f of jsonFields) {
+      if (f in parsed && typeof parsed[f] === 'string') {
+        merged[f] = parsed[f] as string;
+      }
+    }
+
+    // Sync local sub-states
+    try { if (merged.join_specs_json) setJoinSpecs(JSON.parse(merged.join_specs_json)); } catch { /* */ }
+    try { if (merged.sql_expressions_json) setSqlExpressions(JSON.parse(merged.sql_expressions_json)); } catch { /* */ }
+    try { if (merged.sql_measures_json) setSqlMeasures(JSON.parse(merged.sql_measures_json)); } catch { /* */ }
+    try { if (merged.sql_filters_json) setSqlFilters(JSON.parse(merged.sql_filters_json)); } catch { /* */ }
+    try { if (merged.example_sqls_json) setExampleSqls(JSON.parse(merged.example_sqls_json)); } catch { /* */ }
+
+    onChange(merged);
+    setJsonError(null);
+  };
+
+  const countAppliedFields = (parsed: Record<string, unknown>) => {
+    const jsonFields = ['space_title','catalog','schema_name','warehouse_id','databricks_host',
+      'additional_tables','text_instructions','sample_questions',
+      'join_specs_json','sql_expressions_json','sql_measures_json','sql_filters_json','example_sqls_json'];
+    return jsonFields.filter(f => f in parsed && typeof parsed[f] === 'string').length;
+  };
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const parsed = JSON.parse(e.target?.result as string);
+        const n = countAppliedFields(parsed);
+        applyJsonConfig(parsed);
+        setJsonSuccess(`Loaded "${file.name}" — ${n} field${n !== 1 ? 's' : ''} applied`);
+      } catch {
+        setJsonError('Invalid JSON file');
+        setJsonSuccess(null);
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+  };
+
+  const handlePasteApply = () => {
+    try {
+      const parsed = JSON.parse(jsonPasteText);
+      const n = countAppliedFields(parsed);
+      applyJsonConfig(parsed);
+      setJsonPasteText('');
+      setJsonSuccess(`${n} field${n !== 1 ? 's' : ''} applied from pasted JSON`);
+    } catch {
+      setJsonError('Invalid JSON — check syntax and try again');
+      setJsonSuccess(null);
+    }
   };
 
   // ── Join Specs ────────────────────────────────────────────────────────────────
@@ -123,15 +234,10 @@ export const GenieSpaceConfigSelector: React.FC<GenieSpaceConfigSelectorProps> =
     setJoinSpecs(updated);
     onChange({ ...value, join_specs_json: JSON.stringify(updated) });
   };
-
   const addJoinSpec = () => updateJoinSpecs([...joinSpecs, { left_table: '', right_table: '', join_condition: '' }]);
-
   const removeJoinSpec = (i: number) => updateJoinSpecs(joinSpecs.filter((_, idx) => idx !== i));
-
-  const updateJoinSpec = (i: number, field: keyof JoinSpec, v: string) => {
-    const updated = joinSpecs.map((js, idx) => idx === i ? { ...js, [field]: v } : js);
-    updateJoinSpecs(updated);
-  };
+  const updateJoinSpec = (i: number, field: keyof JoinSpec, v: string) =>
+    updateJoinSpecs(joinSpecs.map((js, idx) => idx === i ? { ...js, [field]: v } : js));
 
   // ── SQL Expressions ───────────────────────────────────────────────────────────
 
@@ -139,15 +245,10 @@ export const GenieSpaceConfigSelector: React.FC<GenieSpaceConfigSelectorProps> =
     setSqlExpressions(updated);
     onChange({ ...value, sql_expressions_json: JSON.stringify(updated) });
   };
-
   const addSqlExpression = () => updateSqlExpressions([...sqlExpressions, { display_name: '', sql: '' }]);
-
   const removeSqlExpression = (i: number) => updateSqlExpressions(sqlExpressions.filter((_, idx) => idx !== i));
-
-  const updateSqlExpression = (i: number, field: keyof SqlSnippet, v: string) => {
-    const updated = sqlExpressions.map((e, idx) => idx === i ? { ...e, [field]: v } : e);
-    updateSqlExpressions(updated);
-  };
+  const updateSqlExpression = (i: number, field: keyof SqlSnippet, v: string) =>
+    updateSqlExpressions(sqlExpressions.map((e, idx) => idx === i ? { ...e, [field]: v } : e));
 
   // ── SQL Measures ──────────────────────────────────────────────────────────────
 
@@ -155,15 +256,10 @@ export const GenieSpaceConfigSelector: React.FC<GenieSpaceConfigSelectorProps> =
     setSqlMeasures(updated);
     onChange({ ...value, sql_measures_json: JSON.stringify(updated) });
   };
-
   const addSqlMeasure = () => updateSqlMeasures([...sqlMeasures, { display_name: '', sql: '', instruction: '' }]);
-
   const removeSqlMeasure = (i: number) => updateSqlMeasures(sqlMeasures.filter((_, idx) => idx !== i));
-
-  const updateSqlMeasure = (i: number, field: keyof SqlMeasure, v: string) => {
-    const updated = sqlMeasures.map((m, idx) => idx === i ? { ...m, [field]: v } : m);
-    updateSqlMeasures(updated);
-  };
+  const updateSqlMeasure = (i: number, field: keyof SqlMeasure, v: string) =>
+    updateSqlMeasures(sqlMeasures.map((m, idx) => idx === i ? { ...m, [field]: v } : m));
 
   // ── SQL Filters ───────────────────────────────────────────────────────────────
 
@@ -171,15 +267,10 @@ export const GenieSpaceConfigSelector: React.FC<GenieSpaceConfigSelectorProps> =
     setSqlFilters(updated);
     onChange({ ...value, sql_filters_json: JSON.stringify(updated) });
   };
-
   const addSqlFilter = () => updateSqlFilters([...sqlFilters, { display_name: '', sql: '' }]);
-
   const removeSqlFilter = (i: number) => updateSqlFilters(sqlFilters.filter((_, idx) => idx !== i));
-
-  const updateSqlFilter = (i: number, field: keyof SqlSnippet, v: string) => {
-    const updated = sqlFilters.map((f, idx) => idx === i ? { ...f, [field]: v } : f);
-    updateSqlFilters(updated);
-  };
+  const updateSqlFilter = (i: number, field: keyof SqlSnippet, v: string) =>
+    updateSqlFilters(sqlFilters.map((f, idx) => idx === i ? { ...f, [field]: v } : f));
 
   // ── Example SQLs ──────────────────────────────────────────────────────────────
 
@@ -187,83 +278,189 @@ export const GenieSpaceConfigSelector: React.FC<GenieSpaceConfigSelectorProps> =
     setExampleSqls(updated);
     onChange({ ...value, example_sqls_json: JSON.stringify(updated) });
   };
-
   const addExampleSql = () => updateExampleSqls([...exampleSqls, { question: '', sql: '' }]);
-
   const removeExampleSql = (i: number) => updateExampleSqls(exampleSqls.filter((_, idx) => idx !== i));
-
-  const updateExampleSql = (i: number, field: keyof ExampleSql, v: string) => {
-    const updated = exampleSqls.map((e, idx) => idx === i ? { ...e, [field]: v } : e);
-    updateExampleSqls(updated);
-  };
+  const updateExampleSql = (i: number, field: keyof ExampleSql, v: string) =>
+    updateExampleSqls(exampleSqls.map((e, idx) => idx === i ? { ...e, [field]: v } : e));
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
 
-      {/* ── 1. Basic Setup ──────────────────────────────────────────────────────── */}
+      {/* ── ① Connection ──────────────────────────────────────────────────────── */}
       <Accordion defaultExpanded>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Basic Setup</Typography>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Connection</Typography>
         </AccordionSummary>
         <AccordionDetails>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <TextField
-              label="Space Title"
-              value={value.space_title || ''}
-              onChange={(e) => handleField('space_title', e.target.value)}
-              disabled={disabled}
-              required
-              fullWidth
-              helperText="Display name for the Genie space"
-              size="small"
-            />
-            <TextField
-              label="Warehouse ID"
-              value={value.warehouse_id || ''}
-              onChange={(e) => handleField('warehouse_id', e.target.value)}
-              disabled={disabled}
-              required
-              fullWidth
-              helperText="SQL warehouse ID used to run Genie queries"
-              size="small"
-            />
-            <TextField
-              label="Workspace URL (optional)"
-              value={value.databricks_host || ''}
-              onChange={(e) => handleField('databricks_host', e.target.value)}
-              disabled={disabled}
-              fullWidth
-              helperText="Override workspace URL (e.g. https://adb-123.azuredatabricks.net). Leave blank to use workspace from Kasal Settings / DATABRICKS_HOST env var."
-              size="small"
-              placeholder="https://adb-123456789.7.azuredatabricks.net"
-            />
-            <Box sx={{ display: 'flex', gap: 2 }}>
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
               <TextField
-                label="Catalog"
-                value={value.catalog || ''}
-                onChange={(e) => handleField('catalog', e.target.value)}
+                label="Workspace URL (optional)"
+                value={value.databricks_host || ''}
+                onChange={(e) => handleField('databricks_host', e.target.value)}
                 disabled={disabled}
-                required
                 fullWidth
-                helperText="UC catalog"
+                helperText="Override workspace URL. Leave blank to use Kasal Settings / DATABRICKS_HOST."
                 size="small"
+                placeholder="https://adb-123456789.7.azuredatabricks.net"
               />
-              <TextField
-                label="Schema"
-                value={value.schema_name || ''}
-                onChange={(e) => handleField('schema_name', e.target.value)}
-                disabled={disabled}
-                required
-                fullWidth
-                helperText="UC schema"
+              <Button
+                variant="contained"
                 size="small"
-              />
+                onClick={handleConnect}
+                disabled={disabled || connectLoading}
+                sx={{ mt: 0.5, minWidth: 100, whiteSpace: 'nowrap' }}
+              >
+                {connectLoading ? <CircularProgress size={16} color="inherit" /> : 'Connect'}
+              </Button>
             </Box>
+            {connectError && <Alert severity="error" variant="outlined">{connectError}</Alert>}
+            <FormControl fullWidth size="small">
+              <InputLabel>Warehouse</InputLabel>
+              <Select
+                label="Warehouse"
+                value={value.warehouse_id || ''}
+                onChange={(e) => handleField('warehouse_id', e.target.value)}
+                disabled={disabled}
+              >
+                {warehouses.length === 0 && value.warehouse_id && (
+                  <MenuItem value={value.warehouse_id}>{value.warehouse_id}</MenuItem>
+                )}
+                {warehouses.map((w) => (
+                  <MenuItem key={w.id} value={w.id}>{w.name} ({w.id})</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            {warehouses.length === 0 && !value.warehouse_id && (
+              <Typography variant="caption" color="text.secondary">
+                Enter workspace URL and click Connect to populate the warehouse list, or type the ID directly after connecting.
+              </Typography>
+            )}
           </Box>
         </AccordionDetails>
       </Accordion>
 
-      {/* ── 2. Tables ───────────────────────────────────────────────────────────── */}
+      {/* ── ② Space Identity ──────────────────────────────────────────────────── */}
+      <Accordion defaultExpanded>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Space Identity</Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <TextField
+            label="Space Title"
+            value={value.space_title || ''}
+            onChange={(e) => handleField('space_title', e.target.value)}
+            disabled={disabled}
+            required
+            fullWidth
+            helperText="Display name for the Genie space"
+            size="small"
+          />
+        </AccordionDetails>
+      </Accordion>
+
+      {/* ── ③ Catalog & Schema ────────────────────────────────────────────────── */}
+      <Accordion defaultExpanded>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Catalog &amp; Schema</Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Box sx={{ display: 'flex', gap: 2 }}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Catalog *</InputLabel>
+              <Select
+                label="Catalog *"
+                value={value.catalog || ''}
+                onChange={(e) => handleCatalogChange(e.target.value)}
+                disabled={disabled}
+              >
+                {catalogs.length === 0 && value.catalog && (
+                  <MenuItem value={value.catalog}>{value.catalog}</MenuItem>
+                )}
+                {catalogs.map((c) => (
+                  <MenuItem key={c} value={c}>{c}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl fullWidth size="small">
+              <InputLabel>Schema *</InputLabel>
+              <Select
+                label="Schema *"
+                value={value.schema_name || ''}
+                onChange={(e) => handleField('schema_name', e.target.value)}
+                disabled={disabled || schemaLoading}
+                startAdornment={schemaLoading ? <CircularProgress size={14} sx={{ mr: 1 }} /> : undefined}
+              >
+                {schemas.length === 0 && value.schema_name && (
+                  <MenuItem value={value.schema_name}>{value.schema_name}</MenuItem>
+                )}
+                {schemas.map((s) => (
+                  <MenuItem key={s} value={s}>{s}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Box>
+          {(catalogs.length === 0 || schemas.length === 0) && (
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+              Connect to workspace above to auto-populate dropdowns.
+            </Typography>
+          )}
+        </AccordionDetails>
+      </Accordion>
+
+      {/* ── ④ Load Config from JSON ───────────────────────────────────────────── */}
+      <Accordion>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Load Config from JSON (optional)</Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Typography variant="caption" color="text.secondary">
+              Upload or paste a Genie Space config JSON to populate all fields at once. Existing values are overwritten only for matching keys.
+            </Typography>
+            <Tabs value={jsonTab} onChange={(_, v) => { setJsonTab(v); setJsonError(null); setJsonSuccess(null); }}>
+              <Tab label="Upload File" />
+              <Tab label="Paste JSON" />
+            </Tabs>
+            {jsonTab === 0 && (
+              <Box>
+                <Button variant="outlined" component="label" size="small" disabled={disabled}>
+                  Choose JSON file
+                  <input type="file" accept=".json,application/json" hidden onChange={handleFileUpload} />
+                </Button>
+              </Box>
+            )}
+            {jsonTab === 1 && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <TextField
+                  label="Paste JSON here"
+                  value={jsonPasteText}
+                  onChange={(e) => setJsonPasteText(e.target.value)}
+                  disabled={disabled}
+                  fullWidth
+                  multiline
+                  minRows={5}
+                  size="small"
+                  placeholder={'{\n  "space_title": "My Space",\n  "catalog": "my_catalog",\n  ...\n}'}
+                />
+                <Button
+                  variant="contained"
+                  size="small"
+                  onClick={handlePasteApply}
+                  disabled={disabled || !jsonPasteText.trim()}
+                  sx={{ alignSelf: 'flex-start' }}
+                >
+                  Apply
+                </Button>
+              </Box>
+            )}
+            {jsonSuccess && <Alert severity="success" variant="outlined">{jsonSuccess}</Alert>}
+            {jsonError && <Alert severity="error" variant="outlined">{jsonError}</Alert>}
+          </Box>
+        </AccordionDetails>
+      </Accordion>
+
+      {/* ── ⑤ Tables ───────────────────────────────────────────────────────────── */}
       <Accordion defaultExpanded>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Tables</Typography>
@@ -292,10 +489,10 @@ export const GenieSpaceConfigSelector: React.FC<GenieSpaceConfigSelectorProps> =
         </AccordionDetails>
       </Accordion>
 
-      {/* ── 3. Instructions & Questions ─────────────────────────────────────────── */}
+      {/* ── ⑥ Instructions & Questions ─────────────────────────────────────────── */}
       <Accordion defaultExpanded>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Instructions & Sample Questions</Typography>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Instructions &amp; Sample Questions</Typography>
         </AccordionSummary>
         <AccordionDetails>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -327,8 +524,8 @@ export const GenieSpaceConfigSelector: React.FC<GenieSpaceConfigSelectorProps> =
         </AccordionDetails>
       </Accordion>
 
-      {/* ── 4. Join Specs ───────────────────────────────────────────────────────── */}
-      <Accordion>
+      {/* ── ⑦ Join Specs ───────────────────────────────────────────────────────── */}
+      <Accordion defaultExpanded>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
             Join Specs{joinSpecs.length > 0 ? ` (${joinSpecs.length})` : ' (optional)'}
@@ -345,51 +542,20 @@ export const GenieSpaceConfigSelector: React.FC<GenieSpaceConfigSelectorProps> =
                   </IconButton>
                 </Box>
                 <Box sx={{ display: 'flex', gap: 1 }}>
-                  <TextField
-                    label="Left Table"
-                    value={js.left_table}
-                    onChange={(e) => updateJoinSpec(i, 'left_table', e.target.value)}
-                    disabled={disabled}
-                    fullWidth
-                    size="small"
-                    placeholder="catalog.schema.table"
-                  />
-                  <TextField
-                    label="Right Table"
-                    value={js.right_table}
-                    onChange={(e) => updateJoinSpec(i, 'right_table', e.target.value)}
-                    disabled={disabled}
-                    fullWidth
-                    size="small"
-                    placeholder="catalog.schema.table"
-                  />
+                  <TextField label="Left Table" value={js.left_table} onChange={(e) => updateJoinSpec(i, 'left_table', e.target.value)} disabled={disabled} fullWidth size="small" placeholder="catalog.schema.table" />
+                  <TextField label="Right Table" value={js.right_table} onChange={(e) => updateJoinSpec(i, 'right_table', e.target.value)} disabled={disabled} fullWidth size="small" placeholder="catalog.schema.table" />
                 </Box>
-                <TextField
-                  label="Join Condition"
-                  value={js.join_condition}
-                  onChange={(e) => updateJoinSpec(i, 'join_condition', e.target.value)}
-                  disabled={disabled}
-                  fullWidth
-                  size="small"
-                  placeholder="left_table.customer_id = right_table.customer_id"
-                />
+                <TextField label="Join Condition" value={js.join_condition} onChange={(e) => updateJoinSpec(i, 'join_condition', e.target.value)} disabled={disabled} fullWidth size="small" placeholder="left_table.customer_id = right_table.customer_id" />
               </Box>
             ))}
-            <Button
-              startIcon={<AddIcon />}
-              onClick={addJoinSpec}
-              disabled={disabled}
-              variant="outlined"
-              size="small"
-              sx={{ alignSelf: 'flex-start' }}
-            >
+            <Button startIcon={<AddIcon />} onClick={addJoinSpec} disabled={disabled} variant="outlined" size="small" sx={{ alignSelf: 'flex-start' }}>
               Add Join Spec
             </Button>
           </Box>
         </AccordionDetails>
       </Accordion>
 
-      {/* ── 5. SQL Snippets ─────────────────────────────────────────────────────── */}
+      {/* ── ⑧ SQL Snippets ─────────────────────────────────────────────────────── */}
       <Accordion>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
@@ -461,7 +627,7 @@ export const GenieSpaceConfigSelector: React.FC<GenieSpaceConfigSelectorProps> =
         </AccordionDetails>
       </Accordion>
 
-      {/* ── 6. Example Queries ───────────────────────────────────────────────────── */}
+      {/* ── ⑨ Example Queries ───────────────────────────────────────────────────── */}
       <Accordion>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
@@ -479,36 +645,11 @@ export const GenieSpaceConfigSelector: React.FC<GenieSpaceConfigSelectorProps> =
                   <Typography variant="caption" color="text.secondary">Example {i + 1}</Typography>
                   <IconButton size="small" onClick={() => removeExampleSql(i)} disabled={disabled}><DeleteIcon fontSize="small" /></IconButton>
                 </Box>
-                <TextField
-                  label="Question"
-                  value={eq.question}
-                  onChange={(e) => updateExampleSql(i, 'question', e.target.value)}
-                  disabled={disabled}
-                  fullWidth
-                  size="small"
-                  placeholder="What was total revenue last month?"
-                />
-                <TextField
-                  label="SQL"
-                  value={eq.sql}
-                  onChange={(e) => updateExampleSql(i, 'sql', e.target.value)}
-                  disabled={disabled}
-                  fullWidth
-                  multiline
-                  minRows={3}
-                  size="small"
-                  placeholder="SELECT SUM(revenue) FROM ..."
-                />
+                <TextField label="Question" value={eq.question} onChange={(e) => updateExampleSql(i, 'question', e.target.value)} disabled={disabled} fullWidth size="small" placeholder="What was total revenue last month?" />
+                <TextField label="SQL" value={eq.sql} onChange={(e) => updateExampleSql(i, 'sql', e.target.value)} disabled={disabled} fullWidth multiline minRows={3} size="small" placeholder="SELECT SUM(revenue) FROM ..." />
               </Box>
             ))}
-            <Button
-              startIcon={<AddIcon />}
-              onClick={addExampleSql}
-              disabled={disabled}
-              variant="outlined"
-              size="small"
-              sx={{ alignSelf: 'flex-start' }}
-            >
+            <Button startIcon={<AddIcon />} onClick={addExampleSql} disabled={disabled} variant="outlined" size="small" sx={{ alignSelf: 'flex-start' }}>
               Add Example Query
             </Button>
           </Box>
