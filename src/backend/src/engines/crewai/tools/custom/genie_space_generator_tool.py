@@ -379,7 +379,7 @@ class GenieSpaceGeneratorTool(BaseTool):
                 or existing_space_id
                 or "unknown"
             )
-            space_url = f"{workspace_url}/genie/spaces/{space_id}"
+            space_url = f"{workspace_url}/genie/rooms/{space_id}"
 
             return json.dumps({
                 "space_id": space_id,
