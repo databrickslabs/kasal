@@ -43,6 +43,7 @@ tools_data = [
     (89, "Config Generator", "Auto-propose pipeline_config.json from PBI extraction output. Takes measures_json, mquery_json, relationships_json, scan_data_json and returns a proposed config with join_key_map, enrichment_joins, switch_decompositions, etc.", "transform"),
     (90, "Pipeline Config Generator", "Generate pipeline_config.json by calling 4 PBI APIs directly — no LLM intermediation. Produces all 26 config keys with auto-fill + TODO markers. Requires two Service Principals: non-admin (Execute Queries API, workspace member) and admin (Admin Scanner API, Tenant.Read.All). Output is ready for the UC Metric View Generator (Tool 86).", "transform"),
     (91, "Metric View Validator", "Validate generated UC Metric View YAML definitions against original DAX expressions. Compares each translated measure's SQL with the source DAX to detect semantic mismatches, missing filters, or incorrect aggregations. Returns VALID/EQUIVALENT/REVIEW/INVALID per measure. Input: UCMV Generator output (yaml_content) + measures_json.", "transform"),
+    (92, "Genie Space Generator", "Creates or updates a Databricks Genie Space from deployed UC Metric Views. Configures instructions, join specs, sample questions, and SQL snippets. Idempotent — patches existing space or creates new one. Designed as the final step in the UCMV pipeline: Config Generator → UCMV Generator → UCMV Validator → Genie Space Generator.", "database"),
 ]
 
 def get_tool_configs():
@@ -402,6 +403,22 @@ def get_tool_configs():
             "yaml_content": None,
             "measures_json": None,
         },  # Metric View Validator
+        "92": {
+            "result_as_answer": True,
+            "space_title": "",
+            "catalog": "",
+            "schema_name": "",
+            "warehouse_id": "",
+            "databricks_host": "",   # optional — overrides workspace URL from Kasal Settings
+            "additional_tables": "",
+            "text_instructions": "",
+            "join_specs_json": "",
+            "sample_questions": "",
+            "sql_expressions_json": "",
+            "sql_measures_json": "",
+            "sql_filters_json": "",
+            "example_sqls_json": "",
+        },  # Genie Space Generator
     }
 
 async def seed_async():
@@ -419,7 +436,7 @@ async def seed_async():
     tools_error = 0
 
     # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82, 85, 86, 87, 88, 89, 90]
+    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82, 85, 86, 87, 88, 89, 90, 91, 92]
 
     for tool_id, title, description, icon in tools_data:
         try:
@@ -482,7 +499,7 @@ def seed_sync():
     tools_error = 0
 
     # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82, 85, 86, 87, 88, 89, 90]
+    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82, 85, 86, 87, 88, 89, 90, 91, 92]
 
     for tool_id, title, description, icon in tools_data:
         try:
