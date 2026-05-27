@@ -368,11 +368,12 @@ def get_tool_configs():
         },  # PBI Measure Allocator
         "88": {
             "result_as_answer": True,
-            "dry_run": True,
+            "ucmv_output": None,
+            "dry_run": False,
             "catalog": "main",
             "schema_name": "default",
             "databricks_host": "",
-            "databricks_token": "",
+            "warehouse_id": "",
         },  # Metric View Deployer
         "89": {
             "result_as_answer": True,
