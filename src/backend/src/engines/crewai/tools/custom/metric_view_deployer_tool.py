@@ -1,7 +1,9 @@
-"""Metric View Deployer Tool for CrewAI — deploy YAML to Databricks."""
+"""Metric View Deployer Tool for CrewAI — deploy YAML to Databricks via SQL Statement API."""
+import asyncio
 import json
 import logging
 import re as _re
+import time
 import urllib.parse
 from typing import Any, Optional, Type
 
@@ -13,27 +15,24 @@ logger = logging.getLogger(__name__)
 
 class MetricViewDeployerSchema(BaseModel):
     """Input schema for MetricViewDeployerTool."""
+    ucmv_output: Optional[str] = Field(
+        None, description="Full JSON output from UC Metric View Generator (auto-injected by flow)")
     yaml_specs_json: Optional[str] = Field(
         None, description="JSON dict of table_key → YAML string (from UC Metric View Generator)")
-    sql_specs_json: Optional[str] = Field(
-        None, description="JSON dict of table_key → SQL string (from UC Metric View Generator)")
     catalog: Optional[str] = Field(None, description="Target UC catalog")
     schema_name: Optional[str] = Field(None, description="Target UC schema")
-    dry_run: bool = Field(True, description="If True, validate only without deploying")
-    databricks_host: Optional[str] = Field(None, description="Databricks workspace URL")
-    databricks_token: Optional[str] = Field(None, description="Databricks PAT for deployment", repr=False)
-    warehouse_id: Optional[str] = Field(None, description="Databricks SQL warehouse ID for deployment")
+    dry_run: bool = Field(False, description="If True, validate only without deploying")
+    databricks_host: Optional[str] = Field(None, description="Override workspace URL (optional)")
+    warehouse_id: Optional[str] = Field(None, description="Databricks SQL warehouse ID")
 
 
 class MetricViewDeployerTool(BaseTool):
-    """Deploy UC Metric View YAML + SQL to a Databricks workspace."""
+    """Deploy UC Metric View YAML definitions to Databricks via the SQL Statement API."""
     name: str = "Metric View Deployer"
     description: str = (
-        "Deploy UC Metric View definitions to Databricks. Accepts YAML specs and deploy SQL "
-        "from the UC Metric View Generator tool. Supports dry_run mode (default) for validation "
-        "without actual deployment. When dry_run=False, deploys via the UC Metric View REST API "
-        "(YAML-based creation). "
-        "Input: yaml_specs_json + sql_specs_json from tool 86. "
+        "Deploy UC Metric View definitions to Databricks. Accepts the full ucmv_output from "
+        "the UC Metric View Generator tool (auto-injected in flow). "
+        "Executes CREATE OR REPLACE METRIC VIEW DDL via the Databricks SQL Statement API. "
         "Output: deployment status per metric view."
     )
     args_schema: Type[BaseModel] = MetricViewDeployerSchema
@@ -46,19 +45,13 @@ class MetricViewDeployerTool(BaseTool):
         '.databricks.azure.cn', '.databricksapps.com',
     )
 
-    @staticmethod
-    def _mask_secret(value: str | None) -> str:
-        """Mask a secret value for logging."""
-        if not value:
-            return 'none'
-        if len(value) <= 8:
-            return '***'
-        return f'{value[:4]}...{value[-4:]}'
-
     def __init__(self, **kwargs: Any) -> None:
-        config_keys = ('yaml_specs_json', 'sql_specs_json', 'catalog', 'schema_name',
-                       'dry_run', 'databricks_host', 'databricks_token', 'warehouse_id')
-        default_config = {}
+        config_keys = (
+            'ucmv_output', 'yaml_specs_json',
+            'catalog', 'schema_name', 'dry_run', 'databricks_host', 'warehouse_id',
+        )
+        # Always seed ucmv_output so flow_methods.py injection check fires
+        default_config: dict = {'ucmv_output': None}
         for key in config_keys:
             val = kwargs.pop(key, None)
             if val is not None:
@@ -66,151 +59,214 @@ class MetricViewDeployerTool(BaseTool):
         super().__init__(**kwargs)
         self._default_config = default_config
 
-    def _run(self, **kwargs: Any) -> str:
+    def _authenticate(self, host_override: Optional[str] = None):
+        """Obtain AuthContext synchronously (OBO → PAT → SPN)."""
+        import concurrent.futures
+        from src.utils.databricks_auth import get_auth_context
+
+        def _run_in_thread():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(get_auth_context())
+            finally:
+                loop.close()
+                asyncio.set_event_loop(None)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            auth = executor.submit(_run_in_thread).result(timeout=30)
+
+        if auth is not None and host_override:
+            url = host_override.strip().rstrip('/')
+            if not url.startswith('https://'):
+                url = f'https://{url}'
+            auth.workspace_url = url
+        return auth
+
+    @staticmethod
+    def _yaml_to_ddl(yaml_content: str, view_name: str) -> str:
+        """Wrap UC Metric View YAML in CREATE OR REPLACE VIEW ... WITH METRICS LANGUAGE YAML DDL."""
+        # Correct Databricks syntax for metric views (DBR 17.2+):
+        # CREATE OR REPLACE VIEW <name> WITH METRICS LANGUAGE YAML AS $$ <yaml> $$
+        return (
+            f"CREATE OR REPLACE VIEW {view_name}\n"
+            f"WITH METRICS\n"
+            f"LANGUAGE YAML\n"
+            f"AS $$\n"
+            f"{yaml_content.strip()}\n"
+            f"$$"
+        )
+
+    @staticmethod
+    def _execute_sql_sync(sql: str, workspace_url: str, warehouse_id: str, headers: dict) -> dict:
+        """Execute SQL via Databricks SQL Statement API (synchronous with polling)."""
+        import requests as _requests
+
+        url = f"{workspace_url}/api/2.0/sql/statements"
+        payload = {
+            "statement": sql,
+            "warehouse_id": warehouse_id,
+            "wait_timeout": "50s",
+            "on_wait_timeout": "CONTINUE",
+        }
+
+        resp = _requests.post(url, json=payload, headers=headers, timeout=60)
+        if resp.status_code not in (200, 201):
+            return {"success": False, "http_status": resp.status_code, "error": resp.text[:500]}
+
+        data = resp.json()
+        statement_id = data.get("statement_id")
+        state = data.get("status", {}).get("state", "")
+
+        # Poll until terminal state
+        polls = 0
+        while state in ("RUNNING", "PENDING") and polls < 60:
+            time.sleep(2)
+            pr = _requests.get(f"{url}/{statement_id}", headers=headers, timeout=30)
+            data = pr.json()
+            state = data.get("status", {}).get("state", "")
+            polls += 1
+
+        if state == "SUCCEEDED":
+            return {"success": True, "state": state}
+
+        err = data.get("status", {}).get("error", {})
+        return {"success": False, "state": state, "error": err.get("message", f"State: {state}")}
+
+    def _run(self, **kwargs: Any) -> str:  # noqa: C901
         def _get(key):
             val = kwargs.get(key)
             if val is not None:
                 return val
             return self._default_config.get(key)
 
-        yaml_raw = _get('yaml_specs_json') or '{}'
-        sql_raw = _get('sql_specs_json') or '{}'
         catalog = _get('catalog') or 'main'
         schema = _get('schema_name') or 'default'
         dry_run = _get('dry_run')
         if dry_run is None:
-            dry_run = True
+            dry_run = False
+        host_override = _get('databricks_host') or None
+        warehouse_id = _get('warehouse_id') or ''
 
-        try:
-            yaml_specs = json.loads(yaml_raw) if isinstance(yaml_raw, str) else yaml_raw
-            sql_specs = json.loads(sql_raw) if isinstance(sql_raw, str) else sql_raw
-        except json.JSONDecodeError as e:
-            return json.dumps({"error": f"Invalid JSON: {e}"})
+        # ── Parse yaml specs from ucmv_output or explicit field ──────────────
+        yaml_specs: dict = {}
+
+        ucmv_raw = _get('ucmv_output')
+        if ucmv_raw:
+            try:
+                ucmv = json.loads(ucmv_raw) if isinstance(ucmv_raw, str) else ucmv_raw
+                yaml_dict = ucmv.get('yaml', {})
+                if isinstance(yaml_dict, dict):
+                    yaml_specs = yaml_dict
+                logger.info(f"[MVDeployer] Parsed ucmv_output: {len(yaml_specs)} views")
+            except (json.JSONDecodeError, AttributeError) as e:
+                logger.warning(f"[MVDeployer] Could not parse ucmv_output: {e}")
+
+        if not yaml_specs:
+            yaml_raw = _get('yaml_specs_json') or '{}'
+            try:
+                yaml_specs = json.loads(yaml_raw) if isinstance(yaml_raw, str) else yaml_raw
+            except json.JSONDecodeError as e:
+                return json.dumps({"error": f"Invalid JSON in yaml_specs_json: {e}"})
+
+        if not yaml_specs:
+            return json.dumps({"error": "No metric view specs found — ucmv_output not injected and no yaml_specs_json provided"})
 
         results = {}
-        for table_key in sorted(set(list(yaml_specs.keys()) + list(sql_specs.keys()))):
+        schema_ensured = False  # create schema once before first deployment
+
+        for table_key in sorted(yaml_specs.keys()):
             yaml_content = yaml_specs.get(table_key, '')
-            sql_content = sql_specs.get(table_key, '')
 
             if dry_run:
+                safe_key = _re.sub(r'[^a-zA-Z0-9_]', '_', table_key.lower())
+                view_name = f"{catalog}.{schema}.{safe_key}_uc_metric_view"
                 results[table_key] = {
                     'status': 'validated',
-                    'yaml_lines': len(yaml_content.split('\n')) if yaml_content else 0,
-                    'sql_lines': len(sql_content.split('\n')) if sql_content else 0,
-                    'catalog': catalog,
-                    'schema': schema,
+                    'view_name': view_name,
+                    'yaml_lines': len(yaml_content.split('\n')),
                     'dry_run': True,
                 }
-            else:
-                # Actual deployment via UC Metric View REST API (YAML-based)
-                host = _get('databricks_host')
-                token = _get('databricks_token')
-                warehouse_id = _get('warehouse_id') or ''
-                if not host or not token:
-                    results[table_key] = {
-                        'status': 'error',
-                        'message': 'databricks_host and databricks_token required for deployment',
-                    }
-                    continue
-                if not warehouse_id:
-                    results[table_key] = {
-                        'status': 'error',
-                        'message': 'warehouse_id required for deployment',
-                    }
-                    continue
+                continue
 
-                if not yaml_content or not yaml_content.strip():
-                    results[table_key] = {
-                        'status': 'error',
-                        'message': 'Empty YAML content',
-                    }
-                    continue
+            # ── Actual deployment ─────────────────────────────────────────────
+            if not warehouse_id:
+                results[table_key] = {'status': 'error', 'message': 'warehouse_id is required'}
+                continue
 
-                # Validate databricks_host (SSRF prevention)
-                parsed_host = urllib.parse.urlparse(
-                    f'https://{host}' if not host.startswith('http') else host)
-                if not parsed_host.hostname:
-                    results[table_key] = {'status': 'error', 'message': 'Invalid databricks_host URL'}
-                    continue
-                if not any(parsed_host.hostname.endswith(s) for s in self._ALLOWED_HOST_SUFFIXES):
-                    results[table_key] = {
-                        'status': 'error',
-                        'message': f'Untrusted Databricks host: {parsed_host.hostname}. '
-                                   f'Must be *.cloud.databricks.com or similar.',
-                    }
-                    continue
+            if not yaml_content or not yaml_content.strip():
+                results[table_key] = {'status': 'error', 'message': 'Empty YAML content'}
+                continue
 
-                # YAML content validation (dangerous SQL check)
-                from src.engines.crewai.tools.custom.metric_view_utils.yaml_emitter import (
-                    _check_dangerous_sql,
+            # Generate DDL
+            try:
+                safe_key = _re.sub(r'[^a-zA-Z0-9_]', '_', table_key.lower())
+                safe_cat = _re.sub(r'[^a-zA-Z0-9_]', '_', catalog)
+                safe_sch = _re.sub(r'[^a-zA-Z0-9_]', '_', schema)
+                view_name = f"{safe_cat}.{safe_sch}.{safe_key}_uc_metric_view"
+                ddl = self._yaml_to_ddl(yaml_content, view_name)
+            except Exception as e:
+                results[table_key] = {'status': 'error', 'message': f'DDL generation failed: {e}'}
+                continue
+
+            # Auth
+            try:
+                auth = self._authenticate(host_override=host_override)
+                if not auth:
+                    results[table_key] = {'status': 'error', 'message': 'Authentication failed'}
+                    continue
+                headers = auth.get_headers()
+                workspace_url = (auth.workspace_url or '').rstrip('/')
+            except Exception as e:
+                results[table_key] = {'status': 'error', 'message': f'Authentication error: {e}'}
+                continue
+
+            if not workspace_url:
+                results[table_key] = {'status': 'error', 'message': 'workspace_url not configured'}
+                continue
+
+            # SSRF check
+            parsed_host = urllib.parse.urlparse(workspace_url)
+            if not parsed_host.hostname or not any(
+                parsed_host.hostname.endswith(s) for s in self._ALLOWED_HOST_SUFFIXES
+            ):
+                results[table_key] = {'status': 'error', 'message': f'Untrusted host: {parsed_host.hostname}'}
+                continue
+
+            # Ensure schema exists (once per run, after SSRF validation)
+            if not schema_ensured:
+                safe_cat_s = _re.sub(r'[^a-zA-Z0-9_]', '_', catalog)
+                safe_sch_s = _re.sub(r'[^a-zA-Z0-9_]', '_', schema)
+                schema_result = self._execute_sql_sync(
+                    f"CREATE SCHEMA IF NOT EXISTS {safe_cat_s}.{safe_sch_s}",
+                    workspace_url, warehouse_id, headers
                 )
-                if not _check_dangerous_sql(yaml_content):
+                if not schema_result['success']:
+                    logger.warning(f"[MVDeployer] Could not ensure schema: {schema_result.get('error')}")
+                else:
+                    logger.info(f"[MVDeployer] Schema {safe_cat_s}.{safe_sch_s} ensured")
+                schema_ensured = True
+
+            # YAML safety check
+            from src.engines.crewai.tools.custom.metric_view_utils.yaml_emitter import _check_dangerous_sql
+            if not _check_dangerous_sql(yaml_content):
+                results[table_key] = {'status': 'error', 'message': 'YAML contains dangerous SQL patterns'}
+                continue
+
+            # Execute DDL via SQL Statement API
+            try:
+                result = self._execute_sql_sync(ddl, workspace_url, warehouse_id, headers)
+                if result['success']:
+                    results[table_key] = {'status': 'deployed', 'view_name': view_name}
+                else:
                     results[table_key] = {
                         'status': 'error',
-                        'message': 'YAML contains dangerous SQL patterns',
+                        'view_name': view_name,
+                        'message': result.get('error', 'Unknown error'),
+                        'http_status': result.get('http_status'),
                     }
-                    continue
-
-                # Deploy via UC Metric View API (YAML-based creation)
-                try:
-                    import requests as _requests
-
-                    # UC Metric View API endpoint
-                    actual_host = parsed_host.hostname
-                    mv_url = f"https://{actual_host}/api/2.0/unity-catalog/metric-views"
-                    headers = {
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json",
-                    }
-
-                    # Validate metric view name (prevent injection via PBI table names)
-                    safe_table_key = _re.sub(r'[^a-zA-Z0-9_]', '_', table_key.lower())
-                    safe_catalog = _re.sub(r'[^a-zA-Z0-9_]', '_', catalog)
-                    safe_schema = _re.sub(r'[^a-zA-Z0-9_]', '_', schema)
-                    view_name = f"{safe_catalog}.{safe_schema}.{safe_table_key}_uc_metric_view"
-
-                    payload = {
-                        "name": view_name,
-                        "yaml_body": yaml_content,
-                    }
-
-                    resp = _requests.post(mv_url, json=payload, headers=headers, timeout=120)
-
-                    if resp.status_code in (200, 201):
-                        results[table_key] = {
-                            'status': 'deployed',
-                            'view_name': view_name,
-                            'response': resp.json(),
-                        }
-                    elif resp.status_code == 409:
-                        # Already exists — try PUT to update
-                        update_url = f"{mv_url}/{view_name}"
-                        resp2 = _requests.put(
-                            update_url,
-                            json={"yaml_body": yaml_content},
-                            headers=headers,
-                            timeout=120,
-                        )
-                        if resp2.status_code == 200:
-                            results[table_key] = {
-                                'status': 'updated',
-                                'view_name': view_name,
-                                'response': resp2.json(),
-                            }
-                        else:
-                            results[table_key] = {
-                                'status': 'error',
-                                'http_status': resp2.status_code,
-                                'message': resp2.text[:500],
-                            }
-                    else:
-                        results[table_key] = {
-                            'status': 'error',
-                            'http_status': resp.status_code,
-                            'message': resp.text[:500],
-                        }
-                except Exception as e:
-                    results[table_key] = {'status': 'error', 'message': str(e)}
+            except Exception as e:
+                results[table_key] = {'status': 'error', 'message': str(e)}
 
         return json.dumps({
             'deployment_results': results,
@@ -218,7 +274,6 @@ class MetricViewDeployerTool(BaseTool):
                 'total': len(results),
                 'validated': sum(1 for r in results.values() if r.get('status') == 'validated'),
                 'deployed': sum(1 for r in results.values() if r.get('status') == 'deployed'),
-                'updated': sum(1 for r in results.values() if r.get('status') == 'updated'),
                 'errors': sum(1 for r in results.values() if r.get('status') == 'error'),
                 'dry_run': dry_run,
             }
