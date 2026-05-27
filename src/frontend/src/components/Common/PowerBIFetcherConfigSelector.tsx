@@ -554,7 +554,7 @@ export const PowerBIFetcherConfigSelector: React.FC<PowerBIFetcherConfigSelector
               <InputLabel>Cache TTL (days)</InputLabel>
               <Select
                 value={value.cache_ttl_days ?? 1}
-                onChange={(e) => handleFieldChange('cache_ttl_days', Number(e.target.value))}
+                onChange={(e) => handleFieldChange('cache_ttl_days', String(e.target.value))}
                 label="Cache TTL (days)"
                 disabled={disabled}
               >
