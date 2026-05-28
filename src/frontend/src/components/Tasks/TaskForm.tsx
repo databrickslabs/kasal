@@ -61,6 +61,7 @@ import { ConfigGeneratorConfigSelector, ConfigGeneratorConfig } from '../Common/
 import { PipelineConfigGeneratorConfigSelector, PipelineConfigGeneratorConfig } from '../Common/PipelineConfigGeneratorConfigSelector';
 import { GenieSpaceConfigSelector, GenieSpaceConfig } from '../Common/GenieSpaceConfigSelector';
 import { MetricViewDeployerConfigSelector, MetricViewDeployerConfig } from '../Common/MetricViewDeployerConfigSelector';
+import { UCMVGenieConfigGeneratorConfigSelector, UCMVGenieConfigGeneratorConfig } from '../Common/UCMVGenieConfigGeneratorConfigSelector';
 import { PerplexityConfig, SerperConfig } from '../../types/config';
 import { type LLMGuardrailConfig } from '../../types/task';
 import { ModelService } from '../../api/ModelService';
@@ -161,6 +162,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const [pipelineConfigGenConfig, setPipelineConfigGenConfig] = useState<PipelineConfigGeneratorConfig>({});
   const [genieSpaceConfig, setGenieSpaceConfig] = useState<GenieSpaceConfig>({});
   const [metricViewDeployerConfig, setMetricViewDeployerConfig] = useState<MetricViewDeployerConfig>({});
+  const [ucmvGenieConfigGenConfig, setUcmvGenieConfigGenConfig] = useState<UCMVGenieConfigGeneratorConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
   const [showBestPractices, setShowBestPractices] = useState(false);
@@ -301,6 +303,11 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       // Check for Metric View Deployer config
       if (initialData.tool_configs['Metric View Deployer']) {
         setMetricViewDeployerConfig(initialData.tool_configs['Metric View Deployer'] as MetricViewDeployerConfig);
+      }
+
+      // Check for UCMV Genie Config Generator config
+      if (initialData.tool_configs['UCMV Genie Space Config Generator']) {
+        setUcmvGenieConfigGenConfig(initialData.tool_configs['UCMV Genie Space Config Generator'] as UCMVGenieConfigGeneratorConfig);
       }
 
       // Check for MCP_SERVERS config
@@ -2005,6 +2012,39 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                       setToolConfigs(prev => ({
                         ...prev,
                         'Metric View Deployer': config
+                      }));
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+
+            {/* UCMV Genie Space Config Generator Configuration - Show only when tool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'UCMV Genie Space Config Generator';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  UCMV Genie Space Config Generator (Tool 93) Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(156, 39, 176, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(156, 39, 176, 0.2)'
+                }}>
+                  <UCMVGenieConfigGeneratorConfigSelector
+                    value={ucmvGenieConfigGenConfig}
+                    onChange={(config) => {
+                      setUcmvGenieConfigGenConfig(config);
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'UCMV Genie Space Config Generator': config
                       }));
                     }}
                   />

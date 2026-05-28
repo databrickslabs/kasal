@@ -198,6 +198,13 @@ except ImportError as e:
     GenieSpaceGeneratorTool = None
     logging.warning(f"Could not import GenieSpaceGeneratorTool: {e}")
 
+# UCMV Genie Space Config Generator Tool
+try:
+    from .custom.ucmv_genie_config_generator_tool import UCMVGenieConfigGeneratorTool
+except ImportError as e:
+    UCMVGenieConfigGeneratorTool = None
+    logging.warning(f"Could not import UCMVGenieConfigGeneratorTool: {e}")
+
 # Setup logger
 logger = logging.getLogger(__name__)
 
@@ -284,6 +291,8 @@ class ToolFactory:
             self._tool_implementations["Pipeline Config Generator"] = PipelineConfigGeneratorTool
         if GenieSpaceGeneratorTool is not None:
             self._tool_implementations["Genie Space Generator"] = GenieSpaceGeneratorTool
+        if UCMVGenieConfigGeneratorTool is not None:
+            self._tool_implementations["UCMV Genie Space Config Generator"] = UCMVGenieConfigGeneratorTool
 
         # Initialize _initialized flag
         self._initialized = False
