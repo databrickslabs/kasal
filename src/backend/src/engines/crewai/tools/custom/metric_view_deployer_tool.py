@@ -302,5 +302,8 @@ class MetricViewDeployerTool(BaseTool):
                 'deployed': sum(1 for r in results.values() if r.get('status') == 'deployed'),
                 'errors': sum(1 for r in results.values() if r.get('status') == 'error'),
                 'dry_run': dry_run,
-            }
+            },
+            # Pass yaml_specs through so downstream steps (Genie Config Generator)
+            # can pick them up via the 'yaml' key in flow injection
+            'yaml': yaml_specs,
         }, indent=2)

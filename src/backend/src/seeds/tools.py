@@ -44,6 +44,7 @@ tools_data = [
     (90, "Pipeline Config Generator", "Generate pipeline_config.json by calling 4 PBI APIs directly — no LLM intermediation. Produces all 26 config keys with auto-fill + TODO markers. Requires two Service Principals: non-admin (Execute Queries API, workspace member) and admin (Admin Scanner API, Tenant.Read.All). Output is ready for the UC Metric View Generator (Tool 86).", "transform"),
     (91, "Metric View Validator", "Validate generated UC Metric View YAML definitions against original DAX expressions. Compares each translated measure's SQL with the source DAX to detect semantic mismatches, missing filters, or incorrect aggregations. Returns VALID/EQUIVALENT/REVIEW/INVALID per measure. Input: UCMV Generator output (yaml_content) + measures_json.", "transform"),
     (92, "Genie Space Generator", "Creates or updates a Databricks Genie Space from deployed UC Metric Views. Configures instructions, join specs, sample questions, and SQL snippets. Idempotent — patches existing space or creates new one. Designed as the final step in the UCMV pipeline: Config Generator → UCMV Generator → UCMV Validator → Genie Space Generator.", "database"),
+    (93, "UCMV Genie Space Config Generator", "Auto-generates Genie Space configuration from deployed UC Metric Views. Reads ucmv_output (auto-injected from flow) and uses an LLM to produce: text_instructions (business description), sample_questions (natural language questions), example_sqls_json (MEASURE() SQL queries), and join_specs_json (from UCMV join definitions). If genie_config_override is provided (manually uploaded JSON), the LLM step is skipped. Output fields match the Genie Space Generator schema for direct flow injection. Use as the step between Metric View Deployer and Genie Space Generator.", "transform"),
 ]
 
 def get_tool_configs():
@@ -421,6 +422,17 @@ def get_tool_configs():
             "sql_filters_json": "",
             "example_sqls_json": "",
         },  # Genie Space Generator
+        "93": {
+            "result_as_answer": True,
+            "ucmv_output": None,
+            "genie_config_override": None,
+            "space_title": "",
+            "catalog": "",
+            "schema_name": "",
+            "warehouse_id": "",
+            "databricks_host": "",
+            "llm_model": "databricks-claude-sonnet-4",
+        },  # UCMV Genie Space Config Generator
     }
 
 async def seed_async():
@@ -438,7 +450,7 @@ async def seed_async():
     tools_error = 0
 
     # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82, 85, 86, 87, 88, 89, 90, 91, 92]
+    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82, 85, 86, 87, 88, 89, 90, 91, 92, 93]
 
     for tool_id, title, description, icon in tools_data:
         try:
@@ -501,7 +513,7 @@ def seed_sync():
     tools_error = 0
 
     # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82, 85, 86, 87, 88, 89, 90, 91, 92]
+    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82, 85, 86, 87, 88, 89, 90, 91, 92, 93]
 
     for tool_id, title, description, icon in tools_data:
         try:
