@@ -153,17 +153,30 @@ class GenieSpaceGeneratorTool(BaseTool):
         if ucmv_raw:
             try:
                 ucmv = json.loads(ucmv_raw) if isinstance(ucmv_raw, str) else ucmv_raw
-                # ucmv_output has a "yaml" key which is a dict of table_key → yaml_str
-                yaml_dict = ucmv.get('yaml', {})
-                if isinstance(yaml_dict, dict):
-                    for table_key in sorted(yaml_dict.keys()):
-                        # Sanitise to alphanumeric + underscore
-                        import re as _re
-                        safe_key = _re.sub(r'[^a-zA-Z0-9_]', '_', table_key.lower())
-                        safe_cat = _re.sub(r'[^a-zA-Z0-9_]', '_', catalog)
-                        safe_sch = _re.sub(r'[^a-zA-Z0-9_]', '_', schema)
-                        fqn = f"{safe_cat}.{safe_sch}.{safe_key}_uc_metric_view"
-                        metric_view_tables.append(fqn)
+                import re as _re
+
+                # Prefer actual deployed view names from deployment_results
+                # (these have the exact names used when deploying, no suffix guessing needed)
+                deployment_results = ucmv.get('deployment_results', {})
+                if isinstance(deployment_results, dict):
+                    for result in deployment_results.values():
+                        view_name = result.get('view_name', '')
+                        if view_name and view_name.count('.') == 2:
+                            metric_view_tables.append(view_name)
+                    if metric_view_tables:
+                        logger.info(f"[GenieSpace] Using {len(metric_view_tables)} view names from deployment_results")
+
+                # Fallback: derive from yaml dict keys (legacy path)
+                if not metric_view_tables:
+                    yaml_dict = ucmv.get('yaml', {})
+                    if isinstance(yaml_dict, dict):
+                        for table_key in sorted(yaml_dict.keys()):
+                            safe_key = _re.sub(r'[^a-zA-Z0-9_]', '_', table_key.lower())
+                            safe_cat = _re.sub(r'[^a-zA-Z0-9_]', '_', catalog)
+                            safe_sch = _re.sub(r'[^a-zA-Z0-9_]', '_', schema)
+                            # Don't append _uc_metric_view — Deployer now omits this suffix
+                            fqn = f"{safe_cat}.{safe_sch}.{safe_key}"
+                            metric_view_tables.append(fqn)
             except (json.JSONDecodeError, AttributeError) as e:
                 logger.warning(f"[GenieSpace] Could not parse ucmv_output: {e}")
 
