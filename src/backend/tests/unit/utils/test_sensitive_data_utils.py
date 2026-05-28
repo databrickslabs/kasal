@@ -428,10 +428,10 @@ class TestMaskSensitiveString:
 
     def test_masks_bearer_token(self):
         from src.utils.sensitive_data_utils import mask_sensitive_string
-        text = "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig"
+        text = "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig"  # nosec - mock token for testing
         result = mask_sensitive_string(text)
         assert "Bearer ***REDACTED***" in result
-        assert "eyJhbGciOiJIUzI1NiJ9" not in result
+        assert "eyJhbGciOiJIUzI1NiJ9" not in result  # nosec - mock token for testing
 
     def test_masks_bearer_token_case_insensitive(self):
         from src.utils.sensitive_data_utils import mask_sensitive_string
