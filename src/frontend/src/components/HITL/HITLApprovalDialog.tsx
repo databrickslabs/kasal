@@ -44,6 +44,7 @@ import {
 import UCMVResultViewer, { isUCMVResult, UCMVResult } from '../Jobs/UCMVResultViewer';
 import { runService } from '../../api/ExecutionHistoryService';
 import SaveIcon from '@mui/icons-material/Save';
+import DownloadIcon from '@mui/icons-material/Download';
 
 interface HITLApprovalDialogProps {
   /** Whether the dialog is open */
@@ -357,17 +358,48 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
         {/* Previous Output */}
         {approval.previous_crew_output && (
           <Box mb={2}>
-            <Typography
-              variant="body2"
-              fontWeight="medium"
-              display="flex"
-              alignItems="center"
-              gap={0.5}
-              gutterBottom
-            >
-              <DescriptionIcon fontSize="small" />
-              Previous Crew Output:
-            </Typography>
+            <Box display="flex" alignItems="center" justifyContent="space-between" mb={0.5}>
+              <Typography
+                variant="body2"
+                fontWeight="medium"
+                display="flex"
+                alignItems="center"
+                gap={0.5}
+              >
+                <DescriptionIcon fontSize="small" />
+                Previous Crew Output:
+              </Typography>
+              <IconButton
+                size="small"
+                title="Download output"
+                onClick={() => {
+                  const raw = approval.previous_crew_output ?? '';
+                  let filename = 'step_output.json';
+                  let content = raw;
+                  let type = 'application/json';
+                  try {
+                    const parsed = JSON.parse(raw);
+                    // For UCMV results: download yaml specs dict directly
+                    if (parsed && typeof parsed === 'object' && 'yaml' in parsed) {
+                      content = JSON.stringify(parsed.yaml, null, 2);
+                      filename = 'yaml_specs.json';
+                    } else {
+                      content = JSON.stringify(parsed, null, 2);
+                    }
+                  } catch {
+                    type = 'text/plain';
+                    filename = 'step_output.txt';
+                  }
+                  const blob = new Blob([content], { type });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url; a.download = filename; a.click();
+                  URL.revokeObjectURL(url);
+                }}
+              >
+                <DownloadIcon fontSize="small" />
+              </IconButton>
+            </Box>
             {(() => {
               // Try to detect UCMV result shape for structured rendering
               try {

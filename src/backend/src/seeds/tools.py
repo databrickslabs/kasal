@@ -374,6 +374,7 @@ def get_tool_configs():
             "schema_name": "default",
             "databricks_host": "",
             "warehouse_id": "",
+            "catalog_remap": None,
         },  # Metric View Deployer
         "89": {
             "result_as_answer": True,

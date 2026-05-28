@@ -23,8 +23,13 @@ import {
   CircularProgress,
   Switch,
   FormControlLabel,
+  Tabs,
+  Tab,
+  Chip,
+  IconButton,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { DatabricksService } from '../../api/DatabricksService';
 
 export interface MetricViewDeployerConfig {
@@ -33,6 +38,8 @@ export interface MetricViewDeployerConfig {
   catalog?: string;
   schema_name?: string;
   dry_run?: boolean;
+  yaml_specs_json?: string;
+  catalog_remap?: string;
   [key: string]: string | boolean | undefined;
 }
 
@@ -62,6 +69,15 @@ export const MetricViewDeployerConfigSelector: React.FC<MetricViewDeployerConfig
   const [catalogSearch, setCatalogSearch] = useState('');
   const [schemaSearch, setSchemaSearch] = useState('');
 
+  // ── Manual YAML override state ──────────────────────────────────────────────
+  const [yamlTab, setYamlTab] = useState(0);
+  const [yamlPaste, setYamlPaste] = useState('');
+  const [yamlError, setYamlError] = useState<string | null>(null);
+  const [yamlSuccess, setYamlSuccess] = useState<string | null>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<Record<string, string>>(() => {
+    try { return value.yaml_specs_json ? JSON.parse(value.yaml_specs_json) : {}; } catch { return {}; }
+  });
+
   const handleField = (field: keyof MetricViewDeployerConfig, val: string | boolean) => {
     onChange({ ...value, [field]: val });
   };
@@ -86,8 +102,7 @@ export const MetricViewDeployerConfigSelector: React.FC<MetricViewDeployerConfig
   };
 
   const handleCatalogChange = async (catalog: string) => {
-    handleField('catalog', catalog);
-    handleField('schema_name', '');
+    onChange({ ...value, catalog, schema_name: '' });
     setSchemas([]);
     if (!catalog) return;
     setSchemaLoading(true);
@@ -99,6 +114,56 @@ export const MetricViewDeployerConfigSelector: React.FC<MetricViewDeployerConfig
     } finally {
       setSchemaLoading(false);
     }
+  };
+
+  // ── YAML upload helpers ────────────────────────────────────────────────────
+
+  const applyYamlSpecs = (specs: Record<string, string>) => {
+    setUploadedFiles(specs);
+    onChange({ ...value, yaml_specs_json: JSON.stringify(specs) });
+    setYamlError(null);
+    setYamlSuccess(`${Object.keys(specs).length} metric view(s) loaded`);
+  };
+
+  const handleYamlFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+    const readers = files.map(file => new Promise<{ key: string; yaml: string }>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const key = file.name.replace(/\.(yml|yaml)$/i, '');
+        resolve({ key, yaml: e.target?.result as string });
+      };
+      reader.onerror = reject;
+      reader.readAsText(file);
+    }));
+    Promise.all(readers).then(results => {
+      const merged = { ...uploadedFiles };
+      results.forEach(({ key, yaml }) => { merged[key] = yaml; });
+      applyYamlSpecs(merged);
+    }).catch(() => setYamlError('Failed to read one or more files'));
+    event.target.value = '';
+  };
+
+  const handleYamlPasteApply = () => {
+    try {
+      const parsed = JSON.parse(yamlPaste);
+      if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+        setYamlError('Expected a JSON object: { "table_key": "yaml string", ... }');
+        return;
+      }
+      applyYamlSpecs(parsed as Record<string, string>);
+      setYamlPaste('');
+    } catch {
+      setYamlError('Invalid JSON — expected { "table_key": "yaml string", ... }');
+    }
+  };
+
+  const removeYamlEntry = (key: string) => {
+    const updated = { ...uploadedFiles };
+    delete updated[key];
+    applyYamlSpecs(updated);
+    if (Object.keys(updated).length === 0) setYamlSuccess(null);
   };
 
   return (
@@ -240,6 +305,79 @@ export const MetricViewDeployerConfigSelector: React.FC<MetricViewDeployerConfig
         </AccordionDetails>
       </Accordion>
 
+      {/* ── Manual YAML Override ─────────────────────────────────────────────────── */}
+      <Accordion>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+            Manual YAML Override
+            {Object.keys(uploadedFiles).length > 0 && (
+              <Chip label={`${Object.keys(uploadedFiles).length} loaded`} size="small" color="primary" sx={{ ml: 1 }} />
+            )}
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Typography variant="caption" color="text.secondary">
+              Upload corrected YAML files or paste a JSON spec dict to override the auto-generated YAML from the flow.
+              Useful when you've manually fixed catalog references or SQL aliases.
+            </Typography>
+            <Tabs value={yamlTab} onChange={(_, v) => { setYamlTab(v); setYamlError(null); setYamlSuccess(null); }}>
+              <Tab label="Upload .yml files" />
+              <Tab label="Paste JSON spec" />
+            </Tabs>
+
+            {yamlTab === 0 && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <Button variant="outlined" component="label" size="small" disabled={disabled}>
+                  Upload YAML file(s)
+                  <input type="file" accept=".yml,.yaml" multiple hidden onChange={handleYamlFileUpload} />
+                </Button>
+                <Typography variant="caption" color="text.secondary">
+                  Each file name (without .yml) becomes the table key, e.g. <code>fact_pe002.yml</code> → key <code>fact_pe002</code>
+                </Typography>
+              </Box>
+            )}
+
+            {yamlTab === 1 && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <TextField
+                  label="Paste yaml_specs_json"
+                  value={yamlPaste}
+                  onChange={(e) => setYamlPaste(e.target.value)}
+                  disabled={disabled}
+                  fullWidth multiline minRows={5} size="small"
+                  placeholder={'{\n  "fact_pe002": "version: \'1.1\'\\nsource: ..."\n}'}
+                />
+                <Button variant="contained" size="small" onClick={handleYamlPasteApply}
+                  disabled={disabled || !yamlPaste.trim()} sx={{ alignSelf: 'flex-start' }}>
+                  Apply
+                </Button>
+              </Box>
+            )}
+
+            {yamlSuccess && <Alert severity="success" variant="outlined">{yamlSuccess}</Alert>}
+            {yamlError && <Alert severity="error" variant="outlined">{yamlError}</Alert>}
+
+            {Object.keys(uploadedFiles).length > 0 && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                <Typography variant="caption" sx={{ fontWeight: 600 }}>Loaded views:</Typography>
+                {Object.keys(uploadedFiles).map(k => (
+                  <Box key={k} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Chip label={k} size="small" variant="outlined" />
+                    <Typography variant="caption" color="text.secondary">
+                      {uploadedFiles[k].split('\n').length} lines
+                    </Typography>
+                    <IconButton size="small" onClick={() => removeYamlEntry(k)} disabled={disabled}>
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Box>
+                ))}
+              </Box>
+            )}
+          </Box>
+        </AccordionDetails>
+      </Accordion>
+
       {/* ── Deployment Settings ───────────────────────────────────────────────────── */}
       <Accordion defaultExpanded>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
@@ -273,6 +411,15 @@ export const MetricViewDeployerConfigSelector: React.FC<MetricViewDeployerConfig
                 {value.schema_name && <> schema <strong>{value.schema_name}</strong>.</>}
               </Alert>
             )}
+            <TextField
+              label="Catalog Remap (optional)"
+              value={value.catalog_remap || ''}
+              onChange={(e) => handleField('catalog_remap', e.target.value)}
+              disabled={disabled}
+              fullWidth size="small"
+              helperText='Replace source catalogs in YAML before deploying. JSON dict, e.g. {"dc_datalake_prod_001": "david_test_metrics"}'
+              placeholder='{"dc_datalake_prod_001": "david_test_metrics"}'
+            />
           </Box>
         </AccordionDetails>
       </Accordion>
