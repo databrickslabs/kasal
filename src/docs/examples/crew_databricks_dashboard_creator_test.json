@@ -1,0 +1,92 @@
+{
+  "id": "databricks-dashboard-creator-test-crew",
+  "name": "Databricks Dashboard Creator — PE002 Test",
+  "agent_ids": [
+    "agent-databricks-dashboard-creator-test-001"
+  ],
+  "task_ids": [
+    "task-databricks-dashboard-creator-test-001"
+  ],
+  "nodes": [
+    {
+      "id": "agent-databricks-dashboard-creator-test-001",
+      "type": "agentNode",
+      "position": { "x": 118, "y": 68 },
+      "data": {
+        "label": "Dashboard Creator Agent",
+        "role": "Databricks Platform Engineer",
+        "goal": "Create a Databricks AI/BI dashboard from the visual-to-UCMV mappings.",
+        "backstory": "You are a Databricks platform engineer. Call the Databricks Dashboard Creator tool immediately with ZERO arguments — visual_mappings_json is auto-injected from the previous flow step.",
+        "tools": ["95"],
+        "tool_configs": {
+          "Databricks Dashboard Creator": {
+            "dashboard_title": "PE002 Production Analytics",
+            "catalog": "david_test_metrics",
+            "schema_name": "ucmv_kasal",
+            "warehouse_id": "30d6e63b35f828c5",
+            "databricks_host": "https://e2-demo-field-eng.cloud.databricks.com/",
+            "parent_path": "/Workspace/Shared",
+            "publish_dashboard": true
+          }
+        },
+        "agentId": "agent-databricks-dashboard-creator-test-001",
+        "taskId": null,
+        "llm": "databricks-claude-sonnet-4",
+        "verbose": true,
+        "memory": true,
+        "type": "agent",
+        "context": [],
+        "async_execution": false,
+        "knowledge_sources": null,
+        "markdown": false
+      }
+    },
+    {
+      "id": "task-databricks-dashboard-creator-test-001",
+      "type": "taskNode",
+      "position": { "x": 368, "y": 68 },
+      "data": {
+        "label": "Create PE002 Dashboard",
+        "tools": ["95"],
+        "tool_configs": {
+          "Databricks Dashboard Creator": {
+            "dashboard_title": "PE002 Production Analytics",
+            "catalog": "david_test_metrics",
+            "schema_name": "ucmv_kasal",
+            "warehouse_id": "30d6e63b35f828c5",
+            "databricks_host": "https://e2-demo-field-eng.cloud.databricks.com/",
+            "parent_path": "/Workspace/Shared",
+            "publish_dashboard": true
+          }
+        },
+        "agentId": null,
+        "taskId": "task-databricks-dashboard-creator-test-001",
+        "type": "task",
+        "description": "Create a Databricks AI/BI (Lakeview) dashboard from the PE002 visual mappings.\n\n⚠️ CRITICAL: Call the Databricks Dashboard Creator tool with ZERO arguments.\nvisual_mappings_json is auto-injected from the previous flow step (PBI Visual-UCMV Mapper).\n\nReturn the dashboard URL.",
+        "expected_output": "JSON with dashboard_id, dashboard_url (direct link to open the dashboard), status (created/updated), widget_count, and page_count.",
+        "memory": true,
+        "config": {
+          "output_json": "true",
+          "retry_on_fail": true,
+          "max_retries": 2
+        },
+        "context": [],
+        "async_execution": false,
+        "markdown": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "agent-databricks-dashboard-creator-test-001",
+      "target": "task-databricks-dashboard-creator-test-001",
+      "id": "edge-agent-task"
+    }
+  ],
+  "created_at": "2026-05-28T00:00:00.000000",
+  "updated_at": "2026-05-28T00:00:00.000000",
+  "process": "sequential",
+  "planning": false,
+  "memory": true,
+  "verbose": true
+}

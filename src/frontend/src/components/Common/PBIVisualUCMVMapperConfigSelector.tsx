@@ -21,6 +21,8 @@ import {
   FormControl,
   InputLabel,
   CircularProgress,
+  Tabs,
+  Tab,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { DatabricksService } from '../../api/DatabricksService';
@@ -31,6 +33,7 @@ export interface PBIVisualUCMVMapperConfig {
   dashboard_title?: string;
   databricks_host?: string;
   llm_model?: string;
+  report_references_override?: string;
   [key: string]: string | undefined;
 }
 
@@ -54,6 +57,10 @@ export const PBIVisualUCMVMapperConfigSelector: React.FC<PBIVisualUCMVMapperConf
   const [schemaLoading, setSchemaLoading] = useState(false);
   const [catalogSearch, setCatalogSearch] = useState('');
   const [schemaSearch, setSchemaSearch] = useState('');
+  const [overrideTab, setOverrideTab] = useState(0);
+  const [overridePaste, setOverridePaste] = useState('');
+  const [overrideError, setOverrideError] = useState<string | null>(null);
+  const [overrideSuccess, setOverrideSuccess] = useState<string | null>(null);
 
   const handleField = (field: keyof PBIVisualUCMVMapperConfig, val: string) => {
     onChange({ ...value, [field]: val });
@@ -199,6 +206,77 @@ export const PBIVisualUCMVMapperConfigSelector: React.FC<PBIVisualUCMVMapperConf
             disabled={disabled} fullWidth size="small"
             helperText="Databricks model endpoint used to map PBI measures to UCMV measures"
           />
+        </AccordionDetails>
+      </Accordion>
+
+      {/* ── Report References Override ───────────────────────────────────── */}
+      <Accordion>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+            PBI Report References Override (optional — skips tool 78)
+            {value.report_references_override && (
+              <Typography component="span" variant="caption" color="primary" sx={{ ml: 1 }}>✓ loaded</Typography>
+            )}
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Typography variant="caption" color="text.secondary">
+              Upload the JSON output from tool 78 (Power BI Report References) to skip live PBI extraction.
+              Download it from the HITL gate after tool 78 runs, edit if needed, then upload here.
+            </Typography>
+            <Tabs value={overrideTab} onChange={(_, v) => { setOverrideTab(v); setOverrideError(null); setOverrideSuccess(null); }}>
+              <Tab label="Upload JSON file" />
+              <Tab label="Paste JSON" />
+            </Tabs>
+            {overrideTab === 0 && (
+              <Button variant="outlined" component="label" size="small" disabled={disabled}>
+                Choose JSON file
+                <input type="file" accept=".json,application/json" hidden onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = (ev) => {
+                    try {
+                      const parsed = JSON.parse(ev.target?.result as string);
+                      onChange({ ...value, report_references_override: JSON.stringify(parsed) });
+                      setOverrideSuccess(`Loaded "${file.name}" — will skip tool 78`);
+                      setOverrideError(null);
+                    } catch { setOverrideError('Invalid JSON file'); }
+                  };
+                  reader.readAsText(file);
+                  e.target.value = '';
+                }} />
+              </Button>
+            )}
+            {overrideTab === 1 && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <TextField label="Paste tool 78 JSON output" value={overridePaste}
+                  onChange={(e) => setOverridePaste(e.target.value)}
+                  disabled={disabled} fullWidth multiline minRows={4} size="small"
+                  placeholder={'{\n  "reports": [...]\n}'} />
+                <Button variant="contained" size="small" disabled={disabled || !overridePaste.trim()}
+                  sx={{ alignSelf: 'flex-start' }}
+                  onClick={() => {
+                    try {
+                      const parsed = JSON.parse(overridePaste);
+                      onChange({ ...value, report_references_override: JSON.stringify(parsed) });
+                      setOverrideSuccess('Tool 78 output loaded — will skip live PBI extraction');
+                      setOverridePaste('');
+                      setOverrideError(null);
+                    } catch { setOverrideError('Invalid JSON'); }
+                  }}>Apply</Button>
+              </Box>
+            )}
+            {overrideSuccess && <Alert severity="success" variant="outlined">{overrideSuccess}</Alert>}
+            {overrideError && <Alert severity="error" variant="outlined">{overrideError}</Alert>}
+            {value.report_references_override && (
+              <Button size="small" color="warning" onClick={() => {
+                onChange({ ...value, report_references_override: undefined });
+                setOverrideSuccess(null);
+              }}>Clear override (re-enable tool 78)</Button>
+            )}
+          </Box>
         </AccordionDetails>
       </Accordion>
 
