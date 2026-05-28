@@ -170,12 +170,44 @@ class PBIVisualUCMVMapperTool(BaseTool):
         return summaries
 
     def _extract_visuals(self, report_data: dict) -> list:
-        """Extract all visuals from tool 78 report references output."""
+        """Extract all visuals from tool 78 report references output.
+
+        Handles two formats:
+        A) Real tool 78 output: {"report": {...}, "visuals": [...flat...], "pages": [...]}
+        B) Demo/expected format: {"reports": [{"pages": [{"visuals": [...]}]}]}
+        """
         visuals = []
+
+        # ── Format A: real tool 78 output — flat visuals list at top level ──────
+        if 'visuals' in report_data and isinstance(report_data['visuals'], list):
+            # Build page_name lookup from pages list
+            pages = report_data.get('pages') or []
+            # pages in real format: [{"page_name": "...", "page_url": "...", "visual_count": N}]
+            default_page = pages[0].get('page_name', 'Page 1') if pages else 'Page 1'
+            for visual in report_data['visuals']:
+                measures = visual.get('measures', [])
+                tables = visual.get('tables', [])
+                # Skip slicers/filters with no real measures
+                if not measures or visual.get('visual_type') == 'slicer':
+                    continue
+                visuals.append({
+                    'visual_id': visual.get('visual_id', ''),
+                    'page_name': visual.get('page_name') or default_page,
+                    'visual_type': visual.get('visual_type', 'tableEx'),
+                    'measures': measures,
+                    'tables': tables,
+                })
+            if visuals:
+                logger.info(f"[PBIVisualMapper] Parsed {len(visuals)} visuals (real tool 78 format)")
+                return visuals
+
+        # ── Format B: demo/wrapped format — reports > pages > visuals ────────────
         for report in (report_data.get('reports') or []):
             for page in (report.get('pages') or []):
                 page_name = page.get('page_display_name') or page.get('page_name') or ''
                 for visual in (page.get('visuals') or []):
+                    if visual.get('visual_type') == 'slicer':
+                        continue
                     visuals.append({
                         'visual_id': visual.get('visual_id', ''),
                         'page_name': page_name,
@@ -183,6 +215,7 @@ class PBIVisualUCMVMapperTool(BaseTool):
                         'measures': visual.get('measures', []),
                         'tables': visual.get('tables', []),
                     })
+
         return visuals
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -486,6 +519,9 @@ Map ALL {len(visuals)} visuals. Return the complete JSON array.
 
         output = {
             "visual_mappings": visual_mappings,
+            # Also include as JSON string so flow injection matches tool 95's
+            # visual_mappings_json key in _default_config (key must match exactly)
+            "visual_mappings_json": json.dumps(visual_mappings),
             "dashboard_title": dashboard_title,
             "catalog": catalog,
             "schema_name": schema,
