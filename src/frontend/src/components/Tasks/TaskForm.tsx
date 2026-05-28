@@ -62,6 +62,8 @@ import { PipelineConfigGeneratorConfigSelector, PipelineConfigGeneratorConfig } 
 import { GenieSpaceConfigSelector, GenieSpaceConfig } from '../Common/GenieSpaceConfigSelector';
 import { MetricViewDeployerConfigSelector, MetricViewDeployerConfig } from '../Common/MetricViewDeployerConfigSelector';
 import { UCMVGenieConfigGeneratorConfigSelector, UCMVGenieConfigGeneratorConfig } from '../Common/UCMVGenieConfigGeneratorConfigSelector';
+import { PBIVisualUCMVMapperConfigSelector, PBIVisualUCMVMapperConfig } from '../Common/PBIVisualUCMVMapperConfigSelector';
+import { DatabricksDashboardCreatorConfigSelector, DatabricksDashboardCreatorConfig } from '../Common/DatabricksDashboardCreatorConfigSelector';
 import { PerplexityConfig, SerperConfig } from '../../types/config';
 import { type LLMGuardrailConfig } from '../../types/task';
 import { ModelService } from '../../api/ModelService';
@@ -163,6 +165,8 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const [genieSpaceConfig, setGenieSpaceConfig] = useState<GenieSpaceConfig>({});
   const [metricViewDeployerConfig, setMetricViewDeployerConfig] = useState<MetricViewDeployerConfig>({});
   const [ucmvGenieConfigGenConfig, setUcmvGenieConfigGenConfig] = useState<UCMVGenieConfigGeneratorConfig>({});
+  const [pbiVisualUCMVMapperConfig, setPbiVisualUCMVMapperConfig] = useState<PBIVisualUCMVMapperConfig>({});
+  const [databricksDashboardCreatorConfig, setDatabricksDashboardCreatorConfig] = useState<DatabricksDashboardCreatorConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
   const [showBestPractices, setShowBestPractices] = useState(false);
@@ -308,6 +312,16 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       // Check for UCMV Genie Config Generator config
       if (initialData.tool_configs['UCMV Genie Space Config Generator']) {
         setUcmvGenieConfigGenConfig(initialData.tool_configs['UCMV Genie Space Config Generator'] as UCMVGenieConfigGeneratorConfig);
+      }
+
+      // Check for PBI Visual-UCMV Mapper config
+      if (initialData.tool_configs['PBI Visual-UCMV Mapper']) {
+        setPbiVisualUCMVMapperConfig(initialData.tool_configs['PBI Visual-UCMV Mapper'] as PBIVisualUCMVMapperConfig);
+      }
+
+      // Check for Databricks Dashboard Creator config
+      if (initialData.tool_configs['Databricks Dashboard Creator']) {
+        setDatabricksDashboardCreatorConfig(initialData.tool_configs['Databricks Dashboard Creator'] as DatabricksDashboardCreatorConfig);
       }
 
       // Check for MCP_SERVERS config
@@ -2045,6 +2059,72 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                       setToolConfigs(prev => ({
                         ...prev,
                         'UCMV Genie Space Config Generator': config
+                      }));
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+
+            {/* PBI Visual-UCMV Mapper Configuration - Show only when tool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'PBI Visual-UCMV Mapper';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  PBI Visual-UCMV Mapper (Tool 94) Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(255, 152, 0, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(255, 152, 0, 0.2)'
+                }}>
+                  <PBIVisualUCMVMapperConfigSelector
+                    value={pbiVisualUCMVMapperConfig}
+                    onChange={(config) => {
+                      setPbiVisualUCMVMapperConfig(config);
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'PBI Visual-UCMV Mapper': config
+                      }));
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+
+            {/* Databricks Dashboard Creator Configuration - Show only when tool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'Databricks Dashboard Creator';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                  Databricks Dashboard Creator (Tool 95) Configuration
+                </Typography>
+                <Box sx={{
+                  p: 2,
+                  backgroundColor: 'rgba(33, 150, 243, 0.04)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(33, 150, 243, 0.2)'
+                }}>
+                  <DatabricksDashboardCreatorConfigSelector
+                    value={databricksDashboardCreatorConfig}
+                    onChange={(config) => {
+                      setDatabricksDashboardCreatorConfig(config);
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        'Databricks Dashboard Creator': config
                       }));
                     }}
                   />
