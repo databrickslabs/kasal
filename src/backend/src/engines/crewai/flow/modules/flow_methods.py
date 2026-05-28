@@ -830,10 +830,18 @@ class FlowMethodFactory:
                                                 injected_count += 1
                                                 logger.info(f"📥 Injected pipeline config ({len(first_result_str):,} chars) into {type(tool).__name__}.config_json")
                                         elif 'ucmv_output' in tool._default_config and 'yaml' in prev_data:
-                                            # UCMV Generator output → Validator: inject full output as ucmv_output
-                                            tool._default_config['ucmv_output'] = first_result_str
-                                            injected_count += 1
-                                            logger.info(f"📥 Injected UCMV output ({len(first_result_str):,} chars) into {type(tool).__name__}.ucmv_output")
+                                            # Skip injection if tool already has manual yaml_specs_json override
+                                            has_manual_yaml = bool(
+                                                tool._default_config.get('yaml_specs_json') and
+                                                tool._default_config['yaml_specs_json'] not in ('{}', None, '')
+                                            )
+                                            if has_manual_yaml:
+                                                logger.info(f"⏭️ Skipping UCMV output injection into {type(tool).__name__} — yaml_specs_json override already set")
+                                            else:
+                                                # UCMV Generator output → Validator/Deployer: inject full output as ucmv_output
+                                                tool._default_config['ucmv_output'] = first_result_str
+                                                injected_count += 1
+                                                logger.info(f"📥 Injected UCMV output ({len(first_result_str):,} chars) into {type(tool).__name__}.ucmv_output")
                                         else:
                                             # Generic injection: inject matching keys
                                             for key, value in prev_data.items():
