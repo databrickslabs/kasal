@@ -176,28 +176,29 @@ class DatabricksDashboardCreatorTool(BaseTool):
         dimensions = mapping.get('dimensions') or []
         measures = mapping.get('measures') or []
 
-        # Build query fields
+        # Build query fields — match your CCHBC script conventions:
+        # dimensions: {"name": "col",        "expression": "`col`"}
+        # measures:   {"name": "sum(col)",   "expression": "SUM(`col`)"}
         fields = []
         for dim in dimensions:
-            safe_dim = self._safe_name(dim)
-            fields.append({"name": safe_dim, "expression": f"`{dim}`"})
+            fields.append({"name": dim, "expression": f"`{dim}`"})
         for m in measures:
-            safe_m = self._safe_name(m)
-            fields.append({"name": f"measure_{safe_m}", "expression": f"MEASURE(`{m}`)"})
+            fields.append({"name": f"sum({m})", "expression": f"SUM(`{m}`)"})
 
         query = {
             "name": "main_query",
             "query": {
-                "dataset_name": dataset_name,
+                "datasetName": dataset_name,   # camelCase — Lakeview API requirement
                 "fields": fields,
+                "disaggregated": False,        # widget handles aggregation
             }
         }
 
         # Build widget spec based on type
         if widget_type in ('bar', 'line') and version == 3:
             # Need at least one dim and one measure
-            x_field = self._safe_name(dimensions[0]) if dimensions else (fields[0]['name'] if fields else 'dim')
-            y_field = f"measure_{self._safe_name(measures[0])}" if measures else (fields[-1]['name'] if fields else 'value')
+            x_field = dimensions[0] if dimensions else (fields[0]['name'] if fields else 'dim')
+            y_field = f"sum({measures[0]})" if measures else (fields[-1]['name'] if fields else 'value')
             spec = {
                 "version": version,
                 "widgetType": widget_type,
@@ -207,7 +208,7 @@ class DatabricksDashboardCreatorTool(BaseTool):
                 }
             }
             if len(dimensions) > 1 and version == 3:
-                color_field = self._safe_name(dimensions[1])
+                color_field = dimensions[1]
                 spec["encodings"]["color"] = {"fieldName": color_field, "scale": {"type": "categorical"}}
         elif widget_type == 'table' and version == 2:
             columns = []
@@ -222,7 +223,7 @@ class DatabricksDashboardCreatorTool(BaseTool):
                 "frame": {"showTitle": True, "title": chart_title},
             }
         elif widget_type == 'counter' and version == 2:
-            value_field = f"measure_{self._safe_name(measures[0])}" if measures else (fields[0]['name'] if fields else 'value')
+            value_field = f"sum({measures[0]})" if measures else (fields[0]['name'] if fields else 'value')
             spec = {
                 "version": version,
                 "widgetType": widget_type,

@@ -21,6 +21,10 @@ logger = logging.getLogger(__name__)
 
 class PBIVisualUCMVMapperSchema(BaseModel):
     """Input schema for PBIVisualUCMVMapperTool."""
+    report_references_override: Optional[str] = Field(
+        None,
+        description="Manually uploaded tool 78 JSON output — skips live PBI extraction when provided"
+    )
     report_references_json: Optional[str] = Field(
         None,
         description="Tool 78 JSON output with reports/pages/visuals (auto-injected by flow)"
@@ -62,7 +66,7 @@ class PBIVisualUCMVMapperTool(BaseTool):
 
     def __init__(self, **kwargs: Any) -> None:
         config_keys = (
-            'report_references_json', 'ucmv_output', 'measures_json',
+            'report_references_override', 'report_references_json', 'ucmv_output', 'measures_json',
             'catalog', 'schema_name', 'dashboard_title', 'databricks_host', 'llm_model',
         )
         # Seed ucmv_output so flow_methods.py injection check fires
@@ -380,8 +384,31 @@ Map ALL {len(visuals)} visuals. Return the complete JSON array.
         host_override = _get('databricks_host') or None
         llm_model = _get('llm_model') or 'databricks-claude-sonnet-4'
 
-        # ── 1. Parse report_references_json ─────────────────────────────────
-        report_raw = _get('report_references_json')
+        # ── 1. Parse report_references — override wins over flow injection ──
+        # Priority: report_references_override > report_references_json > ucmv_output (tool 78 injected)
+        override = _get('report_references_override')
+        if override and override.strip() not in ('{}', ''):
+            logger.info("[PBIVisualMapper] Using report_references_override (manual upload)")
+            report_raw = override
+        else:
+            report_raw = None
+
+        # ── Falls back to ucmv_output field if tool 78 output was injected directly
+        # (tool 78 outputs {"reports": [...]} which the flow injects as ucmv_output
+        # when report_references_json key is missing)
+        if not report_raw:
+            report_raw = _get('report_references_json')
+        if not report_raw:
+            # Try ucmv_output — flow may have injected tool 78 output there
+            candidate = _get('ucmv_output')
+            if candidate:
+                try:
+                    parsed = json.loads(candidate) if isinstance(candidate, str) else candidate
+                    if isinstance(parsed, dict) and 'reports' in parsed:
+                        report_raw = candidate
+                        logger.info("[PBIVisualMapper] Using ucmv_output as report_references_json (tool 78 output detected)")
+                except Exception:
+                    pass
         if not report_raw:
             return json.dumps({"error": "No report_references_json available — required for visual mapping"})
 

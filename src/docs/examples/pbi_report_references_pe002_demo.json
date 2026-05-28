@@ -1,0 +1,44 @@
+{
+  "reports": [
+    {
+      "report_name": "PE002 Production Dashboard",
+      "pages": [
+        {
+          "page_name": "Production",
+          "page_display_name": "Production Analytics",
+          "visuals": [
+            {
+              "visual_id": "v1",
+              "visual_type": "barChart",
+              "measures": ["active_shift_hours", "total_hours"],
+              "tables": ["fact_pe002"]
+            },
+            {
+              "visual_id": "v2",
+              "visual_type": "lineChart",
+              "measures": ["sle_waterfall_sle", "sle_waterfall_cip"],
+              "tables": ["fact_pe002"]
+            },
+            {
+              "visual_id": "v3",
+              "visual_type": "tableEx",
+              "measures": ["production_quantity", "paid_hours", "epl"],
+              "tables": ["fact_pe002"]
+            },
+            {
+              "visual_id": "v4",
+              "visual_type": "card",
+              "measures": ["total_sle_actual"],
+              "tables": ["fact_pe002"]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "unique_measures": ["active_shift_hours", "total_hours", "sle_waterfall_sle", "sle_waterfall_cip", "production_quantity", "paid_hours", "epl", "total_sle_actual"],
+    "unique_tables": ["fact_pe002"],
+    "total_visuals": 4
+  }
+}
