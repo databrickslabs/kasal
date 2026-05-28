@@ -42,6 +42,7 @@ import {
   HITLRejectionAction,
 } from '../../api/HITLService';
 import UCMVResultViewer, { isUCMVResult, UCMVResult } from '../Jobs/UCMVResultViewer';
+import { GenieSpaceConfigSelector, GenieSpaceConfig } from '../Common/GenieSpaceConfigSelector';
 import { runService } from '../../api/ExecutionHistoryService';
 import SaveIcon from '@mui/icons-material/Save';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -77,6 +78,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
 
   // UCMV edit state
   const [editedUCMV, setEditedUCMV] = useState<UCMVResult | null>(null);
+  const [editedGenieConfig, setEditedGenieConfig] = useState<GenieSpaceConfig | null>(null);
 
   // Fetch approval for the execution
   const fetchApproval = useCallback(async () => {
@@ -171,6 +173,27 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reject');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Handle Save & Approve for edited Genie Space config
+  const handleSaveAndApproveGenieConfig = async () => {
+    if (!approval || !editedGenieConfig) return;
+
+    setActionLoading(true);
+    try {
+      // Save edited Genie config to checkpoint_data.edited_config
+      // The HITL gate reads this and passes it as previous_output to the next crew
+      await runService.updateExecutionResult(approval.execution_id, editedGenieConfig as unknown as Record<string, unknown>);
+      await HITLService.approveGate(approval.id, {
+        comment: 'Genie Space config reviewed and edited',
+      });
+      onActionComplete?.('approve');
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save and approve');
     } finally {
       setActionLoading(false);
     }
@@ -418,6 +441,21 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
                     </Paper>
                   );
                 }
+                // Detect Genie Space Config output (has space_title + text_instructions)
+                if (parsed && typeof parsed === 'object' && 'space_title' in parsed && 'text_instructions' in parsed) {
+                  const genieConfig = editedGenieConfig ?? (parsed as GenieSpaceConfig);
+                  return (
+                    <Paper variant="outlined" sx={{ p: 2, maxHeight: 600, overflow: 'auto', bgcolor: 'background.default' }}>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                        Review and edit the auto-generated Genie Space configuration before approving:
+                      </Typography>
+                      <GenieSpaceConfigSelector
+                        value={genieConfig}
+                        onChange={(config) => setEditedGenieConfig(config)}
+                      />
+                    </Paper>
+                  );
+                }
               } catch { /* not JSON, fall through to raw display */ }
               return (
                 <Paper
@@ -589,6 +627,16 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
             disabled={actionLoading || approval.is_expired}
           >
             Save &amp; Approve
+          </Button>
+        ) : editedGenieConfig ? (
+          <Button
+            variant="contained"
+            color="success"
+            startIcon={actionLoading ? <CircularProgress size={16} /> : <SaveIcon />}
+            onClick={handleSaveAndApproveGenieConfig}
+            disabled={actionLoading || approval.is_expired}
+          >
+            Save Config &amp; Approve
           </Button>
         ) : (
           <Button
