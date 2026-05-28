@@ -148,8 +148,7 @@ export const GenieSpaceConfigSelector: React.FC<GenieSpaceConfigSelectorProps> =
   // ── Catalog change → fetch schemas ─────────────────────────────────────────
 
   const handleCatalogChange = async (catalog: string) => {
-    handleField('catalog', catalog);
-    handleField('schema_name', '');
+    onChange({ ...value, catalog, schema_name: '' });
     setSchemas([]);
     if (!catalog) return;
     setSchemaLoading(true);

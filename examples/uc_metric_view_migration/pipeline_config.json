@@ -144,7 +144,7 @@
         "volume_in_uc": "co012_volume_in_uc",
         "net_sales_revenue": "co012_net_sales_revenue"
       },
-      "inline_source": "SELECT\n  fiscper,\n  comp_code,\n  bic_chversion,\n  SUM(volume_in_uc) AS volume_in_uc\nFROM dc_datalake_prod_001.udm_datamart_fm.co012_profitability_gross_profit_analysis_actuals\nWHERE fiscper >= CONCAT(CAST(YEAR(CURRENT_DATE()) - 2 AS STRING), '001')\n  AND bic_chversion = '0000'\nGROUP BY\n  fiscper,\n  comp_code,\n  bic_chversion"
+      "inline_source": "SELECT\n  fiscper,\n  comp_code,\n  bic_chversion,\n  SUM(volume_in_uc) AS volume_in_uc\nFROM david_test_metrics.udm_datamart_fm.co012_profitability_gross_profit_analysis_actuals\nWHERE fiscper >= CONCAT(CAST(YEAR(CURRENT_DATE()) - 2 AS STRING), '001')\n  AND bic_chversion = '0000'\nGROUP BY\n  fiscper,\n  comp_code,\n  bic_chversion"
     }
   },
   "enrichment_joins": {
@@ -161,7 +161,7 @@
       },
       {
         "name": "dim_company",
-        "source": "SELECT\n  market_segment,\n  business_unit,\n  business_unit_abbreviation,\n  country,\n  country_abbreviation,\n  geo_country,\n  country_id,\n  CAST(co_code_bw AS STRING) as co_code_bw,\n  country_sequence_id,\n  business_unit_sequence_id,\n  process_run_id,\n  comp_code\nFROM (\n  SELECT DISTINCT\n    market_segment,\n    business_unit,\n    business_unit_abbreviation,\n    country,\n    country_abbreviation,\n    geo_country,\n    country_id,\n    co_code_bw,\n    country_sequence_id,\n    business_unit_sequence_id,\n    process_run_id,\n    CASE\n      WHEN LENGTH(CAST(co_code_bw AS STRING)) = 3\n      THEN CONCAT('0', CAST(co_code_bw AS STRING))\n      ELSE CAST(co_code_bw AS STRING)\n    END as comp_code\n  FROM dc_datalake_prod_001.udm_cchbc_md.ca_dim_company\n  WHERE co_code_bw IS NOT NULL\n) base_data QUALIFY ROW_NUMBER() OVER (PARTITION BY comp_code ORDER BY comp_code) = 1",
+        "source": "SELECT\n  market_segment,\n  business_unit,\n  business_unit_abbreviation,\n  country,\n  country_abbreviation,\n  geo_country,\n  country_id,\n  CAST(co_code_bw AS STRING) as co_code_bw,\n  country_sequence_id,\n  business_unit_sequence_id,\n  process_run_id,\n  comp_code\nFROM (\n  SELECT DISTINCT\n    market_segment,\n    business_unit,\n    business_unit_abbreviation,\n    country,\n    country_abbreviation,\n    geo_country,\n    country_id,\n    co_code_bw,\n    country_sequence_id,\n    business_unit_sequence_id,\n    process_run_id,\n    CASE\n      WHEN LENGTH(CAST(co_code_bw AS STRING)) = 3\n      THEN CONCAT('0', CAST(co_code_bw AS STRING))\n      ELSE CAST(co_code_bw AS STRING)\n    END as comp_code\n  FROM david_test_metrics.udm_cchbc_md.ca_dim_company\n  WHERE co_code_bw IS NOT NULL\n) base_data QUALIFY ROW_NUMBER() OVER (PARTITION BY comp_code ORDER BY comp_code) = 1",
         "join_on": "source.comp_code = dim_company.comp_code",
         "dim_columns": [
           "business_unit",
@@ -170,7 +170,7 @@
       },
       {
         "name": "dim_region",
-        "source": "SELECT\n  region,\n  region_sequence_id,\n  CAST(co_code_bw AS STRING) as co_code_bw,\n  comp_code\nFROM (\n  SELECT DISTINCT\n    region,\n    region_sequence_id,\n    co_code_bw,\n    CASE\n      WHEN LENGTH(CAST(co_code_bw AS STRING)) = 3\n      THEN CONCAT('0', CAST(co_code_bw AS STRING))\n      ELSE CAST(co_code_bw AS STRING)\n    END as comp_code\n  FROM dc_datalake_prod_001.udm_cchbc_md.ca_dim_company\n  WHERE co_code_bw IS NOT NULL\n) base_data\nWHERE region NOT IN ('Africa', 'CCH 27', 'CCH 28', 'CCH P&C All', 'Europe', 'Europe excl. BU Russia', 'Total CCH Territories', 'CCH 29 Trading Update') AND region IS NOT NULL\nQUALIFY ROW_NUMBER() OVER (PARTITION BY comp_code ORDER BY comp_code) = 1",
+        "source": "SELECT\n  region,\n  region_sequence_id,\n  CAST(co_code_bw AS STRING) as co_code_bw,\n  comp_code\nFROM (\n  SELECT DISTINCT\n    region,\n    region_sequence_id,\n    co_code_bw,\n    CASE\n      WHEN LENGTH(CAST(co_code_bw AS STRING)) = 3\n      THEN CONCAT('0', CAST(co_code_bw AS STRING))\n      ELSE CAST(co_code_bw AS STRING)\n    END as comp_code\n  FROM david_test_metrics.udm_cchbc_md.ca_dim_company\n  WHERE co_code_bw IS NOT NULL\n) base_data\nWHERE region NOT IN ('Africa', 'CCH 27', 'CCH 28', 'CCH P&C All', 'Europe', 'Europe excl. BU Russia', 'Total CCH Territories', 'CCH 29 Trading Update') AND region IS NOT NULL\nQUALIFY ROW_NUMBER() OVER (PARTITION BY comp_code ORDER BY comp_code) = 1",
         "join_on": "source.comp_code = dim_region.comp_code",
         "dim_columns": [
           "region"

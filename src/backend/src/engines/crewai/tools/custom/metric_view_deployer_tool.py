@@ -24,6 +24,10 @@ class MetricViewDeployerSchema(BaseModel):
     dry_run: bool = Field(False, description="If True, validate only without deploying")
     databricks_host: Optional[str] = Field(None, description="Override workspace URL (optional)")
     warehouse_id: Optional[str] = Field(None, description="Databricks SQL warehouse ID")
+    catalog_remap: Optional[str] = Field(
+        None,
+        description='JSON dict of source catalog replacements, e.g. {"dc_datalake_prod_001": "david_test_metrics"}'
+    )
 
 
 class MetricViewDeployerTool(BaseTool):
@@ -48,7 +52,7 @@ class MetricViewDeployerTool(BaseTool):
     def __init__(self, **kwargs: Any) -> None:
         config_keys = (
             'ucmv_output', 'yaml_specs_json',
-            'catalog', 'schema_name', 'dry_run', 'databricks_host', 'warehouse_id',
+            'catalog', 'schema_name', 'dry_run', 'databricks_host', 'warehouse_id', 'catalog_remap',
         )
         # Always seed ucmv_output so flow_methods.py injection check fires
         default_config: dict = {'ucmv_output': None}
@@ -172,6 +176,22 @@ class MetricViewDeployerTool(BaseTool):
         if not yaml_specs:
             return json.dumps({"error": "No metric view specs found — ucmv_output not injected and no yaml_specs_json provided"})
 
+        # ── Apply catalog remapping to every YAML spec ────────────────────────
+        remap_raw = _get('catalog_remap')
+        if remap_raw:
+            try:
+                remap = json.loads(remap_raw) if isinstance(remap_raw, str) else remap_raw
+                if isinstance(remap, dict):
+                    remapped = {}
+                    for k, v in yaml_specs.items():
+                        for old_cat, new_cat in remap.items():
+                            v = v.replace(old_cat, new_cat)
+                        remapped[k] = v
+                    yaml_specs = remapped
+                    logger.info(f"[MVDeployer] Applied catalog remap: {remap}")
+            except Exception as e:
+                logger.warning(f"[MVDeployer] Could not apply catalog_remap: {e}")
+
         results = {}
         schema_ensured = False  # create schema once before first deployment
 
@@ -180,7 +200,7 @@ class MetricViewDeployerTool(BaseTool):
 
             if dry_run:
                 safe_key = _re.sub(r'[^a-zA-Z0-9_]', '_', table_key.lower())
-                view_name = f"{catalog}.{schema}.{safe_key}_uc_metric_view"
+                view_name = f"{catalog}.{schema}.{safe_key}"
                 results[table_key] = {
                     'status': 'validated',
                     'view_name': view_name,
@@ -203,7 +223,7 @@ class MetricViewDeployerTool(BaseTool):
                 safe_key = _re.sub(r'[^a-zA-Z0-9_]', '_', table_key.lower())
                 safe_cat = _re.sub(r'[^a-zA-Z0-9_]', '_', catalog)
                 safe_sch = _re.sub(r'[^a-zA-Z0-9_]', '_', schema)
-                view_name = f"{safe_cat}.{safe_sch}.{safe_key}_uc_metric_view"
+                view_name = f"{safe_cat}.{safe_sch}.{safe_key}"
                 ddl = self._yaml_to_ddl(yaml_content, view_name)
             except Exception as e:
                 results[table_key] = {'status': 'error', 'message': f'DDL generation failed: {e}'}
