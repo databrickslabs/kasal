@@ -205,6 +205,20 @@ except ImportError as e:
     UCMVGenieConfigGeneratorTool = None
     logging.warning(f"Could not import UCMVGenieConfigGeneratorTool: {e}")
 
+# PBI Visual-UCMV Mapper Tool (94)
+try:
+    from .custom.pbi_visual_ucmv_mapper_tool import PBIVisualUCMVMapperTool
+except ImportError as e:
+    PBIVisualUCMVMapperTool = None
+    logging.warning(f"Could not import PBIVisualUCMVMapperTool: {e}")
+
+# Databricks Dashboard Creator Tool (95)
+try:
+    from .custom.databricks_dashboard_creator_tool import DatabricksDashboardCreatorTool
+except ImportError as e:
+    DatabricksDashboardCreatorTool = None
+    logging.warning(f"Could not import DatabricksDashboardCreatorTool: {e}")
+
 # Setup logger
 logger = logging.getLogger(__name__)
 
@@ -293,6 +307,10 @@ class ToolFactory:
             self._tool_implementations["Genie Space Generator"] = GenieSpaceGeneratorTool
         if UCMVGenieConfigGeneratorTool is not None:
             self._tool_implementations["UCMV Genie Space Config Generator"] = UCMVGenieConfigGeneratorTool
+        if PBIVisualUCMVMapperTool is not None:
+            self._tool_implementations["PBI Visual-UCMV Mapper"] = PBIVisualUCMVMapperTool
+        if DatabricksDashboardCreatorTool is not None:
+            self._tool_implementations["Databricks Dashboard Creator"] = DatabricksDashboardCreatorTool
 
         # Initialize _initialized flag
         self._initialized = False

@@ -1,0 +1,138 @@
+{
+  "id": "pbi-to-dashboard-pipeline",
+  "name": "PBI → Databricks Dashboard Pipeline",
+  "crew_id": null,
+  "nodes": [
+    {
+      "id": "crew-pbi-report-references",
+      "type": "crewNode",
+      "position": { "x": 100, "y": 150 },
+      "data": {
+        "label": "PBI Report References",
+        "crewName": "PBI Report References",
+        "order": 1,
+        "crewId": "pbi-report-references-crew",
+        "allTasks": [{"id": "task-pbi-report-references-001", "name": "Extract PBI Report References", "description": "Call the Power BI Report References tool (78) with pre-configured credentials and report/dataset ID. Returns visual containers per page with their measures and table references."}],
+        "selectedTasks": []
+      }
+    },
+    {
+      "id": "crew-pbi-visual-ucmv-mapper",
+      "type": "crewNode",
+      "position": { "x": 370, "y": 150 },
+      "data": {
+        "label": "PBI Visual-UCMV Mapper",
+        "crewName": "PBI Visual-UCMV Mapper",
+        "order": 2,
+        "crewId": "pbi-visual-ucmv-mapper-crew",
+        "allTasks": [{"id": "task-pbi-visual-ucmv-mapper-001", "name": "Map PBI Visuals to UCMVs", "description": "Call the PBI Visual-UCMV Mapper tool (94) with ZERO arguments. ucmv_output and report_references_json are auto-injected from flow. Configure catalog, schema_name, dashboard_title in tool config."}],
+        "selectedTasks": []
+      }
+    },
+    {
+      "id": "crew-databricks-dashboard-creator",
+      "type": "crewNode",
+      "position": { "x": 640, "y": 150 },
+      "data": {
+        "label": "Databricks Dashboard Creator",
+        "crewName": "Databricks Dashboard Creator",
+        "order": 3,
+        "crewId": "databricks-dashboard-creator-crew",
+        "allTasks": [{"id": "task-databricks-dashboard-creator-001", "name": "Create Databricks AI/BI Dashboard", "description": "Call the Databricks Dashboard Creator tool (95) with ZERO arguments. visual_mappings_json is auto-injected from flow. Configure warehouse_id, dashboard_title, parent_path in tool config."}],
+        "selectedTasks": []
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "crew-pbi-report-references",
+      "target": "crew-pbi-visual-ucmv-mapper",
+      "id": "edge-refs-to-mapper",
+      "type": "crewEdge",
+      "sourceHandle": "right",
+      "targetHandle": "left",
+      "data": {
+        "listenToTaskIds": ["task-pbi-report-references-001"],
+        "targetTaskIds": ["task-pbi-visual-ucmv-mapper-001"],
+        "logicType": "NONE",
+        "description": "Pass report references to mapper",
+        "checkpoint": true,
+        "hitl": {
+          "enabled": true,
+          "message": "Review extracted PBI visuals and their measure/table references before mapping to UCMVs",
+          "timeout_seconds": 86400,
+          "timeout_action": "auto_reject",
+          "require_comment": false
+        }
+      },
+      "style": { "stroke": "#ff9800", "strokeWidth": 2 },
+      "animated": true
+    },
+    {
+      "source": "crew-pbi-visual-ucmv-mapper",
+      "target": "crew-databricks-dashboard-creator",
+      "id": "edge-mapper-to-dashboard",
+      "type": "crewEdge",
+      "sourceHandle": "right",
+      "targetHandle": "left",
+      "data": {
+        "listenToTaskIds": ["task-pbi-visual-ucmv-mapper-001"],
+        "targetTaskIds": ["task-databricks-dashboard-creator-001"],
+        "logicType": "NONE",
+        "description": "Pass visual-to-UCMV mapping to dashboard creator",
+        "checkpoint": true,
+        "hitl": {
+          "enabled": true,
+          "message": "Review the visual-to-UCMV mapping and generated SQLs before creating the dashboard. Edit any incorrect mappings.",
+          "timeout_seconds": 86400,
+          "timeout_action": "auto_reject",
+          "require_comment": false
+        }
+      },
+      "style": { "stroke": "#9c27b0" },
+      "animated": true
+    }
+  ],
+  "flow_config": {
+    "id": "pbi-to-dashboard-pipeline",
+    "name": "PBI → Databricks Dashboard Pipeline",
+    "type": "default",
+    "listeners": [
+      {
+        "id": "listener-pbi-visual-ucmv-mapper",
+        "name": "PBI Visual-UCMV Mapper",
+        "crewId": "pbi-visual-ucmv-mapper-crew",
+        "crewName": "PBI Visual-UCMV Mapper",
+        "listenToTaskIds": ["task-pbi-report-references-001"],
+        "tasks": [{"id": "task-pbi-visual-ucmv-mapper-001", "name": "Map PBI Visuals to UCMVs"}],
+        "state": {"stateType": "unstructured", "stateDefinition": "", "stateData": {}},
+        "conditionType": "NONE"
+      },
+      {
+        "id": "listener-databricks-dashboard-creator",
+        "name": "Databricks Dashboard Creator",
+        "crewId": "databricks-dashboard-creator-crew",
+        "crewName": "Databricks Dashboard Creator",
+        "listenToTaskIds": ["task-pbi-visual-ucmv-mapper-001"],
+        "tasks": [{"id": "task-databricks-dashboard-creator-001", "name": "Create Databricks AI/BI Dashboard"}],
+        "state": {"stateType": "unstructured", "stateDefinition": "", "stateData": {}},
+        "conditionType": "NONE"
+      }
+    ],
+    "actions": [
+      {"id": "action-mapper", "crewId": "pbi-visual-ucmv-mapper-crew", "taskId": "task-pbi-visual-ucmv-mapper-001", "taskName": "Map PBI Visuals to UCMVs"},
+      {"id": "action-dashboard", "crewId": "databricks-dashboard-creator-crew", "taskId": "task-databricks-dashboard-creator-001", "taskName": "Create Databricks AI/BI Dashboard"}
+    ],
+    "startingPoints": [
+      {
+        "crewId": "pbi-report-references-crew",
+        "crewName": "PBI Report References",
+        "taskId": "task-pbi-report-references-001",
+        "taskName": "Extract PBI Report References",
+        "isStartPoint": true
+      }
+    ]
+  },
+  "created_at": "2026-05-28T00:00:00.000000",
+  "updated_at": "2026-05-28T00:00:00.000000"
+}
