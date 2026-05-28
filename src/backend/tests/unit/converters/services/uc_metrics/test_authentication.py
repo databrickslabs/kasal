@@ -27,9 +27,9 @@ class TestDatabricksAuthServiceInit:
     def test_init_with_access_token(self):
         svc = DatabricksAuthService(
             workspace_url="https://example.databricks.com",
-            access_token="eyJoaWdoLnRva2Vu",
+            access_token="eyJoaWdoLnRva2Vu",  # nosec - mock token for testing
         )
-        assert svc._access_token == "eyJoaWdoLnRva2Vu"
+        assert svc._access_token == "eyJoaWdoLnRva2Vu"  # nosec - mock token for testing
 
     def test_init_with_service_principal(self):
         svc = DatabricksAuthService(
@@ -169,7 +169,7 @@ class TestValidateToken:
 
     def test_validates_jwt_format(self):
         svc = DatabricksAuthService(workspace_url="https://example.databricks.com")
-        token = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.abc123"
+        token = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.abc123"  # nosec - mock token for testing
         assert svc.validate_token(token) is True
 
     def test_rejects_invalid_token(self):
