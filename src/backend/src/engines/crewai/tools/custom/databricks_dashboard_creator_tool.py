@@ -247,15 +247,16 @@ class DatabricksDashboardCreatorTool(BaseTool):
                 "frame": {"showTitle": True, "title": chart_title},
             }
 
+        # Add frame title to bar/line specs (table/counter already have it in spec)
+        if widget_type in ('bar', 'line'):
+            spec["frame"] = {"title": chart_title, "showTitle": True}
+
         widget_obj = {
             "name": widget_name,
             "queries": [query],
+            "spec": spec,               # always required — fixes "missing spec" API error
             "frame": {"title": chart_title, "showTitle": True},
         }
-
-        # Table and counter use version 2 spec structure differently
-        if widget_type != 'table':
-            widget_obj["spec"] = spec
 
         return {
             "widget": widget_obj,
@@ -264,10 +265,11 @@ class DatabricksDashboardCreatorTool(BaseTool):
 
     def _build_dataset(self, view_name: str, sql: Optional[str], dataset_name: str) -> dict:
         """Build a Lakeview dataset entry."""
-        # Use provided SQL or generate a simple SELECT *
         query_sql = sql or f"SELECT * FROM {view_name} LIMIT 1000"
+        display = view_name.split('.')[-1].replace('_', ' ').title()
         return {
             "name": dataset_name,
+            "displayName": display,        # required by Lakeview API
             "query": query_sql,
             "type": "DBSQL",
         }
@@ -349,7 +351,7 @@ class DatabricksDashboardCreatorTool(BaseTool):
 
             pages.append({
                 "name": page_id,
-                "display_name": page_display_name,
+                "displayName": page_display_name,   # camelCase required by Lakeview API
                 "page_type": "PAGE_TYPE_CANVAS",
                 "layout": layout,
             })
