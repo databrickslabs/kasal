@@ -374,27 +374,30 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
                 title="Download output"
                 onClick={() => {
                   const raw = approval.previous_crew_output ?? '';
-                  let filename = 'step_output.json';
-                  let content = raw;
-                  let type = 'application/json';
+                  const triggerDownload = (content: string, name: string, mime = 'application/octet-stream') => {
+                    const blob = new Blob([content], { type: mime });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url; a.download = name; a.click();
+                    URL.revokeObjectURL(url);
+                  };
                   try {
                     const parsed = JSON.parse(raw);
-                    // For UCMV results: download yaml specs dict directly
                     if (parsed && typeof parsed === 'object' && 'yaml' in parsed) {
-                      content = JSON.stringify(parsed.yaml, null, 2);
-                      filename = 'yaml_specs.json';
+                      // UCMV/Validator output — download each view as individual .yml
+                      const yamlDict = parsed.yaml as Record<string, string>;
+                      const entries = Object.entries(yamlDict);
+                      entries.forEach(([key, yamlContent], i) => {
+                        setTimeout(() => {
+                          triggerDownload(yamlContent, `${key}.yml`, 'text/yaml');
+                        }, i * 100);
+                      });
                     } else {
-                      content = JSON.stringify(parsed, null, 2);
+                      triggerDownload(JSON.stringify(parsed, null, 2), 'step_output.json', 'application/json');
                     }
                   } catch {
-                    type = 'text/plain';
-                    filename = 'step_output.txt';
+                    triggerDownload(raw, 'step_output.txt', 'text/plain');
                   }
-                  const blob = new Blob([content], { type });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url; a.download = filename; a.click();
-                  URL.revokeObjectURL(url);
                 }}
               >
                 <DownloadIcon fontSize="small" />
