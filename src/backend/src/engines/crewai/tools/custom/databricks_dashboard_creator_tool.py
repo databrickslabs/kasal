@@ -154,6 +154,7 @@ class DatabricksDashboardCreatorTool(BaseTool):
             'tableEx': ('table', 2),
             'matrix': ('table', 2),
             'card': ('counter', 2),
+            'cardVisual': ('counter', 2),
             'kpiVisual': ('counter', 2),
         }
         return mapping.get(visual_type, ('table', 2))
