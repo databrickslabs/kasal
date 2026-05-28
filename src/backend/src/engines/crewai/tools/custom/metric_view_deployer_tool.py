@@ -152,26 +152,32 @@ class MetricViewDeployerTool(BaseTool):
         host_override = _get('databricks_host') or None
         warehouse_id = _get('warehouse_id') or ''
 
-        # ── Parse yaml specs from ucmv_output or explicit field ──────────────
+        # ── Parse yaml specs — manual upload wins over flow injection ────────
         yaml_specs: dict = {}
 
-        ucmv_raw = _get('ucmv_output')
-        if ucmv_raw:
+        # 1. Manual upload takes priority (explicit override)
+        yaml_raw = _get('yaml_specs_json') or '{}'
+        if yaml_raw and yaml_raw != '{}':
             try:
-                ucmv = json.loads(ucmv_raw) if isinstance(ucmv_raw, str) else ucmv_raw
-                yaml_dict = ucmv.get('yaml', {})
-                if isinstance(yaml_dict, dict):
-                    yaml_specs = yaml_dict
-                logger.info(f"[MVDeployer] Parsed ucmv_output: {len(yaml_specs)} views")
-            except (json.JSONDecodeError, AttributeError) as e:
-                logger.warning(f"[MVDeployer] Could not parse ucmv_output: {e}")
-
-        if not yaml_specs:
-            yaml_raw = _get('yaml_specs_json') or '{}'
-            try:
-                yaml_specs = json.loads(yaml_raw) if isinstance(yaml_raw, str) else yaml_raw
+                parsed = json.loads(yaml_raw) if isinstance(yaml_raw, str) else yaml_raw
+                if isinstance(parsed, dict) and parsed:
+                    yaml_specs = parsed
+                    logger.info(f"[MVDeployer] Using manual yaml_specs_json: {len(yaml_specs)} views")
             except json.JSONDecodeError as e:
                 return json.dumps({"error": f"Invalid JSON in yaml_specs_json: {e}"})
+
+        # 2. Fall back to flow-injected ucmv_output
+        if not yaml_specs:
+            ucmv_raw = _get('ucmv_output')
+            if ucmv_raw:
+                try:
+                    ucmv = json.loads(ucmv_raw) if isinstance(ucmv_raw, str) else ucmv_raw
+                    yaml_dict = ucmv.get('yaml', {})
+                    if isinstance(yaml_dict, dict):
+                        yaml_specs = yaml_dict
+                    logger.info(f"[MVDeployer] Using flow ucmv_output: {len(yaml_specs)} views")
+                except (json.JSONDecodeError, AttributeError) as e:
+                    logger.warning(f"[MVDeployer] Could not parse ucmv_output: {e}")
 
         if not yaml_specs:
             return json.dumps({"error": "No metric view specs found — ucmv_output not injected and no yaml_specs_json provided"})
