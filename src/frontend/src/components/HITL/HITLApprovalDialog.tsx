@@ -22,7 +22,6 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  Paper,
   Divider,
   IconButton,
 } from '@mui/material';
@@ -33,12 +32,14 @@ import {
   AccessTime as TimeIcon,
   Description as DescriptionIcon,
   Refresh as RefreshIcon,
+  Fullscreen as FullscreenIcon,
 } from '@mui/icons-material';
 import {
   HITLService,
   HITLApprovalResponse,
   HITLRejectionAction,
 } from '../../api/HITLService';
+import { CrewOutputRenderer } from './CrewOutputRenderer';
 
 interface HITLApprovalDialogProps {
   /** Whether the dialog is open */
@@ -67,6 +68,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
     HITLRejectionAction.REJECT
   );
   const [actionLoading, setActionLoading] = useState(false);
+  const [outputFullScreen, setOutputFullScreen] = useState(false);
 
   // Fetch approval for the execution
   const fetchApproval = useCallback(async () => {
@@ -104,6 +106,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
 
   // Handle approve action
   const handleApprove = async () => {
+    /* v8 ignore next -- defensive: Approve is only shown when approval exists */
     if (!approval) return;
 
     setActionLoading(true);
@@ -122,6 +125,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
 
   // Handle reject action
   const handleReject = async () => {
+    /* v8 ignore next -- defensive: Confirm Rejection is disabled until both exist */
     if (!approval || !rejectionReason) return;
 
     setActionLoading(true);
@@ -189,6 +193,9 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
       );
     }
 
+    /* v8 ignore start -- defensive only: when there is no pending approval,
+       fetchApproval also sets `error`, so the `error && !approval` branch above
+       always renders first; this fallback is therefore unreachable in practice. */
     if (!approval) {
       return (
         <Alert severity="info">
@@ -196,6 +203,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
         </Alert>
       );
     }
+    /* v8 ignore stop */
 
     // Show approval form based on action type
     if (actionType === 'approve') {
@@ -300,33 +308,66 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
         {/* Previous Output */}
         {approval.previous_crew_output && (
           <Box mb={2}>
-            <Typography
-              variant="body2"
-              fontWeight="medium"
+            <Box
               display="flex"
               alignItems="center"
+              justifyContent="space-between"
               gap={0.5}
-              gutterBottom
-            >
-              <DescriptionIcon fontSize="small" />
-              Previous Crew Output:
-            </Typography>
-            <Paper
-              variant="outlined"
-              sx={{
-                p: 1.5,
-                maxHeight: 200,
-                overflow: 'auto',
-                bgcolor: 'background.default',
-              }}
             >
               <Typography
                 variant="body2"
-                sx={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: '0.85rem' }}
+                fontWeight="medium"
+                display="flex"
+                alignItems="center"
+                gap={0.5}
               >
-                {approval.previous_crew_output}
+                <DescriptionIcon fontSize="small" />
+                Previous Crew Output:
               </Typography>
-            </Paper>
+              <IconButton
+                size="small"
+                onClick={() => setOutputFullScreen(true)}
+                aria-label="View output full screen"
+                title="View full screen"
+              >
+                <FullscreenIcon fontSize="small" />
+              </IconButton>
+            </Box>
+            <CrewOutputRenderer
+              content={approval.previous_crew_output}
+              maxHeight={320}
+            />
+
+            {/* Full-screen view of the crew output */}
+            <Dialog
+              open={outputFullScreen}
+              onClose={() => setOutputFullScreen(false)}
+              fullScreen
+            >
+              <DialogTitle
+                sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+              >
+                <Box display="flex" alignItems="center" gap={0.5}>
+                  <DescriptionIcon fontSize="small" />
+                  Previous Crew Output
+                </Box>
+                <IconButton
+                  onClick={() => setOutputFullScreen(false)}
+                  aria-label="Close full screen"
+                >
+                  <CloseIcon />
+                </IconButton>
+              </DialogTitle>
+              <DialogContent dividers>
+                <CrewOutputRenderer
+                  content={approval.previous_crew_output}
+                  maxHeight="calc(100vh - 160px)"
+                />
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setOutputFullScreen(false)}>Close</Button>
+              </DialogActions>
+            </Dialog>
           </Box>
         )}
 
@@ -445,7 +486,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
     <Dialog
       open={open}
       onClose={onClose}
-      maxWidth="sm"
+      maxWidth="lg"
       fullWidth
       PaperProps={{
         sx: { minHeight: 300 },

@@ -217,6 +217,33 @@ describe('HITLApprovalDialog', () => {
       });
     });
 
+    it('opens the crew output in a full-screen dialog', async () => {
+      const mockApproval = createMockApproval({
+        previous_crew_output: 'Full screen this output',
+      });
+      mocks.mockGetExecutionHITLStatus.mockResolvedValue(createMockExecutionStatus(mockApproval));
+
+      render(
+        <TestWrapper>
+          <HITLApprovalDialog {...defaultProps} />
+        </TestWrapper>
+      );
+
+      const expandBtn = await screen.findByRole('button', {
+        name: /view output full screen/i,
+      });
+      fireEvent.click(expandBtn);
+
+      // Full-screen dialog opens with a dedicated close control.
+      await waitFor(() => {
+        expect(
+          screen.getByRole('button', { name: /close full screen/i })
+        ).toBeInTheDocument();
+      });
+      // Output now rendered in both the inline preview and the full-screen view.
+      expect(screen.getAllByText('Full screen this output').length).toBeGreaterThanOrEqual(2);
+    });
+
     it('displays status chip', async () => {
       const mockApproval = createMockApproval({
         status: HITLApprovalStatus.PENDING,
@@ -953,6 +980,144 @@ describe('HITLApprovalDialog', () => {
       );
 
       expect(mocks.mockGetExecutionHITLStatus).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Additional coverage', () => {
+    it('formats time remaining in days when over 24h', async () => {
+      const mockApproval = createMockApproval({
+        expires_at: new Date(Date.now() + 49 * 60 * 60 * 1000).toISOString(),
+      });
+      mocks.mockGetExecutionHITLStatus.mockResolvedValue(createMockExecutionStatus(mockApproval));
+      render(
+        <TestWrapper>
+          <HITLApprovalDialog {...defaultProps} />
+        </TestWrapper>
+      );
+      await waitFor(() => {
+        expect(screen.getByText(/\d+d \d+h remaining/)).toBeInTheDocument();
+      });
+    });
+
+    it('formats time remaining in minutes when under an hour', async () => {
+      const mockApproval = createMockApproval({
+        expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+      });
+      mocks.mockGetExecutionHITLStatus.mockResolvedValue(createMockExecutionStatus(mockApproval));
+      render(
+        <TestWrapper>
+          <HITLApprovalDialog {...defaultProps} />
+        </TestWrapper>
+      );
+      await waitFor(() => {
+        expect(screen.getByText(/^\d+m remaining$/)).toBeInTheDocument();
+      });
+    });
+
+    it('shows an info message when there is no pending approval', async () => {
+      mocks.mockGetExecutionHITLStatus.mockResolvedValue(createMockExecutionStatus(null));
+      render(
+        <TestWrapper>
+          <HITLApprovalDialog {...defaultProps} />
+        </TestWrapper>
+      );
+      await waitFor(() => {
+        expect(screen.getByText(/No pending approval found/i)).toBeInTheDocument();
+      });
+    });
+
+    it('changes the rejection action and returns to the default view via Back', async () => {
+      const mockApproval = createMockApproval();
+      mocks.mockGetExecutionHITLStatus.mockResolvedValue(createMockExecutionStatus(mockApproval));
+      render(
+        <TestWrapper>
+          <HITLApprovalDialog {...defaultProps} />
+        </TestWrapper>
+      );
+      fireEvent.click(await screen.findByRole('button', { name: /^reject$/i }));
+      await screen.findByLabelText(/Rejection Reason/i);
+      // Change the rejection Action select (covers the onChange handler).
+      fireEvent.mouseDown(screen.getByRole('combobox'));
+      fireEvent.click(await screen.findByRole('option', { name: /Retry/i }));
+      // Back to the default approve/reject view.
+      fireEvent.click(screen.getByRole('button', { name: /back/i }));
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /^approve$/i })).toBeInTheDocument();
+      });
+    });
+
+    it('calls rejectGate with the reason and action on confirm', async () => {
+      const mockApproval = createMockApproval();
+      mocks.mockGetExecutionHITLStatus.mockResolvedValue(createMockExecutionStatus(mockApproval));
+      mocks.mockRejectGate.mockResolvedValue({
+        success: true,
+        approval_id: 1,
+        status: HITLApprovalStatus.REJECTED,
+        message: 'Rejected',
+        execution_resumed: false,
+      });
+      render(
+        <TestWrapper>
+          <HITLApprovalDialog {...defaultProps} />
+        </TestWrapper>
+      );
+      fireEvent.click(await screen.findByRole('button', { name: /^reject$/i }));
+      const reason = await screen.findByLabelText(/Rejection Reason/i);
+      fireEvent.change(reason, { target: { value: 'Not good enough' } });
+      fireEvent.click(screen.getByRole('button', { name: /confirm rejection/i }));
+      await waitFor(() => {
+        expect(mocks.mockRejectGate).toHaveBeenCalledWith(
+          1,
+          expect.objectContaining({ reason: 'Not good enough' })
+        );
+      });
+    });
+
+    it('opens and closes the full-screen crew output (icon + footer)', async () => {
+      const mockApproval = createMockApproval({ previous_crew_output: 'FS content' });
+      mocks.mockGetExecutionHITLStatus.mockResolvedValue(createMockExecutionStatus(mockApproval));
+      render(
+        <TestWrapper>
+          <HITLApprovalDialog {...defaultProps} />
+        </TestWrapper>
+      );
+      // Open, then close via the title-bar X (icon button).
+      fireEvent.click(await screen.findByRole('button', { name: /view output full screen/i }));
+      fireEvent.click(await screen.findByRole('button', { name: /close full screen/i }));
+      await waitFor(() => {
+        expect(
+          screen.queryByRole('button', { name: /close full screen/i })
+        ).not.toBeInTheDocument();
+      });
+      // Reopen, then close via the footer "Close" button.
+      fireEvent.click(screen.getByRole('button', { name: /view output full screen/i }));
+      await screen.findByRole('button', { name: /close full screen/i });
+      const footerClose = screen.getAllByRole('button', { name: /^close$/i }).slice(-1)[0];
+      fireEvent.click(footerClose);
+      await waitFor(() => {
+        expect(
+          screen.queryByRole('button', { name: /close full screen/i })
+        ).not.toBeInTheDocument();
+      });
+    });
+
+    it('closes the full-screen crew output on Escape', async () => {
+      const mockApproval = createMockApproval({ previous_crew_output: 'esc me' });
+      mocks.mockGetExecutionHITLStatus.mockResolvedValue(createMockExecutionStatus(mockApproval));
+      render(
+        <TestWrapper>
+          <HITLApprovalDialog {...defaultProps} />
+        </TestWrapper>
+      );
+      fireEvent.click(await screen.findByRole('button', { name: /view output full screen/i }));
+      const dialogs = await screen.findAllByRole('dialog');
+      // Escape on the top-most (full-screen) dialog triggers its onClose.
+      fireEvent.keyDown(dialogs[dialogs.length - 1], { key: 'Escape', code: 'Escape' });
+      await waitFor(() => {
+        expect(
+          screen.queryByRole('button', { name: /close full screen/i })
+        ).not.toBeInTheDocument();
+      });
     });
   });
 });
