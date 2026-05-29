@@ -338,7 +338,7 @@ class LLMManager:
         
         # Configure LLM parameters (for all providers except Databricks which returns early)
         # Use longer timeout for GPT-5 models as they take more time to respond
-        timeout_value = 300 if (provider == ModelProvider.OPENAI and "gpt-5" in model_name_value.lower()) else 120
+        timeout_value = 300 if (provider == ModelProvider.OPENAI and "gpt-5" in model_name_value.lower()) else 300
         
         llm_params = {
             "model": prefixed_model,

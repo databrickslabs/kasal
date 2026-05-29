@@ -61,14 +61,10 @@ class MemoryBackendBaseService:
                 "name": config.name,
                 "description": config.description,
                 "backend_type": config.backend_type,
-                "enable_short_term": config.enable_short_term,
-                "enable_long_term": config.enable_long_term,
-                "enable_entity": config.enable_entity,
-                "enable_relationship_retrieval": config.enable_relationship_retrieval,
                 "is_active": True,
-                "is_default": False
+                "is_default": False,
             }
-            
+
             # Add backend-specific configuration
             if config.backend_type == MemoryBackendType.DATABRICKS:
                 if not config.databricks_config:
@@ -79,6 +75,11 @@ class MemoryBackendBaseService:
                 if not config.lakebase_config:
                     raise ValueError("Lakebase configuration is required for Lakebase backend")
                 data["lakebase_config"] = config.lakebase_config.model_dump()
+
+            if config.cognitive_config:
+                data["cognitive_config"] = config.cognitive_config.model_dump(
+                    exclude_none=True
+                )
 
             if config.custom_config:
                 data["custom_config"] = config.custom_config
@@ -304,17 +305,16 @@ class MemoryBackendBaseService:
             # Delete all existing configurations
             deleted_count = await repo.delete_all_by_group_id(group_id)
             
-            # Create a new disabled configuration
+            # Create a new disabled configuration. Memory is off because
+            # ``is_active`` is False; the runtime path treats this as "use
+            # crew_kwargs['memory'] = False".
             disabled_config = {
                 "group_id": group_id,
                 "name": "Disabled Configuration",
                 "description": "Memory storage disabled",
                 "backend_type": MemoryBackendType.DEFAULT,
-                "enable_short_term": False,
-                "enable_long_term": False,
-                "enable_entity": False,
-                "is_active": True,
-                "is_default": True
+                "is_active": False,
+                "is_default": True,
             }
             
             backend = await repo.create(disabled_config)

@@ -62,8 +62,8 @@ class DatabricksVectorSearchVerificationService:
                 if db_config.get('document_endpoint_name'):
                     endpoints_to_check.add(db_config['document_endpoint_name'])
                 
-                # Add configured indexes
-                for index_key in ['short_term_index', 'long_term_index', 'entity_index', 'document_index']:
+                # Add configured indexes (unified memory + optional document index)
+                for index_key in ['memory_index', 'document_index']:
                     if db_config.get(index_key):
                         indexes_to_check.add(db_config[index_key])
             

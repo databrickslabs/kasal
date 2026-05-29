@@ -246,13 +246,12 @@ def deploy_source_to_databricks(
         client = WorkspaceClient()
     
     try:
-        # Test connection
         me = client.current_user.me()
         logger.info(f"Connected to Databricks as {me.user_name}")
     except Exception as e:
-        logger.error(f"Failed to connect to Databricks: {e}")
-        raise
-    
+        logger.warning(f"Could not verify identity (proceeding anyway): {e}")
+        logger.info(f"Connecting to Databricks at {client.config.host}")
+
     # Check that frontend source directory exists (built on Databricks Apps)
     frontend_src_dir = root_dir / "frontend"
     if not frontend_src_dir.exists():

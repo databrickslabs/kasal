@@ -140,7 +140,9 @@ describe('DatabaseManagement - Autoscaling changes', () => {
     });
 
     DatabaseManagement = await importComponent();
-  });
+    // Dynamically importing (and transforming) the component can exceed the
+    // default 10s hook timeout when the full suite runs in parallel.
+  }, 30000);
 
   describe('Loading states', () => {
     it('clears databaseInfo at start of load to prevent stale display', async () => {

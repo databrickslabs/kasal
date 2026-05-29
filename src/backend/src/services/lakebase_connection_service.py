@@ -136,8 +136,13 @@ class LakebaseConnectionService(BaseService):
         if spn_username:
             return spn_username
 
-        # 2. Try user email if provided (e.g. from request context)
-        if self.user_email:
+        # 2. Try user email if provided (e.g. from request context).
+        # Skip the local-dev sentinel "*@localhost" — that identity has no PG
+        # role on Lakebase, and the OAuth token we mint via the PAT in API
+        # Keys is issued to the PAT owner, not to dev@localhost. Falling
+        # through to WorkspaceClient.current_user.me() returns the real
+        # identity that matches the token.
+        if self.user_email and "@localhost" not in self.user_email:
             logger.info(f"Using provided user email as PG username: {self.user_email}")
             return self.user_email
 

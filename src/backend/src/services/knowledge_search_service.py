@@ -360,10 +360,8 @@ class KnowledgeSearchService:
             memory_config = MemoryBackendConfig(
                 backend_type=backend.backend_type,
                 databricks_config=backend.databricks_config,
-                enable_short_term=backend.enable_short_term,
-                enable_long_term=backend.enable_long_term,
-                enable_entity=backend.enable_entity,
-                custom_config=backend.custom_config
+                cognitive_config=backend.cognitive_config,
+                custom_config=backend.custom_config,
             )
 
             db_config = memory_config.databricks_config

@@ -33,7 +33,7 @@ interface IndexDocumentsDialogProps {
   open: boolean;
   onClose: () => void;
   indexName: string;
-  indexType: 'short_term' | 'long_term' | 'entity' | 'document';
+  indexType: 'memory' | 'document';
   workspaceUrl: string;
   endpointName: string;
   backendId?: string;
@@ -119,22 +119,18 @@ export const IndexDocumentsDialog: React.FC<IndexDocumentsDialogProps> = ({
   };
 
   const getIndexTypeLabel = () => {
-    const labels = {
-      short_term: 'Short-term Memory',
-      long_term: 'Long-term Memory',
-      entity: 'Entity Memory',
-      document: 'Document Embeddings'
+    const labels: Record<'memory' | 'document', string> = {
+      memory: 'Unified Cognitive Memory',
+      document: 'Document Embeddings',
     };
     return labels[indexType] || indexType;
   };
 
   const getIndexTypeColor = () => {
-    const colors = {
-      short_term: 'primary',
-      long_term: 'secondary',
-      entity: 'success',
-      document: 'info'
-    } as const;
+    const colors: Record<'memory' | 'document', 'primary' | 'info'> = {
+      memory: 'primary',
+      document: 'info',
+    };
     return colors[indexType] || 'default';
   };
 

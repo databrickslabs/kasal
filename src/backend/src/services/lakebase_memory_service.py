@@ -73,20 +73,15 @@ class LakebaseMemoryService:
     async def initialize_tables(
         self,
         embedding_dimension: int = 1024,
-        short_term_table: str = "crew_short_term_memory",
-        long_term_table: str = "crew_long_term_memory",
-        entity_table: str = "crew_entity_memory",
+        memory_table: str = "crew_memory",
     ) -> Dict[str, Any]:
         """
-        Create pgvector extension and memory tables with indexes.
+        Create pgvector extension and the unified memory table with indexes.
 
+        CrewAI 1.10+ uses a single unified ``Memory`` class over one table.
         Uses HNSW indexes (work on empty tables, no periodic rebuilds needed).
         """
-        tables = {
-            "short_term": short_term_table,
-            "long_term": long_term_table,
-            "entity": entity_table,
-        }
+        tables = {"memory": memory_table}
         results = {}
 
         try:
@@ -120,7 +115,11 @@ class LakebaseMemoryService:
 
                 for memory_type, table_name in tables.items():
                     try:
-                        # Create table
+                        # Unified memory schema. Cognitive fields (scope,
+                        # categories, importance, source, private) are kept
+                        # inside the ``metadata`` JSONB column; session_id
+                        # remains a top-level column for cheap run-scoped
+                        # filtering.
                         create_sql = text(f"""
                             CREATE TABLE IF NOT EXISTS {table_name} (
                                 id TEXT PRIMARY KEY,
@@ -138,14 +137,14 @@ class LakebaseMemoryService:
                         """)
                         await session.execute(create_sql)
 
-                        # Create HNSW index on embedding column
+                        # HNSW index on embedding column for cosine similarity.
                         await session.execute(text(f"""
                             CREATE INDEX IF NOT EXISTS idx_{table_name}_embedding
                             ON {table_name}
                             USING hnsw (embedding vector_cosine_ops)
                         """))
 
-                        # Create B-tree indexes for filtering
+                        # B-tree indexes for tenant / session filtering.
                         await session.execute(text(f"""
                             CREATE INDEX IF NOT EXISTS idx_{table_name}_crew_id
                             ON {table_name} (crew_id)
@@ -154,17 +153,22 @@ class LakebaseMemoryService:
                             CREATE INDEX IF NOT EXISTS idx_{table_name}_group_id
                             ON {table_name} (group_id)
                         """))
+                        await session.execute(text(f"""
+                            CREATE INDEX IF NOT EXISTS idx_{table_name}_session_id
+                            ON {table_name} (session_id)
+                        """))
 
-                        if memory_type == "short_term":
-                            await session.execute(text(f"""
-                                CREATE INDEX IF NOT EXISTS idx_{table_name}_session_id
-                                ON {table_name} (session_id)
-                            """))
+                        # GIN index on metadata for scope / category filters.
+                        await session.execute(text(f"""
+                            CREATE INDEX IF NOT EXISTS idx_{table_name}_metadata
+                            ON {table_name}
+                            USING gin (metadata)
+                        """))
 
                         results[memory_type] = {
                             "success": True,
                             "table_name": table_name,
-                            "message": f"Table {table_name} initialized with HNSW index",
+                            "message": f"Table {table_name} initialized with HNSW + GIN indexes",
                         }
                         logger.info(
                             f"Initialized {memory_type} memory table: {table_name}"
@@ -201,21 +205,10 @@ class LakebaseMemoryService:
 
     async def check_tables_initialized(
         self,
-        short_term_table: str = "crew_short_term_memory",
-        long_term_table: str = "crew_long_term_memory",
-        entity_table: str = "crew_entity_memory",
+        memory_table: str = "crew_memory",
     ) -> Dict[str, bool]:
-        """
-        Check if all required memory tables exist.
-
-        Returns:
-            Dict mapping table name to existence boolean
-        """
-        tables = {
-            "short_term": short_term_table,
-            "long_term": long_term_table,
-            "entity": entity_table,
-        }
+        """Check whether the unified memory table exists."""
+        tables = {"memory": memory_table}
         status = {}
 
         try:
@@ -246,21 +239,10 @@ class LakebaseMemoryService:
 
     async def get_table_stats(
         self,
-        short_term_table: str = "crew_short_term_memory",
-        long_term_table: str = "crew_long_term_memory",
-        entity_table: str = "crew_entity_memory",
+        memory_table: str = "crew_memory",
     ) -> Dict[str, Any]:
-        """
-        Get row counts and existence info for all memory tables.
-
-        Returns:
-            Dict with per-table statistics
-        """
-        tables = {
-            "short_term": short_term_table,
-            "long_term": long_term_table,
-            "entity": entity_table,
-        }
+        """Get row-count statistics for the unified memory table."""
+        tables = {"memory": memory_table}
         stats = {}
 
         try:
@@ -407,23 +389,28 @@ class LakebaseMemoryService:
 
     async def get_entity_data(
         self,
-        entity_table: str = "crew_entity_memory",
+        memory_table: str = "crew_memory",
         limit: int = 200,
     ) -> Dict[str, Any]:
         """
-        Fetch entity memory data and format it for graph visualization.
+        Fetch entity-like memory records and format them for graph visualization.
 
-        Parses entity content and metadata to extract nodes and relationships
-        in the same format used by the Databricks entity-data endpoint.
+        CrewAI 1.10+ no longer stores entities in a dedicated table — this
+        method now reads from the unified ``crew_memory`` table and expects
+        any entities to be tagged with an "entity" category by the caller
+        (or their extraction pipeline).
 
         Returns:
             Dict with entities list and relationships list
         """
         allowed_tables = {
+            "crew_memory",
+            # Legacy names kept so saved configs don't break.
             "crew_entity_memory",
         }
-        if entity_table not in allowed_tables:
+        if memory_table not in allowed_tables:
             return {"entities": [], "relationships": []}
+        entity_table = memory_table  # local alias preserved for the SQL below
 
         try:
             async with get_lakebase_session(

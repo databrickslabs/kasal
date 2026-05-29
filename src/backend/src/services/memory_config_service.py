@@ -127,23 +127,26 @@ class MemoryConfigService:
                 logger.info(
                     f"Found latest active backend for group {group_id}: {latest_backend.name} (type: {latest_backend.backend_type})"
                 )
-                logger.info(
-                    f"Backend enable_relationship_retrieval value: {latest_backend.enable_relationship_retrieval}"
-                )
+
+                cognitive_config = None
+                if latest_backend.cognitive_config:
+                    from src.schemas.memory_backend import CognitiveMemoryConfig
+
+                    cognitive_config = CognitiveMemoryConfig(
+                        **latest_backend.cognitive_config
+                    )
 
                 config = MemoryBackendConfig(
                     backend_type=latest_backend.backend_type,
                     databricks_config=databricks_config,
                     lakebase_config=lakebase_config,
-                    enable_short_term=latest_backend.enable_short_term,
-                    enable_long_term=latest_backend.enable_long_term,
-                    enable_entity=latest_backend.enable_entity,
-                    enable_relationship_retrieval=latest_backend.enable_relationship_retrieval,
+                    cognitive_config=cognitive_config,
                     custom_config=latest_backend.custom_config,
                 )
 
                 logger.info(
-                    f"Created MemoryBackendConfig with enable_relationship_retrieval: {config.enable_relationship_retrieval}"
+                    "Created MemoryBackendConfig (cognitive_config=%s)",
+                    "set" if cognitive_config is not None else "default",
                 )
                 return config
 
@@ -194,14 +197,19 @@ class MemoryConfigService:
                             **backend.lakebase_config
                         )
 
+                    cognitive_config = None
+                    if backend.cognitive_config:
+                        from src.schemas.memory_backend import CognitiveMemoryConfig
+
+                        cognitive_config = CognitiveMemoryConfig(
+                            **backend.cognitive_config
+                        )
+
                     return MemoryBackendConfig(
                         backend_type=backend.backend_type,
                         databricks_config=databricks_config,
                         lakebase_config=lakebase_config,
-                        enable_short_term=backend.enable_short_term,
-                        enable_long_term=backend.enable_long_term,
-                        enable_entity=backend.enable_entity,
-                        enable_relationship_retrieval=backend.enable_relationship_retrieval,
+                        cognitive_config=cognitive_config,
                         custom_config=backend.custom_config,
                     )
 

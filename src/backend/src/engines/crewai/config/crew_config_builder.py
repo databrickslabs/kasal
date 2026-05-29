@@ -217,6 +217,8 @@ class CrewConfigBuilder:
         logger.info("=" * 80)
 
         crew_kwargs['memory'] = False
+        # Legacy per-type kwargs (pre-1.10) are popped defensively in case
+        # anything upstream still sets them.
         crew_kwargs.pop('short_term_memory', None)
         crew_kwargs.pop('long_term_memory', None)
         crew_kwargs.pop('entity_memory', None)
@@ -225,28 +227,23 @@ class CrewConfigBuilder:
         return crew_kwargs
 
     def check_memory_disabled_by_backend_config(self, memory_backend_config: Optional[Dict[str, Any]]) -> bool:
-        """
-        Check if all memory types are disabled in backend configuration
+        """Return True when the loaded config explicitly disables memory.
 
-        Args:
-            memory_backend_config: Memory backend configuration
-
-        Returns:
-            True if all memory types are disabled
+        With CrewAI 1.10+ unified memory there are no per-type enable flags.
+        The crew_memory_service returns ``None`` (or a config with no active
+        row) to signal disabled memory — this helper is kept for the API
+        layer which may still pass a disabled sentinel. A config with
+        ``is_active=False`` or ``backend_type='disabled'`` counts as off.
         """
         if not memory_backend_config:
             return False
-
-        all_disabled = (
-            not memory_backend_config.get('enable_short_term', False) and
-            not memory_backend_config.get('enable_long_term', False) and
-            not memory_backend_config.get('enable_entity', False)
-        )
-
-        if all_disabled:
-            logger.info("All memory types are disabled in backend configuration, disabling crew memory")
-
-        return all_disabled
+        if memory_backend_config.get("is_active") is False:
+            logger.info("Memory backend config is inactive — disabling crew memory")
+            return True
+        if memory_backend_config.get("backend_type") == "disabled":
+            logger.info("Memory backend type is 'disabled' — disabling crew memory")
+            return True
+        return False
 
     def log_memory_configuration(
         self,
@@ -261,16 +258,21 @@ class CrewConfigBuilder:
             memory_backend_config: Memory backend configuration
         """
         logger.info("=== MEMORY CONFIGURATION BEFORE CREW CREATION ===")
-        logger.info(f"Memory enabled: {crew_kwargs.get('memory', False)}")
+        memory_value = crew_kwargs.get('memory', False)
+        logger.info(f"Memory enabled: {bool(memory_value)}")
 
         if memory_backend_config:
             logger.info(f"Memory backend: {memory_backend_config.get('backend_type', 'unknown')}")
         else:
-            logger.info("Memory backend: Default (ChromaDB + SQLite)")
+            logger.info("Memory backend: Default (CrewAI unified Memory / LanceDB)")
 
-        logger.info(f"Short-term memory: {'custom configured' if 'short_term_memory' in crew_kwargs else 'default' if crew_kwargs.get('memory', False) else 'disabled'}")
-        logger.info(f"Long-term memory: {'custom configured' if 'long_term_memory' in crew_kwargs else 'default' if crew_kwargs.get('memory', False) else 'disabled'}")
-        logger.info(f"Entity memory: {'custom configured' if 'entity_memory' in crew_kwargs else 'default' if crew_kwargs.get('memory', False) else 'disabled'}")
+        if memory_value in (True, False, None):
+            logger.info(f"Unified Memory: {memory_value}")
+        else:
+            logger.info(
+                f"Unified Memory: {type(memory_value).__name__} "
+                f"(storage={type(getattr(memory_value, '_storage', None) or getattr(memory_value, 'storage', None)).__name__})"
+            )
         logger.info(f"Embedder: {'configured' if 'embedder' in crew_kwargs else 'not configured'}")
 
         # Banner for explicit memory backend summary
@@ -281,19 +283,32 @@ class CrewConfigBuilder:
 
                 if bt == 'databricks':
                     dbc = memory_backend_config.get('databricks_config')
-                    if hasattr(dbc, 'dict') and callable(getattr(dbc, 'dict')):
+                    if hasattr(dbc, 'model_dump') and callable(getattr(dbc, 'model_dump')):
+                        dbc = dbc.model_dump()
+                    elif hasattr(dbc, 'dict') and callable(getattr(dbc, 'dict')):
                         dbc = dbc.dict()
+                    dbc = dbc or {}
 
                     logger.info("=" * 80)
-                    logger.info("MEMORY BACKEND: DATABRICKS VECTOR SEARCH")
+                    logger.info("MEMORY BACKEND: DATABRICKS VECTOR SEARCH (unified)")
                     logger.info(f"Endpoint: {dbc.get('endpoint_name')} | Workspace: {dbc.get('workspace_url')}")
-                    logger.info(f"Indexes => short_term: {dbc.get('short_term_index')}, long_term: {dbc.get('long_term_index')}, entity: {dbc.get('entity_index')}")
-                    logger.info(f"Enabled => short_term: {memory_backend_config.get('enable_short_term')}, long_term: {memory_backend_config.get('enable_long_term')}, entity: {memory_backend_config.get('enable_entity')}")
+                    logger.info(f"Unified memory index: {dbc.get('memory_index')}")
+                    logger.info("=" * 80)
+                elif bt == 'lakebase':
+                    lbc = memory_backend_config.get('lakebase_config')
+                    if hasattr(lbc, 'model_dump') and callable(getattr(lbc, 'model_dump')):
+                        lbc = lbc.model_dump()
+                    elif hasattr(lbc, 'dict') and callable(getattr(lbc, 'dict')):
+                        lbc = lbc.dict()
+                    lbc = lbc or {}
+                    logger.info("=" * 80)
+                    logger.info("MEMORY BACKEND: LAKEBASE PGVECTOR (unified)")
+                    logger.info(f"Instance: {lbc.get('instance_name') or 'default'}")
+                    logger.info(f"Unified memory table: {lbc.get('memory_table')}")
                     logger.info("=" * 80)
                 else:
                     logger.info("=" * 80)
-                    logger.info("MEMORY BACKEND: DEFAULT (ChromaDB + SQLite)")
-                    logger.info("CrewAI will manage local ChromaDB collections for short-term/entity and SQLite for long-term")
+                    logger.info("MEMORY BACKEND: DEFAULT (CrewAI unified Memory / LanceDB)")
                     logger.info("=" * 80)
             else:
                 logger.info("=" * 80)

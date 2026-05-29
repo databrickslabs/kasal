@@ -313,8 +313,16 @@ class KasalDBSpanExporter(SpanExporter):
         self,
         job_id: str,
         group_context: Optional[Any] = None,
-        max_workers: int = 2,
+        max_workers: int = 1,
     ):
+        # max_workers MUST be 1: each write runs in its own fresh event loop
+        # (create_and_run_loop) but the dev SQLite app.db uses a single-connection
+        # StaticPool. Two concurrent writer threads sharing that one connection
+        # across loops races and SILENTLY DROPS commits (observed: a task's
+        # ``memory_write`` span "Wrote 1/1" yet never lands in the table). It also
+        # drives the StaticPool reset errors/hangs at teardown. Serialising writes
+        # makes the single connection safe. The high span volume from cognitive
+        # memory is what exposed this.
         self._job_id = job_id
         self._group_context = group_context
         self._executor = ThreadPoolExecutor(max_workers=max_workers)

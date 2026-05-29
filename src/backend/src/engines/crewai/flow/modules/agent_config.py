@@ -152,10 +152,11 @@ class AgentConfig:
             agent = Agent(**agent_kwargs)
             logger.info(f"Successfully configured agent: {agent_data.name} with {len(tools)} tools")
 
-            # Store the memory setting as a custom attribute for later checking
+            # Store the memory setting as a custom attribute for later checking.
             # CrewAI's Agent class doesn't store the memory parameter as an attribute,
-            # so we add it ourselves to check when determining crew memory
-            agent._kasal_memory_disabled = agent_kwargs.get('memory') is False
+            # and we no longer pass ``memory`` to Agent() (see _prepare_agent_kwargs),
+            # so read the per-agent intent directly from agent_data.
+            agent._kasal_memory_disabled = getattr(agent_data, 'memory', None) is False
             logger.info(f"Agent {agent_data.name} memory disabled: {agent._kasal_memory_disabled}")
 
             # We no longer add default tools - respect the agent configuration
@@ -327,9 +328,17 @@ class AgentConfig:
             agent_kwargs["llm"] = llm
             
         # Add additional properties if they exist
-        # Match the parameters from agent_helpers.py to ensure consistent behavior with crew execution
+        # Match the parameters from agent_helpers.py to ensure consistent behavior with crew execution.
+        #
+        # NOTE: 'memory' is deliberately NOT propagated to the CrewAI Agent. In
+        # CrewAI 1.10+, ``Agent(memory=True)`` builds a per-agent OpenAI-backed
+        # default Memory that overrides the crew's configured Databricks/Lakebase
+        # Memory (``getattr(agent, "memory") or self._memory``), causing the
+        # memory tools to hit OpenAI. Memory is configured at the crew level.
+        # The per-agent enable/disable intent is preserved via
+        # ``_kasal_memory_disabled`` below (read from agent_data).
         additional_params = [
-            'memory', 'max_iter', 'max_rpm', 'code_execution_mode',
+            'max_iter', 'max_rpm', 'code_execution_mode',
             'max_context_window_size', 'max_tokens',
             'reasoning', 'max_reasoning_attempts',
             # Date awareness settings (CrewAI 1.9+) - inject current date into agent context

@@ -67,9 +67,7 @@ class DatabricksConnectionService:
                 indexes_missing = []
                 
                 for index_name, index_type in [
-                    (config.short_term_index, "short_term"),
-                    (config.long_term_index, "long_term"),
-                    (config.entity_index, "entity")
+                    (config.memory_index, "memory"),
                 ]:
                     if index_name:
                         # Use repository to get index info

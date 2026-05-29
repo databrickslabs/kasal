@@ -167,15 +167,12 @@ class DatabricksVectorSearchService {
   }
 
   /**
-   * Saves manual configuration
+   * Saves manual configuration for CrewAI 1.10+ unified cognitive memory.
    */
   static async saveManualConfiguration(config: {
     name: string;
     description: string;
     backend_type: MemoryBackendType;
-    enable_short_term: boolean;
-    enable_long_term: boolean;
-    enable_entity: boolean;
     databricks_config: DatabricksMemoryConfig;
   }, existingConfigId?: string): Promise<{ data: { id: string } }> {
     if (existingConfigId) {

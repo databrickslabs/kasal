@@ -178,3 +178,6 @@ src/frontend_static/
 # MLflow
 mlruns/
 .mlruns/
+
+# graphify knowledge graph output
+graphify-out/

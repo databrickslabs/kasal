@@ -790,7 +790,9 @@ class TestKasalDBSpanExporterInit:
     ):
         mock_settings.DATABASE_URI = "sqlite+aiosqlite:///:memory:"
         KasalDBSpanExporter(job_id="job-3")
-        mock_executor_cls.assert_called_once_with(max_workers=2)
+        # Default is 1: serialized writes are required for the single-connection
+        # SQLite StaticPool (concurrent writers drop commits across event loops).
+        mock_executor_cls.assert_called_once_with(max_workers=1)
 
 
 # ---------------------------------------------------------------------------

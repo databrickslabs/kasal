@@ -90,6 +90,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         system_logger.warning(f"Error validating Databricks environment: {e}")
 
+    # Install CrewAI monkey-patches (memory event context propagation, etc.)
+    # Must run before any crew kickoff so patched __init__s are in place.
+    try:
+        from src.core.crewai_patches import install_all_patches
+        install_all_patches()
+    except Exception as e:
+        system_logger.warning(f"Error installing CrewAI patches: {e}")
+
     # Import needed for DB init
     # pylint: disable=unused-import,import-outside-toplevel
     import src.db.all_models  # noqa
