@@ -76,32 +76,11 @@ describe('MCPConfiguration', () => {
 
     // Check basic elements
     expect(screen.getByText('MCP Server Configuration')).toBeInTheDocument();
-    expect(screen.getByText('Enable MCP Servers')).toBeInTheDocument();
 
     // Wait for data to load
     await waitFor(() => {
-      expect(screen.getByRole('checkbox', { name: /enable mcp servers/i })).toBeChecked();
       expect(screen.getByText('Test Server 1')).toBeInTheDocument();
       expect(screen.getByText('Test Server 2')).toBeInTheDocument();
-    });
-  });
-
-  it('toggles global MCP enabled state', async () => {
-    await act(async () => {
-      render(<MCPConfiguration />);
-    });
-
-    // Wait for checkbox to be loaded and checked
-    const checkbox = await screen.findByRole('checkbox', { name: /enable mcp servers/i });
-    expect(checkbox).toBeChecked();
-
-    // Toggle off
-    await act(async () => {
-      fireEvent.click(checkbox);
-    });
-
-    await waitFor(() => {
-      expect(mockMCPService.updateGlobalSettings).toHaveBeenCalledWith({ global_enabled: false });
     });
   });
 
@@ -233,7 +212,6 @@ describe('MCPConfiguration', () => {
 
       // The page content should NOT appear during loading
       expect(screen.queryByText('MCP Server Configuration')).not.toBeInTheDocument();
-      expect(screen.queryByText('Enable MCP Servers')).not.toBeInTheDocument();
       expect(screen.queryByText('No MCP servers configured yet.')).not.toBeInTheDocument();
 
       // Resolve the fetch to clean up

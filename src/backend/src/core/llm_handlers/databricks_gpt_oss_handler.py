@@ -9,7 +9,7 @@ rather than a simple string, which requires special handling for CrewAI integrat
 """
 
 import time as _time_mod
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, ClassVar, Dict, List, Optional, Union
 from crewai import LLM
 import litellm
 
@@ -311,19 +311,22 @@ class DatabricksRetryLLM(LLM):
     typically reset after 60 seconds.
     """
 
+    # CrewAI 1.13+ made ``LLM`` a Pydantic BaseModel, so class-level constants
+    # must be annotated as ClassVar to avoid being mistaken for model fields.
+
     # Standard retry settings (for timeouts, connection errors, empty responses)
-    MAX_RETRIES = 3
-    INITIAL_BACKOFF = 1.0  # seconds
+    MAX_RETRIES: ClassVar[int] = 3
+    INITIAL_BACKOFF: ClassVar[float] = 1.0  # seconds
 
     # Rate limit specific settings - longer backoffs to allow quota reset
-    RATE_LIMIT_MAX_RETRIES = 5
-    RATE_LIMIT_INITIAL_BACKOFF = 30.0  # seconds (Databricks rate limits reset ~60s)
-    RATE_LIMIT_MAX_BACKOFF = 120.0  # cap at 2 minutes
+    RATE_LIMIT_MAX_RETRIES: ClassVar[int] = 5
+    RATE_LIMIT_INITIAL_BACKOFF: ClassVar[float] = 30.0  # Databricks rate limits reset ~60s
+    RATE_LIMIT_MAX_BACKOFF: ClassVar[float] = 120.0  # cap at 2 minutes
 
-    # Request timeout - prevents hanging on unresponsive endpoints
-    # litellm default is 6000s (100 min) which is way too long
-    # Databricks server-side limit is 297s, so 240s gives headroom
-    REQUEST_TIMEOUT = 297.0  # Databricks server-side limit is 297s
+    # Request timeout - prevents hanging on unresponsive endpoints.
+    # litellm default is 6000s (100 min) which is way too long.
+    # Databricks server-side limit is 297s, so we match it.
+    REQUEST_TIMEOUT: ClassVar[float] = 297.0
 
     def __init__(self, **kwargs):
         """Initialize the Databricks Retry LLM wrapper."""

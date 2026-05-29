@@ -365,9 +365,19 @@ async def create_agent(
         'respect_context_window': True,
     }
 
-    # Add additional agent configuration parameters
+    # Add additional agent configuration parameters.
+    #
+    # NOTE: 'memory' is deliberately NOT propagated to the CrewAI Agent.
+    # In CrewAI 1.10+, ``Agent(memory=True)`` builds a *per-agent* default
+    # ``Memory(llm='gpt-4o-mini', embedder=None, storage='lancedb')`` — i.e. an
+    # OpenAI-backed memory — and ``Crew._tools_for`` resolves memory as
+    # ``getattr(agent, "memory") or self._memory``, so that per-agent default
+    # OVERRIDES the crew's configured Databricks/Lakebase Memory. The memory
+    # tools (search_memory/save_to_memory) would then hit OpenAI (401 on the
+    # placeholder key). Memory is configured once at the CREW level
+    # (see crew_memory_service) and inherited by all agents.
     additional_params = [
-        'max_iter', 'max_rpm', 'memory', 'code_execution_mode',
+        'max_iter', 'max_rpm', 'code_execution_mode',
         'max_context_window_size', 'max_tokens',
         'reasoning', 'max_reasoning_attempts',
         # Date awareness settings (CrewAI 1.9+) - inject current date into agent context

@@ -499,3 +499,30 @@ class TestCrewIdHashComponents:
 
         # Should be same since "Named Task" is used in both cases
         assert id1 == id2
+
+
+class TestAttachCrewMemoryToAgents:
+    """Per-task auto-save reads agent.memory, so the crew Memory must be
+    attached to each agent (without recreating a per-agent OpenAI Memory)."""
+
+    def test_attaches_memory_instance_to_all_agents(self):
+        service = CrewMemoryService({'group_id': 'g'})
+        a1, a2 = MagicMock(), MagicMock()
+        a1.memory = None
+        a2.memory = None
+        sentinel_memory = MagicMock(name="crew_memory")
+        crew_kwargs = {'memory': sentinel_memory, 'agents': [a1, a2]}
+
+        service._attach_crew_memory_to_agents(crew_kwargs)
+
+        assert a1.memory is sentinel_memory
+        assert a2.memory is sentinel_memory
+
+    def test_noop_when_memory_disabled_or_default(self):
+        service = CrewMemoryService({'group_id': 'g'})
+        for sentinel in (False, True, None):
+            agent = MagicMock()
+            agent.memory = None
+            service._attach_crew_memory_to_agents({'memory': sentinel, 'agents': [agent]})
+            # Must NOT attach True/False/None (would create a per-agent default).
+            assert agent.memory is None

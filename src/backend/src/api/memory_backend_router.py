@@ -112,15 +112,11 @@ async def initialize_lakebase_tables(
 
     instance_name = request.get("instance_name")
     embedding_dimension = request.get("embedding_dimension", 1024)
-    short_term_table = request.get("short_term_table", "crew_short_term_memory")
-    long_term_table = request.get("long_term_table", "crew_long_term_memory")
-    entity_table = request.get("entity_table", "crew_entity_memory")
+    memory_table = request.get("memory_table", "crew_memory")
 
     result = await service.initialize_lakebase_tables(
         embedding_dimension=embedding_dimension,
-        short_term_table=short_term_table,
-        long_term_table=long_term_table,
-        entity_table=entity_table,
+        memory_table=memory_table,
         instance_name=instance_name,
     )
     return result
@@ -176,27 +172,30 @@ async def get_lakebase_table_data(
 async def get_lakebase_entity_data(
     group_context: GroupContextDep,
     service: Annotated[MemoryBackendService, Depends(get_memory_backend_service)],
-    entity_table: str = Query("crew_entity_memory", description="Entity table name"),
+    memory_table: str = Query(
+        "crew_memory",
+        description="Unified memory table to read entities from",
+    ),
     limit: int = Query(200, description="Maximum entities to return"),
     instance_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Fetch entity data from Lakebase for graph visualization.
+    Fetch entity-like memory records from the unified Lakebase memory table.
 
     Returns entities and relationships in the same format as the
     Databricks entity-data endpoint, suitable for the EntityGraphVisualization
     component.
 
     Args:
-        entity_table: Name of the entity memory table
-        limit: Maximum number of entities to return
-        instance_name: Optional Lakebase instance name
+        memory_table: Name of the unified memory table (default "crew_memory").
+        limit: Maximum number of entities to return.
+        instance_name: Optional Lakebase instance name.
 
     Returns:
-        Dict with entities and relationships lists
+        Dict with entities and relationships lists.
     """
     result = await service.get_lakebase_entity_data(
-        entity_table=entity_table,
+        memory_table=memory_table,
         limit=limit,
         instance_name=instance_name,
     )
@@ -236,9 +235,6 @@ async def save_lakebase_config(
         name=f"Lakebase Setup {datetime.now().strftime('%Y-%m-%d %H:%M')}",
         backend_type=MemoryBackendType.LAKEBASE,
         lakebase_config=LakebaseMemoryConfig(**lakebase_config),
-        enable_short_term=True,
-        enable_long_term=True,
-        enable_entity=True,
     )
     backend = await service.create_memory_backend(group_id, config)
     await service.set_default_backend(group_id, str(backend.id))
@@ -275,10 +271,16 @@ async def validate_memory_config(
         else:
             if not config.databricks_config.endpoint_name:
                 errors.append("Endpoint name is required")
-            if not config.databricks_config.short_term_index:
-                errors.append("Short-term memory index is required")
+            if not config.databricks_config.memory_index:
+                errors.append("Unified memory index is required")
             if config.databricks_config.embedding_dimension < 1:
                 errors.append("Embedding dimension must be positive")
+
+    if config.backend_type == "lakebase":
+        if not config.lakebase_config:
+            errors.append("Lakebase configuration is required for Lakebase backend")
+        elif not config.lakebase_config.memory_table:
+            errors.append("Unified memory table is required")
 
     return {"valid": len(errors) == 0, "errors": errors}
 
@@ -1275,3 +1277,625 @@ async def get_entity_data(
 
     # Return the actual data from the index
     return result
+
+
+# ---------------------------------------------------------------------------
+# Unified cognitive memory browser (CrewAI 1.10+)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/records")
+async def list_memory_records(
+    group_context: GroupContextDep,
+    service: Annotated[MemoryBackendService, Depends(get_memory_backend_service)],
+    request: Request,
+    scope: Optional[str] = Query(
+        None,
+        description="Optional hierarchical scope prefix to filter records.",
+    ),
+    limit: int = Query(
+        50, ge=1, le=500,
+        description="Maximum number of records to return.",
+    ),
+    offset: int = Query(
+        0, ge=0,
+        description="Number of records to skip for pagination.",
+    ),
+) -> Dict[str, Any]:
+    """Browse records stored in the active unified cognitive memory backend.
+
+    Backend-agnostic: routes to LanceDB (default), Databricks Vector Search,
+    or Lakebase pgvector based on the user's active ``MemoryBackend``
+    configuration. Records are filtered by the caller's group (tenant).
+    """
+    group_id = group_context.primary_group_id
+    user_token = extract_user_token_from_request(request) if request else None
+
+    active = await service.get_active_config(group_id)
+    backend_type = (
+        getattr(active, "backend_type", None).value
+        if active and getattr(active, "backend_type", None)
+        else "default"
+    )
+
+    logger.info(
+        "[memory/records] group=%s backend=%s scope=%s limit=%s offset=%s",
+        group_id,
+        backend_type,
+        scope,
+        limit,
+        offset,
+    )
+
+    if backend_type == "databricks":
+        databricks_cfg = active.databricks_config if active else None
+        if not databricks_cfg or not databricks_cfg.memory_index:
+            return {"backend": backend_type, "records": [], "total": 0}
+        records = await _browse_databricks_records(
+            databricks_cfg,
+            group_id=group_id,
+            scope=scope,
+            limit=limit,
+            offset=offset,
+            user_token=user_token,
+        )
+    elif backend_type == "lakebase":
+        lakebase_cfg = active.lakebase_config if active else None
+        if not lakebase_cfg or not lakebase_cfg.memory_table:
+            return {"backend": backend_type, "records": [], "total": 0}
+        records = await _browse_lakebase_records(
+            lakebase_cfg,
+            group_id=group_id,
+            scope=scope,
+            limit=limit,
+            offset=offset,
+        )
+    else:
+        records = _browse_default_records(
+            group_id=group_id,
+            scope=scope,
+            limit=limit,
+            offset=offset,
+        )
+
+    return {
+        "backend": backend_type,
+        "records": records,
+        "count": len(records),
+    }
+
+
+@router.delete("/records")
+async def delete_memory_records(
+    group_context: GroupContextDep,
+    service: Annotated[MemoryBackendService, Depends(get_memory_backend_service)],
+    request: Request,
+    scope: Optional[str] = Query(
+        None,
+        description=(
+            "Optional scope prefix. When omitted, deletes every record "
+            "owned by the caller's group."
+        ),
+    ),
+) -> Dict[str, Any]:
+    """Delete cognitive-memory records from the active backend.
+
+    The caller can only delete records for their own group — both the
+    Databricks / Lakebase paths enforce ``group_id`` in the filter, and the
+    local (LanceDB) path only touches directories named
+    ``kasal_default_<group_id>_crew_*``.
+    """
+    group_id = group_context.primary_group_id
+    user_token = extract_user_token_from_request(request) if request else None
+
+    active = await service.get_active_config(group_id)
+    backend_type = (
+        getattr(active, "backend_type", None).value
+        if active and getattr(active, "backend_type", None)
+        else "default"
+    )
+
+    logger.info(
+        "[memory/records][DELETE] group=%s backend=%s scope=%s",
+        group_id,
+        backend_type,
+        scope,
+    )
+
+    deleted = 0
+    if backend_type == "databricks":
+        databricks_cfg = active.databricks_config if active else None
+        if databricks_cfg and databricks_cfg.memory_index:
+            deleted = await _delete_databricks_records(
+                databricks_cfg,
+                group_id=group_id,
+                scope=scope,
+                user_token=user_token,
+            )
+    elif backend_type == "lakebase":
+        lakebase_cfg = active.lakebase_config if active else None
+        if lakebase_cfg and lakebase_cfg.memory_table:
+            deleted = await _delete_lakebase_records(
+                lakebase_cfg,
+                group_id=group_id,
+                scope=scope,
+            )
+    else:
+        deleted = _delete_default_records(group_id=group_id, scope=scope)
+
+    return {"backend": backend_type, "deleted": deleted}
+
+
+async def _browse_databricks_records(
+    databricks_cfg: DatabricksMemoryConfig,
+    *,
+    group_id: str,
+    scope: Optional[str],
+    limit: int,
+    offset: int,
+    user_token: Optional[str],
+) -> List[Dict[str, Any]]:
+    """Read records from a Databricks Vector Search unified-memory index."""
+    from src.repositories.databricks_vector_index_repository import (
+        DatabricksVectorIndexRepository,
+    )
+    from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
+
+    repo = DatabricksVectorIndexRepository(
+        databricks_cfg.workspace_url or "",
+        group_id=group_id,
+    )
+    columns = DatabricksIndexSchemas.get_search_columns("unified")
+    positions = DatabricksIndexSchemas.get_column_positions("unified")
+    zero_vector = [0.0] * (databricks_cfg.embedding_dimension or 1024)
+
+    filters: Dict[str, Any] = {"group_id": group_id}
+    response = await repo.similarity_search(
+        index_name=databricks_cfg.memory_index,
+        endpoint_name=databricks_cfg.endpoint_name,
+        query_vector=zero_vector,
+        columns=columns,
+        num_results=limit + offset,
+        filters=filters,
+        user_token=user_token,
+    )
+
+    data_array = (response or {}).get("result", {}).get("data_array") or []
+    records: List[Dict[str, Any]] = []
+    for row in data_array[offset:]:
+        record = _row_to_record_dict(row, columns, positions)
+        if scope and not (record.get("scope") or "").startswith(scope):
+            continue
+        records.append(record)
+        if len(records) >= limit:
+            break
+    return records
+
+
+async def _browse_lakebase_records(
+    lakebase_cfg: Any,
+    *,
+    group_id: str,
+    scope: Optional[str],
+    limit: int,
+    offset: int,
+) -> List[Dict[str, Any]]:
+    """Read records from the unified Lakebase memory table."""
+    from sqlalchemy import text
+
+    from src.db.lakebase_session import get_lakebase_session
+
+    instance_name = getattr(lakebase_cfg, "instance_name", None)
+    table_name = lakebase_cfg.memory_table
+    where = ["group_id = :group_id"]
+    params: Dict[str, Any] = {
+        "group_id": group_id,
+        "limit": limit,
+        "offset": offset,
+    }
+    if scope:
+        where.append("metadata->>'scope' LIKE :scope_prefix")
+        params["scope_prefix"] = f"{scope}%"
+
+    async with get_lakebase_session(
+        instance_name=instance_name, group_id=group_id
+    ) as session:
+        sql = text(
+            f"SELECT id, content, metadata, created_at, updated_at, agent, score "
+            f"FROM {table_name} "
+            f"WHERE {' AND '.join(where)} "
+            f"ORDER BY created_at DESC "
+            f"LIMIT :limit OFFSET :offset"
+        )
+        result = await session.execute(sql, params)
+        records: List[Dict[str, Any]] = []
+        for row in result.fetchall():
+            metadata_val = row[2]
+            metadata = metadata_val if isinstance(metadata_val, dict) else _safe_json(metadata_val)
+            records.append(
+                {
+                    "id": row[0],
+                    "content": row[1],
+                    "scope": metadata.get("scope", "/"),
+                    "categories": metadata.get("categories") or [],
+                    "importance": float(metadata.get("importance") or row[6] or 0.5),
+                    "source": metadata.get("source") or row[5] or None,
+                    "private": bool(metadata.get("private") or False),
+                    "metadata": {
+                        k: v for k, v in metadata.items()
+                        if k not in ("scope", "categories", "importance", "source", "private")
+                    },
+                    "created_at": str(row[3]) if row[3] else None,
+                    "last_accessed": str(row[4]) if row[4] else None,
+                }
+            )
+        return records
+
+
+def _browse_default_records(
+    *,
+    group_id: str,
+    scope: Optional[str],
+    limit: int,
+    offset: int,
+) -> List[Dict[str, Any]]:
+    """Aggregate records from every local LanceDB memory store owned by the group.
+
+    Kasal's DEFAULT backend sets ``CREWAI_STORAGE_DIR`` to
+    ``kasal_default_{group_id}_crew_{hash}`` per crew, which CrewAI resolves
+    relative to the backend process's CWD. This helper discovers every such
+    directory for the caller's group, reads its LanceDB store, and merges the
+    records tagged with their originating crew id.
+    """
+    import os
+    from pathlib import Path
+
+    try:
+        from crewai.memory import Memory  # type: ignore
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Default memory browse failed (crewai.memory missing): %s", exc)
+        return []
+
+    # Search the backend process CWD plus a couple of plausible roots where
+    # CrewAI might drop storage dirs (its default is platform-dependent).
+    candidate_roots: List[Path] = [Path.cwd()]
+    xdg_data = os.environ.get("XDG_DATA_HOME")
+    if xdg_data:
+        candidate_roots.append(Path(xdg_data) / "CrewAI")
+    candidate_roots.append(Path.home() / ".local" / "share" / "CrewAI")
+    candidate_roots.append(Path.home() / "Library" / "Application Support" / "CrewAI")
+
+    pattern = f"kasal_default_{group_id}_crew_*"
+    storage_dirs: List[Path] = []
+    seen: set[str] = set()
+    for root in candidate_roots:
+        if not root.exists():
+            continue
+        try:
+            for match in root.glob(pattern):
+                key = str(match.resolve())
+                if key in seen:
+                    continue
+                seen.add(key)
+                storage_dirs.append(match)
+        except OSError:
+            continue
+
+    if not storage_dirs:
+        logger.info(
+            "[memory/records] No local Kasal memory stores found for group %s "
+            "(looked for '%s' under %s)",
+            group_id,
+            pattern,
+            [str(r) for r in candidate_roots],
+        )
+        return []
+
+    aggregated: List[Dict[str, Any]] = []
+    original_storage = os.environ.get("CREWAI_STORAGE_DIR")
+    try:
+        for storage_dir in storage_dirs:
+            try:
+                # Point CrewAI's unified Memory at this crew's store. Using
+                # env var propagation keeps us compatible with whatever path
+                # layout the installed crewai version expects under the
+                # storage dir (memory/memories.lance on 1.14.x).
+                os.environ["CREWAI_STORAGE_DIR"] = str(storage_dir)
+                memory = Memory()
+                storage = (
+                    getattr(memory, "_storage", None)
+                    or getattr(memory, "storage", None)
+                )
+                if storage is None or not hasattr(storage, "list_records"):
+                    continue
+                fetched = storage.list_records(
+                    scope_prefix=scope,
+                    # Oversample per-store; we sort + paginate after merging.
+                    limit=limit + offset,
+                    offset=0,
+                )
+                crew_id = storage_dir.name.removeprefix("kasal_default_")
+                for r in fetched:
+                    record = _memory_record_to_dict(r)
+                    md = record.setdefault("metadata", {})
+                    md.setdefault("_crew_id", crew_id)
+                    md.setdefault("_storage_path", str(storage_dir))
+                    aggregated.append(record)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to read local memory store %s: %s", storage_dir, exc
+                )
+    finally:
+        if original_storage is None:
+            os.environ.pop("CREWAI_STORAGE_DIR", None)
+        else:
+            os.environ["CREWAI_STORAGE_DIR"] = original_storage
+
+    aggregated.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+    return aggregated[offset : offset + limit]
+
+
+def _row_to_record_dict(
+    row: List[Any],
+    columns: List[str],
+    positions: Dict[str, int],
+) -> Dict[str, Any]:
+    """Map a Databricks similarity-search row to a UI-friendly record dict."""
+    def at(col: str) -> Any:
+        idx = positions.get(col)
+        if idx is None or idx >= len(row):
+            return None
+        return row[idx]
+
+    metadata = _safe_json(at("metadata")) or {}
+    categories = _safe_json_list(at("categories"))
+    # Promote provenance fields into metadata so the UI can render them.
+    for key in ("crew_id", "agent_id", "session_id", "llm_model"):
+        metadata.setdefault(key, at(key))
+
+    return {
+        "id": at("id"),
+        "content": at("content"),
+        "scope": at("scope") or "/",
+        "categories": categories,
+        "importance": float(at("importance") or 0.5),
+        "source": at("source") or None,
+        "private": bool(at("private") or False),
+        "metadata": metadata,
+        "created_at": str(at("created_at")) if at("created_at") else None,
+        "last_accessed": str(at("last_accessed")) if at("last_accessed") else None,
+    }
+
+
+def _memory_record_to_dict(record: Any) -> Dict[str, Any]:
+    """Map a ``crewai.memory.types.MemoryRecord`` into the UI payload."""
+    if hasattr(record, "model_dump"):
+        data = record.model_dump()
+    else:
+        data = dict(record.__dict__)
+    created_at = data.get("created_at")
+    last_accessed = data.get("last_accessed")
+    return {
+        "id": data.get("id"),
+        "content": data.get("content") or "",
+        "scope": data.get("scope") or "/",
+        "categories": data.get("categories") or [],
+        "importance": float(data.get("importance") or 0.5),
+        "source": data.get("source"),
+        "private": bool(data.get("private") or False),
+        "metadata": data.get("metadata") or {},
+        "created_at": str(created_at) if created_at else None,
+        "last_accessed": str(last_accessed) if last_accessed else None,
+    }
+
+
+def _safe_json(value: Any) -> Dict[str, Any]:
+    import json as _json
+    if not value:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    try:
+        parsed = _json.loads(value)
+        return parsed if isinstance(parsed, dict) else {}
+    except (TypeError, ValueError):
+        return {}
+
+
+def _safe_json_list(value: Any) -> List[Any]:
+    import json as _json
+    if not value:
+        return []
+    if isinstance(value, list):
+        return list(value)
+    try:
+        parsed = _json.loads(value)
+        return parsed if isinstance(parsed, list) else []
+    except (TypeError, ValueError):
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Delete helpers for the unified cognitive memory browser
+# ---------------------------------------------------------------------------
+
+
+async def _delete_databricks_records(
+    databricks_cfg: DatabricksMemoryConfig,
+    *,
+    group_id: str,
+    scope: Optional[str],
+    user_token: Optional[str],
+) -> int:
+    """Delete every Databricks unified-memory record that belongs to the group."""
+    from src.repositories.databricks_vector_index_repository import (
+        DatabricksVectorIndexRepository,
+    )
+    from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
+
+    repo = DatabricksVectorIndexRepository(
+        databricks_cfg.workspace_url or "",
+        group_id=group_id,
+    )
+    columns = DatabricksIndexSchemas.get_search_columns("unified")
+    positions = DatabricksIndexSchemas.get_column_positions("unified")
+    zero_vector = [0.0] * (databricks_cfg.embedding_dimension or 1024)
+
+    filters: Dict[str, Any] = {"group_id": group_id}
+    # Databricks similarity search has no hard upper bound we can push
+    # server-side, so we pull records in pages and gather ids client-side.
+    response = await repo.similarity_search(
+        index_name=databricks_cfg.memory_index,
+        endpoint_name=databricks_cfg.endpoint_name,
+        query_vector=zero_vector,
+        columns=columns,
+        num_results=10_000,  # effective cap enforced by Vector Search
+        filters=filters,
+        user_token=user_token,
+    )
+    data_array = (response or {}).get("result", {}).get("data_array") or []
+    id_idx = positions.get("id")
+    scope_idx = positions.get("scope")
+    ids: List[str] = []
+    for row in data_array:
+        if id_idx is None or id_idx >= len(row):
+            continue
+        if scope and scope_idx is not None and scope_idx < len(row):
+            row_scope = row[scope_idx] or ""
+            if not str(row_scope).startswith(scope):
+                continue
+        row_id = row[id_idx]
+        if row_id is not None:
+            ids.append(str(row_id))
+
+    if not ids:
+        return 0
+
+    await repo.delete_records(
+        index_name=databricks_cfg.memory_index,
+        endpoint_name=databricks_cfg.endpoint_name,
+        primary_keys=ids,
+        user_token=user_token,
+    )
+    return len(ids)
+
+
+async def _delete_lakebase_records(
+    lakebase_cfg: Any,
+    *,
+    group_id: str,
+    scope: Optional[str],
+) -> int:
+    """Delete Lakebase unified-memory rows scoped to this group."""
+    from sqlalchemy import text
+
+    from src.db.lakebase_session import get_lakebase_session
+
+    instance_name = getattr(lakebase_cfg, "instance_name", None)
+    table_name = lakebase_cfg.memory_table
+    where = ["group_id = :group_id"]
+    params: Dict[str, Any] = {"group_id": group_id}
+    if scope:
+        where.append("metadata->>'scope' LIKE :scope_prefix")
+        params["scope_prefix"] = f"{scope}%"
+
+    async with get_lakebase_session(
+        instance_name=instance_name, group_id=group_id
+    ) as session:
+        sql = text(f"DELETE FROM {table_name} WHERE {' AND '.join(where)}")
+        result = await session.execute(sql, params)
+        return int(getattr(result, "rowcount", 0) or 0)
+
+
+def _delete_default_records(
+    *,
+    group_id: str,
+    scope: Optional[str],
+) -> int:
+    """Wipe local LanceDB stores for the group's crews on the backend host.
+
+    Matches the same candidate-roots we scan in ``_browse_default_records``.
+    When ``scope`` is provided, we delete only records matching that prefix
+    via ``crewai.memory.Memory`` (the LanceDB storage exposes scope-aware
+    ``delete``). When ``scope`` is unset, the entire per-crew directory is
+    removed — this is the cleanest way to guarantee no orphan LanceDB
+    manifest files remain.
+    """
+    import os
+    import shutil
+    from pathlib import Path
+
+    candidate_roots: List[Path] = [Path.cwd()]
+    xdg_data = os.environ.get("XDG_DATA_HOME")
+    if xdg_data:
+        candidate_roots.append(Path(xdg_data) / "CrewAI")
+    candidate_roots.append(Path.home() / ".local" / "share" / "CrewAI")
+    candidate_roots.append(Path.home() / "Library" / "Application Support" / "CrewAI")
+
+    pattern = f"kasal_default_{group_id}_crew_*"
+    storage_dirs: List[Path] = []
+    seen: set[str] = set()
+    for root in candidate_roots:
+        if not root.exists():
+            continue
+        try:
+            for match in root.glob(pattern):
+                key = str(match.resolve())
+                if key in seen:
+                    continue
+                seen.add(key)
+                storage_dirs.append(match)
+        except OSError:
+            continue
+
+    if not storage_dirs:
+        return 0
+
+    deleted = 0
+    # Scope-filtered delete → use the Memory API so we leave other records
+    # intact in each store.
+    if scope:
+        try:
+            from crewai.memory import Memory  # type: ignore
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Default memory delete failed (crewai.memory missing): %s", exc)
+            return 0
+        original_storage = os.environ.get("CREWAI_STORAGE_DIR")
+        try:
+            for storage_dir in storage_dirs:
+                try:
+                    os.environ["CREWAI_STORAGE_DIR"] = str(storage_dir)
+                    memory = Memory()
+                    storage = (
+                        getattr(memory, "_storage", None)
+                        or getattr(memory, "storage", None)
+                    )
+                    if storage is None or not hasattr(storage, "delete"):
+                        continue
+                    result = storage.delete(scope_prefix=scope)
+                    if isinstance(result, int):
+                        deleted += result
+                    else:
+                        deleted += 1
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to delete from local memory store %s: %s",
+                        storage_dir,
+                        exc,
+                    )
+        finally:
+            if original_storage is None:
+                os.environ.pop("CREWAI_STORAGE_DIR", None)
+            else:
+                os.environ["CREWAI_STORAGE_DIR"] = original_storage
+        return deleted
+
+    # Wholesale wipe → remove each per-crew directory.
+    for storage_dir in storage_dirs:
+        try:
+            shutil.rmtree(storage_dir)
+            deleted += 1
+            logger.info("Removed local memory store %s", storage_dir)
+        except Exception as exc:
+            logger.warning("Failed to remove local memory store %s: %s", storage_dir, exc)
+    return deleted

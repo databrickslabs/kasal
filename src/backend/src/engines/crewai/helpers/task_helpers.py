@@ -513,9 +513,12 @@ async def create_task(
                         memory_service = MemoryBackendService(session)
                         active_config = await memory_service.get_active_config(group_id) if group_id else None
                         if active_config:
-                            # Treat a "disabled" memory config (all types false) as NOT Databricks
-                            all_disabled = (not active_config.enable_short_term and not active_config.enable_long_term and not active_config.enable_entity)
-                            if not all_disabled and getattr(active_config, 'backend_type', None) and getattr(active_config.backend_type, 'value', str(active_config.backend_type)) in ['databricks', 'DATABRICKS']:
+                            # Active memory config exists → respect its backend type.
+                            # (CrewAI 1.10+ has a single unified memory; a row
+                            # with is_active=False means memory is disabled.)
+                            backend_type = getattr(active_config, 'backend_type', None)
+                            backend_str = getattr(backend_type, 'value', str(backend_type))
+                            if backend_str in ['databricks', 'DATABRICKS']:
                                 active_is_databricks = True
                     except Exception as me:
                         logger.debug(f"Could not determine active memory backend for group {group_id}: {me}")

@@ -6,6 +6,7 @@ import { create } from 'zustand';
 import {
   MemoryBackendConfig,
   MemoryBackendType,
+  CognitiveMemoryConfig,
   DatabricksMemoryConfig,
   LakebaseMemoryConfig,
   DEFAULT_MEMORY_BACKEND_CONFIG,
@@ -34,16 +35,13 @@ interface MemoryBackendState {
   
   // Validation
   validationErrors: string[];
-  
-  // Entity Visualization
-  visualizationOpen: boolean;
-  visualizationIndex: { name: string; type: string } | null;
-  
+
   // Actions
   setConfig: (config: MemoryBackendConfig) => void;
   updateConfig: (updates: Partial<MemoryBackendConfig>) => void;
   updateDatabricksConfig: (updates: Partial<MemoryBackendConfig['databricks_config']>) => void;
   updateLakebaseConfig: (updates: Partial<LakebaseMemoryConfig>) => void;
+  updateCognitiveConfig: (updates: Partial<CognitiveMemoryConfig>) => void;
   
   // API actions
   validateConfig: () => Promise<boolean>;
@@ -51,10 +49,6 @@ interface MemoryBackendState {
   loadAvailableIndexes: () => Promise<void>;
   saveConfig: () => Promise<boolean>;
   loadConfig: () => Promise<void>;
-  
-  // Visualization actions
-  openVisualization: (indexName: string, indexType: string) => void;
-  closeVisualization: () => void;
   
   // Utility actions
   resetConfig: () => void;
@@ -72,8 +66,6 @@ export const useMemoryBackendStore = create<MemoryBackendState>((set, get) => ({
   availableIndexes: [],
   isLoadingIndexes: false,
   validationErrors: [],
-  visualizationOpen: false,
-  visualizationIndex: null,
 
   // Basic setters
   setConfig: (config) => set({ config, error: null }),
@@ -101,6 +93,17 @@ export const useMemoryBackendStore = create<MemoryBackendState>((set, get) => ({
         ...(state.config.lakebase_config || DEFAULT_LAKEBASE_CONFIG),
         ...updates,
       } as LakebaseMemoryConfig,
+    },
+    error: null,
+  })),
+
+  updateCognitiveConfig: (updates) => set((state) => ({
+    config: {
+      ...state.config,
+      cognitive_config: {
+        ...(state.config.cognitive_config || {}),
+        ...updates,
+      } as CognitiveMemoryConfig,
     },
     error: null,
   })),
@@ -236,17 +239,6 @@ export const useMemoryBackendStore = create<MemoryBackendState>((set, get) => ({
     }
   },
 
-  // Visualization actions
-  openVisualization: (indexName: string, indexType: string) => set({
-    visualizationOpen: true,
-    visualizationIndex: { name: indexName, type: indexType },
-  }),
-  
-  closeVisualization: () => set({
-    visualizationOpen: false,
-    visualizationIndex: null,
-  }),
-
   // Reset to defaults
   resetConfig: () => set({
     config: DEFAULT_MEMORY_BACKEND_CONFIG,
@@ -254,8 +246,6 @@ export const useMemoryBackendStore = create<MemoryBackendState>((set, get) => ({
     connectionTestResult: null,
     validationErrors: [],
     availableIndexes: [],
-    visualizationOpen: false,
-    visualizationIndex: null,
   }),
 
   // Error handling
@@ -268,3 +258,5 @@ export const useMemoryBackendConfig = () => useMemoryBackendStore((state) => sta
 export const useMemoryBackendType = () => useMemoryBackendStore((state) => state.config.backend_type);
 export const useDatabricksConfig = () => useMemoryBackendStore((state) => state.config.databricks_config);
 export const useLakebaseConfig = () => useMemoryBackendStore((state) => state.config.lakebase_config);
+export const useCognitiveMemoryConfig = () =>
+  useMemoryBackendStore((state) => state.config.cognitive_config);

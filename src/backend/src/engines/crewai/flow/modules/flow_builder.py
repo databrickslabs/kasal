@@ -253,8 +253,16 @@ class FlowBuilder:
             logger.info(f"✅ Dynamic flow created successfully, type: {type(dynamic_flow)}")
             logger.info("="*100)
 
-            # Log the methods we've added to help diagnose issues
-            flow_methods = [method for method in dir(dynamic_flow) if callable(getattr(dynamic_flow, method)) and not method.startswith('_')]
+            # Log the methods we've added to help diagnose issues.
+            # NOTE: filter out dunders BEFORE calling getattr — pydantic v2 exposes
+            # ``__signature__`` as a class-only descriptor on model instances, so
+            # ``getattr(instance, '__signature__')`` raises AttributeError. The
+            # ``and`` short-circuits on the name check; the getattr default is a
+            # belt-and-suspenders guard against any other raising descriptor.
+            flow_methods = [
+                method for method in dir(dynamic_flow)
+                if not method.startswith('_') and callable(getattr(dynamic_flow, method, None))
+            ]
             logger.info(f"Flow has {len(flow_methods)} public methods: {flow_methods}")
 
             # Specifically check for start methods

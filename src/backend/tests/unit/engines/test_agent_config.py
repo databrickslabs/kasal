@@ -371,7 +371,10 @@ class TestAgentConfig:
         assert result["allow_delegation"] is True
         assert result["tools"] == tools
         assert result["llm"] == llm
-        assert result["memory"] == mock_agent_data.memory
+        # 'memory' is intentionally NOT propagated to the Agent: it would create a
+        # per-agent OpenAI-default Memory that overrides the crew-level Databricks
+        # Memory. Memory is configured at the crew level.
+        assert "memory" not in result
         assert result["max_iter"] == mock_agent_data.max_iter
         assert result["max_rpm"] == mock_agent_data.max_rpm
         assert result["config"] == mock_agent_data.config
@@ -665,8 +668,9 @@ class TestAgentConfig:
 
         result = AgentConfig._prepare_agent_kwargs(agent_data, [], None)
 
-        # Verify standard params
-        assert result["memory"] is True
+        # Verify standard params. 'memory' is intentionally NOT propagated to the
+        # Agent (configured at crew level to avoid a per-agent OpenAI Memory).
+        assert "memory" not in result
         assert result["max_iter"] == 15
         assert result["max_rpm"] == 10
         assert result["reasoning"] is True

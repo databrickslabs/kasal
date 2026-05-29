@@ -612,6 +612,99 @@ class TestOTelEventBridgeEmitSpan:
         span.set_attribute.assert_any_call("kasal.tool_name", "web_search")
         span.set_attribute.assert_any_call("kasal.output_content", "Found results")
 
+    def test_memory_event_inherits_current_agent_task(self):
+        """A memory event without its own agent/task is attributed to the most
+        recent agent/task (RecallFlow runs without the agent/task ContextVar)."""
+        tracer, span = _make_tracer()
+        bridge = OTelEventBridge(tracer, "job-mem-attr")
+
+        # Agent/task event establishes the current agent/task.
+        bridge._emit_span(
+            "CrewAI.agent.execute",
+            "agent_execution",
+            _make_event(agent_role="Researcher", task_name="Gather data"),
+        )
+        # Memory failure event carries no agent/task of its own.
+        bridge._emit_span(
+            "kasal.memory.query_failed",
+            "memory_retrieval_failed",
+            _make_event(error="boom"),
+        )
+
+        span.set_attribute.assert_any_call("kasal.agent_name", "Researcher")
+        span.set_attribute.assert_any_call("kasal.task_name", "Gather data")
+        span.set_status.assert_called()  # failed event marked ERROR
+
+    def test_non_memory_event_does_not_inherit_agent_fallback(self):
+        """The fallback is scoped to memory events only."""
+        tracer, span = _make_tracer()
+        bridge = OTelEventBridge(tracer, "job-no-inherit")
+        bridge._current_agent_name = "Researcher"
+
+        bridge._emit_span("CrewAI.tool.execute", "tool_usage", _make_event(tool_name="t"))
+
+        agent_calls = [
+            c for c in span.set_attribute.call_args_list if c.args and c.args[0] == "kasal.agent_name"
+        ]
+        assert agent_calls == []
+
+    def test_memory_span_stamped_with_current_task_id(self):
+        """A memory event without its own task_id is stamped with the most-recent
+        task_id so the frontend groups it under the task (not 'Unassigned')."""
+        tracer, span = _make_tracer()
+        bridge = OTelEventBridge(tracer, "job-taskid")
+
+        # A task event carries the task_id → tracked on the bridge.
+        bridge._emit_span(
+            "CrewAI.task.execute",
+            "task_started",
+            _make_event(agent_role="A", task_name="T", task_id="task-123"),
+        )
+        assert bridge._current_task_id == "task-123"
+
+        # A later memory write (no task_id of its own) is stamped with it.
+        span.set_attribute.reset_mock()
+        bridge._emit_span("kasal.memory.save_completed", "memory_write", _make_event())
+        span.set_attribute.assert_any_call("kasal.extra.task_id", "task-123")
+
+    def test_non_memory_event_not_stamped_with_fallback_task_id(self):
+        """The task_id fallback stamp is scoped to memory events only."""
+        tracer, span = _make_tracer()
+        bridge = OTelEventBridge(tracer, "job-nostamp")
+        bridge._current_task_id = "task-123"
+
+        bridge._emit_span("kasal.llm.call_started", "llm_call", _make_event())
+
+        stamped = [
+            c for c in span.set_attribute.call_args_list
+            if c.args and c.args[0] == "kasal.extra.task_id"
+        ]
+        assert stamped == []
+
+    def test_memory_write_completion_attributed_to_starting_task(self):
+        """A background save that finishes during a later task is attributed to
+        the task that STARTED it, not the task active at completion time."""
+        tracer, span = _make_tracer()
+        bridge = OTelEventBridge(tracer, "job-savecorr")
+
+        # Task 1 active; its agent kicks off a save.
+        bridge._emit_span(
+            "CrewAI.task.execute", "task_started",
+            _make_event(task_id="t1", task_name="T1", agent_role="A"),
+        )
+        bridge._emit_span("kasal.memory.save_started", "memory_write_started", _make_event())
+
+        # Task 2 starts → current task moves on while the save is still running.
+        bridge._emit_span(
+            "CrewAI.task.execute", "task_started",
+            _make_event(task_id="t2", task_name="T2", agent_role="A"),
+        )
+
+        # Task 1's save completes now — must be attributed back to t1.
+        span.set_attribute.reset_mock()
+        bridge._emit_span("kasal.memory.save_completed", "memory_write", _make_event())
+        span.set_attribute.assert_any_call("kasal.extra.task_id", "t1")
+
     def test_emit_span_with_no_fields(self):
         """Span gets only event_type when event has no extractable fields."""
         tracer, span = _make_tracer()
@@ -2396,3 +2489,19 @@ class TestIntegrationRegisterAndTrigger:
         span.set_status.assert_called_once_with(
             StatusCode.ERROR, "Task timed out"
         )
+
+
+class TestFailedMemoryEventMapping:
+    """The failed memory events must be mapped so failures are visible
+    (otherwise a failed save/recall silently disappears from the trace)."""
+
+    def test_failed_memory_events_are_mapped(self):
+        from src.services.otel_tracing.event_bridge import _EVENT_SPAN_MAP
+        assert _EVENT_SPAN_MAP["MemorySaveFailedEvent"][1] == "memory_write_failed"
+        assert _EVENT_SPAN_MAP["MemoryQueryFailedEvent"][1] == "memory_retrieval_failed"
+        assert _EVENT_SPAN_MAP["MemoryRetrievalFailedEvent"][1] == "memory_retrieval_failed"
+
+    def test_failed_memory_span_names(self):
+        from src.services.otel_tracing.event_bridge import _EVENT_SPAN_MAP
+        assert _EVENT_SPAN_MAP["MemorySaveFailedEvent"][0] == "kasal.memory.save_failed"
+        assert _EVENT_SPAN_MAP["MemoryQueryFailedEvent"][0] == "kasal.memory.query_failed"

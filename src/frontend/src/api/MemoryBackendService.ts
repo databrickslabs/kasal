@@ -204,7 +204,7 @@ export class MemoryBackendService {
    */
   static async createDatabricksIndex(
     config: DatabricksMemoryConfig,
-    indexType: 'short_term' | 'long_term' | 'entity' | 'document',
+    indexType: 'memory' | 'document',
     catalog: string,
     schema: string,
     tableName: string,
@@ -438,15 +438,18 @@ export class MemoryBackendService {
   }
 
   /**
-   * Get entity data from Lakebase for graph visualization
+   * Get entity data from the unified Lakebase memory table for graph visualization.
+   *
+   * CrewAI 1.10+ stores every memory record in one unified table; entity-like
+   * records are identified by their category tags in ``metadata``.
    */
   static async getLakebaseEntityData(
-    entityTable = 'crew_entity_memory',
+    memoryTable = 'crew_memory',
     limit = 200,
     instanceName?: string
   ): Promise<{ entities: LakebaseEntity[]; relationships: LakebaseRelationship[] }> {
     try {
-      const params: Record<string, string | number> = { entity_table: entityTable, limit };
+      const params: Record<string, string | number> = { memory_table: memoryTable, limit };
       if (instanceName) params.instance_name = instanceName;
       const response = await apiClient.get<{ entities: LakebaseEntity[]; relationships: LakebaseRelationship[] }>(
         '/memory-backend/lakebase/entity-data',

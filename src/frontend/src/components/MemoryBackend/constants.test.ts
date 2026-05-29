@@ -86,16 +86,17 @@ describe('EMBEDDING_MODELS', () => {
 });
 
 describe('INDEX_DESCRIPTIONS', () => {
-  const expectedKeys = ['short_term', 'long_term', 'entity', 'document'] as const;
+  // CrewAI 1.10+ unified memory: one "memory" index plus the document index.
+  const expectedKeys = ['memory', 'document'] as const;
 
-  it('should have all 4 index type keys', () => {
+  it('should have all 2 index type keys', () => {
     expectedKeys.forEach((key) => {
       expect(INDEX_DESCRIPTIONS).toHaveProperty(key);
     });
   });
 
-  it('should have exactly 4 keys', () => {
-    expect(Object.keys(INDEX_DESCRIPTIONS)).toHaveLength(4);
+  it('should have exactly 2 keys', () => {
+    expect(Object.keys(INDEX_DESCRIPTIONS)).toHaveLength(2);
   });
 
   expectedKeys.forEach((key) => {

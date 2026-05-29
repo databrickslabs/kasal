@@ -566,19 +566,14 @@ class DatabricksVectorIndexRepository:
                         # Index doesn't exist, create it instead
                         logger.info(f"Index {index_name} not found, creating new index")
                         
-                        # Determine index type from name if not provided
+                        # Determine index type from name if not provided.
+                        # CrewAI 1.10+ uses a single unified memory index;
+                        # "document" is the separate knowledge-search index.
                         if not index_type:
-                            if "short_term" in index_name or "short-term" in index_name:
-                                index_type = "short_term"
-                            elif "long_term" in index_name or "long-term" in index_name:
-                                index_type = "long_term"
-                            elif "entity" in index_name:
-                                index_type = "entity"
-                            elif "document" in index_name:
+                            if "document" in index_name:
                                 index_type = "document"
                             else:
-                                # Default to short_term if we can't determine
-                                index_type = "short_term"
+                                index_type = "unified"
                         
                         # Get schema from centralized definition
                         from src.schemas.databricks_index_schemas import DatabricksIndexSchemas

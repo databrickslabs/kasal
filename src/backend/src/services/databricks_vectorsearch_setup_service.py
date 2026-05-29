@@ -124,11 +124,10 @@ class DatabricksVectorSearchSetupService:
             # Indexes can be created while endpoints are provisioning, but the backing tables
             # might take a moment to be created. We'll retry if we get "table does not exist" errors.
             
-            # Step 3: Create all memory indexes
+            # Step 3: Create the unified memory index. CrewAI 1.10+ uses a
+            # single index with UNIFIED_SCHEMA for all memory records.
             index_configs = [
-                ("short_term", f"short_term_memory_{unique_id}", memory_endpoint_name),
-                ("long_term", f"long_term_memory_{unique_id}", memory_endpoint_name),
-                ("entity", f"entity_memory_{unique_id}", memory_endpoint_name),
+                ("unified", f"crew_memory_{unique_id}", memory_endpoint_name),
             ]
             
             # Add document index if document endpoint was created successfully
@@ -214,14 +213,12 @@ class DatabricksVectorSearchSetupService:
             config = DatabricksMemoryConfig(
                 endpoint_name=memory_endpoint_name,
                 document_endpoint_name=doc_endpoint_name if "error" not in results["endpoints"]["document"] else None,
-                short_term_index=results["indexes"].get("short_term", {}).get("name", ""),
-                long_term_index=results["indexes"].get("long_term", {}).get("name", ""),
-                entity_index=results["indexes"].get("entity", {}).get("name", ""),
+                memory_index=results["indexes"].get("unified", {}).get("name", ""),
                 document_index=results["indexes"].get("document", {}).get("name", "") if "document" in results["indexes"] else None,
                 workspace_url=workspace_url,
                 embedding_dimension=embedding_dimension,
                 catalog=catalog,
-                schema=schema
+                schema=schema,
             )
             
             results["config"] = config.model_dump()
@@ -265,9 +262,6 @@ class DatabricksVectorSearchSetupService:
                         "description": "Auto-generated Databricks Vector Search configuration",
                         "backend_type": MemoryBackendType.DATABRICKS,
                         "databricks_config": config,
-                        "enable_short_term": True,
-                        "enable_long_term": True,
-                        "enable_entity": True
                     }
                     
                     # Create MemoryBackendCreate schema instance

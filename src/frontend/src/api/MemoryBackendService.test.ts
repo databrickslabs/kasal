@@ -620,10 +620,10 @@ describe('MemoryBackendService', () => {
       };
       (apiClient.get as Mock).mockResolvedValue({ data: mockResponse });
 
-      const result = await MemoryBackendService.getLakebaseEntityData('crew_entity_memory', 200, 'inst1');
+      const result = await MemoryBackendService.getLakebaseEntityData('crew_memory', 200, 'inst1');
 
       expect(apiClient.get).toHaveBeenCalledWith('/memory-backend/lakebase/entity-data', {
-        params: { entity_table: 'crew_entity_memory', limit: 200, instance_name: 'inst1' },
+        params: { memory_table: 'crew_memory', limit: 200, instance_name: 'inst1' },
       });
       expect(result).toEqual(mockResponse);
     });
@@ -635,7 +635,7 @@ describe('MemoryBackendService', () => {
       await MemoryBackendService.getLakebaseEntityData();
 
       expect(apiClient.get).toHaveBeenCalledWith('/memory-backend/lakebase/entity-data', {
-        params: { entity_table: 'crew_entity_memory', limit: 200 },
+        params: { memory_table: 'crew_memory', limit: 200 },
       });
     });
 

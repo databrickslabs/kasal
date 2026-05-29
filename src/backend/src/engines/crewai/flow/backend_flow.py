@@ -553,11 +553,17 @@ class BackendFlow:
             logger.info("STARTING FLOW EXECUTION - Looking for start methods")
             logger.info("="*100)
 
-            # Get all methods of the flow instance that are decorated with @start
+            # Get all methods of the flow instance that are decorated with @start.
+            # Skip dunders BEFORE calling getattr: pydantic v2 exposes
+            # ``__signature__`` as a class-only descriptor on model instances, so
+            # ``getattr(instance, '__signature__')`` raises AttributeError. The
+            # ``starting_point_*`` methods we care about are never dunders.
             start_methods = []
             all_methods = []
             for attr_name in dir(crewai_flow):
-                if callable(getattr(crewai_flow, attr_name)):
+                if attr_name.startswith('_'):
+                    continue
+                if callable(getattr(crewai_flow, attr_name, None)):
                     all_methods.append(attr_name)
                     if attr_name.startswith('starting_point_'):
                         start_methods.append(attr_name)

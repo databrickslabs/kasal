@@ -332,157 +332,113 @@ describe('useSSE', () => {
     });
   });
 
+  // The hook delegates reconnection to the browser's native EventSource (it does
+  // NOT manually create new connections or use timer-based backoff). It only
+  // tracks consecutive errors and gives up — closing the connection — once
+  // maxReconnectAttempts is exceeded.
   describe('Reconnection Logic', () => {
-    it('attempts reconnection on error when autoReconnect is true', async () => {
+    it('does not manually recreate the EventSource on a transient error', async () => {
       const onMessage = vi.fn();
 
       renderHook(() =>
-        useSSE('/test/endpoint', onMessage, {
-          autoReconnect: true,
-          maxReconnectAttempts: 3,
-          reconnectDelay: 1000,
-        })
+        useSSE('/test/endpoint', onMessage, { maxReconnectAttempts: 3 })
       );
 
       await vi.advanceTimersByTimeAsync(100);
-
-      // First connection
       expect(mockEventSourceInstances.length).toBe(1);
 
-      // Simulate error
+      // A single transient error must not spin up a new EventSource — native
+      // reconnection on the existing instance handles that.
       act(() => {
         getLatestMockInstance()!.simulateError();
       });
-
-      // Wait for reconnection delay
-      await vi.advanceTimersByTimeAsync(1000);
-
-      // Should have attempted reconnection
-      expect(mockEventSourceInstances.length).toBe(2);
-    });
-
-    it('does not reconnect when autoReconnect is false', async () => {
-      const onMessage = vi.fn();
-
-      renderHook(() =>
-        useSSE('/test/endpoint', onMessage, { autoReconnect: false })
-      );
-
-      await vi.advanceTimersByTimeAsync(100);
-
-      expect(mockEventSourceInstances.length).toBe(1);
-
-      // Simulate error
-      act(() => {
-        getLatestMockInstance()!.simulateError();
-      });
-
       await vi.advanceTimersByTimeAsync(5000);
 
-      // Should not have reconnected
       expect(mockEventSourceInstances.length).toBe(1);
     });
 
-    it('uses exponential backoff for reconnection', async () => {
+    it('does not close the connection before max attempts is reached', async () => {
       const onMessage = vi.fn();
 
       renderHook(() =>
-        useSSE('/test/endpoint', onMessage, {
-          autoReconnect: true,
-          maxReconnectAttempts: 5,
-          reconnectDelay: 1000,
-        })
+        useSSE('/test/endpoint', onMessage, { maxReconnectAttempts: 3 })
       );
 
       await vi.advanceTimersByTimeAsync(100);
+      const instance = getLatestMockInstance()!;
+      const closeSpy = vi.spyOn(instance, 'close');
 
-      // First error - should reconnect after 1000ms
+      // Two consecutive errors (< maxReconnectAttempts of 3) — should keep trying.
       act(() => {
-        getLatestMockInstance()!.simulateError();
+        instance.simulateError();
+        instance.simulateError();
       });
-      await vi.advanceTimersByTimeAsync(1000);
-      expect(mockEventSourceInstances.length).toBe(2);
 
-      // Second error - should reconnect after 2000ms (exponential)
-      act(() => {
-        getLatestMockInstance()!.simulateError();
-      });
-      await vi.advanceTimersByTimeAsync(2000);
-      expect(mockEventSourceInstances.length).toBe(3);
+      expect(closeSpy).not.toHaveBeenCalled();
     });
 
-    it('stops reconnecting after max attempts', async () => {
+    it('gives up and closes the connection after max consecutive errors', async () => {
       const onMessage = vi.fn();
       const onError = vi.fn();
 
-      // Create a custom mock that doesn't auto-succeed to properly test max attempts
-      // The hook resets the attempt counter on successful connection, so we need
-      // to simulate continuous failures.
-
-      // maxReconnectAttempts: 2 means after 2 failed reconnects, stop trying
       renderHook(() =>
         useSSE('/test/endpoint', onMessage, {
-          autoReconnect: true,
           maxReconnectAttempts: 2,
-          reconnectDelay: 100,
           onError,
         })
       );
 
-      await vi.advanceTimersByTimeAsync(50);
+      await vi.advanceTimersByTimeAsync(100);
+      const instance = getLatestMockInstance()!;
+      const closeSpy = vi.spyOn(instance, 'close');
 
-      // Initial connection succeeds (counter at 0)
-      expect(mockEventSourceInstances.length).toBe(1);
-
-      // First error - triggers reconnect attempt, counter = 1
+      // Two consecutive errors reaches maxReconnectAttempts → give up.
       act(() => {
-        getLatestMockInstance()!.simulateError();
+        instance.simulateError();
+        instance.simulateError();
       });
-      await vi.advanceTimersByTimeAsync(200);
-      // Reconnect happened, connection succeeded, counter reset to 0
-      expect(mockEventSourceInstances.length).toBe(2);
 
-      // Verify that after successful connection, errors continue to trigger reconnects
-      // because the counter was reset
-      act(() => {
-        getLatestMockInstance()!.simulateError();
-      });
-      await vi.advanceTimersByTimeAsync(200);
-      expect(mockEventSourceInstances.length).toBe(3);
-
-      // This is correct behavior: reconnects happen because each successful
-      // connection resets the counter. The maxReconnectAttempts only limits
-      // consecutive failures without a successful connection.
+      expect(closeSpy).toHaveBeenCalled();
+      // The final, fatal error is reported to the consumer.
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({ isFatal: true })
+      );
     });
 
-    it('resets reconnect counter on successful connection', async () => {
+    it('resets the consecutive-error counter on successful (re)connection', async () => {
       const onMessage = vi.fn();
+      const onError = vi.fn();
 
       renderHook(() =>
         useSSE('/test/endpoint', onMessage, {
-          autoReconnect: true,
-          maxReconnectAttempts: 3,
-          reconnectDelay: 100,
+          maxReconnectAttempts: 2,
+          onError,
         })
       );
 
-      await vi.advanceTimersByTimeAsync(50);
+      await vi.advanceTimersByTimeAsync(100);
+      const instance = getLatestMockInstance()!;
 
-      // First error and reconnect
+      // One error (counter = 1, below the limit of 2).
       act(() => {
-        getLatestMockInstance()!.simulateError();
+        instance.simulateError();
       });
-      await vi.advanceTimersByTimeAsync(200);
 
-      // After successful reconnection, counter should reset
-      // Error again - should allow full reconnect attempts
+      // Native EventSource recovers: fire onopen again to reset the counter.
       act(() => {
-        getLatestMockInstance()!.simulateError();
+        instance.readyState = MockEventSource.OPEN;
+        instance.onopen?.(new Event('open'));
       });
-      await vi.advanceTimersByTimeAsync(200);
 
-      // Should continue reconnecting (counter was reset)
-      expect(mockEventSourceInstances.length).toBeGreaterThanOrEqual(3);
+      // A single subsequent error must not be treated as fatal, because the
+      // counter was reset on the successful reconnection.
+      act(() => {
+        instance.simulateError();
+      });
+
+      expect(onError).not.toHaveBeenCalledWith(
+        expect.objectContaining({ isFatal: true })
+      );
     });
   });
 

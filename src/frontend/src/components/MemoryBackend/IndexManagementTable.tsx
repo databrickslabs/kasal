@@ -37,7 +37,7 @@ interface IndexManagementTableProps {
   endpointName?: string;
   endpointType: 'memory' | 'document';
   indexes: Array<{
-    type: 'short_term' | 'long_term' | 'entity' | 'document';
+    type: 'memory' | 'document';
     name?: string;
   }>;
   indexInfoMap: Record<string, IndexInfoState>;
@@ -46,7 +46,6 @@ interface IndexManagementTableProps {
   onRefresh?: () => void;
   onEmpty: (indexType: string) => void | Promise<void>;
   onDelete: (indexType: string) => void | Promise<void>;
-  onVisualize?: (indexType: string, indexName: string) => void;
   onViewDocuments?: (indexType: string, indexName: string) => void;
   showEndpointLink?: boolean;
 }
@@ -64,7 +63,6 @@ export const IndexManagementTable: React.FC<IndexManagementTableProps> = ({
   onRefresh,
   onEmpty,
   onDelete,
-  onVisualize,
   onViewDocuments,
   showEndpointLink = true,
 }) => {
@@ -213,18 +211,7 @@ export const IndexManagementTable: React.FC<IndexManagementTableProps> = ({
                         <Box sx={{ width: 32 }} />
                       )}
                       
-                      {/* Type-specific button */}
-                      {type === 'entity' && onVisualize ? (
-                        <Tooltip title="Visualize Entity Graph">
-                          <IconButton
-                            size="small"
-                            onClick={() => onVisualize(type, name)}
-                            disabled={isSettingUp}
-                          >
-                            <GraphIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      ) : type === 'document' && onRefresh ? (
+                      {type === 'document' && onRefresh ? (
                         <Tooltip title="Re-seed Documentation">
                           <IconButton
                             size="small"

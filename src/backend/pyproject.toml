@@ -47,9 +47,9 @@ dependencies = [
 
     # AI/ML
     "litellm==1.74.9",
-    "crewai[tools]>=1.9.3",  # [tools] extra installs crewai-tools package
+    "crewai[tools]>=1.14.5",  # Unified cognitive memory system
     "langchain",
-    "mcp>=1.23.1,<1.24.0",  # Required by crewai>=1.9.3
+    "mcp>=1.26.0,<1.27.0",  # Required by crewai 1.14.5
     "mcpadapt",
 
     # Observability
@@ -57,13 +57,13 @@ dependencies = [
     "opentelemetry-sdk>=1.27.0,<2.0.0",
     "opentelemetry-api>=1.27.0,<2.0.0",
     "opentelemetry-exporter-otlp-proto-http>=1.27.0,<2.0.0",
-    "openinference-instrumentation-crewai>=0.1.0,<1.0.0",
+    "openinference-instrumentation-crewai>=1.1.3,<2.0.0",
 
     # Utils
     "tenacity>=8.2.3",
     "croniter",
     "psutil",
-    "rich>=13.7.0,<14.0.0",
+    "rich>=14.2.0",
     "redis>=5.0.0",
     "aiofiles>=23.0.0",
 

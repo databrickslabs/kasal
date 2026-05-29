@@ -14,8 +14,6 @@ import { MemoryBackendType } from '../../types/memoryBackend';
 const {
   mockApiClient,
   mockUpdateConfig,
-  mockOpenVisualization,
-  mockCloseVisualization,
   mockDVSService,
   mockMBService,
   mockValidateIndex,
@@ -28,8 +26,6 @@ const {
     delete: vi.fn().mockResolvedValue({ data: {} }),
   },
   mockUpdateConfig: vi.fn(),
-  mockOpenVisualization: vi.fn(),
-  mockCloseVisualization: vi.fn(),
   mockDVSService: {
     performOneClickSetup: vi.fn().mockResolvedValue({ success: true }),
     deleteAllConfigurations: vi.fn().mockResolvedValue(undefined),
@@ -58,10 +54,6 @@ vi.mock('../../config/api/ApiConfig', () => ({
 vi.mock('../../store/memoryBackend', () => ({
   useMemoryBackendStore: () => ({
     updateConfig: mockUpdateConfig,
-    visualizationOpen: false,
-    visualizationIndex: null,
-    openVisualization: mockOpenVisualization,
-    closeVisualization: mockCloseVisualization,
   }),
 }));
 
@@ -131,14 +123,6 @@ vi.mock('./EndpointsDisplay', () => ({
   },
 }));
 
-vi.mock('./EntityGraphVisualization', () => ({
-  __esModule: true,
-  default: (props: Record<string, unknown>) => {
-    capturedProps.current[`EntityGraphVisualization_${props.dataSource || 'databricks'}`] = props;
-    return <div data-testid={`entity-graph-visualization-${props.dataSource || 'databricks'}`} data-open={String(props.open)} />;
-  },
-}));
-
 vi.mock('./IndexDocumentsDialog', () => ({
   IndexDocumentsDialog: (props: Record<string, unknown>) => {
     capturedProps.current.IndexDocumentsDialog = props;
@@ -146,11 +130,10 @@ vi.mock('./IndexDocumentsDialog', () => ({
   },
 }));
 
-vi.mock('./LakebaseDocumentsDialog', () => ({
-  __esModule: true,
-  default: (props: Record<string, unknown>) => {
-    capturedProps.current.LakebaseDocumentsDialog = props;
-    return <div data-testid="lakebase-documents-dialog" data-open={String(props.open)} />;
+vi.mock('./MemoryRecordsBrowser', () => ({
+  MemoryRecordsBrowser: (props: Record<string, unknown>) => {
+    capturedProps.current.MemoryRecordsBrowser = props;
+    return <div data-testid="memory-records-browser" data-open={String(props.open)} />;
   },
 }));
 
@@ -196,7 +179,13 @@ function paginatedInstances(
   };
 }
 
-/** Mock responses for a full Databricks config scenario */
+/**
+ * Mock responses for a full Databricks config scenario.
+ *
+ * CrewAI 1.10+ unified cognitive memory: a single `memory_index` replaces the
+ * legacy short_term/long_term/entity indexes. The saved config maps
+ * `memory_index` → `indexes.unified` and `document_index` → `indexes.document`.
+ */
 function setupDatabricksMocks(overrides?: { verifyMissing?: string[]; indexInfoError?: boolean }) {
   mockApiClient.get.mockImplementation((url: string) => {
     if (url === '/memory-backend/configs/default') {
@@ -204,16 +193,13 @@ function setupDatabricksMocks(overrides?: { verifyMissing?: string[]; indexInfoE
         data: {
           id: 'db-123',
           backend_type: 'databricks',
-          enable_relationship_retrieval: true,
           databricks_config: {
             workspace_url: 'https://test.databricks.com',
             catalog: 'ml',
             schema: 'agents',
             endpoint_name: 'mem-ep',
             document_endpoint_name: 'doc-ep',
-            short_term_index: 'ml.agents.st',
-            long_term_index: 'ml.agents.lt',
-            entity_index: 'ml.agents.ent',
+            memory_index: 'ml.agents.mem',
             document_index: 'ml.agents.doc',
           },
         },
@@ -228,7 +214,7 @@ function setupDatabricksMocks(overrides?: { verifyMissing?: string[]; indexInfoE
       if (!missing.includes('mem-ep')) endpoints['mem-ep'] = { name: 'mem-ep', state: 'ONLINE', ready: true };
       if (!missing.includes('doc-ep')) endpoints['doc-ep'] = { name: 'doc-ep', state: 'ONLINE', ready: true };
       const indexes: Record<string, unknown> = {};
-      for (const idx of ['ml.agents.st', 'ml.agents.lt', 'ml.agents.ent', 'ml.agents.doc']) {
+      for (const idx of ['ml.agents.mem', 'ml.agents.doc']) {
         if (!missing.includes(idx)) indexes[idx] = { name: idx, status: 'ONLINE' };
       }
       return Promise.resolve({ data: { success: true, resources: { endpoints, indexes } } });
@@ -255,13 +241,13 @@ function setupLakebaseMocks(opts?: { tablesInitialized?: boolean; withStats?: bo
   const lakebaseConfig: Record<string, unknown> = {
     instance_name: 'my-instance',
     embedding_dimension: 1024,
+    memory_table: 'crew_memory',
     tables_initialized: opts?.tablesInitialized ?? false,
   };
   if (opts?.withStats) {
+    // Unified cognitive memory uses a single `crew_memory` table.
     mockMBService.getLakebaseTableStats.mockResolvedValue({
-      short_term: { table_name: 'kasal_short_term', exists: true, row_count: 5 },
-      long_term: { table_name: 'kasal_long_term', exists: true, row_count: 3 },
-      entity: { table_name: 'kasal_entity', exists: true, row_count: 10 },
+      memory: { table_name: 'crew_memory', exists: true, row_count: 18 },
     });
   }
   mockApiClient.get.mockImplementation((url: string) => {
@@ -354,18 +340,31 @@ describe('DatabricksOneClickSetup', () => {
     expect(screen.queryByText('Databricks Vector Search')).not.toBeInTheDocument();
   });
 
-  it('shows info alert about local storage when mode is disabled', async () => {
+  it('shows info alert about local LanceDB storage when mode is disabled', async () => {
     await act(async () => renderComponent());
     await waitForLoaded();
-    expect(screen.getByText(/Uses local storage with ChromaDB for vector search/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/CrewAI unified cognitive memory is stored locally in LanceDB/),
+    ).toBeInTheDocument();
   });
 
-  it('renders SetupResultDialog and EntityGraphVisualization in closed state', async () => {
+  it('renders SetupResultDialog and MemoryRecordsBrowser in closed state', async () => {
     await act(async () => renderComponent());
     await waitForLoaded();
     expect(screen.getByTestId('setup-result-dialog')).toHaveAttribute('data-open', 'false');
-    expect(screen.getByTestId('entity-graph-visualization-databricks')).toHaveAttribute('data-open', 'false');
-    expect(screen.getByTestId('entity-graph-visualization-lakebase')).toHaveAttribute('data-open', 'false');
+    expect(screen.getByTestId('memory-records-browser')).toHaveAttribute('data-open', 'false');
+  });
+
+  it('opens the MemoryRecordsBrowser from the local-mode Browse Memory button', async () => {
+    await act(async () => renderComponent());
+    await waitForLoaded();
+
+    const browseBtn = screen.getByRole('button', { name: /Browse Memory/i });
+    await act(async () => fireEvent.click(browseBtn));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('memory-records-browser')).toHaveAttribute('data-open', 'true');
+    });
   });
 
   it('calls apiClient.get for configs/default and databricks/environment on mount', async () => {
@@ -409,7 +408,7 @@ describe('DatabricksOneClickSetup', () => {
 
       await act(async () => renderComponent());
       await waitForLoaded();
-      expect(screen.getByText(/Uses local storage with ChromaDB/)).toBeInTheDocument();
+      expect(screen.getByText(/CrewAI unified cognitive memory is stored locally in LanceDB/)).toBeInTheDocument();
     });
 
     it('handles 404 error with fallback to all configs that have data', async () => {
@@ -499,7 +498,7 @@ describe('DatabricksOneClickSetup', () => {
 
       await act(async () => renderComponent());
       await waitForLoaded();
-      expect(screen.getByText(/Uses local storage with ChromaDB/)).toBeInTheDocument();
+      expect(screen.getByText(/CrewAI unified cognitive memory is stored locally in LanceDB/)).toBeInTheDocument();
     });
 
     it('detectWorkspaceUrl handles error gracefully', async () => {
@@ -532,9 +531,6 @@ describe('DatabricksOneClickSetup', () => {
       await waitFor(() => {
         expect(mockUpdateConfig).toHaveBeenCalledWith({
           backend_type: MemoryBackendType.DEFAULT,
-          enable_short_term: false,
-          enable_long_term: false,
-          enable_entity: false,
         });
       });
       expect(mockDVSService.switchToDisabledMode).toHaveBeenCalled();
@@ -858,6 +854,23 @@ describe('DatabricksOneClickSetup', () => {
       });
     });
 
+    it('Initialize Tables passes the unified memory_table name', async () => {
+      setupLakebaseMocks();
+      mockApiClient.post.mockResolvedValue({ data: { backend_id: 'lb-new' } });
+
+      await act(async () => renderComponent());
+      await waitForLoaded();
+
+      const initBtn = screen.getByRole('button', { name: /Initialize Tables/i });
+      await act(async () => fireEvent.click(initBtn));
+
+      await waitFor(() => {
+        expect(mockMBService.initializeLakebaseTables).toHaveBeenCalledWith(
+          expect.objectContaining({ memory_table: 'crew_memory' }),
+        );
+      });
+    });
+
     it('Initialize Tables shows error on failure', async () => {
       setupLakebaseMocks();
       mockMBService.initializeLakebaseTables.mockRejectedValueOnce(new Error('fail'));
@@ -906,7 +919,7 @@ describe('DatabricksOneClickSetup', () => {
       const initBtn = screen.getByRole('button', { name: /Initialize Tables/i });
       await act(async () => fireEvent.click(initBtn));
 
-      // The save error is logged but the final status from result.message overwrites it
+      // The save error is logged
       await waitFor(() => {
         expect(consoleSpy).toHaveBeenCalledWith('Failed to save Lakebase config:', expect.any(Error));
       });
@@ -932,6 +945,26 @@ describe('DatabricksOneClickSetup', () => {
       await act(async () => renderComponent());
       await waitForLoaded();
       expect(screen.getByText(/Databricks App Setup/)).toBeInTheDocument();
+    });
+
+    it('opens the MemoryRecordsBrowser from the lakebase Browse Memory button', async () => {
+      setupLakebaseMocks({ tablesInitialized: true, withStats: true });
+      await act(async () => renderComponent());
+      await waitForLoaded();
+
+      // Both the lakebase Memory Tables section and the (collapsed-but-mounted)
+      // local-mode alert render a "Browse Memory" button; either opens the
+      // shared MemoryRecordsBrowser. Click the first one.
+      const browseBtns = await waitFor(() => {
+        const btns = screen.getAllByRole('button', { name: /Browse Memory/i });
+        expect(btns.length).toBeGreaterThanOrEqual(1);
+        return btns;
+      });
+      await act(async () => fireEvent.click(browseBtns[0]));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('memory-records-browser')).toHaveAttribute('data-open', 'true');
+      });
     });
   });
 
@@ -1038,7 +1071,7 @@ describe('DatabricksOneClickSetup', () => {
   // =======================================================================
 
   describe('Lakebase Table Stats', () => {
-    it('displays table stats with Ready/Missing chips and row counts', async () => {
+    it('displays unified memory table stats with Ready chip and row count', async () => {
       setupLakebaseMocks({ tablesInitialized: true, withStats: true });
       await act(async () => renderComponent());
       await waitForLoaded();
@@ -1050,20 +1083,18 @@ describe('DatabricksOneClickSetup', () => {
 
       await waitFor(() => {
         expect(screen.getAllByText('Ready').length).toBeGreaterThanOrEqual(1);
-        expect(screen.getByText('kasal_short_term')).toBeInTheDocument();
-        expect(screen.getByText('kasal_long_term')).toBeInTheDocument();
-        expect(screen.getByText('kasal_entity')).toBeInTheDocument();
+        expect(screen.getByText('crew_memory')).toBeInTheDocument();
       });
     });
 
     it('shows Missing chip for non-existent tables', async () => {
       mockMBService.getLakebaseTableStats.mockResolvedValue({
-        short_term: { table_name: 'kasal_short_term', exists: false, row_count: 0 },
+        memory: { table_name: 'crew_memory', exists: false, row_count: 0 },
       });
       mockApiClient.get.mockImplementation((url: string) => {
         if (url === '/memory-backend/configs/default') {
           return Promise.resolve({
-            data: { id: 'lb-1', backend_type: 'lakebase', lakebase_config: { instance_name: 'inst', embedding_dimension: 1024, tables_initialized: true } },
+            data: { id: 'lb-1', backend_type: 'lakebase', lakebase_config: { instance_name: 'inst', embedding_dimension: 1024, memory_table: 'crew_memory', tables_initialized: true } },
           });
         }
         if (url === '/databricks/environment') return Promise.resolve({ data: { databricks_host: 'https://test.databricks.com' } });
@@ -1079,68 +1110,11 @@ describe('DatabricksOneClickSetup', () => {
       });
     });
 
-    it('shows View Data and Visualize Graph buttons for tables with data', async () => {
-      setupLakebaseMocks({ tablesInitialized: true, withStats: true });
-      await act(async () => renderComponent());
-      await waitForLoaded();
-
-      await waitFor(() => {
-        // View Data buttons (one for each table type with data)
-        const visibilityIcons = document.querySelectorAll('[data-testid="VisibilityIcon"]');
-        expect(visibilityIcons.length).toBeGreaterThanOrEqual(1);
-      });
-
-      // Entity type should have Visualize Graph button
-      await waitFor(() => {
-        const graphIcons = document.querySelectorAll('[data-testid="AccountTreeIcon"]');
-        expect(graphIcons.length).toBeGreaterThanOrEqual(1);
-      });
-    });
-
-    it('opens Lakebase Documents dialog when View Data is clicked', async () => {
-      setupLakebaseMocks({ tablesInitialized: true, withStats: true });
-      await act(async () => renderComponent());
-      await waitForLoaded();
-
-      await waitFor(() => {
-        const visibilityIcons = document.querySelectorAll('[data-testid="VisibilityIcon"]');
-        expect(visibilityIcons.length).toBeGreaterThanOrEqual(1);
-      });
-
-      const viewBtns = document.querySelectorAll('[data-testid="VisibilityIcon"]');
-      const firstViewBtn = viewBtns[0]?.closest('button');
-      if (firstViewBtn) {
-        await act(async () => fireEvent.click(firstViewBtn));
-        await waitFor(() => {
-          expect(screen.getByTestId('lakebase-documents-dialog')).toHaveAttribute('data-open', 'true');
-        });
-      }
-    });
-
-    it('opens entity graph visualization when Visualize Graph is clicked', async () => {
-      setupLakebaseMocks({ tablesInitialized: true, withStats: true });
-      await act(async () => renderComponent());
-      await waitForLoaded();
-
-      await waitFor(() => {
-        const graphIcons = document.querySelectorAll('[data-testid="AccountTreeIcon"]');
-        expect(graphIcons.length).toBeGreaterThanOrEqual(1);
-      });
-
-      const graphBtn = document.querySelector('[data-testid="AccountTreeIcon"]')?.closest('button');
-      if (graphBtn) {
-        await act(async () => fireEvent.click(graphBtn));
-        await waitFor(() => {
-          expect(screen.getByTestId('entity-graph-visualization-lakebase')).toHaveAttribute('data-open', 'true');
-        });
-      }
-    });
-
     it('shows text fallback when tables_initialized but no stats loaded', async () => {
       mockApiClient.get.mockImplementation((url: string) => {
         if (url === '/memory-backend/configs/default') {
           return Promise.resolve({
-            data: { id: 'lb-1', backend_type: 'lakebase', lakebase_config: { instance_name: 'inst', embedding_dimension: 1024, tables_initialized: true } },
+            data: { id: 'lb-1', backend_type: 'lakebase', lakebase_config: { instance_name: 'inst', embedding_dimension: 1024, memory_table: 'crew_memory', tables_initialized: true } },
           });
         }
         if (url === '/databricks/environment') return Promise.resolve({ data: { databricks_host: 'https://test.databricks.com' } });
@@ -1160,6 +1134,12 @@ describe('DatabricksOneClickSetup', () => {
 
   // =======================================================================
   // Databricks Config Display
+  //
+  // CrewAI 1.10+ collapses the per-tier index tables into a single
+  // "Unified Cognitive Memory Index" table plus a "Knowledge Base" table.
+  // The Databricks Vector Search UI section itself is currently behind a
+  // disabled Collapse, but ConfigurationDisplay/children still render when a
+  // saved databricks config carries a workspace_url.
   // =======================================================================
 
   describe('Databricks Config Display', () => {
@@ -1193,7 +1173,7 @@ describe('DatabricksOneClickSetup', () => {
               id: 'db-1', backend_type: 'databricks',
               databricks_config: {
                 workspace_url: 'https://test.databricks.com', endpoint_name: 'ep1',
-                short_term_index: 'ml.st',
+                memory_index: 'ml.mem',
               },
             },
           });
@@ -1212,7 +1192,7 @@ describe('DatabricksOneClickSetup', () => {
     });
 
     it('removes missing endpoints/indexes from config after verify', async () => {
-      setupDatabricksMocks({ verifyMissing: ['mem-ep', 'ml.agents.st'] });
+      setupDatabricksMocks({ verifyMissing: ['mem-ep', 'ml.agents.mem'] });
       mockApiClient.put.mockResolvedValue({ data: {} });
 
       await act(async () => renderComponent());
@@ -1244,14 +1224,14 @@ describe('DatabricksOneClickSetup', () => {
               id: 'db-1', backend_type: 'databricks',
               databricks_config: {
                 workspace_url: 'https://test.databricks.com',
-                endpoint_name: 'ep1', short_term_index: 'ml.st',
+                endpoint_name: 'ep1', memory_index: 'ml.mem',
               },
             },
           });
         }
         if (url === '/databricks/environment') return Promise.resolve({ data: { databricks_host: 'https://test.databricks.com' } });
         if (url === '/memory-backend/databricks/verify-resources') {
-          return Promise.resolve({ data: { success: true, resources: { endpoints: { ep1: { name: 'ep1', state: 'ONLINE', ready: true } }, indexes: { 'ml.st': { name: 'ml.st' } } } } });
+          return Promise.resolve({ data: { success: true, resources: { endpoints: { ep1: { name: 'ep1', state: 'ONLINE', ready: true } }, indexes: { 'ml.mem': { name: 'ml.mem' } } } } });
         }
         if (url === '/memory-backend/databricks/index-info') return Promise.reject(makeAxios404());
         if (url === '/database-management/lakebase/instances') return Promise.resolve(paginatedInstances([]));
@@ -1262,43 +1242,29 @@ describe('DatabricksOneClickSetup', () => {
       await waitForLoaded();
     });
 
-    it('shows Advanced Settings section inside saved config', async () => {
+    it('renders the Unified Cognitive Memory Index and Knowledge Base tables', async () => {
       setupDatabricksMocks();
       await act(async () => renderComponent());
       await waitForLoaded();
 
       await waitFor(() => {
-        expect(screen.getByText('Advanced Settings')).toBeInTheDocument();
-      });
-    });
-
-    it('toggles advanced settings expansion', async () => {
-      setupDatabricksMocks();
-      await act(async () => renderComponent());
-      await waitForLoaded();
-
-      const advancedBtn = screen.getByText('Advanced Settings').closest('[role]') || screen.getByText('Advanced Settings').parentElement;
-      if (advancedBtn) {
-        await act(async () => fireEvent.click(advancedBtn));
-      }
-    });
-
-    it('renders relationship retrieval switch', async () => {
-      setupDatabricksMocks();
-      await act(async () => renderComponent());
-      await waitForLoaded();
-
-      await waitFor(() => {
-        expect(screen.getByText(/Enable Relationship-Based Entity Retrieval/)).toBeInTheDocument();
+        expect(capturedProps.current['IndexManagementTable_Unified Cognitive Memory Index']).toBeDefined();
+        expect(capturedProps.current['IndexManagementTable_Knowledge Base']).toBeDefined();
       });
     });
   });
 
   // =======================================================================
   // Databricks Handlers via captured props
+  //
+  // IndexManagementTable callbacks operate on the unified memory store, so the
+  // index type is now 'memory' (saved-config key 'unified') or 'document'.
   // =======================================================================
 
   describe('Databricks Handlers', () => {
+    const MEM_TABLE = 'IndexManagementTable_Unified Cognitive Memory Index';
+    const KB_TABLE = 'IndexManagementTable_Knowledge Base';
+
     beforeEach(() => {
       setupDatabricksMocks();
     });
@@ -1350,12 +1316,9 @@ describe('DatabricksOneClickSetup', () => {
       cdProps = capturedProps.current.ConfigurationDisplay;
       await act(async () => (cdProps.onSaveEdit as Function)());
 
-      // handleSaveEdit calls updateBackendConfiguration which catches the error
-      // The error message "Failed to save configuration" is set via setError
-      await waitFor(() => {
-        const alerts = screen.queryAllByText(/Failed to save configuration/);
-        expect(alerts.length).toBeGreaterThanOrEqual(0); // error may be set
-      });
+      // handleSaveEdit calls updateBackendConfiguration which catches the error,
+      // so no throw should escape and the component should remain mounted.
+      await waitFor(() => expect(screen.getByTestId('configuration-display')).toBeInTheDocument());
     });
 
     it('handleEditChange for endpoint field', async () => {
@@ -1370,15 +1333,15 @@ describe('DatabricksOneClickSetup', () => {
       await act(async () => (editProps.onEditChange as Function)('endpoints.document.name', undefined));
     });
 
-    it('handleEditChange for index field', async () => {
+    it('handleEditChange for unified index field', async () => {
       await renderAndWaitForDatabricks();
       const cdProps = capturedProps.current.ConfigurationDisplay;
       await act(async () => (cdProps.onStartEdit as Function)());
 
       await waitFor(() => expect(capturedProps.current.EditConfigurationForm).toBeDefined());
       const editProps = capturedProps.current.EditConfigurationForm;
-      await act(async () => (editProps.onEditChange as Function)('indexes.short_term.name', 'ml.agents.new_st'));
-      await act(async () => (editProps.onEditChange as Function)('indexes.long_term.name', undefined));
+      await act(async () => (editProps.onEditChange as Function)('indexes.unified.name', 'ml.agents.new_mem'));
+      await act(async () => (editProps.onEditChange as Function)('indexes.document.name', undefined));
     });
 
     it('handleDeleteEndpoint via EndpointsDisplay', async () => {
@@ -1489,10 +1452,10 @@ describe('DatabricksOneClickSetup', () => {
       await renderAndWaitForDatabricks();
 
       // Wait for IndexManagementTable to capture props
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Memory Indexes']).toBeDefined());
-      const tableProps = capturedProps.current['IndexManagementTable_Memory Indexes'];
+      await waitFor(() => expect(capturedProps.current[MEM_TABLE]).toBeDefined());
+      const tableProps = capturedProps.current[MEM_TABLE];
 
-      await act(async () => (tableProps.onDelete as Function)('short_term'));
+      await act(async () => (tableProps.onDelete as Function)('memory'));
       await waitFor(() => {
         expect(mockApiClient.delete).toHaveBeenCalledWith('/memory-backend/databricks/index', expect.anything());
       });
@@ -1502,8 +1465,8 @@ describe('DatabricksOneClickSetup', () => {
       mockApiClient.delete.mockResolvedValue({ data: { success: false, message: 'Cannot delete' } });
       await renderAndWaitForDatabricks();
 
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Memory Indexes']).toBeDefined());
-      await act(async () => (capturedProps.current['IndexManagementTable_Memory Indexes'].onDelete as Function)('short_term'));
+      await waitFor(() => expect(capturedProps.current[MEM_TABLE]).toBeDefined());
+      await act(async () => (capturedProps.current[MEM_TABLE].onDelete as Function)('memory'));
 
       await waitFor(() => expect(screen.getByText('Cannot delete')).toBeInTheDocument());
     });
@@ -1512,8 +1475,8 @@ describe('DatabricksOneClickSetup', () => {
       mockApiClient.delete.mockRejectedValueOnce(new Error('delete fail'));
       await renderAndWaitForDatabricks();
 
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Memory Indexes']).toBeDefined());
-      await act(async () => (capturedProps.current['IndexManagementTable_Memory Indexes'].onDelete as Function)('short_term'));
+      await waitFor(() => expect(capturedProps.current[MEM_TABLE]).toBeDefined());
+      await act(async () => (capturedProps.current[MEM_TABLE].onDelete as Function)('memory'));
 
       await waitFor(() => expect(screen.getByText(/Failed to delete index/)).toBeInTheDocument());
     });
@@ -1522,8 +1485,8 @@ describe('DatabricksOneClickSetup', () => {
       confirmSpy.mockReturnValueOnce(false);
       await renderAndWaitForDatabricks();
 
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Memory Indexes']).toBeDefined());
-      await act(async () => (capturedProps.current['IndexManagementTable_Memory Indexes'].onDelete as Function)('short_term'));
+      await waitFor(() => expect(capturedProps.current[MEM_TABLE]).toBeDefined());
+      await act(async () => (capturedProps.current[MEM_TABLE].onDelete as Function)('memory'));
 
       expect(mockApiClient.delete).not.toHaveBeenCalledWith('/memory-backend/databricks/index', expect.anything());
     });
@@ -1532,8 +1495,8 @@ describe('DatabricksOneClickSetup', () => {
       mockApiClient.post.mockResolvedValue({ data: { success: true, deleted_count: 5 } });
       await renderAndWaitForDatabricks();
 
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Memory Indexes']).toBeDefined());
-      await act(async () => (capturedProps.current['IndexManagementTable_Memory Indexes'].onEmpty as Function)('short_term'));
+      await waitFor(() => expect(capturedProps.current[MEM_TABLE]).toBeDefined());
+      await act(async () => (capturedProps.current[MEM_TABLE].onEmpty as Function)('memory'));
 
       await waitFor(() => {
         expect(mockApiClient.post).toHaveBeenCalledWith('/memory-backend/databricks/empty-index', expect.anything());
@@ -1545,8 +1508,8 @@ describe('DatabricksOneClickSetup', () => {
       mockApiClient.post.mockResolvedValue({ data: { success: true, message: 'created new index successfully' } });
       await renderAndWaitForDatabricks();
 
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Memory Indexes']).toBeDefined());
-      await act(async () => (capturedProps.current['IndexManagementTable_Memory Indexes'].onEmpty as Function)('short_term'));
+      await waitFor(() => expect(capturedProps.current[MEM_TABLE]).toBeDefined());
+      await act(async () => (capturedProps.current[MEM_TABLE].onEmpty as Function)('memory'));
 
       await waitFor(() => {
         expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('new one was created'));
@@ -1557,8 +1520,8 @@ describe('DatabricksOneClickSetup', () => {
       mockApiClient.post.mockResolvedValue({ data: { success: false, message: 'Failed', error: 'not supported' } });
       await renderAndWaitForDatabricks();
 
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Memory Indexes']).toBeDefined());
-      await act(async () => (capturedProps.current['IndexManagementTable_Memory Indexes'].onEmpty as Function)('short_term'));
+      await waitFor(() => expect(capturedProps.current[MEM_TABLE]).toBeDefined());
+      await act(async () => (capturedProps.current[MEM_TABLE].onEmpty as Function)('memory'));
 
       await waitFor(() => expect(screen.getByText('Failed')).toBeInTheDocument());
     });
@@ -1567,8 +1530,8 @@ describe('DatabricksOneClickSetup', () => {
       mockApiClient.post.mockRejectedValueOnce(new Error('empty fail'));
       await renderAndWaitForDatabricks();
 
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Memory Indexes']).toBeDefined());
-      await act(async () => (capturedProps.current['IndexManagementTable_Memory Indexes'].onEmpty as Function)('short_term'));
+      await waitFor(() => expect(capturedProps.current[MEM_TABLE]).toBeDefined());
+      await act(async () => (capturedProps.current[MEM_TABLE].onEmpty as Function)('memory'));
 
       await waitFor(() => expect(screen.getByText(/Failed to empty index/)).toBeInTheDocument());
     });
@@ -1577,13 +1540,13 @@ describe('DatabricksOneClickSetup', () => {
       confirmSpy.mockReturnValueOnce(false);
       await renderAndWaitForDatabricks();
 
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Memory Indexes']).toBeDefined());
-      await act(async () => (capturedProps.current['IndexManagementTable_Memory Indexes'].onEmpty as Function)('short_term'));
+      await waitFor(() => expect(capturedProps.current[MEM_TABLE]).toBeDefined());
+      await act(async () => (capturedProps.current[MEM_TABLE].onEmpty as Function)('memory'));
 
       expect(mockApiClient.post).not.toHaveBeenCalledWith('/memory-backend/databricks/empty-index', expect.anything());
     });
 
-    it('handleReseedDocumentation via IndexManagementTable', async () => {
+    it('handleReseedDocumentation via Knowledge Base table', async () => {
       mockApiClient.post.mockImplementation((url: string) => {
         if (url === '/memory-backend/databricks/empty-index') return Promise.resolve({ data: { success: true } });
         if (url === '/documentation-embeddings/seed-all') return Promise.resolve({ data: { success: true } });
@@ -1592,8 +1555,8 @@ describe('DatabricksOneClickSetup', () => {
 
       await renderAndWaitForDatabricks();
 
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Knowledge Base']).toBeDefined());
-      await act(async () => (capturedProps.current['IndexManagementTable_Knowledge Base'].onRefresh as Function)());
+      await waitFor(() => expect(capturedProps.current[KB_TABLE]).toBeDefined());
+      await act(async () => (capturedProps.current[KB_TABLE].onRefresh as Function)());
 
       await waitFor(() => {
         expect(mockApiClient.post).toHaveBeenCalledWith('/memory-backend/databricks/empty-index', expect.anything());
@@ -1605,8 +1568,8 @@ describe('DatabricksOneClickSetup', () => {
       mockApiClient.post.mockResolvedValue({ data: { success: false, message: 'Empty failed' } });
       await renderAndWaitForDatabricks();
 
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Knowledge Base']).toBeDefined());
-      await act(async () => (capturedProps.current['IndexManagementTable_Knowledge Base'].onRefresh as Function)());
+      await waitFor(() => expect(capturedProps.current[KB_TABLE]).toBeDefined());
+      await act(async () => (capturedProps.current[KB_TABLE].onRefresh as Function)());
 
       await waitFor(() => expect(screen.getByText(/Empty failed/)).toBeInTheDocument());
     });
@@ -1620,8 +1583,8 @@ describe('DatabricksOneClickSetup', () => {
 
       await renderAndWaitForDatabricks();
 
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Knowledge Base']).toBeDefined());
-      await act(async () => (capturedProps.current['IndexManagementTable_Knowledge Base'].onRefresh as Function)());
+      await waitFor(() => expect(capturedProps.current[KB_TABLE]).toBeDefined());
+      await act(async () => (capturedProps.current[KB_TABLE].onRefresh as Function)());
 
       await waitFor(() => expect(screen.getByText('Seed failed')).toBeInTheDocument());
     });
@@ -1630,8 +1593,8 @@ describe('DatabricksOneClickSetup', () => {
       mockApiClient.post.mockRejectedValue(new Error('seed error'));
       await renderAndWaitForDatabricks();
 
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Knowledge Base']).toBeDefined());
-      await act(async () => (capturedProps.current['IndexManagementTable_Knowledge Base'].onRefresh as Function)());
+      await waitFor(() => expect(capturedProps.current[KB_TABLE]).toBeDefined());
+      await act(async () => (capturedProps.current[KB_TABLE].onRefresh as Function)());
 
       await waitFor(() => expect(screen.getByText(/seed error/)).toBeInTheDocument());
     });
@@ -1643,8 +1606,8 @@ describe('DatabricksOneClickSetup', () => {
       mockApiClient.post.mockRejectedValue(axErr);
       await renderAndWaitForDatabricks();
 
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Knowledge Base']).toBeDefined());
-      await act(async () => (capturedProps.current['IndexManagementTable_Knowledge Base'].onRefresh as Function)());
+      await waitFor(() => expect(capturedProps.current[KB_TABLE]).toBeDefined());
+      await act(async () => (capturedProps.current[KB_TABLE].onRefresh as Function)());
 
       await waitFor(() => expect(screen.getByText('Server error detail')).toBeInTheDocument());
     });
@@ -1653,8 +1616,8 @@ describe('DatabricksOneClickSetup', () => {
       confirmSpy.mockReturnValueOnce(false);
       await renderAndWaitForDatabricks();
 
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Knowledge Base']).toBeDefined());
-      await act(async () => (capturedProps.current['IndexManagementTable_Knowledge Base'].onRefresh as Function)());
+      await waitFor(() => expect(capturedProps.current[KB_TABLE]).toBeDefined());
+      await act(async () => (capturedProps.current[KB_TABLE].onRefresh as Function)());
 
       expect(mockApiClient.post).not.toHaveBeenCalledWith('/memory-backend/databricks/empty-index', expect.anything());
     });
@@ -1662,44 +1625,12 @@ describe('DatabricksOneClickSetup', () => {
     it('handleViewDocuments via IndexManagementTable', async () => {
       await renderAndWaitForDatabricks();
 
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Memory Indexes']).toBeDefined());
-      await act(async () => (capturedProps.current['IndexManagementTable_Memory Indexes'].onViewDocuments as Function)('short_term', 'ml.agents.st'));
+      await waitFor(() => expect(capturedProps.current[MEM_TABLE]).toBeDefined());
+      await act(async () => (capturedProps.current[MEM_TABLE].onViewDocuments as Function)('memory', 'ml.agents.mem'));
 
       await waitFor(() => {
         expect(screen.getByTestId('index-documents-dialog')).toHaveAttribute('data-open', 'true');
       });
-    });
-
-    it('handleViewDocuments shows error when no endpoint', async () => {
-      // Setup with no endpoints
-      mockApiClient.get.mockImplementation((url: string) => {
-        if (url === '/memory-backend/configs/default') {
-          return Promise.resolve({
-            data: {
-              id: 'db-1', backend_type: 'databricks',
-              databricks_config: {
-                workspace_url: 'https://test.databricks.com',
-                short_term_index: 'ml.st',
-              },
-            },
-          });
-        }
-        if (url === '/databricks/environment') return Promise.resolve({ data: { databricks_host: 'https://test.databricks.com' } });
-        if (url === '/memory-backend/databricks/verify-resources') return Promise.resolve({ data: { success: true, resources: { endpoints: {}, indexes: {} } } });
-        if (url === '/database-management/lakebase/instances') return Promise.resolve(paginatedInstances([]));
-        return Promise.resolve({ data: {} });
-      });
-
-      await act(async () => renderComponent());
-      await waitForLoaded();
-
-      // IndexManagementTable won't render because no endpoints with indexes matched
-      // But we can trigger handleViewDocuments through the saved config path
-    });
-
-    it('updateBackendConfiguration with no backend_id returns early', async () => {
-      // This path is tested implicitly when handleSaveEdit is called with no backend_id
-      // Already covered through handleSaveEdit test
     });
 
     it('onRefresh (verifyActualResources) via ConfigurationDisplay', async () => {
@@ -1715,55 +1646,6 @@ describe('DatabricksOneClickSetup', () => {
           expect.anything(),
         );
       });
-    });
-
-    it('onVisualize calls openVisualization from IndexManagementTable', async () => {
-      await renderAndWaitForDatabricks();
-
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Memory Indexes']).toBeDefined());
-      const tableProps = capturedProps.current['IndexManagementTable_Memory Indexes'];
-
-      if (tableProps.onVisualize) {
-        await act(async () => (tableProps.onVisualize as Function)('entity', 'ml.agents.ent'));
-        expect(mockOpenVisualization).toHaveBeenCalledWith('ml.agents.ent', 'entity');
-      }
-    });
-
-    it('handleRelationshipRetrievalChange saves to backend when backend_id exists', async () => {
-      mockApiClient.put.mockResolvedValue({ data: {} });
-      await renderAndWaitForDatabricks();
-
-      // The Switch is inside two Collapse sections (both in={false} and advancedSettingsExpanded=false)
-      // RTL's getByRole won't find hidden elements by default. Use hidden: true option.
-      const switches = screen.getAllByRole('checkbox', { hidden: true });
-      // Find the relationship retrieval switch - it's loaded as checked (enable_relationship_retrieval: true)
-      const relSwitch = switches.find(s => s.closest('[class*="Switch"]'));
-      if (relSwitch) {
-        await act(async () => fireEvent.click(relSwitch));
-        await waitFor(() => {
-          expect(mockApiClient.put).toHaveBeenCalledWith(
-            expect.stringContaining('/memory-backend/configs/'),
-            expect.objectContaining({ enable_relationship_retrieval: expect.any(Boolean) }),
-          );
-        });
-      } else {
-        // Fallback: verify the component rendered with the config
-        expect(screen.getByTestId('configuration-display')).toBeInTheDocument();
-      }
-    });
-
-    it('handleRelationshipRetrievalChange handles error', async () => {
-      mockApiClient.put.mockRejectedValue(new Error('save fail'));
-      await renderAndWaitForDatabricks();
-
-      const switches = screen.getAllByRole('checkbox', { hidden: true });
-      const relSwitch = switches.find(s => s.closest('[class*="Switch"]'));
-      if (relSwitch) {
-        await act(async () => fireEvent.click(relSwitch));
-        // The error sets the error state but the error alert is inside Collapse in={false}
-        // Just verify the put was attempted
-        await waitFor(() => expect(mockApiClient.put).toHaveBeenCalled());
-      }
     });
   });
 
@@ -1784,19 +1666,8 @@ describe('DatabricksOneClickSetup', () => {
       await act(async () => renderComponent());
       await waitForLoaded();
 
-      // Trigger handleSetup via AutomaticSetupForm's captured onSetup
-      // But first we need the AutomaticSetupForm to render — it only renders inside Collapse in={false}
-      // The form renders when mode is 'databricks' and no savedConfig.workspace_url
-      // Since databricks mode is hidden, AutomaticSetupForm won't render in the DOM
-      // So we need to check if it's captured
-      // Actually it IS rendered because Collapse in={false} still renders children
-      // But only if the conditions match (!savedConfig || !savedConfig.workspace_url) && setupMode === 'auto'
-
-      // In the default case (no config), mode is 'disabled', so the Databricks section content won't match
-      // Let me verify: the Collapse in={false} renders children regardless, but inside:
-      // {(!savedConfig || !savedConfig.workspace_url) && (...)} and setupMode === 'auto'
-      // savedConfig is null (no config), so this IS true
-
+      // The Databricks auto-setup form renders (collapsed) when there is no
+      // saved workspace_url and setupMode is 'auto'. Trigger its onSetup.
       if (capturedProps.current.AutomaticSetupForm) {
         await act(async () => (capturedProps.current.AutomaticSetupForm.onSetup as Function)());
       }
@@ -1808,7 +1679,7 @@ describe('DatabricksOneClickSetup', () => {
         catalog: 'ml',
         schema: 'agents',
         endpoints: { memory: { name: 'ep1' }, document: { name: 'ep2' } },
-        indexes: { short_term: { name: 'ml.agents.st' } },
+        indexes: { unified: { name: 'ml.agents.mem' } },
       });
 
       await act(async () => renderComponent());
@@ -1851,6 +1722,9 @@ describe('DatabricksOneClickSetup', () => {
 
   // =======================================================================
   // handleManualSave
+  //
+  // Manual config now requires a single `memory_index` plus a `document_index`
+  // (the legacy short_term/long_term/entity indexes were unified).
   // =======================================================================
 
   describe('handleManualSave', () => {
@@ -1868,9 +1742,7 @@ describe('DatabricksOneClickSetup', () => {
       workspace_url: 'https://test.com',
       endpoint_name: 'ep1',
       document_endpoint_name: 'ep2',
-      short_term_index: 'ml.agents.st',
-      long_term_index: 'ml.agents.lt',
-      entity_index: 'ml.agents.ent',
+      memory_index: 'ml.agents.mem',
       document_index: 'ml.agents.doc',
       embedding_model: 'databricks-gte-large-en',
     };
@@ -1901,7 +1773,7 @@ describe('DatabricksOneClickSetup', () => {
 
       await setManualConfigAndSave({
         ...validManualConfig,
-        short_term_index: 'invalid',
+        memory_index: 'invalid',
       });
     });
 
@@ -1927,6 +1799,34 @@ describe('DatabricksOneClickSetup', () => {
         expect(mockApiClient.put).toHaveBeenCalledWith(
           '/memory-backend/configs/existing-id',
           expect.objectContaining({ backend_type: MemoryBackendType.DATABRICKS }),
+        );
+      });
+    });
+
+    it('manual save payload uses unified memory_index', async () => {
+      mockApiClient.get.mockImplementation((url: string) => {
+        if (url === '/memory-backend/configs/default') {
+          return Promise.resolve({ data: { id: 'existing-id', backend_type: 'default' } });
+        }
+        if (url === '/databricks/environment') return Promise.resolve({ data: { databricks_host: 'https://test.databricks.com' } });
+        if (url === '/memory-backend/configs') return Promise.resolve({ data: [] });
+        if (url === '/database-management/lakebase/instances') return Promise.resolve(paginatedInstances([]));
+        return Promise.resolve({ data: {} });
+      });
+      mockApiClient.put.mockResolvedValue({ data: { id: 'existing-id' } });
+
+      await act(async () => renderComponent());
+      await waitForLoaded();
+      await switchToManualMode();
+
+      await setManualConfigAndSave(validManualConfig);
+
+      await waitFor(() => {
+        expect(mockApiClient.put).toHaveBeenCalledWith(
+          '/memory-backend/configs/existing-id',
+          expect.objectContaining({
+            databricks_config: expect.objectContaining({ memory_index: 'ml.agents.mem' }),
+          }),
         );
       });
     });
@@ -2012,8 +1912,6 @@ describe('DatabricksOneClickSetup', () => {
       // Start with empty default, and /configs/default returns a config when checked inside handleManualSave
       mockApiClient.get.mockImplementation((url: string) => {
         if (url === '/memory-backend/configs/default') {
-          // First call during loadExistingConfig: empty
-          // Second call during handleManualSave: has config
           return Promise.resolve({ data: {} });
         }
         if (url === '/databricks/environment') return Promise.resolve({ data: { databricks_host: 'https://test.databricks.com' } });
@@ -2162,9 +2060,9 @@ describe('DatabricksOneClickSetup', () => {
       await waitForLoaded();
 
       // Open via handleViewDocuments
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Memory Indexes']).toBeDefined());
+      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Unified Cognitive Memory Index']).toBeDefined());
       await act(async () => {
-        (capturedProps.current['IndexManagementTable_Memory Indexes'].onViewDocuments as Function)('short_term', 'ml.agents.st');
+        (capturedProps.current['IndexManagementTable_Unified Cognitive Memory Index'].onViewDocuments as Function)('memory', 'ml.agents.mem');
       });
 
       // Close the dialog
@@ -2174,46 +2072,16 @@ describe('DatabricksOneClickSetup', () => {
       }
     });
 
-    it('LakebaseDocumentsDialog onClose closes and clears selection', async () => {
-      setupLakebaseMocks({ tablesInitialized: true, withStats: true });
+    it('MemoryRecordsBrowser onClose closes the browser', async () => {
       await act(async () => renderComponent());
       await waitForLoaded();
 
-      // Click View Data to open dialog
-      await waitFor(() => {
-        const icons = document.querySelectorAll('[data-testid="VisibilityIcon"]');
-        expect(icons.length).toBeGreaterThanOrEqual(1);
-      });
-      const viewBtn = document.querySelector('[data-testid="VisibilityIcon"]')?.closest('button');
-      if (viewBtn) {
-        await act(async () => fireEvent.click(viewBtn));
-        // Close it
-        await waitFor(() => expect(capturedProps.current.LakebaseDocumentsDialog).toBeDefined());
-        if (capturedProps.current.LakebaseDocumentsDialog?.onClose) {
-          await act(async () => (capturedProps.current.LakebaseDocumentsDialog.onClose as Function)());
-        }
-      }
-    });
+      const browseBtn = screen.getByRole('button', { name: /Browse Memory/i });
+      await act(async () => fireEvent.click(browseBtn));
+      await waitFor(() => expect(screen.getByTestId('memory-records-browser')).toHaveAttribute('data-open', 'true'));
 
-    it('Lakebase EntityGraphVisualization onClose', async () => {
-      setupLakebaseMocks({ tablesInitialized: true, withStats: true });
-      await act(async () => renderComponent());
-      await waitForLoaded();
-
-      // Click Visualize Graph to open
-      await waitFor(() => {
-        const icons = document.querySelectorAll('[data-testid="AccountTreeIcon"]');
-        expect(icons.length).toBeGreaterThanOrEqual(1);
-      });
-      const graphBtn = document.querySelector('[data-testid="AccountTreeIcon"]')?.closest('button');
-      if (graphBtn) {
-        await act(async () => fireEvent.click(graphBtn));
-        // Close it
-        await waitFor(() => expect(capturedProps.current.EntityGraphVisualization_lakebase).toBeDefined());
-        if (capturedProps.current.EntityGraphVisualization_lakebase?.onClose) {
-          await act(async () => (capturedProps.current.EntityGraphVisualization_lakebase.onClose as Function)());
-        }
-      }
+      await act(async () => (capturedProps.current.MemoryRecordsBrowser.onClose as Function)());
+      await waitFor(() => expect(screen.getByTestId('memory-records-browser')).toHaveAttribute('data-open', 'false'));
     });
   });
 
@@ -2222,34 +2090,6 @@ describe('DatabricksOneClickSetup', () => {
   // =======================================================================
 
   describe('Edge cases', () => {
-    it('handleRelationshipRetrievalChange without backend_id logs but does not save', async () => {
-      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-      // Load with no saved config (no backend_id)
-      await act(async () => renderComponent());
-      await waitForLoaded();
-
-      // The switch is in a Collapse in={false}, find it with hidden option
-      const switches = screen.queryAllByRole('checkbox', { hidden: true });
-      // MUI Switch renders as input[type="checkbox"] with a MuiSwitch parent
-      const relSwitch = switches.find(s => {
-        const parent = s.closest('[class*="Switch"]') || s.closest('[class*="switch"]');
-        return !!parent;
-      }) || switches[0]; // fallback to first checkbox
-      if (relSwitch) {
-        await act(async () => fireEvent.click(relSwitch));
-        // Should NOT call put since no backend_id
-        expect(mockApiClient.put).not.toHaveBeenCalledWith(
-          expect.stringContaining('/memory-backend/configs/'),
-          expect.objectContaining({ enable_relationship_retrieval: expect.any(Boolean) }),
-        );
-        // Should log the "no backend_id" message
-        await waitFor(() => {
-          expect(consoleSpy).toHaveBeenCalledWith('No valid backend_id found, not saving to backend');
-        });
-      }
-      consoleSpy.mockRestore();
-    });
-
     it('endpoint statuses update for NOT_FOUND endpoints', async () => {
       // Verify with missing endpoints to trigger NOT_FOUND branch
       mockApiClient.get.mockImplementation((url: string) => {
@@ -2260,7 +2100,7 @@ describe('DatabricksOneClickSetup', () => {
               databricks_config: {
                 workspace_url: 'https://test.databricks.com',
                 endpoint_name: 'mem-ep', document_endpoint_name: 'doc-ep',
-                short_term_index: 'ml.st',
+                memory_index: 'ml.mem',
               },
             },
           });
@@ -2273,7 +2113,7 @@ describe('DatabricksOneClickSetup', () => {
               success: true,
               resources: {
                 endpoints: { 'mem-ep': { name: 'mem-ep', state: 'ONLINE', ready: true } },
-                indexes: { 'ml.st': { name: 'ml.st' } },
+                indexes: { 'ml.mem': { name: 'ml.mem' } },
               },
             },
           });
@@ -2297,10 +2137,12 @@ describe('DatabricksOneClickSetup', () => {
       await act(async () => renderComponent());
       await waitForLoaded();
 
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Memory Indexes']).toBeDefined());
+      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Unified Cognitive Memory Index']).toBeDefined());
       // The index info will show NOT_FOUND/error status
       // When trying to delete, it should show an error about already deleted
-      await act(async () => (capturedProps.current['IndexManagementTable_Memory Indexes'].onDelete as Function)('short_term'));
+      await act(async () => (capturedProps.current['IndexManagementTable_Unified Cognitive Memory Index'].onDelete as Function)('memory'));
+
+      await waitFor(() => expect(screen.getByText(/already been deleted/)).toBeInTheDocument());
     });
 
     it('handleDeleteEndpoint API returns failure response', async () => {
@@ -2317,7 +2159,7 @@ describe('DatabricksOneClickSetup', () => {
     });
 
     it('handleEmptyIndex returns early when no endpoint', async () => {
-      // Setup with index but no endpoint for that type
+      // Setup with memory index but no memory endpoint
       mockApiClient.get.mockImplementation((url: string) => {
         if (url === '/memory-backend/configs/default') {
           return Promise.resolve({
@@ -2325,13 +2167,13 @@ describe('DatabricksOneClickSetup', () => {
               id: 'db-1', backend_type: 'databricks',
               databricks_config: {
                 workspace_url: 'https://test.databricks.com',
-                short_term_index: 'ml.st', // index exists but no endpoint
+                memory_index: 'ml.mem', // index exists but no endpoint
               },
             },
           });
         }
         if (url === '/databricks/environment') return Promise.resolve({ data: { databricks_host: 'https://test.databricks.com' } });
-        if (url === '/memory-backend/databricks/verify-resources') return Promise.resolve({ data: { success: true, resources: { endpoints: {}, indexes: { 'ml.st': { name: 'ml.st' } } } } });
+        if (url === '/memory-backend/databricks/verify-resources') return Promise.resolve({ data: { success: true, resources: { endpoints: {}, indexes: { 'ml.mem': { name: 'ml.mem' } } } } });
         if (url === '/memory-backend/databricks/index-info') return Promise.resolve({ data: { success: true, doc_count: 5, status: 'ONLINE', ready: true, index_type: 'DELTA_SYNC' } });
         if (url === '/database-management/lakebase/instances') return Promise.resolve(paginatedInstances([]));
         if (url.startsWith('/memory-backend/configs/')) return Promise.resolve({ data: { databricks_config: { embedding_dimension: 1024 } } });
@@ -2341,9 +2183,9 @@ describe('DatabricksOneClickSetup', () => {
       await act(async () => renderComponent());
       await waitForLoaded();
 
-      // Memory Indexes table should render since we have short_term index
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Memory Indexes']).toBeDefined());
-      await act(async () => (capturedProps.current['IndexManagementTable_Memory Indexes'].onEmpty as Function)('short_term'));
+      // The unified memory table renders since we have a memory index
+      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Unified Cognitive Memory Index']).toBeDefined());
+      await act(async () => (capturedProps.current['IndexManagementTable_Unified Cognitive Memory Index'].onEmpty as Function)('memory'));
 
       // Should show "Could not determine endpoint" error
       await waitFor(() => expect(screen.getByText(/Could not determine endpoint/)).toBeInTheDocument());
@@ -2424,7 +2266,7 @@ describe('DatabricksOneClickSetup', () => {
       mockDVSService.performOneClickSetup.mockResolvedValueOnce({
         success: true, catalog: 'ml', schema: 'agents',
         endpoints: { memory: { name: 'ep1' } },
-        indexes: { short_term: { name: 'ml.agents.st' } },
+        indexes: { unified: { name: 'ml.agents.mem' } },
       });
 
       await act(async () => renderComponent());
@@ -2518,7 +2360,7 @@ describe('DatabricksOneClickSetup', () => {
               id: 'db-1', backend_type: 'databricks',
               databricks_config: {
                 workspace_url: 'https://test.databricks.com',
-                endpoint_name: 'ep1', short_term_index: 'ml.st',
+                endpoint_name: 'ep1', memory_index: 'ml.mem',
               },
             },
           });
@@ -2530,7 +2372,7 @@ describe('DatabricksOneClickSetup', () => {
               success: true,
               resources: {
                 endpoints: { ep1: { name: 'ep1', state: 'PROVISIONING', ready: false } },
-                indexes: { 'ml.st': { name: 'ml.st', status: 'ONLINE' } },
+                indexes: { 'ml.mem': { name: 'ml.mem', status: 'ONLINE' } },
               },
             },
           });
@@ -2545,15 +2387,15 @@ describe('DatabricksOneClickSetup', () => {
       await act(async () => renderComponent());
       await waitForLoaded();
 
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Memory Indexes']).toBeDefined());
-      await act(async () => (capturedProps.current['IndexManagementTable_Memory Indexes'].onDelete as Function)('short_term'));
+      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Unified Cognitive Memory Index']).toBeDefined());
+      await act(async () => (capturedProps.current['IndexManagementTable_Unified Cognitive Memory Index'].onDelete as Function)('memory'));
 
       await waitFor(() => {
         expect(screen.getByText(/Cannot delete index: Endpoint is PROVISIONING/)).toBeInTheDocument();
       });
     });
 
-    it('handleReseedDocumentation returns early when no document index', async () => {
+    it('Knowledge Base table is absent when no document index', async () => {
       // Setup with no document index
       mockApiClient.get.mockImplementation((url: string) => {
         if (url === '/memory-backend/configs/default') {
@@ -2562,14 +2404,14 @@ describe('DatabricksOneClickSetup', () => {
               id: 'db-1', backend_type: 'databricks',
               databricks_config: {
                 workspace_url: 'https://test.databricks.com',
-                endpoint_name: 'ep1', short_term_index: 'ml.st',
+                endpoint_name: 'ep1', memory_index: 'ml.mem',
               },
             },
           });
         }
         if (url === '/databricks/environment') return Promise.resolve({ data: { databricks_host: 'https://test.databricks.com' } });
         if (url === '/memory-backend/databricks/verify-resources') {
-          return Promise.resolve({ data: { success: true, resources: { endpoints: { ep1: { name: 'ep1', state: 'ONLINE', ready: true } }, indexes: { 'ml.st': { name: 'ml.st' } } } } });
+          return Promise.resolve({ data: { success: true, resources: { endpoints: { ep1: { name: 'ep1', state: 'ONLINE', ready: true } }, indexes: { 'ml.mem': { name: 'ml.mem' } } } } });
         }
         if (url === '/memory-backend/databricks/index-info') return Promise.resolve({ data: { success: true, doc_count: 0 } });
         if (url === '/database-management/lakebase/instances') return Promise.resolve(paginatedInstances([]));
@@ -2578,12 +2420,13 @@ describe('DatabricksOneClickSetup', () => {
 
       await act(async () => renderComponent());
       await waitForLoaded();
+      await waitFor(() => expect(screen.getByTestId('configuration-display')).toBeInTheDocument());
       // Knowledge Base table should not render since no document index
       expect(capturedProps.current['IndexManagementTable_Knowledge Base']).toBeUndefined();
     });
 
-    it('verifyActualResources removes missing long_term, entity, document indexes', async () => {
-      // All four indexes exist in config but only short_term exists in Databricks
+    it('verifyActualResources removes a missing document index', async () => {
+      // Both indexes exist in config but only memory exists in Databricks
       mockApiClient.get.mockImplementation((url: string) => {
         if (url === '/memory-backend/configs/default') {
           return Promise.resolve({
@@ -2592,9 +2435,7 @@ describe('DatabricksOneClickSetup', () => {
               databricks_config: {
                 workspace_url: 'https://test.databricks.com',
                 endpoint_name: 'mem-ep', document_endpoint_name: 'doc-ep',
-                short_term_index: 'ml.agents.st',
-                long_term_index: 'ml.agents.lt',
-                entity_index: 'ml.agents.ent',
+                memory_index: 'ml.agents.mem',
                 document_index: 'ml.agents.doc',
               },
             },
@@ -2602,7 +2443,7 @@ describe('DatabricksOneClickSetup', () => {
         }
         if (url === '/databricks/environment') return Promise.resolve({ data: { databricks_host: 'https://test.databricks.com' } });
         if (url === '/memory-backend/databricks/verify-resources') {
-          // Only st exists, lt/ent/doc are missing
+          // Only mem exists, doc is missing
           return Promise.resolve({
             data: {
               success: true,
@@ -2611,7 +2452,7 @@ describe('DatabricksOneClickSetup', () => {
                   'mem-ep': { name: 'mem-ep', state: 'ONLINE', ready: true },
                   'doc-ep': { name: 'doc-ep', state: 'ONLINE', ready: true },
                 },
-                indexes: { 'ml.agents.st': { name: 'ml.agents.st' } },
+                indexes: { 'ml.agents.mem': { name: 'ml.agents.mem' } },
               },
             },
           });
@@ -2625,7 +2466,7 @@ describe('DatabricksOneClickSetup', () => {
       await act(async () => renderComponent());
       await waitForLoaded();
 
-      // Config should be updated to remove missing indexes
+      // Config should be updated to remove the missing document index
       await waitFor(() => {
         expect(mockApiClient.put).toHaveBeenCalled();
       });
@@ -2641,7 +2482,7 @@ describe('DatabricksOneClickSetup', () => {
               databricks_config: {
                 workspace_url: 'https://test.databricks.com',
                 endpoint_name: 'mem-ep',
-                short_term_index: 'ml.agents.st',
+                memory_index: 'ml.agents.mem',
                 document_index: 'ml.agents.doc',
               },
             },
@@ -2654,7 +2495,7 @@ describe('DatabricksOneClickSetup', () => {
               success: true,
               resources: {
                 endpoints: { 'mem-ep': { name: 'mem-ep', state: 'ONLINE', ready: true } },
-                indexes: { 'ml.agents.st': { name: 'ml.agents.st' }, 'ml.agents.doc': { name: 'ml.agents.doc' } },
+                indexes: { 'ml.agents.mem': { name: 'ml.agents.mem' }, 'ml.agents.doc': { name: 'ml.agents.doc' } },
               },
             },
           });
@@ -2676,16 +2517,12 @@ describe('DatabricksOneClickSetup', () => {
       await waitFor(() => expect(screen.getByText(/Could not determine document endpoint/)).toBeInTheDocument());
     });
 
-    it('handleEditChange with no editedConfig returns early', async () => {
+    it('handleEditChange clears endpoint and unified index when value is undefined', async () => {
       setupDatabricksMocks();
       await act(async () => renderComponent());
       await waitForLoaded();
       await waitFor(() => expect(screen.getByTestId('configuration-display')).toBeInTheDocument());
 
-      // Don't start edit first - editedConfig is null
-      // Directly test the EditConfigurationForm path without starting edit
-      // Actually, handleEditChange is only callable through EditConfigurationForm which only renders when isEditingConfig=true
-      // So we start edit, then test handleEditChange with endpoints that have no existing endpoints object
       const cdProps = capturedProps.current.ConfigurationDisplay;
       await act(async () => (cdProps.onStartEdit as Function)());
       await waitFor(() => expect(capturedProps.current.EditConfigurationForm).toBeDefined());
@@ -2693,33 +2530,30 @@ describe('DatabricksOneClickSetup', () => {
       const editProps = capturedProps.current.EditConfigurationForm;
       // Set value then clear it (undefined)
       await act(async () => (editProps.onEditChange as Function)('endpoints.memory.name', undefined));
-      // Set index value then clear it
-      await act(async () => (editProps.onEditChange as Function)('indexes.short_term.name', undefined));
+      // Clear index value
+      await act(async () => (editProps.onEditChange as Function)('indexes.unified.name', undefined));
     });
 
-    it('handleSaveEdit returns early when editedConfig has no backend_id', async () => {
-      // This tests the early return at line 770
+    it('handleSaveEdit proceeds when editedConfig has a backend_id', async () => {
       setupDatabricksMocks();
+      mockApiClient.put.mockResolvedValue({ data: {} });
       await act(async () => renderComponent());
       await waitForLoaded();
       await waitFor(() => expect(screen.getByTestId('configuration-display')).toBeInTheDocument());
 
-      // Start edit
+      // Start edit (editedConfig is a deep copy of savedConfig with backend_id='db-123')
       let cdProps = capturedProps.current.ConfigurationDisplay;
       await act(async () => (cdProps.onStartEdit as Function)());
       await waitFor(() => expect(capturedProps.current.EditConfigurationForm).toBeDefined());
 
-      // Clear the backend_id from editedConfig by changing config data
-      // Actually, editedConfig is a deep copy of savedConfig which has backend_id='db-123'
-      // We'd need to construct a scenario where editedConfig exists but has no backend_id
-      // This is hard to trigger since handleStartEdit always deep-copies savedConfig
-      // Just verify the normal save path works for coverage
       cdProps = capturedProps.current.ConfigurationDisplay;
       await act(async () => (cdProps.onSaveEdit as Function)());
+
+      await waitFor(() => expect(mockApiClient.put).toHaveBeenCalled());
     });
 
-    it('handleDeleteIndex returns early when no index in savedConfig', async () => {
-      // Setup with saved config that has endpoints but the specific index is missing
+    it('handleDeleteIndex returns early when unified index missing from savedConfig', async () => {
+      // Setup with saved config that has an endpoint but no document index
       mockApiClient.get.mockImplementation((url: string) => {
         if (url === '/memory-backend/configs/default') {
           return Promise.resolve({
@@ -2728,8 +2562,8 @@ describe('DatabricksOneClickSetup', () => {
               databricks_config: {
                 workspace_url: 'https://test.databricks.com',
                 endpoint_name: 'mem-ep',
-                short_term_index: 'ml.agents.st',
-                // no long_term_index
+                memory_index: 'ml.agents.mem',
+                // no document_index
               },
             },
           });
@@ -2737,7 +2571,7 @@ describe('DatabricksOneClickSetup', () => {
         if (url === '/databricks/environment') return Promise.resolve({ data: { databricks_host: 'https://test.databricks.com' } });
         if (url === '/memory-backend/databricks/verify-resources') {
           return Promise.resolve({
-            data: { success: true, resources: { endpoints: { 'mem-ep': { name: 'mem-ep', state: 'ONLINE', ready: true } }, indexes: { 'ml.agents.st': { name: 'ml.agents.st' } } } },
+            data: { success: true, resources: { endpoints: { 'mem-ep': { name: 'mem-ep', state: 'ONLINE', ready: true } }, indexes: { 'ml.agents.mem': { name: 'ml.agents.mem' } } } },
           });
         }
         if (url === '/memory-backend/databricks/index-info') return Promise.resolve({ data: { success: true, doc_count: 0 } });
@@ -2747,32 +2581,16 @@ describe('DatabricksOneClickSetup', () => {
 
       await act(async () => renderComponent());
       await waitForLoaded();
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Memory Indexes']).toBeDefined());
+      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Unified Cognitive Memory Index']).toBeDefined());
 
-      // Try to delete long_term which doesn't exist
-      await act(async () => (capturedProps.current['IndexManagementTable_Memory Indexes'].onDelete as Function)('long_term'));
+      // Try to delete document which doesn't exist in config
+      await act(async () => (capturedProps.current['IndexManagementTable_Unified Cognitive Memory Index'].onDelete as Function)('document'));
       // Should return early without calling delete API
       expect(mockApiClient.delete).not.toHaveBeenCalledWith('/memory-backend/databricks/index', expect.anything());
     });
 
-    it('handleEmptyIndex returns early when no index or workspace_url', async () => {
-      // Setup with a config that has index but we'll test the early return
-      setupDatabricksMocks();
-      await act(async () => renderComponent());
-      await waitForLoaded();
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Memory Indexes']).toBeDefined());
-
-      // Try to empty 'long_term' - which exists in config but we test the path
-      // Actually, let's call onEmpty for a type that maps to a non-existent index
-      await act(async () => (capturedProps.current['IndexManagementTable_Memory Indexes'].onEmpty as Function)('long_term'));
-
-      await waitFor(() => {
-        expect(mockApiClient.post).toHaveBeenCalledWith('/memory-backend/databricks/empty-index', expect.anything());
-      });
-    });
-
     it('handleViewDocuments shows error when endpoint not configured', async () => {
-      // Setup with indexes but no endpoints
+      // Setup with memory index but no endpoints
       mockApiClient.get.mockImplementation((url: string) => {
         if (url === '/memory-backend/configs/default') {
           return Promise.resolve({
@@ -2780,14 +2598,14 @@ describe('DatabricksOneClickSetup', () => {
               id: 'db-1', backend_type: 'databricks',
               databricks_config: {
                 workspace_url: 'https://test.databricks.com',
-                short_term_index: 'ml.st',
+                memory_index: 'ml.mem',
               },
             },
           });
         }
         if (url === '/databricks/environment') return Promise.resolve({ data: { databricks_host: 'https://test.databricks.com' } });
         if (url === '/memory-backend/databricks/verify-resources') {
-          return Promise.resolve({ data: { success: true, resources: { endpoints: {}, indexes: { 'ml.st': { name: 'ml.st' } } } } });
+          return Promise.resolve({ data: { success: true, resources: { endpoints: {}, indexes: { 'ml.mem': { name: 'ml.mem' } } } } });
         }
         if (url === '/memory-backend/databricks/index-info') return Promise.resolve({ data: { success: true, doc_count: 5 } });
         if (url === '/database-management/lakebase/instances') return Promise.resolve(paginatedInstances([]));
@@ -2797,8 +2615,8 @@ describe('DatabricksOneClickSetup', () => {
       await act(async () => renderComponent());
       await waitForLoaded();
 
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Memory Indexes']).toBeDefined());
-      await act(async () => (capturedProps.current['IndexManagementTable_Memory Indexes'].onViewDocuments as Function)('short_term', 'ml.st'));
+      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Unified Cognitive Memory Index']).toBeDefined());
+      await act(async () => (capturedProps.current['IndexManagementTable_Unified Cognitive Memory Index'].onViewDocuments as Function)('memory', 'ml.mem'));
 
       await waitFor(() => expect(screen.getByText(/Cannot view documents: endpoint not configured/)).toBeInTheDocument());
     });

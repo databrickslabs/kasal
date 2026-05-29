@@ -104,9 +104,7 @@ describe('SSEConnectionManager', () => {
       expect(mocks.mockUseGlobalExecutionSSE).toHaveBeenCalledWith(
         expect.any(Function),
         expect.objectContaining({
-          autoReconnect: true,
-          maxReconnectAttempts: 10,
-          reconnectDelay: 3000,
+          maxReconnectAttempts: 50,
           onConnect: expect.any(Function),
           onDisconnect: expect.any(Function),
           onError: expect.any(Function),

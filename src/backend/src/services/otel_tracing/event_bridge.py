@@ -34,9 +34,12 @@ _EVENT_SPAN_MAP = {
     # Memory events — map to frontend-expected event_type names
     "MemorySaveStartedEvent": ("kasal.memory.save_started", "memory_write_started"),
     "MemorySaveCompletedEvent": ("kasal.memory.save_completed", "memory_write"),
+    "MemorySaveFailedEvent": ("kasal.memory.save_failed", "memory_write_failed"),
     "MemoryQueryStartedEvent": ("kasal.memory.query_started", "memory_retrieval_started"),
     "MemoryQueryCompletedEvent": ("kasal.memory.query_completed", "memory_retrieval"),
+    "MemoryQueryFailedEvent": ("kasal.memory.query_failed", "memory_retrieval_failed"),
     "MemoryRetrievalCompletedEvent": ("kasal.memory.retrieval_completed", "memory_retrieval_completed"),
+    "MemoryRetrievalFailedEvent": ("kasal.memory.retrieval_failed", "memory_retrieval_failed"),
     # Knowledge events — map completed to frontend's knowledge_operation
     "KnowledgeRetrievalStartedEvent": ("kasal.knowledge.retrieval_started", "knowledge_retrieval_started"),
     "KnowledgeRetrievalCompletedEvent": ("kasal.knowledge.retrieval_completed", "knowledge_operation"),
@@ -69,6 +72,11 @@ _EVENT_SPAN_MAP = {
 # Events to skip (too noisy)
 _SKIP_EVENTS = {"LLMStreamChunkEvent"}
 
+# Tools whose spans are redundant with the richer ``Memory*`` events emitted
+# by CrewAI's unified Memory class. We absorb them to show one span per
+# logical memory operation, not three.
+_MEMORY_WRAPPER_TOOLS = {"search_memory", "save_to_memory"}
+
 
 def _safe_str(val: Any, max_len: int = 500) -> str:
     """Safely convert a value to a truncated string."""
@@ -81,20 +89,19 @@ def _safe_str(val: Any, max_len: int = 500) -> str:
 def _get_agent_name(event: Any) -> str:
     """Extract agent name from an event object.
 
-    Checks BaseEvent.agent_role first, then event.agent.role, then
-    event.task.agent.role as fallback.
+    Checks BaseEvent.agent_role, then event.agent.role, then
+    event.from_agent.role (MemoryBaseEvent / ToolUsageEvent), then
+    event.task.agent.role as final fallback.
     """
-    # BaseEvent sets agent_role directly
     agent_role = getattr(event, "agent_role", None)
     if agent_role:
         return str(agent_role)
 
-    # Try event.agent.role
-    agent = getattr(event, "agent", None)
-    if agent and hasattr(agent, "role") and agent.role:
-        return str(agent.role)
+    for attr in ("agent", "from_agent"):
+        obj = getattr(event, attr, None)
+        if obj and hasattr(obj, "role") and obj.role:
+            return str(obj.role)
 
-    # Try event.task.agent.role
     task = getattr(event, "task", None)
     if task:
         task_agent = getattr(task, "agent", None)
@@ -168,6 +175,33 @@ class OTelEventBridge:
         # Captured from CrewKickoffStartedEvent and stamped on all subsequent
         # spans so that task-level traces carry the crew name for flow monitoring.
         self._current_crew_name: Optional[str] = None
+        # Most-recent agent/task seen on an agent/task event. Used to attribute
+        # memory events that don't carry their own agent/task — CrewAI's recall
+        # runs in a RecallFlow whose worker thread doesn't inherit the
+        # agent/task ContextVar, so those memory spans would otherwise land
+        # under "System / Unassigned" instead of the running task.
+        self._current_agent_name: Optional[str] = None
+        self._current_task_name: Optional[str] = None
+        # Most-recent task_id seen on any task/agent event. Memory events
+        # (recall/save) frequently arrive WITHOUT a task_id — CrewAI's recall
+        # runs in a RecallFlow worker thread, and some tasks emit no
+        # TaskStartedEvent at all — so they would land under the frontend's
+        # "Unassigned" task bucket. We stamp them with this id so the frontend's
+        # ``getTaskId`` resolves them to the running task.
+        self._current_task_id: Optional[str] = None
+        # Memory saves run on a background thread and complete tens of seconds
+        # later — often after the *next* task has started. Attributing the
+        # completion to the "current" task would misfile it (and hide the
+        # originating task's write). We FIFO-correlate each ``save_completed``
+        # back to the task that was active at its ``save_started``.
+        self._pending_save_task_ids: list = []
+        # When the agent invokes the ``save_to_memory`` wrapper tool, we
+        # capture the args in-flight and hand them to the next
+        # ``MemorySaveCompletedEvent`` so the trace shows *what* was written
+        # instead of just "N memories saved". This is request-local
+        # correlation between two events on the same thread, not a
+        # time-based fallback cache.
+        self._pending_save_content: Optional[str] = None
 
     def register(self, event_bus: Any) -> int:
         """Register span-creating handlers for all available CrewAI event types.
@@ -207,9 +241,12 @@ class OTelEventBridge:
             # Memory
             ("crewai.events", "MemorySaveStartedEvent"),
             ("crewai.events", "MemorySaveCompletedEvent"),
+            ("crewai.events", "MemorySaveFailedEvent"),
             ("crewai.events", "MemoryQueryStartedEvent"),
             ("crewai.events", "MemoryQueryCompletedEvent"),
+            ("crewai.events", "MemoryQueryFailedEvent"),
             ("crewai.events", "MemoryRetrievalCompletedEvent"),
+            ("crewai.events", "MemoryRetrievalFailedEvent"),
             # Knowledge
             ("crewai.events", "KnowledgeRetrievalStartedEvent"),
             ("crewai.events", "KnowledgeRetrievalCompletedEvent"),
@@ -282,12 +319,120 @@ class OTelEventBridge:
             task_name = _get_task_name(event)
             tool_name = _get_tool_name(event)
             output = _get_output(event)
+            event_task_id = getattr(event, "task_id", None)
+
+            # Track the most-recent agent / task / task_id from events that carry
+            # them, then use them to attribute memory events that don't. CrewAI's
+            # recall runs in a RecallFlow worker thread (no agent/task ContextVar)
+            # and some tasks emit no TaskStartedEvent, so memory spans otherwise
+            # land under "System" / "Unassigned". ``task_id`` is the frontend's
+            # primary grouping key (getTaskId), so stamping it is what actually
+            # keeps memory read/write spans under the running task.
+            if agent_name:
+                self._current_agent_name = agent_name
+            if task_name:
+                self._current_task_name = task_name
+            if event_task_id:
+                self._current_task_id = str(event_task_id)
+            if event_type.startswith("memory_"):
+                if not agent_name:
+                    agent_name = self._current_agent_name
+                if not task_name:
+                    task_name = self._current_task_name
+                if not event_task_id:
+                    event_task_id = self._current_task_id
+                # Correlate a save's completion back to the task that started it,
+                # since the background save can finish during a later task.
+                if event_type == "memory_write_started":
+                    self._pending_save_task_ids.append(self._current_task_id)
+                elif event_type in ("memory_write", "memory_write_failed"):
+                    if self._pending_save_task_ids:
+                        started_task_id = self._pending_save_task_ids.pop(0)
+                        if started_task_id:
+                            event_task_id = started_task_id
+
+            # Publish agent/task provenance to the memory-event ContextVar so
+            # that upcoming ``Memory.remember_many()`` saves (which snapshot
+            # the caller's contextvars when submitting to their bg thread
+            # pool) emit ``MemorySaveCompletedEvent`` with proper attribution.
+            # This runs synchronously in the crew's execution context, so the
+            # updates are visible to code executed after this handler.
+            try:
+                from src.core.crewai_patches import update_memory_event_context
+                update_memory_event_context(
+                    agent_role=agent_name or None,
+                    agent_id=getattr(event, "agent_id", None)
+                    or getattr(getattr(event, "agent", None), "id", None)
+                    or getattr(getattr(event, "from_agent", None), "id", None),
+                    task_id=getattr(event, "task_id", None)
+                    or (
+                        str(getattr(getattr(event, "task", None), "id", ""))
+                        or None
+                    ),
+                    task_name=task_name or None,
+                )
+            except Exception:  # pragma: no cover - defensive
+                pass
+
+            # Deduplicate memory-wrapper tool spans. ``search_memory`` and
+            # ``save_to_memory`` are thin agent-facing wrappers around the
+            # unified Memory API; CrewAI already emits ``MemoryQuery*`` /
+            # ``MemorySave*`` events for the underlying operation, so the
+            # tool spans are pure noise. Before skipping ``save_to_memory``
+            # we cache the tool args so the upcoming ``MemorySaveCompleted``
+            # span can surface *what was written* — CrewAI's batch event
+            # only carries "N memories saved", the tool_args carry the
+            # actual payload the agent asked to persist. The two events
+            # fire back-to-back on the same thread so this correlation is
+            # deterministic, not a stale-cache fallback.
+            if tool_name in _MEMORY_WRAPPER_TOOLS and event_type.startswith("tool"):
+                if tool_name == "save_to_memory":
+                    tool_args = getattr(event, "tool_args", None)
+                    if tool_args:
+                        self._pending_save_content = _safe_str(tool_args, 4000)
+                return
 
             # Capture crew_name from crew lifecycle events so it can be
             # propagated to task/agent spans that don't carry it themselves.
             event_crew_name = getattr(event, "crew_name", None)
             if event_crew_name:
                 self._current_crew_name = str(event_crew_name)
+
+            # Memory events need special content handling: write events
+            # replace "13 memories saved" with the agent-supplied payload,
+            # retrieval events surface the recall block (or an explicit
+            # "no matches" message instead of a blank span body).
+            saved_content: Optional[str] = None
+            if event_type == "memory_write":
+                if self._pending_save_content:
+                    # Primary path: agent used the ``save_to_memory`` tool
+                    # and we captured the tool args earlier.
+                    saved_content = self._pending_save_content
+                    self._pending_save_content = None
+                else:
+                    # Fallback path: auto-save at task end pulls the records
+                    # out of ``event.metadata['_kasal_saved_contents']``
+                    # (injected by the ``Memory.remember_many`` patch).
+                    metadata = getattr(event, "metadata", None)
+                    if isinstance(metadata, dict):
+                        saved = metadata.get("_kasal_saved_contents")
+                        if saved:
+                            try:
+                                import json as _json
+                                saved_content = _safe_str(
+                                    _json.dumps(saved, default=str, indent=2),
+                                    4000,
+                                )
+                            except Exception:
+                                saved_content = _safe_str(str(saved), 4000)
+                if saved_content:
+                    output = saved_content
+            elif event_type == "memory_retrieval_completed":
+                memory_content = getattr(event, "memory_content", None)
+                if memory_content and str(memory_content).strip():
+                    output = _safe_str(memory_content, 8000)
+                else:
+                    output = "(no memories matched the query)"
 
             with self._tracer.start_as_current_span(span_name) as span:
                 # Core attributes picked up by db_exporter extractors
@@ -296,10 +441,20 @@ class OTelEventBridge:
                     span.set_attribute("kasal.agent_name", agent_name)
                 if task_name:
                     span.set_attribute("kasal.task_name", task_name[:500])
+                # Stamp the resolved task_id so the frontend groups this span
+                # under the running task instead of "Unassigned" (getTaskId reads
+                # task_id from the span's metadata before falling back to parent).
+                if event_type.startswith("memory_") and event_task_id:
+                    span.set_attribute("kasal.extra.task_id", str(event_task_id))
                 if tool_name:
                     span.set_attribute("kasal.tool_name", tool_name)
                 if output:
                     span.set_attribute("kasal.output_content", output)
+                if saved_content:
+                    # Mirror into extra_data so consumers that don't render
+                    # kasal.output_content (e.g. raw JSON viewers) still see
+                    # exactly what the agent asked to persist.
+                    span.set_attribute("kasal.extra.saved_content", saved_content)
 
                 # Extra metadata
                 self._set_extra_attributes(span, event)
@@ -355,13 +510,24 @@ class OTelEventBridge:
         if agent_id:
             span.set_attribute("kasal.extra.agent_id", str(agent_id))
 
-        # Fallback: check event.agent object
+        # ``MemoryBaseEvent`` and ``ToolUsageEvent`` carry ``from_agent`` /
+        # ``agent`` object references — pull role/id off those when the
+        # flat ``agent_role`` field wasn't set by the emitter.
         if not agent_role:
-            agent = getattr(event, "agent", None)
-            if agent:
-                role = getattr(agent, "role", None)
+            for agent_attr in ("agent", "from_agent"):
+                agent_obj = getattr(event, agent_attr, None)
+                if not agent_obj:
+                    continue
+                role = getattr(agent_obj, "role", None)
+                aid = getattr(agent_obj, "id", None)
                 if role:
                     span.set_attribute("kasal.extra.agent_role", str(role))
+                    agent_role = role
+                if aid and not agent_id:
+                    span.set_attribute("kasal.extra.agent_id", str(aid))
+                    agent_id = aid
+                if role:
+                    break
 
         # ── Memory type from source_type (BaseEvent field) ──
         source_type = getattr(event, "source_type", None)
@@ -384,7 +550,7 @@ class OTelEventBridge:
             span.set_attribute("kasal.extra.query", _safe_str(query, 500))
         value = getattr(event, "value", None)
         if value:
-            span.set_attribute("kasal.extra.value", _safe_str(value, 500))
+            span.set_attribute("kasal.extra.value", _safe_str(value, 4000))
         query_time = getattr(event, "query_time_ms", None)
         if query_time is not None:
             span.set_attribute("kasal.extra.query_time_ms", float(query_time))
@@ -395,8 +561,21 @@ class OTelEventBridge:
         if retrieval_time is not None:
             span.set_attribute("kasal.extra.retrieval_time_ms", float(retrieval_time))
         memory_content = getattr(event, "memory_content", None)
-        if memory_content:
-            span.set_attribute("kasal.extra.memory_content", str(memory_content))
+        if memory_content and str(memory_content).strip():
+            span.set_attribute("kasal.extra.memory_content", _safe_str(memory_content, 8000))
+        else:
+            # MemoryRetrievalCompletedEvent always fires, even when recall
+            # matched nothing. Surface that explicitly so the trace UI doesn't
+            # just render a blank body.
+            if any(
+                hasattr(event, f)
+                for f in ("retrieval_time_ms", "memory_content")
+            ):
+                span.set_attribute(
+                    "kasal.extra.memory_content",
+                    "(no memories matched the query)",
+                )
+
         limit = getattr(event, "limit", None)
         if limit is not None:
             span.set_attribute("kasal.extra.limit", int(limit))
@@ -409,6 +588,25 @@ class OTelEventBridge:
         if results is not None:
             if isinstance(results, (list, tuple)):
                 span.set_attribute("kasal.extra.results_count", len(results))
+
+        # ── Memory metadata (save completed) ──
+        # CrewAI 1.14+ unified Memory emits ``MemorySaveCompletedEvent`` with
+        # ``value="N memories saved"`` and a ``metadata`` dict carrying crew
+        # / task / scope info. Surface the metadata so the trace isn't just a
+        # count.
+        metadata = getattr(event, "metadata", None)
+        if isinstance(metadata, dict) and metadata:
+            try:
+                import json as _json
+                span.set_attribute(
+                    "kasal.extra.memory_metadata",
+                    _safe_str(_json.dumps(metadata, default=str), 2000),
+                )
+            except Exception:
+                span.set_attribute(
+                    "kasal.extra.memory_metadata",
+                    _safe_str(str(metadata), 2000),
+                )
 
         # ── Tool fields ──
         tool_name = getattr(event, "tool_name", None) or getattr(event, "tool", None)

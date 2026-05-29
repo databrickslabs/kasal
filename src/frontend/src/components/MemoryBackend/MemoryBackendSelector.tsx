@@ -87,7 +87,7 @@ export const MemoryBackendSelector: React.FC<MemoryBackendSelectorProps> = ({
 
     if (value.backend_type === MemoryBackendType.DATABRICKS) {
       const isConfigured = value.databricks_config?.endpoint_name &&
-                          value.databricks_config?.short_term_index;
+                          value.databricks_config?.memory_index;
 
       if (isConfigured) {
         return (
@@ -143,8 +143,8 @@ export const MemoryBackendSelector: React.FC<MemoryBackendSelectorProps> = ({
       if (value.databricks_config.endpoint_name) {
         parts.push(`Endpoint: ${value.databricks_config.endpoint_name}`);
       }
-      if (value.databricks_config.short_term_index) {
-        parts.push(`Index: ${value.databricks_config.short_term_index}`);
+      if (value.databricks_config.memory_index) {
+        parts.push(`Index: ${value.databricks_config.memory_index}`);
       }
       return parts.join(' | ');
     }
@@ -173,9 +173,7 @@ export const MemoryBackendSelector: React.FC<MemoryBackendSelectorProps> = ({
                   backend_type: newType,
                   lakebase_config: {
                     embedding_dimension: 1024,
-                    short_term_table: 'crew_short_term_memory',
-                    long_term_table: 'crew_long_term_memory',
-                    entity_table: 'crew_entity_memory',
+                    memory_table: 'crew_memory',
                     tables_initialized: false,
                   },
                 });
