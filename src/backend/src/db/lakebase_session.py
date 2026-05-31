@@ -309,7 +309,11 @@ class LakebaseSessionFactory:
                     "ssl": "require",
                     "server_settings": {
                         "jit": "off",
-                        "search_path": "kasal"
+                        # 'public' MUST stay on the path: the pgvector 'vector'
+                        # type and the vector_cosine_ops opclass live in public,
+                        # so HNSW indexes and the embedding column only resolve
+                        # when public is searchable alongside the kasal schema.
+                        "search_path": "kasal, public"
                     }
                 },
                 **pool_kwargs

@@ -1484,6 +1484,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
             <Alert
               severity={lakebaseStatus.success ? 'success' : 'error'}
               onClose={() => setLakebaseStatus(null)}
+              sx={{ '& .MuiAlert-message': { whiteSpace: 'pre-line' } }}
             >
               {lakebaseStatus.message}
             </Alert>
@@ -1498,14 +1499,36 @@ export const DatabricksOneClickSetup: React.FC = () => {
           <Alert severity="warning" sx={{ '& .MuiAlert-message': { width: '100%' } }}>
             <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Databricks App Setup</Typography>
             <Typography variant="body2" sx={{ mb: 0.5 }}>
-              Before connecting, ensure your App&apos;s service principal has Lakebase access:
+              Before connecting, complete these steps so your App&apos;s service principal can
+              authenticate to and use Lakebase:
             </Typography>
-            <Box component="ol" sx={{ m: 0, pl: 2.5, '& li': { mb: 0.25 } }}>
+            <Box component="ol" sx={{ m: 0, pl: 2.5, '& li': { mb: 0.5 } }}>
               <Typography component="li" variant="body2">
-                Add a <strong>Database</strong> resource to your App in the Databricks UI
+                <strong>Add the Lakebase instance as a Database resource to your App</strong> in the
+                Databricks UI (App → <em>Edit</em> → <em>Resources</em> → <em>Add resource</em> →{' '}
+                <em>Database</em>) with permission <em>&quot;Can connect and create&quot;</em>.
+                This is <strong>required</strong>: it automatically creates a linked PostgreSQL role
+                for the service principal. Without it you will get{' '}
+                <em>&quot;password authentication failed&quot;</em>, because a plain Postgres role is
+                not bound to the App&apos;s Databricks identity.
               </Typography>
               <Typography component="li" variant="body2">
-                Create a <strong>PostgreSQL role</strong> for the service principal on the Lakebase instance
+                Enable the <strong>pgvector</strong> extension <strong>once</strong> as the instance owner
+                (the App&apos;s service principal cannot create it — that requires superuser):
+                <Box
+                  component="code"
+                  sx={{
+                    display: 'block',
+                    mt: 0.5,
+                    p: 1,
+                    bgcolor: 'action.hover',
+                    borderRadius: 1,
+                    fontFamily: 'monospace',
+                    fontSize: '0.8rem',
+                  }}
+                >
+                  CREATE EXTENSION IF NOT EXISTS vector;
+                </Box>
               </Typography>
             </Box>
             <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>

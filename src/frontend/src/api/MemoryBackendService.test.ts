@@ -264,6 +264,22 @@ describe('MemoryBackendService', () => {
 
       expect(result).toBeNull();
     });
+
+    it('should return null when no configs exist', async () => {
+      (apiClient.get as Mock).mockResolvedValue({ data: [] });
+
+      const result = await MemoryBackendService.getConfig();
+
+      expect(result).toBeNull();
+    });
+
+    it('should return null when configs is null', async () => {
+      (apiClient.get as Mock).mockResolvedValue({ data: null });
+
+      const result = await MemoryBackendService.getConfig();
+
+      expect(result).toBeNull();
+    });
   });
 
   describe('getMemoryStats', () => {
