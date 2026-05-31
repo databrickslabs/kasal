@@ -4,6 +4,7 @@ Unit tests for LakebaseConnectionService.
 Tests all connection management, credential generation, engine creation,
 and SPN-based username resolution for Databricks Lakebase (PostgreSQL) instances.
 """
+import os
 import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -376,6 +377,337 @@ class TestCreateLakebaseEngineAsync:
 
         call_kwargs = mock_create_engine.call_args[1]
         assert call_kwargs["echo"] is False
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _make_connect_ctx(mock_conn):
+    """Async context manager mock for engine.connect()."""
+    ctx = AsyncMock()
+    ctx.__aenter__ = AsyncMock(return_value=mock_conn)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    return ctx
+
+
+def _make_sync_connect_ctx(mock_conn):
+    """Sync context manager mock for engine.connect()."""
+    ctx = MagicMock()
+    ctx.__enter__ = MagicMock(return_value=mock_conn)
+    ctx.__exit__ = MagicMock(return_value=False)
+    return ctx
+
+
+# ---------------------------------------------------------------------------
+# Test class: get_workspace_client SPN PAT backup (line 81)
+# ---------------------------------------------------------------------------
+
+class TestGetWorkspaceClientSpnPatBackup:
+    """Tests for SPN OAuth path stripping/restoring PAT env vars."""
+
+    @pytest.mark.asyncio
+    async def test_spn_strips_and_restores_pat_env_vars(self):
+        """SPN path should pop DATABRICKS_TOKEN/API_KEY then restore them."""
+        svc = LakebaseConnectionService()
+        env = {
+            "DATABRICKS_CLIENT_ID": "spn-id",
+            "DATABRICKS_CLIENT_SECRET": "spn-secret",
+            "DATABRICKS_HOST": "https://example.com",
+            "DATABRICKS_TOKEN": "pat-token",
+            "DATABRICKS_API_KEY": "api-key",
+        }
+        captured = {}
+
+        def _fake_ws(**kwargs):
+            import os as _os
+            # During the SDK call, PAT vars must be removed
+            captured["token_present"] = "DATABRICKS_TOKEN" in _os.environ
+            captured["api_key_present"] = "DATABRICKS_API_KEY" in _os.environ
+            return MagicMock()
+
+        with patch.dict("os.environ", env, clear=True), \
+             patch("src.services.lakebase_connection_service.WorkspaceClient", side_effect=_fake_ws):
+            result = await svc.get_workspace_client()
+
+            assert result is svc._workspace_client
+            assert captured["token_present"] is False
+            assert captured["api_key_present"] is False
+            # restored afterwards
+            assert os.environ["DATABRICKS_TOKEN"] == "pat-token"
+            assert os.environ["DATABRICKS_API_KEY"] == "api-key"
+
+
+# ---------------------------------------------------------------------------
+# Test class: test_connection (lines 232-270)
+# ---------------------------------------------------------------------------
+
+class TestTestConnection:
+    """Tests for the test_connection method."""
+
+    @pytest.mark.asyncio
+    @patch("src.services.lakebase_connection_service.create_async_engine")
+    async def test_connection_success(self, mock_create_engine, service, endpoint, instance_name, mock_credential):
+        """test_connection returns success dict with connected_user and version."""
+        mock_conn = AsyncMock()
+        result_row = MagicMock()
+        result_row.fetchone.return_value = ("spn-user", "PostgreSQL 15.4")
+        mock_conn.execute = AsyncMock(return_value=result_row)
+
+        mock_engine = MagicMock()
+        mock_engine.connect = MagicMock(return_value=_make_connect_ctx(mock_conn))
+        mock_engine.dispose = AsyncMock()
+        mock_create_engine.return_value = mock_engine
+
+        service.get_username = AsyncMock(return_value="spn-user")
+        service.generate_credentials = AsyncMock(return_value=mock_credential)
+
+        result = await service.test_connection(endpoint, instance_name)
+
+        assert result["success"] is True
+        assert result["connected_user"] == "spn-user"
+        assert result["version"] == "PostgreSQL 15.4"
+        assert result["username_used"] == "spn-user"
+        mock_engine.dispose.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @patch("src.services.lakebase_connection_service.create_async_engine")
+    async def test_connection_failure(self, mock_create_engine, service, endpoint, instance_name, mock_credential):
+        """test_connection returns failure dict when the connection raises."""
+        mock_engine = MagicMock()
+        failing_ctx = AsyncMock()
+        failing_ctx.__aenter__ = AsyncMock(side_effect=RuntimeError("conn refused"))
+        failing_ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_engine.connect = MagicMock(return_value=failing_ctx)
+        mock_engine.dispose = AsyncMock()
+        mock_create_engine.return_value = mock_engine
+
+        service.get_username = AsyncMock(return_value="spn-user")
+        service.generate_credentials = AsyncMock(return_value=mock_credential)
+
+        result = await service.test_connection(endpoint, instance_name)
+
+        assert result["success"] is False
+        assert "conn refused" in result["error"]
+        assert result["username_used"] == "spn-user"
+        mock_engine.dispose.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Test class: create_engine_with_token_refresh (lines 295-345)
+# ---------------------------------------------------------------------------
+
+class TestCreateEngineWithTokenRefresh:
+    """Tests for create_engine_with_token_refresh (async + sync)."""
+
+    @pytest.mark.asyncio
+    @patch("src.services.lakebase_connection_service.event")
+    @patch("src.services.lakebase_connection_service.create_async_engine")
+    async def test_async_driver_builds_engine_and_registers_listener(
+        self, mock_create_engine, mock_event, service, endpoint
+    ):
+        """asyncpg driver should build async engine with kasal,public search_path and do_connect listener."""
+        mock_engine = MagicMock()
+        mock_create_engine.return_value = mock_engine
+
+        captured = {}
+
+        def _listens_for(target, name):
+            captured["name"] = name
+
+            def _decorator(fn):
+                captured["fn"] = fn
+                return fn
+            return _decorator
+
+        mock_event.listens_for.side_effect = _listens_for
+
+        token_holder = {"token": "tok-123", "refreshed_at": 0.0}
+        result = service.create_engine_with_token_refresh(
+            endpoint=endpoint, username="u", token_holder=token_holder, driver="asyncpg"
+        )
+
+        assert result is mock_engine
+        url = mock_create_engine.call_args[0][0]
+        assert url == f"postgresql+asyncpg://u@{endpoint}:5432/databricks_postgres"
+        ck = mock_create_engine.call_args[1]
+        assert ck["connect_args"]["server_settings"]["search_path"] == "kasal, public"
+        assert ck["pool_pre_ping"] is False
+        # Exercise the registered do_connect listener
+        assert captured["name"] == "do_connect"
+        cparams = {}
+        captured["fn"](None, None, None, cparams)
+        assert cparams["password"] == "tok-123"
+
+    @patch("src.services.lakebase_connection_service.event")
+    @patch("src.services.lakebase_connection_service.create_engine")
+    def test_sync_driver_builds_engine_and_registers_listener(
+        self, mock_create_engine, mock_event, service, endpoint
+    ):
+        """pg8000 driver should build sync engine with do_connect listener."""
+        mock_engine = MagicMock()
+        mock_create_engine.return_value = mock_engine
+
+        captured = {}
+
+        def _listens_for(target, name):
+            captured["name"] = name
+
+            def _decorator(fn):
+                captured["fn"] = fn
+                return fn
+            return _decorator
+
+        mock_event.listens_for.side_effect = _listens_for
+
+        token_holder = {"token": "sync-tok", "refreshed_at": 0.0}
+        result = service.create_engine_with_token_refresh(
+            endpoint=endpoint, username="u", token_holder=token_holder, driver="pg8000"
+        )
+
+        assert result is mock_engine
+        url = mock_create_engine.call_args[0][0]
+        assert url == f"postgresql+pg8000://u:placeholder@{endpoint}:5432/databricks_postgres"
+        ck = mock_create_engine.call_args[1]
+        assert ck["connect_args"]["ssl_context"] is True
+        # Exercise the registered do_connect listener
+        assert captured["name"] == "do_connect"
+        cparams = {}
+        captured["fn"](None, None, None, cparams)
+        assert cparams["password"] == "sync-tok"
+
+
+# ---------------------------------------------------------------------------
+# Test class: create_lakebase_engine_sync statement_timeout (lines 424-430)
+# ---------------------------------------------------------------------------
+
+class TestCreateLakebaseEngineSyncTimeout:
+    """Tests for create_lakebase_engine_sync with statement_timeout_ms."""
+
+    @patch("src.services.lakebase_connection_service.event")
+    @patch("src.services.lakebase_connection_service.create_engine")
+    def test_statement_timeout_registers_connect_listener(
+        self, mock_create_engine, mock_event, service, endpoint
+    ):
+        """statement_timeout_ms > 0 should register a connect listener that SETs statement_timeout."""
+        mock_engine = MagicMock()
+        mock_create_engine.return_value = mock_engine
+
+        captured = {}
+
+        def _listens_for(target, name):
+            captured["name"] = name
+
+            def _decorator(fn):
+                captured["fn"] = fn
+                return fn
+            return _decorator
+
+        mock_event.listens_for.side_effect = _listens_for
+
+        result = service.create_lakebase_engine_sync(
+            endpoint=endpoint, username="u", token="t", statement_timeout_ms=5000
+        )
+
+        assert result is mock_engine
+        assert captured["name"] == "connect"
+        # Exercise the listener
+        cursor = MagicMock()
+        dbapi_conn = MagicMock()
+        dbapi_conn.cursor.return_value = cursor
+        captured["fn"](dbapi_conn, None)
+        cursor.execute.assert_called_once_with("SET statement_timeout = '5000'")
+        cursor.close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Test class: get_connected_engine_async (lines 457-471)
+# ---------------------------------------------------------------------------
+
+class TestGetConnectedEngineAsync:
+    """Tests for get_connected_engine_async."""
+
+    @pytest.mark.asyncio
+    async def test_success(self, service, endpoint, instance_name, mock_credential):
+        """get_connected_engine_async returns (username, engine) on success."""
+        mock_conn = AsyncMock()
+        scalar_result = MagicMock()
+        scalar_result.scalar.return_value = "spn-user"
+        mock_conn.execute = AsyncMock(return_value=scalar_result)
+
+        mock_engine = MagicMock()
+        mock_engine.connect = MagicMock(return_value=_make_connect_ctx(mock_conn))
+        mock_engine.dispose = AsyncMock()
+
+        service.get_username = AsyncMock(return_value="spn-user")
+        service.generate_credentials = AsyncMock(return_value=mock_credential)
+        service.create_lakebase_engine_async = AsyncMock(return_value=mock_engine)
+
+        username, engine = await service.get_connected_engine_async(instance_name, endpoint)
+
+        assert username == "spn-user"
+        assert engine is mock_engine
+        mock_engine.dispose.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_failure_disposes_and_raises(self, service, endpoint, instance_name, mock_credential):
+        """get_connected_engine_async disposes engine and raises on connect failure."""
+        mock_engine = MagicMock()
+        failing_ctx = AsyncMock()
+        failing_ctx.__aenter__ = AsyncMock(side_effect=RuntimeError("boom"))
+        failing_ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_engine.connect = MagicMock(return_value=failing_ctx)
+        mock_engine.dispose = AsyncMock()
+
+        service.get_username = AsyncMock(return_value="spn-user")
+        service.generate_credentials = AsyncMock(return_value=mock_credential)
+        service.create_lakebase_engine_async = AsyncMock(return_value=mock_engine)
+
+        with pytest.raises(Exception, match="Failed to connect to Lakebase"):
+            await service.get_connected_engine_async(instance_name, endpoint)
+
+        mock_engine.dispose.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Test class: get_connected_engine_sync (lines 493-504)
+# ---------------------------------------------------------------------------
+
+class TestGetConnectedEngineSync:
+    """Tests for get_connected_engine_sync."""
+
+    def test_success(self, service, endpoint):
+        """get_connected_engine_sync returns (engine, connected_user) on success."""
+        mock_conn = MagicMock()
+        scalar_result = MagicMock()
+        scalar_result.scalar.return_value = "spn-user"
+        mock_conn.execute = MagicMock(return_value=scalar_result)
+
+        mock_engine = MagicMock()
+        mock_engine.connect = MagicMock(return_value=_make_sync_connect_ctx(mock_conn))
+
+        service.create_lakebase_engine_sync = MagicMock(return_value=mock_engine)
+
+        engine, connected_user = service.get_connected_engine_sync(endpoint, "u", "t")
+
+        assert engine is mock_engine
+        assert connected_user == "spn-user"
+        mock_engine.dispose.assert_not_called()
+
+    def test_failure_disposes_and_raises(self, service, endpoint):
+        """get_connected_engine_sync disposes engine and raises on connect failure."""
+        mock_engine = MagicMock()
+        failing_ctx = MagicMock()
+        failing_ctx.__enter__ = MagicMock(side_effect=RuntimeError("boom"))
+        failing_ctx.__exit__ = MagicMock(return_value=False)
+        mock_engine.connect = MagicMock(return_value=failing_ctx)
+
+        service.create_lakebase_engine_sync = MagicMock(return_value=mock_engine)
+
+        with pytest.raises(Exception, match=r"\[SYNC\] Failed to connect to Lakebase"):
+            service.get_connected_engine_sync(endpoint, "u", "t")
+
+        mock_engine.dispose.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

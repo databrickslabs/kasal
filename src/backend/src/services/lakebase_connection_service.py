@@ -308,7 +308,9 @@ class LakebaseConnectionService(BaseService):
                     "ssl": "require",
                     "server_settings": {
                         "jit": "off",
-                        "search_path": "kasal"
+                        # 'public' MUST stay on the path: the pgvector 'vector'
+                        # type and the vector_cosine_ops opclass live in public.
+                        "search_path": "kasal, public"
                     }
                 }
             )

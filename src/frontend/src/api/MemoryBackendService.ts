@@ -25,6 +25,13 @@ export interface TestConnectionResult {
     endpoint_status?: string;
     indexes_found?: string[];
     error?: string;
+    // Lakebase pgvector connection test fields
+    pgvector_available?: boolean;
+    pg_version?: string;
+    // Present when pgvector is not yet enabled: guidance + exact SQL the
+    // Lakebase instance owner must run (the app SP cannot create the extension).
+    pgvector_setup_instructions?: string;
+    pgvector_setup_sql?: string;
   };
 }
 

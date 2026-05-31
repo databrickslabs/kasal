@@ -13,6 +13,24 @@ from src.db.lakebase_session import get_lakebase_session
 
 logger = LoggerManager.get_instance().system
 
+# pgvector ("vector") is NOT a trusted PostgreSQL extension, so CREATE EXTENSION
+# requires the databricks_superuser role. A deployed Databricks App's service
+# principal only has CONNECT/CREATE/DML on the database (not superuser), so it
+# cannot create the extension itself — it must be pre-created once by the
+# Lakebase instance owner. Everything else (schema, tables, indexes) the app's
+# service principal CAN create on its own.
+PGVECTOR_ADMIN_INSTRUCTIONS = (
+    "The pgvector extension is not enabled on this Lakebase instance, and the "
+    "app's service principal does not have permission to create it "
+    "(CREATE EXTENSION requires the databricks_superuser role).\n\n"
+    "To fix this, the Lakebase instance owner must enable the extension ONCE. "
+    "Connect to the instance (Databricks SQL editor, psql, or any client) as the "
+    "owner and run:\n\n"
+    "    CREATE EXTENSION IF NOT EXISTS vector;\n\n"
+    "Then click 'Initialize Tables' again — the app will create the kasal schema, "
+    "the memory table, and its indexes automatically."
+)
+
 
 class LakebaseMemoryService:
     """Service for managing Lakebase pgvector memory infrastructure."""
@@ -44,22 +62,38 @@ class LakebaseMemoryService:
 
                 # Check if pgvector extension is already enabled
                 result = await session.execute(
-                    text("SELECT extname FROM pg_extension WHERE extname IN ('pgvector', 'vector')")
+                    text("SELECT extname FROM pg_extension WHERE extname IN ('vector', 'pgvector')")
                 )
                 row = result.fetchone()
                 has_pgvector = row is not None
 
+                details = {
+                    "pgvector_available": has_pgvector,
+                    "pg_version": pg_version,
+                }
+                if has_pgvector:
+                    message = "Successfully connected to Lakebase with pgvector support"
+                else:
+                    # pgvector may need to be enabled by the instance owner before
+                    # Initialize Tables can succeed (the app's service principal
+                    # cannot create the extension itself). Surface the exact SQL.
+                    message = (
+                        "Successfully connected to Lakebase, but the pgvector "
+                        "extension is not enabled. If 'Initialize Tables' fails, "
+                        "the instance owner must run: "
+                        "CREATE EXTENSION IF NOT EXISTS vector;"
+                    )
+                    details["pgvector_setup_instructions"] = (
+                        PGVECTOR_ADMIN_INSTRUCTIONS
+                    )
+                    details["pgvector_setup_sql"] = (
+                        "CREATE EXTENSION IF NOT EXISTS vector;"
+                    )
+
                 return {
                     "success": True,
-                    "message": (
-                        "Successfully connected to Lakebase with pgvector support"
-                        if has_pgvector
-                        else "Successfully connected to Lakebase. Click 'Initialize Tables' to enable pgvector and create memory tables."
-                    ),
-                    "details": {
-                        "pgvector_available": has_pgvector,
-                        "pg_version": pg_version,
-                    },
+                    "message": message,
+                    "details": details,
                 }
 
         except Exception as e:
@@ -91,37 +125,61 @@ class LakebaseMemoryService:
                 from sqlalchemy import text
 
                 # Enable pgvector extension
-                # Databricks Lakebase uses 'pgvector', standard PostgreSQL uses 'vector'
-                # Use SAVEPOINT so a failed attempt doesn't poison the transaction
+                # Lakebase documents the extension as 'vector'; some environments
+                # also accept 'pgvector'. Check if already installed first — the
+                # SPN used by deployed Databricks Apps often lacks CREATE EXTENSION
+                # privileges, but can use an extension the instance owner pre-created.
                 pgvector_enabled = False
-                for ext_name in ("pgvector", "vector"):
-                    try:
-                        await session.execute(text("SAVEPOINT ext_attempt"))
-                        await session.execute(text(f"CREATE EXTENSION IF NOT EXISTS {ext_name}"))
-                        await session.execute(text("RELEASE SAVEPOINT ext_attempt"))
-                        pgvector_enabled = True
-                        logger.info(f"Extension '{ext_name}' enabled successfully")
-                        break
-                    except Exception as ext_err:
-                        await session.execute(text("ROLLBACK TO SAVEPOINT ext_attempt"))
-                        logger.debug(f"Extension '{ext_name}' not available: {ext_err}")
+
+                result = await session.execute(
+                    text(
+                        "SELECT extname FROM pg_extension "
+                        "WHERE extname IN ('vector', 'pgvector')"
+                    )
+                )
+                existing_ext = result.scalar()
+                if existing_ext:
+                    pgvector_enabled = True
+                    logger.info(f"Extension '{existing_ext}' already enabled")
+                else:
+                    # Try to create — will succeed for instance owners / superusers
+                    for ext_name in ("vector", "pgvector"):
+                        try:
+                            await session.execute(text("SAVEPOINT ext_attempt"))
+                            await session.execute(text(f"CREATE EXTENSION IF NOT EXISTS {ext_name}"))
+                            await session.execute(text("RELEASE SAVEPOINT ext_attempt"))
+                            pgvector_enabled = True
+                            logger.info(f"Extension '{ext_name}' created successfully")
+                            break
+                        except Exception as ext_err:
+                            await session.execute(text("ROLLBACK TO SAVEPOINT ext_attempt"))
+                            logger.debug(f"Extension '{ext_name}' not available: {ext_err}")
 
                 if not pgvector_enabled:
                     return {
                         "success": False,
-                        "message": "Could not enable pgvector extension. Ensure pgvector is available in your Lakebase project.",
+                        "message": PGVECTOR_ADMIN_INSTRUCTIONS,
                         "tables": results,
                     }
 
+                # Ensure the kasal schema exists before creating tables in it.
+                # The app's service principal has CREATE on the database, so it
+                # can create the schema itself (unlike the extension above).
+                # check_tables_initialized() queries table_schema='kasal', so the
+                # table MUST live in kasal — qualify all DDL explicitly rather
+                # than relying solely on search_path.
+                await session.execute(text("CREATE SCHEMA IF NOT EXISTS kasal"))
+
                 for memory_type, table_name in tables.items():
                     try:
+                        qualified_table = f"kasal.{table_name}"
                         # Unified memory schema. Cognitive fields (scope,
                         # categories, importance, source, private) are kept
                         # inside the ``metadata`` JSONB column; session_id
                         # remains a top-level column for cheap run-scoped
                         # filtering.
                         create_sql = text(f"""
-                            CREATE TABLE IF NOT EXISTS {table_name} (
+                            CREATE TABLE IF NOT EXISTS {qualified_table} (
                                 id TEXT PRIMARY KEY,
                                 crew_id TEXT NOT NULL,
                                 group_id TEXT NOT NULL DEFAULT '',
@@ -140,35 +198,35 @@ class LakebaseMemoryService:
                         # HNSW index on embedding column for cosine similarity.
                         await session.execute(text(f"""
                             CREATE INDEX IF NOT EXISTS idx_{table_name}_embedding
-                            ON {table_name}
+                            ON {qualified_table}
                             USING hnsw (embedding vector_cosine_ops)
                         """))
 
                         # B-tree indexes for tenant / session filtering.
                         await session.execute(text(f"""
                             CREATE INDEX IF NOT EXISTS idx_{table_name}_crew_id
-                            ON {table_name} (crew_id)
+                            ON {qualified_table} (crew_id)
                         """))
                         await session.execute(text(f"""
                             CREATE INDEX IF NOT EXISTS idx_{table_name}_group_id
-                            ON {table_name} (group_id)
+                            ON {qualified_table} (group_id)
                         """))
                         await session.execute(text(f"""
                             CREATE INDEX IF NOT EXISTS idx_{table_name}_session_id
-                            ON {table_name} (session_id)
+                            ON {qualified_table} (session_id)
                         """))
 
                         # GIN index on metadata for scope / category filters.
                         await session.execute(text(f"""
                             CREATE INDEX IF NOT EXISTS idx_{table_name}_metadata
-                            ON {table_name}
+                            ON {qualified_table}
                             USING gin (metadata)
                         """))
 
                         results[memory_type] = {
                             "success": True,
                             "table_name": table_name,
-                            "message": f"Table {table_name} initialized with HNSW + GIN indexes",
+                            "message": f"Table kasal.{table_name} initialized with HNSW + GIN indexes",
                         }
                         logger.info(
                             f"Initialized {memory_type} memory table: {table_name}"

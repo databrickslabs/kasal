@@ -2621,4 +2621,370 @@ describe('DatabricksOneClickSetup', () => {
       await waitFor(() => expect(screen.getByText(/Cannot view documents: endpoint not configured/)).toBeInTheDocument());
     });
   });
+
+  // =======================================================================
+  // Additional coverage: NOT_FOUND endpoint statuses, no-backend_id paths,
+  // setup-built minimal configs, and Lakebase initialize failure branch.
+  // =======================================================================
+
+  describe('Coverage completion', () => {
+    /**
+     * Build a Databricks config where verify-resources succeeds on the FIRST
+     * call (initial load) but returns success:false on every subsequent call.
+     * This lets a post-edit savedConfig keep an endpoint whose name is no longer
+     * present in the (now-stale) verifiedResources, so the useEffect that maps
+     * endpoint statuses takes the NOT_FOUND else-branches.
+     */
+    function setupVerifyOnceThenFail() {
+      let verifyCalls = 0;
+      mockApiClient.get.mockImplementation((url: string) => {
+        if (url === '/memory-backend/configs/default') {
+          return Promise.resolve({
+            data: {
+              id: 'db-1', backend_type: 'databricks',
+              databricks_config: {
+                workspace_url: 'https://test.databricks.com',
+                catalog: 'ml', schema: 'agents',
+                endpoint_name: 'mem-ep', document_endpoint_name: 'doc-ep',
+                memory_index: 'ml.agents.mem', document_index: 'ml.agents.doc',
+              },
+            },
+          });
+        }
+        if (url === '/databricks/environment') return Promise.resolve({ data: { databricks_host: 'https://test.databricks.com' } });
+        if (url === '/memory-backend/databricks/verify-resources') {
+          verifyCalls += 1;
+          if (verifyCalls === 1) {
+            return Promise.resolve({
+              data: {
+                success: true,
+                resources: {
+                  endpoints: {
+                    'mem-ep': { name: 'mem-ep', state: 'ONLINE', ready: true },
+                    'doc-ep': { name: 'doc-ep', state: 'ONLINE', ready: true },
+                  },
+                  indexes: {
+                    'ml.agents.mem': { name: 'ml.agents.mem' },
+                    'ml.agents.doc': { name: 'ml.agents.doc' },
+                  },
+                },
+              },
+            });
+          }
+          // Subsequent verifications report failure so no removal happens and
+          // verifiedResources keeps the original (now-stale) endpoint set.
+          return Promise.resolve({ data: { success: false } });
+        }
+        if (url === '/memory-backend/databricks/index-info') {
+          return Promise.resolve({ data: { success: true, doc_count: 0, status: 'ONLINE', ready: true, index_type: 'DELTA_SYNC' } });
+        }
+        if (url.startsWith('/memory-backend/configs/')) {
+          return Promise.resolve({ data: { id: 'db-1', databricks_config: { embedding_dimension: 1024 } } });
+        }
+        if (url === '/database-management/lakebase/instances') return Promise.resolve(paginatedInstances([]));
+        return Promise.resolve({ data: {} });
+      });
+    }
+
+    it('renaming endpoints to unknown names marks them NOT_FOUND and delete removes from config', async () => {
+      setupVerifyOnceThenFail();
+      mockApiClient.put.mockResolvedValue({ data: {} });
+
+      await act(async () => renderComponent());
+      await waitForLoaded();
+      await waitFor(() => expect(screen.getByTestId('configuration-display')).toBeInTheDocument());
+      await waitFor(() => expect(capturedProps.current.ConfigurationDisplay).toBeDefined());
+
+      // Start editing and rename both endpoints to names not present in the
+      // verified resources, then save so savedConfig keeps the ghost names.
+      let cdProps = capturedProps.current.ConfigurationDisplay;
+      await act(async () => (cdProps.onStartEdit as Function)());
+      await waitFor(() => expect(capturedProps.current.EditConfigurationForm).toBeDefined());
+
+      const editProps = capturedProps.current.EditConfigurationForm;
+      await act(async () => (editProps.onEditChange as Function)('endpoints.memory.name', 'ghost-mem'));
+      await act(async () => (editProps.onEditChange as Function)('endpoints.document.name', 'ghost-doc'));
+
+      cdProps = capturedProps.current.ConfigurationDisplay;
+      await act(async () => (cdProps.onSaveEdit as Function)());
+
+      // The status-mapping effect should now mark the memory + document
+      // endpoints as NOT_FOUND (else-branches), exposed via EndpointsDisplay.
+      await waitFor(() => {
+        const ep = capturedProps.current.EndpointsDisplay;
+        expect(ep).toBeDefined();
+        const statuses = ep.endpointStatuses as Record<string, { state: string }>;
+        expect(statuses.memory?.state).toBe('NOT_FOUND');
+        expect(statuses.document?.state).toBe('NOT_FOUND');
+      });
+
+      // Deleting a NOT_FOUND endpoint should remove it from config (no DELETE
+      // call to Databricks) and persist via updateBackendConfiguration (PUT).
+      mockApiClient.put.mockClear();
+      const epProps = capturedProps.current.EndpointsDisplay;
+      await act(async () => (epProps.onDeleteEndpoint as Function)('document'));
+
+      await waitFor(() => expect(mockApiClient.put).toHaveBeenCalled());
+      expect(mockApiClient.delete).not.toHaveBeenCalledWith('/memory-backend/databricks/endpoint', expect.anything());
+    });
+
+    it('updateBackendConfiguration returns early when config has no backend_id', async () => {
+      // Databricks config WITHOUT an `id`, with a document endpoint that is
+      // missing from Databricks → verifyActualResources detects a change and
+      // calls updateBackendConfiguration with a config that has no backend_id.
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockApiClient.get.mockImplementation((url: string) => {
+        if (url === '/memory-backend/configs/default') {
+          return Promise.resolve({
+            data: {
+              backend_type: 'databricks',
+              databricks_config: {
+                workspace_url: 'https://test.databricks.com',
+                catalog: 'ml', schema: 'agents',
+                endpoint_name: 'mem-ep', document_endpoint_name: 'missing-ep',
+                memory_index: 'ml.agents.mem',
+              },
+            },
+          });
+        }
+        if (url === '/databricks/environment') return Promise.resolve({ data: { databricks_host: 'https://test.databricks.com' } });
+        if (url === '/memory-backend/databricks/verify-resources') {
+          return Promise.resolve({
+            data: {
+              success: true,
+              resources: {
+                endpoints: { 'mem-ep': { name: 'mem-ep', state: 'ONLINE', ready: true } },
+                indexes: { 'ml.agents.mem': { name: 'ml.agents.mem' } },
+              },
+            },
+          });
+        }
+        if (url === '/memory-backend/databricks/index-info') return Promise.resolve({ data: { success: true, doc_count: 0 } });
+        if (url === '/database-management/lakebase/instances') return Promise.resolve(paginatedInstances([]));
+        return Promise.resolve({ data: {} });
+      });
+
+      await act(async () => renderComponent());
+      await waitForLoaded();
+      await waitFor(() => expect(screen.getByTestId('configuration-display')).toBeInTheDocument());
+
+      // updateBackendConfiguration logs the no-backend-id error and returns.
+      await waitFor(() => {
+        expect(consoleSpy).toHaveBeenCalledWith('No backend ID found, cannot update configuration');
+      });
+      // No PUT is performed because the function returned early.
+      expect(mockApiClient.put).not.toHaveBeenCalled();
+      consoleSpy.mockRestore();
+    });
+
+    it('handleSaveEdit returns early when editedConfig has no backend_id', async () => {
+      // Config WITHOUT `id` → editedConfig (deep copy) has no backend_id.
+      mockApiClient.get.mockImplementation((url: string) => {
+        if (url === '/memory-backend/configs/default') {
+          return Promise.resolve({
+            data: {
+              backend_type: 'databricks',
+              databricks_config: {
+                workspace_url: 'https://test.databricks.com',
+                catalog: 'ml', schema: 'agents',
+                endpoint_name: 'mem-ep',
+                memory_index: 'ml.agents.mem',
+              },
+            },
+          });
+        }
+        if (url === '/databricks/environment') return Promise.resolve({ data: { databricks_host: 'https://test.databricks.com' } });
+        if (url === '/memory-backend/databricks/verify-resources') {
+          return Promise.resolve({
+            data: {
+              success: true,
+              resources: {
+                endpoints: { 'mem-ep': { name: 'mem-ep', state: 'ONLINE', ready: true } },
+                indexes: { 'ml.agents.mem': { name: 'ml.agents.mem' } },
+              },
+            },
+          });
+        }
+        if (url === '/memory-backend/databricks/index-info') return Promise.resolve({ data: { success: true, doc_count: 0 } });
+        if (url === '/database-management/lakebase/instances') return Promise.resolve(paginatedInstances([]));
+        return Promise.resolve({ data: {} });
+      });
+
+      await act(async () => renderComponent());
+      await waitForLoaded();
+      await waitFor(() => expect(screen.getByTestId('configuration-display')).toBeInTheDocument());
+      await waitFor(() => expect(capturedProps.current.ConfigurationDisplay).toBeDefined());
+
+      let cdProps = capturedProps.current.ConfigurationDisplay;
+      await act(async () => (cdProps.onStartEdit as Function)());
+      await waitFor(() => expect(screen.getByTestId('edit-config-form')).toBeInTheDocument());
+
+      mockApiClient.put.mockClear();
+      cdProps = capturedProps.current.ConfigurationDisplay;
+      await act(async () => (cdProps.onSaveEdit as Function)());
+
+      // Returns early before any PUT (no backend_id).
+      expect(mockApiClient.put).not.toHaveBeenCalled();
+    });
+
+    it('handleEditChange creates endpoints/indexes objects when missing from edited config', async () => {
+      // A setup-built config (from handleSetup) carries no endpoints/indexes
+      // objects, so editing them exercises the lazy-init branches.
+      mockDVSService.performOneClickSetup.mockResolvedValueOnce({
+        success: true,
+        catalog: 'ml',
+        schema: 'agents',
+        endpoints: undefined,
+        indexes: undefined,
+      });
+
+      await act(async () => renderComponent());
+      await waitForLoaded();
+
+      expect(capturedProps.current.AutomaticSetupForm).toBeDefined();
+      await act(async () => (capturedProps.current.AutomaticSetupForm.onSetup as Function)());
+
+      // savedConfig now has workspace_url but no endpoints/indexes objects.
+      await waitFor(() => expect(screen.getByTestId('configuration-display')).toBeInTheDocument());
+      await waitFor(() => expect(capturedProps.current.ConfigurationDisplay).toBeDefined());
+
+      const cdProps = capturedProps.current.ConfigurationDisplay;
+      await act(async () => (cdProps.onStartEdit as Function)());
+      await waitFor(() => expect(capturedProps.current.EditConfigurationForm).toBeDefined());
+
+      const editProps = capturedProps.current.EditConfigurationForm;
+      // editedConfig has no `endpoints` / `indexes` keys → lazy-init branches.
+      await act(async () => (editProps.onEditChange as Function)('endpoints.memory.name', 'new-ep'));
+      await act(async () => (editProps.onEditChange as Function)('indexes.unified.name', 'ml.agents.new'));
+    });
+
+    it('handleDeleteIndex and handleEmptyIndex return early when index has no name', async () => {
+      // handleSetup result carries index objects without a `name` and no
+      // backend_id → exercises the no-name / no-backend_id early returns.
+      mockDVSService.performOneClickSetup.mockResolvedValueOnce({
+        success: true,
+        catalog: 'ml',
+        schema: 'agents',
+        endpoints: { memory: { name: 'ep1' }, document: { name: 'ep2' } },
+        indexes: { unified: {}, document: {} },
+      });
+
+      await act(async () => renderComponent());
+      await waitForLoaded();
+
+      expect(capturedProps.current.AutomaticSetupForm).toBeDefined();
+      await act(async () => (capturedProps.current.AutomaticSetupForm.onSetup as Function)());
+
+      await waitFor(() => expect(screen.getByTestId('configuration-display')).toBeInTheDocument());
+      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Unified Cognitive Memory Index']).toBeDefined());
+
+      mockApiClient.delete.mockClear();
+      mockApiClient.post.mockClear();
+
+      // onDelete: passes the `indexes.unified` truthy guard but the name is
+      // undefined → early return (no DELETE).
+      await act(async () => (capturedProps.current['IndexManagementTable_Unified Cognitive Memory Index'].onDelete as Function)('memory'));
+      expect(mockApiClient.delete).not.toHaveBeenCalledWith('/memory-backend/databricks/index', expect.anything());
+
+      // onEmpty: the saved config has no backend_id → early return (no POST).
+      await act(async () => (capturedProps.current['IndexManagementTable_Unified Cognitive Memory Index'].onEmpty as Function)('memory'));
+      expect(mockApiClient.post).not.toHaveBeenCalledWith('/memory-backend/databricks/empty-index', expect.anything());
+    });
+
+    it('handleReseedDocumentation returns early when config has no backend_id', async () => {
+      // Setup-built config has a document index (so the Knowledge Base table
+      // renders) but no backend_id → reseed returns at the guard.
+      mockDVSService.performOneClickSetup.mockResolvedValueOnce({
+        success: true,
+        catalog: 'ml',
+        schema: 'agents',
+        endpoints: { document: { name: 'doc-ep' } },
+        indexes: { document: { name: 'ml.agents.doc' } },
+      });
+
+      await act(async () => renderComponent());
+      await waitForLoaded();
+
+      expect(capturedProps.current.AutomaticSetupForm).toBeDefined();
+      await act(async () => (capturedProps.current.AutomaticSetupForm.onSetup as Function)());
+
+      await waitFor(() => expect(screen.getByTestId('configuration-display')).toBeInTheDocument());
+      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Knowledge Base']).toBeDefined());
+
+      mockApiClient.post.mockClear();
+      await act(async () => (capturedProps.current['IndexManagementTable_Knowledge Base'].onRefresh as Function)());
+      // Guard return: no empty-index POST.
+      expect(mockApiClient.post).not.toHaveBeenCalledWith('/memory-backend/databricks/empty-index', expect.anything());
+    });
+
+    it('handleReseedDocumentation refreshes index info after success (timer)', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      setupDatabricksMocks();
+      mockApiClient.post.mockImplementation((url: string) => {
+        if (url === '/memory-backend/databricks/empty-index') return Promise.resolve({ data: { success: true } });
+        if (url === '/documentation-embeddings/seed-all') return Promise.resolve({ data: { success: true } });
+        return Promise.resolve({ data: {} });
+      });
+
+      await act(async () => renderComponent());
+      await act(async () => vi.advanceTimersByTime(100));
+      await waitForLoaded();
+      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Knowledge Base']).toBeDefined());
+
+      await act(async () => (capturedProps.current['IndexManagementTable_Knowledge Base'].onRefresh as Function)());
+
+      // Advance past the 5000ms timer that re-fetches index info.
+      mockApiClient.get.mockClear();
+      await act(async () => vi.advanceTimersByTime(5500));
+
+      await waitFor(() => {
+        expect(mockApiClient.get).toHaveBeenCalledWith('/memory-backend/databricks/index-info', expect.anything());
+      });
+
+      vi.useRealTimers();
+    });
+
+    it('Initialize Tables shows error when the service reports failure', async () => {
+      setupLakebaseMocks();
+      mockMBService.initializeLakebaseTables.mockResolvedValueOnce({ success: false, message: 'pgvector not enabled' });
+
+      await act(async () => renderComponent());
+      await waitForLoaded();
+
+      const initBtn = screen.getByRole('button', { name: /Initialize Tables/i });
+      await act(async () => fireEvent.click(initBtn));
+
+      await waitFor(() => {
+        expect(screen.getByText('pgvector not enabled')).toBeInTheDocument();
+      });
+      // The failure branch returns before attempting to save the config.
+      expect(mockApiClient.post).not.toHaveBeenCalledWith('/memory-backend/lakebase/save-config', expect.anything());
+    });
+
+    it('error alert close handler clears the error', async () => {
+      // Trigger an error via a failed delete, then close the alert.
+      setupDatabricksMocks();
+      mockApiClient.delete.mockRejectedValueOnce(new Error('delete fail'));
+
+      await act(async () => renderComponent());
+      await waitForLoaded();
+      await waitFor(() => expect(capturedProps.current.EndpointsDisplay).toBeDefined());
+
+      await act(async () => (capturedProps.current.EndpointsDisplay.onDeleteEndpoint as Function)('document'));
+      const alertText = await screen.findByText(/Failed to delete endpoint/);
+      expect(alertText).toBeInTheDocument();
+
+      // The error Alert renders a close IconButton in its action area; query
+      // it directly (the SVG-only button isn't matched by getByRole here) and
+      // click it to invoke the onClose handler (setError('')).
+      const alertRoot = alertText.closest('.MuiAlert-root') as HTMLElement;
+      const closeButton = alertRoot.querySelector('.MuiAlert-action button') as HTMLElement;
+      expect(closeButton).toBeTruthy();
+      await act(async () => fireEvent.click(closeButton));
+
+      await waitFor(() => {
+        expect(screen.queryByText(/Failed to delete endpoint/)).not.toBeInTheDocument();
+      });
+    });
+  });
 });
