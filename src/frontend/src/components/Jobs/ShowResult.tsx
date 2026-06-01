@@ -27,7 +27,9 @@ import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import HtmlIcon from '@mui/icons-material/Html';
 // import CloudIcon from '@mui/icons-material/Cloud';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import DownloadForOfflineIcon from '@mui/icons-material/DownloadForOffline';
 import { useNavigate } from 'react-router-dom';
+import apiClient from '../../config/api/ApiConfig';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
@@ -49,7 +51,71 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
   const [viewMode, setViewMode] = useState<'code' | 'html'>('code');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [databricksVolumeInfo, setDatabricksVolumeInfo] = useState<{ path: string; workspaceUrl?: string } | null>(null);
+  const [isCicdDownloading, setIsCicdDownloading] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Detect CI/CD export artifacts anywhere in the result tree.
+  // Tools embed cicd_download_url, cicd_type, cicd_name after creating a
+  // Genie Space or Lakeflow Dashboard.
+  const cicdArtifacts = useMemo(() => {
+    const found: Array<{ url: string; name: string; type: string }> = [];
+    const seen = new Set<string>();
+
+    const search = (obj: unknown) => {
+      if (!obj) return;
+      // The result may be stored as a top-level JSON string — parse it first
+      if (typeof obj === 'string' && obj.trimStart().startsWith('{')) {
+        try { search(JSON.parse(obj)); return; } catch { /* not JSON */ }
+        return;
+      }
+      if (typeof obj !== 'object') return;
+      if (Array.isArray(obj)) { obj.forEach(search); return; }
+      const o = obj as Record<string, unknown>;
+      if (typeof o.cicd_download_url === 'string' && !seen.has(o.cicd_download_url)) {
+        seen.add(o.cicd_download_url);
+        found.push({
+          url: o.cicd_download_url,
+          name: typeof o.cicd_name === 'string' ? o.cicd_name : 'bundle',
+          type: typeof o.cicd_type === 'string' ? o.cicd_type : 'bundle',
+        });
+        return;
+      }
+      // Tool outputs are often JSON strings — parse them too
+      Object.values(o).forEach(v => {
+        if (typeof v === 'string' && v.trimStart().startsWith('{')) {
+          try { search(JSON.parse(v)); } catch { /* not JSON */ }
+        } else {
+          search(v);
+        }
+      });
+    };
+
+    search(result);
+    return found;
+  }, [result]);
+
+  // Download a CI/CD YAML bundle ZIP from the backend.
+  const handleDownloadCicdBundle = useCallback(async (url: string, name: string, type: string) => {
+    setIsCicdDownloading(true);
+    try {
+      const response = await apiClient.get(url, { responseType: 'blob' });
+      const blob = new Blob([response.data as BlobPart], { type: 'application/zip' });
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      const safeName = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+      const suffix = type === 'genie_space' ? 'genie_space' : 'dashboard';
+      link.download = `${safeName}_${suffix}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(objectUrl);
+    } catch (err) {
+      console.error('[ShowResult] CI/CD bundle download failed:', err);
+    } finally {
+      setIsCicdDownloading(false);
+    }
+  }, []);
   // Track if the dialog has been opened at least once
   const hasOpenedRef = useRef(false);
   // Track latest edited UCMV result for save
@@ -1341,6 +1407,35 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
             </Button>
           </Tooltip>
         )}
+        {cicdArtifacts.map((artifact, idx) => (
+          <Tooltip
+            key={idx}
+            title={`Download CI/CD YAML bundle — version-control and redeploy this ${artifact.type === 'genie_space' ? 'Genie Space' : 'Lakeflow Dashboard'} from YAML`}
+          >
+            <Button
+              onClick={() => handleDownloadCicdBundle(artifact.url, artifact.name, artifact.type)}
+              disabled={isCicdDownloading}
+              variant="outlined"
+              startIcon={<DownloadForOfflineIcon />}
+              sx={{
+                borderRadius: '8px',
+                textTransform: 'none',
+                fontWeight: 500,
+                borderColor: '#7B1FA2',
+                color: '#7B1FA2',
+                '&:hover': {
+                  borderColor: '#6A1B9A',
+                  backgroundColor: 'rgba(123, 31, 162, 0.04)',
+                },
+                '&:disabled': {
+                  opacity: 0.6,
+                },
+              }}
+            >
+              {artifact.type === 'genie_space' ? 'Genie Space YAML' : 'Dashboard YAML'}
+            </Button>
+          </Tooltip>
+        ))}
         <Button
           onClick={onClose}
           variant="contained"

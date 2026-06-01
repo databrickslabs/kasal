@@ -558,4 +558,8 @@ class DatabricksDashboardCreatorTool(BaseTool):
             "dataset_count": dataset_count,
             "catalog": catalog,
             "schema_name": schema,
+            # CI/CD export — download a ZIP of YAML configuration files
+            "cicd_type": "lakeflow_dashboard",
+            "cicd_name": dashboard_title,
+            "cicd_download_url": f"/api/analytics-export/dashboards/{dashboard_id}/download",
         }, indent=2)
