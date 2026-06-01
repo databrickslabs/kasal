@@ -404,6 +404,10 @@ class GenieSpaceGeneratorTool(BaseTool):
                 "question_count": len(sample_questions),
                 "sql_snippet_count": len(expressions_list) + len(measures_list) + len(filters_list),
                 "example_sql_count": len(example_question_sqls_list),
+                # CI/CD export — download a ZIP of YAML configuration files
+                "cicd_type": "genie_space",
+                "cicd_name": space_title,
+                "cicd_download_url": f"/api/analytics-export/genie-spaces/{space_id}/download",
             }, indent=2)
 
         except Exception as e:
