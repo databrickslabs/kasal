@@ -25,10 +25,11 @@ engine on top of them without needing to understand the raw Databricks API JSON.
 import io
 import logging
 import zipfile
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Request, Query
 from fastapi.responses import StreamingResponse, JSONResponse
+from pydantic import BaseModel
 
 from src.core.exceptions import NotFoundError
 from src.core.dependencies import GroupContextDep
@@ -100,6 +101,54 @@ async def download_genie_space_export(
     files: list = result["files"]
     zip_bytes = _make_zip(folder_name, files)
 
+    zip_name = f"{folder_name}_genie_space.zip"
+    return StreamingResponse(
+        io.BytesIO(zip_bytes),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{zip_name}"'},
+    )
+
+
+class GenieSpaceExportBody(BaseModel):
+    """Request body for POST download — carries the serialized_space from the tool output."""
+    serialized_space: Optional[str] = None
+
+
+@router.post(
+    "/genie-spaces/{space_id}/download",
+    summary="Download Genie Space CI/CD YAML bundle (with full config)",
+    response_description="ZIP archive with fully-populated YAML configuration files",
+)
+async def download_genie_space_export_post(
+    space_id: str,
+    body: GenieSpaceExportBody,
+    request: Request,
+    group_context: GroupContextDep = None,
+) -> StreamingResponse:
+    """
+    Same as the GET endpoint but accepts ``serialized_space`` in the request body.
+
+    The Databricks GET /api/2.0/genie/spaces/{id} endpoint does NOT return the
+    space configuration (instructions, join specs, SQL snippets, sample questions).
+    The frontend passes the ``cicd_serialized_space`` value captured from the
+    tool's execution-result JSON so the YAML files are fully populated.
+    """
+    if group_context:
+        UserContext.set_group_context(group_context)
+
+    user_token = extract_user_token_from_request(request)
+    service = AnalyticsExportService(user_token=user_token)
+
+    try:
+        result = await service.export_genie_space(
+            space_id, serialized_space=body.serialized_space
+        )
+    except ValueError as exc:
+        raise NotFoundError(str(exc))
+
+    folder_name: str = result["folder_name"]
+    files: list = result["files"]
+    zip_bytes = _make_zip(folder_name, files)
     zip_name = f"{folder_name}_genie_space.zip"
     return StreamingResponse(
         io.BytesIO(zip_bytes),

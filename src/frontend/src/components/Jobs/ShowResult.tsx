@@ -58,7 +58,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
   // Tools embed cicd_download_url, cicd_type, cicd_name after creating a
   // Genie Space or Lakeflow Dashboard.
   const cicdArtifacts = useMemo(() => {
-    const found: Array<{ url: string; name: string; type: string }> = [];
+    const found: Array<{ url: string; name: string; type: string; serializedSpace?: string }> = [];
     const seen = new Set<string>();
 
     const search = (obj: unknown) => {
@@ -77,6 +77,12 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
           url: o.cicd_download_url,
           name: typeof o.cicd_name === 'string' ? o.cicd_name : 'bundle',
           type: typeof o.cicd_type === 'string' ? o.cicd_type : 'bundle',
+          // cicd_serialized_space carries the full Genie space config from the tool.
+          // The Databricks GET endpoint does NOT return serialized_space, so we pass
+          // it here to get fully-populated YAML files.
+          serializedSpace: typeof o.cicd_serialized_space === 'string'
+            ? o.cicd_serialized_space
+            : undefined,
         });
         return;
       }
@@ -95,10 +101,17 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
   }, [result]);
 
   // Download a CI/CD YAML bundle ZIP from the backend.
-  const handleDownloadCicdBundle = useCallback(async (url: string, name: string, type: string) => {
+  const handleDownloadCicdBundle = useCallback(async (
+    url: string, name: string, type: string, serializedSpace?: string
+  ) => {
     setIsCicdDownloading(true);
     try {
-      const response = await apiClient.get(url, { responseType: 'blob' });
+      // For Genie spaces: use POST so we can pass serialized_space in the body.
+      // The Databricks GET endpoint does not return the space config, so without
+      // serialized_space the YAML files would be empty.
+      const response = (type === 'genie_space' && serializedSpace)
+        ? await apiClient.post(url, { serialized_space: serializedSpace }, { responseType: 'blob' })
+        : await apiClient.get(url, { responseType: 'blob' });
       const blob = new Blob([response.data as BlobPart], { type: 'application/zip' });
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -1413,7 +1426,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
             title={`Download CI/CD YAML bundle — version-control and redeploy this ${artifact.type === 'genie_space' ? 'Genie Space' : 'Lakeflow Dashboard'} from YAML`}
           >
             <Button
-              onClick={() => handleDownloadCicdBundle(artifact.url, artifact.name, artifact.type)}
+              onClick={() => handleDownloadCicdBundle(artifact.url, artifact.name, artifact.type, artifact.serializedSpace)}
               disabled={isCicdDownloading}
               variant="outlined"
               startIcon={<DownloadForOfflineIcon />}
