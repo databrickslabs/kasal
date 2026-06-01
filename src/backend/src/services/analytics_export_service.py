@@ -428,10 +428,16 @@ def _dashboard_to_files(dashboard_data: Dict[str, Any]) -> List[ExportFile]:
     # ── datasets.yaml ─────────────────────────────────────────────────────────
     datasets_out: List[Dict[str, Any]] = []
     for ds in datasets_raw:
+        # Lakeview API stores SQL as either "query" (string) or "queryLines" (list[str])
+        query = (
+            ds.get("query")
+            or "\n".join(ds.get("queryLines") or [])
+            or ""
+        )
         ds_entry: Dict[str, Any] = {
             "name": ds.get("name") or "",
             "displayName": ds.get("displayName") or ds.get("display_name") or "",
-            "query": ds.get("query") or "",
+            "query": query,
         }
         datasets_out.append(ds_entry)
 
