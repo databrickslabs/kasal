@@ -42,26 +42,89 @@ def _safe_folder_name(s: str) -> str:
     return safe[:80] or "export"
 
 
-def _yaml_dump(data: Any) -> str:
-    """Dump data to a nicely formatted YAML string."""
-    return yaml.dump(
+def _yaml_dump(data: Any, header_comment: str = "") -> str:
+    """Dump data to a nicely formatted YAML string with optional comment header."""
+
+    class _LiteralStr(str):
+        pass
+
+    def _literal_representer(dumper: Any, data: Any) -> Any:
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+
+    class _Dumper(yaml.Dumper):
+        pass
+
+    _Dumper.add_representer(_LiteralStr, _literal_representer)
+
+    def _str_representer(dumper: Any, s: str) -> Any:
+        # Multi-line strings → literal block scalar (|)
+        style = "|" if "\n" in s else None
+        return dumper.represent_scalar("tag:yaml.org,2002:str", s, style=style)
+
+    _Dumper.add_representer(str, _str_representer)
+
+    body = yaml.dump(
         data,
+        Dumper=_Dumper,
         default_flow_style=False,
         allow_unicode=True,
         sort_keys=False,
         indent=2,
         width=120,
     )
+    return (header_comment + "\n\n" if header_comment else "") + body
+
+
+# Text-list fields: the Genie API stores these as list[str] even for a single
+# item. We join them into a scalar string for human editing — matching the
+# reference implementation in downloads/genie/_yaml_io.py.
+_TEXT_LIST_FIELDS = frozenset({
+    "content", "sql", "question", "usage_guidance", "instruction", "description",
+})
+
+
+def _join_text_lists(data: Any) -> Any:
+    """Recursively join list[str] values for text-list fields into scalar strings.
+
+    Mirrors _yaml_io.join_text_lists from the reference implementation.
+    Multi-line results will be rendered as | block scalars by _yaml_dump.
+    """
+    if isinstance(data, dict):
+        result: Dict[str, Any] = {}
+        for k, v in data.items():
+            if (
+                k in _TEXT_LIST_FIELDS
+                and isinstance(v, list)
+                and v
+                and all(isinstance(s, str) for s in v)
+            ):
+                joined = "\n".join(
+                    s.replace("\r\n", "\n").replace("\r", "\n").rstrip() for s in v
+                ).rstrip()
+                result[k] = joined
+            else:
+                result[k] = _join_text_lists(v)
+        return result
+    if isinstance(data, list):
+        return [_join_text_lists(item) for item in data]
+    return data
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Genie Space → YAML
+# Genie Space → YAML  (mirrors downloads/genie/extract_genie_space.py)
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _genie_space_to_files(space_data: Dict[str, Any]) -> List[ExportFile]:
-    """Convert the raw Genie space API response to a list of YAML ExportFiles."""
+    """Convert the raw Genie space API response to a list of YAML ExportFiles.
 
-    # The API may return serialized_space as a JSON string or an embedded dict.
+    Output structure mirrors the reference implementation:
+      header.yaml        — space_id, title, description, warehouse_id
+      config.yaml        — sample questions
+      data_sources.yaml  — tables / metric-view references
+      instructions.yaml  — text instructions, join specs, SQL snippets, example SQLs
+      benchmarks.yaml    — benchmark Q&A pairs (only if present)
+    """
+    # Parse serialized_space (JSON string or embedded dict)
     serialized_raw = space_data.get("serialized_space") or "{}"
     if isinstance(serialized_raw, str):
         try:
@@ -73,158 +136,99 @@ def _genie_space_to_files(space_data: Dict[str, Any]) -> List[ExportFile]:
 
     space_id = space_data.get("space_id") or space_data.get("id") or ""
     title = space_data.get("title") or space_data.get("display_name") or "Genie Space"
-    warehouse_id = space_data.get("warehouse_id") or ""
     description = space_data.get("description") or ""
+    warehouse_id = space_data.get("warehouse_id") or ""
 
-    # ── config.yaml ──────────────────────────────────────────────────────────
-    config_data: Dict[str, Any] = {
-        "apiVersion": "genie/v1",
-        "kind": "GenieSpace",
-        "metadata": {
-            "name": _safe_folder_name(title),
-            "space_id": space_id,
-        },
-        "spec": {
-            "title": title,
-            "description": description,
-            "warehouse_id": warehouse_id,
-        },
+    files: List[ExportFile] = []
+
+    # ── header.yaml ──────────────────────────────────────────────────────────
+    header_data: Dict[str, Any] = {
+        "space_id": space_id,
+        "title": title,
+        "description": description,
+        "warehouse_id": warehouse_id,
     }
+    files.append(ExportFile(
+        path="header.yaml",
+        content=_yaml_dump(
+            header_data,
+            "# Genie Space header — generated by Kasal\n"
+            "# Redeploy:\n"
+            "#   POST  /api/2.0/genie/spaces            (create)\n"
+            "#   PATCH /api/2.0/genie/spaces/{space_id} (update)"
+        ),
+    ))
 
-    config_yaml = (
-        "# Genie Space CI/CD Configuration — generated by Kasal\n"
-        "# Redeploy by calling the Databricks Genie API:\n"
-        "#   POST /api/2.0/genie/spaces   (create)\n"
-        "#   PATCH /api/2.0/genie/spaces/{id}  (update)\n\n"
-    ) + _yaml_dump(config_data)
+    # ── config.yaml — sample questions ───────────────────────────────────────
+    config_section = spec.get("config")
+    if config_section is not None:
+        files.append(ExportFile(
+            path="config.yaml",
+            content=_yaml_dump(
+                _join_text_lists(config_section),
+                "# Sample questions shown in the Genie UI\n"
+                "# Re-deploy by including under the 'config' key in serialized_space."
+            ),
+        ))
 
-    # ── tables.yaml ──────────────────────────────────────────────────────────
-    data_sources: Dict[str, Any] = spec.get("data_sources") or {}
+    # ── data_sources.yaml — tables & metric views ─────────────────────────────
+    data_sources_section = spec.get("data_sources")
+    if data_sources_section is not None:
+        files.append(ExportFile(
+            path="data_sources.yaml",
+            content=_yaml_dump(
+                _join_text_lists(data_sources_section),
+                "# Tables and Metric Views registered in this Genie Space\n"
+                "# Add or remove identifiers, then redeploy."
+            ),
+        ))
 
-    metric_views: List[str] = [
-        t.get("identifier", "") for t in (data_sources.get("metric_views") or [])
-        if t.get("identifier")
-    ]
-    plain_tables: List[str] = [
-        t.get("identifier", "") for t in (data_sources.get("tables") or [])
-        if t.get("identifier")
-    ]
+    # ── instructions.yaml — text instructions, join specs, SQL snippets ───────
+    instructions_section = spec.get("instructions")
+    if instructions_section is not None:
+        files.append(ExportFile(
+            path="instructions.yaml",
+            content=_yaml_dump(
+                _join_text_lists(instructions_section),
+                "# Genie Space instructions — text instructions, join specs,\n"
+                "# SQL snippets (expressions/measures/filters), example Q&A SQLs."
+            ),
+        ))
 
-    tables_data: Dict[str, Any] = {}
-    if metric_views:
-        tables_data["metric_views"] = metric_views
-    if plain_tables:
-        tables_data["tables"] = plain_tables
-    if not tables_data:
-        tables_data["metric_views"] = []
-        tables_data["tables"] = []
+    # ── benchmarks.yaml — benchmark Q&A pairs (optional) ─────────────────────
+    benchmarks_section = spec.get("benchmarks")
+    if benchmarks_section is not None:
+        files.append(ExportFile(
+            path="benchmarks.yaml",
+            content=_yaml_dump(
+                _join_text_lists(benchmarks_section),
+                "# Benchmark questions for evaluating Genie answer quality."
+            ),
+        ))
 
-    tables_yaml = (
-        "# Tables and Metric Views registered in this Genie Space\n"
-        "# Add or remove entries, then redeploy with your engine.\n\n"
-    ) + _yaml_dump(tables_data)
+    # If serialized_space was absent (no EDIT permission), at least return header
+    if len(files) == 1:
+        files.append(ExportFile(
+            path="config.yaml",
+            content=_yaml_dump(
+                {"sample_questions": []},
+                "# No serialized_space returned — ensure the token has EDIT permission.\n"
+                "# Re-run after granting EDIT access to populate all YAML files."
+            ),
+        ))
+        files.append(ExportFile(
+            path="data_sources.yaml",
+            content=_yaml_dump({"tables": [], "metric_views": []}, ""),
+        ))
+        files.append(ExportFile(
+            path="instructions.yaml",
+            content=_yaml_dump(
+                {"text_instructions": [], "join_specs": [], "sql_snippets": {}},
+                ""
+            ),
+        ))
 
-    # ── instructions.yaml ─────────────────────────────────────────────────────
-    instructions_block: Dict[str, Any] = spec.get("instructions") or {}
-
-    # Text instructions: [{"id": ..., "content": ["..."]}]
-    text_parts: List[str] = []
-    for ti in (instructions_block.get("text_instructions") or []):
-        content = ti.get("content") or []
-        text_parts.extend(content if isinstance(content, list) else [content])
-    text_instructions_str = "\n".join(text_parts)
-
-    # Join specs: [{"left": {...}, "right": {...}, "sql": [...]}]
-    join_specs_out: List[Dict[str, Any]] = []
-    for js in (instructions_block.get("join_specs") or []):
-        left_obj = js.get("left") or {}
-        right_obj = js.get("right") or {}
-        sql_parts: List[str] = [
-            s for s in (js.get("sql") or []) if s and not s.startswith("--rt=")
-        ]
-        join_specs_out.append({
-            "left_table": left_obj.get("identifier", ""),
-            "right_table": right_obj.get("identifier", ""),
-            "join_condition": " ".join(sql_parts),
-        })
-
-    # SQL snippets
-    snippets: Dict[str, Any] = instructions_block.get("sql_snippets") or {}
-    expressions_out: List[Dict[str, Any]] = [
-        {"display_name": e.get("display_name", ""), "sql": " ".join(e.get("sql") or [])}
-        for e in (snippets.get("expressions") or [])
-    ]
-    measures_out: List[Dict[str, Any]] = [
-        {
-            "display_name": m.get("display_name", ""),
-            "sql": " ".join(m.get("sql") or []),
-            "instruction": " ".join(m.get("instruction") or []),
-        }
-        for m in (snippets.get("measures") or [])
-    ]
-    filters_out: List[Dict[str, Any]] = [
-        {"display_name": f.get("display_name", ""), "sql": " ".join(f.get("sql") or [])}
-        for f in (snippets.get("filters") or [])
-    ]
-
-    instructions_data: Dict[str, Any] = {}
-    if text_instructions_str:
-        instructions_data["text_instructions"] = text_instructions_str
-    if join_specs_out:
-        instructions_data["join_specs"] = join_specs_out
-    sql_snippets_data: Dict[str, Any] = {}
-    if expressions_out:
-        sql_snippets_data["expressions"] = expressions_out
-    if measures_out:
-        sql_snippets_data["measures"] = measures_out
-    if filters_out:
-        sql_snippets_data["filters"] = filters_out
-    if sql_snippets_data:
-        instructions_data["sql_snippets"] = sql_snippets_data
-
-    instructions_yaml = (
-        "# Genie Space Instructions — controls AI behavior and data understanding\n"
-        "# text_instructions: free-form guidance for the Genie AI\n"
-        "# join_specs: how dimension tables relate to metric views\n"
-        "# sql_snippets: reusable SQL expressions, measures, and filters\n\n"
-    ) + _yaml_dump(instructions_data if instructions_data else {"text_instructions": ""})
-
-    # ── questions.yaml ───────────────────────────────────────────────────────
-    config_block: Dict[str, Any] = spec.get("config") or {}
-    sample_questions_out: List[str] = [
-        " ".join(sq.get("question") or []) if isinstance(sq.get("question"), list)
-        else str(sq.get("question", ""))
-        for sq in (config_block.get("sample_questions") or [])
-        if sq.get("question")
-    ]
-
-    example_sqls_out: List[Dict[str, Any]] = [
-        {
-            "question": " ".join(eq.get("question") or []) if isinstance(eq.get("question"), list)
-            else str(eq.get("question", "")),
-            "sql": " ".join(eq.get("sql") or []) if isinstance(eq.get("sql"), list)
-            else str(eq.get("sql", "")),
-        }
-        for eq in (instructions_block.get("example_question_sqls") or [])
-    ]
-
-    questions_data: Dict[str, Any] = {
-        "sample_questions": sample_questions_out or [],
-        "example_sqls": example_sqls_out or [],
-    }
-
-    questions_yaml = (
-        "# Sample questions shown to users + curated example SQL queries\n"
-        "# sample_questions: surface these in the Genie UI as suggestions\n"
-        "# example_sqls: show the AI how to answer specific question patterns\n\n"
-    ) + _yaml_dump(questions_data)
-
-    return [
-        ExportFile(path="config.yaml", content=config_yaml),
-        ExportFile(path="tables.yaml", content=tables_yaml),
-        ExportFile(path="instructions.yaml", content=instructions_yaml),
-        ExportFile(path="questions.yaml", content=questions_yaml),
-    ]
+    return files
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -506,42 +510,44 @@ class AnalyticsExportService:
         """
         self._user_token = user_token
 
-    async def export_genie_space(self, space_id: str) -> Dict[str, Any]:
+    async def export_genie_space(
+        self,
+        space_id: str,
+        serialized_space: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
-        Fetch a Genie space from Databricks and convert it to a YAML bundle.
+        Convert a Genie space to a YAML bundle.
+
+        The Databricks GET /api/2.0/genie/spaces/{id} endpoint does NOT return
+        serialized_space (instructions, join specs, SQL snippets, questions).
+        Pass serialized_space explicitly (from the tool output stored in the
+        execution result) to get fully-populated YAML files.
 
         Returns:
-            {
-              "space_id": str,
-              "space_name": str,
-              "folder_name": str,
-              "files": List[ExportFile],
-            }
-        Raises RuntimeError / httpx.HTTPStatusError on failure.
+            {space_id, space_name, folder_name, files: List[ExportFile]}
         """
-        auth_config = GenieAuthConfig(
-            use_obo=bool(self._user_token),
-            user_token=self._user_token,
-            pat_token=None,
-            host=None,
-        )
-        repo = GenieRepository(auth_config=auth_config)
-
-        space_data = await repo.get_space_details(space_id)
-        if not space_data:
-            raise ValueError(f"Genie space {space_id!r} not found")
-
-        # GenieRepository.get_space_details returns a GenieSpace Pydantic model.
-        # Convert to dict for uniform processing.
-        if hasattr(space_data, "model_dump"):
-            space_dict: Dict[str, Any] = space_data.model_dump()
+        # Build space_dict from what we know
+        if serialized_space:
+            # Best path: full config provided by the tool at creation time.
+            # No Databricks API call needed for the content — only try to enrich
+            # with basic metadata (title, warehouse_id) with a short timeout.
+            space_dict: Dict[str, Any] = {
+                "space_id": space_id,
+                "serialized_space": serialized_space,
+            }
+            try:
+                import asyncio as _asyncio
+                raw = await _asyncio.wait_for(
+                    self._fetch_raw_genie_space(space_id), timeout=8.0
+                )
+                space_dict.update({k: v for k, v in raw.items() if k != "serialized_space"})
+            except Exception:
+                # Metadata enrichment is optional — proceed with what we have.
+                pass
         else:
-            space_dict = dict(space_data)
-
-        # If the repository strips serialized_space, we need to fetch the raw dict.
-        # Check whether the full serialized_space is available; if not, re-fetch via
-        # a direct HTTP call using the same auth context.
-        if "serialized_space" not in space_dict:
+            # Fallback: fetch from API with ?include_serialized_space=true.
+            # Requires EDIT permission. If auth hangs, re-run the crew to get
+            # cicd_serialized_space in the tool output (POST endpoint is faster).
             space_dict = await self._fetch_raw_genie_space(space_id)
 
         title = space_dict.get("title") or space_dict.get("name") or space_id
@@ -556,20 +562,75 @@ class AnalyticsExportService:
         }
 
     async def _fetch_raw_genie_space(self, space_id: str) -> Dict[str, Any]:
-        """Direct HTTP fetch of a Genie space to get the full serialized_space field."""
-        import httpx
-        from src.utils.databricks_auth import get_auth_context
+        """Direct HTTP fetch of a Genie space including its serialized_space config.
 
-        auth = await get_auth_context()
-        if not auth or not auth.workspace_url:
+        Uses ?include_serialized_space=true — requires EDIT permission on the space.
+        Avoids get_auth_context() to prevent the slow SPN token-refresh path;
+        instead uses the same safe auth strategy as DashboardRepository.
+        """
+        import httpx
+        import os as _os
+        from src.utils.databricks_auth import _databricks_auth
+
+        # ── workspace URL (already loaded by _load_config on app startup) ─────
+        workspace_url: Optional[str] = None
+        try:
+            if _databricks_auth._workspace_host:
+                workspace_url = _databricks_auth._workspace_host.rstrip("/")
+        except Exception:
+            pass
+        if not workspace_url:
             raise RuntimeError("No Databricks workspace URL configured")
 
-        token = self._user_token or auth.token
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-        url = f"{auth.workspace_url.rstrip('/')}/api/2.0/genie/spaces/{space_id}"
+        # ── PAT: OBO → env var → DB lookup ────────────────────────────────────
+        # Check env var before DB to avoid slow connection if DB is unreachable.
+        token: Optional[str] = self._user_token
+        if not token:
+            for env_key in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY"):
+                token = _os.environ.get(env_key)
+                if token:
+                    break
+        if not token:
+            try:
+                from src.services.api_keys_service import ApiKeysService
+                from src.db.session import async_session_factory
+                from src.utils.user_context import UserContext
+                group_id: Optional[str] = None
+                try:
+                    ctx = UserContext.get_group_context()
+                    if ctx and hasattr(ctx, "primary_group_id"):
+                        group_id = ctx.primary_group_id
+                except Exception:
+                    pass
+                if group_id:
+                    async with async_session_factory() as session:
+                        svc = ApiKeysService(session, group_id=group_id)
+                        for key_name in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY"):
+                            api_key = await svc.find_by_name(key_name)
+                            if api_key and api_key.encrypted_value:
+                                from src.utils.encryption_utils import EncryptionUtils
+                                pat = EncryptionUtils.decrypt_value(api_key.encrypted_value)
+                                if pat:
+                                    token = pat
+                                    break
+            except Exception:
+                pass
+
+        headers: Dict[str, str] = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
+        url = f"{workspace_url}/api/2.0/genie/spaces/{space_id}"
 
         async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(url, headers=headers)
+            # include_serialized_space=true returns the full space config
+            # (text instructions, join specs, SQL snippets, questions).
+            # Requires at least EDIT permission on the space.
+            resp = await client.get(
+                url,
+                headers=headers,
+                params={"include_serialized_space": "true"},
+            )
             resp.raise_for_status()
             return resp.json()
 
