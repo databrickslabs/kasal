@@ -151,6 +151,77 @@ async def run_flow_in_process(
             else:
                 final_message = "Flow execution completed successfully"
             logger.info(f"Flow execution COMPLETED for {execution_id}")
+
+            # ── CI/CD artifact aggregation (parent process — always fresh code) ──
+            # The subprocess only returns the last crew's output as final_result.
+            # Scan the executiontrace table for ALL task outputs from this job
+            # that contain cicd_download_url and inject them as _cicd_all so
+            # ShowResult renders download buttons for every parallel crew
+            # (Genie Space Generator + Dashboard Creator).
+            try:
+                import json as _json
+                import re as _re
+                from src.db.session import async_session_factory
+                from sqlalchemy import text as _text
+
+                async with async_session_factory() as _session:
+                    _rows = await _session.execute(_text(
+                        "SELECT output FROM execution_trace "
+                        "WHERE job_id = :jid AND output::text LIKE '%cicd_download_url%' "
+                        "ORDER BY created_at ASC"
+                    ), {'jid': execution_id})
+                    _trace_rows = _rows.fetchall()
+
+                _artifacts: list = []
+                _seen_urls: set = set()
+                for _row in _trace_rows:
+                    _output = _row[0]
+                    try:
+                        _parsed = _json.loads(_output) if isinstance(_output, str) else _output
+                        if isinstance(_parsed, str):
+                            _parsed = _json.loads(_parsed)
+                        # execution_trace wraps output as {"content": "<json_string>"}
+                        if isinstance(_parsed, dict) and 'content' in _parsed and 'cicd_download_url' not in _parsed:
+                            _inner = _parsed['content']
+                            if isinstance(_inner, str):
+                                _parsed = _json.loads(_inner)
+                            elif isinstance(_inner, dict):
+                                _parsed = _inner
+                        _url = _parsed.get('cicd_download_url') if isinstance(_parsed, dict) else None
+                        if _url and _url not in _seen_urls:
+                            _seen_urls.add(_url)
+                            _art: Dict[str, Any] = {
+                                'cicd_download_url': _url,
+                                'cicd_type': _parsed.get('cicd_type', ''),
+                                'cicd_name': _parsed.get('cicd_name', ''),
+                            }
+                            if 'cicd_serialized_space' in _parsed:
+                                _art['cicd_serialized_space'] = _parsed['cicd_serialized_space']
+                            _artifacts.append(_art)
+                    except Exception:
+                        continue
+
+                if _artifacts:
+                    if isinstance(final_result, dict):
+                        final_result['_cicd_all'] = _artifacts
+                    elif isinstance(final_result, str):
+                        try:
+                            _rv = _json.loads(final_result)
+                            _rv['_cicd_all'] = _artifacts
+                            final_result = _json.dumps(_rv, indent=2)
+                        except Exception:
+                            final_result = _json.dumps(
+                                {'_result': final_result, '_cicd_all': _artifacts}, indent=2
+                            )
+                    logger.info(
+                        f"[CI/CD] Injected {len(_artifacts)} artifacts into flow result: "
+                        f"{[a.get('cicd_type') for a in _artifacts]}"
+                    )
+                else:
+                    logger.info("[CI/CD] No cicd_download_url entries found in executiontrace.")
+            except Exception as _ce:
+                logger.warning(f"[CI/CD] Artifact injection failed: {_ce}")
+            # ── end CI/CD aggregation ──────────────────────────────────────────
         else:
             # Before setting FAILED, check if the execution was stopped
             # This prevents overwriting STOPPED status with FAILED
