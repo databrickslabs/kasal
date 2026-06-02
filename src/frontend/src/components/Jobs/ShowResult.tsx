@@ -84,7 +84,9 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
             ? o.cicd_serialized_space
             : undefined,
         });
-        return;
+        // Do NOT return — continue searching siblings like _cicd_all which
+        // aggregates artifacts from parallel flow crews (e.g. Genie Space when
+        // the last crew result is Dashboard Creator output).
       }
       // Tool outputs are often JSON strings — parse them too
       Object.values(o).forEach(v => {

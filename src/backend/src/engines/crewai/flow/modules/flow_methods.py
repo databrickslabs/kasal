@@ -452,6 +452,43 @@ class FlowMethodFactory:
                         self.state[crew_name] = serializable_result
                         logger.info(f"📦 Stored crew output in state['{method_name}'] and state['{crew_name}'] for checkpoint support")
 
+                        # ── CI/CD artifact aggregation ─────────────────────────
+                        # If this crew produced a cicd_download_url, append it to
+                        # the shared _cicd_artifacts list in the flow state so
+                        # backend_flow.py can inject ALL artifacts into the final
+                        # result (not just the last crew's output).
+                        try:
+                            _parsed_result = None
+                            if isinstance(serializable_result, dict):
+                                _parsed_result = serializable_result
+                            elif isinstance(serializable_result, str) and serializable_result.strip().startswith('{'):
+                                import json as _json
+                                _parsed_result = _json.loads(serializable_result)
+
+                            if _parsed_result and isinstance(_parsed_result, dict):
+                                _url = _parsed_result.get('cicd_download_url')
+                                if _url:
+                                    _artifact = {
+                                        'cicd_download_url': _url,
+                                        'cicd_type': _parsed_result.get('cicd_type', ''),
+                                        'cicd_name': _parsed_result.get('cicd_name', ''),
+                                    }
+                                    if 'cicd_serialized_space' in _parsed_result:
+                                        _artifact['cicd_serialized_space'] = _parsed_result['cicd_serialized_space']
+
+                                    # Initialise or extend the shared list
+                                    existing = self.state.get('_cicd_artifacts', [])
+                                    if not isinstance(existing, list):
+                                        existing = []
+                                    # Deduplicate by URL
+                                    if not any(a.get('cicd_download_url') == _url for a in existing):
+                                        existing.append(_artifact)
+                                    self.state['_cicd_artifacts'] = existing
+                                    logger.info(f"📥 [CI/CD] Captured artifact from '{crew_name}': {_artifact.get('cicd_type')} — {_url}")
+                        except Exception as _ce:
+                            logger.debug(f"[CI/CD] Could not capture artifact from '{crew_name}': {_ce}")
+                        # ── end CI/CD aggregation ──────────────────────────────
+
                 return serializable_result
             except asyncio.TimeoutError:
                 elapsed_time = time.time() - start_time if 'start_time' in dir() else 0
