@@ -1,0 +1,278 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * All chat styling is scoped under #kasal-chat-root so it never affects the
+ * Material-UI surfaces in the rest of Kasal. Theme variables are driven by the
+ * `data-theme` attribute that ChatWorkspace sets on the root element (synced
+ * from Kasal's theme store).
+ */
+#kasal-chat-root,
+#kasal-chat-root[data-theme="light"] {
+  --bg-primary: #FFFFFF;
+  --bg-secondary: #F5F7FA;
+  --bg-sidebar: #F5F7FA;
+  --bg-input: #FFFFFF;
+  --bg-user-msg: #EEF1F5;
+  --bg-assistant-msg: transparent;
+  --text-primary: #1B1F23;
+  --text-secondary: #5A6872;
+  --text-muted: #8D99A4;
+  --border-color: #DFE3E8;
+  --accent: #FF3621;
+  --accent-hover: #E02E1B;
+  /* Borderless-rail tonal + shadow tokens */
+  --bg-rail: #F7F8FA;                          /* a hair grayer than the white canvas */
+  --bg-rail-hover: rgba(27, 31, 35, 0.045);    /* ~4.5% ink — whisper hover */
+  --bg-active-chip: rgba(27, 31, 35, 0.075);   /* ~7.5% ink — soft filled active pill */
+  --shadow-input: 0 1px 2px rgba(16, 24, 40, 0.05), 0 4px 16px rgba(16, 24, 40, 0.06);
+  --shadow-input-focus: 0 0 0 3px rgba(255, 54, 33, 0.14);
+  --shadow-popover: 0 8px 28px rgba(16, 24, 40, 0.12);
+}
+
+#kasal-chat-root[data-theme="dark"] {
+  --bg-primary: #1B1F23;
+  --bg-secondary: #232930;
+  --bg-sidebar: #15191E;
+  --bg-input: #232930;
+  --bg-user-msg: #2A3038;
+  --bg-assistant-msg: transparent;
+  --text-primary: #E8ECEF;
+  --text-secondary: #A0AAB4;
+  --text-muted: #6B7785;
+  --border-color: #333C45;
+  --accent: #FF3621;
+  --accent-hover: #FF5A47;
+  /* Borderless-rail tonal + shadow tokens */
+  --bg-rail: #15191E;                          /* reuse the darker sidebar tone */
+  --bg-rail-hover: rgba(255, 255, 255, 0.05);
+  --bg-active-chip: rgba(255, 255, 255, 0.085);
+  --shadow-input: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-input-focus: 0 0 0 3px rgba(255, 54, 33, 0.22);
+  --shadow-popover: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+
+#kasal-chat-root {
+  /*
+   * `display: flex` MUST be a direct rule here, not the Tailwind `flex` utility:
+   * the config uses `important: '#kasal-chat-root'`, which scopes every utility
+   * as a DESCENDANT selector (`#kasal-chat-root .flex`), so utilities on the
+   * root element itself never apply. Without this, the root is `display: block`,
+   * the sidebar <aside> and <main> stack vertically, and opening the sidebar
+   * pushes the chat content down. Forcing flex keeps them side-by-side and the
+   * main area vertically stable regardless of sidebar state.
+   */
+  display: flex;
+  width: 100%;
+  height: 100%;
+  font-family: 'Söhne', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    Roboto, 'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/*
+ * Tailwind's preflight is disabled (to protect MUI), so form controls keep
+ * their user-agent defaults — a monospace font and a boxy inset border on
+ * <textarea>. Re-apply just the preflight bits the chat needs so inputs match
+ * the surrounding UI and the chat input looks soft rather than "edgy".
+ * `button` is intentionally excluded so buttons keep their own styling.
+ */
+#kasal-chat-root button,
+#kasal-chat-root input,
+#kasal-chat-root optgroup,
+#kasal-chat-root select,
+#kasal-chat-root textarea {
+  font-family: inherit;
+  font-size: 100%;
+  line-height: inherit;
+  letter-spacing: inherit;
+  margin: 0;
+}
+
+/*
+ * Buttons need the full preflight reset too: without it, raw <button>s keep
+ * the user-agent beveled border + gray background, which is what made the
+ * model-picker rows and session items look boxy/"edgy". Each button supplies
+ * its own background/radius via Tailwind/inline styles.
+ */
+#kasal-chat-root button {
+  padding: 0;
+  border: 0;
+  background-color: transparent;
+  background-image: none;
+  color: inherit;
+  text-align: inherit;
+  text-transform: none;
+  -webkit-appearance: button;
+  appearance: button;
+  cursor: pointer;
+}
+#kasal-chat-root button:disabled {
+  cursor: default;
+}
+
+#kasal-chat-root input,
+#kasal-chat-root select,
+#kasal-chat-root textarea {
+  color: inherit;
+  background: transparent;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+#kasal-chat-root textarea {
+  border: 0;
+  padding: 0;
+  resize: none;
+  box-shadow: none;
+}
+
+#kasal-chat-root textarea::placeholder,
+#kasal-chat-root input::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+/* ---- Chat input shell: soft card + calm red focus ring ---- */
+#kasal-chat-root .kasal-input-shell {
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+#kasal-chat-root .kasal-input-shell:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-input), var(--shadow-input-focus);
+}
+
+/* ---- Sidebar session chips (hover needs a class; inline can't hover) ---- */
+#kasal-chat-root .kasal-session {
+  transition: background-color 0.15s ease;
+}
+#kasal-chat-root .kasal-session:hover {
+  background-color: var(--bg-rail-hover);
+}
+#kasal-chat-root .kasal-session:hover .kasal-session-title {
+  color: var(--text-primary);
+}
+
+/* ---- New Chat chip hover (borderless) ---- */
+#kasal-chat-root .kasal-newchat {
+  transition: background-color 0.15s ease;
+}
+#kasal-chat-root .kasal-newchat:hover {
+  background-color: var(--bg-rail-hover);
+}
+
+/* ---- Rename input: red focus ring, not a hard red border ---- */
+#kasal-chat-root .kasal-rename-input {
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+#kasal-chat-root .kasal-rename-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(255, 54, 33, 0.22);
+}
+
+/* ---- Floating popovers keep a card edge but get a softened shadow ---- */
+#kasal-chat-root .kasal-popover {
+  box-shadow: var(--shadow-popover);
+}
+
+/* Scrollbar */
+#kasal-chat-root ::-webkit-scrollbar {
+  width: 5px;
+}
+#kasal-chat-root ::-webkit-scrollbar-track {
+  background: transparent;
+}
+#kasal-chat-root ::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.2);
+  border-radius: 10px;
+}
+#kasal-chat-root ::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 128, 128, 0.35);
+}
+
+/* Code */
+#kasal-chat-root pre {
+  background: #1B2A32;
+  color: #E1E8ED;
+  border-radius: 12px;
+  padding: 16px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 12px 0;
+  border: 1px solid #2A3F4A;
+}
+
+#kasal-chat-root code:not(pre code) {
+  background: rgba(255, 54, 33, 0.08);
+  color: #D42E1B;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+#kasal-chat-root[data-theme="dark"] code:not(pre code) {
+  background: rgba(255, 54, 33, 0.15);
+  color: #FF7A6B;
+}
+
+/* Animations */
+@keyframes kasalChatFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes kasalChatSlideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+#kasal-chat-root .animate-fade-in {
+  animation: kasalChatFadeIn 0.2s ease-out;
+}
+#kasal-chat-root .animate-slide-up {
+  animation: kasalChatSlideUp 0.2s ease-out;
+}
+
+/* Markdown prose overrides */
+#kasal-chat-root .prose h1,
+#kasal-chat-root .prose h2,
+#kasal-chat-root .prose h3,
+#kasal-chat-root .prose h4 {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+#kasal-chat-root .prose p {
+  color: var(--text-primary);
+  line-height: 1.65;
+}
+#kasal-chat-root .prose a {
+  color: var(--accent);
+  text-decoration: none;
+}
+#kasal-chat-root .prose a:hover {
+  text-decoration: underline;
+}
+#kasal-chat-root .prose strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+#kasal-chat-root .prose ul,
+#kasal-chat-root .prose ol {
+  color: var(--text-primary);
+}
+#kasal-chat-root .prose table {
+  font-size: 13px;
+}
+#kasal-chat-root .prose th {
+  color: var(--text-secondary);
+  font-weight: 600;
+  text-align: left;
+}
+#kasal-chat-root .prose td {
+  color: var(--text-primary);
+}

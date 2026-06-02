@@ -1,7 +1,19 @@
 import { create } from 'zustand';
 import { UILayoutState } from '../utils/CanvasLayoutManager';
 
+/**
+ * Top-level workspace mode for the whole app, switched via the grid button in
+ * the TabBar. 'crew' is the default landing experience, 'flow' shows the flow
+ * canvas (formerly the "Show Workflow Panel" toggle), and 'chat' shows the
+ * embedded conversational workspace.
+ */
+export type AppMode = 'crew' | 'flow' | 'chat';
+
 interface UILayoutStore extends UILayoutState {
+  // Top-level workspace mode (crew / flow / chat)
+  appMode: AppMode;
+  setAppMode: (mode: AppMode) => void;
+
   // Actions to update the UI state
   updateScreenDimensions: (width: number, height: number) => void;
   setChatPanelWidth: (width: number) => void;
@@ -34,7 +46,7 @@ const loadPersistedState = () => {
 };
 
 // Helper function to save state to localStorage
-const saveToLocalStorage = (state: Partial<UILayoutState>) => {
+const saveToLocalStorage = (state: Partial<UILayoutState> & { appMode?: AppMode }) => {
   try {
     const stored = localStorage.getItem('ui-layout-storage') || '{}';
     const current = JSON.parse(stored);
@@ -69,8 +81,18 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
   panelPosition: persistedState.panelPosition || 50,
   areFlowsVisible: persistedState.areFlowsVisible !== undefined ? persistedState.areFlowsVisible : false,
   layoutOrientation: persistedState.layoutOrientation || 'horizontal',
+  appMode: persistedState.appMode || 'crew',
 
   // Actions
+  setAppMode: (mode: AppMode) => {
+    // Keep the legacy areFlowsVisible flag in sync: the flow canvas and several
+    // layout effects still key off it. Flow mode shows the flow canvas; crew and
+    // chat modes hide it.
+    const areFlowsVisible = mode === 'flow';
+    set({ appMode: mode, areFlowsVisible });
+    saveToLocalStorage({ appMode: mode, areFlowsVisible });
+  },
+
   updateScreenDimensions: (width: number, height: number) =>
     set({ screenWidth: width, screenHeight: height }),
 
@@ -111,8 +133,18 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
   },
 
   setAreFlowsVisible: (visible: boolean) => {
-    set({ areFlowsVisible: visible });
-    saveToLocalStorage({ areFlowsVisible: visible });
+    // Keep appMode coherent when legacy code paths flip flow visibility
+    // (e.g. loading a flow from the catalog, restoring a tab's view mode).
+    // Don't disturb 'chat' mode: only switch between crew <-> flow.
+    const currentMode = get().appMode;
+    let appMode = currentMode;
+    if (visible) {
+      appMode = 'flow';
+    } else if (currentMode === 'flow') {
+      appMode = 'crew';
+    }
+    set({ areFlowsVisible: visible, appMode });
+    saveToLocalStorage({ areFlowsVisible: visible, appMode });
   },
 
   setChatPanelSide: (side: 'left' | 'right') => {
