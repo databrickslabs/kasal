@@ -10,7 +10,6 @@ import {
 import {
   PersonAdd as PersonAddIcon,
   AddTask as AddTaskIcon,
-  AccountTree as WorkflowIcon,
   Save as SaveIcon,
   MenuBook as MenuBookIcon,
   Schedule as ScheduleIcon,
@@ -20,7 +19,6 @@ import {
   FileDownload as FileDownloadIcon,
 } from '@mui/icons-material';
 import { Edge } from 'reactflow';
-import { useFlowConfigStore } from '../../store/flowConfig';
 import { usePermissionStore } from '../../store/permissions';
 import { useTabManagerStore } from '../../store/tabManager';
 import ExportCrewDialog from '../CrewExport/ExportCrewDialog';
@@ -72,7 +70,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   onOpenSchedulesDialog,
   onToggleExecutionHistory,
   areFlowsVisible = false,
-  toggleFlowsVisibility,
+  toggleFlowsVisibility: _toggleFlowsVisibility, // moved to TabBar mode switcher
   hasCrewNodes = false,
   hasFlowNodes = false,
   onPlayPlan,
@@ -83,8 +81,6 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   const [chatOpenedByClick, setChatOpenedByClick] = useState(false);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
   const [pulsePlay, setPulsePlay] = useState(false);
-
-  const { crewAIFlowEnabled } = useFlowConfigStore();
 
   // Get user permissions
   const { userRole } = usePermissionStore();
@@ -264,20 +260,8 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
       onClick: () => setIsCrewDialogOpen?.(true),
       disabled: false
     },
-    ...(crewAIFlowEnabled ? [
-      {
-        id: 'separator3',
-        isSeparator: true
-      },
-      {
-        id: 'toggle-flows',
-        icon: <WorkflowIcon />,
-        tooltip: areFlowsVisible ? 'Hide Workflow Panel' : 'Show Workflow Panel',
-        onClick: toggleFlowsVisibility,
-        disabled: !toggleFlowsVisibility,
-        isActive: areFlowsVisible
-      }
-    ] : []),
+    // The "Show Workflow Panel" toggle was moved out of this sidebar — Flow is
+    // now a top-level mode reachable via the grid mode switcher in the TabBar.
     // Only show View Assistant Logs when NOT on flow canvas
     ...(!areFlowsVisible ? [
       {
