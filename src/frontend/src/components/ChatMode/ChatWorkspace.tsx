@@ -140,6 +140,26 @@ export function buildTraceEntry(
  * Distill a task output into a concise chat-message body. Returns null when
  * the output is pure progress-noise that shouldn't appear in chat.
  */
+/**
+ * Produce a concise, human-friendly label for a task-output chat message.
+ *
+ * Traces report the task *name* as the full (interpolated) task description, so
+ * a refine surfaces the entire "Improve the artifact below… CURRENT ARTIFACT:
+ * <!DOCTYPE html>…" prompt — which dumps the whole artifact into the chat. We
+ * special-case the refine prompt to "Refined artifact" and otherwise collapse
+ * any over-long description to its first line, truncated.
+ */
+export function cleanTaskLabel(taskName: string): string {
+  const name = (taskName || '').trim();
+  if (!name) return 'Task';
+  // The refine editor task description always starts with this sentinel.
+  if (/^Improve the artifact below based on this instruction/i.test(name)) {
+    return 'Refined artifact';
+  }
+  const firstLine = name.split('\n')[0].trim();
+  return firstLine.length > 80 ? `${firstLine.slice(0, 80).trim()}…` : firstLine;
+}
+
 export function summarizeTaskOutput(
   raw: string,
   preview: PreviewContent | null,
@@ -365,7 +385,7 @@ const ChatWorkspace: React.FC = () => {
       // chat; the real content lives in the preview pane.
       const chatBody = summarizeTaskOutput(displayContent, preview);
       if (chatBody !== null) {
-        const msg = `**${taskName}** — ${chatBody}`;
+        const msg = `**${cleanTaskLabel(taskName)}** — ${chatBody}`;
         if (ownerSession) {
           sessionStore.addMessageToTargetSession(ownerSession, 'assistant', msg);
         } else {
