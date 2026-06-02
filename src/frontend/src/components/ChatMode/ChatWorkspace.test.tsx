@@ -180,6 +180,7 @@ import ChatWorkspace, {
   summarizeArgs,
   buildTraceEntry,
   summarizeTaskOutput,
+  cleanTaskLabel,
 } from './ChatWorkspace';
 import { buildCrewConfigFromGenerated } from './utils/crewConfigBuilder';
 
@@ -300,6 +301,29 @@ describe('summarizeTaskOutput', () => {
   });
   it('returns normal short text unchanged', () => {
     expect(summarizeTaskOutput('a normal result', null)).toBe('a normal result');
+  });
+});
+
+describe('cleanTaskLabel', () => {
+  it('falls back to "Task" for empty input', () => {
+    expect(cleanTaskLabel('')).toBe('Task');
+    expect(cleanTaskLabel('   ')).toBe('Task');
+  });
+  it('collapses the refine prompt to a clean label instead of dumping the artifact', () => {
+    const refinePrompt =
+      'Improve the artifact below based on this instruction.\n\nINSTRUCTION:\n' +
+      'remove this from the title Executive Dashboard\n\nCURRENT ARTIFACT:\n<!DOCTYPE html><html>...';
+    expect(cleanTaskLabel(refinePrompt)).toBe('Refined artifact');
+  });
+  it('keeps a short single-line task name as-is', () => {
+    expect(cleanTaskLabel('Gather Latest Swiss News')).toBe('Gather Latest Swiss News');
+  });
+  it('uses the first line and truncates an over-long description', () => {
+    const long = 'Research and compile the most recent data '.repeat(5);
+    const label = cleanTaskLabel(`${long}\nsecond line`);
+    expect(label.endsWith('…')).toBe(true);
+    expect(label).not.toContain('second line');
+    expect(label.length).toBeLessThanOrEqual(81);
   });
 });
 
