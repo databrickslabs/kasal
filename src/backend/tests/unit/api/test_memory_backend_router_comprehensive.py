@@ -122,6 +122,8 @@ class TestInitializeLakebaseTables:
 
     @pytest.mark.asyncio
     async def test_calls_service_with_defaults(self):
+        # Updated for app-modes: initialize_lakebase_tables now uses memory_table
+        # instead of short_term_table/long_term_table/entity_table
         from src.api.memory_backend_router import initialize_lakebase_tables
         svc = AsyncMock()
         svc.initialize_lakebase_tables = AsyncMock(return_value={"success": True})
@@ -135,14 +137,13 @@ class TestInitializeLakebaseTables:
         assert result["success"] is True
         svc.initialize_lakebase_tables.assert_awaited_once_with(
             embedding_dimension=1024,
-            short_term_table="crew_short_term_memory",
-            long_term_table="crew_long_term_memory",
-            entity_table="crew_entity_memory",
+            memory_table="crew_memory",
             instance_name=None,
         )
 
     @pytest.mark.asyncio
     async def test_calls_service_with_custom_values(self):
+        # Updated for app-modes: uses memory_table instead of per-type tables
         from src.api.memory_backend_router import initialize_lakebase_tables
         svc = AsyncMock()
         svc.initialize_lakebase_tables = AsyncMock(return_value={"success": True})
@@ -152,16 +153,14 @@ class TestInitializeLakebaseTables:
                 request={
                     "instance_name": "my-lb",
                     "embedding_dimension": 768,
-                    "short_term_table": "st",
+                    "memory_table": "custom_memory",
                 },
                 group_context=_admin_ctx(),
                 service=svc,
             )
         svc.initialize_lakebase_tables.assert_awaited_once_with(
             embedding_dimension=768,
-            short_term_table="st",
-            long_term_table="crew_long_term_memory",
-            entity_table="crew_entity_memory",
+            memory_table="custom_memory",
             instance_name="my-lb",
         )
 
@@ -483,12 +482,13 @@ class TestValidateMemoryConfigAdditional:
 
     @pytest.mark.asyncio
     async def test_databricks_missing_endpoint_errors(self):
+        # Updated for app-modes: use memory_index instead of short_term_index
         from src.api.memory_backend_router import validate_memory_config
         cfg = MemoryBackendConfig(
             backend_type=MemoryBackendType.DATABRICKS,
             databricks_config=DatabricksMemoryConfig(
-                endpoint_name="",
-                short_term_index="c.s.i",
+                endpoint_name="",  # empty endpoint_name triggers validation error
+                memory_index="catalog.schema.unified",
                 embedding_dimension=1024,
             ),
         )

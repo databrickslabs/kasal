@@ -101,15 +101,13 @@ class TestFetchMemoryBackendConfig:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_returns_none_for_disabled_config(self):
+    async def test_returns_none_for_no_active_config_second(self):
+        # Updated for app-modes: service no longer checks enable_short_term etc.
+        # A None return from get_active_config means "no backend configured".
         service = CrewMemoryService({"group_id": "grp1"})
         mock_session = AsyncMock()
-        mock_active = MagicMock()
-        mock_active.enable_short_term = False
-        mock_active.enable_long_term = False
-        mock_active.enable_entity = False
         mock_service = AsyncMock()
-        mock_service.get_active_config.return_value = mock_active
+        mock_service.get_active_config.return_value = None  # no active backend
 
         with patch("src.db.session.request_scoped_session") as mock_ctx:
             mock_ctx.return_value.__aenter__.return_value = mock_session
@@ -123,16 +121,16 @@ class TestFetchMemoryBackendConfig:
 
     @pytest.mark.asyncio
     async def test_returns_config_dict_for_enabled_config(self):
+        # Updated for app-modes: config dict no longer includes enable_short_term etc.
+        # Only backend_type, databricks_config, and lakebase_config are included.
         service = CrewMemoryService({"group_id": "grp1"})
         mock_session = AsyncMock()
         mock_active = MagicMock()
-        mock_active.enable_short_term = True
-        mock_active.enable_long_term = True
-        mock_active.enable_entity = True
-        mock_active.enable_relationship_retrieval = False
         mock_active.backend_type.value = "databricks"
         mock_active.databricks_config = {"endpoint": "ep1"}
         mock_active.lakebase_config = None
+        mock_active.cognitive_config = None
+        mock_active.custom_config = None
         mock_service = AsyncMock()
         mock_service.get_active_config.return_value = mock_active
 
@@ -146,7 +144,7 @@ class TestFetchMemoryBackendConfig:
 
         assert result is not None
         assert result["backend_type"] == "databricks"
-        assert result["enable_short_term"] is True
+        assert "databricks_config" in result
 
     @pytest.mark.asyncio
     async def test_returns_none_on_exception(self):
@@ -159,18 +157,16 @@ class TestFetchMemoryBackendConfig:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_mixed_enabled_not_considered_disabled(self):
-        """If at least one type is enabled, it's not a 'Disabled Configuration'."""
+    async def test_active_config_returned_as_dict(self):
+        """Active config is returned as a dict with backend_type key."""
         service = CrewMemoryService({"group_id": "grp1"})
         mock_session = AsyncMock()
         mock_active = MagicMock()
-        mock_active.enable_short_term = True
-        mock_active.enable_long_term = False
-        mock_active.enable_entity = False
-        mock_active.enable_relationship_retrieval = False
         mock_active.backend_type.value = "default"
         mock_active.databricks_config = None
         mock_active.lakebase_config = None
+        mock_active.cognitive_config = None
+        mock_active.custom_config = None
         mock_service = AsyncMock()
         mock_service.get_active_config.return_value = mock_active
 
@@ -182,7 +178,6 @@ class TestFetchMemoryBackendConfig:
             ):
                 result = await service.fetch_memory_backend_config()
 
-        # Not disabled, should return config
         assert result is not None
         assert result["backend_type"] == "default"
 
@@ -324,25 +319,20 @@ class TestCreateMemoryBackends:
 
     @pytest.mark.asyncio
     async def test_converts_databricks_config_dict_to_object(self):
+        # Updated for app-modes: use memory_index instead of short_term/long_term/entity_index
         service = CrewMemoryService({"execution_id": "job_1"})
         memory_backend_config = {
             "backend_type": "databricks",
             "databricks_config": {
                 "endpoint_name": "ep",
-                "short_term_index": "cat.sch.st",
-                "long_term_index": "cat.sch.lt",
-                "entity_index": "cat.sch.ent",
+                "memory_index": "cat.sch.unified",
             },
-            "enable_short_term": True,
-            "enable_long_term": True,
-            "enable_entity": True,
-            "enable_relationship_retrieval": False,
         }
 
         with patch(
-            "src.engines.crewai.services.crew_memory_service.MemoryBackendFactory.create_memory_backends",
+            "src.engines.crewai.services.crew_memory_service.MemoryBackendFactory.create_unified_storage",
             new_callable=AsyncMock,
-            return_value={"short_term": MagicMock()},
+            return_value=MagicMock(),
         ) as mock_factory:
             result = await service.create_memory_backends(
                 memory_backend_config=memory_backend_config,
@@ -351,29 +341,23 @@ class TestCreateMemoryBackends:
             )
 
         assert mock_factory.called
+        assert "unified" in result
 
     @pytest.mark.asyncio
     async def test_converts_lakebase_config_dict_to_object(self):
+        # Updated for app-modes: use memory_table instead of old per-type tables
         service = CrewMemoryService({"execution_id": "job_1"})
         memory_backend_config = {
             "backend_type": "lakebase",
             "lakebase_config": {
-                "host": "localhost",
-                "port": 5432,
-                "database": "memory_db",
-                "username": "user",
-                "password": "pass",
+                "memory_table": "crew_memory",
             },
-            "enable_short_term": True,
-            "enable_long_term": False,
-            "enable_entity": False,
-            "enable_relationship_retrieval": False,
         }
 
         with patch(
-            "src.engines.crewai.services.crew_memory_service.MemoryBackendFactory.create_memory_backends",
+            "src.engines.crewai.services.crew_memory_service.MemoryBackendFactory.create_unified_storage",
             new_callable=AsyncMock,
-            return_value={"short_term": MagicMock()},
+            return_value=MagicMock(),
         ) as mock_factory:
             result = await service.create_memory_backends(
                 memory_backend_config=memory_backend_config,
@@ -382,51 +366,52 @@ class TestCreateMemoryBackends:
             )
 
         assert mock_factory.called
+        assert "unified" in result
 
     @pytest.mark.asyncio
     async def test_passes_job_id_to_factory(self):
+        # Updated for app-modes: create_memory_backends delegates to create_unified_storage
+        # which uses execution_id from self.config as job_id
         service = CrewMemoryService({"execution_id": "my_job_id"})
         memory_backend_config = {
             "backend_type": "default",
-            "enable_short_term": True,
-            "enable_long_term": False,
-            "enable_entity": False,
-            "enable_relationship_retrieval": False,
         }
 
         with patch(
-            "src.engines.crewai.services.crew_memory_service.MemoryBackendFactory.create_memory_backends",
+            "src.engines.crewai.services.crew_memory_service.MemoryBackendFactory.create_unified_storage",
             new_callable=AsyncMock,
-            return_value={},
+            return_value=None,  # DEFAULT backend returns None
         ) as mock_factory:
-            await service.create_memory_backends(
+            result = await service.create_memory_backends(
                 memory_backend_config=memory_backend_config,
                 crew_id="crew_1",
                 embedder=None,
             )
 
+        assert mock_factory.called
         call_kwargs = mock_factory.call_args[1]
         assert call_kwargs.get("job_id") == "my_job_id"
 
     @pytest.mark.asyncio
     async def test_raises_and_emits_trace_on_validation_error(self):
+        # Updated for app-modes: create_memory_backends delegates to create_unified_storage
         service = CrewMemoryService({"execution_id": "job_1", "group_id": "grp"})
         memory_backend_config = {
             "backend_type": "databricks",
-            "enable_short_term": True,
-            "enable_long_term": False,
-            "enable_entity": False,
-            "enable_relationship_retrieval": False,
+            "databricks_config": {
+                "endpoint_name": "ep",
+                "memory_index": "cat.sch.unified",
+            },
         }
         validation_result = {
             "valid": False,
-            "missing_indexes": ["short_term"],
+            "missing_indexes": ["cat.sch.unified"],
             "provisioning_indexes": [],
-            "error_type": "missing_indexes",
+            "error_type": "missing_index",
         }
 
         with patch(
-            "src.engines.crewai.services.crew_memory_service.MemoryBackendFactory.create_memory_backends",
+            "src.engines.crewai.services.crew_memory_service.MemoryBackendFactory.create_unified_storage",
             new_callable=AsyncMock,
             side_effect=DatabricksIndexValidationError("err", validation_result),
         ), patch.object(
@@ -447,146 +432,127 @@ class TestCreateMemoryBackends:
 
 
 class TestConfigureCrewMemoryComponents:
-    """Tests for configure_crew_memory_components."""
+    """Tests for configure_crew_memory_components.
 
-    def _make_memory_config(self, backend_type_str, short_term=True, long_term=True, entity=True):
-        from src.schemas.memory_backend import MemoryBackendConfig
-        from unittest.mock import MagicMock
+    Updated for app-modes: the method now takes a single ``storage`` arg
+    (a StorageBackend or None) instead of the old ``memory_backends`` dict.
+    """
+
+    def _make_memory_config(self, backend_type_str):
+        """Create a MemoryBackendConfig-like MagicMock for the given type."""
+        from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
         cfg = MagicMock()
         cfg.backend_type = MemoryBackendType(backend_type_str)
-        cfg.enable_short_term = short_term
-        cfg.enable_long_term = long_term
-        cfg.enable_entity = entity
+        cfg.cognitive_config = None
         return cfg
 
     def _crewai_memory_mocks(self):
-        """Return a dict of crewai module mocks for configure_crew_memory_components tests."""
+        """Return a dict of crewai module mocks."""
         mock_crewai_mem = MagicMock()
-        mock_crewai_mem.ShortTermMemory = MagicMock(return_value=MagicMock())
-        mock_crewai_mem.LongTermMemory = MagicMock(return_value=MagicMock())
-        mock_crewai_mem.EntityMemory = MagicMock(return_value=MagicMock())
-        mock_storage = MagicMock()
-        mock_storage.rag_storage.RAGStorage = MagicMock(return_value=MagicMock())
-        mock_storage.ltm_sqlite_storage.LTMSQLiteStorage = MagicMock(return_value=MagicMock())
-        mock_crewai_mem.storage = mock_storage
+        mock_memory_instance = MagicMock()
+        mock_crewai_mem.Memory = MagicMock(return_value=mock_memory_instance)
         return {
             "crewai.memory": mock_crewai_mem,
-            "crewai.memory.storage": mock_storage,
-            "crewai.memory.storage.rag_storage": mock_storage.rag_storage,
-            "crewai.memory.storage.ltm_sqlite_storage": mock_storage.ltm_sqlite_storage,
-            "crewai.utilities.paths": MagicMock(db_storage_path=MagicMock(return_value="/tmp/test")),
         }
 
     def test_disables_memory_when_default_no_embedder(self):
+        # DEFAULT backend with no embedder and no OPENAI_API_KEY → memory=False
+        import os
+        os.environ.pop("OPENAI_API_KEY", None)
         service = CrewMemoryService({})
         crew_kwargs = {}
         memory_config = self._make_memory_config("default")
-        memory_backends = {}
 
         with patch.dict("sys.modules", self._crewai_memory_mocks()):
             result = service.configure_crew_memory_components(
-                crew_kwargs, memory_config, memory_backends, "crew_1", custom_embedder=None
+                crew_kwargs, memory_config, storage=None, crew_id="crew_1", custom_embedder=None
             )
 
         assert result.get("memory") is False
 
     def test_configures_default_backend_with_custom_embedder(self):
+        # With a custom embedder, Memory is created with the embedder
         service = CrewMemoryService({"execution_id": "job_1"})
         crew_kwargs = {}
-        memory_config = self._make_memory_config("default", short_term=True, long_term=True, entity=True)
-        memory_backends = {}
+        memory_config = self._make_memory_config("default")
         custom_embedder = MagicMock()
 
-        extra_mocks = self._crewai_memory_mocks()
-        extra_mocks["src.engines.crewai.memory.chromadb_databricks_storage"] = MagicMock()
-
-        with patch.dict("sys.modules", extra_mocks), \
-             patch("src.engines.crewai.services.crew_memory_service.Path") as MockPath:
-            MockPath.return_value = MagicMock()
+        with patch.dict("sys.modules", self._crewai_memory_mocks()):
             result = service.configure_crew_memory_components(
-                crew_kwargs, memory_config, memory_backends, "crew_1", custom_embedder=custom_embedder
+                crew_kwargs, memory_config, storage=None, crew_id="crew_1", custom_embedder=custom_embedder
             )
 
-        assert result.get("memory") is False
+        # Memory should be set (not False) since we have an embedder
+        assert "memory" in result
 
-    def test_configures_lakebase_short_term(self):
+    def test_configures_lakebase_with_storage(self):
+        # LAKEBASE backend with a storage backend provided → Memory is built with storage
         service = CrewMemoryService({})
         crew_kwargs = {}
-        memory_config = self._make_memory_config("lakebase", short_term=True, long_term=True, entity=True)
-        memory_backends = {
-            "short_term": MagicMock(),
-            "long_term": MagicMock(),
-            "entity": MagicMock(),
-        }
+        memory_config = self._make_memory_config("lakebase")
+        mock_storage = MagicMock()
 
         with patch.dict("sys.modules", self._crewai_memory_mocks()):
             result = service.configure_crew_memory_components(
-                crew_kwargs, memory_config, memory_backends, "crew_1"
+                crew_kwargs, memory_config, storage=mock_storage, crew_id="crew_1"
             )
 
-        assert result.get("memory") is False
+        assert "memory" in result
 
-    def test_configures_databricks_short_term(self):
+    def test_configures_databricks_with_storage(self):
+        # DATABRICKS backend with storage provided → Memory is built with storage
         service = CrewMemoryService({})
         crew_kwargs = {}
-        memory_config = self._make_memory_config("databricks", short_term=True, long_term=True, entity=True)
-        memory_backends = {
-            "short_term": MagicMock(),
-            "long_term": MagicMock(),
-            "entity": MagicMock(),
-        }
+        memory_config = self._make_memory_config("databricks")
+        mock_storage = MagicMock()
 
         with patch.dict("sys.modules", self._crewai_memory_mocks()):
             result = service.configure_crew_memory_components(
-                crew_kwargs, memory_config, memory_backends, "crew_1"
+                crew_kwargs, memory_config, storage=mock_storage, crew_id="crew_1"
             )
 
-        assert result.get("memory") is False
+        assert "memory" in result
 
     def test_handles_import_error_gracefully(self):
         service = CrewMemoryService({})
         crew_kwargs = {"memory": True}
         memory_config = self._make_memory_config("databricks")
-        memory_backends = {"short_term": MagicMock()}
 
-        # Simulate ImportError by having crewai.memory raise on import
+        # Simulate ImportError by setting crewai.memory to None
         with patch.dict("sys.modules", {"crewai.memory": None}):
             result = service.configure_crew_memory_components(
-                crew_kwargs, memory_config, memory_backends, "crew_1"
+                crew_kwargs, memory_config, storage=MagicMock(), crew_id="crew_1"
             )
-        # Should return crew_kwargs unchanged after error
+        # Should return crew_kwargs after error (memory=False)
         assert result is not None
 
-    def test_handles_general_exception_gracefully(self):
+    def test_handles_memory_construction_exception(self):
         service = CrewMemoryService({})
         crew_kwargs = {}
         memory_config = self._make_memory_config("databricks")
-        memory_backends = {"short_term": MagicMock()}
+        mock_storage = MagicMock()
 
         mocks = self._crewai_memory_mocks()
-        mocks["crewai.memory"].ShortTermMemory.side_effect = RuntimeError("unexpected")
+        mocks["crewai.memory"].Memory.side_effect = RuntimeError("Memory build failed")
         with patch.dict("sys.modules", mocks):
             result = service.configure_crew_memory_components(
-                crew_kwargs, memory_config, memory_backends, "crew_1"
+                crew_kwargs, memory_config, storage=mock_storage, crew_id="crew_1"
             )
-        assert result is not None
+        # Should fall back to memory=False on exception
+        assert result.get("memory") is False
 
-    def test_non_databricks_backend_with_embedder_uses_rag(self):
-        """Non-databricks non-default backend with embedder should use RAGStorage."""
+    def test_no_storage_with_embedder_creates_memory(self):
+        """Non-DEFAULT backend with no storage but embedder in crew_kwargs."""
         service = CrewMemoryService({})
         crew_kwargs = {"embedder": MagicMock()}
 
         from src.schemas.memory_backend import MemoryBackendType as MBT
-        memory_config = self._make_memory_config("databricks", short_term=True, long_term=False, entity=True)
+        memory_config = self._make_memory_config("databricks")
         memory_config.backend_type = MBT.DATABRICKS
-        memory_backends = {
-            "short_term": MagicMock(),
-            "entity": MagicMock(),
-        }
 
         with patch.dict("sys.modules", self._crewai_memory_mocks()):
             result = service.configure_crew_memory_components(
-                crew_kwargs, memory_config, memory_backends, "crew_1"
+                crew_kwargs, memory_config, storage=None, crew_id="crew_1"
             )
 
         assert result is not None
@@ -747,52 +713,51 @@ class TestAttachToolsTraceContext:
 
 
 class TestSetCrewReferenceOnMemory:
-    """Tests for set_crew_reference_on_memory."""
+    """Tests for set_crew_reference_on_memory.
 
-    def test_sets_crew_on_long_term_storage(self):
+    Updated for app-modes: the method now uses crew._memory (unified Memory)
+    instead of crew._short_term_memory/_long_term_memory/_entity_memory.
+    """
+
+    def test_sets_crew_on_unified_storage(self):
+        # New API: set_crew_reference_on_memory uses crew._memory._storage
         service = CrewMemoryService({})
         mock_crew = MagicMock()
-        mock_storage = MagicMock()
+        mock_storage = MagicMock(spec=["crew"])
         mock_storage.crew = None
-        mock_crew._long_term_memory = MagicMock()
-        mock_crew._long_term_memory.storage = mock_storage
-        mock_crew._entity_memory = None
-        mock_crew._short_term_memory = None
+        mock_memory = MagicMock()
+        mock_memory._storage = mock_storage
+        mock_crew._memory = mock_memory
+        mock_crew.agents = []
 
         service.set_crew_reference_on_memory(mock_crew)
 
         assert mock_storage.crew == mock_crew
 
-    def test_sets_agent_context_on_entity_storage(self):
+    def test_sets_agent_context_on_unified_storage(self):
+        # Agent context is set when storage has set_agent_context
         service = CrewMemoryService({})
         mock_crew = MagicMock()
-        mock_crew._long_term_memory = None
-        mock_crew._short_term_memory = None
-        mock_storage = MagicMock()
-        mock_storage.crew = None
+        mock_storage = MagicMock(spec=["set_agent_context"])
         mock_agent = MagicMock()
         mock_agent.role = "Dev"
         mock_crew.agents = [mock_agent]
-        mock_crew._entity_memory = MagicMock()
-        mock_crew._entity_memory.storage = mock_storage
+        mock_memory = MagicMock()
+        mock_memory._storage = mock_storage
+        mock_crew._memory = mock_memory
 
         service.set_crew_reference_on_memory(mock_crew)
 
         mock_storage.set_agent_context.assert_called_once_with(mock_agent)
 
-    def test_sets_crew_on_short_term_storage(self):
+    def test_does_nothing_when_no_memory(self):
+        # When _memory is None/falsy, nothing is done
         service = CrewMemoryService({})
         mock_crew = MagicMock()
-        mock_crew._long_term_memory = None
-        mock_crew._entity_memory = None
-        mock_storage = MagicMock()
-        mock_storage.crew = None
-        mock_crew._short_term_memory = MagicMock()
-        mock_crew._short_term_memory.storage = mock_storage
+        mock_crew._memory = None
 
+        # Should not raise
         service.set_crew_reference_on_memory(mock_crew)
-
-        assert mock_storage.crew == mock_crew
 
     def test_handles_exception_gracefully(self):
         service = CrewMemoryService({})

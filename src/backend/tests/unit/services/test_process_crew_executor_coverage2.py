@@ -116,7 +116,16 @@ class TestRunCrewInProcessValidation:
 class TestRunCrewIsolated:
 
     def _make_isolated_executor_with_mocks(self, pid, exitcode, queue_empty=True, queue_result=None):
-        """Helper to create executor + mock process for run_crew_isolated tests."""
+        """Helper to create executor + mock process for run_crew_isolated tests.
+
+        Updated for app-modes: the executor now drains result_queue via a
+        background thread using queue.get(timeout=...) before checking
+        result_queue.empty() / get_nowait(). We mock .get() to raise
+        queue.Empty when queue_empty=True (so drained_result stays empty
+        and the empty/exitcode fallback logic runs), or return the expected
+        result when queue_empty=False (so drained_result[0] is used).
+        """
+        import queue as _queue
         executor = _make_executor()
         mock_process = MagicMock()
         mock_process.pid = pid
@@ -128,7 +137,14 @@ class TestRunCrewIsolated:
         mock_q = MagicMock()
         mock_q.empty = MagicMock(return_value=queue_empty)
         if queue_result is not None:
+            # get() used by background drain thread — return the result
+            mock_q.get = MagicMock(return_value=queue_result)
             mock_q.get_nowait = MagicMock(return_value=queue_result)
+        else:
+            # get() raises queue.Empty so drain thread stores nothing →
+            # fallback logic uses exitcode to determine COMPLETED/FAILED
+            mock_q.get = MagicMock(side_effect=_queue.Empty())
+            mock_q.get_nowait = MagicMock(side_effect=_queue.Empty())
         mock_log_q = MagicMock()
         executor._ctx.Queue = MagicMock(side_effect=[mock_q, mock_log_q])
         executor._ctx.Process = MagicMock(return_value=mock_process)

@@ -12,7 +12,7 @@ from src.schemas.memory_backend import MemoryBackendType
 VALID_DATABRICKS_CONFIG = {
     "workspace_url": "https://example.databricks.com",
     "endpoint_name": "my_vs_endpoint",
-    "short_term_index": "catalog.schema.short_term",
+    "memory_index": "catalog.schema.unified",
 }
 
 VALID_LAKEBASE_CONFIG = {
@@ -135,7 +135,7 @@ async def test_group_id_databricks_no_workspace_url_auth_succeeds():
     svc = make_service()
     config = {
         "endpoint_name": "my_endpoint",
-        "short_term_index": "catalog.schema.idx",
+        "memory_index": "catalog.schema.unified",
         # No workspace_url
     }
     backend = make_backend(
@@ -161,7 +161,7 @@ async def test_group_id_databricks_no_workspace_url_auth_fails():
     svc = make_service()
     config = {
         "endpoint_name": "my_endpoint",
-        "short_term_index": "catalog.schema.idx",
+        "memory_index": "catalog.schema.unified",
         # No workspace_url
     }
     backend = make_backend(
@@ -274,7 +274,7 @@ async def test_no_group_id_databricks_no_workspace_url_auth_succeeds():
     svc = make_service()
     config = {
         "endpoint_name": "my_endpoint",
-        "short_term_index": "catalog.schema.idx",
+        "memory_index": "catalog.schema.unified",
     }
     backend = make_backend(
         is_active=True,
@@ -298,7 +298,7 @@ async def test_no_group_id_databricks_no_workspace_url_auth_fails():
     svc = make_service()
     config = {
         "endpoint_name": "my_endpoint",
-        "short_term_index": "catalog.schema.idx",
+        "memory_index": "catalog.schema.unified",
     }
     backend = make_backend(
         is_active=True,

@@ -803,7 +803,7 @@ class DatabricksIndexService:
             random_vector = [random.random() for _ in range(embedding_dimension)]
             
             # Use the correct columns for entity memory from the schema
-            entity_columns = DatabricksIndexSchemas.ENTITY_SEARCH_COLUMNS
+            entity_columns = DatabricksIndexSchemas.UNIFIED_SEARCH_COLUMNS
             entity_logger.info(f"Requesting columns: {entity_columns}")
             
             # Use repository to perform similarity search

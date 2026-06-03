@@ -260,10 +260,8 @@ class TestEndpointCreationFailures:
         assert result["success"] is True
         # Document endpoint records error
         assert "error" in result["endpoints"]["document"]
-        # Only 3 indexes (no document index when doc endpoint fails)
-        assert "short_term" in result["indexes"]
-        assert "long_term" in result["indexes"]
-        assert "entity" in result["indexes"]
+        # Only unified index (no document index when doc endpoint fails)
+        assert "unified" in result["indexes"]
         assert "document" not in result["indexes"]
 
     @pytest.mark.asyncio
@@ -332,7 +330,7 @@ class TestIndexCreationRetry:
             )
 
         assert result["success"] is True
-        assert result["indexes"]["short_term"]["status"] == "already_exists"
+        assert result["indexes"]["unified"]["status"] == "already_exists"
 
     @pytest.mark.asyncio
     async def test_index_table_does_not_exist_retries(self, service):
@@ -378,7 +376,7 @@ class TestIndexCreationRetry:
 
         assert result["success"] is True
         # Each index should have succeeded (after retry)
-        for idx_type in ["short_term", "long_term", "entity", "document"]:
+        for idx_type in ["unified", "document"]:
             assert result["indexes"][idx_type]["status"] == "created"
 
     @pytest.mark.asyncio
@@ -465,8 +463,8 @@ class TestIndexCreationRetry:
 
         assert result["success"] is True
         # The raised exception "Failed to create index: ..." is caught and stored
-        assert "error" in result["indexes"]["short_term"]
-        assert "Failed to create index" in result["indexes"]["short_term"]["error"]
+        assert "error" in result["indexes"]["unified"]
+        assert "Failed to create index" in result["indexes"]["unified"]["error"]
 
     @pytest.mark.asyncio
     async def test_index_exhausts_retries_via_exception(self, service):
@@ -503,8 +501,8 @@ class TestIndexCreationRetry:
 
         assert result["success"] is True
         # On the final attempt, the exception is caught and recorded directly
-        assert "error" in result["indexes"]["short_term"]
-        assert "does not exist" in result["indexes"]["short_term"]["error"]
+        assert "error" in result["indexes"]["unified"]
+        assert "does not exist" in result["indexes"]["unified"]["error"]
 
     @pytest.mark.asyncio
     async def test_index_generic_failure_returns_error(self, service):
@@ -535,8 +533,8 @@ class TestIndexCreationRetry:
             )
 
         assert result["success"] is True
-        assert "error" in result["indexes"]["short_term"]
-        assert "Unexpected network error" in result["indexes"]["short_term"]["error"]
+        assert "error" in result["indexes"]["unified"]
+        assert "Unexpected network error" in result["indexes"]["unified"]["error"]
 
     @pytest.mark.asyncio
     async def test_index_creation_failure_response_not_retryable(self, service):
@@ -573,7 +571,7 @@ class TestIndexCreationRetry:
 
         # The exception from the non-retryable path is caught and stored as error
         assert result["success"] is True
-        assert "error" in result["indexes"]["short_term"]
+        assert "error" in result["indexes"]["unified"]
 
     @pytest.mark.asyncio
     async def test_unknown_index_type_returns_error(self, service):
@@ -607,7 +605,7 @@ class TestIndexCreationRetry:
 
         assert result["success"] is True
         # All indexes should have error about unknown index type
-        for idx_type in ["short_term", "long_term", "entity", "document"]:
+        for idx_type in ["unified", "document"]:
             assert "error" in result["indexes"][idx_type]
             assert "Unknown index type" in result["indexes"][idx_type]["error"]
 
@@ -1268,11 +1266,9 @@ class TestDocumentIndexConditional:
                 workspace_url="https://example.com",
             )
 
-        assert "short_term" in result["indexes"]
-        assert "long_term" in result["indexes"]
-        assert "entity" in result["indexes"]
+        assert "unified" in result["indexes"]
         assert "document" in result["indexes"]
-        assert mock_idx.create_index.call_count == 4
+        assert mock_idx.create_index.call_count == 2
 
 
 # ---------------------------------------------------------------------------
@@ -1597,7 +1593,7 @@ class TestSchemaIntegration:
 
     @pytest.mark.asyncio
     async def test_get_schema_called_for_each_index_type(self, service):
-        """get_schema is invoked for short_term, long_term, entity, and document."""
+        """get_schema is invoked for unified and document index types."""
         ep_resp = _endpoint_response(success=True, message="ok")
         idx_resp = _index_response(success=True, message="ok")
 
@@ -1627,9 +1623,7 @@ class TestSchemaIntegration:
             )
 
         called_types = [c[0][0] for c in MockSchemas.get_schema.call_args_list]
-        assert "short_term" in called_types
-        assert "long_term" in called_types
-        assert "entity" in called_types
+        assert "unified" in called_types
         assert "document" in called_types
 
 
@@ -1748,7 +1742,8 @@ class TestIndexCreateRequestFields:
                 workspace_url="https://example.com",
             )
 
-        assert len(captured) == 4
+        # New: only 2 indexes (unified cognitive memory + document)
+        assert len(captured) == 2
         for req in captured:
             assert req.primary_key == "id"
             assert req.embedding_vector_column == "embedding"

@@ -93,7 +93,8 @@ class TestGetEndpointRepository:
 
 class TestCreateDatabricksIndex:
     @pytest.mark.asyncio
-    async def test_create_short_term_success(self):
+    async def test_create_unified_memory_success(self):
+        """Unified memory index type sets config.memory_index."""
         svc = make_svc()
         config = make_config()
         mock_repo = AsyncMock()
@@ -111,16 +112,17 @@ class TestCreateDatabricksIndex:
                 schemas.get_schema.return_value = {"fields": []}
                 result = await svc.create_databricks_index(
                     config=config,
-                    index_type="short_term",
+                    index_type="memory",
                     catalog="main",
                     schema="default",
-                    table_name="st_memory",
+                    table_name="crew_memory",
                 )
         assert result["success"] is True
-        assert config.short_term_index == "main.default.st_memory"
+        assert config.memory_index == "main.default.crew_memory"
 
     @pytest.mark.asyncio
-    async def test_create_long_term_success(self):
+    async def test_create_short_term_type_succeeds(self):
+        """Legacy short_term index_type succeeds (service logs warning, no config attr set)."""
         svc = make_svc()
         config = make_config()
         mock_repo = AsyncMock()
@@ -132,13 +134,14 @@ class TestCreateDatabricksIndex:
             with patch("src.services.databricks_index_service.DatabricksIndexSchemas") as schemas:
                 schemas.get_schema.return_value = {"fields": []}
                 result = await svc.create_databricks_index(
-                    config=config, index_type="long_term", catalog="main", schema="default", table_name="lt"
+                    config=config, index_type="short_term", catalog="main", schema="default", table_name="lt"
                 )
+        # Service returns success even for legacy type (logs warning)
         assert result["success"] is True
-        assert config.long_term_index == "main.default.lt"
 
     @pytest.mark.asyncio
     async def test_create_entity_index_success(self):
+        """Legacy entity index_type succeeds (service logs warning, no config attr set)."""
         svc = make_svc()
         config = make_config()
         mock_repo = AsyncMock()
@@ -153,7 +156,6 @@ class TestCreateDatabricksIndex:
                     config=config, index_type="entity", catalog="main", schema="default", table_name="entity"
                 )
         assert result["success"] is True
-        assert config.entity_index == "main.default.entity"
 
     @pytest.mark.asyncio
     async def test_create_document_index_uses_document_endpoint(self):
@@ -645,7 +647,7 @@ class TestQueryEntityData:
 
         with patch.object(svc, "_get_index_repository", return_value=mock_repo):
             with patch("src.services.databricks_index_service.DatabricksIndexSchemas") as schemas:
-                schemas.ENTITY_SEARCH_COLUMNS = ["id", "entity_type", "entity_name", "description",
+                schemas.UNIFIED_SEARCH_COLUMNS = ["id", "entity_type", "entity_name", "description",
                                                    "relationships", "attributes", "confidence_score",
                                                    "crew_id", "agent_id", "timestamp", "source_context",
                                                    "relationship_data", "metadata"]
@@ -677,7 +679,7 @@ class TestQueryEntityData:
 
         with patch.object(svc, "_get_index_repository", return_value=mock_repo):
             with patch("src.services.databricks_index_service.DatabricksIndexSchemas") as schemas:
-                schemas.ENTITY_SEARCH_COLUMNS = ["id", "entity_type", "entity_name", "description",
+                schemas.UNIFIED_SEARCH_COLUMNS = ["id", "entity_type", "entity_name", "description",
                                                    "relationships", "attributes", "confidence_score",
                                                    "crew_id", "agent_id", "timestamp", "source_context",
                                                    "relationship_data", "metadata"]
@@ -692,7 +694,7 @@ class TestQueryEntityData:
 
         with patch.object(svc, "_get_index_repository", return_value=mock_repo):
             with patch("src.services.databricks_index_service.DatabricksIndexSchemas") as schemas:
-                schemas.ENTITY_SEARCH_COLUMNS = ["id", "entity_name"]
+                schemas.UNIFIED_SEARCH_COLUMNS = ["id", "entity_name"]
                 result = await svc.query_entity_data("https://ws.databricks.com", "ep", "main.default.entity")
         assert result["success"] is False
 
@@ -701,7 +703,7 @@ class TestQueryEntityData:
         svc = make_svc()
         with patch.object(svc, "_get_index_repository", side_effect=Exception("index not found")):
             with patch("src.services.databricks_index_service.DatabricksIndexSchemas") as schemas:
-                schemas.ENTITY_SEARCH_COLUMNS = ["id"]
+                schemas.UNIFIED_SEARCH_COLUMNS = ["id"]
                 result = await svc.query_entity_data("https://ws.databricks.com", "ep", "main.default.entity")
         assert result["success"] is False
 
@@ -710,7 +712,7 @@ class TestQueryEntityData:
         svc = make_svc()
         with patch.object(svc, "_get_index_repository", side_effect=Exception("other error")):
             with patch("src.services.databricks_index_service.DatabricksIndexSchemas") as schemas:
-                schemas.ENTITY_SEARCH_COLUMNS = ["id"]
+                schemas.UNIFIED_SEARCH_COLUMNS = ["id"]
                 result = await svc.query_entity_data("https://ws.databricks.com", "ep", "main.default.entity")
         assert result["success"] is False
 
@@ -727,7 +729,7 @@ class TestQueryEntityData:
 
         with patch.object(svc, "_get_index_repository", return_value=mock_repo):
             with patch("src.services.databricks_index_service.DatabricksIndexSchemas") as schemas:
-                schemas.ENTITY_SEARCH_COLUMNS = ["id", "entity_type", "entity_name", "description",
+                schemas.UNIFIED_SEARCH_COLUMNS = ["id", "entity_type", "entity_name", "description",
                                                    "relationships", "attributes", "confidence_score",
                                                    "crew_id", "agent_id", "timestamp", "source_context",
                                                    "relationship_data", "metadata"]
@@ -749,7 +751,7 @@ class TestQueryEntityData:
 
         with patch.object(svc, "_get_index_repository", return_value=mock_repo):
             with patch("src.services.databricks_index_service.DatabricksIndexSchemas") as schemas:
-                schemas.ENTITY_SEARCH_COLUMNS = ["id", "entity_name"]
+                schemas.UNIFIED_SEARCH_COLUMNS = ["id", "entity_name"]
                 result = await svc.query_entity_data("https://ws.databricks.com", "ep", "main.default.entity")
         assert result["success"] is True
 
@@ -768,7 +770,7 @@ class TestQueryEntityData:
 
         with patch.object(svc, "_get_index_repository", return_value=mock_repo):
             with patch("src.services.databricks_index_service.DatabricksIndexSchemas") as schemas:
-                schemas.ENTITY_SEARCH_COLUMNS = ["id", "entity_name"]
+                schemas.UNIFIED_SEARCH_COLUMNS = ["id", "entity_name"]
                 result = await svc.query_entity_data("https://ws.databricks.com", "ep", "main.default.entity")
         assert result["success"] is True
 
@@ -926,7 +928,7 @@ class TestEntityRelationshipResolution:
 
         with patch.object(svc, "_get_index_repository", return_value=mock_repo):
             with patch("src.services.databricks_index_service.DatabricksIndexSchemas") as schemas:
-                schemas.ENTITY_SEARCH_COLUMNS = [
+                schemas.UNIFIED_SEARCH_COLUMNS = [
                     "id", "entity_type", "entity_name", "description",
                     "relationships", "attributes", "confidence_score",
                     "crew_id", "agent_id", "timestamp", "source_context",
@@ -956,7 +958,7 @@ class TestEntityRelationshipResolution:
 
         with patch.object(svc, "_get_index_repository", return_value=mock_repo):
             with patch("src.services.databricks_index_service.DatabricksIndexSchemas") as schemas:
-                schemas.ENTITY_SEARCH_COLUMNS = [
+                schemas.UNIFIED_SEARCH_COLUMNS = [
                     "id", "entity_type", "entity_name", "description",
                     "relationships", "attributes", "confidence_score",
                     "crew_id", "agent_id", "timestamp", "source_context",
@@ -983,7 +985,7 @@ class TestEntityRelationshipResolution:
 
         with patch.object(svc, "_get_index_repository", return_value=mock_repo):
             with patch("src.services.databricks_index_service.DatabricksIndexSchemas") as schemas:
-                schemas.ENTITY_SEARCH_COLUMNS = [
+                schemas.UNIFIED_SEARCH_COLUMNS = [
                     "id", "entity_type", "entity_name", "description",
                     "relationships", "attributes", "confidence_score",
                     "crew_id", "agent_id", "timestamp", "source_context",

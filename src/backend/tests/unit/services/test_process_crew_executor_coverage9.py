@@ -141,7 +141,7 @@ class TestRunCrewInProcessWithMockCrew:
         mock_crew = MagicMock()
         mock_result = MagicMock()
         mock_result.raw = "Research complete"
-        mock_crew.kickoff = MagicMock(return_value=mock_result)
+        mock_crew.kickoff_async = AsyncMock(return_value=mock_result)
 
         with _crew_execution_context(mock_crew):
             result = run_crew_in_process("exec-success", config)
@@ -166,7 +166,7 @@ class TestRunCrewInProcessWithMockCrew:
         mock_crew = MagicMock()
         mock_result = MagicMock()
         mock_result.raw = "done with inputs"
-        mock_crew.kickoff = MagicMock(return_value=mock_result)
+        mock_crew.kickoff_async = AsyncMock(return_value=mock_result)
 
         with _crew_execution_context(mock_crew):
             result = run_crew_in_process("exec-inputs", config, inputs=inputs)
@@ -184,7 +184,7 @@ class TestRunCrewInProcessWithMockCrew:
         }
 
         mock_crew = MagicMock()
-        mock_crew.kickoff = MagicMock(return_value={"key": "value"})
+        mock_crew.kickoff_async = AsyncMock(return_value={"key": "value"})
 
         with _crew_execution_context(mock_crew):
             result = run_crew_in_process("exec-dict-result", config)
@@ -204,7 +204,7 @@ class TestRunCrewInProcessWithMockCrew:
         mock_crew = MagicMock()
         mock_result = MagicMock()
         mock_result.raw = "done"
-        mock_crew.kickoff = MagicMock(return_value=mock_result)
+        mock_crew.kickoff_async = AsyncMock(return_value=mock_result)
 
         with _crew_execution_context(mock_crew, mcp_warnings=["tool X not available"]):
             result = run_crew_in_process("exec-mcp-warn", config)
@@ -225,7 +225,7 @@ class TestRunCrewInProcessWithMockCrew:
         mock_crew = MagicMock()
         mock_result = MagicMock()
         mock_result.raw = "done"
-        mock_crew.kickoff = MagicMock(return_value=mock_result)
+        mock_crew.kickoff_async = AsyncMock(return_value=mock_result)
 
         mock_otel_provider = MagicMock()
         mock_otel_provider.get_tracer = MagicMock(return_value=MagicMock())
@@ -258,7 +258,7 @@ class TestRunCrewInProcessWithMockCrew:
         mock_crew = MagicMock()
         mock_result = MagicMock()
         mock_result.raw = "done"
-        mock_crew.kickoff = MagicMock(return_value=mock_result)
+        mock_crew.kickoff_async = AsyncMock(return_value=mock_result)
 
         # Mock event bus where flush returns False (timeout)
         mock_event_bus = MagicMock()
