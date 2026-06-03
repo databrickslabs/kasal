@@ -477,6 +477,9 @@ starlette==0.40.0
                         str(dir_path),
                         target_path
                     ]
+                    if profile is not None:
+                        import_cmd.append("--profile")
+                        import_cmd.append(profile)
                     logger.info(f"Uploading {dir_name}/ to {target_path}")
                     result = subprocess.run(import_cmd, check=True, capture_output=True, text=True)
                     logger.info(f"Uploaded {dir_name}/ successfully")
