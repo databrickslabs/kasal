@@ -18,8 +18,11 @@ import asyncio
 import logging
 import os
 import json
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional, Union, Tuple
 import time
+
+import litellm
+from litellm import CustomLogger
 
 from crewai import LLM
 from src.schemas.model_provider import ModelProvider
@@ -45,6 +48,21 @@ logger.setLevel(logging.DEBUG)
 # Import LoggerManager for documentation embedding logger
 from src.core.logger import LoggerManager
 embedding_logger = LoggerManager.get_instance().documentation_embedding
+
+# Set drop_params to True to automatically drop unsupported parameters
+# This is especially useful for GPT-5 and other new models that may have different parameter support
+# Note: With litellm 1.75.8+, GPT-5 is natively supported
+
+# Module-level token for subprocess callback fallback (contextvars don't propagate to callback threads)
+_subprocess_user_token: Optional[str] = None
+
+def set_subprocess_user_token(token: str) -> None:
+    """Set token for LiteLLM callback fallback in subprocess mode."""
+    global _subprocess_user_token
+    _subprocess_user_token = token
+
+litellm.drop_params = True
+logger.info("Set litellm.drop_params=True to handle unsupported parameters gracefully")
 
 # Register Databricks model context windows with CrewAI
 # This is CRITICAL for CrewAI's respect_context_window to work correctly.
@@ -79,6 +97,365 @@ if not logger.handlers:
 
 
 logger.info(f"LLM operations log file: {log_file_path}")
+
+
+class LiteLLMFileLogger(CustomLogger):
+    """Logs LiteLLM calls to the llm.log file using the module logger."""
+
+    def log_success_event(self, kwargs, response_obj, start_time, end_time):
+        model = kwargs.get("model", "unknown")
+        duration = (end_time - start_time).total_seconds() if hasattr(end_time - start_time, "total_seconds") else 0
+        usage = {}
+        if hasattr(response_obj, "usage") and response_obj.usage:
+            usage = {
+                "prompt_tokens": getattr(response_obj.usage, "prompt_tokens", 0),
+                "completion_tokens": getattr(response_obj.usage, "completion_tokens", 0),
+                "total_tokens": getattr(response_obj.usage, "total_tokens", 0),
+            }
+        logger.info(f"LLM success: model={model}, duration={duration:.2f}s, usage={usage}")
+
+    def log_failure_event(self, kwargs, response_obj, start_time, end_time):
+        model = kwargs.get("model", "unknown")
+        exception = kwargs.get("exception", "unknown error")
+        logger.error(f"LLM failure: model={model}, error={exception}")
+
+    async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
+        self.log_success_event(kwargs, response_obj, start_time, end_time)
+
+    async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
+        self.log_failure_event(kwargs, response_obj, start_time, end_time)
+
+
+# Create logger instance
+litellm_file_logger = LiteLLMFileLogger()
+
+# Dedicated callback for token telemetry to Databricks logfood
+class LiteLLMTokenTelemetryLogger(CustomLogger):
+    """
+    Sends token usage telemetry to Databricks logfood.
+    Uses get_auth_context for unified authentication.
+    """
+    
+    def __init__(self):
+        # Use module logger (already configured with handlers)
+        self.logger = logger
+    
+    def _should_send(self, kwargs: Dict[str, Any], response_obj: Any) -> Tuple[bool, Optional[Dict], Optional[str], Optional[str]]:
+        """Check if telemetry should be sent. Returns (should_send, usage, model, product_context)."""
+        
+        usage = response_obj.get('usage', {})
+        if not usage:
+            self.logger.debug(f"[TokenTelemetry] No usage in response - type={type(response_obj).__name__}")
+            return False, None, None, None
+        
+        model = kwargs.get('model', 'unknown')
+        
+        # Extract product context from User-Agent (e.g., "kasal_agent/0.1.0" -> "agent")
+        extra_headers = kwargs.get('extra_headers', {})
+        user_agent = extra_headers.get('User-Agent', '')
+        if '_' in user_agent and '/' in user_agent:
+            product_context = user_agent.split('_')[1].split('/')[0]
+        else:
+            product_context = "llm"
+        
+        return True, usage, model, product_context
+    
+    def log_success_event(self, kwargs, response_obj, start_time, end_time):
+        """Sync callback."""
+        model = kwargs.get('model', 'unknown')
+        usage = response_obj.get('usage', {}) if hasattr(response_obj, 'get') else {}
+        
+        should_send, usage, model, product_context = self._should_send(kwargs, response_obj)
+        if not should_send:
+            self.logger.debug(f"[TokenTelemetry] _should_send returned False")
+            return
+        
+        msg = f"[TokenTelemetry] Sending: model={model}, context={product_context}, tokens={usage.get('total_tokens', 0)}"
+        self.logger.info(msg)
+        
+        try:
+            import asyncio
+            from src.utils.telemetry import send_logfood_telemetry
+            from src.utils.user_context import UserContext
+            
+            # Get user token from context (set during request via contextvars)
+            # Falls back to module-level token for subprocess callback threads
+            user_token = UserContext.get_user_token() or _subprocess_user_token
+            
+            # Use skip_db_auth=True to avoid opening database sessions during callbacks,
+            # which can cause SQLAlchemy session conflicts with ongoing transactions
+            coro = send_logfood_telemetry(
+                usage=usage, model=model, product_context=product_context, 
+                user_token=user_token, skip_db_auth=True
+            )
+            
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(coro)
+            except RuntimeError:
+                asyncio.run(coro)
+        except Exception as e:
+            self.logger.debug(f"Token telemetry failed: {e}")
+    
+    async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
+        """Async callback."""
+        model = kwargs.get('model', 'unknown')
+        usage = response_obj.get('usage', {}) if hasattr(response_obj, 'get') else {}
+        
+        should_send, usage, model, product_context = self._should_send(kwargs, response_obj)
+        if not should_send:
+            self.logger.debug(f"[TokenTelemetry] _should_send returned False")
+            return
+        
+        msg = f"[TokenTelemetry] Sending: model={model}, context={product_context}, tokens={usage.get('total_tokens', 0)}"
+        self.logger.info(msg)
+        
+        try:
+            from src.utils.telemetry import send_logfood_telemetry
+            from src.utils.user_context import UserContext
+            
+            # Get user token from context (set during request via contextvars)
+            # Falls back to module-level token for subprocess callback threads
+            user_token = UserContext.get_user_token() or _subprocess_user_token
+            
+            # Use skip_db_auth=True to avoid opening database sessions during callbacks,
+            # which can cause SQLAlchemy session conflicts with ongoing transactions
+            await send_logfood_telemetry(
+                usage=usage, model=model, product_context=product_context,
+                user_token=user_token, skip_db_auth=True
+            )
+        except Exception as e:
+            self.logger.debug(f"Token telemetry failed: {e}")
+
+
+# Create telemetry logger instance
+litellm_token_telemetry_logger = LiteLLMTokenTelemetryLogger()
+
+# Register callbacks with LiteLLM
+litellm.callbacks = [litellm_token_telemetry_logger]
+
+# Set up other litellm configuration
+litellm.modify_params = True  # This helps with Anthropic API compatibility
+litellm.num_retries = 5  # Global retries setting
+litellm.retry_on = ["429", "timeout", "rate_limit_error"]  # Retry on these error types
+
+# Configure MLflow integration for Databricks observability
+_mlflow_configured = False
+# Default to disabled globally; we enable per-workspace dynamically
+_use_mlflow = False
+
+def _configure_databricks_mlflow():
+    """
+    Configure MLflow using unified Databricks authentication.
+
+    MLflow is configured ONCE at application startup with service-level credentials.
+    MLflow does NOT support OBO (On-Behalf-Of) authentication because it uses
+    environment variables which are process-wide and would cause race conditions.
+
+    This is acceptable because MLflow is for observability/tracking, not user-specific
+    data access operations.
+    """
+    global _mlflow_configured
+
+    if _mlflow_configured is True:
+        return
+
+    try:
+        import mlflow
+        import asyncio
+        from src.utils.databricks_auth import get_auth_context
+
+        # Get service-level authentication context (NO OBO - PAT/SPN only)
+        # This is configured ONCE at startup to avoid race conditions
+        # Pass user_token=None to skip OBO and use PAT/SPN
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Already in async context, need to run in executor
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, get_auth_context(user_token=None))
+                    auth = future.result()
+            else:
+                # Not in event loop, can use asyncio.run
+                auth = asyncio.run(get_auth_context(user_token=None))
+        except RuntimeError:
+            # No event loop, use asyncio.run
+            auth = asyncio.run(get_auth_context(user_token=None))
+
+        if auth and auth.workspace_url:
+            # Set environment variables ONCE at startup for MLflow
+            # MLflow ONLY supports environment variable authentication
+            os.environ["DATABRICKS_HOST"] = auth.workspace_url
+            os.environ["DATABRICKS_TOKEN"] = auth.token
+            logger.info(f"MLflow configured with {auth.auth_method} authentication")
+
+            # MLflow will automatically use DATABRICKS_HOST and DATABRICKS_TOKEN environment variables
+            tracking_uri = "databricks"  # Simple form - uses environment variables
+            mlflow.set_tracking_uri(tracking_uri)
+
+            # Set up experiment for LLM operations
+            experiment_name = os.getenv("MLFLOW_EXPERIMENT_NAME", "/Shared/kasal-llm-operations")
+            try:
+                exp = mlflow.set_experiment(experiment_name)
+                logger.info(f"MLflow experiment set to: {experiment_name} (ID: {getattr(exp, 'experiment_id', 'unknown')})")
+                # Explicitly configure MLflow 3.x tracing destination and enable it
+                tracing_ok = False
+                try:
+                    from mlflow.tracing.destination import Databricks as _Dest
+                    mlflow.tracing.set_destination(_Dest(experiment_id=str(getattr(exp, "experiment_id", ""))))
+                    mlflow.tracing.enable()
+                    logger.info("MLflow tracing destination set and tracing enabled")
+                    tracing_ok = True
+                except Exception as te:
+                    logger.warning(f"Could not configure MLflow tracing destination: {te}")
+                    tracing_ok = False
+            except Exception as e:
+                logger.warning(f"Could not set MLflow experiment '{experiment_name}': {e}")
+                # Continue with default experiment
+                tracing_ok = False
+
+            # Enable comprehensive MLflow autolog for both LiteLLM and CrewAI
+            # This dual approach ensures maximum coverage of LLM calls
+
+            # 1. Enable LiteLLM autolog (captures underlying LLM calls)
+            try:
+                mlflow.litellm.autolog(log_traces=tracing_ok)
+                logger.info(f"✅ MLflow LiteLLM autolog enabled (log_traces={tracing_ok})")
+            except Exception as e:
+                logger.warning(f"Failed to enable MLflow LiteLLM autolog: {e}")
+
+            # 2. Enable CrewAI autolog (captures CrewAI workflow structure)
+            try:
+                mlflow.crewai.autolog()
+                logger.info("✅ MLflow CrewAI autolog enabled")
+            except AttributeError:
+                logger.warning("⚠️ MLflow CrewAI autolog not available (older MLflow version or integration issues)")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to enable CrewAI autolog: {e}")
+
+            # Note: CrewAI uses LiteLLM internally, so LiteLLM autolog should capture
+            # the underlying calls even when using CrewAI's LLM wrapper
+
+            _mlflow_configured = True
+            logger.info(f"Databricks MLflow configured successfully with {auth.auth_method} authentication")
+
+        else:
+            logger.info("No Databricks workspace available for MLflow")
+
+    except ImportError:
+        logger.info("MLflow not available - install with 'pip install mlflow' for Databricks observability")
+    except Exception as e:
+        logger.warning(f"Failed to configure Databricks MLflow: {e}")
+
+# Configure litellm callbacks to file logger and telemetry logger
+litellm.success_callback = [litellm_file_logger, litellm_token_telemetry_logger]
+litellm.failure_callback = [litellm_file_logger]
+logger.info("Using file-based logging and token telemetry for LLM observability")
+
+# Configure logging
+logger.info(f"Configured LiteLLM to write logs to: {log_file_path}")
+
+# Enhanced LLM Wrapper for MLflow Integration
+class MLflowTrackedLLM:
+    """
+    Wrapper around CrewAI LLM that ensures all calls are tracked in MLflow.
+    This addresses the issue where CrewAI's LLM wrapper doesn't trigger MLflow autolog.
+    """
+
+    def __init__(self, llm_instance, model_name: str):
+        self.llm = llm_instance
+        self.model_name = model_name
+        self._ensure_mlflow_configured()
+
+    def _ensure_mlflow_configured(self):
+        """Ensure MLflow is configured when LLM is used"""
+        global _mlflow_configured
+        if not _mlflow_configured:
+            _configure_databricks_mlflow()
+
+    def _log_llm_call(self, method_name: str, input_data, output_data, duration: float):
+        """Manually log LLM call to MLflow if autolog didn't capture it"""
+        try:
+            import mlflow
+            import time
+
+            # Only log if we have an active MLflow session
+            if _mlflow_configured and _use_mlflow:
+                # Try to get the current run, or create one if needed
+                run = mlflow.active_run()
+                if not run:
+                    # Start a run for this LLM call
+                    mlflow.start_run(run_name=f"crewai_llm_{self.model_name}")
+                    run = mlflow.active_run()
+
+                if run:
+                    # Log the LLM call details
+                    mlflow.log_metric(f"llm_call_duration_{method_name}", duration)
+                    mlflow.log_param(f"llm_model", self.model_name)
+                    mlflow.log_param(f"llm_method", method_name)
+
+                    # Log input/output lengths for tracking
+                    if isinstance(input_data, str):
+                        mlflow.log_metric(f"input_length_{method_name}", len(input_data))
+                    if isinstance(output_data, str):
+                        mlflow.log_metric(f"output_length_{method_name}", len(output_data))
+                    elif hasattr(output_data, 'content'):
+                        mlflow.log_metric(f"output_length_{method_name}", len(str(output_data.content)))
+
+                    logger.info(f"✅ MLflow logged CrewAI LLM call: {method_name} for {self.model_name}")
+
+        except Exception as e:
+            logger.warning(f"Failed to log LLM call to MLflow: {e}")
+
+    def invoke(self, input_data, **kwargs):
+        """Tracked version of LLM invoke"""
+        import time
+        start_time = time.time()
+
+        try:
+            result = self.llm.invoke(input_data, **kwargs)
+            duration = time.time() - start_time
+            self._log_llm_call("invoke", input_data, result, duration)
+            return result
+        except Exception as e:
+            duration = time.time() - start_time
+            self._log_llm_call("invoke_error", input_data, str(e), duration)
+            raise
+
+    async def ainvoke(self, input_data, **kwargs):
+        """Tracked version of LLM ainvoke"""
+        import time
+        start_time = time.time()
+
+        try:
+            result = await self.llm.ainvoke(input_data, **kwargs)
+            duration = time.time() - start_time
+            self._log_llm_call("ainvoke", input_data, result, duration)
+            return result
+        except Exception as e:
+            duration = time.time() - start_time
+            self._log_llm_call("ainvoke_error", input_data, str(e), duration)
+            raise
+
+    def __call__(self, input_data, **kwargs):
+        """Tracked version of LLM __call__"""
+        import time
+        start_time = time.time()
+
+        try:
+            result = self.llm(input_data, **kwargs)
+            duration = time.time() - start_time
+            self._log_llm_call("call", input_data, result, duration)
+            return result
+        except Exception as e:
+            duration = time.time() - start_time
+            self._log_llm_call("call_error", input_data, str(e), duration)
+            raise
+
+    def __getattr__(self, name):
+        """Delegate all other attributes to the wrapped LLM"""
+        return getattr(self.llm, name)
 
 # Export functions for external use
 __all__ = ['LLMManager', 'DatabricksGPTOSSHandler', 'DatabricksRetryLLM']
@@ -130,6 +507,7 @@ class LLMManager:
         model: str,
         temperature: float = 0.7,
         max_tokens: int = 4000,
+        extra_headers: Optional[Dict[str, str]] = None,
     ) -> str:
         """
         Unified async completion method that routes through CrewAI's LLM class.
@@ -139,6 +517,7 @@ class LLMManager:
             model: Model identifier (e.g. 'databricks-llama-4-maverick')
             temperature: Sampling temperature (default 0.7)
             max_tokens: Maximum tokens in response (default 4000)
+            extra_headers: Optional extra HTTP headers (e.g. User-Agent for telemetry)
 
         Returns:
             str: The LLM response content string
@@ -150,6 +529,9 @@ class LLMManager:
         group_id = LLMManager._get_group_id_from_context(required=True)
         llm = await LLMManager.configure_crewai_llm(model, group_id, temperature)
         llm.max_tokens = max_tokens
+        if extra_headers:
+            # Pass extra_headers to the underlying litellm call via LLM extra_headers param
+            llm.extra_headers = extra_headers
 
         # Use sync call() in a thread to ensure custom wrappers
         # (e.g. DatabricksRetryLLM) are invoked correctly.
@@ -282,7 +664,16 @@ class LLMManager:
                 llm_params["api_key"] = api_key
             if api_base:
                 llm_params["api_base"] = api_base
+<<<<<<< HEAD
 
+=======
+            
+            # Add User-Agent header for Databricks API attribution
+            # Using extra_headers instead of user_agent param (which Databricks rejects in body)
+            from src.utils.telemetry import get_user_agent_header, KasalProduct
+            llm_params["extra_headers"] = get_user_agent_header(KasalProduct.AGENT)
+            
+>>>>>>> sifinell/feature/flow
             # Add max_output_tokens if defined in model config
             if "max_output_tokens" in model_config_dict and model_config_dict["max_output_tokens"]:
                 if is_gpt5:

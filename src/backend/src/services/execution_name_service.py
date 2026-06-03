@@ -115,11 +115,17 @@ Tasks:
             ]
             
             # Generate completion via unified LLMManager.completion()
+            # Note: Some models (like Gemini) may use reasoning_tokens internally before generating output.
+            # We set max_tokens=100 to safely accommodate both reasoning and completion tokens,
+            # ensuring we can generate a full 2-4 word name without hitting token limits.
+            # For models without reasoning tokens, we'll truncate to ensure concise names.
+            from src.utils.telemetry import get_user_agent_header, KasalProduct
             name = await LLMManager.completion(
                 messages=messages,
                 model=request.model,
                 temperature=0.7,
                 max_tokens=100,
+                extra_headers=get_user_agent_header(KasalProduct.NAME_GENERATION)
             )
 
             # Clean the name

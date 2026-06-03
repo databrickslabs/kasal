@@ -20,6 +20,7 @@ from src.schemas.databricks_vector_index import (
     IndexType
 )
 from src.utils.databricks_auth import get_auth_context
+from src.utils.telemetry import get_user_agent_header, KasalProduct
 
 logger = LoggerManager.get_instance().databricks_vector_search
 
@@ -109,7 +110,8 @@ class DatabricksVectorIndexRepository:
             # Prepare headers
             headers = {
                 "Authorization": f"Bearer {auth_token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                **get_user_agent_header(KasalProduct.VECTORSEARCH)  # Kasal_vectorsearch User-Agent
             }
             
             # Prepare the payload for direct access index
@@ -197,7 +199,8 @@ class DatabricksVectorIndexRepository:
             # Prepare headers
             headers = {
                 "Authorization": f"Bearer {auth_token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                **get_user_agent_header(KasalProduct.VECTORSEARCH)  # Kasal_vectorsearch User-Agent
             }
             
             logger.debug(f"Getting index {index_name} via REST API at {url}")
@@ -353,7 +356,8 @@ class DatabricksVectorIndexRepository:
             # Prepare headers
             headers = {
                 "Authorization": f"Bearer {auth_token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                **get_user_agent_header(KasalProduct.VECTORSEARCH)  # Kasal_vectorsearch User-Agent
             }
             
             # Add endpoint filter as query parameter
@@ -476,7 +480,8 @@ class DatabricksVectorIndexRepository:
             # Prepare headers
             headers = {
                 "Authorization": f"Bearer {auth_token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                **get_user_agent_header(KasalProduct.VECTORSEARCH)  # Kasal_vectorsearch User-Agent
             }
             
             logger.info(f"Deleting index {index_name} via REST API at {url}")
@@ -550,7 +555,8 @@ class DatabricksVectorIndexRepository:
             # Prepare headers
             headers = {
                 "Authorization": f"Bearer {auth_token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                **get_user_agent_header(KasalProduct.VECTORSEARCH)  # Kasal_vectorsearch User-Agent
             }
             
             from urllib.parse import quote
@@ -782,7 +788,8 @@ class DatabricksVectorIndexRepository:
             # Prepare headers
             headers = {
                 "Authorization": f"Bearer {auth_token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                **get_user_agent_header(KasalProduct.VECTORSEARCH)  # Kasal_vectorsearch User-Agent
             }
             
             # Log search parameters for debugging
@@ -971,7 +978,8 @@ class DatabricksVectorIndexRepository:
             # Prepare headers
             headers = {
                 "Authorization": f"Bearer {auth_token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                **get_user_agent_header(KasalProduct.VECTORSEARCH)  # Kasal_vectorsearch User-Agent
             }
             
             # Prepare the payload - ensure records is a list
@@ -1160,7 +1168,8 @@ class DatabricksVectorIndexRepository:
             # Prepare headers
             headers = {
                 "Authorization": f"Bearer {auth_token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                **get_user_agent_header(KasalProduct.VECTORSEARCH)  # Kasal_vectorsearch User-Agent
             }
             
             # Prepare the payload

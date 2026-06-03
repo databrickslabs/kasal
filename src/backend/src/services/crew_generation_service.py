@@ -552,11 +552,13 @@ class CrewGenerationService:
                 _max_tokens = 4000
                 logger.info(f"CREATE CREW: Using max_tokens={_max_tokens} for model={model}")
 
+                from src.utils.telemetry import get_user_agent_header, KasalProduct
                 content = await LLMManager.completion(
                     messages=messages,
                     model=model,
                     temperature=0.7,
                     max_tokens=_max_tokens,
+                    extra_headers=get_user_agent_header(KasalProduct.CREW_GENERATION)
                 )
 
                 logger.info(f"CREATE CREW: Extracted content from LLM response (length: {len(content)})")

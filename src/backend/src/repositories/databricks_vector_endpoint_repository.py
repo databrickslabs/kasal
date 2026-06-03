@@ -17,6 +17,7 @@ from src.schemas.databricks_vector_endpoint import (
     EndpointType
 )
 from src.utils.databricks_auth import get_auth_context
+from src.utils.telemetry import get_user_agent_header, KasalProduct
 
 logger = LoggerManager.get_instance().databricks_vector_search
 
@@ -87,7 +88,8 @@ class DatabricksVectorEndpointRepository:
             # Prepare headers
             headers = {
                 "Authorization": f"Bearer {auth_token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                **get_user_agent_header(KasalProduct.VECTORSEARCH)
             }
             
             # Prepare the payload
@@ -164,7 +166,8 @@ class DatabricksVectorEndpointRepository:
             # Prepare headers
             headers = {
                 "Authorization": f"Bearer {auth_token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                **get_user_agent_header(KasalProduct.VECTORSEARCH)
             }
             
             logger.debug(f"Getting endpoint {endpoint_name} via REST API")
@@ -238,7 +241,8 @@ class DatabricksVectorEndpointRepository:
             # Prepare headers
             headers = {
                 "Authorization": f"Bearer {auth_token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                **get_user_agent_header(KasalProduct.VECTORSEARCH)
             }
             
             logger.info("Listing all endpoints via REST API")
@@ -321,7 +325,8 @@ class DatabricksVectorEndpointRepository:
             # Prepare headers
             headers = {
                 "Authorization": f"Bearer {auth_token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                **get_user_agent_header(KasalProduct.VECTORSEARCH)
             }
             
             logger.info(f"Deleting endpoint {endpoint_name} via REST API")

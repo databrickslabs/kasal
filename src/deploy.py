@@ -398,7 +398,7 @@ starlette==0.40.0
                     ignore=custom_ignore_function(backend_excluded_dirs, backend_excluded_patterns)
                 )
                 logger.info(f"Copied backend folder (excluding: {backend_excluded_dirs})")
-                logger.warning("⚠️  MIGRATIONS EXCLUDED - You'll need to run migrations manually in the app after deployment")
+                logger.warning("MIGRATIONS EXCLUDED - You'll need to run migrations manually in the app after deployment")
             else:
                 logger.error("Backend folder not found!")
                 raise FileNotFoundError("Backend folder not found")

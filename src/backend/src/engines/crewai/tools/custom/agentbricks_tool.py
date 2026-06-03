@@ -7,6 +7,7 @@ import asyncio
 import os
 from pathlib import Path
 
+from src.utils.telemetry import get_user_agent_header, KasalProduct
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -234,6 +235,9 @@ class AgentBricksTool(BaseTool):
 
             if not headers:
                 raise Exception("No authentication headers available")
+            
+            # Add User-Agent for Databricks telemetry
+            headers.update(get_user_agent_header(KasalProduct.AGENTBRICKS))
 
             # Build endpoint URL
             url = self._make_url(workspace_url, f"/serving-endpoints/{endpoint_name}/invocations")
