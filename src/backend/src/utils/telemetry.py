@@ -65,6 +65,9 @@ class KasalProduct:
     VOLUME = "volume"
     DASHBOARD = "dashboard"
 
+    # Converters / PowerBI migration
+    POWERBI = "powerbi"
+
 
 def get_user_agent(product: str = None) -> str:
     """

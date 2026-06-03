@@ -129,9 +129,11 @@ async def _call_llm(
     base_url = workspace_url.rstrip('/')
     url = f"{base_url}/serving-endpoints/{model}/invocations"
 
+    from src.utils.telemetry import get_user_agent_header, KasalProduct
     headers = {
         'Authorization': f'Bearer {token}',
         'Content-Type': 'application/json',
+        **get_user_agent_header(KasalProduct.POWERBI),
     }
 
     payload = {
