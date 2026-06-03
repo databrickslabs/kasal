@@ -57,30 +57,10 @@ export const EditConfigurationForm: React.FC<EditConfigurationFormProps> = ({
           <Grid item xs={12} sm={6}>
             <TextField
               size="small"
-              label="Short-term Index"
-              value={editedConfig?.indexes?.short_term?.name || ''}
-              onChange={(e) => onEditChange('indexes.short_term.name', e.target.value || undefined)}
-              placeholder="catalog.schema.short_term_memory"
-              fullWidth
-            />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <TextField
-              size="small"
-              label="Long-term Index"
-              value={editedConfig?.indexes?.long_term?.name || ''}
-              onChange={(e) => onEditChange('indexes.long_term.name', e.target.value || undefined)}
-              placeholder="catalog.schema.long_term_memory"
-              fullWidth
-            />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <TextField
-              size="small"
-              label="Entity Index"
-              value={editedConfig?.indexes?.entity?.name || ''}
-              onChange={(e) => onEditChange('indexes.entity.name', e.target.value || undefined)}
-              placeholder="catalog.schema.entity_memory"
+              label="Unified Memory Index"
+              value={editedConfig?.indexes?.unified?.name || ''}
+              onChange={(e) => onEditChange('indexes.unified.name', e.target.value || undefined)}
+              placeholder="catalog.schema.crew_memory"
               fullWidth
             />
           </Grid>

@@ -728,12 +728,11 @@ class CrewPreparation:
             if not memory_backend_config and memory_enabled:
                 memory_backend_config = {
                     'backend_type': 'default',
-                    'enable_short_term': True,
-                    'enable_long_term': True,
-                    'enable_entity': True,
-                    'enable_relationship_retrieval': False,
                 }
-                logger.info("Created default memory backend configuration (ChromaDB + SQLite)")
+                logger.info(
+                    "Created default memory backend configuration "
+                    "(CrewAI unified Memory / LanceDB)"
+                )
 
             # 6. Generate crew ID and setup storage
             crew_id = memory_service.generate_crew_id()
@@ -745,34 +744,44 @@ class CrewPreparation:
                 should_disable_memory = True
                 logger.info("Found 'Disabled Configuration' - ignoring database config and using default memory")
 
-            # 8. Configure memory components
-            # Re-check memory_enabled after potential disability check
+            # 8. Configure unified cognitive memory (CrewAI 1.10+)
             memory_enabled = crew_kwargs.get('memory', True) and not should_disable_memory
-            logger.info(f"Step 8 - Configure memory components: memory_enabled={memory_enabled}, memory_backend_config={memory_backend_config is not None}")
+            logger.info(
+                "Step 8 - Configure unified memory: memory_enabled=%s, memory_backend_config=%s",
+                memory_enabled,
+                memory_backend_config is not None,
+            )
             if memory_enabled and memory_backend_config:
-                # Determine which embedder to use
                 backend_type = memory_backend_config.get('backend_type')
-                embedder_for_backends = custom_embedder if backend_type in ('databricks', 'lakebase') else crew_kwargs.get('embedder')
-                logger.info(f"Creating memory backends with backend_type={backend_type}, using_custom_embedder={embedder_for_backends is not None}")
+                embedder_for_backend = (
+                    custom_embedder if backend_type in ('databricks', 'lakebase')
+                    else crew_kwargs.get('embedder')
+                )
+                logger.info(
+                    "Creating unified storage (backend=%s, custom_embedder=%s)",
+                    backend_type,
+                    embedder_for_backend is not None,
+                )
 
-                # Create memory backends
-                memory_backends = await memory_service.create_memory_backends(
+                unified_storage = await memory_service.create_unified_storage(
                     memory_backend_config,
                     crew_id,
-                    embedder_for_backends
+                    embedder_for_backend,
                 )
-                logger.info(f"Created memory backends: {list(memory_backends.keys()) if memory_backends else 'None'}")
+                logger.info(
+                    "Unified storage: %s",
+                    type(unified_storage).__name__ if unified_storage else "crewai-default",
+                )
 
-                # Configure CrewAI memory components
                 from src.schemas.memory_backend import MemoryBackendConfig as MemBackConfig
                 memory_config = MemBackConfig(**memory_backend_config)
 
                 crew_kwargs = memory_service.configure_crew_memory_components(
                     crew_kwargs,
                     memory_config,
-                    memory_backends,
+                    unified_storage,
                     crew_id,
-                    custom_embedder
+                    custom_embedder,
                 )
 
             # 9. Add optional parameters
@@ -783,32 +792,28 @@ class CrewPreparation:
             if should_disable_memory:
                 crew_kwargs = config_builder.disable_memory_completely(crew_kwargs)
 
-            # 11. Check if custom memory backends override default
-            if 'short_term_memory' in crew_kwargs or 'long_term_memory' in crew_kwargs or 'entity_memory' in crew_kwargs:
-                if memory_backend_config and memory_backend_config.get('backend_type') == 'databricks':
-                    crew_kwargs['memory'] = False
-                    logger.info("Set memory=False to prevent CrewAI default memory initialization for Databricks backend")
-
-            # 12. Log configuration
+            # 11. Log configuration
             config_builder.log_memory_configuration(crew_kwargs, memory_backend_config)
 
-            # SUMMARY: Log which backend is ACTUALLY being used
             logger.info("=" * 80)
             logger.info("MEMORY BACKEND SUMMARY (FINAL)")
             logger.info("=" * 80)
-            actual_backend = memory_backend_config.get('backend_type', 'unknown') if memory_backend_config else 'default (ChromaDB + SQLite)'
-            logger.info(f"Backend Type: {actual_backend}")
-            logger.info(f"short_term_memory configured: {'short_term_memory' in crew_kwargs}")
-            logger.info(f"long_term_memory configured: {'long_term_memory' in crew_kwargs}")
-            logger.info(f"entity_memory configured: {'entity_memory' in crew_kwargs}")
-            logger.info(f"crew_kwargs['memory'] = {crew_kwargs.get('memory')}")
+            actual_backend = memory_backend_config.get('backend_type', 'unknown') if memory_backend_config else 'default (LanceDB)'
+            logger.info("Backend Type: %s", actual_backend)
+            resolved_memory = crew_kwargs.get('memory')
+            logger.info(
+                "Unified Memory: %s",
+                type(resolved_memory).__name__ if resolved_memory not in (True, False, None) else resolved_memory,
+            )
             if memory_backend_config and memory_backend_config.get('backend_type') == 'databricks':
                 db_config = memory_backend_config.get('databricks_config')
                 if db_config:
-                    logger.info(f"Databricks indexes:")
-                    logger.info(f"  short_term: {getattr(db_config, 'short_term_index', 'N/A')}")
-                    logger.info(f"  long_term: {getattr(db_config, 'long_term_index', 'N/A')}")
-                    logger.info(f"  entity: {getattr(db_config, 'entity_index', 'N/A')}")
+                    memory_index = (
+                        getattr(db_config, 'memory_index', None)
+                        if not isinstance(db_config, dict)
+                        else db_config.get('memory_index')
+                    )
+                    logger.info("Databricks unified memory index: %s", memory_index or 'N/A')
             logger.info("=" * 80)
 
             # 13. Handle OpenAI API key
@@ -950,8 +955,9 @@ class CrewPreparation:
             return {"error": "Crew not prepared"}
 
         try:
-            # Execute the crew
-            result = await self.crew.kickoff()
+            # Execute the crew. Use the async kickoff: CrewAI 1.14.5 raises if a
+            # synchronous ``kickoff()`` is invoked from within a running event loop.
+            result = await self.crew.kickoff_async()
 
             # Process the output
             processed_output = await process_crew_output(result)

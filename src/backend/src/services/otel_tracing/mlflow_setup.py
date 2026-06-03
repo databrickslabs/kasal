@@ -817,6 +817,7 @@ async def execute_with_mlflow_trace_async(
     flow_config: dict,
     inputs: Optional[dict] = None,
     async_logger: Optional[logging.Logger] = None,
+    trace_label: str = "flow_kickoff",
     **kickoff_kwargs: Any,
 ) -> Any:
     """Async variant: wraps an awaitable kickoff in an MLflow root trace.
@@ -827,6 +828,9 @@ async def execute_with_mlflow_trace_async(
         flow_config: Execution configuration dict (used for trace attributes).
         inputs: Optional inputs dict for trace metadata.
         async_logger: Logger routed to the subprocess log file.
+        trace_label: Prefix for the MLflow root-trace name. Defaults to
+            ``"flow_kickoff"``; crew executors pass ``"crew_kickoff"`` so crew
+            runs are not mislabeled as flows.
         **kickoff_kwargs: Forwarded to ``kickoff_coro_fn``.
 
     Returns:
@@ -850,7 +854,7 @@ async def execute_with_mlflow_trace_async(
         return await kickoff_coro_fn(**kickoff_kwargs)
 
     run_name = flow_config.get("run_name") or "Unnamed"
-    trace_name = f"flow_kickoff:{run_name}"
+    trace_name = f"{trace_label}:{run_name}"
     trace_inputs = {**(inputs or {}), "run_name": run_name}
 
     with start_root_trace(trace_name, trace_inputs) as root_span:

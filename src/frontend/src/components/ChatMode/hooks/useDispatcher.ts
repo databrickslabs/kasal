@@ -1,0 +1,380 @@
+import { useCallback, useRef } from 'react';
+import { dispatch } from '../api/dispatcher';
+import {
+  DispatchResult,
+  GeneratedCrew,
+  StreamingGenerationResult,
+  CatalogListResult,
+  CatalogLoadResult,
+  FlowListResult,
+  FlowLoadResult,
+  ExecuteCrewResult,
+  ExecuteFlowResult,
+} from '../types/dispatcher';
+import { ChatMessage } from '../types/chat';
+import { generateId } from '../utils/markdown';
+import { GenerationCompleteData } from './useGenerationStream';
+
+export type PlanData = NonNullable<CatalogLoadResult['plan']>;
+export type FlowData = NonNullable<FlowLoadResult['flow']>;
+
+interface UseDispatcherOptions {
+  addMessage: (
+    role: ChatMessage['role'],
+    content: string,
+    extra?: Partial<ChatMessage>
+  ) => string;
+  addMessageToTargetSession: (
+    targetSessionId: string,
+    role: ChatMessage['role'],
+    content: string,
+    extra?: Partial<ChatMessage>
+  ) => string;
+  updateMessage: (id: string, updates: Partial<ChatMessage>) => void;
+  updateMessageInTargetSession: (
+    targetSessionId: string,
+    id: string,
+    updates: Partial<ChatMessage>,
+  ) => void;
+  onStartGenerationStream: (generationId: string, sessionId: string) => void;
+  onStartExecutionStream: (jobId: string, sessionId?: string) => void;
+  onExecuteCrew?: (plan: PlanData) => void;
+  onExecuteFlow?: (flow: FlowData) => void;
+  onExecuteGenerated?: (data: GenerationCompleteData, spaceId?: string) => void;
+  getCurrentSessionId: () => string | null;
+}
+
+function getAssistantResponse(result: DispatchResult): string {
+  const { dispatcher, generation_result } = result;
+
+  if (dispatcher.intent === 'unknown' || dispatcher.intent === 'conversation') {
+    if (generation_result && typeof generation_result === 'object' && 'message' in (generation_result as Record<string, unknown>)) {
+      return (generation_result as Record<string, unknown>).message as string;
+    }
+    return "I'm not sure what you want to do. Try `/help` for available commands.";
+  }
+
+  if (!generation_result) {
+    return 'I understood your request but could not generate a result. Please try again.';
+  }
+
+  switch (dispatcher.intent) {
+    case 'generate_agent':
+    case 'generate_task':
+    case 'generate_crew':
+    case 'generate_plan': {
+      const genResult = generation_result as
+        | StreamingGenerationResult
+        | GeneratedCrew;
+      if (
+        genResult &&
+        typeof genResult === 'object' &&
+        'type' in genResult &&
+        genResult.type === 'streaming'
+      ) {
+        return 'Generating crew progressively...';
+      }
+      // Non-streaming result — use the robust converter to detect shape
+      const genData = crewToGenerationData(generation_result);
+      if (genData.agents.length > 0 || genData.tasks.length > 0) {
+        let response = 'Crew generation complete!\n\n';
+        genData.agents.forEach((agent, i) => {
+          const name = (agent.name as string) || (agent.role as string) || `Agent ${i + 1}`;
+          const role = (agent.role as string) || '';
+          response += `${i + 1}. **${name}**${role && role !== name ? ` (${role})` : ''}\n`;
+        });
+        genData.tasks.forEach((task, i) => {
+          const name = (task.name as string) || `Task ${i + 1}`;
+          const desc = (task.description as string) || '';
+          response += `${genData.agents.length + i + 1}. Task: **${name}**${desc ? `: ${desc.slice(0, 80)}` : ''}\n`;
+        });
+        return response;
+      }
+      return 'Crew generation complete!';
+    }
+    case 'catalog_list': {
+      const listResult = generation_result as CatalogListResult;
+      return listResult.message;
+    }
+    case 'catalog_load': {
+      const genResult = generation_result as Record<string, unknown>;
+      if (
+        genResult.type === 'catalog_list' &&
+        Array.isArray(genResult.plans)
+      ) {
+        return (genResult.message as string) || 'Multiple matches found.';
+      }
+      return (genResult.message as string) || 'Plan loaded.';
+    }
+    case 'flow_list': {
+      const flowListResult = generation_result as FlowListResult;
+      return flowListResult.message;
+    }
+    case 'flow_load': {
+      const genResult = generation_result as Record<string, unknown>;
+      if (genResult.type === 'flow_list' && Array.isArray(genResult.flows)) {
+        return (genResult.message as string) || 'Multiple flows found.';
+      }
+      return (genResult.message as string) || 'Flow loaded.';
+    }
+    case 'execute_crew':
+    case 'execute_flow':
+    case 'catalog_save':
+    case 'catalog_schedule':
+    case 'catalog_help':
+    case 'catalog_delete':
+    case 'flow_delete':
+    case 'flow_save':
+    case 'configure_crew': {
+      const msg = (generation_result as Record<string, unknown>).message;
+      if (typeof msg === 'string') return msg;
+      if (msg && typeof msg === 'object') return JSON.stringify(msg);
+      return 'Your request has been processed.';
+    }
+    default:
+      return 'Your request has been processed.';
+  }
+}
+
+function getResultType(
+  result: DispatchResult
+): string | undefined {
+  const { dispatcher, generation_result } = result;
+  if (!generation_result) return undefined;
+
+  switch (dispatcher.intent) {
+    case 'generate_agent':
+    case 'generate_task':
+    case 'generate_crew':
+    case 'generate_plan': {
+      const genResult = generation_result as Record<string, unknown>;
+      if (genResult.type === 'streaming') return 'streaming';
+      // Non-streaming crew → show "Run crew" button
+      return 'generation_complete';
+    }
+    case 'catalog_list':
+      return 'catalog_list';
+    case 'catalog_load': {
+      const genResult = generation_result as Record<string, unknown>;
+      if (genResult.type === 'catalog_list') return 'catalog_list';
+      return 'catalog_load';
+    }
+    case 'flow_list':
+      return 'flow_list';
+    case 'flow_load': {
+      const genResult = generation_result as Record<string, unknown>;
+      if (genResult.type === 'flow_list') return 'flow_list';
+      return 'flow_load';
+    }
+    case 'execute_crew':
+      return 'execute_crew';
+    case 'execute_flow':
+      return 'execute_flow';
+    case 'catalog_help':
+      return 'help';
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Convert a non-streaming generation result into GenerationCompleteData.
+ * Handles multiple shapes: full crew, single agent, single task, or wrapped.
+ */
+function crewToGenerationData(result: unknown): GenerationCompleteData {
+  if (!result || typeof result !== 'object') return { agents: [], tasks: [] };
+  const obj = result as Record<string, unknown>;
+
+  // Full crew result with arrays
+  if (Array.isArray(obj.agents) || Array.isArray(obj.tasks)) {
+    return {
+      agents: (Array.isArray(obj.agents) ? obj.agents : []).map((a: unknown) => ({ ...(a as Record<string, unknown>) })),
+      tasks: (Array.isArray(obj.tasks) ? obj.tasks : []).map((t: unknown) => ({ ...(t as Record<string, unknown>) })),
+    };
+  }
+
+  // Nested under common wrapper keys (e.g. { result: { agents, tasks } })
+  for (const key of ['result', 'data', 'crew', 'generation_result']) {
+    if (obj[key] && typeof obj[key] === 'object' && !Array.isArray(obj[key])) {
+      const nested = crewToGenerationData(obj[key]);
+      if (nested.agents.length > 0 || nested.tasks.length > 0) return nested;
+    }
+  }
+
+  // Single agent result (has role + goal + backstory)
+  const isAgent = typeof obj.role === 'string' && typeof obj.goal === 'string';
+  // Single task result (has description + expected_output)
+  const isTask = typeof obj.description === 'string' && typeof obj.expected_output === 'string';
+
+  // Could also have a nested single agent/task under an "agent" or "task" key
+  const wrappedAgent = obj.agent && typeof obj.agent === 'object' ? obj.agent as Record<string, unknown> : null;
+  const wrappedTask = obj.task && typeof obj.task === 'object' ? obj.task as Record<string, unknown> : null;
+
+  const agents: Record<string, unknown>[] = [];
+  const tasks: Record<string, unknown>[] = [];
+
+  if (isAgent) agents.push({ ...obj });
+  if (wrappedAgent) agents.push({ ...wrappedAgent });
+  if (isTask) tasks.push({ ...obj });
+  if (wrappedTask) tasks.push({ ...wrappedTask });
+
+  return { agents, tasks };
+}
+
+export function useDispatcher(options: UseDispatcherOptions) {
+  const isDispatchingRef = useRef(false);
+  // Store last generated crew for "ec"/"execute crew" command
+  const lastGeneratedRef = useRef<GenerationCompleteData | null>(null);
+
+  const sendMessage = useCallback(
+    async (message: string, model?: string) => {
+      if (isDispatchingRef.current) return;
+      isDispatchingRef.current = true;
+
+      // Capture the session ID NOW, before any async work.
+      // This ensures all operations target the correct session even if the
+      // user switches sessions while the dispatch API call is in progress.
+      const originSessionId = options.getCurrentSessionId();
+
+      // Intercept "ec" / "execute crew" locally
+      const lower = message.toLowerCase().trim();
+      if (
+        (lower === 'ec' || lower === 'execute crew' || lower === 'run crew' || lower === 'start crew') &&
+        lastGeneratedRef.current &&
+        options.onExecuteGenerated
+      ) {
+        options.addMessage('user', message);
+        options.onExecuteGenerated(lastGeneratedRef.current);
+        isDispatchingRef.current = false;
+        return;
+      }
+
+      options.addMessage('user', message);
+
+      const assistantId = generateId();
+      options.addMessage('assistant', 'Thinking...', {
+        id: assistantId,
+        isStreaming: true,
+      });
+
+      // Augment the prompt to steer intent detection toward generate_crew
+      // when the message looks like a generation request but doesn't already
+      // contain crew/plan keywords.  The original message is shown to the user;
+      // only the dispatch payload is modified.
+      let dispatchMessage = message;
+      const lowerMsg = message.toLowerCase();
+      const isSlashCommand = lowerMsg.startsWith('/');
+      const alreadyHasCrewHint = /\b(crew|plan|create crew|create plan|generate crew)\b/i.test(message);
+      if (!isSlashCommand && !alreadyHasCrewHint) {
+        dispatchMessage = `create a crew plan with agents and tasks: ${message}`;
+      }
+
+      try {
+        const result = await dispatch(dispatchMessage, model);
+
+        const content = getAssistantResponse(result);
+        const resultType = getResultType(result);
+
+        console.log('[dispatcher] intent:', result.dispatcher.intent, 'resultType:', resultType,
+          'generation_result keys:', result.generation_result ? Object.keys(result.generation_result as Record<string, unknown>) : 'null',
+          'generation_result sample:', JSON.stringify(result.generation_result, null, 2)?.slice(0, 800));
+
+        // For non-streaming crew results, convert to GenerationCompleteData format
+        let resultData = result.generation_result;
+        if (resultType === 'generation_complete' && result.generation_result) {
+          const genData = crewToGenerationData(result.generation_result);
+          resultData = genData;
+          console.log('[dispatcher] crewToGenerationData — agents:', genData.agents.length, 'tasks:', genData.tasks.length);
+          // Store for "ec" command
+          if (genData.agents.length > 0 || genData.tasks.length > 0) {
+            lastGeneratedRef.current = genData;
+          }
+        }
+
+        // Use session-targeted update so the message goes to the correct
+        // session even if the user switched sessions during the API call.
+        if (originSessionId) {
+          options.updateMessageInTargetSession(originSessionId, assistantId, {
+            content,
+            isStreaming: false,
+            intent: result.dispatcher.intent,
+            resultType,
+            resultData,
+          });
+        } else {
+          options.updateMessage(assistantId, {
+            content,
+            isStreaming: false,
+            intent: result.dispatcher.intent,
+            resultType,
+            resultData,
+          });
+        }
+
+        if (result.generation_result) {
+          const intent = result.dispatcher.intent;
+
+          if (
+            intent === 'generate_crew' ||
+            intent === 'generate_plan' ||
+            intent === 'generate_agent' ||
+            intent === 'generate_task'
+          ) {
+            const genResult = result.generation_result as Record<string, unknown>;
+            if (genResult.type === 'streaming') {
+              const streamResult =
+                genResult as unknown as StreamingGenerationResult;
+              options.onStartGenerationStream(
+                streamResult.generation_id,
+                originSessionId || '',
+              );
+            }
+          }
+
+          if (intent === 'execute_crew') {
+            const execResult = result.generation_result as ExecuteCrewResult;
+            if (execResult.plan && options.onExecuteCrew) {
+              const plan = execResult.plan;
+              setTimeout(() => {
+                options.onExecuteCrew!(plan);
+              }, 300);
+            }
+          }
+
+          if (intent === 'execute_flow') {
+            const execResult = result.generation_result as ExecuteFlowResult;
+            if (execResult.flow && options.onExecuteFlow) {
+              const flow = execResult.flow;
+              setTimeout(() => {
+                options.onExecuteFlow!(flow);
+              }, 300);
+            }
+          }
+        }
+      } catch (error) {
+        const errMsg =
+          error instanceof Error ? error.message : 'Unknown error';
+        if (originSessionId) {
+          options.updateMessageInTargetSession(originSessionId, assistantId, {
+            content: `Failed to process your request: ${errMsg}`,
+            isStreaming: false,
+          });
+        } else {
+          options.updateMessage(assistantId, {
+            content: `Failed to process your request: ${errMsg}`,
+            isStreaming: false,
+          });
+        }
+      } finally {
+        isDispatchingRef.current = false;
+      }
+    },
+    [options]
+  );
+
+  const setLastGenerated = useCallback((data: GenerationCompleteData) => {
+    lastGeneratedRef.current = data;
+  }, []);
+
+  return { sendMessage, isDispatching: isDispatchingRef, setLastGenerated };
+}

@@ -53,13 +53,9 @@ export const ManualConfigurationForm: React.FC<ManualConfigurationFormProps> = (
       !manualConfig.workspace_url ||
       !manualConfig.endpoint_name ||
       !manualConfig.document_endpoint_name ||
-      !manualConfig.short_term_index ||
-      !manualConfig.long_term_index ||
-      !manualConfig.entity_index ||
+      !manualConfig.memory_index ||
       !manualConfig.document_index ||
-      isInvalidIndex(manualConfig.short_term_index) ||
-      isInvalidIndex(manualConfig.long_term_index) ||
-      isInvalidIndex(manualConfig.entity_index) ||
+      isInvalidIndex(manualConfig.memory_index) ||
       isInvalidIndex(manualConfig.document_index)
     );
   };
@@ -133,53 +129,25 @@ export const ManualConfigurationForm: React.FC<ManualConfigurationFormProps> = (
         </FormControl>
 
         <Typography variant="subtitle2" sx={{ mt: 2 }}>
-          Memory Indexes (catalog.schema.index_name)
+          Memory Index (catalog.schema.index_name)
+        </Typography>
+
+        <Typography variant="caption" color="text.secondary" sx={{ mb: 1 }}>
+          CrewAI&apos;s unified cognitive memory stores every record in a single index.
         </Typography>
 
         <TextField
           fullWidth
-          label="Short-term Memory Index"
-          value={manualConfig.short_term_index}
-          onChange={handleChange('short_term_index')}
-          placeholder="ml.agents.short_term_memory"
+          label="Unified Memory Index"
+          value={manualConfig.memory_index}
+          onChange={handleChange('memory_index')}
+          placeholder="ml.agents.crew_memory"
           required
-          error={isInvalidIndex(manualConfig.short_term_index)}
+          error={isInvalidIndex(manualConfig.memory_index)}
           helperText={
-            isInvalidIndex(manualConfig.short_term_index)
+            isInvalidIndex(manualConfig.memory_index)
               ? 'Invalid format. Use: catalog.schema.index_name'
-              : ''
-          }
-          disabled={isSettingUp}
-        />
-
-        <TextField
-          fullWidth
-          label="Long-term Memory Index"
-          value={manualConfig.long_term_index}
-          onChange={handleChange('long_term_index')}
-          placeholder="ml.agents.long_term_memory"
-          required
-          error={isInvalidIndex(manualConfig.long_term_index)}
-          helperText={
-            isInvalidIndex(manualConfig.long_term_index)
-              ? 'Invalid format. Use: catalog.schema.index_name'
-              : ''
-          }
-          disabled={isSettingUp}
-        />
-
-        <TextField
-          fullWidth
-          label="Entity Memory Index"
-          value={manualConfig.entity_index}
-          onChange={handleChange('entity_index')}
-          placeholder="ml.agents.entity_memory"
-          required
-          error={isInvalidIndex(manualConfig.entity_index)}
-          helperText={
-            isInvalidIndex(manualConfig.entity_index)
-              ? 'Invalid format. Use: catalog.schema.index_name'
-              : ''
+              : 'Must use UNIFIED_SCHEMA (one index replaces short-term/long-term/entity).'
           }
           disabled={isSettingUp}
         />

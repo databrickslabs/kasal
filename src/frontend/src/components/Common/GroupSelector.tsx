@@ -122,12 +122,13 @@ const GroupSelector: React.FC = () => {
     if (!currentGroup) return null;
 
     if (currentGroup.id.startsWith('user_')) {
-      // Personal workspace icon
+      // Personal workspace icon — kept muted/gray to match the mode-switcher
+      // grid icon sitting just to its left.
       return (
         <HomeIcon
           fontSize="small"
           sx={{
-            color: 'primary.main'
+            color: 'text.secondary'
           }}
         />
       );

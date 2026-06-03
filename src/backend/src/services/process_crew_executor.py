@@ -151,6 +151,16 @@ def run_crew_in_process(
         os.environ["DATABASE_TYPE"] = settings.DATABASE_TYPE or "postgres"
         print(f"[SUBPROCESS] Set DATABASE_TYPE to: {os.environ['DATABASE_TYPE']}")
 
+    # Install CrewAI monkey-patches in this subprocess too — the parent
+    # install doesn't cross the 'spawn' boundary. Must run before any
+    # CrewAI memory event is emitted so the patched __init__ is visible.
+    try:
+        from src.core.crewai_patches import install_all_patches
+
+        install_all_patches()
+    except Exception as _patch_exc:  # pragma: no cover - defensive
+        print(f"[SUBPROCESS] Failed to install CrewAI patches: {_patch_exc}", file=sys.stderr)
+
     # Configure logging to only go to file, not stdout
     # Early validation of parameters to catch type errors
     import json
@@ -1284,22 +1294,26 @@ def run_crew_in_process(
                 )
 
                 from src.services.otel_tracing.mlflow_setup import (
-                    execute_with_mlflow_trace,
+                    execute_with_mlflow_trace_async,
                     post_execution_mlflow_cleanup,
                 )
 
+                # CrewAI 1.14.5 refuses a synchronous ``crew.kickoff()`` when a
+                # running event loop is detected (the agent executor returns a
+                # coroutine and raises). We are already inside this subprocess's
+                # asyncio loop (prepare_and_run), so use the async kickoff.
+                async def kickoff_fn():
+                    if inputs:
+                        return await crew.kickoff_async(inputs=inputs)
+                    return await crew.kickoff_async()
 
-                kickoff_fn = (
-                    (lambda: crew.kickoff(inputs=inputs))
-                    if inputs
-                    else crew.kickoff
-                )
-                result = execute_with_mlflow_trace(
-                    kickoff_fn=kickoff_fn,
+                result = await execute_with_mlflow_trace_async(
+                    kickoff_coro_fn=kickoff_fn,
                     mlflow_result=mlflow_result,
-                    crew_config=crew_config,
+                    flow_config=crew_config,
                     inputs=inputs,
                     async_logger=async_logger,
+                    trace_label="crew_kickoff",
                 )
                 async_logger.info(f"✅ Crew execution completed successfully")
 
@@ -1378,13 +1392,20 @@ def run_crew_in_process(
                     pass
 
                 # Dispose all SQLAlchemy async engines while the loop is still alive
-                # to avoid MissingGreenlet/loop-mismatch errors during interpreter shutdown
+                # to avoid MissingGreenlet/loop-mismatch errors during interpreter shutdown.
+                # MUST be time-bounded: disposing the SQLite StaticPool engine can hang
+                # (not raise) when its single async connection was touched across the
+                # OTel exporter's per-write event loops — that hang would block the
+                # subprocess from returning, leaving the job stuck "running" even though
+                # the crew already completed.
                 try:
                     from src.db.session import dispose_engines
 
-                    loop.run_until_complete(dispose_engines())
-                except Exception:
-                    # Best-effort cleanup; continue regardless
+                    loop.run_until_complete(
+                        asyncio.wait_for(dispose_engines(), timeout=10.0)
+                    )
+                except (asyncio.TimeoutError, Exception):
+                    # Best-effort cleanup; never let teardown block job finalization.
                     pass
 
                 # Give async tasks time to complete before closing loop

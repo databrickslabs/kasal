@@ -15,13 +15,12 @@ const mockTestDatabricksConnection = vi.fn();
 const mockLoadAvailableIndexes = vi.fn();
 const mockValidateConfig = vi.fn().mockResolvedValue(true);
 const mockClearError = vi.fn();
+const mockUpdateCognitiveConfig = vi.fn();
 
 const defaultStoreState = {
   config: {
     backend_type: 'default' as const,
-    enable_short_term: true,
-    enable_long_term: true,
-    enable_entity: true,
+    cognitive_config: {} as Record<string, number>,
   },
   error: null as string | null,
   connectionTestResult: null,
@@ -31,6 +30,7 @@ const defaultStoreState = {
   validationErrors: [] as string[],
   updateConfig: mockUpdateConfig,
   updateDatabricksConfig: mockUpdateDatabricksConfig,
+  updateCognitiveConfig: mockUpdateCognitiveConfig,
   testDatabricksConnection: mockTestDatabricksConnection,
   loadAvailableIndexes: mockLoadAvailableIndexes,
   validateConfig: mockValidateConfig,
@@ -39,11 +39,16 @@ const defaultStoreState = {
 
 let storeOverrides: Partial<typeof defaultStoreState> = {};
 
+const getStoreState = () => ({ ...defaultStoreState, ...storeOverrides });
+
 vi.mock('../../store/memoryBackend', () => ({
-  useMemoryBackendStore: () => ({
-    ...defaultStoreState,
-    ...storeOverrides,
-  }),
+  // Honor the selector form `useMemoryBackendStore((state) => ...)` as well as
+  // the bare `useMemoryBackendStore()` call used by the component.
+  useMemoryBackendStore: (selector?: (state: ReturnType<typeof getStoreState>) => unknown) => {
+    const state = getStoreState();
+    return selector ? selector(state) : state;
+  },
+  useCognitiveMemoryConfig: () => getStoreState().config.cognitive_config,
 }));
 
 const mockSetDefaultConfig = vi.fn();
@@ -204,10 +209,11 @@ describe('MemoryBackendConfig', () => {
         backend_type: MemoryBackendType.DATABRICKS,
         databricks_config: {
           endpoint_name: '',
-          short_term_index: '',
+          memory_index: '',
           embedding_dimension: 1024,
           auth_type: 'default',
         },
+        lakebase_config: undefined,
       });
     });
 
@@ -215,16 +221,13 @@ describe('MemoryBackendConfig', () => {
       storeOverrides = {
         config: {
           backend_type: 'databricks' as MemoryBackendType,
-          enable_short_term: true,
-          enable_long_term: true,
-          enable_entity: true,
           databricks_config: {
             endpoint_name: 'my-endpoint',
-            short_term_index: 'my-index',
+            memory_index: 'my-index',
             embedding_dimension: 1024,
             auth_type: 'default' as const,
           },
-        },
+        } as typeof defaultStoreState['config'],
       };
       renderComponent();
 
@@ -237,6 +240,7 @@ describe('MemoryBackendConfig', () => {
       expect(mockUpdateConfig).toHaveBeenCalledWith({
         backend_type: MemoryBackendType.DEFAULT,
         databricks_config: undefined,
+        lakebase_config: undefined,
       });
     });
 
@@ -344,52 +348,19 @@ describe('MemoryBackendConfig', () => {
   // -----------------------------------------------------------------------
   // 7. Memory type toggle switches
   // -----------------------------------------------------------------------
-  describe('memory type toggle switches', () => {
-    it('renders Short-term Memory switch', () => {
+  // CrewAI 1.10+ unified cognitive memory replaces the legacy short/long/entity
+  // toggle switches with a single Cognitive Memory Tuning panel.
+  describe('cognitive memory panel', () => {
+    it('renders the Cognitive Memory Tuning panel', () => {
       renderComponent();
-      expect(screen.getByLabelText('Short-term Memory')).toBeInTheDocument();
+      expect(screen.getByText('Cognitive Memory Tuning')).toBeInTheDocument();
     });
 
-    it('renders Long-term Memory switch', () => {
+    it('does not render the legacy per-tier memory switches', () => {
       renderComponent();
-      expect(screen.getByLabelText('Long-term Memory')).toBeInTheDocument();
-    });
-
-    it('renders Entity Memory switch', () => {
-      renderComponent();
-      expect(screen.getByLabelText('Entity Memory')).toBeInTheDocument();
-    });
-
-    it('all switches are checked by default', () => {
-      renderComponent();
-      const shortTerm = screen.getByLabelText('Short-term Memory') as HTMLInputElement;
-      const longTerm = screen.getByLabelText('Long-term Memory') as HTMLInputElement;
-      const entity = screen.getByLabelText('Entity Memory') as HTMLInputElement;
-
-      expect(shortTerm.checked).toBe(true);
-      expect(longTerm.checked).toBe(true);
-      expect(entity.checked).toBe(true);
-    });
-
-    it('calls updateConfig when Short-term Memory switch is toggled off', () => {
-      renderComponent();
-      const shortTerm = screen.getByLabelText('Short-term Memory');
-      fireEvent.click(shortTerm);
-      expect(mockUpdateConfig).toHaveBeenCalledWith({ enable_short_term: false });
-    });
-
-    it('calls updateConfig when Long-term Memory switch is toggled off', () => {
-      renderComponent();
-      const longTerm = screen.getByLabelText('Long-term Memory');
-      fireEvent.click(longTerm);
-      expect(mockUpdateConfig).toHaveBeenCalledWith({ enable_long_term: false });
-    });
-
-    it('calls updateConfig when Entity Memory switch is toggled off', () => {
-      renderComponent();
-      const entity = screen.getByLabelText('Entity Memory');
-      fireEvent.click(entity);
-      expect(mockUpdateConfig).toHaveBeenCalledWith({ enable_entity: false });
+      expect(screen.queryByLabelText('Short-term Memory')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Long-term Memory')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Entity Memory')).not.toBeInTheDocument();
     });
   });
 

@@ -140,15 +140,18 @@ class DatabricksIndexService:
             response = await repo.create_index(index_request, user_token)
             
             if response.success:
-                # Update the config to include the new index
-                if index_type == "short_term":
-                    config.short_term_index = index_name
-                elif index_type == "long_term":
-                    config.long_term_index = index_name
-                elif index_type == "entity":
-                    config.entity_index = index_name
+                # CrewAI 1.10+ uses a single unified index. "memory" is the
+                # one legitimate index type; "document" is for the separate
+                # knowledge-search feature.
+                if index_type == "memory":
+                    config.memory_index = index_name
                 elif index_type == "document":
                     config.document_index = index_name
+                else:
+                    memory_logger.warning(
+                        "Unknown index_type '%s' — expected 'memory' or 'document'",
+                        index_type,
+                    )
                 
                 memory_logger.info(f"Successfully created {index_type} index: {index_name}")
                 

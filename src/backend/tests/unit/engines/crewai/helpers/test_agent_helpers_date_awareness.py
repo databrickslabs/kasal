@@ -711,7 +711,9 @@ class TestCreateAgentDateAwarenessWithOtherParams:
                 # Verify all additional params are present
                 assert call_kwargs["max_iter"] == 5
                 assert call_kwargs["max_rpm"] == 15
-                assert call_kwargs["memory"] is True
+                # 'memory' is intentionally NOT passed to Agent (configured at the
+                # crew level to avoid a per-agent OpenAI-default Memory overriding it).
+                assert "memory" not in call_kwargs
                 assert call_kwargs["code_execution_mode"] == "safe"
                 assert call_kwargs["max_context_window_size"] == 4096
                 assert call_kwargs["max_tokens"] == 2048

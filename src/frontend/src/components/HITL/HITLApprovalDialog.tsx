@@ -22,9 +22,9 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  Paper,
   Divider,
   IconButton,
+  Paper,
 } from '@mui/material';
 import {
   CheckCircle as ApproveIcon,
@@ -34,6 +34,7 @@ import {
   Description as DescriptionIcon,
   Refresh as RefreshIcon,
   EditNote as EditNoteIcon,
+  Fullscreen as FullscreenIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -46,6 +47,7 @@ import { GenieSpaceConfigSelector, GenieSpaceConfig } from '../Common/GenieSpace
 import { runService } from '../../api/ExecutionHistoryService';
 import SaveIcon from '@mui/icons-material/Save';
 import DownloadIcon from '@mui/icons-material/Download';
+import { CrewOutputRenderer } from './CrewOutputRenderer';
 
 interface HITLApprovalDialogProps {
   /** Whether the dialog is open */
@@ -75,6 +77,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
     HITLRejectionAction.REJECT
   );
   const [actionLoading, setActionLoading] = useState(false);
+  const [outputFullScreen, setOutputFullScreen] = useState(false);
 
   // UCMV edit state
   const [editedUCMV, setEditedUCMV] = useState<UCMVResult | null>(null);
@@ -130,6 +133,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
 
   // Handle approve action
   const handleApprove = async () => {
+    /* v8 ignore next -- defensive: Approve is only shown when approval exists */
     if (!approval) return;
 
     setActionLoading(true);
@@ -161,6 +165,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
 
   // Handle reject action
   const handleReject = async () => {
+    /* v8 ignore next -- defensive: Confirm Rejection is disabled until both exist */
     if (!approval || !rejectionReason) return;
 
     setActionLoading(true);
@@ -270,6 +275,9 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
       );
     }
 
+    /* v8 ignore start -- defensive only: when there is no pending approval,
+       fetchApproval also sets `error`, so the `error && !approval` branch above
+       always renders first; this fallback is therefore unreachable in practice. */
     if (!approval) {
       return (
         <Alert severity="info">
@@ -277,6 +285,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
         </Alert>
       );
     }
+    /* v8 ignore stop */
 
     // Show approval form based on action type
     if (actionType === 'approve') {
@@ -381,7 +390,12 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
         {/* Previous Output */}
         {approval.previous_crew_output && (
           <Box mb={2}>
-            <Box display="flex" alignItems="center" justifyContent="space-between" mb={0.5}>
+            <Box
+              display="flex"
+              alignItems="center"
+              justifyContent="space-between"
+              gap={0.5}
+            >
               <Typography
                 variant="body2"
                 fontWeight="medium"
@@ -392,39 +406,49 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
                 <DescriptionIcon fontSize="small" />
                 Previous Crew Output:
               </Typography>
-              <IconButton
-                size="small"
-                title="Download output"
-                onClick={() => {
-                  const raw = approval.previous_crew_output ?? '';
-                  const triggerDownload = (content: string, name: string, mime = 'application/octet-stream') => {
-                    const blob = new Blob([content], { type: mime });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url; a.download = name; a.click();
-                    URL.revokeObjectURL(url);
-                  };
-                  try {
-                    const parsed = JSON.parse(raw);
-                    if (parsed && typeof parsed === 'object' && 'yaml' in parsed) {
-                      // UCMV/Validator output — download each view as individual .yml
-                      const yamlDict = parsed.yaml as Record<string, string>;
-                      const entries = Object.entries(yamlDict);
-                      entries.forEach(([key, yamlContent], i) => {
-                        setTimeout(() => {
-                          triggerDownload(yamlContent, `${key}.yml`, 'text/yaml');
-                        }, i * 100);
-                      });
-                    } else {
-                      triggerDownload(JSON.stringify(parsed, null, 2), 'step_output.json', 'application/json');
+              <Box display="flex" alignItems="center" gap={0.5}>
+                <IconButton
+                  size="small"
+                  title="Download output"
+                  onClick={() => {
+                    const raw = approval.previous_crew_output ?? '';
+                    const triggerDownload = (content: string, name: string, mime = 'application/octet-stream') => {
+                      const blob = new Blob([content], { type: mime });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url; a.download = name; a.click();
+                      URL.revokeObjectURL(url);
+                    };
+                    try {
+                      const parsed = JSON.parse(raw);
+                      if (parsed && typeof parsed === 'object' && 'yaml' in parsed) {
+                        // UCMV/Validator output — download each view as individual .yml
+                        const yamlDict = parsed.yaml as Record<string, string>;
+                        const entries = Object.entries(yamlDict);
+                        entries.forEach(([key, yamlContent], i) => {
+                          setTimeout(() => {
+                            triggerDownload(yamlContent, `${key}.yml`, 'text/yaml');
+                          }, i * 100);
+                        });
+                      } else {
+                        triggerDownload(JSON.stringify(parsed, null, 2), 'step_output.json', 'application/json');
+                      }
+                    } catch {
+                      triggerDownload(raw, 'step_output.txt', 'text/plain');
                     }
-                  } catch {
-                    triggerDownload(raw, 'step_output.txt', 'text/plain');
-                  }
-                }}
-              >
-                <DownloadIcon fontSize="small" />
-              </IconButton>
+                  }}
+                >
+                  <DownloadIcon fontSize="small" />
+                </IconButton>
+                <IconButton
+                  size="small"
+                  onClick={() => setOutputFullScreen(true)}
+                  aria-label="View output full screen"
+                  title="View full screen"
+                >
+                  <FullscreenIcon fontSize="small" />
+                </IconButton>
+              </Box>
             </Box>
             {(() => {
               // Try to detect UCMV result shape for structured rendering
@@ -458,24 +482,43 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
                 }
               } catch { /* not JSON, fall through to raw display */ }
               return (
-                <Paper
-                  variant="outlined"
-                  sx={{
-                    p: 1.5,
-                    maxHeight: 200,
-                    overflow: 'auto',
-                    bgcolor: 'background.default',
-                  }}
-                >
-                  <Typography
-                    variant="body2"
-                    sx={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: '0.85rem' }}
-                  >
-                    {approval.previous_crew_output}
-                  </Typography>
-                </Paper>
+                <CrewOutputRenderer
+                  content={approval.previous_crew_output}
+                  maxHeight={320}
+                />
               );
             })()}
+
+            {/* Full-screen view of the crew output */}
+            <Dialog
+              open={outputFullScreen}
+              onClose={() => setOutputFullScreen(false)}
+              fullScreen
+            >
+              <DialogTitle
+                sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+              >
+                <Box display="flex" alignItems="center" gap={0.5}>
+                  <DescriptionIcon fontSize="small" />
+                  Previous Crew Output
+                </Box>
+                <IconButton
+                  onClick={() => setOutputFullScreen(false)}
+                  aria-label="Close full screen"
+                >
+                  <CloseIcon />
+                </IconButton>
+              </DialogTitle>
+              <DialogContent dividers>
+                <CrewOutputRenderer
+                  content={approval.previous_crew_output}
+                  maxHeight="calc(100vh - 160px)"
+                />
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setOutputFullScreen(false)}>Close</Button>
+              </DialogActions>
+            </Dialog>
           </Box>
         )}
 

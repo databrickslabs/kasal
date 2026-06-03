@@ -264,6 +264,22 @@ describe('MemoryBackendService', () => {
 
       expect(result).toBeNull();
     });
+
+    it('should return null when no configs exist', async () => {
+      (apiClient.get as Mock).mockResolvedValue({ data: [] });
+
+      const result = await MemoryBackendService.getConfig();
+
+      expect(result).toBeNull();
+    });
+
+    it('should return null when configs is null', async () => {
+      (apiClient.get as Mock).mockResolvedValue({ data: null });
+
+      const result = await MemoryBackendService.getConfig();
+
+      expect(result).toBeNull();
+    });
   });
 
   describe('getMemoryStats', () => {
@@ -620,10 +636,10 @@ describe('MemoryBackendService', () => {
       };
       (apiClient.get as Mock).mockResolvedValue({ data: mockResponse });
 
-      const result = await MemoryBackendService.getLakebaseEntityData('crew_entity_memory', 200, 'inst1');
+      const result = await MemoryBackendService.getLakebaseEntityData('crew_memory', 200, 'inst1');
 
       expect(apiClient.get).toHaveBeenCalledWith('/memory-backend/lakebase/entity-data', {
-        params: { entity_table: 'crew_entity_memory', limit: 200, instance_name: 'inst1' },
+        params: { memory_table: 'crew_memory', limit: 200, instance_name: 'inst1' },
       });
       expect(result).toEqual(mockResponse);
     });
@@ -635,7 +651,7 @@ describe('MemoryBackendService', () => {
       await MemoryBackendService.getLakebaseEntityData();
 
       expect(apiClient.get).toHaveBeenCalledWith('/memory-backend/lakebase/entity-data', {
-        params: { entity_table: 'crew_entity_memory', limit: 200 },
+        params: { memory_table: 'crew_memory', limit: 200 },
       });
     });
 

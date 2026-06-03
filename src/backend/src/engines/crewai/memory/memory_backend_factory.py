@@ -1,11 +1,13 @@
-"""
-Factory for creating memory storage backends.
+"""Factory for building the unified-memory ``StorageBackend`` instance.
 
-This module provides a factory pattern for creating different memory storage
-backends based on configuration.
+Under the legacy per-memory-type architecture this module returned a dict with
+three wrappers (``short_term``/``long_term``/``entity``). CrewAI 1.10+ uses a
+single ``Memory`` class backed by one ``StorageBackend``, so this factory now
+returns a single instance (or ``None`` to signal that the CrewAI default
+LanceDB backend should be used).
 """
+from __future__ import annotations
 
-import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.core.logger import LoggerManager
@@ -15,11 +17,10 @@ logger = LoggerManager.get_instance().crew
 
 
 class DatabricksIndexValidationError(Exception):
-    """
-    Custom exception raised when Databricks Vector Search index validation fails.
+    """Raised when Databricks Vector Search indexes are missing or provisioning.
 
-    This exception includes validation details that can be used to emit
-    trace events visible in the UI.
+    Carries ``validation_result`` so the crew-preparation layer can emit a
+    trace event visible in the UI.
     """
 
     def __init__(self, message: str, validation_result: Dict[str, Any]):
@@ -31,117 +32,262 @@ class DatabricksIndexValidationError(Exception):
 
 
 class MemoryBackendFactory:
-    """Factory for creating memory storage backends."""
+    """Builds a unified ``StorageBackend`` from a ``MemoryBackendConfig``."""
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     @staticmethod
-    async def _validate_databricks_indexes(
-        config: MemoryBackendConfig, user_token: Optional[str] = None
-    ) -> Tuple[bool, List[str], List[str], List[str]]:
-        """
-        Validate that configured Databricks Vector Search indexes exist and are ready.
+    async def create_unified_storage(
+        config: MemoryBackendConfig,
+        crew_id: str,
+        group_id: str,
+        embedder: Optional[Any] = None,
+        user_token: Optional[str] = None,
+        job_id: Optional[str] = None,
+    ) -> Optional[Any]:
+        """Return a ``StorageBackend`` instance, or ``None`` for CrewAI's default.
 
         Args:
-            config: Memory backend configuration
-            user_token: Optional user token for OBO authentication
+            config: Memory backend configuration loaded from the database.
+            crew_id: Deterministic crew identifier (group-scoped).
+            group_id: Tenant group identifier used to isolate memories.
+            embedder: Optional embedder used when ``MemoryRecord.embedding`` is
+                empty. Unified ``Memory`` usually embeds at the Memory layer
+                and passes embeddings down, but we pass this through as a
+                safety net.
+            user_token: Optional user OBO token for Databricks.
+            job_id: Optional execution/job id used as ``session_id`` for
+                short-term-style queries.
 
         Returns:
-            Tuple of (all_valid, valid_indexes, missing_indexes, provisioning_indexes)
+            A ``StorageBackend`` instance, or ``None`` when the unified
+            ``Memory`` should fall back to its built-in LanceDB backend.
+
+        Raises:
+            DatabricksIndexValidationError: When the Databricks target index
+                does not exist or is still provisioning.
         """
+        if config.backend_type == MemoryBackendType.DATABRICKS:
+            return await MemoryBackendFactory._create_databricks_backend(
+                config=config,
+                crew_id=crew_id,
+                group_id=group_id,
+                embedder=embedder,
+                user_token=user_token,
+                job_id=job_id,
+            )
+        if config.backend_type == MemoryBackendType.LAKEBASE:
+            return MemoryBackendFactory._create_lakebase_backend(
+                config=config,
+                crew_id=crew_id,
+                group_id=group_id,
+                embedder=embedder,
+                job_id=job_id,
+            )
+        if config.backend_type == MemoryBackendType.DEFAULT:
+            logger.info(
+                "Using CrewAI default unified memory (LanceDB) for crew %s",
+                crew_id,
+            )
+            return None
+        logger.warning("Unsupported memory backend type: %s", config.backend_type)
+        return None
+
+    # ------------------------------------------------------------------
+    # Databricks
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _create_databricks_backend(
+        config: MemoryBackendConfig,
+        crew_id: str,
+        group_id: str,
+        embedder: Optional[Any],
+        user_token: Optional[str],
+        job_id: Optional[str],
+    ) -> Any:
         if not config.databricks_config:
-            return True, [], [], []
-
-        valid_indexes = []
-        missing_indexes = []
-        provisioning_indexes = []
-
-        try:
-            from src.repositories.databricks_vector_index_repository import (
-                DatabricksVectorIndexRepository,
+            raise ValueError(
+                "Databricks configuration is required for Databricks backend"
             )
 
-            workspace_url = config.databricks_config.workspace_url
-            endpoint_name = config.databricks_config.endpoint_name
+        databricks_cfg = config.databricks_config
+        index_name = databricks_cfg.memory_index
+        if not index_name:
+            raise ValueError(
+                "DatabricksMemoryConfig.memory_index is required for the unified "
+                "cognitive memory."
+            )
 
-            repository = DatabricksVectorIndexRepository(workspace_url)
+        await MemoryBackendFactory._validate_databricks_index(
+            workspace_url=databricks_cfg.workspace_url,
+            endpoint_name=databricks_cfg.endpoint_name,
+            index_name=index_name,
+            user_token=user_token,
+            group_id=group_id,
+        )
 
-            # Check each configured index
-            indexes_to_check = []
-            if config.enable_short_term and config.databricks_config.short_term_index:
-                indexes_to_check.append(
-                    ("short_term", config.databricks_config.short_term_index)
-                )
-            if config.enable_long_term and config.databricks_config.long_term_index:
-                indexes_to_check.append(
-                    ("long_term", config.databricks_config.long_term_index)
-                )
-            if config.enable_entity and config.databricks_config.entity_index:
-                indexes_to_check.append(
-                    ("entity", config.databricks_config.entity_index)
-                )
+        from src.engines.crewai.memory.databricks_storage_backend import (
+            DatabricksStorageBackend,
+        )
 
-            for memory_type, index_name in indexes_to_check:
-                try:
-                    result = await repository.describe_index(
-                        index_name, endpoint_name, user_token
-                    )
+        logger.info(
+            "Creating DatabricksStorageBackend (index=%s, crew_id=%s, group_id=%s)",
+            index_name,
+            crew_id,
+            group_id,
+        )
+        return DatabricksStorageBackend(
+            index_name=index_name,
+            endpoint_name=databricks_cfg.endpoint_name,
+            workspace_url=databricks_cfg.workspace_url or "",
+            crew_id=crew_id,
+            group_id=group_id,
+            user_token=user_token,
+            session_id=job_id,
+            embedder=embedder,
+            embedding_dimension=databricks_cfg.embedding_dimension or 1024,
+        )
 
-                    if result.get("success"):
-                        description = result.get("description", {})
-                        status = description.get("status", {})
-                        state = status.get("state", "UNKNOWN")
-                        is_ready = status.get("ready", False)
+    # ------------------------------------------------------------------
+    # Lakebase
+    # ------------------------------------------------------------------
 
-                        if is_ready or state == "ONLINE" or state == "READY":
-                            valid_indexes.append(f"{memory_type}: {index_name}")
-                            logger.info(
-                                f"✓ Databricks {memory_type} memory index READY: {index_name}"
-                            )
-                        elif state in ["PROVISIONING", "PENDING", "CREATING"]:
-                            provisioning_indexes.append(
-                                f"{memory_type}: {index_name} (state: {state})"
-                            )
-                            logger.warning(
-                                f"⏳ Databricks {memory_type} memory index PROVISIONING: {index_name}"
-                            )
-                            logger.warning(
-                                f"   Index state: {state} - Memory operations may fail until index is ready"
-                            )
-                        else:
-                            # Index exists but in unknown or error state
-                            provisioning_indexes.append(
-                                f"{memory_type}: {index_name} (state: {state}, ready: {is_ready})"
-                            )
-                            logger.warning(
-                                f"⚠ Databricks {memory_type} memory index not ready: {index_name}"
-                            )
-                            logger.warning(
-                                f"   Index state: {state}, ready: {is_ready}"
-                            )
-                    else:
-                        error_msg = result.get("error", "Unknown error")
-                        missing_indexes.append(
-                            f"{memory_type}: {index_name} ({error_msg})"
-                        )
-                        logger.error(
-                            f"✗ Databricks {memory_type} memory index NOT FOUND or inaccessible: {index_name}"
-                        )
-                        logger.error(f"  Error: {error_msg}")
+    @staticmethod
+    def _create_lakebase_backend(
+        config: MemoryBackendConfig,
+        crew_id: str,
+        group_id: str,
+        embedder: Optional[Any],
+        job_id: Optional[str],
+    ) -> Any:
+        if not config.lakebase_config:
+            raise ValueError(
+                "Lakebase configuration is required for Lakebase backend"
+            )
 
-                except Exception as e:
-                    missing_indexes.append(
-                        f"{memory_type}: {index_name} (Error: {str(e)})"
-                    )
-                    logger.error(
-                        f"✗ Failed to validate Databricks {memory_type} memory index: {index_name}"
-                    )
-                    logger.error(f"  Error: {str(e)}")
+        lakebase_cfg = config.lakebase_config
+        table_name = lakebase_cfg.memory_table
+        if not table_name:
+            raise ValueError(
+                "LakebaseMemoryConfig.memory_table is required for the unified "
+                "cognitive memory."
+            )
 
-            all_valid = len(missing_indexes) == 0 and len(provisioning_indexes) == 0
-            return all_valid, valid_indexes, missing_indexes, provisioning_indexes
+        from src.engines.crewai.memory.lakebase_storage_backend import (
+            LakebaseStorageBackend,
+        )
 
-        except Exception as e:
-            logger.error(f"Failed to validate Databricks indexes: {e}")
-            return False, [], [f"Validation failed: {str(e)}"], []
+        logger.info(
+            "Creating LakebaseStorageBackend (table=%s, crew_id=%s, group_id=%s)",
+            table_name,
+            crew_id,
+            group_id,
+        )
+        return LakebaseStorageBackend(
+            table_name=table_name,
+            crew_id=crew_id,
+            group_id=group_id,
+            session_id=job_id,
+            embedder=embedder,
+            embedding_dimension=lakebase_cfg.embedding_dimension or 1024,
+            instance_name=getattr(lakebase_cfg, "instance_name", None),
+        )
+
+    # ------------------------------------------------------------------
+    # Validation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _validate_databricks_index(
+        *,
+        workspace_url: Optional[str],
+        endpoint_name: str,
+        index_name: str,
+        user_token: Optional[str],
+        group_id: Optional[str],
+    ) -> None:
+        """Raise ``DatabricksIndexValidationError`` if the index is not ready."""
+        if not workspace_url or not endpoint_name or not index_name:
+            return
+
+        from src.repositories.databricks_vector_index_repository import (
+            DatabricksVectorIndexRepository,
+        )
+
+        repository = DatabricksVectorIndexRepository(workspace_url, group_id=group_id)
+        try:
+            response = await repository.describe_index(
+                index_name, endpoint_name, user_token
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.error(
+                "Failed to describe Databricks index %s: %s", index_name, exc
+            )
+            validation_result = {
+                "error_type": "describe_failed",
+                "missing_indexes": [index_name],
+                "provisioning_indexes": [],
+                "error_message": str(exc),
+            }
+            raise DatabricksIndexValidationError(
+                f"Could not describe Databricks index '{index_name}': {exc}",
+                validation_result,
+            ) from exc
+
+        if not response.get("success"):
+            validation_result = {
+                "error_type": "missing_index",
+                "missing_indexes": [index_name],
+                "provisioning_indexes": [],
+                "error_message": response.get("message", "Index not found"),
+            }
+            raise DatabricksIndexValidationError(
+                f"Databricks index '{index_name}' not found", validation_result
+            )
+
+        description = response.get("description", {})
+        status = description.get("status", {})
+        state = (status.get("state") or "UNKNOWN").upper()
+        is_ready = status.get("ready") or state in {"ONLINE", "READY"}
+
+        if is_ready:
+            logger.info(
+                "Databricks unified memory index is READY: %s (state=%s)",
+                index_name,
+                state,
+            )
+            return
+
+        if state in {"PROVISIONING", "PENDING", "CREATING"}:
+            validation_result = {
+                "error_type": "provisioning_indexes",
+                "missing_indexes": [],
+                "provisioning_indexes": [index_name],
+                "error_message": (
+                    f"Databricks index '{index_name}' is still provisioning "
+                    f"(state={state}). Retry once the index reaches ONLINE."
+                ),
+            }
+            raise DatabricksIndexValidationError(
+                validation_result["error_message"], validation_result
+            )
+
+        validation_result = {
+            "error_type": "unexpected_state",
+            "missing_indexes": [index_name],
+            "provisioning_indexes": [],
+            "error_message": f"Databricks index '{index_name}' in unexpected state {state}",
+        }
+        raise DatabricksIndexValidationError(
+            validation_result["error_message"], validation_result
+        )
+
+    # ------------------------------------------------------------------
+    # Deprecated — legacy callers should migrate to ``create_unified_storage``
+    # ------------------------------------------------------------------
 
     @staticmethod
     async def create_memory_backends(
@@ -151,485 +297,22 @@ class MemoryBackendFactory:
         user_token: Optional[str] = None,
         job_id: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """Legacy shim. Prefer :py:meth:`create_unified_storage`.
+
+        Returns a dict with a single ``"unified"`` key pointing at the new
+        backend, mirroring the shape of the old return value so migration
+        callers can be updated incrementally.
         """
-        Create memory storage backends based on configuration.
-
-        Args:
-            config: Memory backend configuration
-            crew_id: Unique identifier for the crew
-            embedder: Optional embedder to use for generating embeddings
-            user_token: Optional user access token for OBO authentication
-            job_id: Optional job/execution ID for session scoping (used by short-term memory)
-
-        Returns:
-            Dictionary with memory type keys and storage instances
-        """
-        memory_backends = {}
-
-        if config.backend_type == MemoryBackendType.DATABRICKS:
-            # Create Databricks Vector Storage backends
-            if not config.databricks_config:
-                raise ValueError(
-                    "Databricks configuration is required for Databricks backend"
-                )
-
-            # CRITICAL: Validate that all configured indexes exist and are ready BEFORE creating backends
-            # This prevents confusing "no results found" errors when indexes are deleted or still provisioning
-            logger.info("=" * 80)
-            logger.info("DATABRICKS MEMORY BACKEND - INDEX VALIDATION")
-            logger.info("=" * 80)
-
-            all_valid, valid_indexes, missing_indexes, provisioning_indexes = (
-                await MemoryBackendFactory._validate_databricks_indexes(
-                    config, user_token
-                )
-            )
-
-            # Build validation result for trace emission
-            validation_result = {
-                "valid": all_valid,
-                "valid_indexes": valid_indexes,
-                "missing_indexes": missing_indexes,
-                "provisioning_indexes": provisioning_indexes,
-                "error_message": None,
-            }
-
-            if missing_indexes:
-                logger.error("=" * 80)
-                logger.error("DATABRICKS MEMORY BACKEND - MISSING INDEXES DETECTED!")
-                logger.error("=" * 80)
-                logger.error(
-                    "The following Databricks Vector Search indexes are configured but do not exist:"
-                )
-                for missing in missing_indexes:
-                    logger.error(f"  ✗ {missing}")
-                logger.error("")
-                logger.error("RECOMMENDATION: Either:")
-                logger.error("  1. Create the missing indexes in Databricks")
-                logger.error(
-                    "  2. Disable Databricks memory backend in settings and use default CrewAI memory"
-                )
-                logger.error("=" * 80)
-
-                error_msg = (
-                    f"Databricks memory backend configuration error: The following indexes do not exist or are inaccessible: "
-                    f"{', '.join(missing_indexes)}. "
-                    f"Please create the indexes in Databricks or disable Databricks memory backend in settings."
-                )
-                validation_result["error_message"] = error_msg
-                validation_result["error_type"] = "missing_indexes"
-
-                # Raise a custom exception that includes the validation result
-                raise DatabricksIndexValidationError(error_msg, validation_result)
-
-            if provisioning_indexes:
-                logger.error("=" * 80)
-                logger.error("DATABRICKS MEMORY BACKEND - INDEXES STILL PROVISIONING!")
-                logger.error("=" * 80)
-                logger.error(
-                    "The following Databricks Vector Search indexes are still being provisioned:"
-                )
-                for provisioning in provisioning_indexes:
-                    logger.error(f"  ⏳ {provisioning}")
-                logger.error("")
-                logger.error(
-                    "Memory read/write operations will FAIL until indexes are ready."
-                )
-                logger.error("")
-                logger.error("RECOMMENDATION: Either:")
-                logger.error(
-                    "  1. Wait for the indexes to finish provisioning (check Databricks UI)"
-                )
-                logger.error(
-                    "  2. Disable Databricks memory backend in settings and use default CrewAI memory"
-                )
-                logger.error(
-                    "  3. Disable memory on all agents until indexes are ready"
-                )
-                logger.error("=" * 80)
-
-                error_msg = (
-                    f"Databricks memory backend configuration error: The following indexes are still provisioning: "
-                    f"{', '.join(provisioning_indexes)}. "
-                    f"Please wait for the indexes to finish provisioning, or disable Databricks memory backend in settings."
-                )
-                validation_result["error_message"] = error_msg
-                validation_result["error_type"] = "provisioning_indexes"
-
-                # Raise a custom exception that includes the validation result
-                raise DatabricksIndexValidationError(error_msg, validation_result)
-
-            if valid_indexes:
-                logger.info("All configured Databricks indexes validated successfully:")
-                for valid in valid_indexes:
-                    logger.info(f"  ✓ {valid}")
-            logger.info("=" * 80)
-
-            try:
-                from src.engines.crewai.memory.crewai_databricks_wrapper import (
-                    CrewAIDatabricksWrapper,
-                )
-                from src.engines.crewai.memory.databricks_vector_storage import (
-                    DatabricksVectorStorage,
-                )
-
-                # Create short-term memory storage
-                if (
-                    config.enable_short_term
-                    and config.databricks_config.short_term_index
-                ):
-                    logger.info(
-                        f"Creating Databricks short-term memory storage for crew {crew_id}"
-                    )
-
-                    # Extract group_id from crew_id (format: group_id_crew_uuid)
-                    group_id = None
-                    if crew_id and "_crew_" in crew_id:
-                        group_id = crew_id.split("_crew_")[0]
-                        logger.info(f"Extracted group_id from crew_id: {group_id}")
-
-                    # Build kwargs dynamically to avoid passing None values
-                    storage_kwargs = {
-                        "endpoint_name": config.databricks_config.endpoint_name,
-                        "index_name": config.databricks_config.short_term_index,
-                        "crew_id": crew_id,
-                        "memory_type": "short_term",
-                        "embedding_dimension": config.databricks_config.embedding_dimension
-                        or 1024,
-                        "workspace_url": config.databricks_config.workspace_url,
-                    }
-
-                    # Only add auth parameters if they have values
-                    # This allows DatabricksVectorStorage to check env vars when these are None
-                    if config.databricks_config.personal_access_token:
-                        storage_kwargs["personal_access_token"] = (
-                            config.databricks_config.personal_access_token
-                        )
-                    if config.databricks_config.service_principal_client_id:
-                        storage_kwargs["service_principal_client_id"] = (
-                            config.databricks_config.service_principal_client_id
-                        )
-                    if config.databricks_config.service_principal_client_secret:
-                        storage_kwargs["service_principal_client_secret"] = (
-                            config.databricks_config.service_principal_client_secret
-                        )
-                    if user_token:
-                        storage_kwargs["user_token"] = user_token
-                    if group_id:
-                        storage_kwargs["group_id"] = group_id
-                        logger.info(f"Added group_id to short-term storage: {group_id}")
-                    # CRITICAL: Pass job_id to short-term storage for session scoping
-                    # Short-term memory should only return results from the current run
-                    if job_id:
-                        storage_kwargs["job_id"] = job_id
-                        logger.info(
-                            f"Added job_id to short-term storage for session scoping: {job_id}"
-                        )
-
-                    short_term_storage = DatabricksVectorStorage(**storage_kwargs)
-                    # Wrap with CrewAI-compatible wrapper
-                    memory_backends["short_term"] = CrewAIDatabricksWrapper(
-                        short_term_storage,
-                        embedder,
-                        enable_relationship_retrieval=False,  # Not applicable for short-term memory
-                    )
-
-                # Create long-term memory storage
-                if config.enable_long_term and config.databricks_config.long_term_index:
-                    logger.info(
-                        f"Creating Databricks long-term memory storage for crew {crew_id}"
-                    )
-
-                    # Build kwargs dynamically to avoid passing None values
-                    storage_kwargs = {
-                        "endpoint_name": config.databricks_config.endpoint_name,
-                        "index_name": config.databricks_config.long_term_index,
-                        "crew_id": crew_id,
-                        "memory_type": "long_term",
-                        "embedding_dimension": config.databricks_config.embedding_dimension
-                        or 1024,
-                        "workspace_url": config.databricks_config.workspace_url,
-                    }
-
-                    # Only add auth parameters if they have values
-                    if config.databricks_config.personal_access_token:
-                        storage_kwargs["personal_access_token"] = (
-                            config.databricks_config.personal_access_token
-                        )
-                    if config.databricks_config.service_principal_client_id:
-                        storage_kwargs["service_principal_client_id"] = (
-                            config.databricks_config.service_principal_client_id
-                        )
-                    if config.databricks_config.service_principal_client_secret:
-                        storage_kwargs["service_principal_client_secret"] = (
-                            config.databricks_config.service_principal_client_secret
-                        )
-                    if user_token:
-                        storage_kwargs["user_token"] = user_token
-                    if group_id:
-                        storage_kwargs["group_id"] = group_id
-
-                    long_term_storage = DatabricksVectorStorage(**storage_kwargs)
-                    # Wrap with CrewAI-compatible wrapper
-                    memory_backends["long_term"] = CrewAIDatabricksWrapper(
-                        long_term_storage,
-                        embedder,
-                        enable_relationship_retrieval=False,  # Not applicable for long-term memory
-                    )
-
-                # Create entity memory storage
-                if config.enable_entity and config.databricks_config.entity_index:
-                    logger.info(
-                        f"Creating Databricks entity memory storage for crew {crew_id}"
-                    )
-
-                    # Build kwargs dynamically to avoid passing None values
-                    storage_kwargs = {
-                        "endpoint_name": config.databricks_config.endpoint_name,
-                        "index_name": config.databricks_config.entity_index,
-                        "crew_id": crew_id,
-                        "memory_type": "entity",
-                        "embedding_dimension": config.databricks_config.embedding_dimension
-                        or 1024,
-                        "workspace_url": config.databricks_config.workspace_url,
-                    }
-
-                    # Only add auth parameters if they have values
-                    if config.databricks_config.personal_access_token:
-                        storage_kwargs["personal_access_token"] = (
-                            config.databricks_config.personal_access_token
-                        )
-                    if config.databricks_config.service_principal_client_id:
-                        storage_kwargs["service_principal_client_id"] = (
-                            config.databricks_config.service_principal_client_id
-                        )
-                    if config.databricks_config.service_principal_client_secret:
-                        storage_kwargs["service_principal_client_secret"] = (
-                            config.databricks_config.service_principal_client_secret
-                        )
-                    if user_token:
-                        storage_kwargs["user_token"] = user_token
-                    if group_id:
-                        storage_kwargs["group_id"] = group_id
-
-                    entity_storage = DatabricksVectorStorage(**storage_kwargs)
-                    # Wrap with CrewAI-compatible wrapper, passing relationship retrieval configuration
-                    enable_relationship_retrieval = config.enable_relationship_retrieval
-                    logger.info(
-                        f"MemoryBackendFactory: config.enable_relationship_retrieval = {enable_relationship_retrieval}"
-                    )
-                    memory_backends["entity"] = CrewAIDatabricksWrapper(
-                        entity_storage,
-                        embedder,
-                        enable_relationship_retrieval=enable_relationship_retrieval,
-                    )
-
-            except ImportError as e:
-                logger.error(f"Failed to import Databricks storage: {e}")
-                raise
-            except Exception as e:
-                logger.error(f"Failed to create Databricks memory backends: {e}")
-                raise
-
-        elif config.backend_type == MemoryBackendType.LAKEBASE:
-            # Create Lakebase pgvector storage backends
-            if not config.lakebase_config:
-                raise ValueError(
-                    "Lakebase configuration is required for Lakebase backend"
-                )
-
-            logger.info("=" * 80)
-            logger.info("LAKEBASE MEMORY BACKEND - INITIALIZING PGVECTOR STORAGE")
-            logger.info("=" * 80)
-
-            try:
-                from src.engines.crewai.memory.crewai_lakebase_wrapper import (
-                    CrewAILakebaseWrapper,
-                )
-                from src.engines.crewai.memory.lakebase_pgvector_storage import (
-                    LakebasePgVectorStorage,
-                )
-
-                lakebase_cfg = config.lakebase_config
-                embedding_dim = lakebase_cfg.embedding_dimension or 1024
-
-                # Extract group_id from crew_id
-                group_id = None
-                if crew_id and "_crew_" in crew_id:
-                    group_id = crew_id.split("_crew_")[0]
-
-                instance_name = getattr(lakebase_cfg, 'instance_name', None)
-                logger.info(f"Lakebase instance_name: {instance_name}")
-
-                # Short-term memory
-                if config.enable_short_term:
-                    storage = LakebasePgVectorStorage(
-                        table_name=lakebase_cfg.short_term_table,
-                        memory_type="short_term",
-                        crew_id=crew_id,
-                        group_id=group_id,
-                        job_id=job_id,
-                        embedding_dimension=embedding_dim,
-                        instance_name=instance_name,
-                    )
-                    memory_backends["short_term"] = CrewAILakebaseWrapper(
-                        storage, embedder
-                    )
-                    logger.info(
-                        f"Created Lakebase short-term memory: {lakebase_cfg.short_term_table}"
-                    )
-
-                # Long-term memory
-                if config.enable_long_term:
-                    storage = LakebasePgVectorStorage(
-                        table_name=lakebase_cfg.long_term_table,
-                        memory_type="long_term",
-                        crew_id=crew_id,
-                        group_id=group_id,
-                        embedding_dimension=embedding_dim,
-                        instance_name=instance_name,
-                    )
-                    memory_backends["long_term"] = CrewAILakebaseWrapper(
-                        storage, embedder
-                    )
-                    logger.info(
-                        f"Created Lakebase long-term memory: {lakebase_cfg.long_term_table}"
-                    )
-
-                # Entity memory
-                if config.enable_entity:
-                    storage = LakebasePgVectorStorage(
-                        table_name=lakebase_cfg.entity_table,
-                        memory_type="entity",
-                        crew_id=crew_id,
-                        group_id=group_id,
-                        embedding_dimension=embedding_dim,
-                        instance_name=instance_name,
-                    )
-                    memory_backends["entity"] = CrewAILakebaseWrapper(storage, embedder)
-                    logger.info(
-                        f"Created Lakebase entity memory: {lakebase_cfg.entity_table}"
-                    )
-
-                logger.info(
-                    f"Lakebase memory backends created: {list(memory_backends.keys())}"
-                )
-                logger.info("=" * 80)
-
-            except ImportError as e:
-                logger.error(f"Failed to import Lakebase storage: {e}")
-                raise
-            except Exception as e:
-                logger.error(f"Failed to create Lakebase memory backends: {e}")
-                raise
-
-        elif config.backend_type == MemoryBackendType.DEFAULT:
-            # Create default memory backends using CrewAI's built-in storage
-            logger.info(
-                f"Creating default CrewAI memory backends (ChromaDB + SQLite) for crew {crew_id}"
-            )
-
-            try:
-                from crewai.memory import EntityMemory, LongTermMemory, ShortTermMemory
-                from crewai.memory.storage.ltm_sqlite_storage import LTMSQLiteStorage
-                from crewai.memory.storage.rag_storage import RAGStorage
-
-                # Create memory backends based on configuration
-                # Important: We don't instantiate the memory classes here, just return the configuration
-                # The crew_preparation.py will instantiate them with the proper parameters
-                # For default backend, we return empty dict and let CrewAI handle the initialization
-                # This ensures that CrewAI's default memory initialization works properly
-                # with the embedder configuration we've already set up
-                logger.info(
-                    f"Default memory backend will use ChromaDB for short-term/entity and SQLite for long-term"
-                )
-                logger.info(f"Storage will be created in: kasal_default_{crew_id}")
-
-                # Return empty dict to signal that default CrewAI memory should be used
-                # The crew_preparation.py will handle this by setting memory=True and letting
-                # CrewAI initialize its own memory with our configured embedder
-                return {}
-
-            except ImportError as e:
-                logger.error(
-                    f"Failed to import CrewAI memory classes for default backend: {e}"
-                )
-                raise
-        else:
-            logger.warning(f"Unsupported memory backend type: {config.backend_type}")
-            return {}
-
-        return memory_backends
-
-    @staticmethod
-    def create_embedder_wrapper(embedder: Any, storage: Any):
-        """
-        Create a wrapper that combines embedder and storage for CrewAI integration.
-
-        Args:
-            embedder: The embedder function/object
-            storage: The storage backend
-
-        Returns:
-            A wrapper object that CrewAI can use
-        """
-
-        class EmbedderStorageWrapper:
-            """Wrapper that combines embedding and storage functionality."""
-
-            def __init__(self, embedder, storage):
-                self.embedder = embedder
-                self.storage = storage
-
-            def embed_and_store(
-                self,
-                text: str,
-                metadata: Optional[Dict] = None,
-                agent: Optional[str] = None,
-            ):
-                """Embed text and store in vector database."""
-                try:
-                    # Generate embedding
-                    if hasattr(self.embedder, "__call__"):
-                        # If embedder is a function
-                        embedding = self.embedder([text])[0]
-                    elif hasattr(self.embedder, "embed"):
-                        # If embedder has embed method
-                        embedding = self.embedder.embed(text)
-                    else:
-                        logger.error("Embedder does not have a callable interface")
-                        return
-
-                    # Store with embedding
-                    value = {"data": text, "embedding": embedding}
-                    self.storage.save(value, metadata=metadata, agent=agent)
-
-                except Exception as e:
-                    logger.error(f"Error in embed_and_store: {e}")
-
-            def search(self, query: str, limit: int = 3, **kwargs):
-                """Search for similar content."""
-                try:
-                    # Generate query embedding
-                    if hasattr(self.embedder, "__call__"):
-                        query_embedding = self.embedder([query])[0]
-                    elif hasattr(self.embedder, "embed"):
-                        query_embedding = self.embedder.embed(query)
-                    else:
-                        logger.error("Embedder does not have a callable interface")
-                        return []
-
-                    # Search with embedding
-                    return self.storage.search(
-                        {"embedding": query_embedding}, limit=limit, **kwargs
-                    )
-
-                except Exception as e:
-                    logger.error(f"Error in search: {e}")
-                    return []
-
-            def reset(self):
-                """Reset the storage."""
-                self.storage.reset()
-
-        return EmbedderStorageWrapper(embedder, storage)
+        # Extract group_id from the conventional ``{group_id}_crew_{hash}`` id.
+        group_id = ""
+        if crew_id and "_crew_" in crew_id:
+            group_id = crew_id.split("_crew_")[0]
+        storage = await MemoryBackendFactory.create_unified_storage(
+            config=config,
+            crew_id=crew_id,
+            group_id=group_id,
+            embedder=embedder,
+            user_token=user_token,
+            job_id=job_id,
+        )
+        return {"unified": storage} if storage is not None else {}

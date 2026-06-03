@@ -35,6 +35,7 @@ import {
 } from '@mui/icons-material';
 import { useTabManagerStore } from '../../store/tabManager';
 import { useThemeManager } from '../../hooks/workflow/useThemeManager';
+import ModeSwitcher from './ModeSwitcher';
 
 interface TabBarProps {
   onRunTab?: (tabId: string) => void;
@@ -45,6 +46,7 @@ interface TabBarProps {
   hideTabsAndButtons?: boolean; // Hide tabs and add button, show only workspace selector
   isMobile?: boolean;
   maxTabs?: number;
+  leftSlot?: React.ReactNode; // Optional content rendered at the far-left of the bar (e.g. chat-mode hamburger + logo)
 }
 
 const TabBar: React.FC<TabBarProps> = ({
@@ -55,7 +57,8 @@ const TabBar: React.FC<TabBarProps> = ({
   disabled = false,
   hideTabsAndButtons = false,
   isMobile = false,
-  maxTabs = 20
+  maxTabs = 20,
+  leftSlot
 }) => {
   const { isDarkMode } = useThemeManager();
   const {
@@ -433,6 +436,8 @@ const TabBar: React.FC<TabBarProps> = ({
           overflow: 'hidden'  // Prevent overflow from causing layout shifts
         }}
       >
+        {leftSlot}
+
         {!hideTabsAndButtons && (
           <Box ref={tabBarRef} sx={{ display: 'flex', alignItems: 'center', flex: 1, overflow: 'hidden' }}>
             <Tabs
@@ -625,6 +630,12 @@ const TabBar: React.FC<TabBarProps> = ({
             </Tooltip>
           </Box>
         )}
+
+        {/* Spacer so the mode switcher stays right-aligned when tabs are hidden */}
+        {hideTabsAndButtons && <Box sx={{ flex: 1 }} />}
+
+        {/* Workspace mode switcher (Crew / Flow / Chat) — right-most control */}
+        <ModeSwitcher />
       </Box>
 
       {/* New Tab Menu */}

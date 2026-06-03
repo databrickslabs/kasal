@@ -204,7 +204,9 @@ class DatabricksCodexCompletion(OpenAICompletion):
         from openai.types.responses import Response
 
         try:
-            response: Response = self.client.responses.create(**params)
+            # CrewAI 1.14+ moved the OpenAI client to a private attr; use the
+            # lazy getter so it is built on first use.
+            response: Response = self._get_sync_client().responses.create(**params)
 
             # Capture raw output items WITH phase for next turn
             self._capture_output_items(response)

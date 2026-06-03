@@ -24,19 +24,11 @@ export const EMBEDDING_MODELS = [
   }
 ];
 
-// Comprehensive descriptions for each index type
+// Comprehensive descriptions for each index type (CrewAI 1.10+ unified memory)
 export const INDEX_DESCRIPTIONS = {
-  short_term: {
-    brief: "Recent agent interactions",
-    detailed: "The short-term memory index stores recent conversations and interactions between agents during task execution. It captures immediate context, task progress, decisions made, and intermediate results. This memory is typically retained for the duration of a crew's execution and helps agents maintain context awareness, avoid repeating actions, and build upon previous exchanges. It's essential for coherent multi-agent collaboration within a single session."
-  },
-  long_term: {
-    brief: "Persistent knowledge across sessions",
-    detailed: "The long-term memory index preserves important information, learned patterns, and key insights across multiple crew executions. It stores successful strategies, common solutions, domain knowledge, and historical outcomes that agents can reference in future tasks. This persistent memory enables agents to improve over time, apply lessons learned, and maintain institutional knowledge. It's crucial for building intelligent systems that evolve and adapt based on accumulated experience."
-  },
-  entity: {
-    brief: "Information about entities and relationships",
-    detailed: "The entity memory index maintains a knowledge graph of entities, their attributes, and relationships discovered during agent operations. It stores information about people, organizations, systems, concepts, and their interconnections. This structured memory helps agents understand context, make informed decisions based on entity relationships, and maintain consistency when referring to specific entities across different tasks. It's vital for complex scenarios involving multiple stakeholders or domain-specific entities."
+  memory: {
+    brief: "Unified cognitive memory (all records)",
+    detailed: "CrewAI 1.10+ replaces the old short-term / long-term / entity split with a single unified memory class. Every record lives in this one index, tagged with a hierarchical scope path (e.g. /crew/research/findings) and category tags. Recall blends semantic similarity, recency, and LLM-inferred importance into a composite score; save-time consolidation automatically merges contradictions. Short-term-style session scoping is preserved via the session_id column."
   },
   document: {
     brief: "Uploaded documents and embeddings",

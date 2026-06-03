@@ -70,37 +70,30 @@ class CrewMemoryService:
                     return None
 
                 logger.info(
-                    f"Found active config: backend_type={active_config.backend_type}, "
-                    f"enable_short_term={active_config.enable_short_term}, "
-                    f"enable_long_term={active_config.enable_long_term}, "
-                    f"enable_entity={active_config.enable_entity}"
+                    "Found active memory config: backend_type=%s",
+                    active_config.backend_type,
                 )
 
-                # Check if this is a "Disabled Configuration"
-                is_disabled_config = (
-                    not active_config.enable_short_term
-                    and not active_config.enable_long_term
-                    and not active_config.enable_entity
-                )
-
-                if is_disabled_config:
-                    logger.info(
-                        "Found 'Disabled Configuration' - will use default memory"
-                    )
-                    return None
-
-                # Convert to dict format
+                # Convert to dict format for the factory. Cognitive tuning
+                # flows through ``cognitive_config`` when set.
                 memory_backend_config = {
                     "backend_type": active_config.backend_type.value,
                     "databricks_config": active_config.databricks_config,
                     "lakebase_config": active_config.lakebase_config,
-                    "enable_short_term": active_config.enable_short_term,
-                    "enable_long_term": active_config.enable_long_term,
-                    "enable_entity": active_config.enable_entity,
-                    "enable_relationship_retrieval": active_config.enable_relationship_retrieval,
                 }
+                cognitive_cfg = getattr(active_config, "cognitive_config", None)
+                if cognitive_cfg is not None:
+                    memory_backend_config["cognitive_config"] = (
+                        cognitive_cfg.model_dump(exclude_none=True)
+                        if hasattr(cognitive_cfg, "model_dump")
+                        else cognitive_cfg
+                    )
+                custom_cfg = getattr(active_config, "custom_config", None)
+                if custom_cfg:
+                    memory_backend_config["custom_config"] = custom_cfg
                 logger.info(
-                    f"Loaded memory backend config from database: {memory_backend_config['backend_type']}"
+                    "Loaded memory backend config from database: %s",
+                    memory_backend_config["backend_type"],
                 )
                 return memory_backend_config
 
@@ -278,24 +271,24 @@ class CrewMemoryService:
             )
         logger.info("=" * 80)
 
-    async def create_memory_backends(
+    async def create_unified_storage(
         self, memory_backend_config: Dict[str, Any], crew_id: str, embedder: Any
-    ) -> Dict[str, Any]:
-        """
-        Create memory backends using the factory
+    ) -> Optional[Any]:
+        """Build the unified ``StorageBackend`` for this crew.
 
         Args:
-            memory_backend_config: Memory backend configuration
-            crew_id: Crew identifier
-            embedder: Embedder instance or config
+            memory_backend_config: Memory backend configuration (dict from DB).
+            crew_id: Deterministic crew identifier (already group-scoped).
+            embedder: Embedder callable or provider config dict.
 
         Returns:
-            Dictionary of memory backends
+            A ``StorageBackend`` instance, or ``None`` when the CrewAI default
+            (LanceDB) storage should be used.
 
         Raises:
-            DatabricksIndexValidationError: If Databricks indexes are missing or provisioning
+            DatabricksIndexValidationError: If the Databricks index is missing
+                or still provisioning.
         """
-        # Convert databricks_config dict to object if needed
         if "databricks_config" in memory_backend_config and isinstance(
             memory_backend_config["databricks_config"], dict
         ):
@@ -305,7 +298,6 @@ class CrewMemoryService:
                 **memory_backend_config["databricks_config"]
             )
 
-        # Convert lakebase_config dict to object if needed
         if "lakebase_config" in memory_backend_config and isinstance(
             memory_backend_config["lakebase_config"], dict
         ):
@@ -315,35 +307,50 @@ class CrewMemoryService:
                 **memory_backend_config["lakebase_config"]
             )
 
-        # Create MemoryBackendConfig object
         memory_config = MemoryBackendConfig(**memory_backend_config)
 
         logger.info(
-            f"Creating memory backends for crew {crew_id} with backend type: {memory_config.backend_type}"
+            "Creating unified memory storage for crew %s (backend=%s)",
+            crew_id,
+            memory_config.backend_type,
         )
 
-        # Get job_id from config for short-term memory session scoping
-        # Short-term memory should only return results from the current run
         job_id = self.config.get("execution_id") or self.config.get("job_id")
         if job_id:
-            logger.info(f"Using job_id for short-term memory session scoping: {job_id}")
+            logger.info(
+                "Using job_id=%s as session_id for short-term-scoped queries",
+                job_id,
+            )
+
+        group_id = self.config.get("group_id") or ""
+        if not group_id and crew_id and "_crew_" in crew_id:
+            group_id = crew_id.split("_crew_")[0]
 
         try:
-            # Create backends
-            memory_backends = await MemoryBackendFactory.create_memory_backends(
+            return await MemoryBackendFactory.create_unified_storage(
                 config=memory_config,
                 crew_id=crew_id,
+                group_id=group_id,
                 embedder=embedder,
                 user_token=self.user_token,
                 job_id=job_id,
             )
-            logger.info(f"Created memory backends: {list(memory_backends.keys())}")
-            return memory_backends
-
         except DatabricksIndexValidationError as e:
-            # Emit trace event for UI visibility before re-raising
             await self._emit_index_validation_trace(e)
             raise
+
+    async def create_memory_backends(
+        self, memory_backend_config: Dict[str, Any], crew_id: str, embedder: Any
+    ) -> Dict[str, Any]:
+        """Legacy shim — prefer :py:meth:`create_unified_storage`.
+
+        Returns ``{"unified": storage}`` when a backend is configured, ``{}``
+        when the CrewAI default should be used.
+        """
+        storage = await self.create_unified_storage(
+            memory_backend_config, crew_id, embedder
+        )
+        return {"unified": storage} if storage is not None else {}
 
     async def _emit_index_validation_trace(
         self, error: DatabricksIndexValidationError
@@ -457,210 +464,191 @@ class CrewMemoryService:
         self,
         crew_kwargs: Dict[str, Any],
         memory_config: MemoryBackendConfig,
-        memory_backends: Dict[str, Any],
+        storage: Optional[Any],
         crew_id: str,
         custom_embedder: Any = None,
     ) -> Dict[str, Any]:
-        """
-        Configure CrewAI memory components
+        """Configure the crew's unified ``Memory`` instance.
+
+        Replaces the legacy three-class setup. Instantiates a single
+        ``crewai.memory.Memory`` bound to the Kasal-specific ``StorageBackend``
+        (or signals CrewAI to use its default LanceDB backend).
 
         Args:
-            crew_kwargs: Crew keyword arguments to update
-            memory_config: Memory backend configuration
-            memory_backends: Created memory backends
-            crew_id: Crew identifier
-            custom_embedder: Custom embedder instance
+            crew_kwargs: Crew keyword arguments to update.
+            memory_config: Resolved memory backend configuration.
+            storage: ``StorageBackend`` instance returned by the factory, or
+                ``None`` to fall back to the CrewAI default.
+            crew_id: Deterministic crew identifier (used as root scope prefix).
+            custom_embedder: Optional Databricks/other custom embedder that
+                should take precedence over ``crew_kwargs["embedder"]``.
 
         Returns:
-            Updated crew_kwargs
+            Updated ``crew_kwargs``.
         """
+        # DEFAULT backend with no usable embedder → disable entirely to avoid
+        # the Memory LLM/embedder path hitting the OpenAI placeholder key.
+        if (
+            memory_config.backend_type == MemoryBackendType.DEFAULT
+            and not custom_embedder
+            and not crew_kwargs.get("embedder")
+            and not os.environ.get("OPENAI_API_KEY")
+        ):
+            logger.warning(
+                "DEFAULT memory backend selected but no embedder / OpenAI key "
+                "available. Disabling memory to prevent fallback errors."
+            )
+            crew_kwargs["memory"] = False
+            return crew_kwargs
+
         try:
-            from crewai.memory import EntityMemory, LongTermMemory, ShortTermMemory
-            from crewai.memory.storage.rag_storage import RAGStorage
+            from crewai.memory import Memory
+        except ImportError as exc:
+            logger.error("CrewAI unified Memory class unavailable: %s", exc)
+            logger.warning("Falling back to memory=False")
+            crew_kwargs["memory"] = False
+            return crew_kwargs
 
-            # Handle DEFAULT backend without any usable embedder
-            # When no custom Databricks embedder AND no OpenAI/other embedder is configured,
-            # CrewAI's default memory would fall back to OpenAI embeddings with a dummy key,
-            # causing 401 errors. Disable memory entirely in this case.
-            if (
-                memory_config.backend_type == MemoryBackendType.DEFAULT
-                and not custom_embedder
-                and not crew_kwargs.get("embedder")
-            ):
-                logger.warning(
-                    "DEFAULT memory backend selected but no embedder available "
-                    "(Databricks embedder failed and no OpenAI key configured). "
-                    "Disabling memory to prevent OpenAI fallback errors."
+        # DEFAULT backend → let Memory use its own LanceDB backend, but pass
+        # the crew's embedder/LLM so we don't implicitly require OPENAI_API_KEY.
+        if storage is None:
+            memory_kwargs = self._build_memory_kwargs(
+                crew_kwargs=crew_kwargs,
+                custom_embedder=custom_embedder,
+                crew_id=crew_id,
+                memory_config=memory_config,
+            )
+            try:
+                crew_kwargs["memory"] = Memory(**memory_kwargs)
+                logger.info(
+                    "Configured unified Memory with CrewAI default storage (crew=%s)",
+                    crew_id,
                 )
+            except Exception as exc:
+                logger.error("Failed to build unified Memory: %s", exc)
                 crew_kwargs["memory"] = False
-                return crew_kwargs
+            self._attach_crew_memory_to_agents(crew_kwargs)
+            return crew_kwargs
 
-            # Handle DEFAULT backend with custom embedder
-            if (
-                memory_config.backend_type == MemoryBackendType.DEFAULT
-                and custom_embedder
-            ):
-                logger.info(
-                    "Configuring DEFAULT backend with Databricks custom embedder"
-                )
-
-                from crewai.utilities.paths import db_storage_path
-
-                from src.engines.crewai.memory.chromadb_databricks_storage import (
-                    ChromaDBDatabricksStorage,
-                )
-
-                storage_path = Path(db_storage_path())
-
-                # Get job_id from config for short-term memory session scoping
-                # Short-term memory should only return results from the current run
-                job_id = self.config.get("execution_id") or self.config.get("job_id")
-                if job_id:
-                    logger.info(
-                        f"Using job_id for ChromaDB short-term memory session scoping: {job_id}"
-                    )
-
-                # Configure short-term memory
-                if memory_config.enable_short_term:
-                    storage_st = ChromaDBDatabricksStorage(
-                        storage_path=storage_path,
-                        collection_name=f"{crew_id}_short_term",
-                        embedding_function=custom_embedder,
-                        memory_type="short_term",
-                        job_id=job_id,  # Session scoping for short-term memory
-                    )
-                    crew_kwargs["short_term_memory"] = ShortTermMemory(
-                        storage=storage_st
-                    )
-                    logger.info("Configured short-term memory with Databricks embedder")
-
-                # Configure entity memory
-                if memory_config.enable_entity:
-                    storage_entity = ChromaDBDatabricksStorage(
-                        storage_path=storage_path,
-                        collection_name=f"{crew_id}_entities",
-                        embedding_function=custom_embedder,
-                        memory_type="entities",
-                    )
-                    crew_kwargs["entity_memory"] = EntityMemory(storage=storage_entity)
-                    logger.info("Configured entity memory with Databricks embedder")
-
-                # Configure long-term memory
-                if memory_config.enable_long_term:
-                    from crewai.memory.storage.ltm_sqlite_storage import (
-                        LTMSQLiteStorage,
-                    )
-
-                    ltm_storage = LTMSQLiteStorage()
-                    crew_kwargs["long_term_memory"] = LongTermMemory(
-                        storage=ltm_storage
-                    )
-                    logger.info("Configured long-term memory with SQLite")
-
-                crew_kwargs["memory"] = False
-                logger.info(
-                    "Set memory=False for DEFAULT backend with custom Databricks embedder"
-                )
-
-            # Configure Lakebase backend
-            elif memory_config.backend_type == MemoryBackendType.LAKEBASE:
-                if "short_term" in memory_backends and memory_config.enable_short_term:
-                    crew_kwargs["short_term_memory"] = ShortTermMemory(
-                        storage=memory_backends["short_term"]
-                    )
-                    logger.info("Configured Lakebase short-term memory")
-                if "long_term" in memory_backends and memory_config.enable_long_term:
-                    crew_kwargs["long_term_memory"] = LongTermMemory(
-                        storage=memory_backends["long_term"]
-                    )
-                    logger.info("Configured Lakebase long-term memory")
-                if "entity" in memory_backends and memory_config.enable_entity:
-                    crew_kwargs["entity_memory"] = EntityMemory(
-                        storage=memory_backends["entity"],
-                        embedder_config=crew_kwargs.get("embedder"),
-                    )
-                    logger.info("Configured Lakebase entity memory")
-                crew_kwargs["memory"] = False
-                logger.info(
-                    "Set memory=False for Lakebase backend to prevent conflicts"
-                )
-
-            # Configure non-default backends
-            elif memory_config.backend_type != MemoryBackendType.DEFAULT:
-                # Short-term memory
-                if "short_term" in memory_backends and memory_config.enable_short_term:
-                    logger.info(
-                        f"Configuring custom short-term memory backend for type: {memory_config.backend_type}"
-                    )
-                    if memory_config.backend_type == MemoryBackendType.DATABRICKS:
-                        crew_kwargs["short_term_memory"] = ShortTermMemory(
-                            storage=memory_backends["short_term"]
-                        )
-                        logger.info(
-                            "Successfully configured Databricks short-term memory"
-                        )
-                    else:
-                        if crew_kwargs.get("embedder"):
-                            rag_storage = RAGStorage(
-                                type="short_term",
-                                embedder_config=crew_kwargs.get("embedder"),
-                            )
-                            crew_kwargs["short_term_memory"] = ShortTermMemory(
-                                storage=rag_storage
-                            )
-                            logger.info(
-                                "Successfully configured default short-term memory with RAGStorage"
-                            )
-
-                # Long-term memory
-                if "long_term" in memory_backends and memory_config.enable_long_term:
-                    logger.info("Configuring custom long-term memory backend")
-                    crew_kwargs["long_term_memory"] = LongTermMemory(
-                        storage=memory_backends["long_term"]
-                    )
-                    logger.info("Successfully configured Databricks long-term memory")
-
-                # Entity memory
-                if "entity" in memory_backends and memory_config.enable_entity:
-                    logger.info("Configuring custom entity memory backend")
-                    if memory_config.backend_type == MemoryBackendType.DATABRICKS:
-                        crew_kwargs["entity_memory"] = EntityMemory(
-                            storage=memory_backends["entity"],
-                            embedder_config=crew_kwargs.get("embedder"),
-                        )
-                        logger.info("Successfully configured Databricks entity memory")
-                    else:
-                        if crew_kwargs.get("embedder"):
-                            rag_storage = RAGStorage(
-                                type="entities",
-                                embedder_config=crew_kwargs.get("embedder"),
-                            )
-                            crew_kwargs["entity_memory"] = EntityMemory(
-                                storage=rag_storage
-                            )
-                            logger.info(
-                                "Successfully configured default entity memory with RAGStorage"
-                            )
-
-                logger.info(
-                    f"Memory backend configuration completed for crew {crew_id}"
-                )
-
-                # Set memory=False for Databricks to prevent conflicts
-                if memory_config.backend_type == MemoryBackendType.DATABRICKS:
-                    crew_kwargs["memory"] = False
-                    logger.info(
-                        "Set memory=False for Databricks backend to prevent conflicts"
-                    )
-
-        except ImportError as e:
-            logger.error(f"Failed to import CrewAI memory classes: {e}")
-            logger.warning("Falling back to default memory implementation")
-        except Exception as e:
-            logger.error(f"Error configuring custom memory backends: {e}")
-            logger.warning("Falling back to default memory implementation")
-
+        # Custom backend (Databricks / Lakebase) → wire storage into Memory.
+        memory_kwargs = self._build_memory_kwargs(
+            crew_kwargs=crew_kwargs,
+            custom_embedder=custom_embedder,
+            crew_id=crew_id,
+            memory_config=memory_config,
+        )
+        memory_kwargs["storage"] = storage
+        try:
+            crew_kwargs["memory"] = Memory(**memory_kwargs)
+            logger.info(
+                "Configured unified Memory with %s storage (crew=%s)",
+                memory_config.backend_type.value,
+                crew_id,
+            )
+        except Exception as exc:
+            logger.error("Failed to build unified Memory with custom storage: %s", exc)
+            crew_kwargs["memory"] = False
+        self._attach_crew_memory_to_agents(crew_kwargs)
         return crew_kwargs
+
+    def _attach_crew_memory_to_agents(self, crew_kwargs: Dict[str, Any]) -> None:
+        """Point each agent's ``memory`` at the crew's unified Memory instance.
+
+        CrewAI's per-task auto-save (``Agent._save_kickoff_to_memory``, run when
+        each agent finishes a task) and the recall/save tools both read
+        ``agent.memory`` — NOT the crew memory. We deliberately keep agents free
+        of ``memory=True`` (which would spin up a per-agent OpenAI-default
+        Memory and cause 401s), but that also makes the per-task auto-save a
+        no-op. Assigning the already-built crew Memory *instance* restores
+        per-task writes on the configured Databricks/Lakebase backend without
+        creating a default OpenAI memory.
+        """
+        mem = crew_kwargs.get("memory")
+        if mem in (True, False, None):
+            return
+        for agent in crew_kwargs.get("agents", []) or []:
+            try:
+                agent.memory = mem
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("Could not attach crew memory to agent: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Memory kwarg helpers
+    # ------------------------------------------------------------------
+
+    def _build_memory_kwargs(
+        self,
+        crew_kwargs: Dict[str, Any],
+        custom_embedder: Any,
+        crew_id: str,
+        memory_config: MemoryBackendConfig,
+    ) -> Dict[str, Any]:
+        """Assemble keyword arguments for the unified ``Memory`` class.
+
+        Sources the embedder, LLM (to avoid OpenAI fallback), and cognitive
+        scoring weights from ``memory_config.custom_config`` when present.
+        """
+        kwargs: Dict[str, Any] = {}
+
+        embedder = custom_embedder or crew_kwargs.get("embedder")
+        if embedder is not None:
+            kwargs["embedder"] = embedder
+
+        # Structural root scope: one namespace per crew inside the tenant.
+        group_id = self.config.get("group_id") or "default"
+        kwargs["root_scope"] = f"/{group_id}/{crew_id}"
+
+        cognitive = getattr(memory_config, "cognitive_config", None)
+        cognitive_dict = (
+            cognitive.model_dump(exclude_none=True)
+            if cognitive is not None and hasattr(cognitive, "model_dump")
+            else (cognitive or {})
+        )
+
+        # ``memory_llm_model`` is a string override — everything else maps
+        # directly onto ``Memory`` constructor parameters.
+        llm_override = cognitive_dict.pop("memory_llm_model", None)
+        if llm_override:
+            kwargs["llm"] = llm_override
+        else:
+            memory_llm = self._resolve_memory_llm(crew_kwargs)
+            if memory_llm is not None:
+                kwargs["llm"] = memory_llm
+
+        for key in (
+            "recency_weight",
+            "semantic_weight",
+            "importance_weight",
+            "recency_half_life_days",
+            "consolidation_threshold",
+            "consolidation_limit",
+            "default_importance",
+            "confidence_threshold_high",
+            "confidence_threshold_low",
+            "complex_query_threshold",
+            "exploration_budget",
+            "query_analysis_threshold",
+        ):
+            if key in cognitive_dict and cognitive_dict[key] is not None:
+                kwargs[key] = cognitive_dict[key]
+        return kwargs
+
+    def _resolve_memory_llm(self, crew_kwargs: Dict[str, Any]) -> Optional[Any]:
+        """Pick an LLM for memory analysis so we don't implicitly need OpenAI.
+
+        Preference order: explicit crew ``manager_llm`` > first agent's ``llm``
+        > ``None`` (lets ``Memory`` default to ``gpt-4o-mini`` if the caller
+        has ``OPENAI_API_KEY`` set).
+        """
+        manager = crew_kwargs.get("manager_llm")
+        if manager is not None:
+            return manager
+        agents = crew_kwargs.get("agents") or []
+        for agent in agents:
+            llm = getattr(agent, "llm", None)
+            if llm is not None:
+                return llm
+        return None
 
     def attach_memory_trace_context(
         self,
@@ -694,15 +682,22 @@ class CrewMemoryService:
                 try:
                     if not mem_obj:
                         return
-                    storage = getattr(mem_obj, "storage", None)
-                    if storage is not None and hasattr(storage, "trace_context"):
-                        setattr(storage, "trace_context", trace_ctx)
+                    # Unified Memory exposes the backend as either ``_storage``
+                    # (private attr) or ``storage`` (public field). Tag both
+                    # if they're present.
+                    for attr in ("_storage", "storage"):
+                        storage = getattr(mem_obj, attr, None)
+                        if storage is not None and hasattr(storage, "trace_context"):
+                            setattr(storage, "trace_context", trace_ctx)
                     if hasattr(mem_obj, "trace_context"):
                         setattr(mem_obj, "trace_context", trace_ctx)
                 except Exception:
                     pass
 
-            # Apply to all memory types
+            # Unified Memory on CrewAI 1.10+ is stored on ``crew._memory``.
+            # Legacy attrs are retained defensively in case a caller is
+            # passing a pre-1.10 crew instance.
+            set_trace_ctx(getattr(crew, "_memory", None))
             set_trace_ctx(getattr(crew, "_short_term_memory", None))
             set_trace_ctx(getattr(crew, "_long_term_memory", None))
             set_trace_ctx(getattr(crew, "_entity_memory", None))
@@ -797,44 +792,37 @@ class CrewMemoryService:
             logger.debug(f"Could not attach tools trace context: {trace_ctx_err}")
 
     def set_crew_reference_on_memory(self, crew: Any) -> None:
-        """
-        Set crew reference on memory wrappers for proper model attribution
+        """Propagate the crew reference onto the unified memory storage.
 
-        Args:
-            crew: Crew instance
+        The unified Memory class keeps its storage on ``_storage`` (private
+        attr). Any Kasal storage backend that exposes ``crew`` (for agent/LLM
+        attribution) will receive the crew instance here.
         """
         try:
-            # Long-term memory
-            if hasattr(crew, "_long_term_memory") and crew._long_term_memory:
-                long_term_storage = crew._long_term_memory.storage
-                if hasattr(long_term_storage, "crew"):
-                    long_term_storage.crew = crew
-                    logger.info(
-                        "Set crew reference for long-term memory to enable LLM model extraction"
-                    )
+            memory_obj = getattr(crew, "_memory", None)
+            if not memory_obj:
+                return
 
-            # Entity memory
-            if hasattr(crew, "_entity_memory") and crew._entity_memory:
-                entity_storage = crew._entity_memory.storage
-                if hasattr(entity_storage, "set_agent_context") and crew.agents:
-                    first_agent = crew.agents[0]
-                    entity_storage.set_agent_context(first_agent)
-                    logger.info(
-                        f"Set agent context for entity memory: {getattr(first_agent, 'role', 'Unknown')}"
-                    )
-                if hasattr(entity_storage, "crew"):
-                    entity_storage.crew = crew
-                    logger.info("Set crew reference for entity memory")
+            storage = (
+                getattr(memory_obj, "_storage", None)
+                or getattr(memory_obj, "storage", None)
+            )
+            if storage is None:
+                return
 
-            # Short-term memory
-            if hasattr(crew, "_short_term_memory") and crew._short_term_memory:
-                short_term_storage = crew._short_term_memory.storage
-                if hasattr(short_term_storage, "crew"):
-                    short_term_storage.crew = crew
-                    logger.info("Set crew reference for short-term memory")
+            if hasattr(storage, "crew"):
+                storage.crew = crew
+                logger.info("Set crew reference on unified memory storage")
+
+            if hasattr(storage, "set_agent_context") and getattr(crew, "agents", None):
+                storage.set_agent_context(crew.agents[0])
+                logger.info(
+                    "Set agent context on unified memory storage: %s",
+                    getattr(crew.agents[0], "role", "Unknown"),
+                )
 
         except Exception as context_error:
-            logger.warning(f"Failed to set context on memory backends: {context_error}")
+            logger.warning(f"Failed to set context on memory backend: {context_error}")
 
     def restore_storage_directory(self) -> None:
         """Restore original storage directory environment variable"""

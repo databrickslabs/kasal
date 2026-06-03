@@ -63,15 +63,14 @@ describe('memoryBackendStore', () => {
       
       act(() => {
         result.current.setError('Previous error');
-        result.current.updateConfig({ 
+        result.current.updateConfig({
           backend_type: MemoryBackendType.DATABRICKS,
-          enable_short_term: false,
+          cognitive_config: { semantic_weight: 0.6 },
         });
       });
-      
+
       expect(result.current.config.backend_type).toBe(MemoryBackendType.DATABRICKS);
-      expect(result.current.config.enable_short_term).toBe(false);
-      expect(result.current.config.enable_long_term).toBe(true); // from default
+      expect(result.current.config.cognitive_config?.semantic_weight).toBe(0.6);
       expect(result.current.error).toBeNull();
     });
   });

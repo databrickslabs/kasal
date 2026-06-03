@@ -54,6 +54,8 @@ import {
 } from '../../types/memoryBackend';
 import { DefaultMemoryBackendService } from '../../api/DefaultMemoryBackendService';
 import { MemoryBackendService } from '../../api/MemoryBackendService';
+import { CognitiveMemoryPanel } from './CognitiveMemoryPanel';
+import { MemoryRecordsBrowser } from './MemoryRecordsBrowser';
 
 interface MemoryBackendConfigProps {
   onConfigChange?: (isValid: boolean) => void;
@@ -81,6 +83,7 @@ export const MemoryBackendConfig: React.FC<MemoryBackendConfigProps> = ({
   } = useMemoryBackendStore();
 
   const [lakebaseStatus, setLakebaseStatus] = useState<{ success: boolean; message: string } | null>(null);
+  const [browserOpen, setBrowserOpen] = useState(false);
   const [expandedSections, setExpandedSections] = useState({
     authentication: false,
     advanced: false,
@@ -89,7 +92,7 @@ export const MemoryBackendConfig: React.FC<MemoryBackendConfigProps> = ({
   // Index creation dialog state
   const [createIndexDialog, setCreateIndexDialog] = useState({
     open: false,
-    indexType: 'short_term' as 'short_term' | 'long_term' | 'entity' | 'document',
+    indexType: 'memory' as 'memory' | 'document',
     catalog: '',
     schema: '',
     tableName: '',
@@ -143,7 +146,7 @@ export const MemoryBackendConfig: React.FC<MemoryBackendConfigProps> = ({
         setTimeout(() => {
           setCreateIndexDialog({
             open: false,
-            indexType: 'short_term',
+            indexType: 'memory',
             catalog: '',
             schema: '',
             tableName: '',
@@ -176,7 +179,7 @@ export const MemoryBackendConfig: React.FC<MemoryBackendConfigProps> = ({
       databricks_config: newType === MemoryBackendType.DATABRICKS
         ? {
             endpoint_name: '',
-            short_term_index: '',
+            memory_index: '',
             embedding_dimension: 1024,
             auth_type: 'default',
           }
@@ -184,9 +187,7 @@ export const MemoryBackendConfig: React.FC<MemoryBackendConfigProps> = ({
       lakebase_config: newType === MemoryBackendType.LAKEBASE
         ? {
             embedding_dimension: 1024,
-            short_term_table: 'crew_short_term_memory',
-            long_term_table: 'crew_long_term_memory',
-            entity_table: 'crew_entity_memory',
+            memory_table: 'crew_memory',
             tables_initialized: false,
           }
         : undefined,
@@ -199,16 +200,14 @@ export const MemoryBackendConfig: React.FC<MemoryBackendConfigProps> = ({
     const databricksConfig = config.databricks_config || {
       endpoint_name: '',
       document_endpoint_name: '',
-      short_term_index: '',
-      long_term_index: '',
-      entity_index: '',
+      memory_index: '',
       document_index: '',
       workspace_url: '',
       personal_access_token: '',
       service_principal_client_id: '',
       service_principal_client_secret: '',
       auth_type: 'default' as const,
-      embedding_dimension: 1024
+      embedding_dimension: 1024,
     };
 
     return (
@@ -295,20 +294,24 @@ export const MemoryBackendConfig: React.FC<MemoryBackendConfigProps> = ({
             </Grid>
           )}
 
-          {/* Index Selection */}
+          {/* Index Selection — CrewAI 1.10+ uses a single unified memory index */}
           <Grid item xs={12}>
             <Typography variant="subtitle2" sx={{ mb: 2 }}>
-              Memory Index Configuration
+              Unified Memory Index
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: 'block' }}>
+              CrewAI&apos;s unified cognitive memory stores every record (short-term, long-term,
+              and entity memories) in a single index with UNIFIED_SCHEMA.
             </Typography>
           </Grid>
 
-          <Grid item xs={12} md={4}>
+          <Grid item xs={12}>
             <FormControl fullWidth required>
-              <InputLabel>Short-term Memory Index</InputLabel>
+              <InputLabel>Memory Index</InputLabel>
               <Select
-                value={databricksConfig.short_term_index || ''}
-                onChange={(e) => updateDatabricksConfig({ short_term_index: e.target.value })}
-                label="Short-term Memory Index"
+                value={databricksConfig.memory_index || ''}
+                onChange={(e) => updateDatabricksConfig({ memory_index: e.target.value })}
+                label="Memory Index"
               >
                 <MenuItem value="">
                   <em>Select an index</em>
@@ -316,51 +319,11 @@ export const MemoryBackendConfig: React.FC<MemoryBackendConfigProps> = ({
                 {availableIndexes.map((index) => (
                   <MenuItem key={index.name} value={index.name}>
                     {index.name}
-                    <Chip 
-                      label={`${index.dimension}D`} 
-                      size="small" 
-                      sx={{ ml: 1 }} 
+                    <Chip
+                      label={`${index.dimension}D`}
+                      size="small"
+                      sx={{ ml: 1 }}
                     />
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-
-          <Grid item xs={12} md={4}>
-            <FormControl fullWidth>
-              <InputLabel>Long-term Memory Index</InputLabel>
-              <Select
-                value={databricksConfig.long_term_index || ''}
-                onChange={(e) => updateDatabricksConfig({ long_term_index: e.target.value })}
-                label="Long-term Memory Index"
-              >
-                <MenuItem value="">
-                  <em>None</em>
-                </MenuItem>
-                {availableIndexes.map((index) => (
-                  <MenuItem key={index.name} value={index.name}>
-                    {index.name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-
-          <Grid item xs={12} md={4}>
-            <FormControl fullWidth>
-              <InputLabel>Entity Memory Index</InputLabel>
-              <Select
-                value={databricksConfig.entity_index || ''}
-                onChange={(e) => updateDatabricksConfig({ entity_index: e.target.value })}
-                label="Entity Memory Index"
-              >
-                <MenuItem value="">
-                  <em>None</em>
-                </MenuItem>
-                {availableIndexes.map((index) => (
-                  <MenuItem key={index.name} value={index.name}>
-                    {index.name}
                   </MenuItem>
                 ))}
               </Select>
@@ -545,27 +508,6 @@ export const MemoryBackendConfig: React.FC<MemoryBackendConfigProps> = ({
                     helperText="The dimension of your embedding vectors"
                   />
                   
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={config.enable_relationship_retrieval || false}
-                        onChange={(e) => updateConfig({ 
-                          enable_relationship_retrieval: e.target.checked 
-                        })}
-                        color="primary"
-                      />
-                    }
-                    label={
-                      <Box>
-                        <Typography variant="body2">
-                          Enable Relationship-Based Entity Retrieval
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          Experimental: Use graph-based relationships for smarter entity search instead of just semantic similarity.
-                        </Typography>
-                      </Box>
-                    }
-                  />
                 </Box>
               </Collapse>
             </Box>
@@ -647,9 +589,7 @@ export const MemoryBackendConfig: React.FC<MemoryBackendConfigProps> = ({
               try {
                 const result = await MemoryBackendService.initializeLakebaseTables({
                   embedding_dimension: lakebaseConfig.embedding_dimension,
-                  short_term_table: lakebaseConfig.short_term_table,
-                  long_term_table: lakebaseConfig.long_term_table,
-                  entity_table: lakebaseConfig.entity_table,
+                  memory_table: lakebaseConfig.memory_table,
                 });
                 if (result.success) {
                   updateConfig({
@@ -771,42 +711,6 @@ export const MemoryBackendConfig: React.FC<MemoryBackendConfigProps> = ({
         </RadioGroup>
       </FormControl>
 
-      {/* Memory Type Toggles - only show for active backends */}
-      {config.backend_type !== MemoryBackendType.DEFAULT && (
-        <Box sx={{ mt: 3, mb: 2 }}>
-          <Typography variant="subtitle1" sx={{ mb: 1 }}>
-            Enabled Memory Types
-          </Typography>
-          <FormControlLabel
-            control={
-              <Switch
-                checked={config.enable_short_term ?? true}
-                onChange={(e) => updateConfig({ enable_short_term: e.target.checked })}
-              />
-            }
-            label="Short-term Memory"
-          />
-          <FormControlLabel
-            control={
-              <Switch
-                checked={config.enable_long_term ?? true}
-                onChange={(e) => updateConfig({ enable_long_term: e.target.checked })}
-              />
-            }
-            label="Long-term Memory"
-          />
-          <FormControlLabel
-            control={
-              <Switch
-                checked={config.enable_entity ?? true}
-                onChange={(e) => updateConfig({ enable_entity: e.target.checked })}
-              />
-            }
-            label="Entity Memory"
-          />
-        </Box>
-      )}
-
       {config.backend_type !== MemoryBackendType.DEFAULT && (
         <>
           <Divider sx={{ my: 3 }} />
@@ -816,6 +720,28 @@ export const MemoryBackendConfig: React.FC<MemoryBackendConfigProps> = ({
           {renderLakebaseConfig()}
         </>
       )}
+
+      {/* Browse stored memory records (works for every backend) */}
+      <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={<StorageIcon />}
+          onClick={() => setBrowserOpen(true)}
+        >
+          Browse Memory
+        </Button>
+      </Box>
+
+      <MemoryRecordsBrowser
+        open={browserOpen}
+        onClose={() => setBrowserOpen(false)}
+      />
+
+      {/* Cognitive memory tuning (applies to every backend, including DEFAULT) */}
+      <CognitiveMemoryPanel />
+
+
 
       {/* Validation Errors */}
       {validationErrors.length > 0 && (
@@ -890,12 +816,12 @@ export const MemoryBackendConfig: React.FC<MemoryBackendConfigProps> = ({
                   <>
                     <strong>Important:</strong> This will create a Direct Access index on your memory endpoint.
                     <br />
-                    Direct Access indexes are perfect for dynamic AI agent memory (short-term, long-term, entity).
+                    Direct Access indexes are used by CrewAI&apos;s unified cognitive memory.
                   </>
                 )}
               </Typography>
             </Alert>
-            
+
             <Grid container spacing={2}>
               <Grid item xs={12}>
                 <FormControl fullWidth>
@@ -904,13 +830,11 @@ export const MemoryBackendConfig: React.FC<MemoryBackendConfigProps> = ({
                     value={createIndexDialog.indexType}
                     onChange={(e) => setCreateIndexDialog({
                       ...createIndexDialog,
-                      indexType: e.target.value as 'short_term' | 'long_term' | 'entity' | 'document'
+                      indexType: e.target.value as 'memory' | 'document'
                     })}
                     label="Index Type"
                   >
-                    <MenuItem value="short_term">Short-term Memory</MenuItem>
-                    <MenuItem value="long_term">Long-term Memory</MenuItem>
-                    <MenuItem value="entity">Entity Memory</MenuItem>
+                    <MenuItem value="memory">Unified Cognitive Memory</MenuItem>
                     <MenuItem value="document">Document Embeddings</MenuItem>
                   </Select>
                 </FormControl>

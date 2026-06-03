@@ -160,8 +160,14 @@ export const useSSE = <T = any>(
 
       onDisconnectRef.current?.();
 
-      // Only give up after many consecutive failures
-      if (attempt >= maxReconnectAttempts) {
+      // Only give up after many consecutive failures. Surface a fatal error so
+      // consumers can stop showing the optimistic "will reconnect" state.
+      const givingUp = attempt >= maxReconnectAttempts;
+      onErrorRef.current?.(
+        Object.assign(new Event('error'), { isFatal: givingUp }) as Event
+      );
+
+      if (givingUp) {
         console.error(
           `[SSE] ${new Date().toISOString()} | GIVE UP  | ${endpoint} | ` +
           `${maxReconnectAttempts} consecutive errors`

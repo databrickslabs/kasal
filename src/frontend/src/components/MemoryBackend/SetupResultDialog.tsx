@@ -136,60 +136,22 @@ export const SetupResultDialog: React.FC<SetupResultDialogProps> = ({
                   Indexes Created:
                 </Typography>
                 <List dense>
-                  {setupResult.indexes.short_term && (
+                  {setupResult.indexes.unified && (
                     <ListItem>
                       <ListItemIcon>
-                        {renderSetupStatusIcon(setupResult.indexes.short_term.status)}
+                        {renderSetupStatusIcon(setupResult.indexes.unified.status)}
                       </ListItemIcon>
                       <ListItemText
                         primary={
-                          <Link 
-                            href={buildVectorSearchIndexUrl(getWorkspaceUrl(), setupResult.indexes.short_term.name)}
+                          <Link
+                            href={buildVectorSearchIndexUrl(getWorkspaceUrl(), setupResult.indexes.unified.name)}
                             target="_blank"
                             rel="noopener noreferrer"
                           >
-                            {setupResult.indexes.short_term.name}
+                            {setupResult.indexes.unified.name}
                           </Link>
                         }
-                        secondary="Short-term Memory Index"
-                      />
-                    </ListItem>
-                  )}
-                  {setupResult.indexes.long_term && (
-                    <ListItem>
-                      <ListItemIcon>
-                        {renderSetupStatusIcon(setupResult.indexes.long_term.status)}
-                      </ListItemIcon>
-                      <ListItemText
-                        primary={
-                          <Link 
-                            href={buildVectorSearchIndexUrl(getWorkspaceUrl(), setupResult.indexes.long_term.name)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            {setupResult.indexes.long_term.name}
-                          </Link>
-                        }
-                        secondary="Long-term Memory Index"
-                      />
-                    </ListItem>
-                  )}
-                  {setupResult.indexes.entity && (
-                    <ListItem>
-                      <ListItemIcon>
-                        {renderSetupStatusIcon(setupResult.indexes.entity.status)}
-                      </ListItemIcon>
-                      <ListItemText
-                        primary={
-                          <Link 
-                            href={buildVectorSearchIndexUrl(getWorkspaceUrl(), setupResult.indexes.entity.name)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            {setupResult.indexes.entity.name}
-                          </Link>
-                        }
-                        secondary="Entity Memory Index"
+                        secondary="Unified Cognitive Memory Index"
                       />
                     </ListItem>
                   )}
