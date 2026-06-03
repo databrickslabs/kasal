@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from src.utils.telemetry import get_user_agent_header, KasalProduct
+
 logger = logging.getLogger(__name__)
 
 
@@ -134,6 +136,7 @@ class DashboardRepository:
             headers["Authorization"] = f"Bearer {self._pat}"
         else:
             logger.warning("[DashboardRepo] No auth token — request may return 401")
+        headers.update(get_user_agent_header(KasalProduct.DASHBOARD))
         return headers
 
     # ──────────────────────────────────────────────────────────────────────────

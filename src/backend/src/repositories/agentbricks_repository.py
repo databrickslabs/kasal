@@ -14,6 +14,8 @@ import time
 from typing import Optional, Dict, Any, List, Tuple
 import httpx
 
+from src.utils.telemetry import get_user_agent_header, KasalProduct
+
 from src.schemas.agentbricks import (
     AgentBricksEndpoint,
     AgentBricksEndpointsRequest,
@@ -126,8 +128,10 @@ class AgentBricksRepository:
             if not auth:
                 return None, "No authentication method available"
 
-            # Return headers from auth context
-            return auth.get_headers(), None
+            # Return headers from auth context with telemetry
+            headers = auth.get_headers()
+            headers.update(get_user_agent_header(KasalProduct.AGENTBRICKS))
+            return headers, None
 
         except Exception as e:
             logger.error(f"Error getting auth headers: {e}")
