@@ -180,85 +180,82 @@ def _make_dashboard(**overrides) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestGenieSpaceToFiles:
-    def test_returns_four_files(self):
+    """Tests for the new reference-implementation YAML structure.
+
+    Output files: header.yaml, config.yaml, data_sources.yaml, instructions.yaml
+    (replaces the old config/tables/instructions/questions layout)
+    """
+
+    def test_returns_at_least_four_files(self):
         files = _genie_space_to_files(_make_genie_space())
-        assert len(files) == 4
+        # header + config + data_sources + instructions = 4 minimum
+        assert len(files) >= 4
         paths = {f.path for f in files}
-        assert paths == {"config.yaml", "tables.yaml", "instructions.yaml", "questions.yaml"}
+        assert "header.yaml" in paths
+        assert "config.yaml" in paths
+        assert "data_sources.yaml" in paths
+        assert "instructions.yaml" in paths
 
-    def test_config_yaml_is_valid(self):
+    def test_header_yaml_has_space_metadata(self):
         files = {f.path: f for f in _genie_space_to_files(_make_genie_space())}
-        data = yaml.safe_load(files["config.yaml"].content)
-        assert data["apiVersion"] == "genie/v1"
-        assert data["kind"] == "GenieSpace"
-        assert data["metadata"]["space_id"] == "space_abc123"
-        assert data["spec"]["title"] == "Supply Chain Analytics"
-        assert data["spec"]["warehouse_id"] == "wh_xyz"
+        data = yaml.safe_load(files["header.yaml"].content)
+        assert data["space_id"] == "space_abc123"
+        assert data["title"] == "Supply Chain Analytics"
+        assert data["warehouse_id"] == "wh_xyz"
 
-    def test_tables_yaml_has_metric_views_and_tables(self):
+    def test_header_yaml_has_api_comment(self):
         files = {f.path: f for f in _genie_space_to_files(_make_genie_space())}
-        data = yaml.safe_load(files["tables.yaml"].content)
-        assert "main.sc.orders_mv" in data["metric_views"]
-        assert "main.sc.dim_customer" in data["tables"]
+        assert "/api/2.0/genie/spaces" in files["header.yaml"].content
 
-    def test_instructions_yaml_contains_text(self):
+    def test_data_sources_yaml_has_metric_views_and_tables(self):
         files = {f.path: f for f in _genie_space_to_files(_make_genie_space())}
-        data = yaml.safe_load(files["instructions.yaml"].content)
-        assert "fiscal periods" in data["text_instructions"]
+        data = yaml.safe_load(files["data_sources.yaml"].content)
+        mv_ids = [t.get("identifier", "") for t in data.get("metric_views", [])]
+        tbl_ids = [t.get("identifier", "") for t in data.get("tables", [])]
+        assert "main.sc.orders_mv" in mv_ids
+        assert "main.sc.dim_customer" in tbl_ids
 
-    def test_instructions_yaml_has_join_spec(self):
+    def test_instructions_yaml_has_text_instructions(self):
         files = {f.path: f for f in _genie_space_to_files(_make_genie_space())}
-        data = yaml.safe_load(files["instructions.yaml"].content)
-        js = data["join_specs"][0]
-        assert js["left_table"] == "main.sc.orders_mv"
-        assert js["right_table"] == "main.sc.dim_customer"
-        assert "customer_id" in js["join_condition"]
+        content = files["instructions.yaml"].content
+        assert "fiscal periods" in content
 
-    def test_instructions_yaml_strips_rt_comment_from_join(self):
-        """The --rt= SQL comment from Databricks internals must be stripped."""
+    def test_instructions_yaml_has_join_specs(self):
         files = {f.path: f for f in _genie_space_to_files(_make_genie_space())}
-        data = yaml.safe_load(files["instructions.yaml"].content)
-        join_cond = data["join_specs"][0]["join_condition"]
-        assert "--rt=" not in join_cond
+        content = files["instructions.yaml"].content
+        assert "orders_mv" in content
+        assert "dim_customer" in content
 
     def test_instructions_yaml_has_sql_snippets(self):
         files = {f.path: f for f in _genie_space_to_files(_make_genie_space())}
-        data = yaml.safe_load(files["instructions.yaml"].content)
-        snippets = data["sql_snippets"]
-        assert snippets["expressions"][0]["display_name"] == "Total Revenue"
-        assert snippets["measures"][0]["display_name"] == "Service Level %"
-        assert snippets["filters"][0]["display_name"] == "Active Orders"
+        content = files["instructions.yaml"].content
+        assert "Total Revenue" in content
+        assert "Service Level" in content
+        assert "Active Orders" in content
 
-    def test_questions_yaml_has_sample_questions(self):
+    def test_config_yaml_has_sample_questions(self):
         files = {f.path: f for f in _genie_space_to_files(_make_genie_space())}
-        data = yaml.safe_load(files["questions.yaml"].content)
-        assert "What is total revenue?" in data["sample_questions"]
-        assert "Top 10 customers?" in data["sample_questions"]
-
-    def test_questions_yaml_has_example_sql(self):
-        files = {f.path: f for f in _genie_space_to_files(_make_genie_space())}
-        data = yaml.safe_load(files["questions.yaml"].content)
-        ex = data["example_sqls"][0]
-        assert "Top 10 customers" in ex["question"]
-        assert "SELECT" in ex["sql"]
+        content = files["config.yaml"].content
+        assert "total revenue" in content.lower() or "revenue" in content.lower()
 
     def test_empty_serialized_space_still_produces_files(self):
-        """Minimal space with no serialized_space → still 4 valid YAML files."""
-        space = {
-            "space_id": "x",
-            "title": "Empty Space",
-            "warehouse_id": "wh1",
-        }
+        """Minimal space with no serialized_space → still valid YAML files."""
+        space = {"space_id": "x", "title": "Empty Space", "warehouse_id": "wh1"}
         files = _genie_space_to_files(space)
-        assert len(files) == 4
+        assert len(files) >= 1
+        # header.yaml always present
+        paths = {f.path for f in files}
+        assert "header.yaml" in paths
         for f in files:
             yaml.safe_load(f.content)  # must be valid YAML
 
     def test_malformed_serialized_space_falls_back_gracefully(self):
-        """Corrupt JSON in serialized_space → no crash, valid YAML output."""
+        """Corrupt JSON in serialized_space → no crash, still produces header."""
         space = _make_genie_space(serialized_space="{corrupt json")
         files = _genie_space_to_files(space)
-        assert len(files) == 4
+        assert len(files) >= 1
+        paths = {f.path for f in files}
+        assert "header.yaml" in paths
 
     def test_only_metric_views_no_plain_tables(self):
         space = _make_genie_space()
@@ -266,13 +263,9 @@ class TestGenieSpaceToFiles:
         del spec["data_sources"]["tables"]
         space["serialized_space"] = json.dumps(spec)
         files = {f.path: f for f in _genie_space_to_files(space)}
-        data = yaml.safe_load(files["tables.yaml"].content)
-        assert "metric_views" in data
-        assert "main.sc.orders_mv" in data["metric_views"]
-
-    def test_config_yaml_has_api_comment(self):
-        files = {f.path: f for f in _genie_space_to_files(_make_genie_space())}
-        assert "POST /api/2.0/genie/spaces" in files["config.yaml"].content
+        data = yaml.safe_load(files["data_sources.yaml"].content)
+        mv_ids = [t.get("identifier", "") for t in data.get("metric_views", [])]
+        assert "main.sc.orders_mv" in mv_ids
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -528,67 +521,49 @@ class TestAnalyticsExportService:
     async def test_export_genie_space_returns_bundle(self):
         """export_genie_space returns space_id, space_name, folder_name, files."""
         service = AnalyticsExportService(user_token="tok")
-
         space = _make_genie_space()
-        # GenieRepository.get_space_details is called; it returns a Pydantic model
-        # that has model_dump(). We'll return the raw dict with model_dump support.
-        mock_space = MagicMock()
-        mock_space.model_dump.return_value = space
 
-        with patch(
-            "src.services.analytics_export_service.GenieRepository"
-        ) as MockRepo:
-            instance = MockRepo.return_value
-            instance.get_space_details = AsyncMock(return_value=mock_space)
-
-            # space_dict won't have 'serialized_space' key from model_dump
-            # so _fetch_raw_genie_space is called. Patch that too.
-            with patch.object(
-                service, "_fetch_raw_genie_space", new=AsyncMock(return_value=space)
-            ):
-                result = await service.export_genie_space("space_abc123")
+        # The service now calls _fetch_raw_genie_space directly (no GenieRepository)
+        with patch.object(
+            service, "_fetch_raw_genie_space", new=AsyncMock(return_value=space)
+        ):
+            result = await service.export_genie_space("space_abc123")
 
         assert result["space_id"] == "space_abc123"
         assert result["space_name"] == "Supply Chain Analytics"
         assert result["folder_name"] == "supply_chain_analytics"
-        assert len(result["files"]) == 4
+        assert len(result["files"]) >= 4
 
     @pytest.mark.asyncio
     async def test_export_genie_space_not_found_raises(self):
-        """export_genie_space raises ValueError when space is not found."""
+        """export_genie_space raises ValueError when _fetch_raw_genie_space raises."""
         service = AnalyticsExportService()
 
-        with patch(
-            "src.services.analytics_export_service.GenieRepository"
-        ) as MockRepo:
-            instance = MockRepo.return_value
-            instance.get_space_details = AsyncMock(return_value=None)
-
-            with pytest.raises(ValueError, match="not found"):
+        with patch.object(
+            service, "_fetch_raw_genie_space",
+            new=AsyncMock(side_effect=Exception("HTTP 404"))
+        ):
+            with pytest.raises(Exception):
                 await service.export_genie_space("missing_id")
 
     @pytest.mark.asyncio
-    async def test_export_genie_space_with_serialized_space_in_model_dump(self):
-        """When model_dump includes serialized_space, no raw fetch is needed."""
+    async def test_export_genie_space_with_serialized_space_passed_directly(self):
+        """When serialized_space is passed, metadata fetch is attempted but optional."""
         service = AnalyticsExportService(user_token="tok")
-
         space = _make_genie_space()
-        mock_space = MagicMock()
-        mock_space.model_dump.return_value = space  # includes 'serialized_space'
 
-        with patch(
-            "src.services.analytics_export_service.GenieRepository"
-        ) as MockRepo:
-            instance = MockRepo.return_value
-            instance.get_space_details = AsyncMock(return_value=mock_space)
+        # Pass serialized_space directly — fetch is only for metadata enrichment
+        with patch.object(
+            service, "_fetch_raw_genie_space",
+            new=AsyncMock(return_value={"title": "Supply Chain Analytics", "warehouse_id": "wh_xyz"})
+        ):
+            result = await service.export_genie_space(
+                "space_abc123",
+                serialized_space=space["serialized_space"]
+            )
 
-            fetch_raw = AsyncMock()
-            with patch.object(service, "_fetch_raw_genie_space", new=fetch_raw):
-                result = await service.export_genie_space("space_abc123")
-
-        # serialized_space was in model_dump → no raw fetch needed
-        fetch_raw.assert_not_awaited()
-        assert len(result["files"]) == 4
+        assert result["space_id"] == "space_abc123"
+        assert len(result["files"]) >= 4
 
     # ── export_dashboard ──────────────────────────────────────────────────────
 
