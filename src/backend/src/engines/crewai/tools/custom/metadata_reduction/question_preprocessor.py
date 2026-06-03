@@ -326,8 +326,9 @@ Question: "{question}"
 Return JSON:
 {{"measures": ["measure names from question"], "dimensions": ["dimension/grouping columns"], "time_grain": "year|quarter|month|week|day|null", "output_shape": "single_value|top_n|trend|comparison|list"}}"""
 
+            from src.utils.telemetry import get_user_agent_header, KasalProduct
             url = f"{llm_workspace_url.rstrip('/')}/serving-endpoints/{llm_model}/invocations"
-            headers = {"Authorization": f"Bearer {llm_token}", "Content-Type": "application/json"}
+            headers = {"Authorization": f"Bearer {llm_token}", "Content-Type": "application/json", **get_user_agent_header(KasalProduct.POWERBI)}
             payload = {
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": 500,

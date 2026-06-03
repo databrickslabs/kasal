@@ -242,6 +242,8 @@ class MetricViewDeployerTool(BaseTool):
                     results[table_key] = {'status': 'error', 'message': 'Authentication failed'}
                     continue
                 headers = auth.get_headers()
+                from src.utils.telemetry import get_user_agent_header, KasalProduct
+                headers.update(get_user_agent_header(KasalProduct.POWERBI))
                 workspace_url = (auth.workspace_url or '').rstrip('/')
             except Exception as e:
                 results[table_key] = {'status': 'error', 'message': f'Authentication error: {e}'}

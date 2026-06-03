@@ -224,6 +224,8 @@ class GenieSpaceGeneratorTool(BaseTool):
                 return json.dumps({"error": "Authentication failed: no auth context returned"})
             workspace_url = auth.workspace_url  # e.g. "https://my.cloud.databricks.com"
             headers = auth.get_headers()
+            from src.utils.telemetry import get_user_agent_header, KasalProduct
+            headers.update(get_user_agent_header(KasalProduct.GENIE))
         except Exception as e:
             return json.dumps({"error": f"Authentication failed: {e}"})
 

@@ -496,6 +496,8 @@ class DatabricksDashboardCreatorTool(BaseTool):
                 return json.dumps({"error": "Authentication failed"})
             workspace_url = (auth.workspace_url or '').rstrip('/')
             headers = auth.get_headers()
+            from src.utils.telemetry import get_user_agent_header, KasalProduct
+            headers.update(get_user_agent_header(KasalProduct.DASHBOARD))
         except Exception as e:
             return json.dumps({"error": f"Authentication error: {e}"})
 
