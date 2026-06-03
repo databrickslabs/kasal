@@ -32,6 +32,10 @@ from src.models.agent import Agent
 from src.models.task import Task
 from src.models.group import Group
 from src.models.flow import Flow
+from src.models.group_tool import GroupTool
+
+# Tools required by the PBI migration pipeline — pre-enabled for bi-specialist
+BI_TOOLS = [78, 86, 88, 90, 91, 92, 93, 94, 95]
 
 logger = logging.getLogger(__name__)
 
@@ -1121,6 +1125,28 @@ async def seed() -> None:
                 await _seed_task(session, entry["task"])
                 await _seed_crew(session, entry["crew"])
             await _seed_flow(session, BI_FLOW)
+
+            # Enable required tools for the bi-specialist workspace
+            from sqlalchemy import select as _select
+            from datetime import datetime as _dt
+            for _tool_id in BI_TOOLS:
+                _exists = await session.execute(
+                    _select(GroupTool).where(
+                        GroupTool.tool_id == _tool_id,
+                        GroupTool.group_id == BI_GROUP_ID,
+                    )
+                )
+                if not _exists.scalar_one_or_none():
+                    session.add(GroupTool(
+                        tool_id=_tool_id,
+                        group_id=BI_GROUP_ID,
+                        enabled=True,
+                        config={},
+                        credentials_status="unknown",
+                        created_at=_dt.utcnow(),
+                        updated_at=_dt.utcnow(),
+                    ))
+
             await session.commit()
             logger.info(
                 f"✅ bi-specialist workspace seeded: "
