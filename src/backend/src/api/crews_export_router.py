@@ -370,7 +370,10 @@ async def get_deployment_status(
         raise BadRequestError("No valid group context provided")
 
     from databricks.sdk import WorkspaceClient
+    from databricks.sdk.useragent import with_product
+    from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
 
+    with_product(f"{KASAL_BASE}_{KasalProduct.DEPLOYMENT}", VERSION)
     w = WorkspaceClient()
     endpoint = w.serving_endpoints.get(endpoint_name)
 
@@ -424,7 +427,10 @@ async def delete_deployment(
         raise BadRequestError("No valid group context provided")
 
     from databricks.sdk import WorkspaceClient
+    from databricks.sdk.useragent import with_product
+    from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
 
+    with_product(f"{KASAL_BASE}_{KasalProduct.DEPLOYMENT}", VERSION)
     w = WorkspaceClient()
     w.serving_endpoints.delete(endpoint_name)
 

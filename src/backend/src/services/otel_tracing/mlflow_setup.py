@@ -160,6 +160,9 @@ async def configure_mlflow_in_subprocess(
                 if _k in os.environ:
                     _pat_backup[_k] = os.environ.pop(_k)
             try:
+                from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
+                from databricks.sdk.useragent import with_product
+                with_product(f"{KASAL_BASE}_{KasalProduct.MLFLOW}", VERSION)
                 w = _WC(host=host, client_id=client_id, client_secret=client_secret)
                 headers = w.config.authenticate()
             finally:

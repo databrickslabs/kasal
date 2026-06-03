@@ -14,6 +14,7 @@ from databricks.sdk.service import files
 
 from src.engines.crewai.callbacks.base import CrewAICallback
 from src.utils.databricks_auth import get_workspace_client
+from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,8 @@ class DatabricksVolumeCallback(CrewAICallback):
 
             # Get workspace client from centralized auth middleware
             # This supports OBO, PAT, and Service Principal OAuth
+            from databricks.sdk.useragent import with_product
+            with_product(f"{KASAL_BASE}_{KasalProduct.VOLUME}", VERSION)
             self._client = await get_workspace_client(user_token=self.token)
 
             if not self._client:

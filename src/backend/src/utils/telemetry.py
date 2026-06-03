@@ -59,6 +59,11 @@ class KasalProduct:
 
     # Model serving
     AGENTBRICKS = "agentbricks"
+    DEPLOYMENT = "deployment"
+
+    # Storage
+    VOLUME = "volume"
+    DASHBOARD = "dashboard"
 
 
 def get_user_agent(product: str = None) -> str:
