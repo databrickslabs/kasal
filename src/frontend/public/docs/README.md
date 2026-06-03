@@ -149,7 +149,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](https:
 Project and documentation version details.
 
 - **Current Version**: 2.0.0
-- **Documentation Updated**: December 2025
+- **Documentation Updated**: June 2026
 - **Minimum Python Version**: 3.10
 - **Minimum Node Version**: 16.0
 
