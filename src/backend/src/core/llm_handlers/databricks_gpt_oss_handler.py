@@ -342,6 +342,20 @@ class DatabricksRetryLLM(LLM):
         super().__init__(**kwargs)
         self._original_model_name = kwargs.get("model", "")
         timeout_val = kwargs.get("timeout", self.REQUEST_TIMEOUT)
+
+        # Capture group_id at init time (main thread / request context) so
+        # _try_refresh_token() can pass it explicitly to get_auth_context().
+        # Background threads don't propagate contextvars, so without this the
+        # PAT lookup from DB fails and the fallback silently gives up.
+        self._group_id: str | None = None
+        try:
+            from src.utils.user_context import UserContext
+            ctx = UserContext.get_group_context()
+            if ctx and hasattr(ctx, "primary_group_id"):
+                self._group_id = ctx.primary_group_id
+        except Exception:
+            pass
+
         logger.info(
             f"Initialized DatabricksRetryLLM wrapper for model: {self._original_model_name} (timeout: {timeout_val}s, litellm.request_timeout: {litellm.request_timeout}s)"
         )
@@ -476,15 +490,21 @@ class DatabricksRetryLLM(LLM):
             except RuntimeError:
                 loop = None
 
+            # Pass group_id explicitly so get_auth_context() can find the PAT
+            # from the DB even in a background thread where UserContext context
+            # vars are not propagated (Python contextvars copy-on-task-create
+            # but NOT copy-on-thread-create).
+            gid = self._group_id
+
             if loop and loop.is_running():
                 # We're inside an async context — use a thread to avoid nesting
                 import concurrent.futures
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                     auth_ctx = pool.submit(
-                        lambda: asyncio.run(get_auth_context(user_token=None))
+                        lambda: asyncio.run(get_auth_context(user_token=None, group_id=gid))
                     ).result(timeout=15)
             else:
-                auth_ctx = asyncio.run(get_auth_context(user_token=None))
+                auth_ctx = asyncio.run(get_auth_context(user_token=None, group_id=gid))
 
             if auth_ctx and auth_ctx.token and auth_ctx.token != self.api_key:
                 old_method = "obo"  # the one that just failed
