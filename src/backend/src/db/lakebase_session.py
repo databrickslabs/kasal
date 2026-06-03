@@ -24,6 +24,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from databricks.sdk import WorkspaceClient
 
 from src.core.logger import LoggerManager
+from src.utils.databricks_auth import get_current_databricks_user, get_workspace_client
+from src.utils.telemetry import get_application_name
 
 logger_manager = LoggerManager.get_instance()
 logger = logging.getLogger(__name__)
@@ -313,7 +315,8 @@ class LakebaseSessionFactory:
                         # type and the vector_cosine_ops opclass live in public,
                         # so HNSW indexes and the embedding column only resolve
                         # when public is searchable alongside the kasal schema.
-                        "search_path": "kasal, public"
+                        "search_path": "kasal, public",
+                        "application_name": get_application_name()  # Kasal/0.1.0
                     }
                 },
                 **pool_kwargs

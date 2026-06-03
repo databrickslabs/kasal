@@ -198,11 +198,13 @@ class ConnectionService:
             
             try:
                 # Generate completion via unified LLMManager.completion()
+                from src.utils.telemetry import get_user_agent_header, KasalProduct
                 content = await LLMManager.completion(
                     messages=messages,
                     model=model,
                     temperature=0.7,
                     max_tokens=4000,
+                    extra_headers=get_user_agent_header(KasalProduct.CONNECTION_TEST)
                 )
 
                 # Log the successful interaction

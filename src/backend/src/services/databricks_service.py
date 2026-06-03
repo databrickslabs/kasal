@@ -8,6 +8,7 @@ from src.core.exceptions import KasalError
 
 from src.repositories.databricks_config_repository import DatabricksConfigRepository
 from src.schemas.databricks_config import DatabricksConfigCreate, DatabricksConfigResponse
+from src.utils.telemetry import get_user_agent_header, KasalProduct
 
 logger = logging.getLogger(__name__)
 
@@ -444,6 +445,7 @@ class DatabricksService:
                     }
 
                 headers = auth.get_headers()
+                headers.update(get_user_agent_header(KasalProduct.CONNECTION_TEST))  # Kasal User-Agent
 
             except Exception as e:
                 logger.error(f"Failed to get authentication context: {e}")

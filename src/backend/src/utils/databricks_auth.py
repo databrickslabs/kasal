@@ -910,7 +910,8 @@ def extract_user_token_from_request(request) -> Optional[str]:
 
 async def get_auth_context(
     user_token: Optional[str] = None,
-    group_id: Optional[str] = None
+    group_id: Optional[str] = None,
+    skip_db_auth: bool = False
 ) -> Optional[AuthContext]:
     """
     Get authentication context with token, headers, and environment.
@@ -918,7 +919,7 @@ async def get_auth_context(
 
     Authentication Priority Chain (applies to ALL services):
     1. OBO (On-Behalf-Of) - User token from request headers (if provided)
-    2. PAT (Personal Access Token) - From API Keys Service with group_id
+    2. PAT (Personal Access Token) - From API Keys Service with group_id (skipped if skip_db_auth=True)
     3. SPN (Service Principal) - OAuth with client credentials
 
     Args:
@@ -927,6 +928,9 @@ async def get_auth_context(
         group_id: Optional group_id for PAT lookup. If not provided, will try
                  to get from UserContext. Useful for background threads where
                  UserContext is not available.
+        skip_db_auth: If True, skip authentication methods that require database access
+                      (PAT lookup). Use this when called from callbacks during active
+                      database transactions to avoid session conflicts.
 
     Returns:
         AuthContext with all authentication artifacts, or None if auth failed
@@ -952,6 +956,9 @@ async def get_auth_context(
             messages=[...],
             **params
         )
+        
+        # From callback during database transaction (skip PAT lookup)
+        auth = await get_auth_context(user_token=None, skip_db_auth=True)
     """
     try:
         logger.debug(f"get_auth_context called with user_token={'SET' if user_token else 'None'}")
@@ -996,56 +1003,62 @@ async def get_auth_context(
 
         # Priority 2: Try PAT from ApiKeysService (per-request lookup with group_id)
         # SECURITY: PAT tokens must be loaded with group_id for multi-tenant isolation
-        logger.debug("[AUTH] Priority 2: Attempting PAT authentication from API Keys Service")
+        # Skip this step if skip_db_auth=True (avoids session conflicts during transactions)
         pat_token = None
-        try:
-            from src.services.api_keys_service import ApiKeysService
-            from src.db.session import async_session_factory
-            from src.utils.user_context import UserContext
+        if skip_db_auth:
+            logger.info("[AUTH] Priority 2: Skipping PAT lookup (skip_db_auth=True)")
+        else:
+            logger.debug("[AUTH] Priority 2: Attempting PAT authentication from API Keys Service")
+            try:
+                from src.services.api_keys_service import ApiKeysService
+                from src.db.session import async_session_factory
+                from src.utils.user_context import UserContext
 
-            # Get group_id for multi-tenant isolation
-            # Priority: 1. Passed group_id parameter (for background threads)
-            #           2. UserContext (for request context)
-            effective_group_id = group_id  # Use passed group_id if available
-            if not effective_group_id:
-                try:
-                    group_context = UserContext.get_group_context()
-                    logger.debug(f"[AUTH PAT] Retrieved group_context: {group_context}")
-                    if group_context and hasattr(group_context, 'primary_group_id'):
-                        effective_group_id = group_context.primary_group_id
-                        logger.debug(f"[AUTH PAT] ✓ Using group_id from UserContext: {effective_group_id}")
-                    else:
-                        logger.debug(f"[AUTH PAT] No group_context or primary_group_id. group_context={group_context}")
-                except Exception as e:
-                    logger.debug(f"[AUTH PAT] Could not get group_id from UserContext: {e}")
-            else:
-                logger.debug(f"[AUTH PAT] ✓ Using passed group_id parameter: {effective_group_id}")
+                # Get group_id for multi-tenant isolation
+                # Priority: 1. Passed group_id parameter (for background threads)
+                #           2. UserContext (for request context)
+                effective_group_id = group_id  # Use passed group_id if available
+                if not effective_group_id:
+                    try:
+                        group_context = UserContext.get_group_context()
+                        logger.debug(f"[AUTH PAT] Retrieved group_context: {group_context}")
+                        if group_context and hasattr(group_context, 'primary_group_id'):
+                            effective_group_id = group_context.primary_group_id
+                            logger.debug(f"[AUTH PAT] ✓ Using group_id from UserContext: {effective_group_id}")
+                        else:
+                            logger.debug(f"[AUTH PAT] No group_context or primary_group_id. group_context={group_context}")
+                    except Exception as e:
+                        logger.debug(f"[AUTH PAT] Could not get group_id from UserContext: {e}")
+                else:
+                    logger.debug(f"[AUTH PAT] ✓ Using passed group_id parameter: {effective_group_id}")
 
-            if effective_group_id:
-                logger.debug(f"[AUTH PAT] Attempting to load PAT from database with group_id={effective_group_id}")
-                async with async_session_factory() as session:
-                    api_service = ApiKeysService(session, group_id=effective_group_id)
+                if effective_group_id:
+                    logger.debug(f"[AUTH PAT] Attempting to load PAT from database with group_id={effective_group_id}")
+                    logger.info("[AUTH PAT] ABOUT TO CREATE async_session_factory() - if hang occurs, it's here")
+                    async with async_session_factory() as session:
+                        logger.info("[AUTH PAT] async_session_factory() created successfully")
+                        api_service = ApiKeysService(session, group_id=effective_group_id)
 
-                    for key_name in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY"]:
-                        try:
-                            logger.debug(f"[AUTH PAT] Looking for key: {key_name}")
-                            api_key = await api_service.find_by_name(key_name)
-                            logger.debug(f"[AUTH PAT] Key {key_name} found: {api_key is not None}")
-                            if api_key and api_key.encrypted_value:
-                                from src.utils.encryption_utils import EncryptionUtils
-                                pat_token = EncryptionUtils.decrypt_value(api_key.encrypted_value)
-                                logger.info(f"[AUTH] Priority 2: ✓ PAT loaded from database ({key_name}) with group_id={effective_group_id}")
-                                break
-                        except Exception as e:
-                            logger.warning(f"[AUTH PAT] Error loading {key_name}: {e}")
+                        for key_name in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY"]:
+                            try:
+                                logger.debug(f"[AUTH PAT] Looking for key: {key_name}")
+                                api_key = await api_service.find_by_name(key_name)
+                                logger.debug(f"[AUTH PAT] Key {key_name} found: {api_key is not None}")
+                                if api_key and api_key.encrypted_value:
+                                    from src.utils.encryption_utils import EncryptionUtils
+                                    pat_token = EncryptionUtils.decrypt_value(api_key.encrypted_value)
+                                    logger.info(f"[AUTH] Priority 2: ✓ PAT loaded from database ({key_name}) with group_id={effective_group_id}")
+                                    break
+                            except Exception as e:
+                                logger.warning(f"[AUTH PAT] Error loading {key_name}: {e}")
 
-                if not pat_token:
-                    logger.debug(f"[AUTH] Priority 2: No PAT found in database with group_id={effective_group_id}")
-            else:
-                logger.debug("[AUTH] Priority 2: No group_id available for PAT lookup (neither passed nor from UserContext)")
+                    if not pat_token:
+                        logger.debug(f"[AUTH] Priority 2: No PAT found in database with group_id={effective_group_id}")
+                else:
+                    logger.debug("[AUTH] Priority 2: No group_id available for PAT lookup (neither passed nor from UserContext)")
 
-        except Exception as e:
-            logger.error(f"[AUTH PAT] Error during PAT lookup: {e}")
+            except Exception as e:
+                logger.error(f"[AUTH PAT] Error during PAT lookup: {e}")
 
         # Priority 2b: Check environment variable as PAT fallback
         # In subprocess contexts, MLflow setup converts SPN creds into a
@@ -1067,7 +1080,7 @@ async def get_auth_context(
                 auth_method="pat",
                 user_identity=None
             )
-        else:
+        elif not skip_db_auth:
             logger.debug("[AUTH] Priority 2: No PAT token available")
 
         # Priority 3: Try Service Principal OAuth as last resort
