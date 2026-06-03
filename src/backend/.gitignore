@@ -47,4 +47,13 @@ alembic/versions/
 .DS_Store
 .coverage
 htmlcov/
-.pytest_cache/ 
+.pytest_cache/
+
+# CrewAI unified cognitive memory stores (per-crew local LanceDB) — never commit
+# user data. Matches the CREWAI_STORAGE_DIR naming that
+# CrewMemoryService.setup_storage_directory emits.
+kasal_default_*/
+kasal_databricks_*/
+kasal_lakebase_*/
+**/memories.lance/
+**/memories.lance/**

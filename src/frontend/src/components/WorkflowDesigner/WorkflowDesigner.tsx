@@ -46,6 +46,8 @@ import ChatPanel from '../Chat/ChatPanel';
 import RightSidebar from './RightSidebar';
 import LeftSidebar from './LeftSidebar';
 import GroupSelector from '../Common/GroupSelector';
+import ChatWorkspace from '../ChatMode/ChatWorkspace';
+import ChatModeHeaderSlot from '../ChatMode/ChatModeHeaderSlot';
 import { useUILayoutStore } from '../../store/uiLayout';
 import { useUIFitView } from '../../hooks/workflow/useUIFitView';
 import { useWorkflowLayoutEvents } from '../../hooks/workflow/useWorkflowLayoutEvents';
@@ -331,6 +333,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     executionHistoryVisible: showRunHistory,
     panelPosition,
     areFlowsVisible,
+    appMode,
   } = useUILayoutStore();
 
   // Responsive layout — computed overrides, never mutates the store
@@ -433,6 +436,14 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
 
   const [isChatProcessing, setIsChatProcessing] = React.useState(false);
+
+  // Once the Chat workspace has been opened, keep it mounted (just hidden) when
+  // the user switches to other modes — otherwise unmounting tears down the live
+  // execution SSE stream and a running crew's progress/result is lost.
+  const [chatEverOpened, setChatEverOpened] = React.useState(appMode === 'chat');
+  React.useEffect(() => {
+    if (appMode === 'chat') setChatEverOpened(true);
+  }, [appMode]);
   const [mobileChatDrawerOpen, setMobileChatDrawerOpen] = React.useState(false);
   const [hasManuallyResized, setHasManuallyResized] = React.useState(false);
   const [executionCount, setExecutionCount] = React.useState(0);
@@ -1121,6 +1132,9 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
 
 
+  // Chat mode swaps the crew/flow canvas for the embedded chat workspace.
+  const isChatMode = appMode === 'chat';
+
   // Render the component
   return (
     <div className="workflow-designer">
@@ -1138,7 +1152,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         {/* Interactive walkthrough tutorial */}
         <InteractiveTutorial isOpen={dialogManager.isTutorialOpen} onClose={dialogManager.handleCloseTutorial} />
 
-        {/* Tab Bar */}
+        {/* Tab Bar — in chat mode only the mode switcher + group selector show */}
         <TabBar
           onRunTab={handleRunTab}
           isRunning={!!runningTabId}
@@ -1150,10 +1164,29 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           }}
 
           disabled={isChatProcessing || !!runningTabId}
-          hideTabsAndButtons={false}
+          hideTabsAndButtons={isChatMode}
           isMobile={isMobile}
+          leftSlot={isChatMode ? <ChatModeHeaderSlot /> : undefined}
         />
 
+        {/* Chat workspace — replaces the crew/flow canvas and all of its
+            sidebars/panels when the user switches to Chat mode. Kept mounted
+            (hidden) once opened so a running crew's live SSE stream and state
+            survive switching to other modes and back. */}
+        {chatEverOpened && (
+          <Box
+            sx={{
+              display: isChatMode ? 'flex' : 'none',
+              flex: isChatMode ? 1 : '0 0 auto',
+              overflow: 'hidden',
+              position: 'relative',
+            }}
+          >
+            <ChatWorkspace />
+          </Box>
+        )}
+
+        {!isChatMode && (
         <Box sx={{
           flex: 1,
           display: 'flex',
@@ -1489,10 +1522,11 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             )}
           </Box>
         </Box>
+        )}
 
 
         {/* Jobs Panel with Run History and Kasal - Overlay on canvas */}
-        {showRunHistory && (
+        {!isChatMode && showRunHistory && (
           <Box sx={{
             position: 'absolute',
             bottom: 0,
@@ -1779,7 +1813,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           onRefresh={refreshCheckpoints}
         />
 
-        {/* Right Sidebar */}
+        {/* Right Sidebar — hidden in chat mode */}
+        {!isChatMode && (
         <RightSidebar
             onOpenLogsDialog={() => dialogManager.setIsLogsDialogOpen(true)}
             onToggleChat={() => setChatPanelVisible(!showChatPanel)}
@@ -1837,8 +1872,10 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               handleRunClick('flow');
             }}
           />
+        )}
 
-        {/* Left Sidebar */}
+        {/* Left Sidebar — hidden in chat mode */}
+        {!isChatMode && (
         <LeftSidebar
             onClearCanvas={() => {
               // Context-aware: clear flow canvas or crew canvas based on which is visible
@@ -1889,12 +1926,15 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             }}
             hideRuntimeFilters={areFlowsVisible}
           />
+        )}
 
-        {/* Workspace Selector - Upper Right Corner */}
+        {/* Workspace Selector - Upper Right Corner. Span the TabBar height and
+            center vertically so it lines up with the mode switcher to its left. */}
         <Box
           sx={{
             position: 'fixed',
-            top: '12px',
+            top: 0,
+            height: isMobile ? '40px' : '48px',
             right: isMobile ? '8px' : '20px',
             zIndex: 1002, // Above everything else
             display: 'flex',

@@ -1361,3 +1361,363 @@ class TestModuleLevelConstants:
         # The variable exists (may or may not be None depending on test ordering,
         # but the attribute must exist).
         assert hasattr(mod, "_lakebase_factory")
+
+
+# ---------------------------------------------------------------------------
+# Coverage for remaining branches
+# ---------------------------------------------------------------------------
+class TestMissingCoverage:
+    """Tests targeting the remaining uncovered lines/branches."""
+
+    @pytest.mark.asyncio
+    async def test_spn_oauth_strips_pat_env_vars(self, monkeypatch):
+        """Line 87: PAT env vars are stripped (popped) while creating SPN client."""
+        from src.db.lakebase_session import LakebaseSessionFactory
+
+        factory = LakebaseSessionFactory()
+        monkeypatch.setenv("DATABRICKS_CLIENT_ID", "cid")
+        monkeypatch.setenv("DATABRICKS_CLIENT_SECRET", "secret")
+        monkeypatch.setenv("DATABRICKS_HOST", "https://example.com")
+        monkeypatch.setenv("DATABRICKS_TOKEN", "pat-token")
+        monkeypatch.setenv("DATABRICKS_API_KEY", "api-key")
+
+        captured = {}
+
+        def fake_ws(**kwargs):
+            # During WorkspaceClient construction the PAT vars must be removed
+            captured["DATABRICKS_TOKEN"] = os.environ.get("DATABRICKS_TOKEN")
+            captured["DATABRICKS_API_KEY"] = os.environ.get("DATABRICKS_API_KEY")
+            return MagicMock()
+
+        with patch("src.db.lakebase_session.WorkspaceClient", side_effect=fake_ws):
+            await factory._get_workspace_client()
+
+        # They were popped during construction
+        assert captured["DATABRICKS_TOKEN"] is None
+        assert captured["DATABRICKS_API_KEY"] is None
+        # And restored afterwards
+        assert os.environ.get("DATABRICKS_TOKEN") == "pat-token"
+        assert os.environ.get("DATABRICKS_API_KEY") == "api-key"
+
+    @pytest.mark.asyncio
+    async def test_background_refresh_logs_success_then_cancels(self):
+        """Line 205: successful background refresh logs completion, then cancellation breaks loop."""
+        from src.db.lakebase_session import LakebaseSessionFactory
+
+        factory = LakebaseSessionFactory(instance_name="bg-inst")
+        sleep_calls = 0
+
+        async def fake_sleep(_seconds):
+            nonlocal sleep_calls
+            sleep_calls += 1
+            if sleep_calls >= 2:
+                raise asyncio.CancelledError
+            # first sleep returns normally
+
+        with patch.object(factory, "_refresh_token", new_callable=AsyncMock) as mock_refresh:
+            with patch("src.db.lakebase_session.asyncio.sleep", side_effect=fake_sleep):
+                await factory._schedule_token_refresh()
+
+        # One successful refresh happened (line 204-205), then second sleep cancelled
+        mock_refresh.assert_awaited_once()
+        assert sleep_calls == 2
+
+    @pytest.mark.asyncio
+    async def test_create_engine_swallows_dispose_error(self):
+        """Lines 276-277: dispose error on old engine is swallowed."""
+        from src.db.lakebase_session import LakebaseSessionFactory
+
+        factory = LakebaseSessionFactory()
+        old_engine = AsyncMock()
+        old_engine.dispose.side_effect = RuntimeError("event loop closed")
+        factory._engine = old_engine
+
+        new_engine = MagicMock()
+        new_engine.sync_engine = MagicMock()
+
+        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u@h/d"):
+            with patch("src.db.lakebase_session.create_async_engine", return_value=new_engine):
+                with patch("src.db.lakebase_session.async_sessionmaker", return_value=MagicMock()):
+                    with patch("src.db.lakebase_session.event"):
+                        with patch("src.db.lakebase_session.asyncio.create_task", return_value=MagicMock()):
+                            await factory.create_engine()
+
+        old_engine.dispose.assert_awaited_once()
+        assert factory._engine is new_engine
+
+    @pytest.mark.asyncio
+    async def test_create_engine_uses_nullpool_and_no_refresh_task(self, monkeypatch):
+        """Lines 294-296, 347: NullPool branch and refresh_task set to None."""
+        from src.db.lakebase_session import LakebaseSessionFactory
+        from sqlalchemy.pool import NullPool
+
+        monkeypatch.setenv("USE_NULLPOOL", "true")
+        factory = LakebaseSessionFactory()
+        new_engine = MagicMock()
+        new_engine.sync_engine = MagicMock()
+
+        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u@h/d"):
+            with patch("src.db.lakebase_session.create_async_engine", return_value=new_engine) as mock_cae:
+                with patch("src.db.lakebase_session.async_sessionmaker", return_value=MagicMock()):
+                    with patch("src.db.lakebase_session.event"):
+                        with patch("src.db.lakebase_session.asyncio.create_task") as mock_task:
+                            await factory.create_engine()
+
+        # NullPool path: poolclass=NullPool, no pool_size, refresh task not started
+        call_kwargs = mock_cae.call_args[1]
+        assert call_kwargs["poolclass"] is NullPool
+        assert "pool_size" not in call_kwargs
+        mock_task.assert_not_called()
+        assert factory._refresh_task is None
+
+    @pytest.mark.asyncio
+    async def test_do_connect_injects_token(self):
+        """Line 327: the inject_token event listener sets cparams['password'] from holder."""
+        from src.db.lakebase_session import LakebaseSessionFactory
+
+        factory = LakebaseSessionFactory()
+        factory._token_holder["token"] = "injected-token"
+        new_engine = MagicMock()
+        new_engine.sync_engine = MagicMock()
+
+        captured = {}
+
+        def fake_listens_for(target, name):
+            def decorator(fn):
+                captured["fn"] = fn
+                return fn
+            return decorator
+
+        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u@h/d"):
+            with patch("src.db.lakebase_session.create_async_engine", return_value=new_engine):
+                with patch("src.db.lakebase_session.async_sessionmaker", return_value=MagicMock()):
+                    with patch("src.db.lakebase_session.event.listens_for", side_effect=fake_listens_for):
+                        with patch("src.db.lakebase_session.asyncio.create_task", return_value=MagicMock()):
+                            await factory.create_engine()
+
+        cparams = {}
+        captured["fn"](MagicMock(), MagicMock(), [], cparams)
+        assert cparams["password"] == "injected-token"
+
+    @pytest.mark.asyncio
+    async def test_create_engine_loop_id_runtime_error(self):
+        """Lines 340-341: engine_loop_id set to None when no running loop available."""
+        from src.db.lakebase_session import LakebaseSessionFactory
+
+        factory = LakebaseSessionFactory()
+        new_engine = MagicMock()
+        new_engine.sync_engine = MagicMock()
+
+        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u@h/d"):
+            with patch("src.db.lakebase_session.create_async_engine", return_value=new_engine):
+                with patch("src.db.lakebase_session.async_sessionmaker", return_value=MagicMock()):
+                    with patch("src.db.lakebase_session.event"):
+                        with patch("src.db.lakebase_session.asyncio.create_task", return_value=MagicMock()):
+                            with patch("src.db.lakebase_session.asyncio.get_running_loop", side_effect=RuntimeError("no loop")):
+                                await factory.create_engine()
+
+        assert factory._engine_loop_id is None
+
+    def test_is_engine_loop_stale_runtime_error(self):
+        """Lines 362-363: _is_engine_loop_stale returns True on RuntimeError (no running loop)."""
+        from src.db.lakebase_session import LakebaseSessionFactory
+
+        factory = LakebaseSessionFactory()
+        factory._engine = MagicMock()
+        factory._engine_loop_id = 12345  # not None so we reach the loop check
+
+        with patch("src.db.lakebase_session.asyncio.get_running_loop", side_effect=RuntimeError("no loop")):
+            assert factory._is_engine_loop_stale() is True
+
+    @pytest.mark.asyncio
+    async def test_get_session_generator_exit_caught(self):
+        """Line 390: GeneratorExit thrown into the session block is caught silently."""
+        from src.db.lakebase_session import LakebaseSessionFactory
+
+        factory = LakebaseSessionFactory()
+        mock_session = AsyncMock()
+
+        mock_sf = MagicMock()
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_sf.return_value = mock_ctx
+
+        factory._engine = MagicMock()
+        factory._session_factory = mock_sf
+        factory._engine_loop_id = id(asyncio.get_running_loop())
+
+        # Drive the underlying async generator manually so we can throw
+        # GeneratorExit into the suspended yield (the @asynccontextmanager
+        # wrapper exposes the raw generator via .gen).
+        cm = factory.get_session()
+        gen = cm.gen
+        session = await gen.asend(None)
+        assert session is mock_session
+        # aclose() throws GeneratorExit into the generator at the yield point.
+        await gen.aclose()
+
+    @pytest.mark.asyncio
+    async def test_dispose_swallows_engine_dispose_error(self):
+        """Lines 416-417: dispose() swallows errors from engine.dispose()."""
+        from src.db.lakebase_session import LakebaseSessionFactory
+
+        factory = LakebaseSessionFactory()
+        mock_engine = AsyncMock()
+        mock_engine.dispose.side_effect = RuntimeError("loop closed")
+        factory._engine = mock_engine
+        factory._session_factory = MagicMock()
+
+        await factory.dispose()
+
+        mock_engine.dispose.assert_awaited_once()
+        assert factory._engine is None
+        assert factory._session_factory is None
+        assert factory._engine_loop_id is None
+
+    @pytest.mark.asyncio
+    async def test_crew_thread_uses_thread_local_factory(self, monkeypatch):
+        """Lines 495-518: crew-thread branch creates a thread-local factory and commits."""
+        import src.db.lakebase_session as mod
+
+        monkeypatch.setenv("USE_NULLPOOL", "true")
+        # Clear any pre-existing thread-local factory
+        if hasattr(mod._thread_local, "factory"):
+            delattr(mod._thread_local, "factory")
+
+        mock_session = AsyncMock()
+        mock_inner_ctx = AsyncMock()
+        mock_inner_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_inner_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("src.db.lakebase_session.LakebaseSessionFactory") as MockFactory:
+            mock_factory_instance = MagicMock()
+            mock_factory_instance.instance_name = "crew-inst"
+            mock_factory_instance.get_session = MagicMock(return_value=mock_inner_ctx)
+            MockFactory.return_value = mock_factory_instance
+
+            async with mod.get_lakebase_session(instance_name="crew-inst", group_id="g1") as session:
+                assert session is mock_session
+
+            MockFactory.assert_called_once_with("crew-inst", user_email=None, group_id="g1")
+            # The thread-local factory was stored
+            assert mod._thread_local.factory is mock_factory_instance
+
+        mock_session.commit.assert_awaited_once()
+        mock_session.close.assert_awaited_once()
+        # cleanup
+        delattr(mod._thread_local, "factory")
+
+    @pytest.mark.asyncio
+    async def test_crew_thread_reuses_thread_local_factory(self, monkeypatch):
+        """Lines 495-496: existing thread-local factory with matching instance is reused."""
+        import src.db.lakebase_session as mod
+
+        monkeypatch.setenv("USE_NULLPOOL", "true")
+
+        mock_session = AsyncMock()
+        mock_inner_ctx = AsyncMock()
+        mock_inner_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_inner_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        existing = MagicMock()
+        existing.instance_name = "crew-inst"
+        existing.get_session = MagicMock(return_value=mock_inner_ctx)
+        mod._thread_local.factory = existing
+
+        with patch("src.db.lakebase_session.LakebaseSessionFactory") as MockFactory:
+            async with mod.get_lakebase_session(instance_name="crew-inst") as session:
+                assert session is mock_session
+
+            MockFactory.assert_not_called()
+
+        mock_session.commit.assert_awaited_once()
+        delattr(mod._thread_local, "factory")
+
+    @pytest.mark.asyncio
+    async def test_crew_thread_exception_rolls_back(self, monkeypatch):
+        """Lines 507-517: crew-thread branch rolls back and closes on exception."""
+        import src.db.lakebase_session as mod
+
+        monkeypatch.setenv("USE_NULLPOOL", "true")
+        if hasattr(mod._thread_local, "factory"):
+            delattr(mod._thread_local, "factory")
+
+        mock_session = AsyncMock()
+        mock_session.rollback.side_effect = RuntimeError("rollback fail")
+        mock_session.close.side_effect = RuntimeError("close fail")
+        mock_inner_ctx = AsyncMock()
+        mock_inner_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_inner_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("src.db.lakebase_session.LakebaseSessionFactory") as MockFactory:
+            mock_factory_instance = MagicMock()
+            mock_factory_instance.instance_name = "crew-inst"
+            mock_factory_instance.get_session = MagicMock(return_value=mock_inner_ctx)
+            MockFactory.return_value = mock_factory_instance
+
+            with pytest.raises(ValueError, match="boom"):
+                async with mod.get_lakebase_session(instance_name="crew-inst") as session:
+                    raise ValueError("boom")
+
+        mock_session.rollback.assert_awaited_once()
+        delattr(mod._thread_local, "factory")
+
+    @pytest.mark.asyncio
+    async def test_crew_thread_generator_exit(self, monkeypatch):
+        """Lines 505-506: crew-thread branch GeneratorExit is caught silently."""
+        import src.db.lakebase_session as mod
+
+        monkeypatch.setenv("USE_NULLPOOL", "true")
+        if hasattr(mod._thread_local, "factory"):
+            delattr(mod._thread_local, "factory")
+
+        mock_session = AsyncMock()
+        mock_inner_ctx = AsyncMock()
+        mock_inner_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_inner_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("src.db.lakebase_session.LakebaseSessionFactory") as MockFactory:
+            mock_factory_instance = MagicMock()
+            mock_factory_instance.instance_name = "crew-inst"
+            mock_factory_instance.get_session = MagicMock(return_value=mock_inner_ctx)
+            MockFactory.return_value = mock_factory_instance
+
+            cm = mod.get_lakebase_session(instance_name="crew-inst")
+            gen = cm.gen
+            session = await gen.asend(None)
+            assert session is mock_session
+            await gen.aclose()
+
+        delattr(mod._thread_local, "factory")
+
+    @pytest.mark.asyncio
+    async def test_global_factory_generator_exit(self):
+        """Line 537: GeneratorExit in the main-loop branch is caught (skips commit)."""
+        import src.db.lakebase_session as mod
+
+        mock_session = AsyncMock()
+        mock_inner_ctx = AsyncMock()
+        mock_inner_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_inner_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        mock_factory = MagicMock()
+        mock_factory.instance_name = "kasal-lakebase"
+        mock_factory.user_email = None
+        mock_factory.get_session = MagicMock(return_value=mock_inner_ctx)
+
+        original = mod._lakebase_factory
+        try:
+            mod._lakebase_factory = mock_factory
+
+            cm = mod.get_lakebase_session()
+            gen = cm.gen
+            session = await gen.asend(None)
+            assert session is mock_session
+            await gen.aclose()
+
+            # GeneratorExit path skips commit, then finally closes
+            mock_session.commit.assert_not_awaited()
+            mock_session.close.assert_awaited_once()
+        finally:
+            mod._lakebase_factory = original

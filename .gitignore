@@ -181,3 +181,6 @@ examples/uc_metric_view_migration/output/
 # MLflow
 mlruns/
 .mlruns/
+
+# graphify knowledge graph output
+graphify-out/

@@ -64,7 +64,7 @@ export const useKnowledgeConfigStore = create<KnowledgeConfigState>()(
         const memoryConfigured = !!(
           memoryConfig?.backend_type === MemoryBackendType.DATABRICKS &&
           memoryConfig.databricks_config?.endpoint_name &&
-          memoryConfig.databricks_config?.short_term_index
+          memoryConfig.databricks_config?.memory_index
         );
 
         // Check Databricks knowledge source configuration

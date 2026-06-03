@@ -66,10 +66,8 @@ class DocumentationEmbeddingService:
                 self._memory_config = MemoryBackendConfig(
                     backend_type=backend.backend_type,
                     databricks_config=backend.databricks_config,
-                    enable_short_term=backend.enable_short_term,
-                    enable_long_term=backend.enable_long_term,
-                    enable_entity=backend.enable_entity,
-                    custom_config=backend.custom_config
+                    cognitive_config=backend.cognitive_config,
+                    custom_config=backend.custom_config,
                 )
                 logger.info(f"Found latest Databricks configuration for documentation storage (from group: {backend.group_id}, created: {backend.created_at})")
                 return True
@@ -118,16 +116,16 @@ class DocumentationEmbeddingService:
                 index_name = None
 
             if not index_name:
-                # Create a default documentation index name
-                if hasattr(db_config, 'short_term_index'):
-                    short_term_index = db_config.short_term_index
+                # Derive a documentation index name from the unified memory index.
+                if hasattr(db_config, 'memory_index'):
+                    memory_index = db_config.memory_index
                 elif isinstance(db_config, dict):
-                    short_term_index = db_config.get('short_term_index', '')
+                    memory_index = db_config.get('memory_index', '')
                 else:
-                    short_term_index = ''
+                    memory_index = ''
 
-                if short_term_index:
-                    index_name = short_term_index.rsplit('.', 1)[0] + '.documentation_embeddings'
+                if memory_index:
+                    index_name = memory_index.rsplit('.', 1)[0] + '.documentation_embeddings'
                 else:
                     index_name = 'documentation_embeddings'
                 logger.info(f"No document index configured, using: {index_name}")

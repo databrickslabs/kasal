@@ -1,0 +1,503 @@
+import { create } from 'zustand';
+import { ExecutionStatus } from '../types/execution';
+import { ExecutionContext } from '../components/Chat/ChatContainer';
+import { PreviewContent, parsePreviewContent } from '../components/Preview/PreviewPanel';
+import { useSessionStore } from './sessionStore';
+import {
+  saveSessionPreview,
+  getSessionPreview,
+} from '../db/sessionDb';
+
+interface SessionExecSnapshot {
+  activeExecution: { jobId: string; status: ExecutionStatus } | null;
+  isExecuting: boolean;
+  isGenerating: boolean;
+  isLoading: boolean;
+  executionContext: ExecutionContext | null;
+  previewContent: PreviewContent | null;
+  previewHistory?: PreviewContent[];
+  previewIndex?: number;
+}
+
+export interface ExecutionLogEntry {
+  id: string;
+  timestamp: number;
+  kind: 'trace' | 'task_output' | 'status';
+  label: string;
+  detail?: string;
+}
+
+interface ExecutionState {
+  activeExecution: { jobId: string; status: ExecutionStatus } | null;
+  isExecuting: boolean;
+  isGenerating: boolean;
+  isLoading: boolean;
+  executionContext: ExecutionContext | null;
+  previewContent: PreviewContent | null;
+  /**
+   * The session the currently-held `previewContent` belongs to. The preview
+   * pane must only render when this matches the session being viewed —
+   * otherwise a late SSE callback (or a re-render during a session switch) from
+   * a job started in another session can surface that session's preview against
+   * the one you switched to. Gating render on this is what isolates previews.
+   */
+  previewOwnerSessionId: string | null;
+  /**
+   * Every previewable task output produced by the current run, in order. The
+   * preview pane shows `previewContent` (the item at `previewIndex`) and lets
+   * the user page back/forward through earlier task outputs. Defaults to the
+   * latest (the final task's output shows first).
+   */
+  previewHistory: PreviewContent[];
+  previewIndex: number;
+  chatCollapsed: boolean;
+  executionOwnerSessionId: string | null;
+  executionLog: ExecutionLogEntry[];
+}
+
+interface ExecutionActions {
+  setIsLoading: (loading: boolean) => void;
+  setExecutionContext: (ctx: ExecutionContext | null) => void;
+  setPreviewContent: (content: PreviewContent | null) => void;
+  navigatePreview: (index: number) => void;
+  setChatCollapsed: (collapsed: boolean) => void;
+  toggleChatCollapsed: () => void;
+  clearPreview: () => void;
+  reopenPreview: () => void;
+  appendLog: (entry: Omit<ExecutionLogEntry, 'id' | 'timestamp'>) => void;
+  clearLog: () => void;
+
+  // Execution lifecycle
+  startExecution: (jobId: string, sessionId?: string, opts?: { preservePreview?: boolean }) => void;
+  updateExecutionStatus: (status: ExecutionStatus) => void;
+  completeExecution: (resultText: string) => void;
+  failExecution: (error: string) => void;
+
+  // Generation lifecycle
+  startGeneration: (sessionId?: string) => void;
+  completeGeneration: () => void;
+  failGeneration: (error: string) => void;
+
+  // Session-aware state management
+  saveSessionState: (sessionId: string) => void;
+  restoreSessionState: (sessionId: string) => void;
+  hasActiveExecution: (sessionId: string) => boolean;
+
+  // Reset
+  resetForSession: () => void;
+}
+
+type ExecutionStore = ExecutionState & ExecutionActions;
+
+// Per-session snapshots stored outside Zustand to avoid re-renders
+const sessionSnapshots = new Map<string, SessionExecSnapshot>();
+
+export const useExecutionStore = create<ExecutionStore>((set, get) => ({
+  // --- State ---
+  activeExecution: null,
+  isExecuting: false,
+  isGenerating: false,
+  isLoading: false,
+  executionContext: null,
+  previewContent: null,
+  previewOwnerSessionId: null,
+  previewHistory: [],
+  previewIndex: 0,
+  chatCollapsed: false,
+  executionOwnerSessionId: null,
+  executionLog: [],
+
+  appendLog: (entry) => set((s) => ({
+    executionLog: [
+      ...s.executionLog,
+      {
+        ...entry,
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        timestamp: Date.now(),
+      },
+    ],
+  })),
+  clearLog: () => set({ executionLog: [] }),
+
+  // --- Basic setters ---
+  setIsLoading: (loading) => set({ isLoading: loading }),
+  setExecutionContext: (ctx) => set({ executionContext: ctx }),
+  // Stamp the preview with the session currently being viewed so the pane can
+  // gate rendering on ownership (see previewOwnerSessionId), and append it to
+  // the session's preview history so earlier task outputs stay browsable.
+  setPreviewContent: (content) =>
+    set((s) => {
+      if (!content) {
+        return { previewContent: null, previewOwnerSessionId: null };
+      }
+      const last = s.previewHistory[s.previewHistory.length - 1];
+      const isDup = last && last.type === content.type && last.data === content.data;
+      const previewHistory = isDup ? s.previewHistory : [...s.previewHistory, content];
+      return {
+        previewContent: content,
+        previewOwnerSessionId: useSessionStore.getState().currentSessionId,
+        previewHistory,
+        previewIndex: previewHistory.length - 1,
+      };
+    }),
+  // Page back/forward through the captured task-output previews.
+  navigatePreview: (index) =>
+    set((s) => {
+      if (index < 0 || index >= s.previewHistory.length) return {};
+      return { previewContent: s.previewHistory[index], previewIndex: index };
+    }),
+  setChatCollapsed: (collapsed) => set({ chatCollapsed: collapsed }),
+  toggleChatCollapsed: () => set((s) => ({ chatCollapsed: !s.chatCollapsed })),
+  clearPreview: () => {
+    // Only hide the preview panel — keep history/data so the user can reopen
+    set({ previewContent: null, previewOwnerSessionId: null, chatCollapsed: false });
+  },
+
+  reopenPreview: () => {
+    const sessionId = useSessionStore.getState().currentSessionId;
+    if (!sessionId) return;
+    getSessionPreview(sessionId).then((stored) => {
+      if (stored) {
+        const currentId = useSessionStore.getState().currentSessionId;
+        if (currentId === sessionId) {
+          const content: PreviewContent = {
+            type: stored.type as PreviewContent['type'],
+            data: stored.data,
+            title: stored.title,
+          };
+          set((s) => {
+            // If history is empty (e.g. after a refresh), seed it so the user
+            // still has a single navigable entry.
+            const previewHistory = s.previewHistory.length ? s.previewHistory : [content];
+            return {
+              previewContent: content,
+              previewOwnerSessionId: sessionId,
+              previewHistory,
+              previewIndex: previewHistory.length - 1,
+            };
+          });
+        }
+      }
+    });
+  },
+
+  // --- Execution lifecycle ---
+  startExecution: (jobId, sessionId, opts) => {
+    const owner = sessionId || useSessionStore.getState().currentSessionId;
+    // A refine continues the same artifact lineage, so it keeps the existing
+    // preview + history and just appends the revised output. A fresh run clears
+    // the previous preview so an unrelated prompt doesn't inherit stale output.
+    const preserve = opts?.preservePreview;
+    const s = get();
+    set({
+      executionOwnerSessionId: owner,
+      isExecuting: true,
+      isLoading: true,
+      activeExecution: { jobId, status: 'running' },
+      previewContent: preserve ? s.previewContent : null,
+      previewOwnerSessionId: preserve ? s.previewOwnerSessionId : null,
+      previewHistory: preserve ? s.previewHistory : [],
+      previewIndex: preserve ? s.previewIndex : 0,
+      executionLog: [],
+    });
+  },
+
+  updateExecutionStatus: (status) => {
+    set((s) => ({
+      activeExecution: s.activeExecution
+        ? { ...s.activeExecution, status }
+        : null,
+    }));
+  },
+
+  completeExecution: (resultText: string) => {
+    const state = get();
+    const ownerSession = state.executionOwnerSessionId;
+    const currentSessionId = useSessionStore.getState().currentSessionId;
+    const isViewingOwner = currentSessionId === ownerSession;
+    const sessionStore = useSessionStore.getState();
+
+    // Parse preview content if any
+    let preview: PreviewContent | null = null;
+    if (resultText) {
+      preview = parsePreviewContent(resultText);
+      if (preview) {
+        // Only surface the preview pane if the user is currently viewing the
+        // session that owns this execution — otherwise it would leak the
+        // owner session's HTML into whatever session is on screen now.
+        if (isViewingOwner) {
+          set((s) => {
+            const last = s.previewHistory[s.previewHistory.length - 1];
+            const isDup = last && last.type === preview!.type && last.data === preview!.data;
+            const previewHistory = isDup ? s.previewHistory : [...s.previewHistory, preview!];
+            return {
+              previewContent: preview,
+              previewOwnerSessionId: ownerSession,
+              previewHistory,
+              previewIndex: previewHistory.length - 1,
+            };
+          });
+        }
+        // Persist preview to IndexedDB so it survives page refreshes
+        if (ownerSession) {
+          saveSessionPreview(ownerSession, preview);
+        }
+      } else {
+        // Route text message to the correct session
+        if (ownerSession) {
+          sessionStore.addMessageToTargetSession(
+            ownerSession,
+            'assistant',
+            resultText,
+          );
+        } else {
+          sessionStore.addMessage('assistant', resultText);
+        }
+      }
+    } else {
+      if (ownerSession) {
+        sessionStore.addMessageToTargetSession(
+          ownerSession,
+          'assistant',
+          'Execution completed.',
+        );
+      } else {
+        sessionStore.addMessage('assistant', 'Execution completed.');
+      }
+    }
+
+    if (isViewingOwner) {
+      set({
+        activeExecution: state.activeExecution
+          ? { ...state.activeExecution, status: 'completed' }
+          : null,
+        isExecuting: false,
+        executionContext: null,
+        isLoading: false,
+        executionOwnerSessionId: null,
+      });
+      if (ownerSession) sessionSnapshots.delete(ownerSession);
+    } else if (ownerSession) {
+      // Save preview to snapshot for when user switches back. The background
+      // session keeps a single-item history seeded from the final preview.
+      sessionSnapshots.set(ownerSession, {
+        activeExecution: null,
+        isExecuting: false,
+        isGenerating: false,
+        isLoading: false,
+        executionContext: null,
+        previewContent: preview,
+        previewHistory: preview ? [preview] : [],
+        previewIndex: 0,
+      });
+      set({ executionOwnerSessionId: null });
+    }
+  },
+
+  failExecution: (error: string) => {
+    const state = get();
+    const ownerSession = state.executionOwnerSessionId;
+    const currentSessionId = useSessionStore.getState().currentSessionId;
+    const isViewingOwner = currentSessionId === ownerSession;
+    const sessionStore = useSessionStore.getState();
+
+    if (ownerSession) {
+      sessionStore.addMessageToTargetSession(
+        ownerSession,
+        'assistant',
+        `Execution failed: ${error}`,
+      );
+    } else {
+      sessionStore.addMessage('assistant', `Execution failed: ${error}`);
+    }
+
+    if (isViewingOwner) {
+      set({
+        activeExecution: state.activeExecution
+          ? { ...state.activeExecution, status: 'failed' }
+          : null,
+        isExecuting: false,
+        executionContext: null,
+        isLoading: false,
+        executionOwnerSessionId: null,
+      });
+      if (ownerSession) sessionSnapshots.delete(ownerSession);
+    } else if (ownerSession) {
+      sessionSnapshots.set(ownerSession, {
+        activeExecution: null,
+        isExecuting: false,
+        isGenerating: false,
+        isLoading: false,
+        executionContext: null,
+        previewContent: null,
+      });
+      set({ executionOwnerSessionId: null });
+    }
+  },
+
+  // --- Generation lifecycle ---
+  startGeneration: (sessionId) => {
+    const owner = sessionId || useSessionStore.getState().currentSessionId;
+    set({
+      executionOwnerSessionId: owner,
+      isGenerating: true,
+      isLoading: true,
+    });
+  },
+
+  completeGeneration: () => {
+    const state = get();
+    const ownerSession = state.executionOwnerSessionId;
+    const currentSessionId = useSessionStore.getState().currentSessionId;
+    const isViewingOwner = currentSessionId === ownerSession;
+
+    if (isViewingOwner) {
+      set({
+        isGenerating: false,
+        isLoading: false,
+        executionOwnerSessionId: null,
+      });
+      if (ownerSession) sessionSnapshots.delete(ownerSession);
+    } else if (ownerSession) {
+      sessionSnapshots.set(ownerSession, {
+        activeExecution: null,
+        isExecuting: false,
+        isGenerating: false,
+        isLoading: false,
+        executionContext: null,
+        previewContent: null,
+      });
+      set({ executionOwnerSessionId: null });
+    }
+  },
+
+  failGeneration: (error: string) => {
+    const state = get();
+    const ownerSession = state.executionOwnerSessionId;
+    const currentSessionId = useSessionStore.getState().currentSessionId;
+    const isViewingOwner = currentSessionId === ownerSession;
+    const sessionStore = useSessionStore.getState();
+
+    if (ownerSession) {
+      sessionStore.addMessageToTargetSession(
+        ownerSession,
+        'assistant',
+        `Generation failed: ${error}`,
+      );
+    } else {
+      sessionStore.addMessage('assistant', `Generation failed: ${error}`);
+    }
+
+    if (isViewingOwner) {
+      set({
+        isGenerating: false,
+        isLoading: false,
+        executionOwnerSessionId: null,
+      });
+      if (ownerSession) sessionSnapshots.delete(ownerSession);
+    } else if (ownerSession) {
+      sessionSnapshots.set(ownerSession, {
+        activeExecution: null,
+        isExecuting: false,
+        isGenerating: false,
+        isLoading: false,
+        executionContext: null,
+        previewContent: null,
+      });
+      set({ executionOwnerSessionId: null });
+    }
+  },
+
+  // --- Session-aware state management ---
+  saveSessionState: (sessionId: string) => {
+    const state = get();
+    if (state.isExecuting || state.isGenerating || state.previewContent) {
+      sessionSnapshots.set(sessionId, {
+        activeExecution: state.activeExecution,
+        isExecuting: state.isExecuting,
+        isGenerating: state.isGenerating,
+        isLoading: state.isLoading,
+        executionContext: state.executionContext,
+        previewContent: state.previewContent,
+        previewHistory: state.previewHistory,
+        previewIndex: state.previewIndex,
+      });
+    } else {
+      sessionSnapshots.delete(sessionId);
+    }
+  },
+
+  restoreSessionState: (sessionId: string) => {
+    const snap = sessionSnapshots.get(sessionId);
+    if (snap) {
+      const previewHistory = snap.previewHistory ?? [];
+      set({
+        activeExecution: snap.activeExecution,
+        isExecuting: snap.isExecuting,
+        isGenerating: snap.isGenerating,
+        isLoading: snap.isLoading,
+        executionContext: snap.executionContext,
+        previewContent: snap.previewContent,
+        // The snapshot's preview (if any) belongs to this session.
+        previewOwnerSessionId: snap.previewContent ? sessionId : null,
+        previewHistory,
+        previewIndex: snap.previewIndex ?? Math.max(0, previewHistory.length - 1),
+      });
+    } else {
+      // No in-memory snapshot — try to load persisted preview from IndexedDB
+      set({
+        activeExecution: null,
+        isExecuting: false,
+        isGenerating: false,
+        isLoading: false,
+        executionContext: null,
+        previewContent: null,
+        previewOwnerSessionId: null,
+        previewHistory: [],
+        previewIndex: 0,
+      });
+      getSessionPreview(sessionId).then((stored) => {
+        if (stored) {
+          // Only apply if we're still on the same session
+          const currentId = useSessionStore.getState().currentSessionId;
+          if (currentId === sessionId) {
+            const content: PreviewContent = {
+              type: stored.type as PreviewContent['type'],
+              data: stored.data,
+              title: stored.title,
+            };
+            set({
+              previewContent: content,
+              previewOwnerSessionId: sessionId,
+              previewHistory: [content],
+              previewIndex: 0,
+            });
+          }
+        }
+      });
+    }
+  },
+
+  hasActiveExecution: (sessionId: string) => {
+    const state = get();
+    if (state.executionOwnerSessionId === sessionId) return true;
+    // Only show spinner if the snapshot indicates a running execution/generation,
+    // not just a saved preview from a completed one
+    const snap = sessionSnapshots.get(sessionId);
+    return !!(snap && (snap.isExecuting || snap.isGenerating));
+  },
+
+  resetForSession: () => {
+    set({
+      activeExecution: null,
+      isExecuting: false,
+      isGenerating: false,
+      isLoading: false,
+      executionContext: null,
+      previewContent: null,
+      previewOwnerSessionId: null,
+      previewHistory: [],
+      previewIndex: 0,
+    });
+  },
+}));

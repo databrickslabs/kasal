@@ -36,7 +36,6 @@ import {
   Error as ErrorIcon,
   Add as AddIcon,
   Refresh as RefreshIcon,
-  Visibility as VisibilityIcon,
   AccountTree as AccountTreeIcon,
   Save as SaveIcon,
 } from '@mui/icons-material';
@@ -68,9 +67,8 @@ import { ManualConfigurationForm } from './ManualConfigurationForm';
 import { AutomaticSetupForm } from './AutomaticSetupForm';
 import { EditConfigurationForm } from './EditConfigurationForm';
 import { EndpointsDisplay } from './EndpointsDisplay';
-import EntityGraphVisualization from './EntityGraphVisualization';
 import { IndexDocumentsDialog } from './IndexDocumentsDialog';
-import LakebaseDocumentsDialog from './LakebaseDocumentsDialog';
+import { MemoryRecordsBrowser } from './MemoryRecordsBrowser';
 
 export const DatabricksOneClickSetup: React.FC = () => {
   const [mode, setMode] = useState<'disabled' | 'lakebase'>('disabled');
@@ -91,7 +89,6 @@ export const DatabricksOneClickSetup: React.FC = () => {
   const [indexInfoMap, setIndexInfoMap] = useState<Record<string, IndexInfoState>>({});
   const [hasCheckedInitialConfig, setHasCheckedInitialConfig] = useState(false);
   const [advancedSettingsExpanded, setAdvancedSettingsExpanded] = useState(false);
-  const [enableRelationshipRetrieval, setEnableRelationshipRetrieval] = useState(false);
 
   // Lakebase state
   const [lakebaseConfig, setLakebaseConfig] = useState<LakebaseMemoryConfig>(DEFAULT_LAKEBASE_CONFIG);
@@ -104,64 +101,27 @@ export const DatabricksOneClickSetup: React.FC = () => {
   const [instanceHasMore, setInstanceHasMore] = useState(false);
   const instanceSearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [lakebaseTableStats, setLakebaseTableStats] = useState<Record<string, { table_name: string; exists: boolean; row_count: number }> | null>(null);
+  const [memoryBrowserOpen, setMemoryBrowserOpen] = useState(false);
   
-  // Save relationship retrieval setting when it changes
-  const handleRelationshipRetrievalChange = async (enabled: boolean) => {
-    console.log('handleRelationshipRetrievalChange called with:', enabled);
-    console.log('savedConfig:', savedConfig);
-    console.log('savedConfig?.backend_id:', savedConfig?.backend_id);
-    
-    setEnableRelationshipRetrieval(enabled);
-    
-    // Save to backend if we have a valid config
-    if (savedConfig?.backend_id) {
-      try {
-        console.log('Attempting to save to backend...');
-        const response = await apiClient.put(`/memory-backend/configs/${savedConfig.backend_id}`, {
-          enable_relationship_retrieval: enabled
-        });
-        console.log('Relationship retrieval setting saved:', enabled);
-        console.log('API response:', response.data);
-      } catch (error) {
-        console.error('Failed to save relationship retrieval setting:', error);
-        setError('Failed to save advanced settings');
-      }
-    } else {
-      console.log('No valid backend_id found, not saving to backend');
-    }
-  };
+  // Relationship-retrieval was tied to the old entity-memory subsystem. CrewAI
+  // 1.10+ unified cognitive memory replaces it with scope-aware recall, so
+  // there is no equivalent to wire up here.
   const [manualConfig, setManualConfig] = useState<ManualConfig>({
     workspace_url: '',
     endpoint_name: '',
     document_endpoint_name: '',
-    short_term_index: '',
-    long_term_index: '',
-    entity_index: '',
+    memory_index: '',
     document_index: '',
     embedding_model: 'databricks-gte-large-en', // Default to GTE Large
   });
   const [documentsDialogOpen, setDocumentsDialogOpen] = useState(false);
   const [selectedIndexForDocs, setSelectedIndexForDocs] = useState<{
     name: string;
-    type: 'short_term' | 'long_term' | 'entity' | 'document';
+    type: 'memory' | 'document';
     endpointName: string;
   } | null>(null);
 
-  // Lakebase documents/visualization dialogs
-  const [lakebaseDocsOpen, setLakebaseDocsOpen] = useState(false);
-  const [selectedLakebaseTable, setSelectedLakebaseTable] = useState<{
-    tableName: string;
-    memoryType: 'short_term' | 'long_term' | 'entity';
-  } | null>(null);
-  const [lakebaseEntityGraphOpen, setLakebaseEntityGraphOpen] = useState(false);
-  
-  const { 
-    updateConfig,
-    visualizationOpen,
-    visualizationIndex,
-    openVisualization,
-    closeVisualization
-  } = useMemoryBackendStore();
+  const { updateConfig } = useMemoryBackendStore();
   
   
   // Load existing configuration and detect workspace URL on mount
@@ -323,19 +283,18 @@ export const DatabricksOneClickSetup: React.FC = () => {
     }
   };
   
-  const processConfigResponse = (configData: { backend_type?: string; databricks_config?: DatabricksConfig; lakebase_config?: LakebaseMemoryConfig; id?: string; enable_relationship_retrieval?: boolean }) => {
+  const processConfigResponse = (configData: { backend_type?: string; databricks_config?: DatabricksConfig; lakebase_config?: LakebaseMemoryConfig; id?: string }) => {
     console.log('processConfigResponse - Full configData:', configData);
     console.log('processConfigResponse - backend_type:', configData?.backend_type);
     console.log('processConfigResponse - databricks_config:', configData?.databricks_config);
-    
+
     if (configData && configData.backend_type === MemoryBackendType.DATABRICKS && configData.databricks_config) {
       const config = configData.databricks_config;
       console.log('Databricks Config:', config);
       console.log('Config endpoint_name:', config.endpoint_name);
       console.log('Config document_endpoint_name:', config.document_endpoint_name);
-      console.log('Config short_term_index:', config.short_term_index);
-      console.log('Config long_term_index:', config.long_term_index);
-      
+      console.log('Config memory_index:', config.memory_index);
+
       const savedInfo: SavedConfigInfo = {
         backend_id: configData.id,
         workspace_url: config.workspace_url,
@@ -343,24 +302,16 @@ export const DatabricksOneClickSetup: React.FC = () => {
         schema: config.schema || 'agents',
         endpoints: {
           memory: config.endpoint_name ? { name: config.endpoint_name } : undefined,
-          document: config.document_endpoint_name ? { name: config.document_endpoint_name } : undefined
+          document: config.document_endpoint_name ? { name: config.document_endpoint_name } : undefined,
         },
         indexes: {
-          short_term: config.short_term_index ? { name: config.short_term_index } : undefined,
-          long_term: config.long_term_index ? { name: config.long_term_index } : undefined,
-          entity: config.entity_index ? { name: config.entity_index } : undefined,
-          document: config.document_index ? { name: config.document_index } : undefined
-        }
+          unified: config.memory_index ? { name: config.memory_index } : undefined,
+          document: config.document_index ? { name: config.document_index } : undefined,
+        },
       };
       console.log('SavedInfo:', savedInfo);
-      console.log('Has endpoints:', !!savedInfo.endpoints);
-      console.log('Endpoints memory:', savedInfo.endpoints?.memory);
-      console.log('Endpoints document:', savedInfo.endpoints?.document);
       setSavedConfig(savedInfo);
       setMode('lakebase');
-      
-      // Load relationship retrieval setting from the top-level config
-      setEnableRelationshipRetrieval(configData.enable_relationship_retrieval || false);
     } else if (configData && configData.backend_type === MemoryBackendType.LAKEBASE) {
       // Lakebase backend
       setSavedConfig({
@@ -368,13 +319,20 @@ export const DatabricksOneClickSetup: React.FC = () => {
       });
       if (configData.lakebase_config) {
         setLakebaseConfig(configData.lakebase_config);
-        // Auto-load table stats if tables were previously initialized
-        if (configData.lakebase_config.tables_initialized && configData.lakebase_config.instance_name) {
+        // Always refresh table stats from the live instance so tables_initialized
+        // reflects reality (the persisted flag can lag behind if the user saved
+        // before initializing tables).
+        if (configData.lakebase_config.instance_name) {
           loadLakebaseTableStats(configData.lakebase_config.instance_name);
         }
       }
       setMode('lakebase');
-      loadLakebaseInstances();
+      // Seed the instance search with the saved name so the Autocomplete
+      // displays it (and so loadLakebaseInstances pulls the matching record
+      // back into the options list).
+      const savedInstance = configData.lakebase_config?.instance_name || '';
+      setInstanceSearch(savedInstance);
+      loadLakebaseInstances(savedInstance);
     } else if (configData && configData.backend_type === MemoryBackendType.DEFAULT) {
       // When in disabled mode, clear the saved databricks config but keep the backend_id
       setSavedConfig({
@@ -392,9 +350,6 @@ export const DatabricksOneClickSetup: React.FC = () => {
       // Update store to use DEFAULT backend with all memory types disabled
       updateConfig({
         backend_type: MemoryBackendType.DEFAULT,
-        enable_short_term: false,
-        enable_long_term: false,
-        enable_entity: false,
       });
 
       // Delete all configurations from the memory backend table and create disabled config
@@ -474,9 +429,6 @@ export const DatabricksOneClickSetup: React.FC = () => {
       updateConfig({
         backend_type: MemoryBackendType.LAKEBASE,
         lakebase_config: lakebaseConfig,
-        enable_short_term: true,
-        enable_long_term: true,
-        enable_entity: true,
       });
       setLakebaseStatus({ success: true, message: 'Configuration saved successfully' });
     } catch (error) {
@@ -537,9 +489,6 @@ export const DatabricksOneClickSetup: React.FC = () => {
         // Update store with Databricks configuration
         updateConfig({
           backend_type: MemoryBackendType.DATABRICKS,
-          enable_short_term: true,
-          enable_long_term: true,
-          enable_entity: true,
         });
         
         // Reload the configuration from backend after successful setup
@@ -575,9 +524,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
           schema: updatedConfig.schema,
           endpoint_name: updatedConfig.endpoints?.memory?.name || null,
           document_endpoint_name: updatedConfig.endpoints?.document?.name || null,
-          short_term_index: updatedConfig.indexes?.short_term?.name || null,
-          long_term_index: updatedConfig.indexes?.long_term?.name || null,
-          entity_index: updatedConfig.indexes?.entity?.name || null,
+          memory_index: updatedConfig.indexes?.unified?.name || null,
           document_index: updatedConfig.indexes?.document?.name || null,
           auth_type: 'default',
           embedding_dimension: 1024
@@ -649,27 +596,11 @@ export const DatabricksOneClickSetup: React.FC = () => {
         console.log('Verified indexes:', response.data.resources.indexes);
         console.log('Saved indexes:', savedConfig.indexes);
         
-        if (savedConfig.indexes?.short_term) {
-          console.log(`Checking short_term index: ${savedConfig.indexes.short_term.name}`);
-          if (!response.data.resources.indexes[savedConfig.indexes.short_term.name]) {
-            console.log('Short-term index not found in Databricks, removing from config');
-            updatedConfig.indexes = { ...updatedConfig.indexes, short_term: undefined };
-            hasChanges = true;
-          }
-        }
-        if (savedConfig.indexes?.long_term) {
-          console.log(`Checking long_term index: ${savedConfig.indexes.long_term.name}`);
-          if (!response.data.resources.indexes[savedConfig.indexes.long_term.name]) {
-            console.log('Long-term index not found in Databricks, removing from config');
-            updatedConfig.indexes = { ...updatedConfig.indexes, long_term: undefined };
-            hasChanges = true;
-          }
-        }
-        if (savedConfig.indexes?.entity) {
-          console.log(`Checking entity index: ${savedConfig.indexes.entity.name}`);
-          if (!response.data.resources.indexes[savedConfig.indexes.entity.name]) {
-            console.log('Entity index not found in Databricks, removing from config');
-            updatedConfig.indexes = { ...updatedConfig.indexes, entity: undefined };
+        if (savedConfig.indexes?.unified) {
+          console.log(`Checking unified memory index: ${savedConfig.indexes.unified.name}`);
+          if (!response.data.resources.indexes[savedConfig.indexes.unified.name]) {
+            console.log('Unified memory index not found in Databricks, removing from config');
+            updatedConfig.indexes = { ...updatedConfig.indexes, unified: undefined };
             hasChanges = true;
           }
         }
@@ -694,51 +625,59 @@ export const DatabricksOneClickSetup: React.FC = () => {
   };
 
 
-  const handleDeleteIndex = async (indexType: 'short_term' | 'long_term' | 'entity' | 'document') => {
-    if (!savedConfig?.indexes?.[indexType]) return;
-    
-    const indexName = savedConfig.indexes[indexType]?.name;
+  // Map UI index-type (``memory`` | ``document``) to the shape of
+  // ``savedConfig.indexes`` (``unified`` | ``document``). CrewAI 1.10+ uses
+  // "memory" externally; the saved config schema still calls it "unified".
+  const indexConfigKey = (
+    indexType: 'memory' | 'document',
+  ): 'unified' | 'document' => (indexType === 'memory' ? 'unified' : 'document');
+
+  const handleDeleteIndex = async (indexType: 'memory' | 'document') => {
+    const cfgKey = indexConfigKey(indexType);
+    if (!savedConfig?.indexes?.[cfgKey]) return;
+
+    const indexName = savedConfig.indexes[cfgKey]?.name;
     if (!indexName) return;
-    
+
     // Check if index is already deleted
     const indexInfo = indexInfoMap[indexName];
     if (indexInfo?.status === 'NOT_FOUND' || indexInfo?.index_type === 'DELETED') {
-      setError(`Cannot delete index: ${indexType.replace('_', ' ')} index has already been deleted from Databricks.`);
+      setError(`Cannot delete index: ${indexType} index has already been deleted from Databricks.`);
       return;
     }
-    
+
     // Check which endpoint this index belongs to
     const endpointType = indexType === 'document' ? 'document' : 'memory';
     const endpointStatus = endpointStatuses[endpointType];
-    
+
     // Check if endpoint is ready for index deletion
     if (endpointStatus && !endpointStatus.can_delete_indexes) {
       setError(`Cannot delete index: Endpoint is ${endpointStatus.state}. Indexes can only be deleted when the endpoint is ONLINE.`);
       return;
     }
-    
-    const confirmDelete = window.confirm(`Are you sure you want to delete the ${indexType.replace('_', ' ')} index?`);
+
+    const confirmDelete = window.confirm(`Are you sure you want to delete the ${indexType} index?`);
     if (!confirmDelete) return;
-    
+
     setIsSettingUp(true);
     setError('');
-    
+
     try {
       const response = await apiClient.delete('/memory-backend/databricks/index', {
         data: {
           workspace_url: savedConfig.workspace_url,
-          index_name: savedConfig.indexes[indexType]?.name,
+          index_name: indexName,
           endpoint_name: indexType === 'document' ? savedConfig.endpoints?.document?.name : savedConfig.endpoints?.memory?.name
         }
       });
-      
+
       if (response.data.success) {
         // Update saved config to remove the deleted index
         const updatedConfig = {
           ...savedConfig,
           indexes: {
             ...savedConfig.indexes,
-            [indexType]: undefined
+            [cfgKey]: undefined
           }
         };
         setSavedConfig(updatedConfig);
@@ -808,10 +747,11 @@ export const DatabricksOneClickSetup: React.FC = () => {
       }
     } else if (parts[0] === 'indexes' && parts[1] && parts[2] === 'name') {
       if (!newConfig.indexes) newConfig.indexes = {};
+      const key = parts[1] as 'unified' | 'document';
       if (value) {
-        newConfig.indexes[parts[1] as 'short_term' | 'long_term' | 'entity' | 'document'] = { name: value };
+        newConfig.indexes[key] = { name: value };
       } else {
-        newConfig.indexes[parts[1] as 'short_term' | 'long_term' | 'entity' | 'document'] = undefined;
+        newConfig.indexes[key] = undefined;
       }
     }
     
@@ -893,15 +833,9 @@ export const DatabricksOneClickSetup: React.FC = () => {
     if (savedConfig?.indexes && savedConfig?.workspace_url) {
       const indexes = savedConfig.indexes;
       
-      // Fetch info for each index
-      if (indexes.short_term?.name && savedConfig.endpoints?.memory?.name) {
-        fetchIndexInfo(indexes.short_term.name, savedConfig.endpoints.memory.name);
-      }
-      if (indexes.long_term?.name && savedConfig.endpoints?.memory?.name) {
-        fetchIndexInfo(indexes.long_term.name, savedConfig.endpoints.memory.name);
-      }
-      if (indexes.entity?.name && savedConfig.endpoints?.memory?.name) {
-        fetchIndexInfo(indexes.entity.name, savedConfig.endpoints.memory.name);
+      // Fetch info for each configured index
+      if (indexes.unified?.name && savedConfig.endpoints?.memory?.name) {
+        fetchIndexInfo(indexes.unified.name, savedConfig.endpoints.memory.name);
       }
       if (indexes.document?.name && savedConfig.endpoints?.document?.name) {
         fetchIndexInfo(indexes.document.name, savedConfig.endpoints.document.name);
@@ -914,9 +848,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
     if (!manualConfig.workspace_url || 
         !manualConfig.endpoint_name || 
         !manualConfig.document_endpoint_name ||
-        !manualConfig.short_term_index ||
-        !manualConfig.long_term_index ||
-        !manualConfig.entity_index ||
+        !manualConfig.memory_index ||
         !manualConfig.document_index) {
       setError('All fields are required. Please provide workspace URL, both endpoints, and all four indexes.');
       return;
@@ -924,9 +856,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
     
     // Validate index name formats
     const indexesToValidate = [
-      { name: 'Short-term index', value: manualConfig.short_term_index },
-      { name: 'Long-term index', value: manualConfig.long_term_index },
-      { name: 'Entity index', value: manualConfig.entity_index },
+      { name: 'Memory index', value: manualConfig.memory_index },
       { name: 'Document index', value: manualConfig.document_index }
     ];
     
@@ -954,8 +884,8 @@ export const DatabricksOneClickSetup: React.FC = () => {
       let catalogName = catalog;
       let schemaName = schema;
       
-      // Try to extract from short_term_index (format: catalog.schema.table)
-      const indexParts = manualConfig.short_term_index.split('.');
+      // Try to extract from memory_index (format: catalog.schema.table)
+      const indexParts = manualConfig.memory_index.split('.');
       if (indexParts.length >= 3) {
         catalogName = indexParts[0];
         schemaName = indexParts[1];
@@ -981,16 +911,11 @@ export const DatabricksOneClickSetup: React.FC = () => {
         name: 'Databricks Vector Search Configuration', // Always update the name
         description: 'Manually configured Databricks Vector Search',
         backend_type: MemoryBackendType.DATABRICKS,
-        enable_short_term: true,
-        enable_long_term: true,
-        enable_entity: true,
         databricks_config: {
           workspace_url: manualConfig.workspace_url,
           endpoint_name: manualConfig.endpoint_name,
           document_endpoint_name: manualConfig.document_endpoint_name,
-          short_term_index: manualConfig.short_term_index,
-          long_term_index: manualConfig.long_term_index,
-          entity_index: manualConfig.entity_index,
+          memory_index: manualConfig.memory_index,
           document_index: manualConfig.document_index,
           auth_type: 'default',
           embedding_dimension: EMBEDDING_MODELS.find(m => m.value === manualConfig.embedding_model)?.dimension || 1024,
@@ -1021,9 +946,6 @@ export const DatabricksOneClickSetup: React.FC = () => {
         // Update store
         updateConfig({
           backend_type: MemoryBackendType.DATABRICKS,
-          enable_short_term: true,
-          enable_long_term: true,
-          enable_entity: true,
         });
         
         // Reload configuration
@@ -1034,9 +956,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
           workspace_url: '',
           endpoint_name: '',
           document_endpoint_name: '',
-          short_term_index: '',
-          long_term_index: '',
-          entity_index: '',
+          memory_index: '',
           document_index: '',
           embedding_model: 'databricks-gte-large-en', // Reset to default
         });
@@ -1049,13 +969,14 @@ export const DatabricksOneClickSetup: React.FC = () => {
     }
   };
 
-  const handleEmptyIndex = async (indexType: 'short_term' | 'long_term' | 'entity' | 'document') => {
-    if (!savedConfig?.indexes?.[indexType] || !savedConfig?.workspace_url || !savedConfig?.backend_id) return;
-    
-    const indexName = savedConfig.indexes[indexType]?.name;
+  const handleEmptyIndex = async (indexType: 'memory' | 'document') => {
+    const cfgKey = indexConfigKey(indexType);
+    if (!savedConfig?.indexes?.[cfgKey] || !savedConfig?.workspace_url || !savedConfig?.backend_id) return;
+
+    const indexName = savedConfig.indexes[cfgKey]?.name;
     if (!indexName) return;
-    
-    const confirmEmpty = window.confirm(`Are you sure you want to empty the ${indexType.replace('_', ' ')} index? This will delete all documents but keep the index structure.`);
+
+    const confirmEmpty = window.confirm(`Are you sure you want to empty the ${indexType} index? This will delete all documents but keep the index structure.`);
     if (!confirmEmpty) return;
     
     setIsSettingUp(true);
@@ -1198,7 +1119,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
     
     setSelectedIndexForDocs({
       name: indexName,
-      type: indexType as 'short_term' | 'long_term' | 'entity' | 'document',
+      type: indexType as 'memory' | 'document',
       endpointName: endpointName
     });
     setDocumentsDialogOpen(true);
@@ -1243,9 +1164,6 @@ export const DatabricksOneClickSetup: React.FC = () => {
         // Update store
         updateConfig({
           backend_type: MemoryBackendType.DEFAULT,
-          enable_short_term: false,
-          enable_long_term: false,
-          enable_entity: false,
         });
         
         return;
@@ -1471,7 +1389,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
             console.log('Memory endpoint:', savedConfig?.endpoints?.memory);
             console.log('Document endpoint:', savedConfig?.endpoints?.document);
             console.log('Condition check:', !!(savedConfig?.endpoints && (savedConfig.endpoints.memory || savedConfig.endpoints.document) || 
-              savedConfig?.indexes && (savedConfig.indexes.short_term || savedConfig.indexes.long_term || savedConfig.indexes.entity || savedConfig.indexes.document)));
+              savedConfig?.indexes && (savedConfig.indexes.unified || savedConfig.indexes.document)));
             return null;
           })()}
           {savedConfig && savedConfig.workspace_url && (
@@ -1501,52 +1419,6 @@ export const DatabricksOneClickSetup: React.FC = () => {
                       />
                       
                       {/* Advanced Settings */}
-                      <Box sx={{ mt: 2, mb: 2 }}>
-                        <Divider sx={{ mb: 1 }} />
-                        <Box
-                          sx={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            cursor: 'pointer',
-                            py: 0.5,
-                          }}
-                          onClick={() => setAdvancedSettingsExpanded(!advancedSettingsExpanded)}
-                        >
-                          <Typography variant="subtitle2" color="text.secondary">
-                            Advanced Settings
-                          </Typography>
-                          <IconButton size="small">
-                            {advancedSettingsExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                          </IconButton>
-                        </Box>
-                        
-                        <Collapse in={advancedSettingsExpanded}>
-                          <Box sx={{ mt: 1, pl: 1 }}>
-                            <FormControlLabel
-                              control={
-                                <Switch
-                                  checked={enableRelationshipRetrieval}
-                                  onChange={(e) => handleRelationshipRetrievalChange(e.target.checked)}
-                                  color="primary"
-                                />
-                              }
-                              label={
-                                <Box>
-                                  <Typography variant="body2">
-                                    Enable Relationship-Based Entity Retrieval
-                                  </Typography>
-                                  <Typography variant="caption" color="text.secondary">
-                                    Experimental: Use graph-based relationships for smarter entity search instead of just semantic similarity.
-                                  </Typography>
-                                </Box>
-                              }
-                            />
-                          </Box>
-                        </Collapse>
-                        <Divider sx={{ mt: 1 }} />
-                      </Box>
-                      
                       {/* Indexes Table */}
                       <Box>
                         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
@@ -1568,31 +1440,28 @@ export const DatabricksOneClickSetup: React.FC = () => {
                             endpointStatuses={endpointStatuses}
                             isSettingUp={isSettingUp}
                             onRefresh={handleReseedDocumentation}
-                            onEmpty={(indexType) => handleEmptyIndex(indexType as 'short_term' | 'long_term' | 'entity' | 'document')}
-                            onDelete={(indexType) => handleDeleteIndex(indexType as 'short_term' | 'long_term' | 'entity' | 'document')}
+                            onEmpty={(indexType) => handleEmptyIndex(indexType as 'memory' | 'document')}
+                            onDelete={(indexType) => handleDeleteIndex(indexType as 'memory' | 'document')}
                             onViewDocuments={handleViewDocuments}
                           />
                         )}
 
-                        {/* Memory Indexes Table */}
-                        {(savedConfig.indexes?.short_term || savedConfig.indexes?.long_term || savedConfig.indexes?.entity) && (
+                        {/* Unified Memory Index Table */}
+                        {savedConfig.indexes?.unified && (
                           <IndexManagementTable
-                            title="Memory Indexes"
-                            subtitle="Memory indexes store agent conversations and interactions during runtime. Short-term memory holds recent context, long-term memory persists important information across sessions, and entity memory tracks relationships and facts about people, organizations, and concepts."
+                            title="Unified Cognitive Memory Index"
+                            subtitle="CrewAI 1.10+ stores every memory record (short-term, long-term, and entity alike) in a single index using UNIFIED_SCHEMA. Scope paths and category tags inside metadata replace the old per-tier splits."
                             savedConfig={savedConfig}
                             endpointName={savedConfig.endpoints?.memory?.name}
                             endpointType="memory"
                             indexes={[
-                              savedConfig.indexes.short_term && { type: 'short_term' as const, name: savedConfig.indexes.short_term.name },
-                              savedConfig.indexes.long_term && { type: 'long_term' as const, name: savedConfig.indexes.long_term.name },
-                              savedConfig.indexes.entity && { type: 'entity' as const, name: savedConfig.indexes.entity.name }
-                            ].filter((index): index is { type: 'short_term' | 'long_term' | 'entity', name: string } => Boolean(index))}
+                              savedConfig.indexes.unified && { type: 'memory' as const, name: savedConfig.indexes.unified.name },
+                            ].filter((index): index is { type: 'memory', name: string } => Boolean(index))}
                             indexInfoMap={indexInfoMap}
                             endpointStatuses={endpointStatuses}
                             isSettingUp={isSettingUp}
-                            onEmpty={(indexType) => handleEmptyIndex(indexType as 'short_term' | 'long_term' | 'entity' | 'document')}
-                            onDelete={(indexType) => handleDeleteIndex(indexType as 'short_term' | 'long_term' | 'entity' | 'document')}
-                            onVisualize={(indexType, indexName) => openVisualization(indexName, indexType)}
+                            onEmpty={(indexType) => handleEmptyIndex(indexType as 'memory' | 'document')}
+                            onDelete={(indexType) => handleDeleteIndex(indexType as 'memory' | 'document')}
                             onViewDocuments={handleViewDocuments}
                           />
                         )}
@@ -1615,6 +1484,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
             <Alert
               severity={lakebaseStatus.success ? 'success' : 'error'}
               onClose={() => setLakebaseStatus(null)}
+              sx={{ '& .MuiAlert-message': { whiteSpace: 'pre-line' } }}
             >
               {lakebaseStatus.message}
             </Alert>
@@ -1629,14 +1499,36 @@ export const DatabricksOneClickSetup: React.FC = () => {
           <Alert severity="warning" sx={{ '& .MuiAlert-message': { width: '100%' } }}>
             <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Databricks App Setup</Typography>
             <Typography variant="body2" sx={{ mb: 0.5 }}>
-              Before connecting, ensure your App&apos;s service principal has Lakebase access:
+              Before connecting, complete these steps so your App&apos;s service principal can
+              authenticate to and use Lakebase:
             </Typography>
-            <Box component="ol" sx={{ m: 0, pl: 2.5, '& li': { mb: 0.25 } }}>
+            <Box component="ol" sx={{ m: 0, pl: 2.5, '& li': { mb: 0.5 } }}>
               <Typography component="li" variant="body2">
-                Add a <strong>Database</strong> resource to your App in the Databricks UI
+                <strong>Add the Lakebase instance as a Database resource to your App</strong> in the
+                Databricks UI (App → <em>Edit</em> → <em>Resources</em> → <em>Add resource</em> →{' '}
+                <em>Database</em>) with permission <em>&quot;Can connect and create&quot;</em>.
+                This is <strong>required</strong>: it automatically creates a linked PostgreSQL role
+                for the service principal. Without it you will get{' '}
+                <em>&quot;password authentication failed&quot;</em>, because a plain Postgres role is
+                not bound to the App&apos;s Databricks identity.
               </Typography>
               <Typography component="li" variant="body2">
-                Create a <strong>PostgreSQL role</strong> for the service principal on the Lakebase instance
+                Enable the <strong>pgvector</strong> extension <strong>once</strong> as the instance owner
+                (the App&apos;s service principal cannot create it — that requires superuser):
+                <Box
+                  component="code"
+                  sx={{
+                    display: 'block',
+                    mt: 0.5,
+                    p: 1,
+                    bgcolor: 'action.hover',
+                    borderRadius: 1,
+                    fontFamily: 'monospace',
+                    fontSize: '0.8rem',
+                  }}
+                >
+                  CREATE EXTENSION IF NOT EXISTS vector;
+                </Box>
               </Typography>
             </Box>
             <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
@@ -1664,7 +1556,10 @@ export const DatabricksOneClickSetup: React.FC = () => {
                 freeSolo
                 options={lakebaseInstances}
                 getOptionLabel={(option) => typeof option === 'string' ? option : option.name}
-                value={lakebaseInstances.find(i => i.name === lakebaseConfig.instance_name) || null}
+                value={
+                  lakebaseInstances.find(i => i.name === lakebaseConfig.instance_name)
+                  || (lakebaseConfig.instance_name || null)
+                }
                 inputValue={instanceSearch}
                 onInputChange={(_e, value, reason) => {
                   setInstanceSearch(value);
@@ -1834,40 +1729,45 @@ export const DatabricksOneClickSetup: React.FC = () => {
                     const result = await MemoryBackendService.initializeLakebaseTables({
                       instance_name: lakebaseConfig.instance_name,
                       embedding_dimension: lakebaseConfig.embedding_dimension,
-                      short_term_table: lakebaseConfig.short_term_table,
-                      long_term_table: lakebaseConfig.long_term_table,
-                      entity_table: lakebaseConfig.entity_table,
+                      memory_table: lakebaseConfig.memory_table,
                     });
-                    if (result.success) {
-                      setLakebaseConfig(prev => ({ ...prev, tables_initialized: true }));
-
-                      // Save config to backend
-                      try {
-                        const saveResult = await apiClient.post('/memory-backend/lakebase/save-config', {
-                          lakebase_config: {
-                            ...lakebaseConfig,
-                            tables_initialized: true,
-                          },
-                        });
-                        setSavedConfig({ backend_id: saveResult.data.backend_id });
-                        updateConfig({
-                          backend_type: MemoryBackendType.LAKEBASE,
-                          lakebase_config: { ...lakebaseConfig, tables_initialized: true },
-                          enable_short_term: true,
-                          enable_long_term: true,
-                          enable_entity: true,
-                        });
-                      } catch (saveError) {
-                        console.error('Failed to save Lakebase config:', saveError);
-                        setLakebaseStatus({ success: true, message: 'Tables initialized but failed to save configuration. Try again.' });
-                      }
-
-                      // Load table stats
-                      if (lakebaseConfig.instance_name) {
-                        await loadLakebaseTableStats(lakebaseConfig.instance_name);
-                      }
+                    if (!result.success) {
+                      setLakebaseStatus({ success: false, message: result.message });
+                      return;
                     }
-                    setLakebaseStatus({ success: result.success, message: result.message });
+
+                    setLakebaseConfig(prev => ({ ...prev, tables_initialized: true }));
+
+                    let saveErrorMessage: string | null = null;
+                    try {
+                      const saveResult = await apiClient.post('/memory-backend/lakebase/save-config', {
+                        lakebase_config: {
+                          ...lakebaseConfig,
+                          tables_initialized: true,
+                        },
+                      });
+                      setSavedConfig({ backend_id: saveResult.data.backend_id });
+                      updateConfig({
+                        backend_type: MemoryBackendType.LAKEBASE,
+                        lakebase_config: { ...lakebaseConfig, tables_initialized: true },
+                      });
+                    } catch (saveError) {
+                      console.error('Failed to save Lakebase config:', saveError);
+                      saveErrorMessage = saveError instanceof Error ? saveError.message : 'Unknown error';
+                    }
+
+                    if (lakebaseConfig.instance_name) {
+                      await loadLakebaseTableStats(lakebaseConfig.instance_name);
+                    }
+
+                    if (saveErrorMessage) {
+                      setLakebaseStatus({
+                        success: false,
+                        message: `Tables initialized, but saving the configuration failed: ${saveErrorMessage}. The config will not persist on refresh.`,
+                      });
+                    } else {
+                      setLakebaseStatus({ success: true, message: result.message });
+                    }
                   } catch {
                     setLakebaseStatus({ success: false, message: 'Failed to initialize tables' });
                   } finally {
@@ -1927,6 +1827,16 @@ export const DatabricksOneClickSetup: React.FC = () => {
                       sx={{ ml: 1.5, height: 22 }}
                     />
                   )}
+                  <Box sx={{ flexGrow: 1 }} />
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={<StorageIcon />}
+                    onClick={() => setMemoryBrowserOpen(true)}
+                    disabled={!lakebaseConfig.tables_initialized}
+                  >
+                    Browse Memory
+                  </Button>
                 </Box>
                 {lakebaseTableStats ? (
                   <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
@@ -1944,9 +1854,6 @@ export const DatabricksOneClickSetup: React.FC = () => {
                           </Box>
                           <Box component="th" sx={{ px: 2, py: 1, textAlign: 'right' }}>
                             <Typography variant="caption" fontWeight={600} color="text.secondary">Rows</Typography>
-                          </Box>
-                          <Box component="th" sx={{ px: 2, py: 1, textAlign: 'center' }}>
-                            <Typography variant="caption" fontWeight={600} color="text.secondary">Actions</Typography>
                           </Box>
                         </Box>
                       </Box>
@@ -1975,39 +1882,6 @@ export const DatabricksOneClickSetup: React.FC = () => {
                                 {stats.exists ? stats.row_count.toLocaleString() : '—'}
                               </Typography>
                             </Box>
-                            <Box component="td" sx={{ px: 2, py: 1.5, textAlign: 'center' }}>
-                              <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.5 }}>
-                                {stats.exists && stats.row_count > 0 && (
-                                  <>
-                                    <Tooltip title="View Data">
-                                      <IconButton
-                                        size="small"
-                                        onClick={() => {
-                                          setSelectedLakebaseTable({
-                                            tableName: stats.table_name,
-                                            memoryType: type as 'short_term' | 'long_term' | 'entity',
-                                          });
-                                          setLakebaseDocsOpen(true);
-                                        }}
-                                      >
-                                        <VisibilityIcon fontSize="small" />
-                                      </IconButton>
-                                    </Tooltip>
-                                    {type === 'entity' && (
-                                      <Tooltip title="Visualize Graph">
-                                        <IconButton
-                                          size="small"
-                                          color="primary"
-                                          onClick={() => setLakebaseEntityGraphOpen(true)}
-                                        >
-                                          <AccountTreeIcon fontSize="small" />
-                                        </IconButton>
-                                      </Tooltip>
-                                    )}
-                                  </>
-                                )}
-                              </Box>
-                            </Box>
                           </Box>
                         ))}
                       </Box>
@@ -2025,11 +1899,31 @@ export const DatabricksOneClickSetup: React.FC = () => {
       </Collapse>
 
       <Collapse in={mode === 'disabled'}>
-        <Alert severity="info" sx={{ mt: 2 }}>
-          Uses local storage with ChromaDB for vector search and SQLite for long-term memory.
-          No external infrastructure needed — all data is stored locally on the server.
+        <Alert
+          severity="info"
+          sx={{ mt: 2 }}
+          action={
+            <Button
+              color="inherit"
+              size="small"
+              startIcon={<StorageIcon />}
+              onClick={() => setMemoryBrowserOpen(true)}
+            >
+              Browse Memory
+            </Button>
+          }
+        >
+          CrewAI unified cognitive memory is stored locally in LanceDB under
+          <code style={{ margin: '0 4px' }}>kasal_default_&lt;group&gt;_crew_&lt;hash&gt;/memory/</code>
+          relative to the backend working directory. No external infrastructure required.
+          Click &ldquo;Browse Memory&rdquo; to inspect the records your crews have persisted.
         </Alert>
       </Collapse>
+
+      <MemoryRecordsBrowser
+        open={memoryBrowserOpen}
+        onClose={() => setMemoryBrowserOpen(false)}
+      />
 
       {/* Result Dialog */}
       <SetupResultDialog
@@ -2038,15 +1932,6 @@ export const DatabricksOneClickSetup: React.FC = () => {
         setupResult={setupResult}
         workspaceUrl={detectedWorkspaceUrl || ''}
         savedConfigWorkspaceUrl={savedConfig?.workspace_url}
-      />
-      
-      {/* Entity Visualization Dialog */}
-      <EntityGraphVisualization
-        open={visualizationOpen}
-        onClose={closeVisualization}
-        indexName={visualizationIndex?.name}
-        workspaceUrl={savedConfig?.workspace_url}
-        endpointName={savedConfig?.endpoints?.memory?.name}
       />
       
       {/* Index Documents Dialog */}
@@ -2065,27 +1950,6 @@ export const DatabricksOneClickSetup: React.FC = () => {
         />
       )}
 
-      {/* Lakebase Documents Dialog */}
-      {selectedLakebaseTable && (
-        <LakebaseDocumentsDialog
-          open={lakebaseDocsOpen}
-          onClose={() => {
-            setLakebaseDocsOpen(false);
-            setSelectedLakebaseTable(null);
-          }}
-          tableName={selectedLakebaseTable.tableName}
-          memoryType={selectedLakebaseTable.memoryType}
-          instanceName={lakebaseConfig.instance_name}
-        />
-      )}
-
-      {/* Lakebase Entity Graph Visualization */}
-      <EntityGraphVisualization
-        open={lakebaseEntityGraphOpen}
-        onClose={() => setLakebaseEntityGraphOpen(false)}
-        dataSource="lakebase"
-        lakebaseInstanceName={lakebaseConfig.instance_name}
-      />
       </Paper>
     </Box>
   );

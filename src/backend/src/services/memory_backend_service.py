@@ -376,17 +376,13 @@ class MemoryBackendService:
     async def initialize_lakebase_tables(
         self,
         embedding_dimension: int = 1024,
-        short_term_table: str = "crew_short_term_memory",
-        long_term_table: str = "crew_long_term_memory",
-        entity_table: str = "crew_entity_memory",
+        memory_table: str = "crew_memory",
         instance_name: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Create pgvector extension and memory tables on Lakebase."""
+        """Create pgvector extension and the unified memory table on Lakebase."""
         return await self._get_lakebase_service(instance_name).initialize_tables(
             embedding_dimension=embedding_dimension,
-            short_term_table=short_term_table,
-            long_term_table=long_term_table,
-            entity_table=entity_table,
+            memory_table=memory_table,
         )
 
     async def get_lakebase_table_stats(
@@ -409,12 +405,12 @@ class MemoryBackendService:
 
     async def get_lakebase_entity_data(
         self,
-        entity_table: str = "crew_entity_memory",
+        memory_table: str = "crew_memory",
         limit: int = 200,
         instance_name: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Fetch entity data formatted for graph visualization."""
+        """Fetch entity-like records from the unified memory table."""
         return await self._get_lakebase_service(instance_name).get_entity_data(
-            entity_table=entity_table,
+            memory_table=memory_table,
             limit=limit,
         )

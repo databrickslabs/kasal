@@ -2,14 +2,15 @@
 Memory backend configuration database model.
 
 This module defines the SQLAlchemy model for storing memory backend configurations.
+CrewAI 1.10+ uses a single unified ``Memory`` class, so this model no longer
+carries per-type enable flags — memory is either on (``is_active=True``) or off.
 """
 
 import enum
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Enum, ForeignKey, String
-from sqlalchemy.orm import relationship
+from sqlalchemy import JSON, Boolean, Column, DateTime, Enum, String
 
 from src.db.base import Base
 
@@ -27,11 +28,11 @@ class MemoryBackendTypeEnum(str, enum.Enum):
 
 
 class MemoryBackend(Base):
-    """
-    Memory backend configuration model.
+    """Memory backend configuration model.
 
-    Stores configuration for different vector database backends
-    used for agent memory storage.
+    Stores one configuration per named memory backend. A single row defines
+    the unified cognitive memory for a given tenant: backend type, connection
+    details, cognitive tuning parameters, and activation flags.
     """
 
     __tablename__ = "memory_backends"
@@ -50,24 +51,22 @@ class MemoryBackend(Base):
         default=MemoryBackendTypeEnum.DEFAULT,
     )
 
-    # Backend-specific configuration (stored as JSON)
+    # Backend-specific configuration (stored as JSON).
     databricks_config = Column(JSON, nullable=True)
     lakebase_config = Column(JSON, nullable=True)
 
-    # Common settings
-    enable_short_term = Column(Boolean, default=True)
-    enable_long_term = Column(Boolean, default=True)
-    enable_entity = Column(Boolean, default=True)
+    # CrewAI 1.10+ unified cognitive memory tuning (weights, consolidation,
+    # recall depth). Stored as JSON so the shape can evolve without requiring
+    # a migration per field.
+    cognitive_config = Column(JSON, nullable=True)
 
-    # Advanced settings
-    enable_relationship_retrieval = Column(Boolean, default=False)
-
-    # Additional configuration
+    # Escape hatch for backend-specific options that haven't graduated to a
+    # first-class schema field yet.
     custom_config = Column(JSON, nullable=True)
 
     # Metadata
     is_active = Column(Boolean, default=True)
-    is_default = Column(Boolean, default=False)  # User's default config
+    is_default = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -81,10 +80,7 @@ class MemoryBackend(Base):
             "backend_type": self.backend_type.value if self.backend_type else None,
             "databricks_config": self.databricks_config,
             "lakebase_config": self.lakebase_config,
-            "enable_short_term": self.enable_short_term,
-            "enable_long_term": self.enable_long_term,
-            "enable_entity": self.enable_entity,
-            "enable_relationship_retrieval": self.enable_relationship_retrieval,
+            "cognitive_config": self.cognitive_config,
             "custom_config": self.custom_config,
             "is_active": self.is_active,
             "is_default": self.is_default,
@@ -93,13 +89,9 @@ class MemoryBackend(Base):
         }
 
     def to_config_dict(self):
-        """Convert to configuration format expected by CrewAI."""
+        """Convert to runtime configuration for the memory factory."""
         config = {
             "backend_type": self.backend_type.value if self.backend_type else "default",
-            "enable_short_term": self.enable_short_term,
-            "enable_long_term": self.enable_long_term,
-            "enable_entity": self.enable_entity,
-            "enable_relationship_retrieval": self.enable_relationship_retrieval,
         }
 
         if (
@@ -110,6 +102,9 @@ class MemoryBackend(Base):
 
         if self.backend_type == MemoryBackendTypeEnum.LAKEBASE and self.lakebase_config:
             config["lakebase_config"] = self.lakebase_config
+
+        if self.cognitive_config:
+            config["cognitive_config"] = self.cognitive_config
 
         if self.custom_config:
             config["custom_config"] = self.custom_config

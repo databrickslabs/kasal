@@ -84,7 +84,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
         // Knowledge sources ONLY work with Databricks Vector Search, not with ChromaDB
         const isConfigured = memoryConfig.backend_type === MemoryBackendType.DATABRICKS &&
           memoryConfig.databricks_config?.endpoint_name &&
-          memoryConfig.databricks_config?.short_term_index;
+          memoryConfig.databricks_config?.memory_index;
 
         setIsMemoryBackendConfigured(!!isConfigured);
         setMemoryBackendType(memoryConfig.backend_type);
@@ -136,7 +136,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
                 isValidMemoryBackendConfig(memoryConfig) &&
                 memoryConfig.backend_type === MemoryBackendType.DATABRICKS &&
                 memoryConfig.databricks_config?.endpoint_name &&
-                memoryConfig.databricks_config?.short_term_index;
+                memoryConfig.databricks_config?.memory_index;
 
               const shouldBeEnabled = savedConfig.enabled && savedConfig.knowledge_volume_enabled && isMemoryConfigured;
 

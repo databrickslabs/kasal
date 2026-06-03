@@ -154,6 +154,88 @@ async def get_model_context_limits(agent, group_context) -> tuple[int, int]:
         return default_context_window, default_max_output
 
 
+async def configure_flow_crew_memory(
+    crew_kwargs: Dict[str, Any],
+    agents: List[Any],
+    task_list: List[Any],
+    crew_name: str,
+    group_id: Optional[str],
+    user_token: Optional[str],
+) -> Dict[str, Any]:
+    """Wire the unified Databricks/Lakebase memory backend into a flow crew.
+
+    Crews built inside a Flow never went through ``CrewMemoryService`` like the
+    regular crew path (crew_preparation step 8), so they fell back to CrewAI's
+    default LanceDB + OpenAI embedder and failed with
+    ``CHROMA_OPENAI_API_KEY is not set``. This mirrors the crew-mode setup:
+    fetch the backend config, build the Databricks embedder, create the unified
+    storage, and attach the configured ``Memory`` to the crew + its agents.
+    Falls back gracefully (CrewAI default) when no backend is configured.
+    """
+    from src.engines.crewai.services.crew_memory_service import CrewMemoryService
+    from src.engines.crewai.config.embedder_config_builder import EmbedderConfigBuilder
+    from src.schemas.memory_backend import MemoryBackendConfig as MemBackConfig
+
+    model = None
+    if agents and getattr(agents[0], "llm", None) is not None:
+        model = getattr(agents[0].llm, "model", None)
+
+    mem_service_config = {
+        "group_id": group_id,
+        "agents": [{"role": getattr(a, "role", "")} for a in agents],
+        "tasks": [
+            {"description": getattr(t, "description", "") or getattr(t, "name", "")}
+            for t in task_list
+        ],
+        "name": crew_name,
+        "model": model,
+    }
+    memory_service = CrewMemoryService(mem_service_config, user_token=user_token)
+
+    try:
+        memory_backend_config = await memory_service.fetch_memory_backend_config()
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning(f"[FLOW MEMORY] Could not fetch memory backend config: {e}")
+        memory_backend_config = None
+
+    # Build the embedder (callable for databricks/lakebase, provider dict otherwise).
+    custom_embedder = None
+    try:
+        embedder_build_config = {"agents": [{"embedder_config": None}], "group_id": group_id}
+        embedder_builder = EmbedderConfigBuilder(embedder_build_config, user_token)
+        crew_kwargs, custom_embedder, _ = await embedder_builder.configure_embedder(crew_kwargs)
+    except Exception as e:
+        logger.warning(f"[FLOW MEMORY] Embedder configuration failed: {e}")
+
+    if not memory_backend_config:
+        # No unified backend configured → leave whatever embedder was set
+        # (CrewAI default LanceDB storage).
+        return crew_kwargs
+
+    try:
+        crew_id = memory_service.generate_crew_id()
+        backend_type = memory_backend_config.get("backend_type")
+        embedder_for_backend = (
+            custom_embedder
+            if backend_type in ("databricks", "lakebase")
+            else crew_kwargs.get("embedder")
+        )
+        unified_storage = await memory_service.create_unified_storage(
+            memory_backend_config, crew_id, embedder_for_backend
+        )
+        memory_config = MemBackConfig(**memory_backend_config)
+        crew_kwargs = memory_service.configure_crew_memory_components(
+            crew_kwargs, memory_config, unified_storage, crew_id, custom_embedder
+        )
+        logger.info(
+            f"[FLOW MEMORY] Configured unified memory (backend={backend_type}, crew_id={crew_id})"
+        )
+    except Exception as e:
+        logger.warning(f"[FLOW MEMORY] Failed to configure unified memory backend: {e}")
+
+    return crew_kwargs
+
+
 class FlowMethodFactory:
     """
     Factory for creating dynamic flow methods (starting points, listeners, routers).
@@ -335,22 +417,14 @@ class FlowMethodFactory:
                         agent_role = agent.role if hasattr(agent, 'role') else 'Unknown'
                         logger.info(f"  → Propagated reasoning=True to agent '{agent_role}'")
 
-            # Configure embedder for memory (same as regular crew path)
+            # Configure the unified memory backend (Databricks/Lakebase) for the
+            # flow crew — same wiring as the regular crew path. Without this the
+            # crew falls back to CrewAI's default LanceDB + OpenAI embedder and
+            # fails with "CHROMA_OPENAI_API_KEY is not set".
             if crew_memory:
-                try:
-                    from src.engines.crewai.config.embedder_config_builder import EmbedderConfigBuilder
-                    embedder_build_config = {
-                        'agents': [{'embedder_config': None}],
-                        'group_id': group_id,
-                    }
-                    embedder_builder = EmbedderConfigBuilder(embedder_build_config, user_token)
-                    crew_kwargs, _, _ = await embedder_builder.configure_embedder(crew_kwargs)
-                    if 'embedder' in crew_kwargs:
-                        logger.info(f"Configured embedder for flow crew: {crew_kwargs['embedder'].get('provider', 'custom') if isinstance(crew_kwargs.get('embedder'), dict) else 'custom'}")
-                    else:
-                        logger.warning("No embedder configured - CrewAI will use its default (requires OPENAI_API_KEY)")
-                except Exception as e:
-                    logger.warning(f"Failed to configure embedder for flow crew: {e}")
+                crew_kwargs = await configure_flow_crew_memory(
+                    crew_kwargs, agents, task_list, crew_name, group_id, user_token
+                )
 
             # Log crew configuration for debugging
             logger.info(f"📋 Crew configuration: memory={crew_memory}, process={process_type}, planning={crew_kwargs.get('planning', False)}, reasoning={crew_kwargs.get('reasoning', False)}")
@@ -727,22 +801,13 @@ class FlowMethodFactory:
                         agent_role = agent.role if hasattr(agent, 'role') else 'Unknown'
                         logger.info(f"  → Propagated reasoning=True to agent '{agent_role}'")
 
-            # Configure embedder for memory (same as regular crew path)
+            # Configure the unified memory backend (Databricks/Lakebase) for the
+            # listener crew — same wiring as the regular crew path (avoids the
+            # CrewAI default LanceDB + OpenAI embedder / CHROMA_OPENAI_API_KEY).
             if crew_memory:
-                try:
-                    from src.engines.crewai.config.embedder_config_builder import EmbedderConfigBuilder
-                    embedder_build_config = {
-                        'agents': [{'embedder_config': None}],
-                        'group_id': group_id,
-                    }
-                    embedder_builder = EmbedderConfigBuilder(embedder_build_config, user_token)
-                    crew_kwargs, _, _ = await embedder_builder.configure_embedder(crew_kwargs)
-                    if 'embedder' in crew_kwargs:
-                        logger.info(f"Configured embedder for listener crew: {crew_kwargs['embedder'].get('provider', 'custom') if isinstance(crew_kwargs.get('embedder'), dict) else 'custom'}")
-                    else:
-                        logger.warning("No embedder configured for listener - CrewAI will use its default (requires OPENAI_API_KEY)")
-                except Exception as e:
-                    logger.warning(f"Failed to configure embedder for listener crew: {e}")
+                crew_kwargs = await configure_flow_crew_memory(
+                    crew_kwargs, agents, runtime_tasks, listener_crew_name, group_id, user_token
+                )
 
             # Log crew configuration for debugging
             logger.info(f"Listener crew configuration: memory={crew_memory}, process={process_type}, planning={crew_kwargs.get('planning', False)}, reasoning={crew_kwargs.get('reasoning', False)}")

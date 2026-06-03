@@ -8,6 +8,20 @@ import uuid
 from typing import Dict, Any, List
 
 
+def _real_async_method(*_args, **_kwargs):
+    """Return a fresh real async function for use as a dynamic Flow method.
+
+    pydantic v2.11 (shipped with CrewAI 1.14.5) treats a non-function class
+    attribute as an unannotated model field and raises ``PydanticUserError``.
+    Flow methods are injected into the dynamic class via ``type()``, so they
+    must be real functions — Mock/AsyncMock objects are rejected. The factory
+    is still patched to return these, so ``assert_called`` checks remain valid.
+    """
+    async def _method(self, *args, **kwargs):
+        return None
+    return _method
+
+
 class TestFlowBuilder:
     """Tests for FlowBuilder class."""
 
@@ -293,7 +307,7 @@ class TestCreateDynamicFlow:
         ]
 
         with patch('src.engines.crewai.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
-            mock_method = AsyncMock()
+            mock_method = _real_async_method()
             mock_factory.create_starting_point_crew_method = MagicMock(return_value=mock_method)
 
             flow = await FlowBuilder._create_dynamic_flow(
@@ -334,7 +348,7 @@ class TestCreateDynamicFlow:
         }
 
         with patch('src.engines.crewai.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
-            mock_method = AsyncMock()
+            mock_method = _real_async_method()
             mock_factory.create_starting_point_crew_method = MagicMock(return_value=mock_method)
 
             flow = await FlowBuilder._create_dynamic_flow(
@@ -374,7 +388,7 @@ class TestCreateDynamicFlow:
         }
 
         with patch('src.engines.crewai.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
-            mock_method = AsyncMock()
+            mock_method = _real_async_method()
             mock_factory.create_starting_point_crew_method = MagicMock(return_value=mock_method)
 
             flow = await FlowBuilder._create_dynamic_flow(
@@ -412,8 +426,8 @@ class TestCreateDynamicFlow:
         ]
 
         with patch('src.engines.crewai.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
-            mock_start_method = AsyncMock()
-            mock_listener_method = AsyncMock()
+            mock_start_method = _real_async_method()
+            mock_listener_method = _real_async_method()
             mock_factory.create_starting_point_crew_method = MagicMock(return_value=mock_start_method)
             mock_factory.create_listener_method = MagicMock(return_value=mock_listener_method)
 
@@ -455,7 +469,7 @@ class TestCreateDynamicFlow:
         checkpoint_outputs = {'Start Crew': 'Previous output'}
 
         with patch('src.engines.crewai.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
-            mock_skip_method = AsyncMock()
+            mock_skip_method = _real_async_method()
             mock_factory.create_skipped_crew_method = MagicMock(return_value=mock_skip_method)
 
             flow = await FlowBuilder._create_dynamic_flow(
@@ -500,7 +514,7 @@ class TestCreateDynamicFlow:
         ]
 
         with patch('src.engines.crewai.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
-            mock_start_method = AsyncMock()
+            mock_start_method = _real_async_method()
             mock_factory.create_starting_point_crew_method = MagicMock(return_value=mock_start_method)
 
             flow = await FlowBuilder._create_dynamic_flow(
@@ -538,8 +552,8 @@ class TestCreateDynamicFlow:
         ]
 
         with patch('src.engines.crewai.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
-            mock_start_method = AsyncMock()
-            mock_listener_method = AsyncMock()
+            mock_start_method = _real_async_method()
+            mock_listener_method = _real_async_method()
             mock_factory.create_starting_point_crew_method = MagicMock(return_value=mock_start_method)
             mock_factory.create_listener_method = MagicMock(return_value=mock_listener_method)
 
@@ -578,8 +592,8 @@ class TestCreateDynamicFlow:
         ]
 
         with patch('src.engines.crewai.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
-            mock_start_method = AsyncMock()
-            mock_listener_method = AsyncMock()
+            mock_start_method = _real_async_method()
+            mock_listener_method = _real_async_method()
             mock_factory.create_starting_point_crew_method = MagicMock(return_value=mock_start_method)
             mock_factory.create_listener_method = MagicMock(return_value=mock_listener_method)
 
@@ -622,8 +636,11 @@ class TestCreateDynamicFlow:
         }
 
         with patch('src.engines.crewai.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
-            mock_skip_method = AsyncMock()
-            mock_factory.create_skipped_crew_method = MagicMock(return_value=mock_skip_method)
+            # All factory methods must return real functions (not Mocks) so the
+            # dynamic Flow class passes pydantic v2.11 field validation.
+            mock_factory.create_starting_point_crew_method = MagicMock(side_effect=_real_async_method)
+            mock_factory.create_listener_method = MagicMock(side_effect=_real_async_method)
+            mock_factory.create_skipped_crew_method = MagicMock(side_effect=_real_async_method)
 
             flow = await FlowBuilder._create_dynamic_flow(
                 starting_points=starting_points,
