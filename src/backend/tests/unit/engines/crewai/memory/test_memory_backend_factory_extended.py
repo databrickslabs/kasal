@@ -1,15 +1,14 @@
 """
 Extended tests for memory_backend_factory.py — targeting uncovered branches.
 
-Focus areas:
-- _validate_databricks_indexes: READY state (via status.ready=True), PENDING state,
-  object-based exception during per-index check, outer exception handling
-- create_memory_backends DATABRICKS: entity storage with relationship retrieval,
-  all indexes with auth params (PAT, service principal), user_token, group_id extraction
-- create_memory_backends LAKEBASE: no instance_name on lakebase_config
-- create_embedder_wrapper: embed-method-only path, search with embed method
-- DatabricksIndexValidationError: all field extraction paths
+Updated for app-modes refactoring:
+- Uses _validate_databricks_index (singular) — single unified index
+- create_memory_backends returns {"unified": backend} or {}
+- DatabricksMemoryConfig requires memory_index (not short_term/long_term/entity indexes)
+- LakebaseMemoryConfig uses memory_table (not short_term/long_term/entity tables)
+- create_embedder_wrapper was removed (no longer in API)
 """
+import sys
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
@@ -25,25 +24,13 @@ from src.schemas.memory_backend import (
 )
 
 
-# ─── _validate_databricks_indexes extra branches ──────────────────────────────
+# ─── _validate_databricks_index extra state branches ──────────────────────────
 
-class TestValidateDatabricksIndexesExtra:
+class TestValidateDatabricksIndexExtra:
 
     @pytest.mark.asyncio
-    async def test_ready_via_is_ready_flag(self):
+    async def test_ready_via_is_ready_flag_even_non_online_state(self):
         """Index is valid when status.ready=True even if state is not ONLINE."""
-        config = MemoryBackendConfig(
-            backend_type=MemoryBackendType.DATABRICKS,
-            databricks_config=DatabricksMemoryConfig(
-                endpoint_name="ep",
-                short_term_index="cat.sch.st",
-                workspace_url="https://example.databricks.com",
-            ),
-            enable_short_term=True,
-            enable_long_term=False,
-            enable_entity=False,
-        )
-
         mock_repo = MagicMock()
         mock_repo.describe_index = AsyncMock(
             return_value={
@@ -60,29 +47,18 @@ class TestValidateDatabricksIndexesExtra:
                 )
             },
         ):
-            all_valid, valid, missing, provisioning = (
-                await MemoryBackendFactory._validate_databricks_indexes(config)
+            # Should not raise
+            await MemoryBackendFactory._validate_databricks_index(
+                workspace_url="https://example.databricks.com",
+                endpoint_name="ep",
+                index_name="cat.sch.mem",
+                user_token=None,
+                group_id=None,
             )
-
-        assert all_valid is True
-        assert len(valid) == 1
 
     @pytest.mark.asyncio
     async def test_pending_state_treated_as_provisioning(self):
-        """PENDING state goes into provisioning list."""
-        config = MemoryBackendConfig(
-            backend_type=MemoryBackendType.DATABRICKS,
-            databricks_config=DatabricksMemoryConfig(
-                endpoint_name="ep",
-                short_term_index="cat.sch.st",
-                long_term_index="cat.sch.lt",
-                workspace_url="https://example.databricks.com",
-            ),
-            enable_short_term=False,
-            enable_long_term=True,
-            enable_entity=False,
-        )
-
+        """PENDING state raises with provisioning_indexes error_type."""
         mock_repo = MagicMock()
         mock_repo.describe_index = AsyncMock(
             return_value={
@@ -99,29 +75,19 @@ class TestValidateDatabricksIndexesExtra:
                 )
             },
         ):
-            all_valid, valid, missing, provisioning = (
-                await MemoryBackendFactory._validate_databricks_indexes(config)
-            )
-
-        assert all_valid is False
-        assert len(provisioning) == 1
+            with pytest.raises(DatabricksIndexValidationError) as exc_info:
+                await MemoryBackendFactory._validate_databricks_index(
+                    workspace_url="https://example.databricks.com",
+                    endpoint_name="ep",
+                    index_name="cat.sch.mem",
+                    user_token=None,
+                    group_id=None,
+                )
+        assert exc_info.value.error_type == "provisioning_indexes"
 
     @pytest.mark.asyncio
     async def test_creating_state_treated_as_provisioning(self):
-        """CREATING state goes into provisioning list."""
-        config = MemoryBackendConfig(
-            backend_type=MemoryBackendType.DATABRICKS,
-            databricks_config=DatabricksMemoryConfig(
-                endpoint_name="ep",
-                short_term_index="cat.sch.st",
-                entity_index="cat.sch.ent",
-                workspace_url="https://example.databricks.com",
-            ),
-            enable_short_term=False,
-            enable_long_term=False,
-            enable_entity=True,
-        )
-
+        """CREATING state raises with provisioning_indexes error_type."""
         mock_repo = MagicMock()
         mock_repo.describe_index = AsyncMock(
             return_value={
@@ -138,26 +104,19 @@ class TestValidateDatabricksIndexesExtra:
                 )
             },
         ):
-            all_valid, valid, missing, provisioning = (
-                await MemoryBackendFactory._validate_databricks_indexes(config)
-            )
-
-        assert all_valid is False
-        assert len(provisioning) == 1
+            with pytest.raises(DatabricksIndexValidationError) as exc_info:
+                await MemoryBackendFactory._validate_databricks_index(
+                    workspace_url="https://example.databricks.com",
+                    endpoint_name="ep",
+                    index_name="cat.sch.mem",
+                    user_token=None,
+                    group_id=None,
+                )
+        assert exc_info.value.error_type == "provisioning_indexes"
 
     @pytest.mark.asyncio
-    async def test_unknown_state_treated_as_provisioning(self):
-        """Unknown state + not ready goes into provisioning list."""
-        config = MemoryBackendConfig(
-            backend_type=MemoryBackendType.DATABRICKS,
-            databricks_config=DatabricksMemoryConfig(
-                endpoint_name="ep",
-                short_term_index="cat.sch.st",
-                workspace_url="https://example.databricks.com",
-            ),
-            enable_short_term=True,
-        )
-
+    async def test_unknown_state_not_ready_raises_unexpected_state(self):
+        """Unknown state + not ready raises with unexpected_state error_type."""
         mock_repo = MagicMock()
         mock_repo.describe_index = AsyncMock(
             return_value={
@@ -174,28 +133,21 @@ class TestValidateDatabricksIndexesExtra:
                 )
             },
         ):
-            all_valid, valid, missing, provisioning = (
-                await MemoryBackendFactory._validate_databricks_indexes(config)
-            )
-
-        assert all_valid is False
-        assert len(provisioning) == 1
+            with pytest.raises(DatabricksIndexValidationError) as exc_info:
+                await MemoryBackendFactory._validate_databricks_index(
+                    workspace_url="https://example.databricks.com",
+                    endpoint_name="ep",
+                    index_name="cat.sch.mem",
+                    user_token=None,
+                    group_id=None,
+                )
+        assert exc_info.value.error_type == "unexpected_state"
 
     @pytest.mark.asyncio
-    async def test_per_index_exception_adds_to_missing(self):
-        """Exception during individual index describe adds to missing list."""
-        config = MemoryBackendConfig(
-            backend_type=MemoryBackendType.DATABRICKS,
-            databricks_config=DatabricksMemoryConfig(
-                endpoint_name="ep",
-                short_term_index="cat.sch.st",
-                workspace_url="https://example.databricks.com",
-            ),
-            enable_short_term=True,
-        )
-
+    async def test_describe_exception_raises_describe_failed(self):
+        """Exception during describe raises with describe_failed error_type."""
         mock_repo = MagicMock()
-        mock_repo.describe_index = AsyncMock(side_effect=Exception("Connection timeout"))
+        mock_repo.describe_index = AsyncMock(side_effect=RuntimeError("Connection timeout"))
 
         with patch.dict(
             "sys.modules",
@@ -205,349 +157,288 @@ class TestValidateDatabricksIndexesExtra:
                 )
             },
         ):
-            all_valid, valid, missing, provisioning = (
-                await MemoryBackendFactory._validate_databricks_indexes(config)
-            )
-
-        assert all_valid is False
-        assert len(missing) == 1
-        assert "Connection timeout" in missing[0]
+            with pytest.raises(DatabricksIndexValidationError) as exc_info:
+                await MemoryBackendFactory._validate_databricks_index(
+                    workspace_url="https://example.databricks.com",
+                    endpoint_name="ep",
+                    index_name="cat.sch.mem",
+                    user_token=None,
+                    group_id=None,
+                )
+        assert exc_info.value.error_type == "describe_failed"
 
     @pytest.mark.asyncio
-    async def test_no_indexes_configured_returns_valid(self):
-        """When indexes are disabled, validation skips them and returns valid."""
+    async def test_all_skipped_when_no_workspace_url(self):
+        """Validation is skipped entirely when workspace_url is absent."""
+        # Should not raise at all
+        await MemoryBackendFactory._validate_databricks_index(
+            workspace_url=None,
+            endpoint_name="ep",
+            index_name="cat.sch.mem",
+            user_token=None,
+            group_id=None,
+        )
+
+
+# ─── create_memory_backends DATABRICKS ──────────────────────────────────────
+
+class TestDatabricksBackendCases:
+
+    @pytest.mark.asyncio
+    async def test_databricks_with_user_token_forwarded_to_storage(self):
+        """user_token is passed through to DatabricksStorageBackend."""
         config = MemoryBackendConfig(
             backend_type=MemoryBackendType.DATABRICKS,
             databricks_config=DatabricksMemoryConfig(
                 endpoint_name="ep",
-                short_term_index="cat.sch.st",
-                # No long_term_index, no entity_index
+                memory_index="cat.sch.mem",
                 workspace_url="https://example.databricks.com",
             ),
-            enable_short_term=False,  # Disabled -> not checked
-            enable_long_term=False,   # Disabled -> not checked
-            enable_entity=False,      # Disabled -> not checked
+        )
+        captured_kwargs = {}
+
+        def capture(**kwargs):
+            captured_kwargs.update(kwargs)
+            return MagicMock()
+
+        mock_repo = MagicMock()
+        mock_repo.describe_index = AsyncMock(
+            return_value={
+                "success": True,
+                "description": {"status": {"state": "ONLINE", "ready": True}},
+            }
         )
 
         with patch.dict(
             "sys.modules",
             {
                 "src.repositories.databricks_vector_index_repository": MagicMock(
-                    DatabricksVectorIndexRepository=MagicMock(return_value=MagicMock())
-                )
+                    DatabricksVectorIndexRepository=MagicMock(return_value=mock_repo)
+                ),
+                "src.engines.crewai.memory.databricks_storage_backend": MagicMock(
+                    DatabricksStorageBackend=MagicMock(side_effect=capture)
+                ),
             },
         ):
-            all_valid, valid, missing, provisioning = (
-                await MemoryBackendFactory._validate_databricks_indexes(config)
+            await MemoryBackendFactory.create_memory_backends(
+                config=config,
+                crew_id="grp_crew_abc",
+                user_token="user-obo-token",
             )
 
-        # No indexes to check means all_valid=True with empty lists
-        assert all_valid is True
-        assert valid == []
-        assert missing == []
-        assert provisioning == []
-
-
-# ─── create_memory_backends DATABRICKS with auth params ──────────────────────
-
-class TestDatabricksBackendWithAuthParams:
+        assert captured_kwargs.get("user_token") == "user-obo-token"
 
     @pytest.mark.asyncio
-    async def test_databricks_with_personal_access_token(self):
-        """PAT is passed to storage kwargs when provided."""
+    async def test_databricks_group_id_extracted_correctly(self):
+        """group_id is correctly extracted from crew_id using _crew_ separator."""
         config = MemoryBackendConfig(
             backend_type=MemoryBackendType.DATABRICKS,
             databricks_config=DatabricksMemoryConfig(
                 endpoint_name="ep",
-                short_term_index="cat.sch.st",
+                memory_index="cat.sch.mem",
                 workspace_url="https://example.databricks.com",
-                personal_access_token="dapi-test-token",
             ),
-            enable_short_term=True,
-            enable_long_term=False,
-            enable_entity=False,
         )
-
         captured_kwargs = {}
 
-        def capture_storage(**kwargs):
+        def capture(**kwargs):
             captured_kwargs.update(kwargs)
-            m = MagicMock()
-            m.memory_type = "short_term"
-            m.workspace_url = "https://example.databricks.com"
-            m.index_name = "cat.sch.st"
-            m.endpoint_name = "ep"
-            m.user_token = None
-            m.group_id = None
-            m.job_id = None
-            return m
-
-        with patch(
-            "src.engines.crewai.memory.memory_backend_factory.MemoryBackendFactory._validate_databricks_indexes",
-            new_callable=AsyncMock,
-            return_value=(True, ["short_term: cat.sch.st"], [], []),
-        ), patch.dict(
-            "sys.modules",
-            {
-                "src.engines.crewai.memory.crewai_databricks_wrapper": MagicMock(
-                    CrewAIDatabricksWrapper=MagicMock(return_value=MagicMock())
-                ),
-                "src.engines.crewai.memory.databricks_vector_storage": MagicMock(
-                    DatabricksVectorStorage=MagicMock(side_effect=capture_storage)
-                ),
-            },
-        ):
-            await MemoryBackendFactory.create_memory_backends(
-                config=config, crew_id="test_crew"
-            )
-
-        assert captured_kwargs.get("personal_access_token") == "dapi-test-token"
-
-    @pytest.mark.asyncio
-    async def test_databricks_with_service_principal(self):
-        """Service principal creds passed to storage kwargs when provided."""
-        config = MemoryBackendConfig(
-            backend_type=MemoryBackendType.DATABRICKS,
-            databricks_config=DatabricksMemoryConfig(
-                endpoint_name="ep",
-                short_term_index="cat.sch.st",
-                long_term_index="cat.sch.lt",
-                workspace_url="https://example.databricks.com",
-                service_principal_client_id="sp-client",
-                service_principal_client_secret="sp-secret",
-            ),
-            enable_short_term=True,  # must be True so group_id is initialized
-            enable_long_term=True,
-            enable_entity=False,
-        )
-
-        captured_kwargs_list = []
-
-        def capture_storage(**kwargs):
-            captured_kwargs_list.append(dict(kwargs))
-            m = MagicMock()
-            m.memory_type = kwargs.get("memory_type", "short_term")
-            m.workspace_url = "https://example.databricks.com"
-            m.index_name = kwargs.get("index_name", "cat.sch.st")
-            m.endpoint_name = "ep"
-            m.user_token = None
-            m.group_id = None
-            m.job_id = None
-            return m
-
-        with patch(
-            "src.engines.crewai.memory.memory_backend_factory.MemoryBackendFactory._validate_databricks_indexes",
-            new_callable=AsyncMock,
-            return_value=(True, ["short_term: cat.sch.st", "long_term: cat.sch.lt"], [], []),
-        ), patch.dict(
-            "sys.modules",
-            {
-                "src.engines.crewai.memory.crewai_databricks_wrapper": MagicMock(
-                    CrewAIDatabricksWrapper=MagicMock(return_value=MagicMock())
-                ),
-                "src.engines.crewai.memory.databricks_vector_storage": MagicMock(
-                    DatabricksVectorStorage=MagicMock(side_effect=capture_storage)
-                ),
-            },
-        ):
-            await MemoryBackendFactory.create_memory_backends(
-                config=config, crew_id="test_crew"
-            )
-
-        # The long-term storage should have the SP credentials
-        lt_kwargs = next(
-            (kw for kw in captured_kwargs_list if kw.get("memory_type") == "long_term"), {}
-        )
-        assert lt_kwargs.get("service_principal_client_id") == "sp-client"
-        assert lt_kwargs.get("service_principal_client_secret") == "sp-secret"
-
-    @pytest.mark.asyncio
-    async def test_databricks_entity_with_relationship_retrieval(self):
-        """Entity storage wrapper gets enable_relationship_retrieval from config."""
-        config = MemoryBackendConfig(
-            backend_type=MemoryBackendType.DATABRICKS,
-            databricks_config=DatabricksMemoryConfig(
-                endpoint_name="ep",
-                short_term_index="cat.sch.st",
-                entity_index="cat.sch.ent",
-                workspace_url="https://example.databricks.com",
-            ),
-            enable_short_term=True,  # must be True so group_id is initialized
-            enable_long_term=False,
-            enable_entity=True,
-            enable_relationship_retrieval=True,
-        )
-
-        captured_wrapper_kwargs = {}
-
-        def capture_wrapper(storage, embedder, enable_relationship_retrieval=False):
-            captured_wrapper_kwargs['enable_relationship_retrieval'] = enable_relationship_retrieval
             return MagicMock()
 
-        with patch(
-            "src.engines.crewai.memory.memory_backend_factory.MemoryBackendFactory._validate_databricks_indexes",
-            new_callable=AsyncMock,
-            return_value=(True, ["entity: cat.sch.ent"], [], []),
-        ), patch.dict(
+        mock_repo = MagicMock()
+        mock_repo.describe_index = AsyncMock(
+            return_value={
+                "success": True,
+                "description": {"status": {"state": "ONLINE", "ready": True}},
+            }
+        )
+
+        with patch.dict(
             "sys.modules",
             {
-                "src.engines.crewai.memory.crewai_databricks_wrapper": MagicMock(
-                    CrewAIDatabricksWrapper=MagicMock(side_effect=capture_wrapper)
+                "src.repositories.databricks_vector_index_repository": MagicMock(
+                    DatabricksVectorIndexRepository=MagicMock(return_value=mock_repo)
                 ),
-                "src.engines.crewai.memory.databricks_vector_storage": MagicMock(
-                    DatabricksVectorStorage=MagicMock(return_value=MagicMock(
-                        memory_type="entity",
-                        workspace_url="https://example.databricks.com",
-                        index_name="cat.sch.ent",
-                        endpoint_name="ep",
-                        user_token=None,
-                        group_id=None,
-                    ))
+                "src.engines.crewai.memory.databricks_storage_backend": MagicMock(
+                    DatabricksStorageBackend=MagicMock(side_effect=capture)
                 ),
             },
         ):
-            result = await MemoryBackendFactory.create_memory_backends(
-                config=config, crew_id="test_crew"
+            await MemoryBackendFactory.create_memory_backends(
+                config=config,
+                crew_id="my_tenant_group_crew_abc123",
             )
 
-        assert captured_wrapper_kwargs.get('enable_relationship_retrieval') is True
+        assert captured_kwargs.get("group_id") == "my_tenant_group"
 
     @pytest.mark.asyncio
-    async def test_databricks_all_three_types(self):
-        """Creates short-term, long-term, entity all at once."""
+    async def test_databricks_job_id_forwarded_as_session_id(self):
+        """job_id is forwarded to DatabricksStorageBackend as session_id."""
         config = MemoryBackendConfig(
             backend_type=MemoryBackendType.DATABRICKS,
             databricks_config=DatabricksMemoryConfig(
                 endpoint_name="ep",
-                short_term_index="cat.sch.st",
-                long_term_index="cat.sch.lt",
-                entity_index="cat.sch.ent",
+                memory_index="cat.sch.mem",
                 workspace_url="https://example.databricks.com",
             ),
-            enable_short_term=True,
-            enable_long_term=True,
-            enable_entity=True,
+        )
+        captured_kwargs = {}
+
+        def capture(**kwargs):
+            captured_kwargs.update(kwargs)
+            return MagicMock()
+
+        mock_repo = MagicMock()
+        mock_repo.describe_index = AsyncMock(
+            return_value={
+                "success": True,
+                "description": {"status": {"state": "READY", "ready": True}},
+            }
         )
 
-        mock_storage = MagicMock()
-        mock_storage.memory_type = "short_term"
-        mock_storage.workspace_url = "https://example.databricks.com"
-        mock_storage.index_name = "cat.sch.st"
-        mock_storage.endpoint_name = "ep"
-        mock_storage.user_token = None
-        mock_storage.group_id = None
-        mock_storage.job_id = None
-
-        with patch(
-            "src.engines.crewai.memory.memory_backend_factory.MemoryBackendFactory._validate_databricks_indexes",
-            new_callable=AsyncMock,
-            return_value=(True, ["short_term", "long_term", "entity"], [], []),
-        ), patch.dict(
+        with patch.dict(
             "sys.modules",
             {
-                "src.engines.crewai.memory.crewai_databricks_wrapper": MagicMock(
-                    CrewAIDatabricksWrapper=MagicMock(return_value=MagicMock())
+                "src.repositories.databricks_vector_index_repository": MagicMock(
+                    DatabricksVectorIndexRepository=MagicMock(return_value=mock_repo)
                 ),
-                "src.engines.crewai.memory.databricks_vector_storage": MagicMock(
-                    DatabricksVectorStorage=MagicMock(return_value=mock_storage)
+                "src.engines.crewai.memory.databricks_storage_backend": MagicMock(
+                    DatabricksStorageBackend=MagicMock(side_effect=capture)
                 ),
             },
         ):
-            result = await MemoryBackendFactory.create_memory_backends(
-                config=config, crew_id="group_crew_abc123", user_token="user-tok"
+            await MemoryBackendFactory.create_memory_backends(
+                config=config,
+                crew_id="grp_crew_xyz",
+                job_id="my-job-session-99",
             )
 
-        assert "short_term" in result
-        assert "long_term" in result
-        assert "entity" in result
+        assert captured_kwargs.get("session_id") == "my-job-session-99"
 
     @pytest.mark.asyncio
-    async def test_databricks_import_error_raises(self):
-        """ImportError from lazy imports propagates."""
+    async def test_databricks_no_memory_index_raises(self):
+        """Empty memory_index raises ValueError before validation."""
         config = MemoryBackendConfig(
             backend_type=MemoryBackendType.DATABRICKS,
             databricks_config=DatabricksMemoryConfig(
                 endpoint_name="ep",
-                short_term_index="cat.sch.st",
+                memory_index="",  # empty
                 workspace_url="https://example.databricks.com",
             ),
-            enable_short_term=True,
         )
+        with pytest.raises(ValueError, match="memory_index is required"):
+            await MemoryBackendFactory.create_memory_backends(
+                config=config, crew_id="grp_crew_xyz"
+            )
 
-        with patch(
-            "src.engines.crewai.memory.memory_backend_factory.MemoryBackendFactory._validate_databricks_indexes",
-            new_callable=AsyncMock,
-            return_value=(True, ["short_term: cat.sch.st"], [], []),
-        ), patch.dict(
+
+# ─── create_memory_backends LAKEBASE extra cases ──────────────────────────────
+
+class TestLakebaseBackendCases:
+
+    @pytest.mark.asyncio
+    async def test_lakebase_without_instance_name(self):
+        """Lakebase backend works without instance_name (defaults to None)."""
+        config = MemoryBackendConfig(
+            backend_type=MemoryBackendType.LAKEBASE,
+            lakebase_config=LakebaseMemoryConfig(
+                memory_table="crew_memory",
+                # instance_name not provided → defaults to None
+            ),
+        )
+        mock_backend = MagicMock()
+        captured_kwargs = {}
+
+        def capture(**kwargs):
+            captured_kwargs.update(kwargs)
+            return mock_backend
+
+        with patch.dict(
             "sys.modules",
             {
-                "src.engines.crewai.memory.databricks_vector_storage": None,
-                "src.engines.crewai.memory.crewai_databricks_wrapper": None,
-            },
-        ):
-            with pytest.raises((ImportError, TypeError)):
-                await MemoryBackendFactory.create_memory_backends(
-                    config=config, crew_id="test_crew"
+                "src.engines.crewai.memory.lakebase_storage_backend": MagicMock(
+                    LakebaseStorageBackend=MagicMock(side_effect=capture)
                 )
+            },
+        ):
+            result = await MemoryBackendFactory.create_memory_backends(
+                config=config, crew_id="grp_crew_abc123"
+            )
 
+        assert "unified" in result
+        assert captured_kwargs.get("instance_name") is None
 
-# ─── create_embedder_wrapper: embed-method-only path ─────────────────────────
+    @pytest.mark.asyncio
+    async def test_lakebase_with_instance_name(self):
+        """instance_name is forwarded to LakebaseStorageBackend."""
+        config = MemoryBackendConfig(
+            backend_type=MemoryBackendType.LAKEBASE,
+            lakebase_config=LakebaseMemoryConfig(
+                memory_table="crew_memory",
+                instance_name="my-lakebase-instance",
+            ),
+        )
+        captured_kwargs = {}
 
-class TestCreateEmbedderWrapperExtended:
+        def capture(**kwargs):
+            captured_kwargs.update(kwargs)
+            return MagicMock()
 
-    def test_search_with_embed_method_embedder(self):
-        """search() works when embedder has .embed() method (not __call__)."""
-        class EmbedOnlyEmbedder:
-            def embed(self, text):
-                return [0.1, 0.2, 0.3]
+        with patch.dict(
+            "sys.modules",
+            {
+                "src.engines.crewai.memory.lakebase_storage_backend": MagicMock(
+                    LakebaseStorageBackend=MagicMock(side_effect=capture)
+                )
+            },
+        ):
+            await MemoryBackendFactory.create_memory_backends(
+                config=config, crew_id="grp_crew_abc123"
+            )
 
-        mock_storage = MagicMock()
-        mock_storage.search.return_value = [{"id": "r1"}]
+        assert captured_kwargs.get("instance_name") == "my-lakebase-instance"
 
-        wrapper = MemoryBackendFactory.create_embedder_wrapper(EmbedOnlyEmbedder(), mock_storage)
-        results = wrapper.search("query", limit=3)
+    @pytest.mark.asyncio
+    async def test_lakebase_embedding_dimension_forwarded(self):
+        """embedding_dimension is forwarded to LakebaseStorageBackend."""
+        config = MemoryBackendConfig(
+            backend_type=MemoryBackendType.LAKEBASE,
+            lakebase_config=LakebaseMemoryConfig(
+                memory_table="crew_memory",
+                embedding_dimension=768,
+            ),
+        )
+        captured_kwargs = {}
 
-        mock_storage.search.assert_called_once()
-        assert results == [{"id": "r1"}]
+        def capture(**kwargs):
+            captured_kwargs.update(kwargs)
+            return MagicMock()
 
-    def test_embed_and_store_with_embed_method_embedder(self):
-        """embed_and_store() works with .embed() method embedder."""
-        class EmbedOnlyEmbedder:
-            def embed(self, text):
-                return [0.5, 0.6]
+        with patch.dict(
+            "sys.modules",
+            {
+                "src.engines.crewai.memory.lakebase_storage_backend": MagicMock(
+                    LakebaseStorageBackend=MagicMock(side_effect=capture)
+                )
+            },
+        ):
+            await MemoryBackendFactory.create_memory_backends(
+                config=config, crew_id="grp_crew_abc123"
+            )
 
-        mock_storage = MagicMock()
-        wrapper = MemoryBackendFactory.create_embedder_wrapper(EmbedOnlyEmbedder(), mock_storage)
-        wrapper.embed_and_store("content", metadata={"key": "val"})
+        assert captured_kwargs.get("embedding_dimension") == 768
 
-        mock_storage.save.assert_called_once()
-        call_args = mock_storage.save.call_args
-        value = call_args[0][0]
-        assert "embedding" in value
-        assert value["embedding"] == [0.5, 0.6]
-
-    def test_search_exception_in_embed_returns_empty(self):
-        """search() returns [] when embed raises an exception."""
-        class BrokenEmbedder:
-            def embed(self, text):
-                raise ValueError("embed failed")
-
-        mock_storage = MagicMock()
-        wrapper = MemoryBackendFactory.create_embedder_wrapper(BrokenEmbedder(), mock_storage)
-        results = wrapper.search("q")
-        assert results == []
-
-    def test_callable_embedder_in_search(self):
-        """search() generates embedding using callable embedder."""
-        mock_embedder = MagicMock(return_value=[[0.1, 0.2]])
-        mock_storage = MagicMock()
-        mock_storage.search.return_value = [{"id": "x"}]
-
-        wrapper = MemoryBackendFactory.create_embedder_wrapper(mock_embedder, mock_storage)
-        results = wrapper.search("my query", limit=10)
-
-        mock_embedder.assert_called_once_with(["my query"])
-        assert results == [{"id": "x"}]
+    @pytest.mark.asyncio
+    async def test_lakebase_empty_table_name_raises(self):
+        """Empty memory_table raises ValueError."""
+        config = MemoryBackendConfig(
+            backend_type=MemoryBackendType.LAKEBASE,
+            lakebase_config=LakebaseMemoryConfig(memory_table=""),
+        )
+        with pytest.raises(ValueError, match="memory_table is required"):
+            await MemoryBackendFactory.create_memory_backends(
+                config=config, crew_id="grp_crew_abc123"
+            )
 
 
 # ─── DatabricksIndexValidationError edge cases ───────────────────────────────
@@ -570,7 +461,7 @@ class TestDatabricksIndexValidationErrorEdgeCases:
         with pytest.raises(DatabricksIndexValidationError) as exc_info:
             raise DatabricksIndexValidationError(
                 "test error",
-                {"error_type": "missing_indexes", "missing_indexes": ["idx1"]}
+                {"error_type": "missing_index", "missing_indexes": ["idx1"]}
             )
-        assert exc_info.value.error_type == "missing_indexes"
+        assert exc_info.value.error_type == "missing_index"
         assert "idx1" in exc_info.value.missing_indexes

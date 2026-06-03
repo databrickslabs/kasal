@@ -1,22 +1,35 @@
-"""Tests for the deployer tool — both dry-run and live path."""
+"""
+Tests for MetricViewDeployerTool.
+
+Updated for app-modes refactoring:
+- Tool now uses DDL via SQL Statement API instead of REST metric-views endpoint
+- Authentication via _authenticate() / get_auth_context(), not databricks_token param
+- sql_specs_json parameter was removed from the schema
+- view_name format changed to "{cat}.{sch}.{safe_key}" (no _uc_metric_view suffix)
+- summary no longer has 'updated' key (no PUT/update logic)
+- live deployment requires warehouse_id, auth context, and a whitelisted workspace URL
+"""
 import json
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from src.engines.crewai.tools.custom.metric_view_deployer_tool import MetricViewDeployerTool
 
 
-class TestDeployerLivePath:
-    def test_dry_run_validates(self):
+class TestDryRun:
+    """Tests for dry_run=True (validation only, no deployment)."""
+
+    def test_dry_run_validates_single_view(self):
         tool = MetricViewDeployerTool()
         yaml_specs = {'fact_test': 'name: test\nsource: tbl\nmeasures:\n  - name: x\n    expr: SUM(source.x)'}
-        sql_specs = {'fact_test': '-- Deploy instructions'}
         result = tool._run(
             yaml_specs_json=json.dumps(yaml_specs),
-            sql_specs_json=json.dumps(sql_specs),
             dry_run=True,
         )
         data = json.loads(result)
         assert data['summary']['validated'] == 1
+        assert data['summary']['total'] == 1
+        assert data['deployment_results']['fact_test']['status'] == 'validated'
+        assert data['deployment_results']['fact_test']['dry_run'] is True
 
     def test_dry_run_multiple_tables(self):
         tool = MetricViewDeployerTool()
@@ -24,39 +37,72 @@ class TestDeployerLivePath:
             'fact_a': 'version: 1.1\nsource: cat.sch.a',
             'fact_b': 'version: 1.1\nsource: cat.sch.b',
         }
-        sql_specs = {'fact_a': '-- SQL A', 'fact_b': '-- SQL B'}
         result = tool._run(
             yaml_specs_json=json.dumps(yaml_specs),
-            sql_specs_json=json.dumps(sql_specs),
             dry_run=True,
         )
         data = json.loads(result)
         assert data['summary']['total'] == 2
         assert data['summary']['validated'] == 2
+        assert data['deployment_results']['fact_a']['status'] == 'validated'
+        assert data['deployment_results']['fact_b']['status'] == 'validated'
 
-    def test_live_path_missing_host_and_token(self):
+    def test_dry_run_view_name_format(self):
+        """View name uses safe_cat.safe_sch.safe_key (no _uc_metric_view suffix)."""
         tool = MetricViewDeployerTool()
         yaml_specs = {'fact_test': 'name: test'}
-        sql_specs = {'fact_test': '-- SQL'}
         result = tool._run(
             yaml_specs_json=json.dumps(yaml_specs),
-            sql_specs_json=json.dumps(sql_specs),
-            dry_run=False,
+            dry_run=True,
+            catalog='main',
+            schema_name='default',
         )
         data = json.loads(result)
-        assert data['deployment_results']['fact_test']['status'] == 'error'
-        assert 'required' in data['deployment_results']['fact_test']['message']
+        assert data['deployment_results']['fact_test']['view_name'] == 'main.default.fact_test'
 
-    def test_live_path_missing_warehouse(self):
+    def test_dry_run_reports_yaml_lines(self):
         tool = MetricViewDeployerTool()
-        yaml_specs = {'fact_test': 'name: test'}
-        sql_specs = {'fact_test': '-- SQL'}
+        yaml_specs = {'t': 'line1\nline2\nline3'}
         result = tool._run(
             yaml_specs_json=json.dumps(yaml_specs),
-            sql_specs_json=json.dumps(sql_specs),
+            dry_run=True,
+        )
+        data = json.loads(result)
+        assert data['deployment_results']['t']['yaml_lines'] == 3
+
+    def test_dry_run_no_errors(self):
+        tool = MetricViewDeployerTool()
+        yaml_specs = {'t': 'yaml content'}
+        result = tool._run(
+            yaml_specs_json=json.dumps(yaml_specs),
+            dry_run=True,
+        )
+        data = json.loads(result)
+        assert data['summary']['errors'] == 0
+
+    def test_yaml_key_is_included_in_output(self):
+        """The output includes a 'yaml' key for downstream flow injection."""
+        tool = MetricViewDeployerTool()
+        yaml_specs = {'fact': 'yaml: content'}
+        result = tool._run(
+            yaml_specs_json=json.dumps(yaml_specs),
+            dry_run=True,
+        )
+        data = json.loads(result)
+        assert 'yaml' in data
+        assert data['yaml']['fact'] == 'yaml: content'
+
+
+class TestLivePathErrors:
+    """Tests for live deployment error cases (no actual network calls)."""
+
+    def test_live_path_missing_warehouse(self):
+        """Empty warehouse_id → error result."""
+        tool = MetricViewDeployerTool()
+        yaml_specs = {'fact_test': 'name: test'}
+        result = tool._run(
+            yaml_specs_json=json.dumps(yaml_specs),
             dry_run=False,
-            databricks_host='myworkspace.cloud.databricks.com',
-            databricks_token='token123',
             warehouse_id='',  # Empty
         )
         data = json.loads(result)
@@ -64,247 +110,265 @@ class TestDeployerLivePath:
         assert 'warehouse_id' in data['deployment_results']['fact_test']['message']
 
     def test_live_path_empty_yaml_content(self):
+        """Empty YAML content → error result."""
         tool = MetricViewDeployerTool()
         yaml_specs = {'fact_test': ''}  # Empty YAML
-        sql_specs = {'fact_test': '-- Deploy'}
         result = tool._run(
             yaml_specs_json=json.dumps(yaml_specs),
-            sql_specs_json=json.dumps(sql_specs),
             dry_run=False,
-            databricks_host='myworkspace.cloud.databricks.com',
-            databricks_token='token123',
             warehouse_id='wh-123',
         )
         data = json.loads(result)
         assert data['deployment_results']['fact_test']['status'] == 'error'
         assert 'Empty YAML content' in data['deployment_results']['fact_test']['message']
 
-    @patch('requests.post')
-    def test_live_path_successful_deploy(self, mock_post):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 201
-        mock_resp.json.return_value = {'name': 'test_view', 'status': 'ACTIVE'}
-        mock_post.return_value = mock_resp
-
-        tool = MetricViewDeployerTool()
-        yaml_specs = {'fact_test': 'name: test\nmeasures:\n  - name: x'}
-        sql_specs = {'fact_test': '-- Deploy'}
-        result = tool._run(
-            yaml_specs_json=json.dumps(yaml_specs),
-            sql_specs_json=json.dumps(sql_specs),
-            dry_run=False,
-            databricks_host='myworkspace.cloud.databricks.com',
-            databricks_token='token123',
-            warehouse_id='wh-123',
-            catalog='main',
-            schema_name='default',
-        )
-        data = json.loads(result)
-        assert data['deployment_results']['fact_test']['status'] == 'deployed'
-        assert data['deployment_results']['fact_test']['view_name'] == 'main.default.fact_test_uc_metric_view'
-
-        # Verify the API was called with correct payload
-        call_args = mock_post.call_args
-        assert 'unity-catalog/metric-views' in call_args[0][0] or 'unity-catalog/metric-views' in call_args.kwargs.get('url', call_args[0][0])
-        payload = call_args.kwargs.get('json') or call_args[1].get('json')
-        assert payload['name'] == 'main.default.fact_test_uc_metric_view'
-        assert payload['yaml_body'] == 'name: test\nmeasures:\n  - name: x'
-
-    @patch('requests.post')
-    def test_live_path_200_also_succeeds(self, mock_post):
-        """Status code 200 should also count as deployed."""
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {'name': 'test_view'}
-        mock_post.return_value = mock_resp
-
+    def test_live_path_no_yaml_specs(self):
+        """No yaml_specs → top-level error dict."""
         tool = MetricViewDeployerTool()
         result = tool._run(
-            yaml_specs_json=json.dumps({'fact': 'version: 1.1'}),
-            sql_specs_json=json.dumps({'fact': '-- SQL'}),
+            yaml_specs_json='{}',
             dry_run=False,
-            databricks_host='myworkspace.cloud.databricks.com',
-            databricks_token='tok',
-            warehouse_id='wh',
         )
         data = json.loads(result)
-        assert data['deployment_results']['fact']['status'] == 'deployed'
-
-    @patch('requests.put')
-    @patch('requests.post')
-    def test_live_path_conflict_triggers_update(self, mock_post, mock_put):
-        """409 Conflict should trigger a PUT update."""
-        # POST returns 409
-        mock_post_resp = MagicMock()
-        mock_post_resp.status_code = 409
-        mock_post.return_value = mock_post_resp
-
-        # PUT returns 200
-        mock_put_resp = MagicMock()
-        mock_put_resp.status_code = 200
-        mock_put_resp.json.return_value = {'name': 'updated_view'}
-        mock_put.return_value = mock_put_resp
-
-        tool = MetricViewDeployerTool()
-        result = tool._run(
-            yaml_specs_json=json.dumps({'fact': 'version: 1.1\nsource: tbl'}),
-            sql_specs_json=json.dumps({'fact': '-- SQL'}),
-            dry_run=False,
-            databricks_host='myworkspace.cloud.databricks.com',
-            databricks_token='tok',
-            warehouse_id='wh',
-            catalog='cat',
-            schema_name='sch',
-        )
-        data = json.loads(result)
-        assert data['deployment_results']['fact']['status'] == 'updated'
-        assert data['summary']['updated'] == 1
-
-        # Verify PUT was called with correct URL
-        put_call = mock_put.call_args
-        put_url = put_call[0][0] if put_call[0] else put_call.kwargs.get('url', '')
-        assert 'cat.sch.fact_uc_metric_view' in put_url
-
-    @patch('requests.put')
-    @patch('requests.post')
-    def test_live_path_conflict_update_fails(self, mock_post, mock_put):
-        """409 + failed PUT should report error."""
-        mock_post_resp = MagicMock()
-        mock_post_resp.status_code = 409
-        mock_post.return_value = mock_post_resp
-
-        mock_put_resp = MagicMock()
-        mock_put_resp.status_code = 500
-        mock_put_resp.text = 'Internal Server Error'
-        mock_put.return_value = mock_put_resp
-
-        tool = MetricViewDeployerTool()
-        result = tool._run(
-            yaml_specs_json=json.dumps({'fact': 'yaml content'}),
-            sql_specs_json=json.dumps({'fact': '-- SQL'}),
-            dry_run=False,
-            databricks_host='myworkspace.cloud.databricks.com',
-            databricks_token='tok',
-            warehouse_id='wh',
-        )
-        data = json.loads(result)
-        assert data['deployment_results']['fact']['status'] == 'error'
-        assert data['deployment_results']['fact']['http_status'] == 500
-
-    @patch('requests.post')
-    def test_live_path_server_error(self, mock_post):
-        """Non-200/201/409 should report error with status code."""
-        mock_resp = MagicMock()
-        mock_resp.status_code = 403
-        mock_resp.text = 'Forbidden: insufficient permissions'
-        mock_post.return_value = mock_resp
-
-        tool = MetricViewDeployerTool()
-        result = tool._run(
-            yaml_specs_json=json.dumps({'fact': 'yaml content'}),
-            sql_specs_json=json.dumps({'fact': '-- SQL'}),
-            dry_run=False,
-            databricks_host='myworkspace.cloud.databricks.com',
-            databricks_token='tok',
-            warehouse_id='wh',
-        )
-        data = json.loads(result)
-        assert data['deployment_results']['fact']['status'] == 'error'
-        assert data['deployment_results']['fact']['http_status'] == 403
-        assert 'Forbidden' in data['deployment_results']['fact']['message']
-
-    @patch('requests.post', side_effect=Exception('Connection timeout'))
-    def test_live_path_network_error(self, mock_post):
-        """Network errors should be caught and reported."""
-        tool = MetricViewDeployerTool()
-        result = tool._run(
-            yaml_specs_json=json.dumps({'fact': 'yaml content'}),
-            sql_specs_json=json.dumps({'fact': '-- SQL'}),
-            dry_run=False,
-            databricks_host='myworkspace.cloud.databricks.com',
-            databricks_token='tok',
-            warehouse_id='wh',
-        )
-        data = json.loads(result)
-        assert data['deployment_results']['fact']['status'] == 'error'
-        assert 'Connection timeout' in data['deployment_results']['fact']['message']
+        assert 'error' in data
 
     def test_invalid_json_input(self):
+        """Invalid yaml_specs_json → top-level error."""
         tool = MetricViewDeployerTool()
         result = tool._run(
             yaml_specs_json='not valid json{{{',
-            sql_specs_json='{}',
         )
         data = json.loads(result)
         assert 'error' in data
         assert 'Invalid JSON' in data['error']
 
-    def test_summary_updated_counter(self):
-        """Verify the summary includes the updated counter."""
+    def test_live_path_authentication_error(self):
+        """Auth failure (exception from _authenticate) → error result."""
         tool = MetricViewDeployerTool()
-        result = tool._run(
-            yaml_specs_json='{}',
-            sql_specs_json='{}',
-            dry_run=True,
-        )
+        yaml_specs = {'fact': 'yaml content'}
+
+        with patch.object(tool, '_authenticate', side_effect=Exception('Auth failed')):
+            result = tool._run(
+                yaml_specs_json=json.dumps(yaml_specs),
+                dry_run=False,
+                warehouse_id='wh',
+            )
         data = json.loads(result)
-        assert 'updated' in data['summary']
-        assert data['summary']['updated'] == 0
+        assert data['deployment_results']['fact']['status'] == 'error'
+        assert 'Auth failed' in data['deployment_results']['fact']['message']
+
+    def test_live_path_auth_returns_none(self):
+        """None auth context → authentication failed error."""
+        tool = MetricViewDeployerTool()
+        yaml_specs = {'fact': 'yaml content'}
+
+        with patch.object(tool, '_authenticate', return_value=None):
+            result = tool._run(
+                yaml_specs_json=json.dumps(yaml_specs),
+                dry_run=False,
+                warehouse_id='wh',
+            )
+        data = json.loads(result)
+        assert data['deployment_results']['fact']['status'] == 'error'
+        assert 'Authentication failed' in data['deployment_results']['fact']['message']
+
+    def test_live_path_untrusted_host(self):
+        """Non-whitelisted workspace_url → error result."""
+        tool = MetricViewDeployerTool()
+        yaml_specs = {'fact': 'yaml content'}
+
+        mock_auth = MagicMock()
+        mock_auth.get_headers.return_value = {'Authorization': 'Bearer tok'}
+        mock_auth.workspace_url = 'https://untrusted-host.example.com'
+
+        with patch.object(tool, '_authenticate', return_value=mock_auth):
+            result = tool._run(
+                yaml_specs_json=json.dumps(yaml_specs),
+                dry_run=False,
+                warehouse_id='wh-123',
+            )
+        data = json.loads(result)
+        assert data['deployment_results']['fact']['status'] == 'error'
+        assert 'Untrusted host' in data['deployment_results']['fact']['message']
+
+
+class TestLivePathSuccess:
+    """Tests for successful live deployment (mocking auth + SQL Statement API)."""
+
+    def _make_mock_auth(self, workspace_url='https://myworkspace.cloud.databricks.com'):
+        mock_auth = MagicMock()
+        mock_auth.get_headers.return_value = {'Authorization': 'Bearer test-token'}
+        mock_auth.workspace_url = workspace_url
+        return mock_auth
+
+    def _make_sql_response(self, state='SUCCEEDED', statement_id='stmt-1'):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            'statement_id': statement_id,
+            'status': {'state': state},
+        }
+        return mock_resp
 
     @patch('requests.post')
-    def test_live_path_uses_correct_api_endpoint(self, mock_post):
-        """Verify the tool hits the UC Metric View API, not the SQL Statement API."""
-        mock_resp = MagicMock()
-        mock_resp.status_code = 201
-        mock_resp.json.return_value = {}
-        mock_post.return_value = mock_resp
-
+    def test_successful_deploy_via_sql_api(self, mock_post):
+        """Successful DDL execution → status=deployed."""
         tool = MetricViewDeployerTool()
-        tool._run(
-            yaml_specs_json=json.dumps({'tbl': 'yaml_body'}),
-            sql_specs_json=json.dumps({'tbl': '-- sql'}),
-            dry_run=False,
-            databricks_host='myhost.cloud.databricks.com',
-            databricks_token='dapi123',
-            warehouse_id='wh-abc',
-        )
+        yaml_specs = {'fact_test': 'name: test\nmeasures:\n  - name: x'}
+
+        mock_auth = self._make_mock_auth()
+        sql_resp = self._make_sql_response()
+        mock_post.return_value = sql_resp
+
+        with patch.object(tool, '_authenticate', return_value=mock_auth):
+            with patch('src.engines.crewai.tools.custom.metric_view_utils.yaml_emitter._check_dangerous_sql', return_value=True):
+                result = tool._run(
+                    yaml_specs_json=json.dumps(yaml_specs),
+                    dry_run=False,
+                    warehouse_id='wh-123',
+                    catalog='main',
+                    schema_name='default',
+                )
+
+        data = json.loads(result)
+        assert data['deployment_results']['fact_test']['status'] == 'deployed'
+        assert data['deployment_results']['fact_test']['view_name'] == 'main.default.fact_test'
+
+    @patch('requests.post')
+    def test_sql_api_endpoint_is_used(self, mock_post):
+        """Verify SQL Statement API (not the old metric-views REST API) is called."""
+        tool = MetricViewDeployerTool()
+        yaml_specs = {'tbl': 'yaml_body'}
+
+        mock_auth = self._make_mock_auth()
+        mock_post.return_value = self._make_sql_response()
+
+        with patch.object(tool, '_authenticate', return_value=mock_auth):
+            with patch('src.engines.crewai.tools.custom.metric_view_utils.yaml_emitter._check_dangerous_sql', return_value=True):
+                tool._run(
+                    yaml_specs_json=json.dumps(yaml_specs),
+                    dry_run=False,
+                    warehouse_id='wh-abc',
+                )
+
+        # Should call /api/2.0/sql/statements
+        assert mock_post.called
         call_url = mock_post.call_args[0][0]
-        assert '/api/2.0/unity-catalog/metric-views' in call_url
-        assert '/api/2.0/sql/statements' not in call_url
+        assert '/api/2.0/sql/statements' in call_url
+        # Should NOT call the old metric-views endpoint
+        assert 'unity-catalog/metric-views' not in call_url
 
     @patch('requests.post')
-    def test_live_path_view_name_lowercase(self, mock_post):
-        """View name should use lowercase table_key."""
-        mock_resp = MagicMock()
-        mock_resp.status_code = 201
-        mock_resp.json.return_value = {}
-        mock_post.return_value = mock_resp
-
+    def test_view_name_uses_safe_key(self, mock_post):
+        """View name safely encodes the table_key (no _uc_metric_view suffix)."""
         tool = MetricViewDeployerTool()
-        result = tool._run(
-            yaml_specs_json=json.dumps({'Fact_Sales': 'yaml'}),
-            sql_specs_json=json.dumps({'Fact_Sales': '-- sql'}),
-            dry_run=False,
-            databricks_host='myworkspace.cloud.databricks.com',
-            databricks_token='tok',
-            warehouse_id='wh',
-            catalog='CAT',
-            schema_name='SCH',
-        )
+        yaml_specs = {'Fact-Sales': 'yaml'}
+
+        mock_auth = self._make_mock_auth()
+        mock_post.return_value = self._make_sql_response()
+
+        with patch.object(tool, '_authenticate', return_value=mock_auth):
+            with patch('src.engines.crewai.tools.custom.metric_view_utils.yaml_emitter._check_dangerous_sql', return_value=True):
+                result = tool._run(
+                    yaml_specs_json=json.dumps(yaml_specs),
+                    dry_run=False,
+                    warehouse_id='wh',
+                    catalog='CAT',
+                    schema_name='SCH',
+                )
+
         data = json.loads(result)
-        assert data['deployment_results']['Fact_Sales']['view_name'] == 'CAT.SCH.fact_sales_uc_metric_view'
+        # safe_key replaces non-alphanumeric with _
+        view_name = data['deployment_results']['Fact-Sales']['view_name']
+        assert 'CAT' in view_name
+        assert 'SCH' in view_name
+        # No _uc_metric_view suffix in the new API
+        assert '_uc_metric_view' not in view_name
+
+    @patch('requests.post')
+    def test_sql_api_failure_reports_error(self, mock_post):
+        """SQL Statement API HTTP error → error result."""
+        tool = MetricViewDeployerTool()
+        yaml_specs = {'fact': 'yaml content'}
+
+        mock_auth = self._make_mock_auth()
+        fail_resp = MagicMock()
+        fail_resp.status_code = 500
+        fail_resp.text = 'Internal Server Error'
+        mock_post.return_value = fail_resp
+
+        with patch.object(tool, '_authenticate', return_value=mock_auth):
+            with patch('src.engines.crewai.tools.custom.metric_view_utils.yaml_emitter._check_dangerous_sql', return_value=True):
+                result = tool._run(
+                    yaml_specs_json=json.dumps(yaml_specs),
+                    dry_run=False,
+                    warehouse_id='wh',
+                )
+
+        data = json.loads(result)
+        assert data['deployment_results']['fact']['status'] == 'error'
+        assert data['deployment_results']['fact']['http_status'] == 500
+
+    def test_network_error_caught(self):
+        """Network exception during DDL execution → error result.
+
+        Patch _execute_sql_sync since it's called for both schema creation and DDL.
+        Schema creation must succeed but DDL fails.
+        """
+        tool = MetricViewDeployerTool()
+        yaml_specs = {'fact': 'yaml content'}
+
+        mock_auth = self._make_mock_auth()
+        # First call (CREATE SCHEMA) succeeds; second call (DDL) raises
+        call_count = [0]
+        def side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return {"success": True}  # schema creation
+            raise Exception('Connection timeout')
+
+        with patch.object(tool, '_authenticate', return_value=mock_auth):
+            with patch.object(tool, '_execute_sql_sync', side_effect=side_effect):
+                with patch('src.engines.crewai.tools.custom.metric_view_utils.yaml_emitter._check_dangerous_sql', return_value=True):
+                    result = tool._run(
+                        yaml_specs_json=json.dumps(yaml_specs),
+                        dry_run=False,
+                        warehouse_id='wh',
+                    )
+
+        data = json.loads(result)
+        assert data['deployment_results']['fact']['status'] == 'error'
+        assert 'Connection timeout' in data['deployment_results']['fact']['message']
+
+
+class TestToolConfig:
+    """Tests for tool initialization and configuration."""
 
     def test_default_config_passthrough(self):
-        """Test that __init__ defaults are used when _run() kwargs are absent."""
+        """Catalog and schema_name defaults from __init__ are used in dry-run."""
         tool = MetricViewDeployerTool(
             catalog='init_cat',
             schema_name='init_sch',
         )
         result = tool._run(
             yaml_specs_json=json.dumps({'t': 'yaml'}),
-            sql_specs_json=json.dumps({'t': '-- sql'}),
             dry_run=True,
         )
         data = json.loads(result)
-        assert data['deployment_results']['t']['catalog'] == 'init_cat'
-        assert data['deployment_results']['t']['schema'] == 'init_sch'
+        view_name = data['deployment_results']['t']['view_name']
+        assert 'init_cat' in view_name
+        assert 'init_sch' in view_name
+
+    def test_summary_structure(self):
+        """Summary dict has expected keys."""
+        tool = MetricViewDeployerTool()
+        result = tool._run(
+            yaml_specs_json=json.dumps({'t': 'yaml'}),
+            dry_run=True,
+        )
+        data = json.loads(result)
+        assert 'total' in data['summary']
+        assert 'validated' in data['summary']
+        assert 'deployed' in data['summary']
+        assert 'errors' in data['summary']
+        assert 'dry_run' in data['summary']

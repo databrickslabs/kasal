@@ -29,9 +29,7 @@ def databricks_config():
     """Create a sample Databricks configuration."""
     return DatabricksMemoryConfig(
         endpoint_name="test-endpoint",
-        short_term_index="ml.agents.short_term",
-        long_term_index="ml.agents.long_term",
-        entity_index="ml.agents.entity",
+        memory_index="ml.agents.crew_memory",
         workspace_url="https://test.databricks.com",
         embedding_dimension=768
     )
@@ -41,113 +39,111 @@ class TestDatabricksIndexService:
     """Test cases for DatabricksIndexService."""
     
     @pytest.mark.asyncio
-    async def test_create_index_short_term_success(self, service, databricks_config):
-        """Test successful creation of short-term memory index."""
+    async def test_create_index_unified_success(self, service, databricks_config):
+        """Test successful creation of unified cognitive memory index."""
         # Arrange
         from src.schemas.databricks_vector_index import IndexResponse
-        
+
         user_token = "user-token"
         mock_repo = AsyncMock()
-        
+
         # Mock repository response
         mock_repo.create_index.return_value = IndexResponse(
             success=True,
-            message="Successfully created short_term index: ml.agents.short_term_test"
+            message="Successfully created memory index: ml.agents.crew_memory_test"
         )
-        
+
         # Patch the _get_index_repository method to return our mock
         with patch.object(service, '_get_index_repository', return_value=mock_repo):
             # Act
             result = await service.create_databricks_index(
                 config=databricks_config,
-                index_type="short_term",
+                index_type="unified",
                 catalog="ml",
                 schema="agents",
-                table_name="short_term_test",
+                table_name="crew_memory_test",
                 user_token=user_token
             )
-        
+
         # Assert
         assert result["success"] is True
         assert "Successfully created" in result["message"]
-        assert result["details"]["index_type"] == "short_term"
+        assert result["details"]["index_type"] == "unified"
         assert result["details"]["embedding_dimension"] == 768
-        
+
         # Verify the repository was called with correct parameters
         mock_repo.create_index.assert_called_once()
         call_args = mock_repo.create_index.call_args
         index_request = call_args[0][0]
-        assert index_request.name == "ml.agents.short_term_test"
+        assert index_request.name == "ml.agents.crew_memory_test"
         assert index_request.endpoint_name == "test-endpoint"
         assert index_request.embedding_dimension == 768
-    
+
     @pytest.mark.asyncio
-    async def test_create_index_long_term_schema(self, service, databricks_config, mock_repo):
-        """Test long-term index creation with correct schema."""
+    async def test_create_index_unified_schema(self, service, databricks_config, mock_repo):
+        """Test unified index creation has correct schema fields."""
         # Arrange
         from src.schemas.databricks_vector_index import IndexResponse
         from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
-        
+
         # Mock repository response
         mock_repo.create_index.return_value = IndexResponse(
             success=True,
-            message="Successfully created long_term index"
+            message="Successfully created unified index"
         )
-        
+
         # Patch the _get_index_repository method to return our mock
         with patch.object(service, '_get_index_repository', return_value=mock_repo):
             # Act
             await service.create_databricks_index(
                 config=databricks_config,
-                index_type="long_term",
+                index_type="unified",
                 catalog="ml",
                 schema="agents",
-                table_name="long_term_test"
+                table_name="unified_test"
             )
-        
+
         # Assert
         mock_repo.create_index.assert_called_once()
-        call_args = mock_repo.create_index.call_args
-        index_request = call_args[0][0]
-        
-        # Verify schema has correct fields for long_term
-        schema = DatabricksIndexSchemas.get_schema("long_term")
+
+        # Verify schema has correct fields for unified
+        schema = DatabricksIndexSchemas.get_schema("unified")
         assert "importance" in schema
-        assert "score" not in schema
-    
+        assert "content" in schema
+        assert "crew_id" in schema
+
     @pytest.mark.asyncio
-    async def test_create_index_entity_schema(self, service, databricks_config, mock_repo):
-        """Test entity index creation with correct schema."""
+    async def test_create_index_document_schema(self, service, databricks_config, mock_repo):
+        """Test document index creation has correct schema fields."""
         # Arrange
         from src.schemas.databricks_vector_index import IndexResponse
         from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
-        
+
         # Mock repository response
         mock_repo.create_index.return_value = IndexResponse(
             success=True,
-            message="Successfully created entity index"
+            message="Successfully created document index"
         )
-        
+
         # Patch the _get_index_repository method to return our mock
         with patch.object(service, '_get_index_repository', return_value=mock_repo):
             # Act
             await service.create_databricks_index(
                 config=databricks_config,
-                index_type="entity",
+                index_type="document",
                 catalog="ml",
                 schema="agents",
-                table_name="entity_test"
+                table_name="doc_test"
             )
-        
+
         # Assert
         mock_repo.create_index.assert_called_once()
-        
-        # Verify schema has correct fields for entity
-        schema = DatabricksIndexSchemas.get_schema("entity")
-        assert "entity_type" in schema
-        assert "entity_name" in schema
-        assert "description" in schema  # Changed from attributes
-        assert "relationships" in schema
+
+        # Verify schema has correct fields for document
+        schema = DatabricksIndexSchemas.get_schema("document")
+        assert "source" in schema
+        assert "title" in schema
+        assert "doc_metadata" in schema
     
     @pytest.mark.asyncio
     async def test_create_index_document_with_endpoint(self, service, mock_repo):
@@ -159,7 +155,7 @@ class TestDatabricksIndexService:
         config = DatabricksMemoryConfig(
             endpoint_name="memory-endpoint",
             document_endpoint_name="document-endpoint",
-            short_term_index="ml.agents.short_term",
+            memory_index="ml.agents.crew_memory",
             workspace_url="https://test.databricks.com"
         )
         
@@ -209,13 +205,13 @@ class TestDatabricksIndexService:
         with patch.object(service, '_get_index_repository', return_value=mock_repo):
             # Act
             result = await service.create_databricks_index(
-            config=databricks_config,
-            index_type="short_term",
-            catalog="ml",
-            schema="agents",
+                config=databricks_config,
+                index_type="unified",
+                catalog="ml",
+                schema="agents",
                 table_name="existing"
             )
-        
+
         # Assert
         assert result["success"] is False
         assert "already exists" in result["message"]
@@ -492,44 +488,58 @@ class TestDatabricksIndexService:
     
     @pytest.mark.asyncio
     async def test_get_index_documents_with_repository(self, service, mock_repo):
-        """Test get_index_documents uses repository pattern for similarity search."""
+        """Test get_index_documents uses repository pattern for similarity search.
+
+        Updated for app-modes: index_type="unified" (column positions changed).
+        Unified schema columns (by position):
+          0=id, 1=content, 2=scope, 3=categories, 4=importance, 5=source,
+          6=private, 7=metadata, 8=created_at, 9=last_accessed, 10=crew_id,
+          11=agent_id, 12=group_id, 13=session_id, 14=llm_model, 15=tools_used,
+          16=embedding_model, 17=version
+        """
         # Arrange
-        # Mock similarity search result
+        # Mock similarity search result — rows aligned to unified schema positions
         mock_search_result = {
             "success": True,
             "results": {
                 "result": {
                     "data_array": [
-                        ["doc1", "Test content 1", "query1", "session1", 1, "2024-01-01", "2024-01-01", 24, '{"meta": "data"}', "crew1", "agent1", "group1", "gpt-4", "[]", "model1", 1],
-                        ["doc2", "Test content 2", "query2", "session1", 2, "2024-01-02", "2024-01-02", 24, '{"meta": "data2"}', "crew1", "agent2", "group1", "gpt-4", "[]", "model1", 1]
+                        ["doc1", "Test content 1", "global", "cat1", 0.9, "src1",
+                         False, '{"meta": "data"}', "2024-01-01", "2024-01-01",
+                         "crew1", "agent1", "group1", "session1", "gpt-4", "[]",
+                         "model1", 1],
+                        ["doc2", "Test content 2", "global", "cat2", 0.8, "src2",
+                         False, '{"meta": "data2"}', "2024-01-02", "2024-01-02",
+                         "crew1", "agent2", "group1", "session1", "gpt-4", "[]",
+                         "model1", 1],
                     ]
                 }
             }
         }
         mock_repo.similarity_search.return_value = mock_search_result
-        
+
         # Patch the _get_index_repository method to return our mock
         with patch.object(service, '_get_index_repository', return_value=mock_repo):
             # Act
             result = await service.get_index_documents(
                 workspace_url="https://test.databricks.com",
                 endpoint_name="test-endpoint",
-                index_name="ml.agents.short_term",
-                index_type="short_term",
+                index_name="ml.agents.crew_memory",
+                index_type="unified",
                 limit=10
             )
-        
+
         # Assert
         assert result["success"] is True
         assert result["count"] == 2
         assert len(result["documents"]) == 2
         assert result["documents"][0]["id"] == "doc1"
         assert result["documents"][0]["text"] == "Test content 1"
-        
+
         # Verify repository method was called
         mock_repo.similarity_search.assert_called_once()
         call_args = mock_repo.similarity_search.call_args
-        assert call_args.kwargs["index_name"] == "ml.agents.short_term"
+        assert call_args.kwargs["index_name"] == "ml.agents.crew_memory"
         assert call_args.kwargs["endpoint_name"] == "test-endpoint"
         assert call_args.kwargs["num_results"] == 10
     
@@ -609,45 +619,56 @@ class TestDatabricksIndexService:
     async def test_query_entity_data_with_repository(
         self, service, mock_repo
     ):
-        """Test query_entity_data uses repository pattern for similarity search."""
+        """Test query_entity_data uses repository pattern for similarity search.
+
+        Updated for app-modes: uses UNIFIED_SEARCH_COLUMNS.
+        Unified columns: id, content, scope, categories, importance, source,
+        private, metadata, created_at, last_accessed, crew_id, agent_id,
+        group_id, session_id, llm_model, tools_used, embedding_model, version
+        """
         # Arrange
-        
-        # Mock similarity search result for entity data - match the actual schema columns
+        # Data rows aligned to UNIFIED_SEARCH_COLUMNS order
         mock_search_result = {
             "success": True,
             "results": {
                 "result": {
                     "data_array": [
-                        ["entity1", "John Doe", "Person", "A person named John", '["rel1", "rel2"]', "2024-01-01", "crew1", "agent1", "group1", "gpt-4", "[]", "model1"],
-                        ["entity2", "Acme Corp", "Company", "A large company", '["rel3"]', "2024-01-02", "crew1", "agent2", "group1", "gpt-4", "[]", "model1"]
+                        # id, content, scope, categories, importance, source,
+                        # private, metadata, created_at, last_accessed,
+                        # crew_id, agent_id, group_id, session_id,
+                        # llm_model, tools_used, embedding_model, version
+                        ["entity1", "John Doe content", "/crew/c1", "['person']", 0.9, "agent:researcher",
+                         False, '{}', "2024-01-01", "2024-01-01",
+                         "crew1", "agent1", "group1", "session1",
+                         "gpt-4", "[]", "model1", 1],
+                        ["entity2", "Acme Corp content", "/crew/c1", "['company']", 0.8, "agent:researcher",
+                         False, '{}', "2024-01-02", "2024-01-02",
+                         "crew1", "agent2", "group1", "session1",
+                         "gpt-4", "[]", "model1", 1],
                     ]
                 }
             }
         }
         mock_repo.similarity_search.return_value = mock_search_result
-        
+
         # Act
         with patch.object(service, '_get_index_repository', return_value=mock_repo):
             result = await service.query_entity_data(
-            workspace_url="https://test.databricks.com",
-            endpoint_name="test-endpoint",
-            index_name="ml.agents.entity",
-            embedding_dimension=768,
-            limit=5
-        )
-        
+                workspace_url="https://test.databricks.com",
+                endpoint_name="test-endpoint",
+                index_name="ml.agents.entity",
+                embedding_dimension=768,
+                limit=5
+            )
+
         # Assert
         assert result["success"] is True
-        # The service creates additional entities from relationships, so we expect more than 2
         assert len(result["entities"]) >= 2
-        
-        # Find the specific entities we're looking for
+
+        # Find the specific entity by id
         entities_by_id = {e["id"]: e for e in result["entities"]}
         assert "entity1" in entities_by_id
-        entity1 = entities_by_id["entity1"]
-        assert entity1["type"] == "Person"
-        assert entity1["name"] == "John Doe"
-        
+
         # Verify repository method was called with correct parameters
         mock_repo.similarity_search.assert_called_once()
         call_args = mock_repo.similarity_search.call_args
@@ -660,38 +681,50 @@ class TestDatabricksIndexService:
     async def test_query_entity_data_without_search_query(
         self, service, mock_repo
     ):
-        """Test query_entity_data without search query returns all entities."""
+        """Test query_entity_data without search query returns all entities.
+
+        Updated for app-modes: uses UNIFIED_SEARCH_COLUMNS.
+        """
         # Arrange
-        
-        # Mock similarity search result
+        # Data rows aligned to UNIFIED_SEARCH_COLUMNS order:
+        # id, content, scope, categories, importance, source,
+        # private, metadata, created_at, last_accessed,
+        # crew_id, agent_id, group_id, session_id,
+        # llm_model, tools_used, embedding_model, version
         mock_search_result = {
             "success": True,
             "results": {
                 "result": {
                     "data_array": [
-                        ["e1", "Name1", "Type1", "Description1", "[]", "2024-01-01", "crew1", "agent1", "group1", "gpt-4", "[]", "model1"],
-                        ["e2", "Name2", "Type2", "Description2", "[]", "2024-01-02", "crew1", "agent2", "group1", "gpt-4", "[]", "model1"]
+                        ["e1", "Name1", "/crew/c1", "[]", 0.9, "agent:a1",
+                         False, '{}', "2024-01-01", "2024-01-01",
+                         "crew1", "agent1", "group1", "session1",
+                         "gpt-4", "[]", "model1", 1],
+                        ["e2", "Name2", "/crew/c1", "[]", 0.8, "agent:a2",
+                         False, '{}', "2024-01-02", "2024-01-02",
+                         "crew1", "agent2", "group1", "session1",
+                         "gpt-4", "[]", "model1", 1],
                     ]
                 }
             }
         }
         mock_repo.similarity_search.return_value = mock_search_result
-        
+
         # Act
         with patch.object(service, '_get_index_repository', return_value=mock_repo):
             with patch('random.random', return_value=0.5):
                 result = await service.query_entity_data(
-                workspace_url="https://test.databricks.com",
-                endpoint_name="test-endpoint",
-                index_name="ml.agents.entity",
-                embedding_dimension=768,
-                limit=100
-            )
-        
+                    workspace_url="https://test.databricks.com",
+                    endpoint_name="test-endpoint",
+                    index_name="ml.agents.entity",
+                    embedding_dimension=768,
+                    limit=100
+                )
+
         # Assert
         assert result["success"] is True
         assert len(result["entities"]) == 2
-        
+
         # Verify random vector was used
         call_args = mock_repo.similarity_search.call_args
         query_vector = call_args.kwargs["query_vector"]

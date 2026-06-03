@@ -36,6 +36,10 @@ class _FakeOpenAICompletion:
         self._last_response_id = None
         self._last_reasoning_items = []
 
+    # CrewAI 1.14+ moved the OpenAI client to a private attr via _get_sync_client()
+    def _get_sync_client(self):
+        return self.client
+
     # Methods that the subclass may call via super()
     def _prepare_responses_params(self, messages, tools=None, response_model=None):
         params = {

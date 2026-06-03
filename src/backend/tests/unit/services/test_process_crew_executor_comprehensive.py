@@ -404,93 +404,116 @@ class TestProcessCrewExecutorRunCrewIsolated:
             with patch('src.services.process_crew_executor.os.environ', {}):
                 self.executor = ProcessCrewExecutor()
 
+    def _setup_ctx_mocks(self, exitcode=0, queue_result=None):
+        """Configure self.executor._ctx to use controlled mock process + queue.
+
+        Updated for app-modes: run_crew_isolated uses self._ctx.Queue/Process,
+        not mp.Queue/Process directly. The background drain thread calls
+        result_queue.get(timeout=...) — we configure this to return the
+        expected result (or raise queue.Empty for fallback to exitcode logic).
+        """
+        import queue as _queue
+        mock_queue_instance = Mock()
+        mock_log_queue_instance = Mock()
+        mock_process_instance = Mock()
+
+        mock_process_instance.is_alive.return_value = False
+        mock_process_instance.exitcode = exitcode
+        mock_process_instance.pid = 12345
+        mock_process_instance.start = Mock()
+        mock_process_instance.join = Mock()
+
+        if queue_result is not None:
+            mock_queue_instance.get = Mock(return_value=queue_result)
+            mock_queue_instance.get_nowait = Mock(return_value=queue_result)
+            mock_queue_instance.empty = Mock(return_value=False)
+        else:
+            mock_queue_instance.get = Mock(side_effect=_queue.Empty())
+            mock_queue_instance.get_nowait = Mock(side_effect=_queue.Empty())
+            mock_queue_instance.empty = Mock(return_value=True)
+
+        mock_log_queue_instance.get = Mock(side_effect=_queue.Empty())
+        mock_log_queue_instance.empty = Mock(return_value=True)
+
+        # Queue is called twice: first for result_queue, second for log_queue
+        self.executor._ctx.Queue = Mock(
+            side_effect=[mock_queue_instance, mock_log_queue_instance]
+        )
+        self.executor._ctx.Process = Mock(return_value=mock_process_instance)
+
+        return mock_queue_instance, mock_process_instance
+
     @pytest.mark.asyncio
     async def test_run_crew_isolated_basic_parameters(self):
-        """Test run_crew_isolated with basic parameters"""
+        """Test run_crew_isolated with basic parameters."""
         execution_id = "test-execution-id"
         crew_config = {"agents": [], "tasks": []}
         group_context = Mock()
+        group_context.primary_group_id = "grp-test"
+        group_context.access_token = None
 
-        with patch.object(self.executor, '_running_processes', {}):
-            with patch('src.services.process_crew_executor.mp.Queue') as mock_queue:
-                with patch('src.services.process_crew_executor.mp.Process') as mock_process:
-                    mock_queue_instance = Mock()
-                    mock_process_instance = Mock()
-                    mock_queue.return_value = mock_queue_instance
-                    mock_process.return_value = mock_process_instance
-                    mock_process_instance.is_alive.return_value = False
-                    mock_process_instance.exitcode = 0
+        mock_queue_instance, _ = self._setup_ctx_mocks(
+            exitcode=0,
+            queue_result={"success": True, "result": "Test result", "status": "COMPLETED"},
+        )
 
-                    # Mock the queue to return a result
-                    mock_queue_instance.get.return_value = {
-                        "success": True,
-                        "result": "Test result"
-                    }
+        with patch("src.db.database_router.is_lakebase_enabled", new_callable=AsyncMock, return_value=False), \
+             patch.object(self.executor, "_process_log_queue", new_callable=AsyncMock), \
+             patch.object(self.executor, "_relay_task_events", new_callable=AsyncMock):
+            result = await self.executor.run_crew_isolated(
+                execution_id, crew_config, group_context
+            )
 
-                    result = await self.executor.run_crew_isolated(
-                        execution_id, crew_config, group_context
-                    )
-
-                    assert isinstance(result, dict)
-                    assert "success" in result or "error" in result
+        assert isinstance(result, dict)
+        assert "success" in result or "status" in result or "error" in result
 
     @pytest.mark.asyncio
     async def test_run_crew_isolated_with_inputs(self):
-        """Test run_crew_isolated with inputs parameter"""
+        """Test run_crew_isolated with inputs parameter."""
         execution_id = "test-execution-id"
         crew_config = {"agents": [], "tasks": []}
         group_context = Mock()
+        group_context.primary_group_id = "grp-test"
+        group_context.access_token = None
         inputs = {"input1": "value1"}
 
-        with patch.object(self.executor, '_running_processes', {}):
-            with patch('src.services.process_crew_executor.mp.Queue') as mock_queue:
-                with patch('src.services.process_crew_executor.mp.Process') as mock_process:
-                    mock_queue_instance = Mock()
-                    mock_process_instance = Mock()
-                    mock_queue.return_value = mock_queue_instance
-                    mock_process.return_value = mock_process_instance
-                    mock_process_instance.is_alive.return_value = False
-                    mock_process_instance.exitcode = 0
+        self._setup_ctx_mocks(
+            exitcode=0,
+            queue_result={"success": True, "result": "Test result", "status": "COMPLETED"},
+        )
 
-                    mock_queue_instance.get.return_value = {
-                        "success": True,
-                        "result": "Test result"
-                    }
+        with patch("src.db.database_router.is_lakebase_enabled", new_callable=AsyncMock, return_value=False), \
+             patch.object(self.executor, "_process_log_queue", new_callable=AsyncMock), \
+             patch.object(self.executor, "_relay_task_events", new_callable=AsyncMock):
+            result = await self.executor.run_crew_isolated(
+                execution_id, crew_config, group_context, inputs
+            )
 
-                    result = await self.executor.run_crew_isolated(
-                        execution_id, crew_config, group_context, inputs
-                    )
-
-                    assert isinstance(result, dict)
+        assert isinstance(result, dict)
 
     @pytest.mark.asyncio
     async def test_run_crew_isolated_with_timeout(self):
-        """Test run_crew_isolated with timeout parameter"""
+        """Test run_crew_isolated with timeout parameter."""
         execution_id = "test-execution-id"
         crew_config = {"agents": [], "tasks": []}
         group_context = Mock()
+        group_context.primary_group_id = "grp-test"
+        group_context.access_token = None
         timeout = 30.0
 
-        with patch.object(self.executor, '_running_processes', {}):
-            with patch('src.services.process_crew_executor.mp.Queue') as mock_queue:
-                with patch('src.services.process_crew_executor.mp.Process') as mock_process:
-                    mock_queue_instance = Mock()
-                    mock_process_instance = Mock()
-                    mock_queue.return_value = mock_queue_instance
-                    mock_process.return_value = mock_process_instance
-                    mock_process_instance.is_alive.return_value = False
-                    mock_process_instance.exitcode = 0
+        self._setup_ctx_mocks(
+            exitcode=0,
+            queue_result={"success": True, "result": "Test result", "status": "COMPLETED"},
+        )
 
-                    mock_queue_instance.get.return_value = {
-                        "success": True,
-                        "result": "Test result"
-                    }
+        with patch("src.db.database_router.is_lakebase_enabled", new_callable=AsyncMock, return_value=False), \
+             patch.object(self.executor, "_process_log_queue", new_callable=AsyncMock), \
+             patch.object(self.executor, "_relay_task_events", new_callable=AsyncMock):
+            result = await self.executor.run_crew_isolated(
+                execution_id, crew_config, group_context, timeout=timeout
+            )
 
-                    result = await self.executor.run_crew_isolated(
-                        execution_id, crew_config, group_context, timeout=timeout
-                    )
-
-                    assert isinstance(result, dict)
+        assert isinstance(result, dict)
 
     # NOTE: test_run_crew_isolated_with_debug_tracing was removed because
     # debug_tracing_enabled parameter was removed from run_crew_isolated()
