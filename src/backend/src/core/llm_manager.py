@@ -664,16 +664,12 @@ class LLMManager:
                 llm_params["api_key"] = api_key
             if api_base:
                 llm_params["api_base"] = api_base
-<<<<<<< HEAD
 
-=======
-            
             # Add User-Agent header for Databricks API attribution
             # Using extra_headers instead of user_agent param (which Databricks rejects in body)
             from src.utils.telemetry import get_user_agent_header, KasalProduct
             llm_params["extra_headers"] = get_user_agent_header(KasalProduct.AGENT)
-            
->>>>>>> sifinell/feature/flow
+
             # Add max_output_tokens if defined in model config
             if "max_output_tokens" in model_config_dict and model_config_dict["max_output_tokens"]:
                 if is_gpt5:
