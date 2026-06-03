@@ -54,7 +54,7 @@ const ModeSwitcher: React.FC = () => {
     },
     {
       mode: 'chat',
-      label: 'Chat',
+      label: 'Business Chat',
       description: 'Converse with Kasal',
       icon: <ChatIcon fontSize="small" />,
     },
