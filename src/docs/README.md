@@ -105,36 +105,12 @@ End-to-end automation of PBI semantic model translation to UC Metric Views.
 
 Explains every config key in the pipeline — what is auto-extracted from PBI APIs and what requires human domain knowledge.
 
-**Key Topics:**
-- Auto-extracted fields (`relationships`, `measures`, `mquery`, `scan_data`)
-- Manual fields (`join_key_map`, `filter_sets`, `switch_decompositions`, `measure_resolutions`)
-- When and why human review is needed
-
 ### [PowerBI Tools Reference](./powerbi/README.md)
 **For Platform Engineers and Power BI Admins**
 
 Full reference for all 18 Power BI tools (Tools 72–90) and their configuration.
 
 ---
-
-## Example Crews & Flows
-Import-ready JSON definitions for the full UCMV migration pipeline.
-
-### [Examples Folder](./examples/)
-
-| File | Description |
-|------|-------------|
-| [`crew_ucmv_pipeline_config_generator.json`](./examples/crew_ucmv_pipeline_config_generator.json) | **Crew 1** — Connects to PBI REST API, extracts metadata, proposes pipeline config |
-| [`crew_uc_metric_view_generator.json`](./examples/crew_uc_metric_view_generator.json) | **Crew 2** — Translates DAX → Spark SQL, generates UC Metric View YAML + SQL |
-| [`crew_ucmv_quality_validator.json`](./examples/crew_ucmv_quality_validator.json) | **Crew 3** — Validates every measure's translation (VALID/EQUIVALENT/REVIEW/INVALID) |
-| [`flow_ucmv_plus_validation.json`](./examples/flow_ucmv_plus_validation.json) | **Full flow** — Chains all 3 crews end-to-end |
-| [`crew_pbi_analyst_qa.json`](./examples/crew_pbi_analyst_qa.json) | **Analytics Q&A** — 3-agent crew: fetch → reduce → DAX (natural language questions against live PBI model) |
-
-**How to import**: Kasal UI → Crews (or Flows) → Import → select the JSON file.
-All credentials are placeholders — see the [examples README](./examples/README.md) for the full setup guide.
-
----
-
 ## Documentation Structure
 How this folder is organized and where to find topics.
 
@@ -145,12 +121,8 @@ docs/
 ├── CODE_STRUCTURE_GUIDE.md           # Code structure documentation
 ├── DEVELOPER_GUIDE.md                # Developer documentation
 ├── ARCHITECTURE_GUIDE.md             # Architecture documentation
-├── examples/                         # Import-ready crew & flow JSONs
-│   ├── README.md                     # Setup guide for UCMV examples
-│   ├── crew_ucmv_pipeline_config_generator.json
-│   ├── crew_uc_metric_view_generator.json
-│   ├── crew_ucmv_quality_validator.json
-│   └── flow_ucmv_plus_validation.json
+├── API_REFERENCE.md                  # API reference
+├── WHY_KASAL.md                      # What problems Kasal solves
 └── archive/                          # Legacy documentation
     ├── technical/
     ├── security/
@@ -193,7 +165,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](https:
 Project and documentation version details.
 
 - **Current Version**: 2.0.0
-- **Documentation Updated**: December 2025
+- **Documentation Updated**: June 2026
 - **Minimum Python Version**: 3.10
 - **Minimum Node Version**: 16.0
 

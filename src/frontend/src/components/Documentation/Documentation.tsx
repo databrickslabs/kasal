@@ -33,8 +33,9 @@ interface DocSection {
 
 const docSections: DocSection[] = [
   {
-    label: 'Architecture',
+    label: 'Overview',
     items: [
+      { label: 'Why Kasal', file: 'WHY_KASAL' },
       { label: 'Solution Architecture', file: 'ARCHITECTURE_GUIDE' },
     ],
   },
@@ -102,6 +103,15 @@ const docSections: DocSection[] = [
       { label: 'Pipeline Config Reference', file: 'UCMV_PIPELINE_CONFIG_GUIDE' },
     ],
   },
+  {
+    label: 'Development',
+    items: [
+      { label: 'Developer Guide', file: 'DEVELOPER_GUIDE' },
+      { label: 'Code structure', file: 'CODE_STRUCTURE_GUIDE' },
+      { label: 'API Reference', file: 'API_REFERENCE' },
+    ],
+  },
+  
 ];
 
 const Documentation: React.FC = () => {
