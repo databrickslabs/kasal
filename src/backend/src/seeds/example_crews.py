@@ -711,15 +711,19 @@ EXAMPLE_CREWS = [
 ]
 
 
-async def seed_agent(session: AsyncSession, agent_data: Dict[str, Any]) -> None:
-    """Seed a single agent if it doesn't exist."""
+async def seed_agent(session: AsyncSession, agent_data: Dict[str, Any], group_id: str = "bi-specialist") -> None:
+    """Seed a single agent if it doesn't exist, or update its group_id."""
     result = await session.execute(
         select(Agent).where(Agent.id == agent_data["id"])
     )
     existing = result.scalar_one_or_none()
 
     if existing:
-        logger.info(f"Agent '{agent_data['name']}' already exists, skipping...")
+        if existing.group_id != group_id:
+            existing.group_id = group_id
+            logger.info(f"Updated agent '{agent_data['name']}' group_id → {group_id}")
+        else:
+            logger.info(f"Agent '{agent_data['name']}' already exists, skipping...")
         return
 
     agent = Agent(
@@ -728,6 +732,7 @@ async def seed_agent(session: AsyncSession, agent_data: Dict[str, Any]) -> None:
         role=agent_data["role"],
         goal=agent_data["goal"],
         backstory=agent_data.get("backstory"),
+        group_id=group_id,
         llm=agent_data.get("llm", "databricks-llama-4-maverick"),
         tools=agent_data.get("tools", []),
         tool_configs=agent_data.get("tool_configs"),
@@ -749,15 +754,19 @@ async def seed_agent(session: AsyncSession, agent_data: Dict[str, Any]) -> None:
     logger.info(f"Created agent: {agent_data['name']}")
 
 
-async def seed_task(session: AsyncSession, task_data: Dict[str, Any]) -> None:
-    """Seed a single task if it doesn't exist."""
+async def seed_task(session: AsyncSession, task_data: Dict[str, Any], group_id: str = "bi-specialist") -> None:
+    """Seed a single task if it doesn't exist, or update its group_id."""
     result = await session.execute(
         select(Task).where(Task.id == task_data["id"])
     )
     existing = result.scalar_one_or_none()
 
     if existing:
-        logger.info(f"Task '{task_data['name']}' already exists, skipping...")
+        if existing.group_id != group_id:
+            existing.group_id = group_id
+            logger.info(f"Updated task '{task_data['name']}' group_id → {group_id}")
+        else:
+            logger.info(f"Task '{task_data['name']}' already exists, skipping...")
         return
 
     task = Task(
@@ -766,6 +775,7 @@ async def seed_task(session: AsyncSession, task_data: Dict[str, Any]) -> None:
         description=task_data["description"],
         expected_output=task_data["expected_output"],
         agent_id=task_data.get("agent_id"),
+        group_id=group_id,
         tools=task_data.get("tools", []),
         tool_configs=task_data.get("tool_configs"),
         async_execution=task_data.get("async_execution", False),
@@ -776,8 +786,8 @@ async def seed_task(session: AsyncSession, task_data: Dict[str, Any]) -> None:
     logger.info(f"Created task: {task_data['name']}")
 
 
-async def seed_crew(session: AsyncSession, crew_data: Dict[str, Any]) -> None:
-    """Seed a single crew if it doesn't exist."""
+async def seed_crew(session: AsyncSession, crew_data: Dict[str, Any], group_id: str = "bi-specialist") -> None:
+    """Seed a single crew if it doesn't exist, or update its group_id."""
     try:
         crew_id = uuid.UUID(crew_data["id"]) if isinstance(crew_data["id"], str) else crew_data["id"]
     except ValueError:
@@ -790,12 +800,17 @@ async def seed_crew(session: AsyncSession, crew_data: Dict[str, Any]) -> None:
     existing = result.scalar_one_or_none()
 
     if existing:
-        logger.info(f"Crew '{crew_data['name']}' already exists, skipping...")
+        if existing.group_id != group_id:
+            existing.group_id = group_id
+            logger.info(f"Updated crew '{crew_data['name']}' group_id → {group_id}")
+        else:
+            logger.info(f"Crew '{crew_data['name']}' already exists, skipping...")
         return
 
     crew = Crew(
         id=crew_id,
         name=crew_data["name"],
+        group_id=group_id,
         process=crew_data.get("process", "sequential"),
         planning=crew_data.get("planning", False),
         planning_llm=crew_data.get("planning_llm"),
