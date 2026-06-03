@@ -31,7 +31,6 @@ from src.models.crew import Crew
 from src.models.agent import Agent
 from src.models.task import Task
 from src.models.group import Group
-from src.models.flow import Flow
 from src.models.group_tool import GroupTool
 
 # Tools required by the PBI migration pipeline — pre-enabled for bi-specialist
@@ -908,95 +907,6 @@ ALL_CREWS = [
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
-# E2E Flow definition
-# ─────────────────────────────────────────────────────────────────────────────
-#
-# Topology (matches flow_e2e_flow_pbi_migrator):
-#
-#   Pipeline Config Generator
-#     → UC Metric View Generator
-#       → UCMV Quality Validator
-#         → Metric View Deployer ─┬─ references → PBI Mapper → Dashboard Creator
-#                                 └─ UCMV Genie Config Gen → Genie Space Generator
-#
-# HITL gate after Metric View Deployer (before the two parallel tracks).
-
-FLOW_ID = uuid.uuid5(uuid.NAMESPACE_DNS, "bi-specialist-e2e-flow-001")
-
-# Node IDs in the flow graph (each node wraps a crew)
-N_PIPELINE  = "flow-node-pipeline-config"
-N_UCMV_GEN  = "flow-node-ucmv-gen"
-N_UCMV_VAL  = "flow-node-ucmv-val"
-N_DEPLOYER  = "flow-node-deployer"
-N_REFS      = "flow-node-references"
-N_MAPPER    = "flow-node-mapper"
-N_DASHBOARD = "flow-node-dashboard"
-N_GENIE_CFG = "flow-node-genie-cfg"
-N_GENIE_GEN = "flow-node-genie-gen"
-N_HITL      = "flow-node-hitl-gate"
-
-
-def _crew_flow_node(node_id: str, crew_id_str: str, crew_name: str, x: int, y: int) -> dict:
-    crew_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, crew_id_str))
-    return {
-        "id": node_id,
-        "type": "crewNode",
-        "position": {"x": x, "y": y},
-        "data": {
-            "label": crew_name,
-            "crewId": crew_uuid,
-        },
-    }
-
-
-def _hitl_node(node_id: str, x: int, y: int) -> dict:
-    return {
-        "id": node_id,
-        "type": "gateNode",
-        "position": {"x": x, "y": y},
-        "data": {
-            "label": "Review & Approve Deployment",
-            "gateType": "approval",
-            "message": "Review the UCMV deployment results. Approve to continue with Genie Space and Dashboard creation.",
-        },
-    }
-
-
-def _flow_edge(edge_id: str, source: str, target: str) -> dict:
-    return {"id": edge_id, "source": source, "target": target}
-
-
-BI_FLOW = {
-    "id": str(FLOW_ID),
-    "name": "E2E PBI Migration Pipeline",
-    "group_id": BI_GROUP_ID,
-    "nodes": [
-        _crew_flow_node(N_PIPELINE,  PIPELINE_CONFIG_CREW_ID, "UCMV — Generate Pipeline Config (API-Direct)", 100, 300),
-        _crew_flow_node(N_UCMV_GEN,  UCMV_GEN_CREW_ID,        "UC Metric View Generator — JSON Mode",          400, 300),
-        _crew_flow_node(N_UCMV_VAL,  UCMV_VAL_CREW_ID,        "UCMV Quality Validator",                        700, 300),
-        _crew_flow_node(N_DEPLOYER,  DEPLOYER_CREW_ID,        "Metric View Deployer",                          1000, 300),
-        _hitl_node(N_HITL,                                                                                       1300, 300),
-        _crew_flow_node(N_REFS,      REFERENCES_CREW_ID,      "references",                                    1600, 150),
-        _crew_flow_node(N_MAPPER,    MAPPER_CREW_ID,          "PBI Visual-UCMV Mapper",                        1900, 150),
-        _crew_flow_node(N_DASHBOARD, DASHBOARD_CREW_ID,       "Databricks Dashboard Creator",                  2200, 150),
-        _crew_flow_node(N_GENIE_CFG, GENIE_CFG_CREW_ID,       "UCMV Genie Space Config Generator",             1600, 450),
-        _crew_flow_node(N_GENIE_GEN, GENIE_GEN_CREW_ID,       "Genie Space Generator",                         1900, 450),
-    ],
-    "edges": [
-        _flow_edge("e1", N_PIPELINE,  N_UCMV_GEN),
-        _flow_edge("e2", N_UCMV_GEN,  N_UCMV_VAL),
-        _flow_edge("e3", N_UCMV_VAL,  N_DEPLOYER),
-        _flow_edge("e4", N_DEPLOYER,  N_HITL),
-        _flow_edge("e5", N_HITL,      N_REFS),
-        _flow_edge("e6", N_REFS,      N_MAPPER),
-        _flow_edge("e7", N_MAPPER,    N_DASHBOARD),
-        _flow_edge("e8", N_HITL,      N_GENIE_CFG),
-        _flow_edge("e9", N_GENIE_CFG, N_GENIE_GEN),
-    ],
-    "flow_config": {"actions": []},
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Seeder helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1093,23 +1003,6 @@ async def _seed_crew(session, data: dict) -> None:
     logger.info(f"Created crew: {data['name']}")
 
 
-async def _seed_flow(session, data: dict) -> None:
-    flow_id = uuid.UUID(data["id"])
-    result = await session.execute(select(Flow).where(Flow.id == flow_id))
-    if result.scalars().first():
-        return
-    flow = Flow(
-        id=flow_id,
-        name=data["name"],
-        group_id=data.get("group_id"),
-        nodes=data.get("nodes", []),
-        edges=data.get("edges", []),
-        flow_config=data.get("flow_config", {"actions": []}),
-    )
-    session.add(flow)
-    logger.info(f"Created flow: {data['name']}")
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Entry point
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1124,8 +1017,6 @@ async def seed() -> None:
                 await _seed_agent(session, entry["agent"])
                 await _seed_task(session, entry["task"])
                 await _seed_crew(session, entry["crew"])
-            await _seed_flow(session, BI_FLOW)
-
             # Enable required tools for the bi-specialist workspace
             from sqlalchemy import select as _select
             from datetime import datetime as _dt
@@ -1150,7 +1041,7 @@ async def seed() -> None:
             await session.commit()
             logger.info(
                 f"✅ bi-specialist workspace seeded: "
-                f"{len(ALL_CREWS)} crews + 1 flow"
+                f"{len(ALL_CREWS)} crews + {len(BI_TOOLS)} tools enabled"
             )
         except Exception as exc:
             await session.rollback()
