@@ -70,6 +70,39 @@ Add new models in `src/seeds/model_configs.py`:
 }
 ```
 
+### User-Agent Telemetry (REQUIRED for new Databricks API callers)
+
+Every HTTP call to a Databricks API **must** include a Kasal User-Agent header for usage tracking
+(Partner Well-Architected Framework). When creating a new tool, service, or repository that calls
+Databricks, add telemetry using one of these patterns:
+
+**For direct REST calls (httpx/aiohttp):**
+```python
+from src.utils.telemetry import get_user_agent_header, KasalProduct
+headers = {"Authorization": f"Bearer {token}", **get_user_agent_header(KasalProduct.YOUR_PRODUCT)}
+```
+
+**For headers from `auth.get_headers()`:**
+```python
+headers = auth.get_headers()
+from src.utils.telemetry import get_user_agent_header, KasalProduct
+headers.update(get_user_agent_header(KasalProduct.YOUR_PRODUCT))
+```
+
+**For WorkspaceClient SDK calls:**
+```python
+from databricks.sdk.useragent import with_product
+from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
+with_product(f"{KASAL_BASE}_{KasalProduct.YOUR_PRODUCT}", VERSION)
+w = WorkspaceClient()
+```
+
+**For LLM calls via `llm_manager.get_llm()`:** Already handled — `extra_headers` with User-Agent
+is injected automatically by `llm_manager.py`.
+
+Add new product constants to `KasalProduct` in `src/utils/telemetry.py` as needed.
+Do NOT add telemetry to non-Databricks calls (e.g., PowerBI API, external APIs).
+
 ### Known Issues
 - **databricks-gpt-oss Models**: Return reasoning blocks without "signature" field
 - **Fix**: Automatic monkey patch in `llm_manager.py` handles missing signature fields
