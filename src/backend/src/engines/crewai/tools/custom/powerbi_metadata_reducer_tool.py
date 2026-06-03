@@ -1160,8 +1160,9 @@ Return ONLY valid JSON (no markdown, no explanation):
         llm_temperature = config.get("llm_temperature", 0.1)
         llm_confidence_threshold = config.get("llm_confidence_threshold", 0.0)
 
+        from src.utils.telemetry import get_user_agent_header, KasalProduct
         url = f"{llm_workspace_url.rstrip('/')}/serving-endpoints/{llm_model}/invocations"
-        headers = {"Authorization": f"Bearer {llm_token}", "Content-Type": "application/json"}
+        headers = {"Authorization": f"Bearer {llm_token}", "Content-Type": "application/json", **get_user_agent_header(KasalProduct.POWERBI)}
         payload = {
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": 2000,

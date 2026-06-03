@@ -2499,10 +2499,12 @@ CALCULATETABLE(...)
         )
 
         # Call Databricks LLM
+        from src.utils.telemetry import get_user_agent_header, KasalProduct
         url = f"{llm_workspace_url.rstrip('/')}/serving-endpoints/{llm_model}/invocations"
         headers = {
             "Authorization": f"Bearer {llm_token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            **get_user_agent_header(KasalProduct.POWERBI),
         }
         payload = {
             "messages": [{"role": "user", "content": prompt}],
@@ -2842,10 +2844,12 @@ Your previous attempt(s) to generate a DAX query failed. Analyze the errors and 
         logger.info("=" * 80)
 
         # Call LLM
+        from src.utils.telemetry import get_user_agent_header, KasalProduct
         url = f"{llm_workspace_url.rstrip('/')}/serving-endpoints/{llm_model}/invocations"
         headers = {
             "Authorization": f"Bearer {llm_token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            **get_user_agent_header(KasalProduct.POWERBI),
         }
         payload = {
             "messages": [{"role": "user", "content": prompt}],

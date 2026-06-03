@@ -1523,8 +1523,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         measures = model_context.get("measures", [])
         sample_data = model_context.get("sample_data", {})
 
+        from src.utils.telemetry import get_user_agent_header, KasalProduct
         serving_url = f"{workspace_url}/serving-endpoints/{endpoint}/invocations"
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json", **get_user_agent_header(KasalProduct.POWERBI)}
 
         logger.info(
             f"[SemanticEnrichment] Starting — {len(tables)} tables, "

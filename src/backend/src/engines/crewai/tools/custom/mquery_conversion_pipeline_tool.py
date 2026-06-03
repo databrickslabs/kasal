@@ -1398,7 +1398,8 @@ class MqueryConversionPipelineTool(BaseTool):
             return workspace_url, m.group(1)
 
         # Auto-detect: list warehouses and pick best running one
-        headers = {"Authorization": f"Bearer {pat}"}
+        from src.utils.telemetry import get_user_agent_header, KasalProduct
+        headers = {"Authorization": f"Bearer {pat}", **get_user_agent_header(KasalProduct.POWERBI)}
         async with _httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(f"{workspace_url}/api/2.0/sql/warehouses", headers=headers)
             resp.raise_for_status()
@@ -1420,8 +1421,9 @@ class MqueryConversionPipelineTool(BaseTool):
         base = workspace_url.rstrip("/")
         if not base:
             return {"success": False, "error": "databricks_workspace_url not configured — set llm_workspace_url"}
+        from src.utils.telemetry import get_user_agent_header, KasalProduct
         url = f"{base}/api/2.0/sql/statements"
-        headers = {"Authorization": f"Bearer {pat}", "Content-Type": "application/json"}
+        headers = {"Authorization": f"Bearer {pat}", "Content-Type": "application/json", **get_user_agent_header(KasalProduct.POWERBI)}
         payload = {"statement": sql, "warehouse_id": warehouse_id, "wait_timeout": "50s", "on_wait_timeout": "CONTINUE"}
         try:
             async with _httpx.AsyncClient(timeout=60.0) as client:

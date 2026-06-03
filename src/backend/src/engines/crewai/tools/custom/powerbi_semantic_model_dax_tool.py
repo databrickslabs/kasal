@@ -1252,8 +1252,9 @@ OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text, no explanatio
 
         self._emit_llm_trace(event_context="DAX Generation - Prompt", prompt=prompt, model=llm_model, operation="generate_dax")
 
+        from src.utils.telemetry import get_user_agent_header, KasalProduct
         url = f"{llm_workspace_url.rstrip('/')}/serving-endpoints/{llm_model}/invocations"
-        headers = {"Authorization": f"Bearer {llm_token}", "Content-Type": "application/json"}
+        headers = {"Authorization": f"Bearer {llm_token}", "Content-Type": "application/json", **get_user_agent_header(KasalProduct.POWERBI)}
 
         # Try system+user first; fall back to single user message if endpoint rejects system role
         payloads = [
@@ -1395,8 +1396,9 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
         logger.info(f"[DaxTool] ═══ SELF-CORRECTION PROMPT (system={len(system_prompt)} chars, user={len(user_prompt)} chars) ═══")
         logger.info(f"[DaxTool] PROMPT START ═══\n{prompt}\n═══ PROMPT END")
 
+        from src.utils.telemetry import get_user_agent_header, KasalProduct
         url = f"{llm_workspace_url.rstrip('/')}/serving-endpoints/{llm_model}/invocations"
-        headers = {"Authorization": f"Bearer {llm_token}", "Content-Type": "application/json"}
+        headers = {"Authorization": f"Bearer {llm_token}", "Content-Type": "application/json", **get_user_agent_header(KasalProduct.POWERBI)}
 
         # Try system+user first; fall back to single user message if endpoint rejects system role
         payloads = [
