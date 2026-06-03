@@ -43,7 +43,7 @@ BI_GROUP_ID = "bi-specialist"
 BI_GROUP = {
     "id": BI_GROUP_ID,
     "name": "BI Specialist",
-    "status": "ACTIVE",
+    "status": "active",
     "description": (
         "Pre-configured workspace for the Power BI → Databricks migration pipeline. "
         "Contains ready-to-run crew templates for UC Metric View generation, "
