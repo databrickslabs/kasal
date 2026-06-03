@@ -173,12 +173,10 @@ class GroupContext:
                     # Check if it's a regular group the user belongs to
                     if group_id in roles_by_group:
                         user_role = roles_by_group[group_id]
-                        # Put the selected group first in the list
-                        user_group_ids = [group_id] + [gid for gid in user_group_ids if gid != group_id]
-                        # ALWAYS include personal workspace so users can see their personal data
-                        if personal_workspace_id not in user_group_ids:
-                            user_group_ids.append(personal_workspace_id)
-                            logger.debug(f"Added personal workspace {personal_workspace_id} to group list for data access")
+                        # Strict workspace isolation: only show data from the selected workspace.
+                        # Personal workspace data is accessible when the user switches back to it.
+                        user_group_ids = [group_id]
+                        logger.debug(f"Strict isolation: group_ids=['{group_id}'] (personal workspace excluded)")
                     # Check if it's a personal workspace
                     elif group_id.startswith("user_"):
                         # Validate that the personal workspace matches the user's email
