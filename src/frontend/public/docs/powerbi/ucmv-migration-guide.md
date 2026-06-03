@@ -283,40 +283,36 @@ LIMIT 10;
 
 ## Running the Demo (No PBI Credentials Needed)
 
-To demo the pipeline capability before setting up SP access:
+The fastest way to demo the pipeline is the **BI Specialist workspace** built into Kasal.
+On startup, Kasal seeds 9 pre-configured crew templates covering the full pipeline:
 
-```bash
-cd src/backend
-source .venv/bin/activate
-python ../../examples/uc_metric_view_migration/run_locally.py
-```
+1. Open Kasal → **Workspaces** → switch to **BI Specialist**
+2. Go to **Crews** — the UCMV Generation Pipeline crew is already there
+3. Build a flow by connecting crews on the **Flows** canvas
+4. Run it against your own data or use the pre-configured demo inputs
 
-Output in `~/Downloads/ucmv_example_output/`. Uses pre-extracted SC Reporting data (26 tables, 470 measures). No PBI API credentials required.
-
-All-limitations demo:
-```bash
-python ../../examples/uc_metric_view_migration/run_all_limitations_demo.py
-```
+No Python setup, no backend access required.
 
 ---
 
 ## Iteration Tips
 
-- **Use `gap_analyzer.py`** to see which config keys would unlock the most additional measures: `python examples/uc_metric_view_migration/gap_analyzer.py`
-- **Re-run Tool 86 as many times as needed** - it's deterministic and fast (~30 seconds)
-- **LLM fallback** (`use_llm_fallback: true`) can handle complex SWITCH and cross-table patterns that regex rules miss - use it after exhausting config-based improvements
-- **Each fact table is independent** - if one fails validation, the others still deploy; fix and re-run that table alone
+- **Re-run Tool 86 as many times as needed** — it's deterministic and fast (~30 seconds)
+- **LLM fallback** (`use_llm_fallback: true`) can handle complex SWITCH and cross-table patterns that regex rules miss — use it after exhausting config-based improvements
+- **Each fact table is independent** — if one fails validation, the others still deploy; fix and re-run that table alone
+- **Tool 89** (gap analysis) shows which config keys would unlock the most additional measure translations
 
 ---
 
 ## Example Crews (JSON)
 
-Full migration crew configurations are available in the examples directory:
+Ready-to-import crew definitions are in [`src/docs/examples/`](../docs/examples/):
 
 | File | Description |
 |------|-------------|
-| `examples/uc_metric_view_migration/crew_ucmv_generator.json` | Full generation crew (Tools 73→75→87→86) |
-| `examples/uc_metric_view_migration/crew_ucmv_validator.json` | Validation crew (Tool 88 dry-run) |
+| `crew_ucmv_pipeline_config_generator.json` | Config generation crew (Tool 90) |
+| `crew_uc_metric_view_generator.json` | UC Metric View generation crew (Tool 86) |
+| `crew_ucmv_quality_validator.json` | Validation crew (Tool 91) |
 
 ---
 

@@ -51,15 +51,13 @@ GROUP BY Region
 
 ### Fast Path: "Show Me It Works" (1-2 hours with an SA)
 
-Use the standalone pipeline (no Kasal UI needed):
+Use the **BI Specialist workspace** in Kasal — no setup required:
 
-```bash
-cd src/backend
-source .venv/bin/activate
-python ../../examples/uc_metric_view_migration/run_locally.py
-```
+1. Open Kasal → **Workspaces** → switch to **BI Specialist**
+2. Go to **Crews** — the UCMV Generation Pipeline crew is pre-configured
+3. Connect the crews on the **Flows** canvas and run
 
-This runs the full 5-phase pipeline against pre-extracted demo data and produces YAML files in `~/Downloads/ucmv_example_output/`. No PBI credentials needed for the demo.
+All 9 migration crews are pre-seeded with tools enabled. Fill in credentials and go.
 
 Use this to demo the capability to a customer before they commit to setting up SP access.
 
