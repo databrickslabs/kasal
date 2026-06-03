@@ -42,7 +42,7 @@ const ModeSwitcher: React.FC = () => {
   const allOptions: ModeOption[] = [
     {
       mode: 'crew',
-      label: 'Crew',
+      label: 'Agent Builder',
       description: 'Design and run agent crews',
       icon: <CrewIcon fontSize="small" />,
     },
