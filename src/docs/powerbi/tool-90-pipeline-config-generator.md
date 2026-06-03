@@ -106,30 +106,10 @@ Typical result: **11 keys auto-filled, 4 need review, 11 need manual domain know
 3. Search for `TODO` markers - these are the gaps
 4. Fill `switch_decompositions` first (biggest unlock - each entry increases translation rate)
 5. Run Tool 86 → check `migration_report` for translation rate
-6. Iterate: use `gap_analyzer.py` or Tool 89 gap analysis to prioritize next fixes
+6. Iterate: use **Tool 89** (gap analysis) to prioritize which config keys unlock the most additional measures
 7. When rate is acceptable → Tool 88 dry-run → approve → deploy
 
 See [UCMV Migration Guide](./ucmv-migration-guide.md) for the full iterative workflow.
-
----
-
-## Standalone Script Equivalent
-
-Tool 90 wraps the `generate_config.py` script from the examples directory. If you prefer running it outside Kasal:
-
-```bash
-python examples/uc_metric_view_migration/generate_config.py \
-  --workspace-id ac0fa11c-... \
-  --dataset-id ecdd57ae-... \
-  --tenant-id 9f37a392-... \
-  --client-id 7b597aac-... \
-  --client-secret "U5b8Q~..." \
-  --admin-client-id 8d8aa6ee-... \
-  --admin-client-secret "RXm8Q~..." \
-  --catalog my_catalog \
-  --schema metrics \
-  --output proposed_pipeline_config.json
-```
 
 ---
 
