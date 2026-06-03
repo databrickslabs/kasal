@@ -18,6 +18,8 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from src.utils.telemetry import get_user_agent_header, KasalProduct
+
 logger = logging.getLogger(__name__)
 
 
@@ -76,6 +78,7 @@ class DaxRagRetriever:
                     headers={
                         "Authorization": f"Bearer {token}",
                         "Content-Type": "application/json",
+                        **get_user_agent_header(KasalProduct.POWERBI),
                     },
                     json=payload,
                 )
@@ -173,6 +176,7 @@ class DaxRagRetriever:
                     headers={
                         "Authorization": f"Bearer {token}",
                         "Content-Type": "application/json",
+                        **get_user_agent_header(KasalProduct.POWERBI),
                     },
                     json=payload,
                 )
