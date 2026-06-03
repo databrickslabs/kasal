@@ -11,7 +11,7 @@ import {
 } from '@mui/material';
 import {
   GridViewRounded as GridIcon,
-  Groups as CrewIcon,
+  SmartToy as CrewIcon,
   AccountTree as FlowModeIcon,
   ChatBubbleOutline as ChatIcon,
   Check as CheckIcon,
@@ -48,7 +48,7 @@ const ModeSwitcher: React.FC = () => {
     },
     {
       mode: 'flow',
-      label: 'Flow',
+      label: 'Flow Builder',
       description: 'Build multi-crew workflows',
       icon: <FlowModeIcon fontSize="small" />,
     },
