@@ -642,6 +642,15 @@ def main():
         logger.error("App name must contain only lowercase letters, numbers, and hyphens")
         sys.exit(1)
     
+    # Always rebuild frontend before deploying
+    logger.info("Building frontend static assets...")
+    build_script = Path(__file__).parent / "build.py"
+    build_result = subprocess.run([sys.executable, str(build_script)], capture_output=True, text=True)
+    if build_result.returncode != 0:
+        logger.error(f"Frontend build failed: {build_result.stderr}")
+        sys.exit(1)
+    logger.info("Frontend build complete")
+
     try:
         success = deploy_source_to_databricks(
             app_name=args.app_name,
