@@ -72,7 +72,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
         <div className="w-full max-w-3xl">
           {/* Greeting */}
           <div className="text-center mb-8">
-            <img src={`${import.meta.env.BASE_URL}databricks-logo.png`} alt="Databricks" className="w-14 h-14 mx-auto mb-6" />
+            <img src="/databricks-logo.png" alt="Databricks" className="w-14 h-14 mx-auto mb-6" />
 
             <h1
               className="text-2xl font-semibold mb-2"
