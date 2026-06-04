@@ -59,7 +59,8 @@ export function summarizeArgs(args: unknown): string | undefined {
       parsed = args as Record<string, unknown>;
     }
   } catch {
-    return typeof args === 'string' ? args : undefined;
+    // The catch only runs when JSON.parse throws, which only happens for string args.
+    return args as string;
   }
   const vals = Object.values(parsed).filter((v) => typeof v === 'string');
   let s = vals.join(', ');
@@ -488,8 +489,6 @@ const ChatWorkspace: React.FC = () => {
     onAgentDetail: () => {},
     onTaskDetail: () => {},
     onComplete: (data: GenerationCompleteData) => {
-      console.log('[App onComplete] SSE generation data — agents:', data?.agents?.length, 'tasks:', data?.tasks?.length,
-        'keys:', data ? Object.keys(data) : 'null');
       const ownerSession = useExecutionStore.getState().executionOwnerSessionId;
       const sessionStore = useSessionStore.getState();
       const id = generateId();
@@ -514,9 +513,7 @@ const ChatWorkspace: React.FC = () => {
         });
       }
 
-      if (dispatcher.setLastGenerated) {
-        dispatcher.setLastGenerated(data);
-      }
+      dispatcher.setLastGenerated(data);
       // Remember it as the /save target.
       lastGeneratedRef.current = data;
 
@@ -828,10 +825,11 @@ const ChatWorkspace: React.FC = () => {
       setDetectedVariables([]);
 
       if (!pending) return;
-      if (pending.type === 'crew' && pending.plan) {
-        doExecuteCrew(pending.plan, inputs);
-      } else if (pending.type === 'generated' && pending.data) {
-        doExecuteGenerated(pending.data, pending.spaceId, inputs, { originSession: pending.originSession });
+      // pending is always a crew (carrying a plan) or a generated crew (carrying data).
+      if (pending.type === 'crew') {
+        doExecuteCrew(pending.plan as PlanData, inputs);
+      } else {
+        doExecuteGenerated(pending.data as GenerationCompleteData, pending.spaceId, inputs, { originSession: pending.originSession });
       }
     },
     [pendingExecution, doExecuteCrew, doExecuteGenerated],

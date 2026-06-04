@@ -48,9 +48,9 @@ export default defineConfig({
           lines: 100,
         },
         'src/components/ChatMode/ChatWorkspace.tsx': {
-          statements: 99,
-          branches: 86,
-          functions: 96,
+          statements: 100,
+          branches: 100,
+          functions: 100,
           lines: 100,
         },
         'src/store/uiLayout.ts': {

@@ -869,6 +869,8 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                       <Box sx={{ display: 'flex', gap: 0.5 }}>
                         {userRole !== 'operator' && (
                           <Tooltip title={t('runHistory.deleteAllRuns')}>
+                            {/* span wrapper so the Tooltip works while the button is disabled */}
+                            <span style={{ display: 'inline-flex' }}>
                             <IconButton
                               className="delete-all-button"
                               size="small"
@@ -890,6 +892,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                             >
                               <DeleteIcon sx={{ fontSize: '0.875rem' }} />
                             </IconButton>
+                            </span>
                           </Tooltip>
                         )}
                       </Box>

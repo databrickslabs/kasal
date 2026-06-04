@@ -26,7 +26,7 @@ describe('ModeSwitcher', () => {
 
   it('renders the grid trigger button (menu closed initially)', () => {
     render(<ModeSwitcher />);
-    expect(screen.getByRole('button', { name: /Workspace mode: Crew/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Workspace mode: Agent Builder/i })).toBeInTheDocument();
     expect(screen.queryByText('Switch Mode')).not.toBeInTheDocument();
   });
 
@@ -35,8 +35,8 @@ describe('ModeSwitcher', () => {
     fireEvent.click(screen.getByRole('button', { name: /Workspace mode/i }));
     expect(screen.getByText('Switch Mode')).toBeInTheDocument();
     const menu = screen.getByRole('menu');
-    expect(within(menu).getByText('Crew')).toBeInTheDocument();
-    expect(within(menu).getByText('Flow')).toBeInTheDocument();
+    expect(within(menu).getByText('Agent Builder')).toBeInTheDocument();
+    expect(within(menu).getByText('Flow Builder')).toBeInTheDocument();
     expect(within(menu).getByText('Chat')).toBeInTheDocument();
   });
 
@@ -45,8 +45,8 @@ describe('ModeSwitcher', () => {
     render(<ModeSwitcher />);
     fireEvent.click(screen.getByRole('button', { name: /Workspace mode/i }));
     const menu = screen.getByRole('menu');
-    expect(within(menu).getByText('Crew')).toBeInTheDocument();
-    expect(within(menu).queryByText('Flow')).not.toBeInTheDocument();
+    expect(within(menu).getByText('Agent Builder')).toBeInTheDocument();
+    expect(within(menu).queryByText('Flow Builder')).not.toBeInTheDocument();
     expect(within(menu).getByText('Chat')).toBeInTheDocument();
   });
 
@@ -61,7 +61,7 @@ describe('ModeSwitcher', () => {
   it('selecting Flow calls setAppMode("flow")', () => {
     render(<ModeSwitcher />);
     fireEvent.click(screen.getByRole('button', { name: /Workspace mode/i }));
-    fireEvent.click(screen.getByText('Flow'));
+    fireEvent.click(screen.getByText('Flow Builder'));
     expect(setAppMode).toHaveBeenCalledWith('flow');
   });
 
@@ -81,7 +81,7 @@ describe('ModeSwitcher', () => {
     mockAppMode = 'flow';
     mockFlowEnabled = false;
     render(<ModeSwitcher />);
-    expect(screen.getByRole('button', { name: /Workspace mode: Crew/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Workspace mode: Agent Builder/i })).toBeInTheDocument();
   });
 
   it('closes the menu via onClose (backdrop)', async () => {

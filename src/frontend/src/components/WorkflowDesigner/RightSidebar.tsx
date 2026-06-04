@@ -350,6 +350,9 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                 <Divider sx={{ width: '80%', my: 0.5 }} />
               ) : (
                 <Tooltip title={item.tooltip} placement="left">
+                  {/* span wrapper: a disabled button doesn't fire the events the
+                      Tooltip needs, so the tooltip listens on the span instead. */}
+                  <span style={{ display: 'inline-flex' }}>
                   <IconButton
                     onClick={(e) => {
                       if (item.onClick && !item.disabled) {
@@ -386,6 +389,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                   >
                     {item.icon}
                   </IconButton>
+                  </span>
                 </Tooltip>
               )}
             </React.Fragment>

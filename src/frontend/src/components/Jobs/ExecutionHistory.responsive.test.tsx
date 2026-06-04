@@ -10,6 +10,13 @@ import { ThemeProvider, createTheme } from '@mui/material';
 
 // --- Mocks that must be defined before importing the component ---
 
+// ExecutionHistory renders ShowResult, which now uses react-router's useNavigate;
+// stub it so these layout tests don't need a Router wrapper.
+vi.mock('react-router-dom', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('react-router-dom')>()),
+  useNavigate: () => vi.fn(),
+}));
+
 let mockIsMobile = false;
 
 vi.mock('../../hooks/workflow/useResponsiveLayout', () => ({
