@@ -13,6 +13,24 @@ from sqlalchemy.orm import Session
 # Configure logging
 logger = logging.getLogger(__name__)
 
+
+def model_rejects_temperature(model_name: Optional[str]) -> bool:
+    """
+    Return True for models whose serving endpoint rejects the `temperature`
+    parameter (a 400 BAD_REQUEST otherwise). Covers GPT-5 / reasoning models and
+    the newest Anthropic Claude Opus models (4.7+) on Databricks, e.g.
+    `databricks-claude-opus-4-8` (served as `global.anthropic.claude-opus-4-8`).
+    """
+    if not model_name:
+        return False
+    m = model_name.lower()
+    if "gpt-5" in m or "gpt5" in m:
+        return True
+    if "claude-opus-4-7" in m or "claude-opus-4-8" in m:
+        return True
+    return False
+
+
 def get_model_config(model_key: str, db: Optional[Session] = None) -> Dict[str, Any]:
     """
     Get model configuration based on model key.
@@ -85,13 +103,10 @@ def get_max_rpm_for_model(model_key: str) -> int:
         "gpt-3.5-turbo": 200,
         "gpt-3.5-turbo-1106": 200,
         
-        # Anthropic models
-        "claude-3-opus-20240229": 5,  # More conservative for Opus
-        "claude-3-5-sonnet-20241022": 10,
-        "claude-3-5-haiku-20241022": 20,
-        "claude-3-7-sonnet-20250219": 10,
-        "claude-3-7-sonnet-20250219-thinking": 5,  # More conservative for thinking model
-        
+        # Anthropic models (Claude 4.x; Claude 3 retired)
+        "claude-opus-4-20250514": 5,  # More conservative for Opus
+        "claude-sonnet-4-20250514": 10,
+
         # Ollama models are hosted locally, but still use conservative defaults
         "qwen2.5:32b": 5,
         "llama2": 10,
@@ -113,8 +128,7 @@ def get_max_rpm_for_model(model_key: str) -> int:
         # Databricks models
         "databricks-meta-llama-3-3-70b-instruct": 5,
         "databricks-meta-llama-3-1-405b-instruct": 3,  # Larger model, more conservative
-        "databricks-claude-3-7-sonnet": 10,  # Claude model via Databricks
-        
+
         # Google models
         "gemini-2.5-pro": 10,  # Standard rate limit for Gemini
         "gemini-2.0-flash": 10,  # Standard rate limit for Gemini Flash
@@ -129,12 +143,8 @@ def get_max_rpm_for_model(model_key: str) -> int:
         return 50
     elif "gpt-3.5" in model_key or "gpt3" in model_key:
         return 200
-    elif "claude-3-opus" in model_key:
-        return 5
-    elif "claude-3-5" in model_key or "claude-3-haiku" in model_key:
-        return 20
-    elif "claude-3-7" in model_key:
-        return 10
+    elif "claude" in model_key:
+        return 10  # Claude family (Opus/Sonnet/Haiku 4.x)
     elif "llama" in model_key and "3b" in model_key:
         return 20  # Smaller model
     elif "llama" in model_key or "mistral" in model_key or "mixtral" in model_key:

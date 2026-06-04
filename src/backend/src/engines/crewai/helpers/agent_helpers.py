@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logger import LoggerManager
 from src.engines.crewai.helpers.tool_helpers import resolve_tool_ids_to_names
+from src.utils.model_config import model_rejects_temperature
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().crew
@@ -184,6 +185,10 @@ async def create_agent(
                             llm_kwargs['max_completion_tokens'] = llm_kwargs.pop('max_tokens')
                         llm_kwargs['additional_drop_params'] = ['stop', 'temperature', 'presence_penalty', 'frequency_penalty', 'logit_bias']
                         llm_kwargs['timeout'] = 300
+                    elif model_rejects_temperature(model_name):
+                        # e.g. Claude Opus 4.8 — endpoint 400s on `temperature`.
+                        llm_kwargs.pop('temperature', None)
+                        llm_kwargs['additional_drop_params'] = ['temperature']
 
                     if is_databricks:
                         from src.core.llm_handlers.databricks_gpt_oss_handler import DatabricksRetryLLM
@@ -234,6 +239,10 @@ async def create_agent(
                             llm_kwargs['max_completion_tokens'] = llm_kwargs.pop('max_tokens')
                         llm_kwargs['additional_drop_params'] = ['stop', 'temperature', 'presence_penalty', 'frequency_penalty', 'logit_bias']
                         llm_kwargs['timeout'] = 300
+                    elif model_rejects_temperature(model_name):
+                        # e.g. Claude Opus 4.8 — endpoint 400s on `temperature`.
+                        llm_kwargs.pop('temperature', None)
+                        llm_kwargs['additional_drop_params'] = ['temperature']
 
                     if is_databricks:
                         from src.core.llm_handlers.databricks_gpt_oss_handler import DatabricksRetryLLM

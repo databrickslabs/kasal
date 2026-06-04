@@ -95,12 +95,13 @@ class TestSupportedModels:
         assert isinstance(anthropic_models, list)
         assert len(anthropic_models) > 0
         
-        # Check for specific known models
-        assert "claude-3-opus-20240229" in anthropic_models
-        assert "claude-3-5-sonnet-20241022" in anthropic_models
-        assert "claude-3-7-sonnet-20250219" in anthropic_models
-        assert "claude-2.1" in anthropic_models
-        
+        # Check for specific known (current, Claude 4.x) models
+        assert "claude-opus-4-20250514" in anthropic_models
+        assert "claude-sonnet-4-20250514" in anthropic_models
+        # Claude 3 (and older Claude 2) models have been removed.
+        assert not any("claude-3" in m for m in anthropic_models)
+        assert "claude-2.1" not in anthropic_models
+
         # Verify all models are strings
         for model in anthropic_models:
             assert isinstance(model, str)
@@ -230,11 +231,11 @@ class TestModelProviderIntegration:
         
         # Test valid combinations
         assert is_model_supported("openai", "gpt-4")
-        assert is_model_supported("anthropic", "claude-3-opus-20240229")
+        assert is_model_supported("anthropic", "claude-opus-4-20250514")
         assert is_model_supported("databricks", "databricks-meta-llama-3-3-70b-instruct")
-        
+
         # Test invalid combinations
-        assert not is_model_supported("openai", "claude-3-opus-20240229")
+        assert not is_model_supported("openai", "claude-opus-4-20250514")
         assert not is_model_supported("anthropic", "gpt-4")
         assert not is_model_supported("invalid_provider", "any_model")
         assert not is_model_supported("openai", "non_existent_model")

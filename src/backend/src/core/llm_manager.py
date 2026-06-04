@@ -636,6 +636,9 @@ class LLMManager:
             
             prefixed_model = f"databricks/{model_name_value}"
             is_gpt5 = "gpt-5" in model_name_value.lower() or "gpt5" in model_name_value.lower()
+            # Newer frontier models (GPT-5, Claude Opus 4.7+) reject `temperature`.
+            from src.utils.model_config import model_rejects_temperature
+            rejects_temperature = model_rejects_temperature(model_name_value)
 
             # Ensure the model string explicitly includes the provider for CrewAI compatibility
             # GPT-5 reasoning models need longer timeout (300s) — they can take 2-4 min on complex prompts
@@ -653,9 +656,13 @@ class LLMManager:
             if is_gpt5:
                 llm_params["additional_drop_params"] = ["stop", "temperature", "presence_penalty", "frequency_penalty", "logit_bias"]
                 logger.info(f"Databricks GPT-5 model: {model_name_value} — additional_drop_params and 300s timeout set")
+            elif rejects_temperature:
+                # e.g. Claude Opus 4.8 — endpoint 400s on `temperature`.
+                llm_params["additional_drop_params"] = ["temperature"]
+                logger.info(f"Databricks model {model_name_value} rejects temperature — dropping it")
 
-            # Add temperature if specified (only for non-GPT-5; GPT-5 rejects it)
-            if temperature is not None and not is_gpt5:
+            # Add temperature only for models that accept it.
+            if temperature is not None and not rejects_temperature:
                 llm_params["temperature"] = temperature
                 logger.info(f"Setting temperature to {temperature} for model {prefixed_model}")
 
