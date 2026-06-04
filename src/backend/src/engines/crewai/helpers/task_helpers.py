@@ -567,6 +567,19 @@ async def create_task(
             except (json.JSONDecodeError, TypeError):
                 _parsed_config = {}
 
+        # If description matches a known factory type, promote it to the type field
+        _KNOWN_FACTORY_TYPES = {'prompt_injection_check', 'self_reflection'}
+        if (
+            isinstance(_parsed_config, dict)
+            and 'type' not in _parsed_config
+            and _parsed_config.get('description') in _KNOWN_FACTORY_TYPES
+        ):
+            _parsed_config = dict(_parsed_config)
+            _parsed_config['type'] = _parsed_config.pop('description')
+            guardrail_logger.info(
+                f"Task {task_key} guardrail: promoted description '{_parsed_config['type']}' to type field"
+            )
+
         _is_llm_guardrail = (
             isinstance(_parsed_config, dict)
             and ('description' in _parsed_config or 'llm_model' in _parsed_config)
@@ -583,12 +596,11 @@ async def create_task(
                 # Import guardrail factory only when needed
                 from src.engines.crewai.guardrails.guardrail_factory import GuardrailFactory
 
-                # Convert guardrail config to JSON string if it's a dictionary
-                if isinstance(guardrail_config, dict):
-                    guardrail_config = json.dumps(guardrail_config)
+                # Use promoted _parsed_config (may have type field added) rather than original
+                factory_config = json.dumps(_parsed_config) if isinstance(_parsed_config, dict) else _parsed_config
 
                 # Create the guardrail instance
-                guardrail = GuardrailFactory.create_guardrail(guardrail_config)
+                guardrail = GuardrailFactory.create_guardrail(factory_config)
                 if guardrail:
                     # Create a callable wrapper for this guardrail
                     # Using GuardrailWrapper class instead of a closure because:
@@ -600,7 +612,7 @@ async def create_task(
 
                     # Instead of setting as callback, set as guardrail function
                     # This integrates with CrewAI's native retry mechanism
-                    task_args['guardrail'] = guardrail_wrapper
+                    task_args['guardrail'] = guardrail_wrapper.__call__
 
                     # Make sure retry_on_fail is set to True
                     if 'retry_on_fail' not in task_config:
@@ -680,8 +692,9 @@ async def create_task(
                     llm_model = f"databricks/{llm_model}"
                     guardrail_logger.info(f"Added databricks/ prefix to model: {llm_model}")
 
-            # Create LLM instance for the guardrail
-            guardrail_llm = LLM(model=llm_model)
+            # Create LLM instance for the guardrail with custom User-Agent
+            from src.utils.telemetry import get_user_agent_header, KasalProduct
+            guardrail_llm = LLM(model=llm_model, extra_headers=get_user_agent_header(KasalProduct.GUARDRAIL))
 
             # Create LLMGuardrail (OSS-compatible, NOT HallucinationGuardrail)
             llm_guardrail = LLMGuardrail(

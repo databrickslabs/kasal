@@ -13,6 +13,7 @@ from collections import deque
 from typing import Dict, Optional, Any, List
 
 from src.core.exceptions import MCPConnectionError
+from src.utils.telemetry import KasalProduct, get_user_agent
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +147,12 @@ class MCPAdapter:
             logger.info(f"MCP discovery using Bearer token (length={len(auth_value) - 7})")
         else:
             logger.warning(f"MCP discovery using non-Bearer auth type")
+
+        # Add User-Agent header to identify Kasal MCP client for Databricks telemetry tracking
+        clean_headers = {
+            "Authorization": headers["Authorization"],
+            "User-Agent": get_user_agent(KasalProduct.MCP)
+        }
 
         # Try streamable HTTP first
         try:
@@ -397,7 +404,12 @@ class MCPAdapter:
         if not headers:
             raise ValueError("No authentication headers available")
 
-        clean_headers = {"Authorization": headers["Authorization"]}
+        # Use Authorization and User-Agent headers
+        # User-Agent identifies Kasal MCP client for tracking in Databricks telemetry
+        clean_headers = {
+            "Authorization": headers["Authorization"],
+            "User-Agent": get_user_agent(KasalProduct.MCP)
+        }
 
         last_error: Optional[Exception] = None
         for attempt in range(self.max_retries):

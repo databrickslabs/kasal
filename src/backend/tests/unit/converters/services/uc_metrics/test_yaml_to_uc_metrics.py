@@ -662,3 +662,334 @@ class TestUCMetricsGenerator:
         yaml_str = generator.format_consolidated_uc_metrics_yaml(result)
         assert yaml_str is not None
         assert "measures:" in yaml_str
+
+    # ========== Constant Selection Tests (using generate_uc_metric directly) ==========
+
+    @pytest.fixture
+    def simple_definition(self):
+        """Simple KPI definition for generate_uc_metric"""
+        return KPIDefinition(
+            description="Inventory Metrics",
+            technical_name="inventory_metrics",
+            kpis=[
+                KPI(
+                    description="Inventory Balance",
+                    technical_name="inventory_balance",
+                    formula="stock_level",
+                    aggregation_type="SUM",
+                    source_table="Inventory",
+                    fields_for_constant_selection=["fiscal_period"],
+                )
+            ]
+        )
+
+    def test_generate_uc_metric_constant_selection_direct(self, generator, yaml_metadata):
+        """Test generate_uc_metric (constant selection version) called directly."""
+        kpi = KPI(
+            description="Inventory Balance",
+            technical_name="inventory_balance",
+            formula="stock_level",
+            aggregation_type="SUM",
+            source_table="Inventory",
+            fields_for_constant_selection=["fiscal_period"],
+        )
+        definition = KPIDefinition(
+            description="Test",
+            technical_name="test",
+            kpis=[kpi],
+        )
+        result = generator.generate_uc_metric(definition, kpi, yaml_metadata)
+        assert result is not None
+        assert result["version"] == "1.0"
+        assert "measures" in result
+        # Window config should appear in the measure
+        assert "window" in result["measures"][0]
+        assert result["measures"][0]["window"][0]["order"] == "fiscal_period"
+        assert result["measures"][0]["window"][0]["semiadditive"] == "last"
+
+    def test_generate_uc_metric_constant_selection_with_filters_direct(self, generator, yaml_metadata):
+        """Test constant selection KBI with KBI-specific filters, calling generate_uc_metric directly."""
+        kpi = KPI(
+            description="Active Inventory",
+            technical_name="active_inventory",
+            formula="stock_level",
+            aggregation_type="SUM",
+            source_table="Inventory",
+            filters=["status = 'active'"],
+            fields_for_constant_selection=["fiscal_period"],
+        )
+        definition = KPIDefinition(
+            description="Test",
+            technical_name="test",
+            kpis=[kpi],
+        )
+        result = generator.generate_uc_metric(definition, kpi, yaml_metadata)
+        assert result is not None
+        measure_expr = result["measures"][0]["expr"]
+        assert "FILTER" in measure_expr
+        assert "status = 'active'" in measure_expr
+
+    def test_generate_uc_metric_constant_selection_with_query_filter_direct(self, generator, yaml_metadata):
+        """Test constant selection KBI with $query_filter, calling generate_uc_metric directly."""
+        kpi = KPI(
+            description="Filtered Inventory",
+            technical_name="filtered_inventory",
+            formula="stock_level",
+            aggregation_type="SUM",
+            source_table="Inventory",
+            filters=["$query_filter"],
+            fields_for_constant_selection=["fiscal_period"],
+        )
+        definition = KPIDefinition(
+            description="Test",
+            technical_name="test",
+            kpis=[kpi],
+        )
+        result = generator.generate_uc_metric(definition, kpi, yaml_metadata)
+        # $query_filter becomes global filter
+        assert result is not None
+        assert "filter" in result
+        assert "year = '2023'" in result["filter"]
+
+    def test_generate_uc_metric_constant_selection_display_sign_negative_direct(self, generator, yaml_metadata):
+        """Test constant selection KBI with display_sign = -1."""
+        kpi = KPI(
+            description="Net Debt",
+            technical_name="net_debt",
+            formula="debt_amount",
+            aggregation_type="SUM",
+            source_table="Finance",
+            display_sign=-1,
+            fields_for_constant_selection=["fiscal_period"],
+        )
+        definition = KPIDefinition(
+            description="Test",
+            technical_name="test",
+            kpis=[kpi],
+        )
+        result = generator.generate_uc_metric(definition, kpi, yaml_metadata)
+        assert result is not None
+        measure_expr = result["measures"][0]["expr"]
+        assert "(-1) *" in measure_expr
+
+    def test_generate_uc_metric_constant_selection_multiple_fields_direct(self, generator, yaml_metadata):
+        """Test constant selection KBI with multiple constant selection fields."""
+        kpi = KPI(
+            description="Multi-Field Balance",
+            technical_name="multi_balance",
+            formula="amount",
+            aggregation_type="SUM",
+            source_table="Finance",
+            fields_for_constant_selection=["fiscal_period", "product_id"],
+        )
+        definition = KPIDefinition(
+            description="Test",
+            technical_name="test",
+            kpis=[kpi],
+        )
+        result = generator.generate_uc_metric(definition, kpi, yaml_metadata)
+        assert result is not None
+        window = result["measures"][0]["window"]
+        assert len(window) == 2
+        orders = [w["order"] for w in window]
+        assert "fiscal_period" in orders
+        assert "product_id" in orders
+
+    def test_generate_consolidated_constant_selection_multiple_kbis(self, generator, yaml_metadata):
+        """Test consolidated constant selection with multiple KBIs calls _build_consolidated_constant_selection."""
+        kbi_list = [
+            KPI(
+                description="Inventory Balance",
+                technical_name="inventory_balance",
+                formula="stock_level",
+                aggregation_type="SUM",
+                source_table="Inventory",
+                fields_for_constant_selection=["fiscal_period"],
+            ),
+            KPI(
+                description="Customer Balance",
+                technical_name="customer_balance",
+                formula="balance",
+                aggregation_type="SUM",
+                source_table="Inventory",
+                fields_for_constant_selection=["fiscal_period"],
+            ),
+        ]
+        result = generator.generate_consolidated_uc_metrics(kbi_list, yaml_metadata)
+        assert result is not None
+        assert result["version"] == "1.0"
+        assert "measures" in result
+        assert len(result["measures"]) == 2
+        assert "dimensions" in result
+
+    def test_generate_consolidated_mixed_constant_and_regular_kbis(self, generator, yaml_metadata):
+        """Test consolidated with both regular and constant selection KBIs uses consolidated format."""
+        kbi_list = [
+            KPI(
+                description="Revenue",
+                technical_name="revenue",
+                formula="amount",
+                aggregation_type="SUM",
+                source_table="Sales",
+            ),
+            KPI(
+                description="Inventory Balance",
+                technical_name="inventory_balance",
+                formula="stock_level",
+                aggregation_type="SUM",
+                source_table="Inventory",
+                fields_for_constant_selection=["fiscal_period"],
+            ),
+        ]
+        # Mixed mode - uses consolidated format (version 0.1)
+        result = generator.generate_consolidated_uc_metrics(kbi_list, yaml_metadata)
+        assert result is not None
+        assert len(result["measures"]) == 2
+
+    def test_generate_uc_metric_constant_selection_with_count_direct(self, generator, yaml_metadata):
+        """Test constant selection KBI with COUNT aggregation."""
+        kpi = KPI(
+            description="Count",
+            technical_name="count",
+            formula="id",
+            aggregation_type="COUNT",
+            source_table="Sales",
+            fields_for_constant_selection=["fiscal_period"],
+        )
+        definition = KPIDefinition(description="Test", technical_name="test", kpis=[kpi])
+        result = generator.generate_uc_metric(definition, kpi, yaml_metadata)
+        assert "COUNT(id)" in result["measures"][0]["expr"]
+
+    def test_generate_uc_metric_constant_selection_with_average_direct(self, generator, yaml_metadata):
+        """Test constant selection KBI with AVERAGE aggregation."""
+        kpi = KPI(
+            description="Average",
+            technical_name="avg",
+            formula="price",
+            aggregation_type="AVERAGE",
+            source_table="Sales",
+            fields_for_constant_selection=["fiscal_period"],
+        )
+        definition = KPIDefinition(description="Test", technical_name="test", kpis=[kpi])
+        result = generator.generate_uc_metric(definition, kpi, yaml_metadata)
+        assert "AVG(price)" in result["measures"][0]["expr"]
+
+    def test_generate_uc_metric_constant_selection_with_min_direct(self, generator, yaml_metadata):
+        """Test constant selection KBI with MIN aggregation."""
+        kpi = KPI(
+            description="Minimum",
+            technical_name="min",
+            formula="value",
+            aggregation_type="MIN",
+            source_table="Sales",
+            fields_for_constant_selection=["fiscal_period"],
+        )
+        definition = KPIDefinition(description="Test", technical_name="test", kpis=[kpi])
+        result = generator.generate_uc_metric(definition, kpi, yaml_metadata)
+        assert "MIN(value)" in result["measures"][0]["expr"]
+
+    def test_generate_uc_metric_constant_selection_with_max_direct(self, generator, yaml_metadata):
+        """Test constant selection KBI with MAX aggregation."""
+        kpi = KPI(
+            description="Maximum",
+            technical_name="max",
+            formula="value",
+            aggregation_type="MAX",
+            source_table="Sales",
+            fields_for_constant_selection=["fiscal_period"],
+        )
+        definition = KPIDefinition(description="Test", technical_name="test", kpis=[kpi])
+        result = generator.generate_uc_metric(definition, kpi, yaml_metadata)
+        assert "MAX(value)" in result["measures"][0]["expr"]
+
+    def test_generate_consolidated_constant_selection_with_query_filter_multiple(self, generator, yaml_metadata):
+        """Test consolidated constant selection (multiple KBIs) includes query filter."""
+        kbi_list = [
+            KPI(
+                description="Balance",
+                technical_name="balance",
+                formula="amount",
+                aggregation_type="SUM",
+                source_table="Finance",
+                filters=["$query_filter"],
+                fields_for_constant_selection=["fiscal_period"],
+            ),
+            KPI(
+                description="Balance2",
+                technical_name="balance2",
+                formula="amount2",
+                aggregation_type="SUM",
+                source_table="Finance",
+                fields_for_constant_selection=["fiscal_period"],
+            ),
+        ]
+        result = generator.generate_consolidated_uc_metrics(kbi_list, yaml_metadata)
+        assert "filter" in result
+        assert "year = '2023'" in result["filter"]
+
+    def test_generate_uc_metric_constant_selection_qualified_source_direct(self, generator, yaml_metadata):
+        """Test constant selection KBI with qualified source table."""
+        kpi = KPI(
+            description="Balance",
+            technical_name="balance",
+            formula="amount",
+            aggregation_type="SUM",
+            source_table="main.finance.table",
+            fields_for_constant_selection=["fiscal_period"],
+        )
+        definition = KPIDefinition(description="Test", technical_name="test", kpis=[kpi])
+        result = generator.generate_uc_metric(definition, kpi, yaml_metadata)
+        assert result is not None
+        assert result["source"] == "main.finance.table"
+
+    def test_exception_aggregation_in_consolidated(self, generator, yaml_metadata):
+        """Test EXCEPTION_AGGREGATION type in consolidated metrics."""
+        kpi = KPI(
+            description="Exceptional Aggregation",
+            technical_name="exc_agg",
+            formula="amount",
+            aggregation_type="EXCEPTION_AGGREGATION",
+            source_table="Finance",
+            exception_aggregation="SUM",
+            fields_for_exception_aggregation=["fiscal_period"],
+        )
+        result = generator.generate_consolidated_uc_metrics([kpi], yaml_metadata)
+        assert result is not None
+        assert len(result["measures"]) == 1
+        # Should have window configuration for exception aggregation
+        assert "window" in result["measures"][0]
+
+    def test_format_consolidated_yaml_with_subquery(self, generator):
+        """Test formatting consolidated YAML with subquery field."""
+        uc_metrics = {
+            "version": "0.1",
+            "description": "Test",
+            "measures": [
+                {
+                    "name": "balance",
+                    "expr": "SUM(amount)",
+                    "subquery": "SELECT * FROM t\nWHERE active = 1"
+                }
+            ]
+        }
+        result = generator.format_consolidated_uc_metrics_yaml(uc_metrics)
+        assert "subquery:" in result
+
+    def test_format_consolidated_yaml_with_dimensions(self, generator):
+        """Test formatting consolidated YAML with dimensions."""
+        uc_metrics = {
+            "version": "1.0",
+            "source": "catalog.schema.table",
+            "description": "Test",
+            "dimensions": [
+                {"name": "fiscal_period", "expr": "fiscal_period"},
+                {"name": "region", "expr": "region"},
+            ],
+            "measures": [
+                {"name": "balance", "expr": "SUM(amount)"}
+            ]
+        }
+        result = generator.format_consolidated_uc_metrics_yaml(uc_metrics)
+        assert "dimensions:" in result
+        assert "fiscal_period" in result
+        assert "region" in result

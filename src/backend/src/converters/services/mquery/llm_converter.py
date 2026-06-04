@@ -172,11 +172,14 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
             logger.warning("LLM credentials not configured, using rule-based conversion")
             return {"content": None, "usage": {}, "error": "LLM not configured"}
 
-        url = f"{self.workspace_url}/serving-endpoints/{self.model}/invocations"
+        base_url = self.workspace_url.rstrip("/")
+        url = f"{base_url}/serving-endpoints/{self.model}/invocations"
 
+        from src.utils.telemetry import get_user_agent_header, KasalProduct
         headers = {
             "Authorization": f"Bearer {self.token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            **get_user_agent_header(KasalProduct.POWERBI),
         }
 
         payload = {

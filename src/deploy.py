@@ -398,7 +398,7 @@ starlette==0.40.0
                     ignore=custom_ignore_function(backend_excluded_dirs, backend_excluded_patterns)
                 )
                 logger.info(f"Copied backend folder (excluding: {backend_excluded_dirs})")
-                logger.warning("⚠️  MIGRATIONS EXCLUDED - You'll need to run migrations manually in the app after deployment")
+                logger.warning("MIGRATIONS EXCLUDED - You'll need to run migrations manually in the app after deployment")
             else:
                 logger.error("Backend folder not found!")
                 raise FileNotFoundError("Backend folder not found")
@@ -477,6 +477,9 @@ starlette==0.40.0
                         str(dir_path),
                         target_path
                     ]
+                    if profile is not None:
+                        import_cmd.append("--profile")
+                        import_cmd.append(profile)
                     logger.info(f"Uploading {dir_name}/ to {target_path}")
                     result = subprocess.run(import_cmd, check=True, capture_output=True, text=True)
                     logger.info(f"Uploaded {dir_name}/ successfully")
@@ -639,6 +642,15 @@ def main():
         logger.error("App name must contain only lowercase letters, numbers, and hyphens")
         sys.exit(1)
     
+    # Always rebuild frontend before deploying
+    logger.info("Building frontend static assets...")
+    build_script = Path(__file__).parent / "build.py"
+    build_result = subprocess.run([sys.executable, str(build_script)], capture_output=True, text=True)
+    if build_result.returncode != 0:
+        logger.error(f"Frontend build failed: {build_result.stderr}")
+        sys.exit(1)
+    logger.info("Frontend build complete")
+
     try:
         success = deploy_source_to_databricks(
             app_name=args.app_name,

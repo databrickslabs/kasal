@@ -8,6 +8,7 @@ from src.core.exceptions import KasalError
 
 from src.repositories.databricks_config_repository import DatabricksConfigRepository
 from src.schemas.databricks_config import DatabricksConfigCreate, DatabricksConfigResponse
+from src.utils.telemetry import get_user_agent_header, KasalProduct
 
 logger = logging.getLogger(__name__)
 
@@ -297,6 +298,79 @@ class DatabricksService:
         
         return service
         
+    async def _resolve_workspace_url_and_headers(self, host: str | None = None):
+        """Helper: returns (auth_headers, workspace_url) applying optional host override."""
+        from src.utils.databricks_auth import get_auth_context
+
+        auth = await get_auth_context()
+        if not auth:
+            raise KasalError(detail="No authentication credentials available")
+
+        headers = auth.get_headers()
+
+        if host:
+            workspace_url = host
+        else:
+            config = await self.repository.get_active_config()
+            workspace_url = ""
+            if config and config.workspace_url:
+                workspace_url = config.workspace_url
+            if not workspace_url:
+                workspace_url = os.getenv("DATABRICKS_HOST", "")
+
+        if not workspace_url:
+            raise KasalError(detail="workspace_url not configured and DATABRICKS_HOST not set")
+        if not workspace_url.startswith("https://"):
+            workspace_url = f"https://{workspace_url}"
+        workspace_url = workspace_url.rstrip("/")
+
+        return headers, workspace_url
+
+    async def list_warehouses(self, host: str | None = None) -> list:
+        """List SQL warehouses accessible in the workspace."""
+        headers, workspace_url = await self._resolve_workspace_url_and_headers(host)
+        url = f"{workspace_url}/api/2.0/sql/warehouses"
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(url, headers=headers)
+
+        if response.status_code != 200:
+            raise KasalError(detail=f"Failed to list warehouses: {response.status_code} {response.text}")
+
+        data = response.json()
+        return [
+            {"id": w["id"], "name": w["name"], "state": w.get("state", "")}
+            for w in data.get("warehouses", [])
+        ]
+
+    async def list_catalogs(self, host: str | None = None) -> list:
+        """List Unity Catalog catalogs accessible in the workspace."""
+        headers, workspace_url = await self._resolve_workspace_url_and_headers(host)
+        url = f"{workspace_url}/api/2.1/unity-catalog/catalogs"
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(url, headers=headers)
+
+        if response.status_code != 200:
+            raise KasalError(detail=f"Failed to list catalogs: {response.status_code} {response.text}")
+
+        data = response.json()
+        return [c["name"] for c in data.get("catalogs", [])]
+
+    async def list_schemas(self, catalog: str, host: str | None = None) -> list:
+        """List Unity Catalog schemas for a given catalog."""
+        headers, workspace_url = await self._resolve_workspace_url_and_headers(host)
+        url = f"{workspace_url}/api/2.1/unity-catalog/schemas"
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(url, headers=headers, params={"catalog_name": catalog})
+
+        if response.status_code != 200:
+            raise KasalError(detail=f"Failed to list schemas: {response.status_code} {response.text}")
+
+        data = response.json()
+        return [s["name"] for s in data.get("schemas", [])]
+
     async def check_databricks_connection(self) -> Dict[str, Any]:
         """
         Check connection to Databricks.
@@ -371,6 +445,7 @@ class DatabricksService:
                     }
 
                 headers = auth.get_headers()
+                headers.update(get_user_agent_header(KasalProduct.CONNECTION_TEST))  # Kasal User-Agent
 
             except Exception as e:
                 logger.error(f"Failed to get authentication context: {e}")

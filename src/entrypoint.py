@@ -387,6 +387,13 @@ def run_app():
                 async def serve_kasal_icon_24():
                     return FileResponse(kasal_icon_24)
 
+            # Serve Databricks logo for chat mode
+            databricks_logo = os.path.join(frontend_static_dir, "databricks-logo.png")
+            if os.path.exists(databricks_logo):
+                @app.get("/databricks-logo.png")
+                async def serve_databricks_logo():
+                    return FileResponse(databricks_logo)
+
             # Serve markdown files from docs directory
             docs_dir = os.path.join(frontend_static_dir, "docs")
             if os.path.exists(docs_dir):

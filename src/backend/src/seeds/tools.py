@@ -32,6 +32,21 @@ tools_data = [
     (76, "Power BI Hierarchies Tool", "Extracts hierarchies from Microsoft Fabric semantic models using the Fabric API getDefinition endpoint (TMDL format). Parses TMDL to extract hierarchy definitions and generates Unity Catalog dimension views with hierarchy_path columns plus metadata table DDL. IMPORTANT: Requires a Service Principal with SemanticModel.ReadWrite.All permissions and works with Fabric workspaces only (not legacy Power BI Service). Perfect for migrating Power BI hierarchies to Databricks as dimension views, documenting drill-down structures, or generating DDL for dimension tables.", "transform"),
     (77, "Power BI Field Parameters & Calculation Groups Tool", "Extracts Field Parameters and Calculation Groups from Microsoft Fabric semantic models using the Fabric API getDefinition endpoint (TMDL format). Field Parameters allow users to dynamically switch between measures in reports using NAMEOF() DAX functions. Calculation Groups provide reusable time intelligence calculations (YTD, PY, YoY%, MTD) using SELECTEDMEASURE() patterns. Generates Unity Catalog metadata tables with parameter/calculation item details and SQL patterns for implementing equivalent logic. IMPORTANT: Requires a Service Principal with SemanticModel.ReadWrite.All permissions and works with Fabric workspaces only (not legacy Power BI Service). Perfect for documenting Power BI dynamic measure switching, migrating time intelligence patterns to Databricks, or generating SQL equivalents for calculation group logic.", "transform"),
     (78, "Power BI Report References Tool", "Extracts visual-to-measure and visual-to-table references from Microsoft Fabric reports using the Fabric Report Definition API (PBIR format). Shows which measures, tables, and fields are used in each report page and visual. Output formats include markdown (grouped by page, measure, or table), JSON, and matrix view. IMPORTANT: Requires a Service Principal with Report.ReadWrite.All permissions and works only with Fabric reports in PBIR format. Perfect for understanding report dependencies, impact analysis for measure/table changes, identifying unused measures, and documenting report-to-semantic-model relationships.", "transform"),
+    (79, "Power BI Semantic Model Fetcher", "Extracts and caches semantic model metadata (measures, tables, relationships, columns, sample data, default filters) from Power BI. Uses 3-tier fallback: Fabric TMDL API, Admin Scanner API, or DAX-based extraction. Output is JSON that can be fed directly into the 'Power BI Semantic Model DAX Generator' tool for multi-step workflows. Caches metadata for same-day reuse. Requires Service Principal with SemanticModel.ReadWrite.All permission or user OAuth token.", "database"),
+    (80, "Power BI Semantic Model DAX Generator", "Generates and executes DAX queries from natural language questions using LLM with self-correction retry loop (up to N retries). Accepts model context JSON from the 'Power BI Semantic Model Fetcher' tool output, or reads from cache as fallback. Features business term mappings, field synonyms, active filter auto-application, and optional visual reference lookup. Requires Service Principal or user OAuth token for DAX execution, plus Databricks LLM endpoint for DAX generation.", "database"),
+    (81, "Power BI Metadata Reducer", "Intelligently reduces semantic model metadata to only what's relevant for a specific question. Uses fuzzy matching, LLM-powered table/measure selection, and measure dependency resolution to filter the full model context from the Fetcher tool. Produces a focused, reduced JSON that dramatically improves DAX generation accuracy. Place between Fetcher and DAX Generator tools in multi-step workflows. Pass the Fetcher output as 'model_context_json' and the user's business question as 'user_question'.", "database"),
+    (82, "Power BI DAX Executor", "Executes a pre-configured DAX query directly against a Power BI semantic model via the Execute Queries API. Accepts workspace ID, dataset ID, authentication credentials, and a DAX EVALUATE statement. Returns results as a formatted markdown table or JSON. No LLM required — use when you already have a working DAX query and want to run it against Power BI.", "database"),
+    (85, "DAX to SQL Translator", "Translate Power BI DAX measure expressions to Databricks Spark SQL using pattern-based rules. Supports 14+ DAX patterns including SUM, SUMX+FILTER, CALCULATE, DIVIDE, COUNTX, AVERAGEX, SAMEPERIODLASTYEAR, and SELECTEDVALUE+SWITCH detection. Input: JSON array of measures with dax_expression fields. Output: JSON array with sql_expr, confidence, and skip_reason per measure. Can be used standalone or as part of the UC Metric View Generator pipeline.", "transform"),
+    (86, "UC Metric View Generator", "Full pipeline: generates UC Metric View YAML + deploy SQL per fact table. TWO MODES: (1) API mode — provide workspace_id + dataset_id + PBI credentials, and the tool extracts measures, MQuery, and relationships from the PBI API automatically. (2) JSON mode — provide pre-extracted measures_json (from tool 73) + mquery_json (from tool 74). Combines MQuery parsing, DAX translation (14+ patterns + LLM fallback), Kahn's dependency graph, join detection (dim + fact-to-fact), scan data enrichment, and YAML/SQL emission. Optionally accepts PBI relationships JSON (tool 75) for auto-detected enrichment joins and scan data for inline SQL source generation. Output: JSON with YAML + SQL per fact table, plus generation statistics.", "transform"),
+    (87, "PBI Measure Allocator", "Groups Power BI measures into fact tables with confidence scores based on DAX table column references (Table[Column] patterns). Analyzes DAX expressions to determine which table each measure belongs to. Input: raw measures JSON (from Power BI Connector/Fetcher) + mquery_transpilation JSON (from tool 74). Output: JSON mapping of measure → fact table allocation with confidence (high/medium/low/none). Use before the UC Metric View Generator when measures don't have proposed_allocation fields.", "transform"),
+    (88, "Metric View Deployer", "Deploy UC Metric View definitions to a Databricks workspace. Accepts YAML specs and deploy SQL from the UC Metric View Generator tool (86). Supports dry_run mode (default) for validation without actual deployment. When dry_run=False, executes CREATE METRIC VIEW SQL via the Databricks SQL Statement API. Input: yaml_specs_json + sql_specs_json from tool 86. Output: deployment status per metric view.", "transform"),
+    (89, "Config Generator", "Auto-propose pipeline_config.json from PBI extraction output. Takes measures_json, mquery_json, relationships_json, scan_data_json and returns a proposed config with join_key_map, enrichment_joins, switch_decompositions, etc.", "transform"),
+    (90, "Pipeline Config Generator", "Generate pipeline_config.json by calling 4 PBI APIs directly — no LLM intermediation. Produces all 26 config keys with auto-fill + TODO markers. Requires two Service Principals: non-admin (Execute Queries API, workspace member) and admin (Admin Scanner API, Tenant.Read.All). Output is ready for the UC Metric View Generator (Tool 86).", "transform"),
+    (91, "Metric View Validator", "Validate generated UC Metric View YAML definitions against original DAX expressions. Compares each translated measure's SQL with the source DAX to detect semantic mismatches, missing filters, or incorrect aggregations. Returns VALID/EQUIVALENT/REVIEW/INVALID per measure. Input: UCMV Generator output (yaml_content) + measures_json.", "transform"),
+    (92, "Genie Space Generator", "Creates or updates a Databricks Genie Space from deployed UC Metric Views. Configures instructions, join specs, sample questions, and SQL snippets. Idempotent — patches existing space or creates new one. Designed as the final step in the UCMV pipeline: Config Generator → UCMV Generator → UCMV Validator → Genie Space Generator.", "database"),
+    (93, "UCMV Genie Space Config Generator", "Auto-generates Genie Space configuration from deployed UC Metric Views. Reads ucmv_output (auto-injected from flow) and uses an LLM to produce: text_instructions (business description), sample_questions (natural language questions), example_sqls_json (MEASURE() SQL queries), and join_specs_json (from UCMV join definitions). If genie_config_override is provided (manually uploaded JSON), the LLM step is skipped. Output fields match the Genie Space Generator schema for direct flow injection. Use as the step between Metric View Deployer and Genie Space Generator.", "transform"),
+    (94, "PBI Visual-UCMV Mapper", "Maps Power BI report visuals to deployed UC Metric View metric views. Takes Power BI Report References (tool 78) output and ucmv_output (from flow injection) and uses an LLM to match each visual's PBI measures to UCMV SQL measures, identify the correct metric view, determine grouping dimensions, and generate executable Databricks SQL with MEASURE() syntax. Output feeds directly into the Dashboard Creator (tool 95). Part of the CI/CD dashboard pipeline: Report References → UCMV Mapper → Dashboard Creator.", "transform"),
+    (95, "Databricks Dashboard Creator", "Creates Databricks AI/BI (Lakeview) dashboards from visual-to-UCMV mappings. Takes the structured visual mappings from the PBI Visual-UCMV Mapper (tool 94), generates a Lakeview dashboard JSON with correct widget types (bar, line, table, counter), datasets with MEASURE() SQL queries, and page layouts. Calls the Databricks Lakeview REST API to create or update the dashboard and optionally publishes it. Returns the dashboard URL. Final step in the CI/CD dashboard pipeline.", "database"),
 ]
 
 def get_tool_configs():
@@ -169,7 +184,11 @@ def get_tool_configs():
             "include_hidden_tables": False,
             "skip_static_tables": True,
             # Output Options
-            "include_summary": True
+            "include_summary": True,
+            # DBSQL Validation (optional — enables classify-first + DAX vs SQL comparison)
+            "databricks_sql_endpoint": "",  # e.g. https://workspace.cloud.databricks.com/api/2.0/mcp/sql
+            "databricks_pat": "",
+            "max_iterations": 10,
         },  # M-Query Conversion Pipeline
         "75": {
             "result_as_answer": True,
@@ -256,7 +275,188 @@ def get_tool_configs():
             "output_format": "markdown",  # Output format: "markdown", "json", or "matrix"
             "include_visual_details": True,
             "group_by": "page"  # Group results by: "page", "measure", or "table"
-        }   # Power BI Report References Tool
+        },   # Power BI Report References Tool
+        "79": {
+            "result_as_answer": False,
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
+            "workspace_id": "",
+            "semantic_model_id": "",  # Alias for dataset_id
+            "auth_method": None,
+            "username": "",
+            "password": "",
+            "output_format": "json",
+            "cache_ttl_days": 1,  # Days to cache model metadata (1=daily, 7=weekly)
+        },  # Power BI Semantic Model Fetcher
+        "80": {
+            "result_as_answer": False,
+            "workspace_id": "",
+            "semantic_model_id": "",  # Alias for dataset_id
+            "auth_method": None,
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
+            "username": "",
+            "password": "",
+            "llm_model": "databricks-claude-sonnet-4",
+            "max_dax_retries": 5,
+            "user_question": "",
+            "context_knowledge": "",
+            "reference_dax": "",
+            # Context enrichment fields (dynamic context passed via crew inputs or UI config)
+            "active_filters": {},
+            "business_mappings": {},
+            "field_synonyms": {},
+            "visible_tables": [],
+            "conversation_history": [],
+        },  # Power BI Semantic Model DAX Generator
+        "81": {
+            "result_as_answer": True,
+            "strategy": "combined",
+            "synonym_threshold": 70,
+            "synonym_boost_min": 60.0,
+            "max_tables": 15,
+            "max_measures": 30,
+            "enable_value_normalization": True,
+            "dataset_id": "",
+            "workspace_id": "",
+            "llm_model": "databricks-claude-sonnet-4",
+        },  # Power BI Metadata Reducer
+        "82": {
+            "result_as_answer": True,
+            "workspace_id": "",
+            "dataset_id": "",
+            "dax_query": "",
+            "auth_method": None,
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
+            "username": "",
+            "password": "",
+            "access_token": "",
+            "output_format": "markdown",
+            "max_rows": 1000,
+        },  # Power BI DAX Executor
+        "85": {
+            "result_as_answer": True,
+            "config_json": "{}",
+        },  # DAX to SQL Translator
+        "86": {
+            "result_as_answer": True,
+            "catalog": "main",
+            "schema_name": "default",
+            "config_json": "{}",
+            "inner_dim_joins": False,
+            "unflatten_tables": False,
+            "use_llm_fallback": False,
+            "llm_model": "databricks-claude-sonnet-4",
+            "llm_workspace_url": "",
+            "llm_token": "",
+            # PBI API extraction (alternative to providing pre-extracted JSON)
+            "workspace_id": "",
+            "dataset_id": "",
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
+            "username": "",
+            "password": "",
+            "auth_method": None,
+            "access_token": "",
+            "pbi_api_base_url": "",
+        },  # UC Metric View Generator
+        "87": {
+            "result_as_answer": True,
+            "config_json": "{}",
+        },  # PBI Measure Allocator
+        "88": {
+            "result_as_answer": True,
+            "ucmv_output": None,
+            "dry_run": False,
+            "catalog": "main",
+            "schema_name": "default",
+            "databricks_host": "",
+            "warehouse_id": "",
+            "catalog_remap": None,
+        },  # Metric View Deployer
+        "89": {
+            "result_as_answer": True,
+            "workspace_id": None,
+            "dataset_id": None,
+            "measures_json": None,
+            "mquery_json": None,
+            "relationships_json": None,
+            "scan_data_json": None,
+            "catalog": None,
+            "schema_name": None,
+        },  # Config Generator
+        "90": {
+            "result_as_answer": True,
+            "workspace_id": "",
+            "dataset_id": "",
+            "report_id": "",
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
+            "admin_client_id": "",
+            "admin_client_secret": "",
+            "catalog": "main",
+            "schema_name": "default",
+        },  # Pipeline Config Generator
+        "91": {
+            "result_as_answer": True,
+            "yaml_content": None,
+            "measures_json": None,
+        },  # Metric View Validator
+        "92": {
+            "result_as_answer": True,
+            "space_title": "",
+            "catalog": "",
+            "schema_name": "",
+            "warehouse_id": "",
+            "databricks_host": "",   # optional — overrides workspace URL from Kasal Settings
+            "additional_tables": "",
+            "text_instructions": "",
+            "join_specs_json": "",
+            "sample_questions": "",
+            "sql_expressions_json": "",
+            "sql_measures_json": "",
+            "sql_filters_json": "",
+            "example_sqls_json": "",
+        },  # Genie Space Generator
+        "93": {
+            "result_as_answer": True,
+            "ucmv_output": None,
+            "genie_config_override": None,
+            "space_title": "",
+            "catalog": "",
+            "schema_name": "",
+            "warehouse_id": "",
+            "databricks_host": "",
+            "llm_model": "databricks-claude-sonnet-4",
+        },  # UCMV Genie Space Config Generator
+        "94": {
+            "result_as_answer": True,
+            "report_references_json": None,
+            "ucmv_output": None,
+            "measures_json": None,
+            "catalog": "",
+            "schema_name": "",
+            "dashboard_title": "",
+            "databricks_host": "",
+            "llm_model": "databricks-claude-sonnet-4",
+        },  # PBI Visual-UCMV Mapper
+        "95": {
+            "result_as_answer": True,
+            "visual_mappings_json": None,
+            "dashboard_title": "",
+            "catalog": "",
+            "schema_name": "",
+            "warehouse_id": "",
+            "databricks_host": "",
+            "parent_path": "/Workspace/Shared",
+            "publish_dashboard": True,
+        },  # Databricks Dashboard Creator
     }
 
 async def seed_async():
@@ -274,7 +474,7 @@ async def seed_async():
     tools_error = 0
 
     # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77]
+    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95]
 
     for tool_id, title, description, icon in tools_data:
         try:
@@ -337,7 +537,7 @@ def seed_sync():
     tools_error = 0
 
     # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77]
+    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95]
 
     for tool_id, title, description, icon in tools_data:
         try:

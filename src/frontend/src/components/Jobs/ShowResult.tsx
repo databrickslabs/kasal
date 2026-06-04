@@ -27,24 +27,152 @@ import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import HtmlIcon from '@mui/icons-material/Html';
 // import CloudIcon from '@mui/icons-material/Cloud';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import DownloadForOfflineIcon from '@mui/icons-material/DownloadForOffline';
+import { useNavigate } from 'react-router-dom';
+import apiClient from '../../config/api/ApiConfig';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
+import rehypeSanitize from 'rehype-sanitize';
+import { sanitizeUrl } from '../Chat/components/MessageRenderer';
 import { ShowResultProps } from '../../types/common';
 import { ResultValue } from '../../types/result';
 import { generateRunPDF } from '../../utils/pdfGenerator';
 import { DatabricksService } from '../../api/DatabricksService';
-// import { Run } from '../../api/ExecutionHistoryService';
+import UCMVResultViewer, { isUCMVResult, UCMVResult } from './UCMVResultViewer';
+import ValidatorResultViewer, { isValidatorResult } from './ValidatorResultViewer';
+import { runService } from '../../api/ExecutionHistoryService';
 
 // eslint-disable-next-line react/prop-types
 const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
   const theme = useTheme();
+  const navigate = useNavigate();
   const [copied, setCopied] = useState(false);
   const [viewMode, setViewMode] = useState<'code' | 'html'>('code');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [databricksVolumeInfo, setDatabricksVolumeInfo] = useState<{ path: string; workspaceUrl?: string } | null>(null);
+  const [isCicdDownloading, setIsCicdDownloading] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Detect CI/CD export artifacts anywhere in the result tree.
+  // Tools embed cicd_download_url, cicd_type, cicd_name after creating a
+  // Genie Space or Lakeflow Dashboard.
+  const cicdArtifacts = useMemo(() => {
+    const found: Array<{ url: string; name: string; type: string; serializedSpace?: string }> = [];
+    const seen = new Set<string>();
+
+    const search = (obj: unknown) => {
+      if (!obj) return;
+      // The result may be stored as a top-level JSON string — parse it first
+      if (typeof obj === 'string' && obj.trimStart().startsWith('{')) {
+        try { search(JSON.parse(obj)); return; } catch { /* not JSON */ }
+        return;
+      }
+      if (typeof obj !== 'object') return;
+      if (Array.isArray(obj)) { obj.forEach(search); return; }
+      const o = obj as Record<string, unknown>;
+      if (typeof o.cicd_download_url === 'string' && !seen.has(o.cicd_download_url)) {
+        seen.add(o.cicd_download_url);
+        found.push({
+          url: o.cicd_download_url,
+          name: typeof o.cicd_name === 'string' ? o.cicd_name : 'bundle',
+          type: typeof o.cicd_type === 'string' ? o.cicd_type : 'bundle',
+          // cicd_serialized_space carries the full Genie space config from the tool.
+          // The Databricks GET endpoint does NOT return serialized_space, so we pass
+          // it here to get fully-populated YAML files.
+          serializedSpace: typeof o.cicd_serialized_space === 'string'
+            ? o.cicd_serialized_space
+            : undefined,
+        });
+        // Do NOT return — continue searching siblings like _cicd_all which
+        // aggregates artifacts from parallel flow crews (e.g. Genie Space when
+        // the last crew result is Dashboard Creator output).
+      }
+      // Tool outputs are often JSON strings — parse them too
+      Object.values(o).forEach(v => {
+        if (typeof v === 'string' && v.trimStart().startsWith('{')) {
+          try { search(JSON.parse(v)); } catch { /* not JSON */ }
+        } else {
+          search(v);
+        }
+      });
+    };
+
+    search(result);
+    return found;
+  }, [result]);
+
+  // Download a CI/CD YAML bundle ZIP from the backend.
+  const handleDownloadCicdBundle = useCallback(async (
+    url: string, name: string, type: string, serializedSpace?: string
+  ) => {
+    setIsCicdDownloading(true);
+    try {
+      // For Genie spaces: use POST so we can pass serialized_space in the body.
+      // The Databricks GET endpoint does not return the space config, so without
+      // serialized_space the YAML files would be empty.
+      const response = (type === 'genie_space' && serializedSpace)
+        ? await apiClient.post(url, { serialized_space: serializedSpace }, { responseType: 'blob' })
+        : await apiClient.get(url, { responseType: 'blob' });
+      const blob = new Blob([response.data as BlobPart], { type: 'application/zip' });
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      const safeName = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+      const suffix = type === 'genie_space' ? 'genie_space' : 'dashboard';
+      link.download = `${safeName}_${suffix}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(objectUrl);
+    } catch (err) {
+      console.error('[ShowResult] CI/CD bundle download failed:', err);
+    } finally {
+      setIsCicdDownloading(false);
+    }
+  }, []);
   // Track if the dialog has been opened at least once
   const hasOpenedRef = useRef(false);
+  // Track latest edited UCMV result for save
+  const editedUcmvResult = useRef<UCMVResult | null>(null);
+
+  // Save handler for UCMVResultViewer edits
+  const handleSaveUcmvResult = useCallback(async (updated: UCMVResult) => {
+    const jobId = run?.job_id;
+    if (!jobId) return;
+    editedUcmvResult.current = updated;
+    await runService.updateExecutionResult(
+      jobId,
+      updated as unknown as Record<string, unknown>
+    );
+  }, [run?.job_id]);
+
+  // Auto-save UCMV result when displayed (so UCMV Validator can find it in the flow).
+  // This mirrors what the Pipeline Config Generator does: persisting output so the
+  // next crew in the flow can pick it up from the DB without manual "Save Changes".
+  const autoSavedUcmvJobRef = useRef<string | null>(null);
+
+  const UCMVResultWithAutoSave: React.FC<{
+    result: Parameters<typeof UCMVResultViewer>[0]['result'];
+    jobId: string;
+  }> = useCallback(({ result, jobId }) => {
+    useEffect(() => {
+      if (!jobId || autoSavedUcmvJobRef.current === jobId) return;
+      autoSavedUcmvJobRef.current = jobId;
+      runService.updateExecutionResult(jobId, result as unknown as Record<string, unknown>)
+        .then(() => console.log('[ShowResult] Auto-saved UCMV result for validator'))
+        .catch(err => console.warn('[ShowResult] Auto-save UCMV failed:', err));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [jobId]);
+    return (
+      <UCMVResultViewer
+        result={result}
+        editable={!!jobId}
+        onSave={jobId ? handleSaveUcmvResult : undefined}
+      />
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handleSaveUcmvResult]);
 
   // Function to check for Databricks volume information from configuration
   const checkForDatabricksVolumeInfo = useCallback(async (resultData: Record<string, unknown>) => {
@@ -176,8 +304,30 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
   // Memoize the formatted result to prevent unnecessary re-processing
   const memoizedResult = useMemo(() => {
     if (!result) return {};
-    // Return the result directly if it's already an object
-    // Only clone if necessary for stability
+    // If result is a string (JSON-encoded), try to parse it
+    if (typeof result === 'string') {
+      try {
+        const trimmed = (result as string).trim();
+        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+          return JSON.parse(trimmed);
+        }
+      } catch { /* not valid JSON, return as-is */ }
+    }
+    // If result is an object with a single string value that's JSON, unwrap it
+    if (typeof result === 'object' && result !== null) {
+      const keys = Object.keys(result);
+      if (keys.length === 1) {
+        const val = (result as Record<string, unknown>)[keys[0]];
+        if (typeof val === 'string') {
+          try {
+            const trimmed = val.trim();
+            if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+              return JSON.parse(trimmed);
+            }
+          } catch { /* not JSON */ }
+        }
+      }
+    }
     return result;
   }, [result]);
 
@@ -545,15 +695,23 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
         </script>
       `;
 
-      // Insert initialization script at the very beginning of the document
-      // This ensures it runs before any library scripts
+      // SECURITY: Inject a Content-Security-Policy meta tag into the srcdoc HTML.
+      // connect-src 'none' blocks all outbound network requests from within the
+      // preview (prevents data exfiltration via fetch/XHR even when allow-scripts
+      // is present). img-src allows only data:/blob: URIs (base64 images) while
+      // blocking external image URLs (the primary markdown injection exfil vector).
+      const cspMeta = `<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval'; img-src data: blob:; connect-src 'none';">`;
+
+      // Insert CSP meta tag and initialization script at the very beginning of the
+      // document. This ensures both run before any library scripts.
+      const headInjection = cspMeta + initScript;
       if (processedHtml.includes('<head>')) {
-        processedHtml = processedHtml.replace('<head>', '<head>' + initScript);
+        processedHtml = processedHtml.replace('<head>', '<head>' + headInjection);
       } else if (processedHtml.includes('<html>')) {
-        processedHtml = processedHtml.replace('<html>', '<html><head>' + initScript + '</head>');
+        processedHtml = processedHtml.replace('<html>', '<html><head>' + headInjection + '</head>');
       } else {
-        // If no head or html tag, prepend the script
-        processedHtml = initScript + processedHtml;
+        // If no head or html tag, prepend both
+        processedHtml = headInjection + processedHtml;
       }
 
       // Use srcdoc for better security and compatibility
@@ -616,7 +774,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
               // Ignore focus errors in strict sandbox contexts
             }
           }}
-          sandbox="allow-scripts allow-forms allow-modals allow-popups allow-presentation allow-pointer-lock allow-downloads"
+          sandbox="allow-scripts allow-modals allow-presentation allow-pointer-lock"
           allow="accelerometer; camera; encrypted-media; fullscreen; gyroscope; magnetometer; microphone; midi; payment; usb; xr-spatial-tracking"
           style={{
             width: '100%',
@@ -646,6 +804,44 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
 
   const renderContent = (content: Record<string, ResultValue>) => {
     if (typeof content === 'object' && content !== null) {
+      // Try to parse string values that might be JSON-encoded results
+      let parsed = content;
+      if (typeof (content as unknown) === 'string') {
+        try {
+          const str = content as unknown as string;
+          if (str.trim().startsWith('{')) {
+            parsed = JSON.parse(str);
+          }
+        } catch { /* not JSON, continue */ }
+      }
+      // Also check if content has a single string value that's JSON
+      const contentEntries = Object.entries(content);
+      if (contentEntries.length === 1 && typeof contentEntries[0][1] === 'string') {
+        try {
+          const inner = JSON.parse(contentEntries[0][1] as string);
+          if (typeof inner === 'object' && inner !== null) {
+            if (isUCMVResult(inner)) {
+              return run?.job_id
+                ? <UCMVResultWithAutoSave result={inner as Parameters<typeof UCMVResultViewer>[0]['result']} jobId={run.job_id} />
+                : <UCMVResultViewer result={inner as Parameters<typeof UCMVResultViewer>[0]['result']} />;
+            }
+            if (isValidatorResult(inner)) {
+              return <ValidatorResultViewer result={inner as Parameters<typeof ValidatorResultViewer>[0]['result']} />;
+            }
+          }
+        } catch { /* not JSON */ }
+      }
+
+      // UCMV Builder result: structured metric-view display
+      if (isUCMVResult(parsed)) {
+        return <UCMVResultViewer result={parsed as Parameters<typeof UCMVResultViewer>[0]['result']} editable={!!run?.job_id} onSave={run?.job_id ? handleSaveUcmvResult : undefined} />;
+      }
+
+      // UCMV Quality Validator result: green/amber/red quality report
+      if (isValidatorResult(parsed)) {
+        return <ValidatorResultViewer result={parsed as Parameters<typeof ValidatorResultViewer>[0]['result']} />;
+      }
+
       // If there's only one key called 'Value', render its content directly
       const entries = Object.entries(content);
       if (entries.length === 1 && entries[0][0].toLowerCase() === 'value') {
@@ -753,31 +949,38 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
                 <ReactMarkdown
                   className="markdown-body"
                   remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[rehypeRaw, rehypeSanitize]}
+                  disallowedElements={['img', 'script', 'iframe']}
+                  urlTransform={sanitizeUrl}
                   components={{
-                    a: ({node, children, href, ...props}) => (
-                      <a
-                        href={href}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                          color: theme.palette.primary.main,
-                          textDecoration: 'none',
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.textDecoration = 'underline';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.textDecoration = 'none';
-                        }}
-                        {...props}
-                      >
-                        {children}
-                        <OpenInNewIcon sx={{ fontSize: 16 }} />
-                      </a>
-                    ),
+                    a: ({node, children, href, ...props}) => {
+                      const safeHref = sanitizeUrl(href);
+                      if (!safeHref) return <span>{children}</span>;
+                      return (
+                        <a
+                          href={safeHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            color: theme.palette.primary.main,
+                            textDecoration: 'none',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.textDecoration = 'underline';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.textDecoration = 'none';
+                          }}
+                          {...props}
+                        >
+                          {children}
+                          <OpenInNewIcon sx={{ fontSize: 16 }} />
+                        </a>
+                      );
+                    },
                   }}
                 >
                   {value}
@@ -828,6 +1031,9 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
           <ReactMarkdown
             className="markdown-body"
             remarkPlugins={[remarkGfm]}
+            rehypePlugins={[rehypeRaw, rehypeSanitize]}
+            disallowedElements={['img', 'script', 'iframe']}
+            urlTransform={sanitizeUrl}
           >
             {content}
           </ReactMarkdown>
@@ -980,31 +1186,38 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
             <ReactMarkdown
               className="markdown-body"
               remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeRaw, rehypeSanitize]}
+              disallowedElements={['img', 'script', 'iframe']}
+              urlTransform={sanitizeUrl}
               components={{
-                a: ({node, children, href, ...props}) => (
-                  <a
-                    href={href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      color: theme.palette.primary.main,
-                      textDecoration: 'none',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.textDecoration = 'underline';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.textDecoration = 'none';
-                    }}
-                    {...props}
-                  >
-                    {children}
-                    <OpenInNewIcon sx={{ fontSize: 16 }} />
-                  </a>
-                ),
+                a: ({node, children, href, ...props}) => {
+                  const safeHref = sanitizeUrl(href);
+                  if (!safeHref) return <span>{children}</span>;
+                  return (
+                    <a
+                      href={safeHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        color: theme.palette.primary.main,
+                        textDecoration: 'none',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.textDecoration = 'underline';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.textDecoration = 'none';
+                      }}
+                      {...props}
+                    >
+                      {children}
+                      <OpenInNewIcon sx={{ fontSize: 16 }} />
+                    </a>
+                  );
+                },
               }}
             >
               {value}
@@ -1144,6 +1357,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
         </Box>
       </DialogContent>
       <DialogActions sx={{ px: 3, py: 2, gap: 1 }}>
+        {/* Config Editor button removed — config editing is now exclusively via HITL flow */}
         {databricksVolumeInfo && (
           <Tooltip title="Open Databricks Volume Location">
             <Button
@@ -1208,6 +1422,35 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
             </Button>
           </Tooltip>
         )}
+        {cicdArtifacts.map((artifact, idx) => (
+          <Tooltip
+            key={idx}
+            title={`Download CI/CD YAML bundle — version-control and redeploy this ${artifact.type === 'genie_space' ? 'Genie Space' : 'Lakeflow Dashboard'} from YAML`}
+          >
+            <Button
+              onClick={() => handleDownloadCicdBundle(artifact.url, artifact.name, artifact.type, artifact.serializedSpace)}
+              disabled={isCicdDownloading}
+              variant="outlined"
+              startIcon={<DownloadForOfflineIcon />}
+              sx={{
+                borderRadius: '8px',
+                textTransform: 'none',
+                fontWeight: 500,
+                borderColor: '#7B1FA2',
+                color: '#7B1FA2',
+                '&:hover': {
+                  borderColor: '#6A1B9A',
+                  backgroundColor: 'rgba(123, 31, 162, 0.04)',
+                },
+                '&:disabled': {
+                  opacity: 0.6,
+                },
+              }}
+            >
+              {artifact.type === 'genie_space' ? 'Genie Space YAML' : 'Dashboard YAML'}
+            </Button>
+          </Tooltip>
+        ))}
         <Button
           onClick={onClose}
           variant="contained"

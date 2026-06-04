@@ -10,6 +10,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { Node, Edge } from 'reactflow';
 import { useCrewExecutionStore } from '../../store/crewExecution';
+import { useTabManagerStore } from '../../store/tabManager';
 
 // Icons
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -74,6 +75,15 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
   } = useCrewExecutionStore();
 
   const canRunCrew = React.useMemo(() => hasCrewContent(nodes), [nodes]);
+
+  // Get the active tab's info so we can overwrite instead of creating new
+  const { activeTabSavedCrewId, activeTabId } = useTabManagerStore(state => {
+    const activeTab = state.tabs.find(t => t.id === state.activeTabId);
+    return {
+      activeTabSavedCrewId: activeTab?.savedCrewId,
+      activeTabId: state.activeTabId,
+    };
+  });
 
   // Check if all edges are configured for flow execution
   const canRunFlow = React.useMemo(() => {
@@ -337,8 +347,15 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               }}
               data-tour="save-button"
               onClick={() => {
-                const event = new CustomEvent('openSaveCrewDialog');
-                window.dispatchEvent(event);
+                if (activeTabSavedCrewId) {
+                  // Overwrite the existing crew
+                  window.dispatchEvent(new CustomEvent('updateExistingCrew', {
+                    detail: { crewId: activeTabSavedCrewId, tabId: activeTabId }
+                  }));
+                } else {
+                  // No existing crew — open save-as dialog
+                  window.dispatchEvent(new CustomEvent('openSaveCrewDialog'));
+                }
               }}
             >
               <_SaveIcon sx={{ fontSize: 20 }} />

@@ -317,6 +317,7 @@ class DispatcherService:
         model: str,
         temperature: float = 0.3,
         max_tokens: int = 4000,
+        extra_headers: Optional[dict] = None,
     ) -> str:
         """Call LLMManager.completion with retry, timeout, and exponential backoff.
 
@@ -325,6 +326,7 @@ class DispatcherService:
             model: LLM model identifier
             temperature: Sampling temperature
             max_tokens: Maximum tokens in response
+            extra_headers: Optional extra HTTP headers (e.g. User-Agent for telemetry)
 
         Returns:
             Content string from the LLM response
@@ -336,13 +338,16 @@ class DispatcherService:
 
         for attempt in range(self.LLM_MAX_RETRIES):
             try:
+                completion_kwargs = dict(
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                if extra_headers:
+                    completion_kwargs["extra_headers"] = extra_headers
                 content = await asyncio.wait_for(
-                    LLMManager.completion(
-                        messages=messages,
-                        model=model,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                    ),
+                    LLMManager.completion(**completion_kwargs),
                     timeout=self.LLM_REQUEST_TIMEOUT,
                 )
                 return content
@@ -935,6 +940,9 @@ Please analyze this message and provide your intent classification."""
             return cached
 
         try:
+            from src.utils.telemetry import get_user_agent_header, KasalProduct
+            intent_extra_headers = get_user_agent_header(KasalProduct.INTENT_DETECTION)
+
             # Acquire concurrency semaphore to limit parallel LLM calls
             async with self._get_semaphore():
                 # Generate completion with optional MLflow span for tracing
@@ -951,7 +959,7 @@ Please analyze this message and provide your intent classification."""
                                 }
                             )
                         content = await self._call_llm_with_retry(
-                            messages=messages, model=model
+                            messages=messages, model=model, extra_headers=intent_extra_headers
                         )
                         if hasattr(intent_span, "set_outputs"):
                             intent_span.set_outputs(
@@ -959,7 +967,7 @@ Please analyze this message and provide your intent classification."""
                             )
                 else:
                     content = await self._call_llm_with_retry(
-                        messages=messages, model=model
+                        messages=messages, model=model, extra_headers=intent_extra_headers
                     )
 
             # Record success for circuit breaker
@@ -1118,9 +1126,11 @@ Please analyze this message and provide your intent classification."""
             )
 
             # Create dispatcher response
+            # Clamp confidence to [0.0, 1.0] range (LLM sometimes returns >1.0)
+            confidence = min(max(float(intent_result["confidence"]), 0.0), 1.0)
             dispatcher_response = DispatcherResponse(
                 intent=IntentType(intent_result["intent"]),
-                confidence=max(0.0, min(1.0, float(intent_result["confidence"]))),
+                confidence=confidence,
                 extracted_info=intent_result["extracted_info"],
                 suggested_prompt=intent_result["suggested_prompt"],
                 source=intent_result.get("source"),

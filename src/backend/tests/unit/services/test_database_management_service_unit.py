@@ -459,6 +459,9 @@ class TestExportToVolume:
             "src.services.database_management_service.os.path.exists", return_value=True
         ), patch(
             "src.services.database_management_service.os.path.getsize", return_value=1024
+        ), patch(
+            "src.utils.databricks_auth.get_auth_context",
+            side_effect=Exception("auth unavailable"),
         ):
             mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
             mock_repository.create_sqlite_backup.return_value = {

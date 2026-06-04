@@ -4,9 +4,9 @@ Repository for PowerBI Semantic Model Cache operations.
 Handles database operations for semantic model metadata caching.
 """
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional, Dict, Any
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.powerbi_semantic_model_cache import PowerBISemanticModelCache
@@ -29,31 +29,50 @@ class PowerBISemanticModelCacheRepository:
         group_id: str,
         dataset_id: str,
         workspace_id: str,
-        report_id: Optional[str] = None
+        report_id: Optional[str] = None,
+        any_report_id: bool = False,
+        cache_ttl_days: int = 1,
     ) -> Optional[PowerBISemanticModelCache]:
         """
-        Get cached metadata for today if it exists.
+        Get cached metadata if a valid entry exists within the TTL window.
 
         Args:
             group_id: Multi-tenant group ID
             dataset_id: Power BI dataset/semantic model ID
             workspace_id: Power BI workspace ID
             report_id: Optional report ID (if filters are report-specific)
+            any_report_id: If True, match any report_id (ignore report_id filter)
+            cache_ttl_days: Accept entries up to this many days old (default 1 = today only)
 
         Returns:
-            Cache object if found and valid for today, None otherwise
+            Most recent cache object within TTL, None otherwise
         """
-        today = date.today()
+        cutoff = date.today() - timedelta(days=cache_ttl_days - 1)
 
-        # Build query based on whether report_id is provided
-        if report_id:
+        if any_report_id:
+            # Match any report_id except 'reduced' — used by tools that need
+            # the full model cache (e.g., Metadata Reducer). The 'reduced'
+            # report_id is a synthetic entry created by the Reducer itself.
+            query = select(PowerBISemanticModelCache).where(
+                and_(
+                    PowerBISemanticModelCache.group_id == group_id,
+                    PowerBISemanticModelCache.dataset_id == dataset_id,
+                    PowerBISemanticModelCache.workspace_id == workspace_id,
+                    PowerBISemanticModelCache.cached_date >= cutoff,
+                    or_(
+                        PowerBISemanticModelCache.report_id.is_(None),
+                        PowerBISemanticModelCache.report_id != "reduced",
+                    ),
+                )
+            )
+        elif report_id:
             query = select(PowerBISemanticModelCache).where(
                 and_(
                     PowerBISemanticModelCache.group_id == group_id,
                     PowerBISemanticModelCache.dataset_id == dataset_id,
                     PowerBISemanticModelCache.workspace_id == workspace_id,
                     PowerBISemanticModelCache.report_id == report_id,
-                    PowerBISemanticModelCache.cached_date == today
+                    PowerBISemanticModelCache.cached_date >= cutoff,
                 )
             )
         else:
@@ -63,12 +82,15 @@ class PowerBISemanticModelCacheRepository:
                     PowerBISemanticModelCache.dataset_id == dataset_id,
                     PowerBISemanticModelCache.workspace_id == workspace_id,
                     PowerBISemanticModelCache.report_id.is_(None),
-                    PowerBISemanticModelCache.cached_date == today
+                    PowerBISemanticModelCache.cached_date >= cutoff,
                 )
             )
 
-        result = await self.session.execute(query)
-        return result.scalar_one_or_none()
+        # Return the most recent entry within the TTL window
+        result = await self.session.execute(
+            query.order_by(PowerBISemanticModelCache.cached_date.desc())
+        )
+        return result.scalars().first()
 
     async def create_cache(
         self,

@@ -175,6 +175,9 @@ service_layer
 # Frontend build output (built on Databricks Apps during deployment)
 src/frontend_static/
 
+# UC Metric View pipeline output (generated, not tracked)
+examples/uc_metric_view_migration/output/
+
 # MLflow
 mlruns/
 .mlruns/

@@ -1,0 +1,625 @@
+{
+  "id": "358669c8-73cc-4ba9-b451-f100afaca86f",
+  "name": "UCMV + Validation Flow",
+  "crew_id": "fc63b178-13ff-4350-9be4-1f8471c20b99",
+  "nodes": [
+    {
+      "id": "crew-b6d1647a-e2ba-4474-a530-4cc88dd7eae8-1779203673028",
+      "type": "crewNode",
+      "position": {
+        "x": 540,
+        "y": 150
+      },
+      "data": {
+        "label": "UCMV Quality Validator",
+        "crewName": "UCMV Quality Validator",
+        "type": null,
+        "decorator": null,
+        "listenTo": null,
+        "routerCondition": null,
+        "stateType": null,
+        "stateDefinition": null,
+        "listener": null,
+        "allTasks": [
+          {
+            "id": "ucmv-validator-task-001",
+            "name": "Validate UC Metric Views",
+            "description": "Validate the generated UC Metric View YAML definitions against the original DAX expressions.\n\nYou receive the UCMV Generator output containing YAML definitions for all metric views, and the measures_json containing original DAX expressions with table allocations.\n\nCall the Metric View Validator tool with:\n- yaml_content: the YAML dict from the previous crew's output (JSON dict of table_key \u2192 YAML string)\n- measures_json: the measures JSON used by the UCMV Generator\n\nReturn the full validation report with per-table and per-measure quality status."
+          }
+        ],
+        "selectedTasks": [],
+        "order": 3,
+        "crewId": "b6d1647a-e2ba-4474-a530-4cc88dd7eae8",
+        "flowConfig": {
+          "id": "ec79c542-c8ff-43a6-a187-4c082647e98c",
+          "name": "TEST flow app",
+          "type": "default",
+          "listeners": [
+            {
+              "id": "listener-crew-b6d1647a-e2ba-4474-a530-4cc88dd7eae8-1779203673028",
+              "name": "UCMV Quality Validator",
+              "crewId": "b6d1647a-e2ba-4474-a530-4cc88dd7eae8",
+              "crewName": "UCMV Quality Validator",
+              "listenToTaskIds": [
+                "90a62060-d230-4b9c-88b2-1661b8ecc73d"
+              ],
+              "listenToTaskNames": [],
+              "tasks": [
+                {
+                  "id": "ucmv-validator-task-001",
+                  "name": "Validate UC Metric Views",
+                  "description": "Validate the generated UC Metric View YAML definitions against the original DAX expressions.\n\nYou receive the UCMV Generator output containing YAML definitions for all metric views, and the measures_json containing original DAX expressions with table allocations.\n\nCall the Metric View Validator tool with:\n- yaml_content: the YAML dict from the previous crew's output (JSON dict of table_key \u2192 YAML string)\n- measures_json: the measures JSON used by the UCMV Generator\n\nReturn the full validation report with per-table and per-measure quality status.",
+                  "expected_output": "",
+                  "tools": [],
+                  "context": [],
+                  "markdown": false
+                }
+              ],
+              "state": {
+                "stateType": "unstructured",
+                "stateDefinition": "",
+                "stateData": {}
+              },
+              "conditionType": "NONE"
+            },
+            {
+              "id": "listener-crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0-1779203671845",
+              "name": "UC Metric View Generator \u2014 JSON Mode (SC Reporting)",
+              "crewId": "51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0",
+              "crewName": "UC Metric View Generator \u2014 JSON Mode (SC Reporting)",
+              "listenToTaskIds": [
+                "986f4cec-bd03-466e-8003-b4d4fe3c911c"
+              ],
+              "listenToTaskNames": [],
+              "tasks": [
+                {
+                  "id": "90a62060-d230-4b9c-88b2-1661b8ecc73d",
+                  "name": "Generate UC Metric Views",
+                  "description": "Generate UC Metric View YAML definitions and deploy SQL for all fact tables.\n\nYou have the following data available in execution inputs:\n- measures_json: DAX measures with table allocations (from Measure Conversion Pipeline)\n- mquery_json: MQuery table transpilations (from MQuery Conversion Pipeline)\n- relationships_json: PBI relationships for join detection (from Relationships Tool)\n- scan_data_json: PBI scan data for inline SQL enrichment\n- config_json: Customer-specific pipeline config (join maps, filter sets, SWITCH decompositions)\n\nCall the UC Metric View Generator tool with ALL of these inputs.\nSet catalog='david_test_metrics' and schema_name='test_schema'.\nSet unflatten_tables=true.\n\nReturn the full output including number of metric views generated and per-table statistics.",
+                  "expected_output": "",
+                  "tools": [],
+                  "context": [],
+                  "markdown": false
+                }
+              ],
+              "state": {
+                "stateType": "unstructured",
+                "stateDefinition": "",
+                "stateData": {}
+              },
+              "conditionType": "NONE"
+            }
+          ],
+          "actions": [
+            {
+              "id": "action-crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0-1779203671845-crew-b6d1647a-e2ba-4474-a530-4cc88dd7eae8-1779203673028-ucmv-validator-task-001",
+              "crewId": "b6d1647a-e2ba-4474-a530-4cc88dd7eae8",
+              "crewName": "UCMV Quality Validator",
+              "taskId": "ucmv-validator-task-001",
+              "taskName": "Validate UC Metric Views"
+            },
+            {
+              "id": "action-crew-fc63b178-13ff-4350-9be4-1f8471c20b99-1779203670735-crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0-1779203671845-90a62060-d230-4b9c-88b2-1661b8ecc73d",
+              "crewId": "51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0",
+              "crewName": "UC Metric View Generator \u2014 JSON Mode (SC Reporting)",
+              "taskId": "90a62060-d230-4b9c-88b2-1661b8ecc73d",
+              "taskName": "Generate UC Metric Views"
+            }
+          ],
+          "startingPoints": [
+            {
+              "crewId": "fc63b178-13ff-4350-9be4-1f8471c20b99",
+              "crewName": "UCMV \u2014 Generate Pipeline Config (API-Direct)",
+              "taskId": "986f4cec-bd03-466e-8003-b4d4fe3c911c",
+              "taskName": "Generate Pipeline Config from PBI APIs",
+              "isStartPoint": true
+            }
+          ]
+        },
+        "id": "crew-b6d1647a-e2ba-4474-a530-4cc88dd7eae8"
+      },
+      "width": null,
+      "height": null,
+      "selected": null,
+      "positionAbsolute": null,
+      "dragging": null,
+      "style": null,
+      "className": null,
+      "measured": null
+    },
+    {
+      "id": "crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0-1779203671845",
+      "type": "crewNode",
+      "position": {
+        "x": 320,
+        "y": 150
+      },
+      "data": {
+        "label": "UC Metric View Generator \u2014 JSON Mode (SC Reporting)",
+        "crewName": "UC Metric View Generator \u2014 JSON Mode (SC Reporting)",
+        "type": null,
+        "decorator": null,
+        "listenTo": null,
+        "routerCondition": null,
+        "stateType": null,
+        "stateDefinition": null,
+        "listener": null,
+        "allTasks": [
+          {
+            "id": "90a62060-d230-4b9c-88b2-1661b8ecc73d",
+            "name": "Generate UC Metric Views",
+            "description": "Generate UC Metric View YAML definitions and deploy SQL for all fact tables.\n\nYou have the following data available in execution inputs:\n- measures_json: DAX measures with table allocations (from Measure Conversion Pipeline)\n- mquery_json: MQuery table transpilations (from MQuery Conversion Pipeline)\n- relationships_json: PBI relationships for join detection (from Relationships Tool)\n- scan_data_json: PBI scan data for inline SQL enrichment\n- config_json: Customer-specific pipeline config (join maps, filter sets, SWITCH decompositions)\n\nCall the UC Metric View Generator tool with ALL of these inputs.\nSet catalog='david_test_metrics' and schema_name='test_schema'.\nSet unflatten_tables=true.\n\nReturn the full output including number of metric views generated and per-table statistics."
+          }
+        ],
+        "selectedTasks": [],
+        "order": 2,
+        "crewId": "51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0",
+        "flowConfig": {
+          "id": "ec79c542-c8ff-43a6-a187-4c082647e98c",
+          "name": "TEST flow app",
+          "type": "default",
+          "listeners": [
+            {
+              "id": "listener-crew-b6d1647a-e2ba-4474-a530-4cc88dd7eae8-1779203673028",
+              "name": "UCMV Quality Validator",
+              "crewId": "b6d1647a-e2ba-4474-a530-4cc88dd7eae8",
+              "crewName": "UCMV Quality Validator",
+              "listenToTaskIds": [
+                "90a62060-d230-4b9c-88b2-1661b8ecc73d"
+              ],
+              "listenToTaskNames": [],
+              "tasks": [
+                {
+                  "id": "ucmv-validator-task-001",
+                  "name": "Validate UC Metric Views",
+                  "description": "Validate the generated UC Metric View YAML definitions against the original DAX expressions.\n\nYou receive the UCMV Generator output containing YAML definitions for all metric views, and the measures_json containing original DAX expressions with table allocations.\n\nCall the Metric View Validator tool with:\n- yaml_content: the YAML dict from the previous crew's output (JSON dict of table_key \u2192 YAML string)\n- measures_json: the measures JSON used by the UCMV Generator\n\nReturn the full validation report with per-table and per-measure quality status.",
+                  "expected_output": "",
+                  "tools": [],
+                  "context": [],
+                  "markdown": false
+                }
+              ],
+              "state": {
+                "stateType": "unstructured",
+                "stateDefinition": "",
+                "stateData": {}
+              },
+              "conditionType": "NONE"
+            },
+            {
+              "id": "listener-crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0-1779203671845",
+              "name": "UC Metric View Generator \u2014 JSON Mode (SC Reporting)",
+              "crewId": "51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0",
+              "crewName": "UC Metric View Generator \u2014 JSON Mode (SC Reporting)",
+              "listenToTaskIds": [
+                "986f4cec-bd03-466e-8003-b4d4fe3c911c"
+              ],
+              "listenToTaskNames": [],
+              "tasks": [
+                {
+                  "id": "90a62060-d230-4b9c-88b2-1661b8ecc73d",
+                  "name": "Generate UC Metric Views",
+                  "description": "Generate UC Metric View YAML definitions and deploy SQL for all fact tables.\n\nYou have the following data available in execution inputs:\n- measures_json: DAX measures with table allocations (from Measure Conversion Pipeline)\n- mquery_json: MQuery table transpilations (from MQuery Conversion Pipeline)\n- relationships_json: PBI relationships for join detection (from Relationships Tool)\n- scan_data_json: PBI scan data for inline SQL enrichment\n- config_json: Customer-specific pipeline config (join maps, filter sets, SWITCH decompositions)\n\nCall the UC Metric View Generator tool with ALL of these inputs.\nSet catalog='david_test_metrics' and schema_name='test_schema'.\nSet unflatten_tables=true.\n\nReturn the full output including number of metric views generated and per-table statistics.",
+                  "expected_output": "",
+                  "tools": [],
+                  "context": [],
+                  "markdown": false
+                }
+              ],
+              "state": {
+                "stateType": "unstructured",
+                "stateDefinition": "",
+                "stateData": {}
+              },
+              "conditionType": "NONE"
+            }
+          ],
+          "actions": [
+            {
+              "id": "action-crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0-1779203671845-crew-b6d1647a-e2ba-4474-a530-4cc88dd7eae8-1779203673028-ucmv-validator-task-001",
+              "crewId": "b6d1647a-e2ba-4474-a530-4cc88dd7eae8",
+              "crewName": "UCMV Quality Validator",
+              "taskId": "ucmv-validator-task-001",
+              "taskName": "Validate UC Metric Views"
+            },
+            {
+              "id": "action-crew-fc63b178-13ff-4350-9be4-1f8471c20b99-1779203670735-crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0-1779203671845-90a62060-d230-4b9c-88b2-1661b8ecc73d",
+              "crewId": "51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0",
+              "crewName": "UC Metric View Generator \u2014 JSON Mode (SC Reporting)",
+              "taskId": "90a62060-d230-4b9c-88b2-1661b8ecc73d",
+              "taskName": "Generate UC Metric Views"
+            }
+          ],
+          "startingPoints": [
+            {
+              "crewId": "fc63b178-13ff-4350-9be4-1f8471c20b99",
+              "crewName": "UCMV \u2014 Generate Pipeline Config (API-Direct)",
+              "taskId": "986f4cec-bd03-466e-8003-b4d4fe3c911c",
+              "taskName": "Generate Pipeline Config from PBI APIs",
+              "isStartPoint": true
+            }
+          ]
+        },
+        "id": "crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0"
+      },
+      "width": null,
+      "height": null,
+      "selected": null,
+      "positionAbsolute": null,
+      "dragging": null,
+      "style": null,
+      "className": null,
+      "measured": null
+    },
+    {
+      "id": "crew-fc63b178-13ff-4350-9be4-1f8471c20b99-1779203670735",
+      "type": "crewNode",
+      "position": {
+        "x": 100,
+        "y": 150
+      },
+      "data": {
+        "label": "UCMV \u2014 Generate Pipeline Config (API-Direct)",
+        "crewName": "UCMV \u2014 Generate Pipeline Config (API-Direct)",
+        "type": null,
+        "decorator": null,
+        "listenTo": null,
+        "routerCondition": null,
+        "stateType": null,
+        "stateDefinition": null,
+        "listener": null,
+        "allTasks": [
+          {
+            "id": "986f4cec-bd03-466e-8003-b4d4fe3c911c",
+            "name": "Generate Pipeline Config from PBI APIs",
+            "description": "Call the Pipeline Config Generator tool with NO arguments \u2014 credentials and PBI IDs are pre-configured in tool_configs. The tool calls 4 PBI APIs directly and returns a JSON with all 26 pipeline_config keys. Return the full output without modification."
+          }
+        ],
+        "selectedTasks": [],
+        "order": 1,
+        "crewId": "fc63b178-13ff-4350-9be4-1f8471c20b99",
+        "flowConfig": {
+          "id": "ec79c542-c8ff-43a6-a187-4c082647e98c",
+          "name": "TEST flow app",
+          "type": "default",
+          "listeners": [
+            {
+              "id": "listener-crew-b6d1647a-e2ba-4474-a530-4cc88dd7eae8-1779203673028",
+              "name": "UCMV Quality Validator",
+              "crewId": "b6d1647a-e2ba-4474-a530-4cc88dd7eae8",
+              "crewName": "UCMV Quality Validator",
+              "listenToTaskIds": [
+                "90a62060-d230-4b9c-88b2-1661b8ecc73d"
+              ],
+              "listenToTaskNames": [],
+              "tasks": [
+                {
+                  "id": "ucmv-validator-task-001",
+                  "name": "Validate UC Metric Views",
+                  "description": "Validate the generated UC Metric View YAML definitions against the original DAX expressions.\n\nYou receive the UCMV Generator output containing YAML definitions for all metric views, and the measures_json containing original DAX expressions with table allocations.\n\nCall the Metric View Validator tool with:\n- yaml_content: the YAML dict from the previous crew's output (JSON dict of table_key \u2192 YAML string)\n- measures_json: the measures JSON used by the UCMV Generator\n\nReturn the full validation report with per-table and per-measure quality status.",
+                  "expected_output": "",
+                  "tools": [],
+                  "context": [],
+                  "markdown": false
+                }
+              ],
+              "state": {
+                "stateType": "unstructured",
+                "stateDefinition": "",
+                "stateData": {}
+              },
+              "conditionType": "NONE"
+            },
+            {
+              "id": "listener-crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0-1779203671845",
+              "name": "UC Metric View Generator \u2014 JSON Mode (SC Reporting)",
+              "crewId": "51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0",
+              "crewName": "UC Metric View Generator \u2014 JSON Mode (SC Reporting)",
+              "listenToTaskIds": [
+                "986f4cec-bd03-466e-8003-b4d4fe3c911c"
+              ],
+              "listenToTaskNames": [],
+              "tasks": [
+                {
+                  "id": "90a62060-d230-4b9c-88b2-1661b8ecc73d",
+                  "name": "Generate UC Metric Views",
+                  "description": "Generate UC Metric View YAML definitions and deploy SQL for all fact tables.\n\nYou have the following data available in execution inputs:\n- measures_json: DAX measures with table allocations (from Measure Conversion Pipeline)\n- mquery_json: MQuery table transpilations (from MQuery Conversion Pipeline)\n- relationships_json: PBI relationships for join detection (from Relationships Tool)\n- scan_data_json: PBI scan data for inline SQL enrichment\n- config_json: Customer-specific pipeline config (join maps, filter sets, SWITCH decompositions)\n\nCall the UC Metric View Generator tool with ALL of these inputs.\nSet catalog='david_test_metrics' and schema_name='test_schema'.\nSet unflatten_tables=true.\n\nReturn the full output including number of metric views generated and per-table statistics.",
+                  "expected_output": "",
+                  "tools": [],
+                  "context": [],
+                  "markdown": false
+                }
+              ],
+              "state": {
+                "stateType": "unstructured",
+                "stateDefinition": "",
+                "stateData": {}
+              },
+              "conditionType": "NONE"
+            }
+          ],
+          "actions": [
+            {
+              "id": "action-crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0-1779203671845-crew-b6d1647a-e2ba-4474-a530-4cc88dd7eae8-1779203673028-ucmv-validator-task-001",
+              "crewId": "b6d1647a-e2ba-4474-a530-4cc88dd7eae8",
+              "crewName": "UCMV Quality Validator",
+              "taskId": "ucmv-validator-task-001",
+              "taskName": "Validate UC Metric Views"
+            },
+            {
+              "id": "action-crew-fc63b178-13ff-4350-9be4-1f8471c20b99-1779203670735-crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0-1779203671845-90a62060-d230-4b9c-88b2-1661b8ecc73d",
+              "crewId": "51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0",
+              "crewName": "UC Metric View Generator \u2014 JSON Mode (SC Reporting)",
+              "taskId": "90a62060-d230-4b9c-88b2-1661b8ecc73d",
+              "taskName": "Generate UC Metric Views"
+            }
+          ],
+          "startingPoints": [
+            {
+              "crewId": "fc63b178-13ff-4350-9be4-1f8471c20b99",
+              "crewName": "UCMV \u2014 Generate Pipeline Config (API-Direct)",
+              "taskId": "986f4cec-bd03-466e-8003-b4d4fe3c911c",
+              "taskName": "Generate Pipeline Config from PBI APIs",
+              "isStartPoint": true
+            }
+          ]
+        },
+        "id": "crew-fc63b178-13ff-4350-9be4-1f8471c20b99"
+      },
+      "width": null,
+      "height": null,
+      "selected": null,
+      "positionAbsolute": null,
+      "dragging": null,
+      "style": null,
+      "className": null,
+      "measured": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0-1779203671845",
+      "target": "crew-b6d1647a-e2ba-4474-a530-4cc88dd7eae8-1779203673028",
+      "id": "crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0-1779203671845-crew-b6d1647a-e2ba-4474-a530-4cc88dd7eae8-1779203673028",
+      "type": "crewEdge",
+      "sourceHandle": "right",
+      "targetHandle": "left",
+      "data": {
+        "listenToTaskIds": [
+          "90a62060-d230-4b9c-88b2-1661b8ecc73d"
+        ],
+        "targetTaskIds": [
+          "ucmv-validator-task-001"
+        ],
+        "logicType": "NONE",
+        "description": "",
+        "checkpoint": true,
+        "hitl": {
+          "enabled": true,
+          "message": "Please review and approve to continue",
+          "timeout_seconds": 86400,
+          "timeout_action": "auto_reject",
+          "require_comment": false
+        }
+      },
+      "style": {
+        "stroke": "#ff9800",
+        "strokeWidth": 2
+      },
+      "animated": true,
+      "label": null,
+      "labelStyle": null,
+      "labelBgStyle": null,
+      "className": null
+    },
+    {
+      "source": "crew-fc63b178-13ff-4350-9be4-1f8471c20b99-1779203670735",
+      "target": "crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0-1779203671845",
+      "id": "crew-fc63b178-13ff-4350-9be4-1f8471c20b99-1779203670735-crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0-1779203671845",
+      "type": "crewEdge",
+      "sourceHandle": "right",
+      "targetHandle": "left",
+      "data": {
+        "listenToTaskIds": [
+          "986f4cec-bd03-466e-8003-b4d4fe3c911c"
+        ],
+        "targetTaskIds": [
+          "90a62060-d230-4b9c-88b2-1661b8ecc73d"
+        ],
+        "logicType": "NONE",
+        "description": "",
+        "checkpoint": true,
+        "hitl": {
+          "enabled": true,
+          "message": "Please review and approve to continue",
+          "timeout_seconds": 86400,
+          "timeout_action": "auto_reject",
+          "require_comment": false
+        }
+      },
+      "style": {
+        "stroke": "#ff9800",
+        "strokeWidth": 2
+      },
+      "animated": true,
+      "label": null,
+      "labelStyle": null,
+      "labelBgStyle": null,
+      "className": null
+    }
+  ],
+  "flow_config": {
+    "id": "ec79c542-c8ff-43a6-a187-4c082647e98c",
+    "name": "TEST flow app",
+    "type": "default",
+    "listeners": [
+      {
+        "id": "listener-crew-b6d1647a-e2ba-4474-a530-4cc88dd7eae8-1779203673028",
+        "name": "UCMV Quality Validator",
+        "crewId": "b6d1647a-e2ba-4474-a530-4cc88dd7eae8",
+        "crewName": "UCMV Quality Validator",
+        "listenToTaskIds": [
+          "90a62060-d230-4b9c-88b2-1661b8ecc73d"
+        ],
+        "listenToTaskNames": [],
+        "tasks": [
+          {
+            "id": "ucmv-validator-task-001",
+            "name": "Validate UC Metric Views",
+            "description": "Validate the generated UC Metric View YAML definitions against the original DAX expressions.\n\nYou receive the UCMV Generator output containing YAML definitions for all metric views, and the measures_json containing original DAX expressions with table allocations.\n\nCall the Metric View Validator tool with:\n- yaml_content: the YAML dict from the previous crew's output (JSON dict of table_key \u2192 YAML string)\n- measures_json: the measures JSON used by the UCMV Generator\n\nReturn the full validation report with per-table and per-measure quality status.",
+            "expected_output": "",
+            "tools": [],
+            "context": [],
+            "markdown": false
+          }
+        ],
+        "state": {
+          "stateType": "unstructured",
+          "stateDefinition": "",
+          "stateData": {}
+        },
+        "conditionType": "NONE"
+      },
+      {
+        "id": "listener-crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0-1779203671845",
+        "name": "UC Metric View Generator \u2014 JSON Mode (SC Reporting)",
+        "crewId": "51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0",
+        "crewName": "UC Metric View Generator \u2014 JSON Mode (SC Reporting)",
+        "listenToTaskIds": [
+          "986f4cec-bd03-466e-8003-b4d4fe3c911c"
+        ],
+        "listenToTaskNames": [],
+        "tasks": [
+          {
+            "id": "90a62060-d230-4b9c-88b2-1661b8ecc73d",
+            "name": "Generate UC Metric Views",
+            "description": "Generate UC Metric View YAML definitions and deploy SQL for all fact tables.\n\nYou have the following data available in execution inputs:\n- measures_json: DAX measures with table allocations (from Measure Conversion Pipeline)\n- mquery_json: MQuery table transpilations (from MQuery Conversion Pipeline)\n- relationships_json: PBI relationships for join detection (from Relationships Tool)\n- scan_data_json: PBI scan data for inline SQL enrichment\n- config_json: Customer-specific pipeline config (join maps, filter sets, SWITCH decompositions)\n\nCall the UC Metric View Generator tool with ALL of these inputs.\nSet catalog='david_test_metrics' and schema_name='test_schema'.\nSet unflatten_tables=true.\n\nReturn the full output including number of metric views generated and per-table statistics.",
+            "expected_output": "",
+            "tools": [],
+            "context": [],
+            "markdown": false
+          }
+        ],
+        "state": {
+          "stateType": "unstructured",
+          "stateDefinition": "",
+          "stateData": {}
+        },
+        "conditionType": "NONE"
+      }
+    ],
+    "actions": [
+      {
+        "id": "action-crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0-1779203671845-crew-b6d1647a-e2ba-4474-a530-4cc88dd7eae8-1779203673028-ucmv-validator-task-001",
+        "crewId": "b6d1647a-e2ba-4474-a530-4cc88dd7eae8",
+        "crewName": "UCMV Quality Validator",
+        "taskId": "ucmv-validator-task-001",
+        "taskName": "Validate UC Metric Views"
+      },
+      {
+        "id": "action-crew-fc63b178-13ff-4350-9be4-1f8471c20b99-1779203670735-crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0-1779203671845-90a62060-d230-4b9c-88b2-1661b8ecc73d",
+        "crewId": "51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0",
+        "crewName": "UC Metric View Generator \u2014 JSON Mode (SC Reporting)",
+        "taskId": "90a62060-d230-4b9c-88b2-1661b8ecc73d",
+        "taskName": "Generate UC Metric Views"
+      }
+    ],
+    "startingPoints": [
+      {
+        "crewId": "fc63b178-13ff-4350-9be4-1f8471c20b99",
+        "crewName": "UCMV \u2014 Generate Pipeline Config (API-Direct)",
+        "taskId": "986f4cec-bd03-466e-8003-b4d4fe3c911c",
+        "taskName": "Generate Pipeline Config from PBI APIs",
+        "isStartPoint": true
+      }
+    ]
+  },
+  "created_at": "2026-05-19T15:14:56.595908",
+  "updated_at": "2026-05-19T15:14:56.595913",
+  "flowConfig": {
+    "id": "ec79c542-c8ff-43a6-a187-4c082647e98c",
+    "name": "TEST flow app",
+    "type": "default",
+    "listeners": [
+      {
+        "id": "listener-crew-b6d1647a-e2ba-4474-a530-4cc88dd7eae8-1779203673028",
+        "name": "UCMV Quality Validator",
+        "crewId": "b6d1647a-e2ba-4474-a530-4cc88dd7eae8",
+        "crewName": "UCMV Quality Validator",
+        "listenToTaskIds": [
+          "90a62060-d230-4b9c-88b2-1661b8ecc73d"
+        ],
+        "listenToTaskNames": [],
+        "tasks": [
+          {
+            "id": "ucmv-validator-task-001",
+            "name": "Validate UC Metric Views",
+            "description": "Validate the generated UC Metric View YAML definitions against the original DAX expressions.\n\nYou receive the UCMV Generator output containing YAML definitions for all metric views, and the measures_json containing original DAX expressions with table allocations.\n\nCall the Metric View Validator tool with:\n- yaml_content: the YAML dict from the previous crew's output (JSON dict of table_key \u2192 YAML string)\n- measures_json: the measures JSON used by the UCMV Generator\n\nReturn the full validation report with per-table and per-measure quality status.",
+            "expected_output": "",
+            "tools": [],
+            "context": [],
+            "markdown": false
+          }
+        ],
+        "state": {
+          "stateType": "unstructured",
+          "stateDefinition": "",
+          "stateData": {}
+        },
+        "conditionType": "NONE"
+      },
+      {
+        "id": "listener-crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0-1779203671845",
+        "name": "UC Metric View Generator \u2014 JSON Mode (SC Reporting)",
+        "crewId": "51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0",
+        "crewName": "UC Metric View Generator \u2014 JSON Mode (SC Reporting)",
+        "listenToTaskIds": [
+          "986f4cec-bd03-466e-8003-b4d4fe3c911c"
+        ],
+        "listenToTaskNames": [],
+        "tasks": [
+          {
+            "id": "90a62060-d230-4b9c-88b2-1661b8ecc73d",
+            "name": "Generate UC Metric Views",
+            "description": "Generate UC Metric View YAML definitions and deploy SQL for all fact tables.\n\nYou have the following data available in execution inputs:\n- measures_json: DAX measures with table allocations (from Measure Conversion Pipeline)\n- mquery_json: MQuery table transpilations (from MQuery Conversion Pipeline)\n- relationships_json: PBI relationships for join detection (from Relationships Tool)\n- scan_data_json: PBI scan data for inline SQL enrichment\n- config_json: Customer-specific pipeline config (join maps, filter sets, SWITCH decompositions)\n\nCall the UC Metric View Generator tool with ALL of these inputs.\nSet catalog='david_test_metrics' and schema_name='test_schema'.\nSet unflatten_tables=true.\n\nReturn the full output including number of metric views generated and per-table statistics.",
+            "expected_output": "",
+            "tools": [],
+            "context": [],
+            "markdown": false
+          }
+        ],
+        "state": {
+          "stateType": "unstructured",
+          "stateDefinition": "",
+          "stateData": {}
+        },
+        "conditionType": "NONE"
+      }
+    ],
+    "actions": [
+      {
+        "id": "action-crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0-1779203671845-crew-b6d1647a-e2ba-4474-a530-4cc88dd7eae8-1779203673028-ucmv-validator-task-001",
+        "crewId": "b6d1647a-e2ba-4474-a530-4cc88dd7eae8",
+        "crewName": "UCMV Quality Validator",
+        "taskId": "ucmv-validator-task-001",
+        "taskName": "Validate UC Metric Views"
+      },
+      {
+        "id": "action-crew-fc63b178-13ff-4350-9be4-1f8471c20b99-1779203670735-crew-51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0-1779203671845-90a62060-d230-4b9c-88b2-1661b8ecc73d",
+        "crewId": "51e85297-3eb8-4e8f-ba34-e3cd3f69f8e0",
+        "crewName": "UC Metric View Generator \u2014 JSON Mode (SC Reporting)",
+        "taskId": "90a62060-d230-4b9c-88b2-1661b8ecc73d",
+        "taskName": "Generate UC Metric Views"
+      }
+    ],
+    "startingPoints": [
+      {
+        "crewId": "fc63b178-13ff-4350-9be4-1f8471c20b99",
+        "crewName": "UCMV \u2014 Generate Pipeline Config (API-Direct)",
+        "taskId": "986f4cec-bd03-466e-8003-b4d4fe3c911c",
+        "taskName": "Generate Pipeline Config from PBI APIs",
+        "isStartPoint": true
+      }
+    ]
+  }
+}

@@ -5,7 +5,7 @@ import json
 import pytest
 from unittest.mock import patch, MagicMock
 
-sys.path.insert(0, "/Users/nehme.tohme/workspace/kasal/src")
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src"))
 
 from deploy import configure_oauth_scopes
 

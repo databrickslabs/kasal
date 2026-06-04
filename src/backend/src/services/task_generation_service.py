@@ -202,11 +202,13 @@ class TaskGenerationService:
         
         try:
             # Generate completion via unified LLMManager.completion()
+            from src.utils.telemetry import get_user_agent_header, KasalProduct
             content = await LLMManager.completion(
                 messages=messages,
                 model=model,
                 temperature=0.2 if fast_planning else 0.7,
                 max_tokens=1200 if fast_planning else 4000,
+                extra_headers=get_user_agent_header(KasalProduct.TASK_GENERATION)
             )
             
             if not content:

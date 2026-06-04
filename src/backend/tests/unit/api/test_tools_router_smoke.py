@@ -127,7 +127,8 @@ async def test_config_endpoints(monkeypatch):
             self.tool_registry = FakeRegistry()
     async def fake_get_engine(**kwargs):
         return FakeEngine()
-    EngineFactory.get_engine = staticmethod(fake_get_engine)
+    # Use monkeypatch so the original get_engine is restored after this test.
+    monkeypatch.setattr(EngineFactory, "get_engine", staticmethod(fake_get_engine))
 
     schema = await get_tool_configuration_schema("toolA", session=SimpleNamespace(), group_context=Ctx())
     assert schema["type"] == "object"

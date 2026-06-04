@@ -691,6 +691,80 @@ class ExecutionHistoryRepository:
             logger.error(f"Error getting crew checkpoints for job {job_id}: {str(e)}", exc_info=True)
             return []
 
+    async def update_execution_result(
+        self, job_id: str, result_data: dict, group_ids: list[str] = None
+    ) -> bool:
+        """
+        Update the result field for an execution identified by job_id.
+
+        Args:
+            job_id: Job ID of the execution
+            result_data: New result data to store
+            group_ids: Optional list of group IDs for tenant filtering
+
+        Returns:
+            True if successful, False if execution not found
+        """
+        if not self.session:
+            raise RuntimeError("ExecutionHistoryRepository requires a session")
+
+        try:
+            filters = [ExecutionHistory.job_id == job_id]
+            if group_ids and len(group_ids) > 0:
+                filters.append(ExecutionHistory.group_id.in_(group_ids))
+
+            stmt = select(ExecutionHistory).where(*filters)
+            result = await self.session.execute(stmt)
+            execution = result.scalar_one_or_none()
+
+            if not execution:
+                logger.warning(f"No execution found with job_id: {job_id}")
+                return False
+
+            import json as _json
+
+            # Detect the type of result being saved so we use a dedicated
+            # checkpoint_data key and never collide with other tools.
+            is_ucmv = isinstance(result_data, dict) and 'yaml' in result_data and 'sql' in result_data
+            is_config = isinstance(result_data, dict) and 'join_key_map' in result_data
+
+            checkpoint_data = execution.checkpoint_data or {}
+
+            if is_ucmv:
+                # UCMV Generator edit: use a dedicated key so Config Generator
+                # saves (which also use edited_config) never overwrite it.
+                checkpoint_data["ucmv_yaml_edits"] = result_data
+                logger.info(f"Saved UCMV yaml edits to checkpoint_data.ucmv_yaml_edits for job_id: {job_id}")
+                # Also write to /tmp so the Validator subprocess can read the
+                # user's edits (subprocess can't connect to DB in deployed env).
+                try:
+                    import os as _os
+                    _tmp_path = '/tmp/ucmv_user_edits.json'
+                    with open(_tmp_path, 'w') as _f:
+                        _json.dump(result_data, _f)
+                    logger.info(f"[UCMV] Wrote user edits to {_tmp_path} for validator subprocess access")
+                except Exception as _tmp_err:
+                    logger.debug(f"[UCMV] Could not write user edits to /tmp: {_tmp_err}")
+            elif is_config:
+                # Config Generator edit: keep using edited_config (existing behaviour)
+                checkpoint_data["edited_config"] = result_data
+                logger.info(f"Saved config edits to checkpoint_data.edited_config for job_id: {job_id}")
+            else:
+                # Generic: store under edited_config as before
+                checkpoint_data["edited_config"] = result_data
+
+            execution.checkpoint_data = checkpoint_data
+            await self.session.flush()
+            logger.info(f"Saved edited result for job_id: {job_id}")
+            return True
+
+        except Exception as e:
+            logger.error(
+                f"Error updating result for job_id {job_id}: {str(e)}",
+                exc_info=True,
+            )
+            return False
+
     async def delete_older_than(self, cutoff: datetime) -> Dict[str, int]:
         """
         Delete execution history records older than a cutoff date, including

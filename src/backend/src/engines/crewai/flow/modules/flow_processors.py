@@ -174,9 +174,24 @@ class FlowProcessorManager:
                         agent_id = getattr(task_data, 'agent_id', None)
                         if agent_id:
                             logger.info(f"  Using agent {agent_id} from task.agent_id for task {task_id}")
-                        else:
-                            logger.warning(f"  Could not resolve agent for task {task_id}")
-                            continue
+
+                    # Last resort: if the crew has exactly one agentNode, use it.
+                    # This handles the case where the flow's taskId doesn't match the
+                    # crew's canvas task node ID (e.g. IDs diverged after re-creation).
+                    if not agent_id and crew_data.nodes:
+                        agent_nodes = [n for n in crew_data.nodes if n.get('type') == 'agentNode']
+                        if len(agent_nodes) == 1:
+                            agent_full_id = agent_nodes[0].get('id', '')
+                            agent_id = agent_full_id.split('-', 1)[1] if '-' in agent_full_id else agent_full_id
+                            if not agent_id:
+                                agent_id = agent_nodes[0].get('data', {}).get('id') or agent_nodes[0].get('data', {}).get('agentId')
+                            agent_node_data = agent_nodes[0].get('data', {})
+                            if agent_id:
+                                logger.info(f"  Using sole agentNode {agent_id} from crew as fallback for task {task_id}")
+
+                    if not agent_id:
+                        logger.warning(f"  Could not resolve agent for task {task_id}")
+                        continue
 
                     # Import necessary classes for building CrewAI objects
                     from src.engines.crewai.flow.modules.task_config import TaskConfig
@@ -451,33 +466,43 @@ class FlowProcessorManager:
 
                     # Always scan crew structure for task/agent data (needed for both DB and embedded cases)
                     if crew_data.nodes:
-                        for node in crew_data.nodes:
+                        task_nodes = [n for n in crew_data.nodes if n.get('type') == 'taskNode']
+                        matched_node = None
+
+                        # 1. Exact ID match
+                        for node in task_nodes:
                             node_id = node.get('id', '')
                             node_uuid = node_id.split('-', 1)[1] if '-' in node_id else node_id
-
-                            if node.get('type') == 'taskNode' and node_uuid == str(task_id):
-                                # Found the task node - save its data for fallback
-                                task_node_data = node.get('data', {})
-
-                                # Find the agent connected to this task
-                                if crew_data.edges:
-                                    for edge in crew_data.edges:
-                                        if edge.get('target') == node.get('id'):
-                                            agent_node_id = edge.get('source')
-                                            # Find the agent node
-                                            for agent_node in crew_data.nodes:
-                                                if agent_node.get('id') == agent_node_id and agent_node.get('type') == 'agentNode':
-                                                    agent_full_id = agent_node.get('id', '')
-                                                    agent_id = agent_full_id.split('-', 1)[1] if '-' in agent_full_id else agent_full_id
-                                                    if not agent_id:
-                                                        agent_id = agent_node.get('data', {}).get('id') or agent_node.get('data', {}).get('agentId')
-                                                    # Save agent node data for fallback
-                                                    agent_node_data = agent_node.get('data', {})
-                                                    logger.info(f"  Resolved agent {agent_id} from crew structure for listener task {task_id}")
-                                                    break
-                                            if agent_id:
-                                                break
+                            if node_uuid == str(task_id):
+                                matched_node = node
                                 break
+
+                        # 2. If crew has exactly one task node and ID didn't match, use it
+                        #    (handles flow config task ID ≠ crew DB task ID mismatch)
+                        if not matched_node and len(task_nodes) == 1:
+                            matched_node = task_nodes[0]
+                            logger.info(f"  ID mismatch fallback: using sole task node (flow task_id={task_id}, crew node={matched_node.get('id','')})")
+                            # Force re-creation from node data so tool_configs come from current crew node,
+                            # not from a stale DB record for the mismatched task_id
+                            task_data = None
+
+                        if matched_node:
+                            task_node_data = matched_node.get('data', {})
+                            if crew_data.edges:
+                                for edge in crew_data.edges:
+                                    if edge.get('target') == matched_node.get('id'):
+                                        agent_node_id = edge.get('source')
+                                        for agent_node in crew_data.nodes:
+                                            if agent_node.get('id') == agent_node_id and agent_node.get('type') == 'agentNode':
+                                                agent_full_id = agent_node.get('id', '')
+                                                agent_id = agent_full_id.split('-', 1)[1] if '-' in agent_full_id else agent_full_id
+                                                if not agent_id:
+                                                    agent_id = agent_node.get('data', {}).get('id') or agent_node.get('data', {}).get('agentId')
+                                                agent_node_data = agent_node.get('data', {})
+                                                logger.info(f"  Resolved agent {agent_id} from crew structure for listener task {task_id}")
+                                                break
+                                        if agent_id:
+                                            break
 
                     # If task not in DB, try to create from embedded node data
                     if not task_data:

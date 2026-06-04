@@ -269,8 +269,10 @@ class DatabricksAuthService:
         Returns:
             Dict with Authorization header and token
         """
+        from src.utils.telemetry import get_user_agent_header, KasalProduct
         token = self.get_access_token()
         return {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
+            **get_user_agent_header(KasalProduct.POWERBI),
         }

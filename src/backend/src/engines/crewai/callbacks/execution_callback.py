@@ -60,6 +60,16 @@ def create_execution_callbacks(
             else:
                 content = str(step_output)
 
+            # SECURITY: Scan tool output for injection patterns.
+            # Intentionally log-only (fail-open by design) — blocking here would halt
+            # live streaming on false positives.  Detection feeds into audit logs;
+            # the LLM injection guardrail is the blocking layer when enabled by the user.
+            try:
+                from src.engines.crewai.security.scanner_pipeline import security_scanner
+                _scan = security_scanner.scan(content, context=f"step_callback:{job_id}")
+            except Exception as _sec_err:
+                logger.debug("%s [SECURITY] Tool output scan skipped: %s", log_prefix, _sec_err)
+
             content_preview = content[:500] + "..." if len(content) > 500 else content
             log_message = f"[STEP] {content_preview}"
 
@@ -93,6 +103,16 @@ def create_execution_callbacks(
                 content = str(task_output.output)
             else:
                 content = str(task_output)
+
+            # SECURITY: Scan task output for injection + secret leakage.
+            # Intentionally log-only (fail-open by design) — blocking here would break
+            # task chaining on false positives.  Detection feeds into audit logs;
+            # the LLM injection guardrail is the blocking layer when enabled by the user.
+            try:
+                from src.engines.crewai.security.scanner_pipeline import security_scanner
+                _scan = security_scanner.scan(content, context=f"task_callback:{job_id}")
+            except Exception as _sec_err:
+                logger.debug("%s [SECURITY] Task output scan skipped: %s", log_prefix, _sec_err)
 
             task_preview = (
                 task_description[:100] + "..."

@@ -32,18 +32,26 @@ interface DocSection {
 }
 
 const docSections: DocSection[] = [
-
   {
-    label: 'Architecture',
+    label: 'Overview',
     items: [
+      { label: 'Why Kasal', file: 'WHY_KASAL' },
       { label: 'Solution Architecture', file: 'ARCHITECTURE_GUIDE' },
+    ],
+  },
+  {
+    label: 'Security',
+    items: [
+      { label: 'Security Compliance', file: 'README_SECURITY_COMPLIANCE' },
+      { label: 'Security Test Guide', file: 'README_SECURITY_GUARDRAILS_TESTGUIDE' },
+      { label: 'Supply Chain Security', file: 'README_SECURITY_SUPPLY_CHAIN' },
     ],
   },
   {
     label: 'Development',
     items: [
       { label: 'Developer Guide', file: 'DEVELOPER_GUIDE' },
-      { label: 'Code structure', file: 'CODE_STRUCTURE_GUIDE' },
+      { label: 'Code Structure', file: 'CODE_STRUCTURE_GUIDE' },
     ],
   },
   {
@@ -53,32 +61,67 @@ const docSections: DocSection[] = [
     ],
   },
   {
-    label: 'Integrations',
+    label: 'Power BI - Overview',
     items: [
-      { label: 'Power BI Integration', file: 'powerbi_integration' },
-      { label: 'Power BI Tools Guide', file: 'powerbi-tools-guide' },
+      { label: '📋 Overview & Navigation', file: 'powerbi/README' },
+      { label: '🔐 Authentication & SP Setup', file: 'powerbi/01-authentication-setup' },
+      { label: '📖 Simple Migration Story', file: 'powerbi/02-simple-migration-story' },
     ],
   },
   {
-    label: 'Power BI Tools',
+    label: 'Power BI - Analytics / Q&A',
     items: [
-      { label: 'Comprehensive Analysis Tool', file: 'tool-comprehensive-analysis' },
-      { label: 'Measure Conversion Tool', file: 'tool-measure-conversion' },
-      { label: 'M-Query Conversion Tool', file: 'tool-mquery-conversion' },
-      { label: 'Relationships Tool', file: 'tool-relationships-conversion' },
-      { label: 'Hierarchies Tool', file: 'tool-hierarchies-conversion' },
-      { label: 'Field Parameters & Calc Groups', file: 'tool-field-parameters' },
-      { label: 'Report References Tool', file: 'tool-report-references' },
+      { label: '⭐ Analytics Q&A — Case Study', file: 'powerbi/powerbi-analytics-qa-case-study' },
+      { label: 'Tool 72 — Comprehensive Analysis', file: 'powerbi/tool-72-comprehensive-analysis' },
+      { label: 'Tool 79 — Semantic Model Fetcher', file: 'powerbi/tool-79-semantic-model-fetcher' },
+      { label: 'Tool 80 — DAX Generator', file: 'powerbi/tool-80-dax-generator' },
+      { label: 'Tool 81 — Metadata Reducer', file: 'powerbi/tool-81-metadata-reducer' },
+      { label: 'Tool 82 — DAX Executor', file: 'powerbi/tool-82-dax-executor' },
     ],
   },
-
+  {
+    label: 'Power BI - Migration (Extraction)',
+    items: [
+      { label: 'Tool 73 — Measure Conversion', file: 'powerbi/tool-73-measure-conversion' },
+      { label: 'Tool 74 — M-Query Conversion', file: 'powerbi/tool-74-mquery-conversion' },
+      { label: 'Tool 75 — Relationships', file: 'powerbi/tool-75-relationships' },
+      { label: 'Tool 76 — Hierarchies (Fabric)', file: 'powerbi/tool-76-hierarchies' },
+      { label: 'Tool 77 — Field Parameters (Fabric)', file: 'powerbi/tool-77-field-parameters' },
+      { label: 'Tool 78 — Report References (Fabric)', file: 'powerbi/tool-78-report-references' },
+    ],
+  },
+  {
+    label: 'Power BI - UC Metric Views',
+    items: [
+      { label: '🚀 End-to-End Migration Guide', file: 'powerbi/ucmv-migration-guide' },
+      { label: 'Tool 85 — DAX to SQL Translator', file: 'powerbi/tool-85-dax-to-sql-translator' },
+      { label: 'Tool 86 — UC Metric View Generator', file: 'powerbi/tool-86-uc-metric-view-generator' },
+      { label: 'Tool 87 — Measure Allocator', file: 'powerbi/tool-87-measure-allocator' },
+      { label: 'Tool 88 — Metric View Deployer', file: 'powerbi/tool-88-metric-view-deployer' },
+      { label: 'Tool 89 — Config Generator', file: 'powerbi/tool-89-config-generator' },
+      { label: 'Tool 90 — Pipeline Config Generator', file: 'powerbi/tool-90-pipeline-config-generator' },
+      { label: 'Pipeline Config Reference', file: 'UCMV_PIPELINE_CONFIG_GUIDE' },
+    ],
+  },
+  {
+    label: 'Development',
+    items: [
+      { label: 'Developer Guide', file: 'DEVELOPER_GUIDE' },
+      { label: 'Code structure', file: 'CODE_STRUCTURE_GUIDE' },
+      { label: 'API Reference', file: 'API_REFERENCE' },
+    ],
+  },
+  
 ];
 
 const Documentation: React.FC = () => {
   const [currentDoc, setCurrentDoc] = useState<string>('README');
   const [docContent, setDocContent] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
-  const [openSections, setOpenSections] = useState<{ [key: string]: boolean }>({});
+  const [openSections, setOpenSections] = useState<{ [key: string]: boolean }>({
+    'Power BI - Overview': true,
+    'Power BI - UC Metric Views': true,
+  });
   const [mobileOpen, setMobileOpen] = useState(false);
   
   const theme = useTheme();
@@ -323,7 +366,13 @@ const Documentation: React.FC = () => {
                     const normalized = href
                       .replace(/^\/?src\/docs\//i, '')
                       .replace(/^\/?docs\//i, '');
-                    const base = (normalized.split('/').pop() || normalized).replace(/\.md$/i, '');
+                    // Resolve relative links (./something.md) against current doc's directory
+                    let base = normalized.replace(/\.md$/i, '');
+                    if (base.startsWith('./') || (!base.startsWith('/') && !base.includes(':'))) {
+                      const currentDir = currentDoc.includes('/') ? currentDoc.substring(0, currentDoc.lastIndexOf('/')) : '';
+                      const relativePart = base.replace(/^\.\//, '');
+                      base = currentDir ? `${currentDir}/${relativePart}` : relativePart;
+                    }
                     return (
                       <Box
                         component="a"

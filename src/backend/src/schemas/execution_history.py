@@ -133,4 +133,18 @@ class ResumeFromCheckpointRequest(BaseModel):
     """Schema for requesting execution resume from checkpoint."""
 
     flow_uuid: Optional[str] = Field(None, description="CrewAI state.id to resume from")
-    execution_id: Optional[int] = Field(None, description="Execution ID to resume from (alternative to flow_uuid)") 
+    execution_id: Optional[int] = Field(None, description="Execution ID to resume from (alternative to flow_uuid)")
+
+
+class UpdateExecutionResultRequest(BaseModel):
+    """Schema for updating an execution's result data."""
+
+    result: Dict[str, Any] = Field(description="The updated result data to store")
+
+
+class UpdateExecutionResultResponse(BaseModel):
+    """Schema for the response after updating an execution result."""
+
+    success: bool = Field(description="Whether the update was successful")
+    job_id: str = Field(description="Job ID of the updated execution")
+    updated_at: str = Field(description="ISO timestamp of the update") 

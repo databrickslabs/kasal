@@ -1,0 +1,172 @@
+{
+  "id": "d294f4ef-8666-4f97-afbe-8b665f71b527",
+  "name": "UCMV \u2014 Generate Pipeline Config (API-Direct)",
+  "agent_ids": [
+    "e398d418-91ba-4795-ac31-3589768a955f"
+  ],
+  "task_ids": [
+    "0da91c09-7a16-49c6-afbf-d4f901ea2be2"
+  ],
+  "nodes": [
+    {
+      "id": "task-0da91c09-7a16-49c6-afbf-d4f901ea2be2",
+      "type": "taskNode",
+      "position": {
+        "x": 68,
+        "y": 318
+      },
+      "data": {
+        "label": "Generate Pipeline Config from PBI APIs",
+        "role": null,
+        "goal": null,
+        "backstory": null,
+        "tools": [
+          "90"
+        ],
+        "tool_configs": {
+          "Pipeline Config Generator": {
+            "workspace_id": "ac0fa11c-fc3a-43f9-9873-fe62816f439d",
+            "dataset_id": "826baa71-34d7-4ea4-89d2-67202f7e9b63",
+            "report_id": "7ff0e337-8f43-4109-93a5-164e77cb4d47",
+            "tenant_id": "<YOUR_AZURE_TENANT_ID>",
+            "client_id": "<YOUR_SP_CLIENT_ID>",
+            "client_secret": "<YOUR_SP_CLIENT_SECRET>",
+            "admin_client_id": "<YOUR_ADMIN_SP_CLIENT_ID>",
+            "admin_client_secret": "<YOUR_ADMIN_SP_CLIENT_SECRET>",
+            "catalog": "david_test_metrics",
+            "schema_name": "cchbc"
+          }
+        },
+        "agentId": null,
+        "taskId": "0da91c09-7a16-49c6-afbf-d4f901ea2be2",
+        "llm": null,
+        "function_calling_llm": null,
+        "max_iter": null,
+        "max_rpm": null,
+        "max_execution_time": null,
+        "verbose": null,
+        "allow_delegation": null,
+        "cache": null,
+        "memory": true,
+        "embedder_config": null,
+        "system_template": null,
+        "prompt_template": null,
+        "response_template": null,
+        "allow_code_execution": null,
+        "code_execution_mode": null,
+        "max_retry_limit": null,
+        "use_system_prompt": null,
+        "respect_context_window": null,
+        "type": "task",
+        "description": "Call the Pipeline Config Generator tool with NO arguments \u2014 credentials and PBI IDs are pre-configured in tool_configs. The tool calls 4 PBI APIs directly and returns a JSON with all 26 pipeline_config keys. Return the full output without modification.",
+        "expected_output": "JSON containing proposed_config (all 26 keys) and summary (auto-filled count, TODO count, extraction stats).",
+        "icon": null,
+        "advanced_config": null,
+        "config": {
+          "cache_response": false,
+          "cache_ttl": 3600,
+          "retry_on_fail": true,
+          "max_retries": 2,
+          "timeout": null,
+          "priority": 1,
+          "error_handling": "default",
+          "output_file": null,
+          "output_json": "true",
+          "output_pydantic": null,
+          "validation_function": null,
+          "callback_function": null,
+          "human_input": false,
+          "markdown": false,
+          "llm_guardrail": null
+        },
+        "context": [],
+        "async_execution": false,
+        "knowledge_sources": null,
+        "markdown": false,
+        "llm_guardrail": null
+      },
+      "width": null,
+      "height": null,
+      "selected": null,
+      "positionAbsolute": null,
+      "dragging": null,
+      "style": null
+    },
+    {
+      "id": "agent-e398d418-91ba-4795-ac31-3589768a955f",
+      "type": "agentNode",
+      "position": {
+        "x": 113,
+        "y": 68
+      },
+      "data": {
+        "label": "Config Generator Agent",
+        "role": "Pipeline Config Generator",
+        "goal": "Generate a complete pipeline_config.json from Power BI APIs",
+        "backstory": "You are a data engineering agent. Call the Pipeline Config Generator tool exactly once with no arguments (credentials are pre-configured). Return the full JSON output. Do not modify or summarize the result.",
+        "tools": [
+          "90"
+        ],
+        "tool_configs": null,
+        "agentId": "e398d418-91ba-4795-ac31-3589768a955f",
+        "taskId": null,
+        "llm": "databricks-claude-sonnet-4",
+        "function_calling_llm": null,
+        "max_iter": null,
+        "max_rpm": null,
+        "max_execution_time": null,
+        "verbose": true,
+        "allow_delegation": null,
+        "cache": null,
+        "memory": true,
+        "embedder_config": null,
+        "system_template": null,
+        "prompt_template": null,
+        "response_template": null,
+        "allow_code_execution": null,
+        "code_execution_mode": null,
+        "max_retry_limit": null,
+        "use_system_prompt": null,
+        "respect_context_window": null,
+        "type": "agent",
+        "description": null,
+        "expected_output": null,
+        "icon": null,
+        "advanced_config": null,
+        "config": null,
+        "context": [],
+        "async_execution": false,
+        "knowledge_sources": null,
+        "markdown": false,
+        "llm_guardrail": null
+      },
+      "width": null,
+      "height": null,
+      "selected": null,
+      "positionAbsolute": null,
+      "dragging": null,
+      "style": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "agent-e398d418-91ba-4795-ac31-3589768a955f",
+      "target": "task-0da91c09-7a16-49c6-afbf-d4f901ea2be2",
+      "id": "edge-agent-task",
+      "sourceHandle": null,
+      "targetHandle": null
+    }
+  ],
+  "created_at": "2026-05-16T04:35:43.821641",
+  "updated_at": "2026-05-16T05:19:46.286195",
+  "process": "sequential",
+  "planning": false,
+  "planning_llm": null,
+  "reasoning": false,
+  "reasoning_llm": null,
+  "manager_llm": null,
+  "tool_configs": null,
+  "memory": true,
+  "verbose": true,
+  "max_rpm": null
+}

@@ -1,7 +1,6 @@
-import os
-from typing import Annotated, Dict
+from typing import Annotated, Dict, List
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from src.core.exceptions import ForbiddenError
 
@@ -224,3 +223,31 @@ async def get_databricks_environment(
         "user_identity": user_identity,
         "authenticated": bool(auth),
     }
+
+
+@router.get("/warehouses", response_model=List[Dict])
+async def list_warehouses(
+    service: DatabricksServiceDep,
+    host: str = Query(default=None, description="Override workspace URL"),
+):
+    """List SQL warehouses in the workspace. Optional ?host= overrides the configured workspace URL."""
+    return await service.list_warehouses(host=host)
+
+
+@router.get("/catalogs", response_model=List[str])
+async def list_catalogs(
+    service: DatabricksServiceDep,
+    host: str = Query(default=None, description="Override workspace URL"),
+):
+    """List Unity Catalog catalogs in the workspace. Optional ?host= overrides the configured workspace URL."""
+    return await service.list_catalogs(host=host)
+
+
+@router.get("/schemas", response_model=List[str])
+async def list_schemas(
+    service: DatabricksServiceDep,
+    catalog: str = Query(..., description="Catalog name to list schemas for"),
+    host: str = Query(default=None, description="Override workspace URL"),
+):
+    """List Unity Catalog schemas for a given catalog. Optional ?host= overrides the configured workspace URL."""
+    return await service.list_schemas(catalog=catalog, host=host)

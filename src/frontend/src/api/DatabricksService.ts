@@ -125,6 +125,49 @@ export class DatabricksService {
     }
   }
 
+  // Static methods for workspace discovery (warehouses, catalogs, schemas)
+  public static async listWarehouses(host?: string): Promise<{id: string; name: string; state: string}[]> {
+    try {
+      const params = host ? { host } : {};
+      const response = await apiClient.get<{id: string; name: string; state: string}[]>(
+        '/databricks/warehouses', { params }
+      );
+      return response.data;
+    } catch (error) {
+      if (error instanceof AxiosError) {
+        throw new Error(error.response?.data?.detail || 'Failed to list warehouses');
+      }
+      throw new Error('Failed to connect to the server');
+    }
+  }
+
+  public static async listCatalogs(host?: string): Promise<string[]> {
+    try {
+      const params = host ? { host } : {};
+      const response = await apiClient.get<string[]>('/databricks/catalogs', { params });
+      return response.data;
+    } catch (error) {
+      if (error instanceof AxiosError) {
+        throw new Error(error.response?.data?.detail || 'Failed to list catalogs');
+      }
+      throw new Error('Failed to connect to the server');
+    }
+  }
+
+  public static async listSchemas(catalog: string, host?: string): Promise<string[]> {
+    try {
+      const params: Record<string, string> = { catalog };
+      if (host) params.host = host;
+      const response = await apiClient.get<string[]>('/databricks/schemas', { params });
+      return response.data;
+    } catch (error) {
+      if (error instanceof AxiosError) {
+        throw new Error(error.response?.data?.detail || 'Failed to list schemas');
+      }
+      throw new Error('Failed to connect to the server');
+    }
+  }
+
   // Static methods for DatabricksVolumeConfiguration component
   public static async getConfiguration(): Promise<DatabricksConfig | null> {
     const instance = DatabricksService.getInstance();

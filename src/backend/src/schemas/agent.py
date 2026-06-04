@@ -61,12 +61,71 @@ class AgentBase(BaseModel):
             return 10
         return v
 
+    @field_validator('llm', mode='before')
+    @classmethod
+    def coerce_llm_none_to_default(cls, v):
+        return v if v is not None else "databricks-llama-4-maverick"
+
+    @field_validator('max_iter', mode='before')
+    @classmethod
+    def coerce_max_iter_none_to_default(cls, v):
+        return v if v is not None else 25
+
+    @field_validator('verbose', mode='before')
+    @classmethod
+    def coerce_verbose_none_to_default(cls, v):
+        return v if v is not None else False
+
+    @field_validator('allow_delegation', mode='before')
+    @classmethod
+    def coerce_allow_delegation_none_to_default(cls, v):
+        return v if v is not None else False
+
+    @field_validator('cache', mode='before')
+    @classmethod
+    def coerce_cache_none_to_default(cls, v):
+        return v if v is not None else True
+
+    @field_validator('memory', mode='before')
+    @classmethod
+    def coerce_memory_none_to_default(cls, v):
+        return v if v is not None else True
+
+    @field_validator('code_execution_mode', mode='before')
+    @classmethod
+    def coerce_code_execution_mode_none_to_default(cls, v):
+        return v if v is not None else "safe"
+
+    @field_validator('max_retry_limit', mode='before')
+    @classmethod
+    def coerce_max_retry_limit_none_to_default(cls, v):
+        return v if v is not None else 2
+
+    @field_validator('use_system_prompt', mode='before')
+    @classmethod
+    def coerce_use_system_prompt_none_to_default(cls, v):
+        return v if v is not None else True
+
+    @field_validator('respect_context_window', mode='before')
+    @classmethod
+    def coerce_respect_context_window_none_to_default(cls, v):
+        return v if v is not None else True
+
+    @field_validator('knowledge_sources', mode='before')
+    @classmethod
+    def coerce_knowledge_sources_none_to_default(cls, v):
+        return v if v is not None else []
+
+    @field_validator('inject_date', mode='before')
+    @classmethod
+    def coerce_inject_date_none_to_default(cls, v):
+        return v if v is not None else True
+
     @field_validator('allow_code_execution', mode='before')
     @classmethod
     def force_code_execution_false(cls, v):
         """SECURITY: Always force allow_code_execution to False for safety."""
         if v is True:
-            # Log or notify that we're overriding this for security
             print(f"WARNING: Attempted to set allow_code_execution=True, forcing to False for security")
         return False
 
