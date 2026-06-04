@@ -19,6 +19,7 @@ interface ChatContainerProps {
   onExecuteCrew?: (plan: PlanData) => void;
   onExecuteFlow?: (flow: FlowData) => void;
   onExecuteGenerated?: (data: GenerationCompleteData, spaceId?: string) => void;
+  onSaveCrew?: (data: GenerationCompleteData) => Promise<{ id: string; name: string }>;
   onStopExecution?: () => void;
   isLoading: boolean;
   isExecuting?: boolean;
@@ -36,6 +37,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   onExecuteCrew,
   onExecuteFlow,
   onExecuteGenerated,
+  onSaveCrew,
   onStopExecution,
   isLoading,
   isExecuting,
@@ -213,6 +215,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
               onExecuteCrew={onExecuteCrew}
               onExecuteFlow={onExecuteFlow}
               onExecuteGenerated={onExecuteGenerated}
+              onSaveCrew={onSaveCrew}
             />
           ))}
           <div ref={messagesEndRef} />

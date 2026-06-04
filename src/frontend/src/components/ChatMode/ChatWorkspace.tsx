@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { ExecutionStatus } from './types/execution';
 import { createExecution, stopExecution, listExecutions } from './api/executions';
+import { saveGeneratedCrew, usesGenieTool } from './api/crews';
 import { useSessionStore } from './store/sessionStore';
 import { useExecutionStore } from './store/executionStore';
 import { useAppStore } from './store/appStore';
@@ -219,6 +220,18 @@ const ChatWorkspace: React.FC = () => {
       ? rawPreviewContent
       : null;
 
+  // Execution UI (the "Running crew…" banner, generation spinner, loading
+  // state) belongs to the session that OWNS the run. A run started in one
+  // session must never surface in whatever session is on screen now — e.g. you
+  // submit in chat A, switch to B, and A's crew starts: it must stay in A.
+  // Strict equality so a run owned by another session never leaks here.
+  const executionOwnerSessionId = useExecutionStore((s) => s.executionOwnerSessionId);
+  const ownsExecution = executionOwnerSessionId === currentSessionId;
+  const viewIsExecuting = isExecuting && ownsExecution;
+  const viewIsGenerating = isGenerating && ownsExecution;
+  const viewIsLoading = isLoading && ownsExecution;
+  const viewExecutionContext = ownsExecution ? executionContext : null;
+
   const models = useAppStore((s) => s.models);
   const selectedModel = useAppStore((s) => s.selectedModel);
   const sidebarOpen = useAppStore((s) => s.sidebarOpen);
@@ -238,6 +251,7 @@ const ChatWorkspace: React.FC = () => {
     plan?: PlanData;
     data?: GenerationCompleteData;
     spaceId?: string;
+    originSession?: string | null;
   } | null>(null);
 
   // Check for hidden preview when session changes or preview is closed.
@@ -300,6 +314,10 @@ const ChatWorkspace: React.FC = () => {
   const traceMessageIdsRef = useRef<Map<string, { messageId: string; resolved: boolean }>>(
     new Map(),
   );
+
+  // The most recent generated crew in this session — the target for `/save`.
+  // (The bookmark on each crew card saves its own specific crew directly.)
+  const lastGeneratedRef = useRef<GenerationCompleteData | null>(null);
 
   // --- Execution Stream ---
   const executionStream = useExecutionStream({
@@ -475,7 +493,12 @@ const ChatWorkspace: React.FC = () => {
       const ownerSession = useExecutionStore.getState().executionOwnerSessionId;
       const sessionStore = useSessionStore.getState();
       const id = generateId();
-      const msgContent = 'Crew generated. Starting run...';
+      // A Genie crew can't run until the user picks a Genie space, so don't
+      // auto-run it — surface the space selector + a Run button on the card.
+      const needsGenieSpace = usesGenieTool(data, useAppStore.getState().toolNameMap);
+      const msgContent = needsGenieSpace
+        ? 'Crew generated. Pick a Genie space below, then run it.'
+        : 'Crew generated. Starting run...';
 
       if (ownerSession) {
         sessionStore.addMessageToTargetSession(ownerSession, 'assistant', msgContent, {
@@ -494,13 +517,20 @@ const ChatWorkspace: React.FC = () => {
       if (dispatcher.setLastGenerated) {
         dispatcher.setLastGenerated(data);
       }
+      // Remember it as the /save target.
+      lastGeneratedRef.current = data;
 
       useExecutionStore.getState().completeGeneration();
 
       // Auto-run the generated crew so the user doesn't have to click "Run crew".
       // handleExecuteGenerated handles variable detection and will open the
-      // variables dialog if any inputs are required.
-      handleExecuteGenerated(data);
+      // variables dialog if any inputs are required. Genie crews are NOT
+      // auto-run — the user runs them from the card after choosing a space.
+      if (!needsGenieSpace) {
+        // Run under the generation's origin session (where the prompt was
+        // submitted) — not whatever session is on screen now.
+        handleExecuteGenerated(data, undefined, ownerSession);
+      }
     },
     onFailed: (error) => {
       useExecutionStore.getState().failGeneration(error);
@@ -589,10 +619,12 @@ const ChatWorkspace: React.FC = () => {
       data: GenerationCompleteData,
       spaceId?: string,
       inputs?: Record<string, string>,
-      opts?: { preservePreview?: boolean },
+      opts?: { preservePreview?: boolean; originSession?: string | null },
     ) => {
-      // Capture the session ID NOW, before the async createExecution call.
-      const originSessionId = useSessionStore.getState().currentSessionId;
+      // The run belongs to the session that started it. On auto-run after
+      // generation, that's the generation's origin (passed via opts) — NOT the
+      // session currently on screen, which the user may have switched to.
+      const originSessionId = opts?.originSession || useSessionStore.getState().currentSessionId;
 
       const execStore = useExecutionStore.getState();
       execStore.setIsLoading(true);
@@ -618,12 +650,16 @@ const ChatWorkspace: React.FC = () => {
           ? { GenieTool: { spaceId } }
           : undefined;
 
+        // NOTE: "Predefined UI" emission is enforced in the BACKEND
+        // (crew_preparation → ui_emission) so every channel — chat, Crew mode,
+        // API, schedules — behaves the same. No frontend injection here.
         const crewConfig = buildCrewConfigFromGenerated(
           agents,
           taskList,
           selectedModel || undefined,
           toolConfigs,
           inputs,
+          useAppStore.getState().toolNameMap,
         );
         const execution = await createExecution(crewConfig);
         const jobId = execution.job_id || execution.execution_id;
@@ -645,15 +681,15 @@ const ChatWorkspace: React.FC = () => {
   );
 
   const handleExecuteGenerated = useCallback(
-    async (data: GenerationCompleteData, spaceId?: string) => {
+    async (data: GenerationCompleteData, spaceId?: string, originSession?: string | null) => {
       const vars = detectVariablesFromGenerated(data.agents || [], data.tasks || []);
       if (vars.length > 0) {
         setDetectedVariables(vars);
-        setPendingExecution({ type: 'generated', data, spaceId });
+        setPendingExecution({ type: 'generated', data, spaceId, originSession });
         setVariablesDialogOpen(true);
         return;
       }
-      doExecuteGenerated(data, spaceId);
+      doExecuteGenerated(data, spaceId, undefined, { originSession });
     },
     [doExecuteGenerated],
   );
@@ -741,6 +777,14 @@ const ChatWorkspace: React.FC = () => {
     [addMessage, doExecuteGenerated, selectedModel],
   );
 
+  // --- Save a generated crew's plan to the catalog ---
+  // Used by the bookmark on each crew card (it owns its own saved-state UI), so
+  // this just performs the save and resolves to the created crew.
+  const handleSaveCrew = useCallback(
+    (data: GenerationCompleteData) => saveGeneratedCrew(data),
+    [],
+  );
+
   const handleExecuteFlow = useCallback(
     async (flow: FlowData) => {
       // Capture the session ID NOW, before the async createExecution call.
@@ -787,7 +831,7 @@ const ChatWorkspace: React.FC = () => {
       if (pending.type === 'crew' && pending.plan) {
         doExecuteCrew(pending.plan, inputs);
       } else if (pending.type === 'generated' && pending.data) {
-        doExecuteGenerated(pending.data, pending.spaceId, inputs);
+        doExecuteGenerated(pending.data, pending.spaceId, inputs, { originSession: pending.originSession });
       }
     },
     [pendingExecution, doExecuteCrew, doExecuteGenerated],
@@ -889,6 +933,30 @@ const ChatWorkspace: React.FC = () => {
           return true;
         }
         handleRefine(instruction);
+        return true;
+      }
+
+      if (lower === '/save' || lower.startsWith('/save ')) {
+        const data = lastGeneratedRef.current;
+        if (!data) {
+          addMessage(
+            'assistant',
+            'There is no generated crew to save yet. Generate a crew first, then `/save` it or use the bookmark on the crew card.',
+          );
+          return true;
+        }
+        addMessage('user', message);
+        const name = message.trim().slice(5).trim();
+        try {
+          const saved = await saveGeneratedCrew(data, name || undefined);
+          addMessage(
+            'assistant',
+            `✓ Saved **${saved.name}** to the catalog. Load it later with \`/list crews\`.`,
+          );
+        } catch (error) {
+          const errMsg = error instanceof Error ? error.message : 'Failed to save crew';
+          addMessage('assistant', `Failed to save crew: ${errMsg}`);
+        }
         return true;
       }
 
@@ -1145,11 +1213,12 @@ const ChatWorkspace: React.FC = () => {
               onExecuteCrew={handleExecuteCrew}
               onExecuteFlow={handleExecuteFlow}
               onExecuteGenerated={handleExecuteGenerated}
+              onSaveCrew={handleSaveCrew}
               onStopExecution={handleStopExecution}
-              isLoading={isLoading}
-              isExecuting={isExecuting}
-              isGenerating={isGenerating}
-              executionContext={executionContext}
+              isLoading={viewIsLoading}
+              isExecuting={viewIsExecuting}
+              isGenerating={viewIsGenerating}
+              executionContext={viewExecutionContext}
               models={models}
               selectedModel={selectedModel}
               onModelChange={(m) => useAppStore.getState().setSelectedModel(m)}

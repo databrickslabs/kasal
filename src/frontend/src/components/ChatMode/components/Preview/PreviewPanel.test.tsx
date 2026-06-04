@@ -335,4 +335,18 @@ describe('PreviewPanel component', () => {
       if (original) Object.defineProperty(proto, 'contentDocument', original);
     }
   });
+
+  it('detects an A2UI document and renders it via the brand renderer with an "App" label', () => {
+    const uiDoc = JSON.stringify({
+      messages: [{ updateComponents: { surfaceId: 's1', components: [
+        { id: 'root', component: 'Text', text: 'Hello App' },
+      ] } }],
+    });
+    // parsePreviewContent classifies it as 'ui' before generic JSON detection
+    expect(parsePreviewContent(uiDoc).type).toBe('ui');
+    // and the panel renders the UI (App title chip + the rendered text)
+    renderPanel({ type: 'ui', data: uiDoc });
+    expect(screen.getByText('App')).toBeInTheDocument();
+    expect(screen.getByText('Hello App')).toBeInTheDocument();
+  });
 });

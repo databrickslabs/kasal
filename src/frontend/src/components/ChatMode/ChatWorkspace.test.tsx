@@ -67,6 +67,7 @@ const h = vi.hoisted(() => {
       models: [{ key: 'm1', name: 'Model 1' }],
       selectedModel: 'm1',
       sidebarOpen: true,
+      toolNameMap: {} as Record<string, string>,
       init: vi.fn(),
       setTheme: vi.fn(),
       loadModels: vi.fn(),
@@ -84,6 +85,7 @@ const h = vi.hoisted(() => {
     createExecution: vi.fn(async () => ({ job_id: 'job-1' })),
     listExecutions: vi.fn(async () => []),
     stopExecution: vi.fn(async () => {}),
+    saveGeneratedCrew: vi.fn(async () => ({ id: 'crew-1', name: 'Saved Crew' })),
     saveSessionPreview: vi.fn(),
     getSessionPreview: vi.fn(async () => null),
     parsePreview: vi.fn(() => null),
@@ -129,6 +131,15 @@ vi.mock('./api/executions', () => ({
   listExecutions: (...a: unknown[]) => h.listExecutions(...a),
   stopExecution: (...a: unknown[]) => h.stopExecution(...a),
 }));
+vi.mock('./api/crews', () => ({
+  saveGeneratedCrew: (...a: unknown[]) => h.saveGeneratedCrew(...a),
+  // Faithful-enough stand-in (the real impl is covered in crews.test.ts):
+  // true when any agent/task lists the GenieTool by name.
+  usesGenieTool: (data: { agents?: { tools?: unknown }[]; tasks?: { tools?: unknown }[] }) => {
+    const items = [...(data?.agents ?? []), ...(data?.tasks ?? [])];
+    return items.some((x) => Array.isArray(x?.tools) && x.tools.includes('GenieTool'));
+  },
+}));
 vi.mock('./db/sessionDb', () => ({
   saveSessionPreview: (...a: unknown[]) => h.saveSessionPreview(...a),
   getSessionPreview: (...a: unknown[]) => h.getSessionPreview(...a),
@@ -151,6 +162,7 @@ vi.mock('./components/Chat/ChatContainer', () => ({
       <button data-testid="cc-exec-crew" onClick={() => props.onExecuteCrew?.((globalThis as { __crewPlan?: unknown }).__crewPlan ?? { name: 'P', nodes: [], edges: [] })}>crew</button>
       <button data-testid="cc-exec-flow" onClick={() => props.onExecuteFlow?.({ name: 'F', nodes: [], edges: [] })}>flow</button>
       <button data-testid="cc-exec-gen" onClick={() => props.onExecuteGenerated?.((globalThis as { __genData?: unknown }).__genData ?? { agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] })}>gen</button>
+      <button data-testid="cc-save" onClick={() => props.onSaveCrew?.({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] })}>save</button>
       <button data-testid="cc-model" onClick={() => props.onModelChange?.('m2')}>model</button>
     </div>
   ),
@@ -658,6 +670,70 @@ describe('ChatWorkspace component', () => {
     render(<ChatWorkspace />);
     await act(async () => { fireEvent.click(screen.getByTestId('preview-refine')); });
     expect(h.createExecution).toHaveBeenCalled();
+  });
+
+  // --- save crew to catalog ---
+  it('/save tells the user when there is no generated crew yet', async () => {
+    render(<ChatWorkspace />);
+    await send('/save');
+    expect(h.saveGeneratedCrew).not.toHaveBeenCalled();
+    expect(h.session.addMessage).toHaveBeenCalledWith(
+      'assistant',
+      expect.stringContaining('no generated crew to save'),
+    );
+  });
+
+  it('/save persists the last generated crew and confirms by name', async () => {
+    render(<ChatWorkspace />);
+    // a generation completes → becomes the /save target
+    await act(async () => { h.genOpts.onComplete({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }); });
+    await send('/save');
+    expect(h.saveGeneratedCrew).toHaveBeenCalledWith({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }, undefined);
+    expect(h.session.addMessage).toHaveBeenCalledWith(
+      'assistant',
+      expect.stringContaining('Saved **Saved Crew** to the catalog'),
+    );
+  });
+
+  it('/save <name> passes the explicit name through', async () => {
+    render(<ChatWorkspace />);
+    await act(async () => { h.genOpts.onComplete({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }); });
+    await send('/save Oil Crew');
+    expect(h.saveGeneratedCrew).toHaveBeenCalledWith(expect.anything(), 'Oil Crew');
+  });
+
+  it('/save reports an error when the save fails', async () => {
+    h.saveGeneratedCrew.mockRejectedValueOnce(new Error('nope'));
+    render(<ChatWorkspace />);
+    await act(async () => { h.genOpts.onComplete({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }); });
+    await send('/save');
+    expect(h.session.addMessage).toHaveBeenCalledWith(
+      'assistant',
+      expect.stringContaining('Failed to save crew: nope'),
+    );
+  });
+
+  it('saves a crew via the card bookmark (onSaveCrew handler)', async () => {
+    render(<ChatWorkspace />);
+    await act(async () => { fireEvent.click(screen.getByTestId('cc-save')); });
+    expect(h.saveGeneratedCrew).toHaveBeenCalledWith({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] });
+  });
+
+  // --- Genie crews are not auto-run ---
+  it('does NOT auto-run a Genie crew and prompts to pick a space', async () => {
+    render(<ChatWorkspace />);
+    await act(async () => {
+      h.genOpts.onComplete({ agents: [{ id: 'a1', tools: ['GenieTool'] }], tasks: [] });
+    });
+    // generation finalized, but no execution kicked off
+    expect(h.exec.completeGeneration).toHaveBeenCalled();
+    expect(h.createExecution).not.toHaveBeenCalled();
+    expect(h.session.addMessageToTargetSession).toHaveBeenCalledWith(
+      's1',
+      'assistant',
+      'Crew generated. Pick a Genie space below, then run it.',
+      expect.objectContaining({ resultType: 'generation_complete' }),
+    );
   });
 
   // --- sidebar interactions ---
