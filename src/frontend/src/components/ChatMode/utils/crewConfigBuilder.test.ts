@@ -391,6 +391,23 @@ describe('crewConfigBuilder', () => {
       expect(agent).not.toHaveProperty('allow_delegation');
     });
 
+    it('resolves a tool referenced by id to its name when attaching tool_configs', () => {
+      // The generated crew lists GenieTool by id ('5'); toolConfigs is keyed by
+      // the canonical name. The toolNameMap resolves id → name so the override
+      // attaches under "GenieTool" (what the backend looks up). Without this the
+      // Genie space never reaches the tool.
+      const config = buildCrewConfigFromGenerated(
+        [{ id: 'a1', tools: ['5'] }],
+        [{ id: 't1', tools: ['5'], agent_id: 'a1' }],
+        undefined,
+        { GenieTool: { spaceId: 'space-1' } },
+        undefined,
+        { '5': 'GenieTool' }, // toolNameMap: id → name
+      );
+      expect(config.agents_yaml.agent_a1.tool_configs).toEqual({ GenieTool: { spaceId: 'space-1' } });
+      expect(config.tasks_yaml.task_t1.tool_configs).toEqual({ GenieTool: { spaceId: 'space-1' } });
+    });
+
     it('does not add tool_configs when no tools match and handles non-array tools', () => {
       const config = buildCrewConfigFromGenerated(
         [

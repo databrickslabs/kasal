@@ -202,9 +202,29 @@ export function buildCrewConfigFromGenerated(
   model?: string,
   toolConfigs?: Record<string, Record<string, unknown>>,
   inputs?: Record<string, string>,
+  toolNameMap: Record<string, string> = {},
 ): CrewExecutionConfig {
   const agents_yaml: Record<string, Record<string, unknown>> = {};
   const tasks_yaml: Record<string, Record<string, unknown>> = {};
+
+  // toolConfigs are keyed by canonical tool NAME (e.g. "GenieTool"), but a
+  // generated agent/task references tools by ID. Resolve each tool entry through
+  // toolNameMap so the override attaches under the name the backend looks up
+  // (task_tool_configs.get(tool_name)). Without this, a Genie space picked in
+  // the chat never reaches the tool ("Genie space ID is not configured").
+  const applicableToolConfigs = (
+    tools: string[],
+  ): Record<string, Record<string, unknown>> => {
+    const applicable: Record<string, Record<string, unknown>> = {};
+    if (!toolConfigs) return applicable;
+    tools.forEach((t) => {
+      // toolConfigs is keyed by canonical tool name; the agent/task may list the
+      // tool by id, so resolve through toolNameMap before matching.
+      const name = toolNameMap[String(t)] || String(t);
+      if (toolConfigs[name]) applicable[name] = toolConfigs[name];
+    });
+    return applicable;
+  };
 
   // Build agent configs keyed by agent_<id>
   const agentIdToKey: Record<string, string> = {};
@@ -222,14 +242,9 @@ export function buildCrewConfigFromGenerated(
     };
 
     // Inject tool_configs for tools that have overrides (e.g. GenieTool spaceId)
-    if (toolConfigs) {
-      const applicable: Record<string, Record<string, unknown>> = {};
-      agentTools.forEach((t) => {
-        if (toolConfigs[t]) applicable[t] = toolConfigs[t];
-      });
-      if (Object.keys(applicable).length > 0) {
-        agentConfig.tool_configs = applicable;
-      }
+    const agentApplicable = applicableToolConfigs(agentTools);
+    if (Object.keys(agentApplicable).length > 0) {
+      agentConfig.tool_configs = agentApplicable;
     }
 
     const optionalFields = [
@@ -279,14 +294,9 @@ export function buildCrewConfigFromGenerated(
     };
 
     // Inject tool_configs for tasks that have matching tools
-    if (toolConfigs) {
-      const applicable: Record<string, Record<string, unknown>> = {};
-      taskTools.forEach((t) => {
-        if (toolConfigs[t]) applicable[t] = toolConfigs[t];
-      });
-      if (Object.keys(applicable).length > 0) {
-        taskEntry.tool_configs = applicable;
-      }
+    const taskApplicable = applicableToolConfigs(taskTools);
+    if (Object.keys(taskApplicable).length > 0) {
+      taskEntry.tool_configs = taskApplicable;
     }
 
     tasks_yaml[key] = taskEntry;

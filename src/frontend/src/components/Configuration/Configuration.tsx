@@ -30,6 +30,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import MemoryIcon from '@mui/icons-material/Memory';
 import StorageIcon from '@mui/icons-material/Storage';
 import WorkspacesIcon from '@mui/icons-material/Workspaces';
+import ViewQuiltIcon from '@mui/icons-material/ViewQuilt';
 // import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import { useTranslation } from 'react-i18next';
 import { LanguageService } from '../../api/LanguageService';
@@ -48,6 +49,7 @@ import EnginesConfiguration from './Engines';
 import { DatabricksOneClickSetup } from '../MemoryBackend';
 import DatabaseManagement from './DatabaseManagement';
 import GroupManagement from './GroupManagement';
+import UIConfigurator from './UIConfigurator';
 import WorkspaceOverview from './WorkspaceOverview';
 import UserPermissionManagement from './UserPermissionManagement';
 // import DSPyConfiguration from './DSPyConfiguration'; // Temporarily disabled
@@ -256,6 +258,13 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
       baseNavItems.push({
         label: t('configuration.tools.workspace', { defaultValue: 'Tools (Workspace)' }),
         icon: <BuildIcon fontSize="small" />,
+        index: currentIndex++,
+        group: 'workspace'
+      });
+      // Predefined UI (Workspace) - structured, on-brand crew output
+      baseNavItems.push({
+        label: t('configuration.uiConfigurator.tab', { defaultValue: 'UI Configurator' }),
+        icon: <ViewQuiltIcon fontSize="small" />,
         index: currentIndex++,
         group: 'workspace'
       });
@@ -684,6 +693,15 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
               return (
                 <ContentPanel key={item.index} value={activeSection} index={item.index}>
                   <ToolsConfiguration mode="workspace" />
+                </ContentPanel>
+              );
+            }
+
+            // Predefined UI - Workspace Settings
+            if (item.label === t('configuration.uiConfigurator.tab', { defaultValue: 'UI Configurator' })) {
+              return (
+                <ContentPanel key={item.index} value={activeSection} index={item.index}>
+                  <UIConfigurator />
                 </ContentPanel>
               );
             }

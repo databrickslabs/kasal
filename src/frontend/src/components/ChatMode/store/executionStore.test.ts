@@ -692,6 +692,23 @@ describe('executionStore - saveSessionState / restoreSessionState / hasActiveExe
     expect(useExecutionStore.getState().previewOwnerSessionId).toBe('sess-S');
   });
 
+  it('restoreSessionState is a no-op while a run is live (owner set)', () => {
+    // a snapshot with a preview exists for the target session...
+    useExecutionStore.setState({ previewContent: preview as any });
+    useExecutionStore.getState().saveSessionState('sess-S');
+    // ...but a run owned by ANOTHER session is live, so restore must not clobber it
+    useExecutionStore.setState({
+      executionOwnerSessionId: 'sess-OTHER',
+      previewContent: null,
+      isExecuting: true,
+    });
+    useExecutionStore.getState().restoreSessionState('sess-S');
+    // early return: the snapshot was NOT applied, live state is preserved
+    expect(useExecutionStore.getState().previewContent).toBeNull();
+    expect(useExecutionStore.getState().isExecuting).toBe(true);
+    expect(useExecutionStore.getState().executionOwnerSessionId).toBe('sess-OTHER');
+  });
+
   it('saveSessionState deletes snapshot when nothing active', () => {
     // first create a snapshot
     useExecutionStore.setState({ isExecuting: true });

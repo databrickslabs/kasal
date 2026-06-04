@@ -428,6 +428,15 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   },
 
   restoreSessionState: (sessionId: string) => {
+    // While ANY run is live (owner set), the single global execution slot holds
+    // that run — don't clobber it on a session switch. Display is already gated
+    // by owner (banner) and previewOwnerSessionId (preview), so a run owned by
+    // another session simply stays hidden here, and returning to the owner keeps
+    // the live "Running crew…" banner. We only restore/reset per-session state
+    // once no run is active.
+    if (get().executionOwnerSessionId) {
+      return;
+    }
     const snap = sessionSnapshots.get(sessionId);
     if (snap) {
       const previewHistory = snap.previewHistory ?? [];

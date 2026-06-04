@@ -21,6 +21,7 @@ from src.api.documentation_embeddings_router import (
     router as documentation_embeddings_router,
 )
 from src.api.engine_config_router import router as engine_config_router
+from src.api.ui_config_router import router as ui_config_router
 from src.api.execution_history_router import router as execution_history_router
 from src.api.execution_logs_router import logs_router as execution_logs_router
 from src.api.execution_logs_router import (
@@ -64,6 +65,7 @@ api_router.include_router(agents_router)
 api_router.include_router(crews_router)
 api_router.include_router(crews_export_router)
 api_router.include_router(databricks_router)
+api_router.include_router(ui_config_router)
 api_router.include_router(databricks_knowledge_router)
 api_router.include_router(powerbi_router)
 api_router.include_router(flows_router)

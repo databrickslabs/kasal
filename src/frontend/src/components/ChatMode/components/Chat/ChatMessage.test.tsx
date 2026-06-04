@@ -33,7 +33,12 @@ vi.mock('../Cards/HelpCard', () => ({
   default: ({ content }: { content: string }) => <div data-testid="help-card">{content}</div>,
 }));
 vi.mock('../Cards/GenieSpaceSelector', () => ({
-  default: ({ value }: { value: string }) => <div data-testid="genie-selector">{value}</div>,
+  default: ({ value, onChange }: { value: string; onChange: (id: string) => void }) => (
+    <div data-testid="genie-selector">
+      {value}
+      <button data-testid="genie-pick" onClick={() => onChange('space-123')}>pick</button>
+    </div>
+  ),
 }));
 
 let toolNameMap: Record<string, string> = {};
@@ -250,6 +255,7 @@ describe('ChatMessage — generation_complete card', () => {
           resultType: 'generation_complete',
           resultData: { agents: [{ name: 'A', tools: ['5'] }], tasks: [] },
         })}
+        onExecuteGenerated={vi.fn()}
       />,
     );
     expect(screen.getByTestId('genie-selector')).toBeInTheDocument();
@@ -262,6 +268,7 @@ describe('ChatMessage — generation_complete card', () => {
           resultType: 'generation_complete',
           resultData: { agents: [], tasks: [{ name: 'T', tools: ['GenieTool'] }] },
         })}
+        onExecuteGenerated={vi.fn()}
       />,
     );
     expect(screen.getByTestId('genie-selector')).toBeInTheDocument();
@@ -311,5 +318,99 @@ describe('ChatMessage — generation_complete card', () => {
     // buttons are disabled (no details) — clicking does nothing
     const agentBtn = screen.getByText('NoDetail').closest('button')!;
     expect(agentBtn).toBeDisabled();
+  });
+});
+
+describe('ChatMessage — save crew bookmark', () => {
+  const genMsg = () =>
+    msg({
+      resultType: 'generation_complete',
+      resultData: { agents: [{ id: 'a1', name: 'A' }], tasks: [{ id: 't1', name: 'T' }] },
+    });
+
+  it('does not render the bookmark when onSaveCrew is not provided', () => {
+    render(<ChatMessage message={genMsg()} />);
+    expect(screen.queryByLabelText(/save crew to catalog/i)).not.toBeInTheDocument();
+  });
+
+  it('does not render the bookmark when there are no agents or tasks', () => {
+    render(
+      <ChatMessage
+        message={msg({ resultType: 'generation_complete', resultData: { agents: [], tasks: [] } })}
+        onSaveCrew={vi.fn()}
+      />,
+    );
+    expect(screen.queryByLabelText(/save crew to catalog/i)).not.toBeInTheDocument();
+  });
+
+  it('saves on click and shows the saved confirmation, then ignores further clicks', async () => {
+    const onSaveCrew = vi.fn().mockResolvedValue({ id: 'c1', name: 'My Crew' });
+    render(<ChatMessage message={genMsg()} onSaveCrew={onSaveCrew} />);
+    const btn = screen.getByLabelText('Save crew to catalog');
+    fireEvent.click(btn);
+    expect(await screen.findByText(/Saved .*My Crew.* to catalog/)).toBeInTheDocument();
+    expect(onSaveCrew).toHaveBeenCalledTimes(1);
+    // now disabled / labelled "Saved" — clicking again is a no-op
+    const savedBtn = screen.getByLabelText('Saved to catalog');
+    expect(savedBtn).toBeDisabled();
+    fireEvent.click(savedBtn);
+    expect(onSaveCrew).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores a second click while a save is in flight', async () => {
+    let resolveSave: (v: { id: string; name: string }) => void = () => {};
+    const onSaveCrew = vi.fn(
+      () => new Promise<{ id: string; name: string }>((res) => { resolveSave = res; }),
+    );
+    render(<ChatMessage message={genMsg()} onSaveCrew={onSaveCrew} />);
+    const btn = screen.getByLabelText('Save crew to catalog');
+    fireEvent.click(btn); // starts saving (button now shows a spinner)
+    fireEvent.click(btn); // in-flight → guard ignores it
+    resolveSave({ id: 'c1', name: 'Done' });
+    expect(await screen.findByText(/Saved .*Done.* to catalog/)).toBeInTheDocument();
+    expect(onSaveCrew).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows an error hint when saving fails', async () => {
+    const onSaveCrew = vi.fn().mockRejectedValue(new Error('boom'));
+    render(<ChatMessage message={genMsg()} onSaveCrew={onSaveCrew} />);
+    fireEvent.click(screen.getByLabelText('Save crew to catalog'));
+    expect(await screen.findByText(/Couldn.t save/i)).toBeInTheDocument();
+    // still re-clickable after an error
+    expect(screen.getByLabelText('Save crew to catalog')).not.toBeDisabled();
+  });
+});
+
+describe('ChatMessage — Genie crew run button', () => {
+  const genieMsg = () =>
+    msg({
+      resultType: 'generation_complete',
+      resultData: { agents: [{ id: 'a1', name: 'A', tools: ['GenieTool'] }], tasks: [] },
+    });
+
+  it('shows the Run button (disabled) until a Genie space is selected, then runs with the space id', () => {
+    const onExecuteGenerated = vi.fn();
+    render(<ChatMessage message={genieMsg()} onExecuteGenerated={onExecuteGenerated} />);
+    const runBtn = screen.getByText(/Select a Genie space to run/).closest('button')!;
+    expect(runBtn).toBeDisabled();
+    // clicking while disabled / no space does nothing
+    fireEvent.click(runBtn);
+    expect(onExecuteGenerated).not.toHaveBeenCalled();
+    // pick a space via the selector's onChange — open it and choose
+    // (GenieSpaceSelector is mocked to expose its value; drive onChange directly)
+    fireEvent.click(screen.getByTestId('genie-pick'));
+    const runBtn2 = screen.getByText('Run crew').closest('button')!;
+    expect(runBtn2).not.toBeDisabled();
+    fireEvent.click(runBtn2);
+    expect(onExecuteGenerated).toHaveBeenCalledWith(expect.anything(), 'space-123');
+    // becomes "Running…" and ignores a second click
+    expect(screen.getByText('Running…')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Running…').closest('button')!);
+    expect(onExecuteGenerated).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not render the Run button when onExecute is not provided', () => {
+    render(<ChatMessage message={genieMsg()} />);
+    expect(screen.queryByText(/Run crew|Select a Genie space/)).not.toBeInTheDocument();
   });
 });

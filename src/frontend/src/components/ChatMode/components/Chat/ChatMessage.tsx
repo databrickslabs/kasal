@@ -27,6 +27,8 @@ interface ChatMessageProps {
   onExecuteCrew?: (plan: PlanData) => void;
   onExecuteFlow?: (flow: FlowData) => void;
   onExecuteGenerated?: (data: GenerationCompleteData, spaceId?: string) => void;
+  /** Save this generated crew's plan to the catalog. Resolves to the saved name. */
+  onSaveCrew?: (data: GenerationCompleteData) => Promise<{ id: string; name: string }>;
 }
 
 /** Resolve a tool identifier (ID or name) to its display name */
@@ -41,6 +43,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
   onExecuteCrew,
   onExecuteFlow,
   onExecuteGenerated,
+  onSaveCrew,
 }) => {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
@@ -128,6 +131,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
           <GenerationCompleteCard
             data={message.resultData as GenerationCompleteData}
             onExecute={onExecuteGenerated}
+            onSaveCrew={onSaveCrew}
           />
         );
       }
@@ -270,24 +274,87 @@ function hasGenieTool(
 const GenerationCompleteCard: React.FC<{
   data: GenerationCompleteData;
   onExecute?: (data: GenerationCompleteData, spaceId?: string) => void;
-}> = ({ data }) => {
+  onSaveCrew?: (data: GenerationCompleteData) => Promise<{ id: string; name: string }>;
+}> = ({ data, onExecute, onSaveCrew }) => {
   const { agents, tasks } = normalizeGenerationData(data);
   const toolNameMap = useAppStore((s) => s.toolNameMap);
   const [selectedSpaceId, setSelectedSpaceId] = useState('');
+  const [ran, setRan] = useState(false);
+  // idle → saving → saved (terminal); error returns to idle with a hint.
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [savedName, setSavedName] = useState('');
+
+  const canSave = Boolean(onSaveCrew) && (agents.length > 0 || tasks.length > 0);
+
+  const handleSave = async () => {
+    // The button only renders when canSave (onSaveCrew present) and is disabled
+    // while saving/once saved, so re-entry is prevented at the DOM level.
+    setSaveState('saving');
+    try {
+      const result = await onSaveCrew!(data);
+      setSavedName(result.name);
+      setSaveState('saved');
+    } catch {
+      setSaveState('error');
+    }
+  };
 
   const showGenieSelector = hasGenieTool(agents, tasks, toolNameMap);
 
   return (
     <div className="mt-3 space-y-3">
-      {/* Section label */}
-      {agents.length > 0 && (
-        <div
-          className="text-[10px] font-semibold uppercase tracking-wider px-1"
-          style={{ color: 'var(--text-muted)' }}
-        >
-          {agents.length} Agent{agents.length > 1 ? 's' : ''}
-        </div>
-      )}
+      {/* Header: agent count + subtle "save to catalog" bookmark */}
+      <div className="flex items-center justify-between px-1">
+        {agents.length > 0 ? (
+          <div
+            className="text-[10px] font-semibold uppercase tracking-wider"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            {agents.length} Agent{agents.length > 1 ? 's' : ''}
+          </div>
+        ) : <span />}
+
+        {canSave && (
+          <div className="flex items-center gap-1.5">
+            {saveState === 'saved' && (
+              <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                Saved “{savedName}” to catalog
+              </span>
+            )}
+            {saveState === 'error' && (
+              <span className="text-[10px]" style={{ color: 'var(--bad, #fb7185)' }}>
+                Couldn’t save — try again
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saveState === 'saving' || saveState === 'saved'}
+              title={saveState === 'saved' ? 'Saved to catalog' : 'Save this crew to the catalog'}
+              aria-label={saveState === 'saved' ? 'Saved to catalog' : 'Save crew to catalog'}
+              className="w-6 h-6 rounded-md flex items-center justify-center transition-colors hover:opacity-70 disabled:cursor-default"
+              style={{ color: saveState === 'saved' ? 'var(--accent)' : 'var(--text-muted)' }}
+            >
+              {saveState === 'saving' ? (
+                <div
+                  className="w-3.5 h-3.5 rounded-full border-2 border-t-transparent animate-spin"
+                  style={{ borderColor: 'var(--border-color)', borderTopColor: 'var(--accent)' }}
+                />
+              ) : (
+                <svg
+                  className="w-4 h-4"
+                  viewBox="0 0 24 24"
+                  fill={saveState === 'saved' ? 'currentColor' : 'none'}
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
+                </svg>
+              )}
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Agent details */}
       {agents.map((agent, i) => (
@@ -309,10 +376,28 @@ const GenerationCompleteCard: React.FC<{
         <TaskRow key={i} task={task} index={i} toolNameMap={toolNameMap} />
       ))}
 
-      {/* Genie Space selector — only shown when GenieTool is in the crew's tools */}
-      {showGenieSelector && (
-        <div className="pt-1">
+      {/* Genie Space selector + Run — only when GenieTool is in the crew's tools.
+          Genie crews aren't auto-run; the user picks a space here then runs. */}
+      {showGenieSelector && onExecute && (
+        <div className="pt-1 space-y-2">
           <GenieSpaceSelector value={selectedSpaceId} onChange={setSelectedSpaceId} />
+          <button
+            type="button"
+            onClick={() => {
+              // Button is disabled until a space is chosen and after it runs,
+              // so a fired click always has a space and hasn't run yet.
+              setRan(true);
+              onExecute(data, selectedSpaceId);
+            }}
+            disabled={!selectedSpaceId || ran}
+            className="w-full flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ backgroundColor: 'var(--accent)' }}
+          >
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+            {ran ? 'Running…' : selectedSpaceId ? 'Run crew' : 'Select a Genie space to run'}
+          </button>
         </div>
       )}
     </div>

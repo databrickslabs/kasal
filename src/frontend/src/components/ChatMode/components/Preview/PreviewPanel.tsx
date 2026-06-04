@@ -1,8 +1,10 @@
 import React, { useRef, useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { parseUiDocument } from '../../utils/uiDocument';
+import UiRenderer from './UiRenderer';
 
-export type PreviewContentType = 'html' | 'json' | 'markdown' | 'text';
+export type PreviewContentType = 'html' | 'json' | 'markdown' | 'text' | 'ui';
 
 export interface PreviewContent {
   type: PreviewContentType;
@@ -124,6 +126,13 @@ export function parsePreviewContent(raw: string): PreviewContent | null {
 
   // Strip markdown code fences that often wrap HTML/JSON output
   const cleaned = stripCodeFences(body);
+
+  // A2UI documents are JSON too, so check before generic JSON detection: an
+  // A2UI doc declares a surface / catalog components and renders via our
+  // brand-consistent renderer instead of a raw JSON table.
+  if (parseUiDocument(cleaned)) {
+    return { type: 'ui', data: cleaned };
+  }
 
   const type = detectContentType(cleaned);
   if (type !== 'text') {
@@ -329,6 +338,12 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
     return null;
   }, [content, displayData]);
 
+  // Parse the A2UI document for the brand-consistent renderer.
+  const uiSurface = useMemo(
+    () => (content.type === 'ui' ? parseUiDocument(displayData) : null),
+    [content, displayData],
+  );
+
   return (
     <aside
       className="flex flex-col h-full"
@@ -392,7 +407,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
             className="text-sm font-medium"
             style={{ color: 'var(--text-primary)' }}
           >
-            {content.title || (content.type === 'html' ? 'Preview' : content.type === 'markdown' ? 'Report' : 'Result')}
+            {content.title || (content.type === 'html' ? 'Preview' : content.type === 'markdown' ? 'Report' : content.type === 'ui' ? 'App' : 'Result')}
           </span>
           <span
             className="text-[10px] px-1.5 py-0.5 rounded font-mono"
@@ -545,6 +560,10 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
               {displayData}
             </ReactMarkdown>
           </div>
+        )}
+
+        {content.type === 'ui' && uiSurface && (
+          <UiRenderer surface={uiSurface} />
         )}
       </div>
     </aside>

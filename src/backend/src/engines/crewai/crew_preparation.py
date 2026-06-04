@@ -415,8 +415,13 @@ class CrewPreparation:
         """
         try:
             from src.engines.crewai.helpers.task_helpers import create_task
+            from src.engines.crewai.helpers.ui_emission import apply_ui_emission
 
             tasks = self.config.get('tasks', [])
+            # Predefined UI Configurator: when enabled for the workspace, append a
+            # "return a UI document" instruction to the final task. Enforced here so
+            # ALL channels (chat, Crew mode, API, schedules) behave consistently.
+            await apply_ui_emission(tasks, self.config.get('group_id'))
             total_tasks = len(tasks)
 
             # Create a dictionary to store tasks by ID for reference

@@ -17,6 +17,18 @@ const SLASH_COMMANDS = [
   { command: '/clear', description: 'Clear chat history' },
 ];
 
+// Per-message output format. "auto" lets the crew infer; the others append a
+// directive so the generated crew + the structured-UI renderer target that type.
+type FormatKey = 'auto' | 'presentation' | 'quiz' | 'dashboard' | 'report' | 'genie';
+const FORMAT_OPTIONS: { key: FormatKey; label: string; directive: string }[] = [
+  { key: 'auto', label: 'Auto format', directive: '' },
+  { key: 'presentation', label: 'Presentation', directive: 'Produce the final result as a slide presentation (a deck of slides).' },
+  { key: 'quiz', label: 'Interactive quiz', directive: 'Produce the final result as an interactive multiple-choice quiz that tracks the score.' },
+  { key: 'dashboard', label: 'Dashboard', directive: 'Produce the final result as a metrics dashboard with KPI tiles and charts.' },
+  { key: 'report', label: 'Report', directive: 'Produce the final result as a structured, readable report.' },
+  { key: 'genie', label: 'Data answer (Genie)', directive: 'Produce the final result as a data answer: a short answer, the result Table, and a chart when useful.' },
+];
+
 interface ChatInputProps {
   onSend: (message: string) => void;
   disabled?: boolean;
@@ -35,11 +47,14 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const [value, setValue] = useState('');
   const [showCommands, setShowCommands] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
+  const [showFormatPicker, setShowFormatPicker] = useState(false);
+  const [format, setFormat] = useState<FormatKey>('auto');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const modelPickerRef = useRef<HTMLDivElement>(null);
+  const formatPickerRef = useRef<HTMLDivElement>(null);
 
   const filteredCommands = SLASH_COMMANDS.filter((cmd) =>
     cmd.command.toLowerCase().startsWith(value.toLowerCase())
@@ -54,18 +69,21 @@ const ChatInput: React.FC<ChatInputProps> = ({
     }
   }, [value, filteredCommands.length]);
 
-  // Close model picker on outside click
+  // Close model / format pickers on outside click
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (modelPickerRef.current && !modelPickerRef.current.contains(e.target as Node)) {
         setShowModelPicker(false);
       }
+      if (formatPickerRef.current && !formatPickerRef.current.contains(e.target as Node)) {
+        setShowFormatPicker(false);
+      }
     };
-    if (showModelPicker) {
+    if (showModelPicker || showFormatPicker) {
       document.addEventListener('mousedown', handleClick);
       return () => document.removeEventListener('mousedown', handleClick);
     }
-  }, [showModelPicker]);
+  }, [showModelPicker, showFormatPicker]);
 
   const handleSend = () => {
     const trimmed = value.trim();
@@ -73,7 +91,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
     setCommandHistory((prev) => [...prev.slice(-50), trimmed]);
     setHistoryIndex(-1);
-    onSend(trimmed);
+    // Slash commands are literal; only natural-language prompts get a format hint.
+    const directive = trimmed.startsWith('/')
+      ? ''
+      : (FORMAT_OPTIONS.find((f) => f.key === format)?.directive || '');
+    onSend(directive ? `${trimmed}\n\n[Output format: ${directive}]` : trimmed);
     setValue('');
     setShowCommands(false);
     // Reset the auto-grown height after sending. The textarea is always mounted
@@ -316,10 +338,62 @@ const ChatInput: React.FC<ChatInputProps> = ({
           />
         </div>
 
-        {/* Bottom row — model selector + send button */}
+        {/* Bottom row — format + model selector + send button */}
         <div className="flex items-center justify-end px-4 py-2.5">
-          {/* Right side — model selector + send */}
+          {/* Right side — format selector + model selector + send */}
           <div className="flex items-center gap-2">
+            {/* Output format selector */}
+            <div className="relative" ref={formatPickerRef}>
+              <button
+                onClick={() => {
+                  setShowFormatPicker((v) => !v);
+                  setShowModelPicker(false);
+                  setShowCommands(false);
+                }}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
+                style={{
+                  color: format === 'auto' ? 'var(--text-secondary)' : 'var(--accent)',
+                  backgroundColor: 'var(--bg-secondary)',
+                }}
+                title="Choose the output format the crew should produce"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+                </svg>
+                <span className="max-w-[120px] truncate">
+                  {FORMAT_OPTIONS.find((f) => f.key === format)?.label}
+                </span>
+                <svg className={`w-3 h-3 transition-transform ${showFormatPicker ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                </svg>
+              </button>
+              {showFormatPicker && (
+                <div
+                  className="absolute bottom-full right-0 mb-1 w-56 rounded-lg shadow-lg overflow-hidden z-50 py-1"
+                  style={{ backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)' }}
+                >
+                  {FORMAT_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.key}
+                      onClick={() => { setFormat(opt.key); setShowFormatPicker(false); }}
+                      className="w-full text-left px-3 py-2 text-xs transition-colors hover:opacity-80 flex items-center justify-between gap-2"
+                      style={{
+                        color: 'var(--text-primary)',
+                        backgroundColor: opt.key === format ? 'var(--bg-secondary)' : 'transparent',
+                      }}
+                    >
+                      <span>{opt.label}</span>
+                      {opt.key === format && (
+                        <svg className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--accent)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                        </svg>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {/* Model selector button */}
             {models.length > 0 && (
               <button
