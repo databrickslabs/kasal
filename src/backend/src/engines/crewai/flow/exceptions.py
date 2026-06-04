@@ -13,7 +13,7 @@ class FlowExecutionError(Exception):
     pass
 
 
-class FlowPausedForApprovalException(Exception):
+class FlowPausedForApprovalException(BaseException):
     """
     Raised when a flow pauses at an HITL gate awaiting human approval.
 

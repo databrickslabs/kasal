@@ -12,7 +12,7 @@ Cached data includes:
 - Default filters (report-level filters)
 """
 
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 from sqlalchemy import Column, Integer, String, Date, DateTime, JSON, Index
 from sqlalchemy.schema import UniqueConstraint
 
@@ -45,7 +45,7 @@ class PowerBISemanticModelCache(Base):
     report_id = Column(String(255), nullable=True)
 
     # Cache validity
-    cached_date = Column(Date, nullable=False)  # Cache valid for this date only
+    cached_date = Column(Date, nullable=False)  # Date the cache was written
 
     # Cached metadata (stored as JSON)
     # Note: Named 'cache_data' instead of 'metadata' to avoid SQLAlchemy reserved name
@@ -77,6 +77,11 @@ class PowerBISemanticModelCache(Base):
         Index('idx_semantic_cache_date', 'cached_date'),
     )
 
-    def is_valid_for_today(self) -> bool:
-        """Check if cache is still valid for today."""
-        return self.cached_date == date.today()
+    def is_valid_for_today(self, cache_ttl_days: int = 1) -> bool:
+        """Check if cache is still valid within the given TTL window.
+
+        Args:
+            cache_ttl_days: How many days back to accept a cached entry (default 1 = today only)
+        """
+        cutoff = date.today() - timedelta(days=cache_ttl_days - 1)
+        return self.cached_date >= cutoff

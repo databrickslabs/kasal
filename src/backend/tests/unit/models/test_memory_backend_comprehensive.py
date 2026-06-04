@@ -97,15 +97,16 @@ class TestMemoryBackend:
 
     def test_memory_backend_columns(self):
         """Test MemoryBackend has expected columns."""
+        # Updated for app-modes: enable_short_term/long_term/entity/relationship_retrieval
+        # were removed; cognitive_config was added.
         expected_columns = [
             'id', 'group_id', 'name', 'description', 'backend_type',
-            'databricks_config', 'lakebase_config', 'enable_short_term',
-            'enable_long_term', 'enable_entity', 'enable_relationship_retrieval',
+            'databricks_config', 'lakebase_config', 'cognitive_config',
             'custom_config', 'is_active', 'is_default', 'created_at', 'updated_at'
         ]
-        
+
         actual_columns = list(MemoryBackend.__table__.columns.keys())
-        
+
         for col in expected_columns:
             assert col in actual_columns
 
@@ -145,12 +146,8 @@ class TestMemoryBackend:
     def test_memory_backend_default_values(self):
         """Test MemoryBackend column default values."""
         columns = MemoryBackend.__table__.columns
-        
-        # Boolean defaults
-        assert columns['enable_short_term'].default.arg is True
-        assert columns['enable_long_term'].default.arg is True
-        assert columns['enable_entity'].default.arg is True
-        assert columns['enable_relationship_retrieval'].default.arg is False
+
+        # Updated for app-modes: enable_* fields removed, only is_active/is_default remain
         assert columns['is_active'].default.arg is True
         assert columns['is_default'].default.arg is False
 
@@ -173,6 +170,7 @@ class TestMemoryBackend:
 
     def test_memory_backend_to_dict_minimal(self):
         """Test MemoryBackend to_dict with minimal data."""
+        # Updated for app-modes: enable_* fields removed, cognitive_config added
         backend = MemoryBackend()
         backend.id = "test-id"
         backend.group_id = "test-group"
@@ -181,10 +179,7 @@ class TestMemoryBackend:
         backend.backend_type = MemoryBackendTypeEnum.DEFAULT
         backend.databricks_config = None
         backend.lakebase_config = None
-        backend.enable_short_term = True
-        backend.enable_long_term = True
-        backend.enable_entity = True
-        backend.enable_relationship_retrieval = False
+        backend.cognitive_config = None
         backend.custom_config = None
         backend.is_active = True
         backend.is_default = False
@@ -201,10 +196,7 @@ class TestMemoryBackend:
             "backend_type": "default",
             "databricks_config": None,
             "lakebase_config": None,
-            "enable_short_term": True,
-            "enable_long_term": True,
-            "enable_entity": True,
-            "enable_relationship_retrieval": False,
+            "cognitive_config": None,
             "custom_config": None,
             "is_active": True,
             "is_default": False,
@@ -216,6 +208,7 @@ class TestMemoryBackend:
 
     def test_memory_backend_to_dict_full(self):
         """Test MemoryBackend to_dict with full data."""
+        # Updated for app-modes: enable_* fields removed, cognitive_config added
         now = datetime(2023, 1, 1, 12, 0, 0)
         backend = MemoryBackend()
         backend.id = "test-id"
@@ -225,10 +218,7 @@ class TestMemoryBackend:
         backend.backend_type = MemoryBackendTypeEnum.DATABRICKS
         backend.databricks_config = {"endpoint": "test"}
         backend.lakebase_config = {"catalog": "test_catalog"}
-        backend.enable_short_term = False
-        backend.enable_long_term = False
-        backend.enable_entity = False
-        backend.enable_relationship_retrieval = True
+        backend.cognitive_config = {"depth": 5}
         backend.custom_config = {"custom": "value"}
         backend.is_active = False
         backend.is_default = True
@@ -245,10 +235,7 @@ class TestMemoryBackend:
             "backend_type": "databricks",
             "databricks_config": {"endpoint": "test"},
             "lakebase_config": {"catalog": "test_catalog"},
-            "enable_short_term": False,
-            "enable_long_term": False,
-            "enable_entity": False,
-            "enable_relationship_retrieval": True,
+            "cognitive_config": {"depth": 5},
             "custom_config": {"custom": "value"},
             "is_active": False,
             "is_default": True,
@@ -272,109 +259,109 @@ class TestMemoryBackend:
 
     def test_memory_backend_to_config_dict_default(self):
         """Test MemoryBackend to_config_dict with default backend."""
+        # Updated for app-modes: to_config_dict() no longer includes enable_* fields
         backend = MemoryBackend()
         backend.backend_type = MemoryBackendTypeEnum.DEFAULT
-        backend.enable_short_term = True
-        backend.enable_long_term = False
-        backend.enable_entity = True
-        backend.enable_relationship_retrieval = False
         backend.databricks_config = None
+        backend.lakebase_config = None
+        backend.cognitive_config = None
         backend.custom_config = None
-        
+
         result = backend.to_config_dict()
-        
-        expected = {
-            "backend_type": "default",
-            "enable_short_term": True,
-            "enable_long_term": False,
-            "enable_entity": True,
-            "enable_relationship_retrieval": False,
-        }
-        
-        assert result == expected
+
+        assert result == {"backend_type": "default"}
 
     def test_memory_backend_to_config_dict_databricks(self):
         """Test MemoryBackend to_config_dict with Databricks backend."""
-        databricks_config = {"endpoint": "test", "index": "test-index"}
+        databricks_config = {"endpoint": "test", "memory_index": "test-index"}
         backend = MemoryBackend()
         backend.backend_type = MemoryBackendTypeEnum.DATABRICKS
-        backend.enable_short_term = True
-        backend.enable_long_term = True
-        backend.enable_entity = False
-        backend.enable_relationship_retrieval = True
         backend.databricks_config = databricks_config
+        backend.lakebase_config = None
+        backend.cognitive_config = None
         backend.custom_config = None
-        
+
         result = backend.to_config_dict()
-        
-        expected = {
+
+        assert result == {
             "backend_type": "databricks",
-            "enable_short_term": True,
-            "enable_long_term": True,
-            "enable_entity": False,
-            "enable_relationship_retrieval": True,
             "databricks_config": databricks_config,
         }
-        
-        assert result == expected
 
     def test_memory_backend_to_config_dict_with_custom_config(self):
         """Test MemoryBackend to_config_dict with custom config."""
         custom_config = {"custom_setting": "value", "another": 42}
         backend = MemoryBackend()
         backend.backend_type = MemoryBackendTypeEnum.DEFAULT
-        backend.enable_short_term = True
-        backend.enable_long_term = True
-        backend.enable_entity = True
-        backend.enable_relationship_retrieval = False
         backend.databricks_config = None
+        backend.lakebase_config = None
+        backend.cognitive_config = None
         backend.custom_config = custom_config
-        
+
         result = backend.to_config_dict()
-        
-        expected = {
+
+        assert result == {
             "backend_type": "default",
-            "enable_short_term": True,
-            "enable_long_term": True,
-            "enable_entity": True,
-            "enable_relationship_retrieval": False,
             "custom_config": custom_config,
         }
-        
-        assert result == expected
 
     def test_memory_backend_to_config_dict_databricks_no_config(self):
-        """Test MemoryBackend to_config_dict with Databricks but no config."""
+        """Test MemoryBackend to_config_dict with Databricks but no config dict."""
         backend = MemoryBackend()
         backend.backend_type = MemoryBackendTypeEnum.DATABRICKS
-        backend.enable_short_term = True
-        backend.enable_long_term = True
-        backend.enable_entity = True
-        backend.enable_relationship_retrieval = False
         backend.databricks_config = None
+        backend.lakebase_config = None
+        backend.cognitive_config = None
         backend.custom_config = None
-        
+
         result = backend.to_config_dict()
-        
-        expected = {
-            "backend_type": "databricks",
-            "enable_short_term": True,
-            "enable_long_term": True,
-            "enable_entity": True,
-            "enable_relationship_retrieval": False,
-        }
-        
-        assert result == expected
+
+        # No databricks_config present when config is None
+        assert result == {"backend_type": "databricks"}
 
     def test_memory_backend_to_config_dict_none_backend_type(self):
         """Test MemoryBackend to_config_dict with None backend_type."""
         backend = MemoryBackend()
         backend.backend_type = None
-        backend.enable_short_term = True
-        backend.enable_long_term = True
-        backend.enable_entity = True
-        backend.enable_relationship_retrieval = False
-        
+        backend.databricks_config = None
+        backend.lakebase_config = None
+        backend.cognitive_config = None
+        backend.custom_config = None
+
         result = backend.to_config_dict()
-        
+
         assert result["backend_type"] == "default"
+
+    def test_memory_backend_to_config_dict_with_cognitive_config(self):
+        """Test MemoryBackend to_config_dict with cognitive config."""
+        cognitive_config = {"depth": 5, "consolidation_threshold": 0.8}
+        backend = MemoryBackend()
+        backend.backend_type = MemoryBackendTypeEnum.DEFAULT
+        backend.databricks_config = None
+        backend.lakebase_config = None
+        backend.cognitive_config = cognitive_config
+        backend.custom_config = None
+
+        result = backend.to_config_dict()
+
+        assert result == {
+            "backend_type": "default",
+            "cognitive_config": cognitive_config,
+        }
+
+    def test_memory_backend_to_config_dict_lakebase(self):
+        """Test MemoryBackend to_config_dict with Lakebase backend."""
+        lakebase_config = {"memory_table": "crew_memory"}
+        backend = MemoryBackend()
+        backend.backend_type = MemoryBackendTypeEnum.LAKEBASE
+        backend.databricks_config = None
+        backend.lakebase_config = lakebase_config
+        backend.cognitive_config = None
+        backend.custom_config = None
+
+        result = backend.to_config_dict()
+
+        assert result == {
+            "backend_type": "lakebase",
+            "lakebase_config": lakebase_config,
+        }

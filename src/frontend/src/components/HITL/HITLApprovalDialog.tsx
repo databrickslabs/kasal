@@ -5,7 +5,7 @@
  * Allows users to quickly approve or reject a pending HITL gate.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -24,6 +24,7 @@ import {
   MenuItem,
   Divider,
   IconButton,
+  Paper,
 } from '@mui/material';
 import {
   CheckCircle as ApproveIcon,
@@ -32,13 +33,20 @@ import {
   AccessTime as TimeIcon,
   Description as DescriptionIcon,
   Refresh as RefreshIcon,
+  EditNote as EditNoteIcon,
   Fullscreen as FullscreenIcon,
 } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
 import {
   HITLService,
   HITLApprovalResponse,
   HITLRejectionAction,
 } from '../../api/HITLService';
+import UCMVResultViewer, { isUCMVResult, UCMVResult } from '../Jobs/UCMVResultViewer';
+import { GenieSpaceConfigSelector, GenieSpaceConfig } from '../Common/GenieSpaceConfigSelector';
+import { runService } from '../../api/ExecutionHistoryService';
+import SaveIcon from '@mui/icons-material/Save';
+import DownloadIcon from '@mui/icons-material/Download';
 import { CrewOutputRenderer } from './CrewOutputRenderer';
 
 interface HITLApprovalDialogProps {
@@ -58,6 +66,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
   onClose,
   onActionComplete,
 }) => {
+  const navigate = useNavigate();
   const [approval, setApproval] = useState<HITLApprovalResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -70,6 +79,10 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
   const [actionLoading, setActionLoading] = useState(false);
   const [outputFullScreen, setOutputFullScreen] = useState(false);
 
+  // UCMV edit state
+  const [editedUCMV, setEditedUCMV] = useState<UCMVResult | null>(null);
+  const [editedGenieConfig, setEditedGenieConfig] = useState<GenieSpaceConfig | null>(null);
+
   // Fetch approval for the execution
   const fetchApproval = useCallback(async () => {
     if (!executionId) return;
@@ -81,6 +94,19 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
       const status = await HITLService.getExecutionHITLStatus(executionId);
       if (status.pending_approval) {
         setApproval(status.pending_approval);
+        // Pre-persist UCMV output as soon as the dialog opens so the Validator
+        // can find it even if the user approves immediately without editing.
+        if (status.pending_approval.previous_crew_output) {
+          try {
+            const parsed = JSON.parse(status.pending_approval.previous_crew_output);
+            if (isUCMVResult(parsed)) {
+              runService.updateExecutionResult(
+                status.pending_approval.execution_id,
+                parsed as unknown as Record<string, unknown>
+              ).catch(() => { /* non-blocking */ });
+            }
+          } catch { /* not UCMV, skip */ }
+        }
       } else {
         setApproval(null);
         setError('No pending approval found for this execution');
@@ -101,6 +127,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
       setComment('');
       setRejectionReason('');
       setRejectionAction(HITLRejectionAction.REJECT);
+      setEditedUCMV(null);
     }
   }, [open, executionId, fetchApproval]);
 
@@ -111,6 +138,19 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
 
     setActionLoading(true);
     try {
+      // If the previous crew output is a UCMV result, persist it to ucmv_yaml_edits
+      // BEFORE approving so the UCMV Validator can find it in the next flow step.
+      if (approval.previous_crew_output) {
+        try {
+          const parsed = JSON.parse(approval.previous_crew_output);
+          if (isUCMVResult(parsed)) {
+            await runService.updateExecutionResult(
+              approval.execution_id,
+              (editedUCMV ?? parsed) as unknown as Record<string, unknown>
+            );
+          }
+        } catch { /* not UCMV, skip */ }
+      }
       await HITLService.approveGate(approval.id, {
         comment: comment || undefined,
       });
@@ -138,6 +178,48 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reject');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Handle Save & Approve for edited Genie Space config
+  const handleSaveAndApproveGenieConfig = async () => {
+    if (!approval || !editedGenieConfig) return;
+
+    setActionLoading(true);
+    try {
+      // Save edited Genie config to checkpoint_data.edited_config
+      // The HITL gate reads this and passes it as previous_output to the next crew
+      await runService.updateExecutionResult(approval.execution_id, editedGenieConfig as unknown as Record<string, unknown>);
+      await HITLService.approveGate(approval.id, {
+        comment: 'Genie Space config reviewed and edited',
+      });
+      onActionComplete?.('approve');
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save and approve');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Handle Save & Approve for edited UCMV output
+  const handleSaveAndApproveUCMV = async () => {
+    if (!approval || !editedUCMV) return;
+
+    setActionLoading(true);
+    try {
+      // Save edited UCMV result to checkpoint_data.edited_config
+      await runService.updateExecutionResult(approval.execution_id, editedUCMV as unknown as Record<string, unknown>);
+      // Approve the gate
+      await HITLService.approveGate(approval.id, {
+        comment: 'UCMV output reviewed and edited via UCMV Viewer',
+      });
+      onActionComplete?.('approve');
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save and approve');
     } finally {
       setActionLoading(false);
     }
@@ -324,19 +406,88 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
                 <DescriptionIcon fontSize="small" />
                 Previous Crew Output:
               </Typography>
-              <IconButton
-                size="small"
-                onClick={() => setOutputFullScreen(true)}
-                aria-label="View output full screen"
-                title="View full screen"
-              >
-                <FullscreenIcon fontSize="small" />
-              </IconButton>
+              <Box display="flex" alignItems="center" gap={0.5}>
+                <IconButton
+                  size="small"
+                  title="Download output"
+                  onClick={() => {
+                    const raw = approval.previous_crew_output ?? '';
+                    const triggerDownload = (content: string, name: string, mime = 'application/octet-stream') => {
+                      const blob = new Blob([content], { type: mime });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url; a.download = name; a.click();
+                      URL.revokeObjectURL(url);
+                    };
+                    try {
+                      const parsed = JSON.parse(raw);
+                      if (parsed && typeof parsed === 'object' && 'yaml' in parsed) {
+                        // UCMV/Validator output — download each view as individual .yml
+                        const yamlDict = parsed.yaml as Record<string, string>;
+                        const entries = Object.entries(yamlDict);
+                        entries.forEach(([key, yamlContent], i) => {
+                          setTimeout(() => {
+                            triggerDownload(yamlContent, `${key}.yml`, 'text/yaml');
+                          }, i * 100);
+                        });
+                      } else {
+                        triggerDownload(JSON.stringify(parsed, null, 2), 'step_output.json', 'application/json');
+                      }
+                    } catch {
+                      triggerDownload(raw, 'step_output.txt', 'text/plain');
+                    }
+                  }}
+                >
+                  <DownloadIcon fontSize="small" />
+                </IconButton>
+                <IconButton
+                  size="small"
+                  onClick={() => setOutputFullScreen(true)}
+                  aria-label="View output full screen"
+                  title="View full screen"
+                >
+                  <FullscreenIcon fontSize="small" />
+                </IconButton>
+              </Box>
             </Box>
-            <CrewOutputRenderer
-              content={approval.previous_crew_output}
-              maxHeight={320}
-            />
+            {(() => {
+              // Try to detect UCMV result shape for structured rendering
+              try {
+                const parsed = JSON.parse(approval.previous_crew_output);
+                if (isUCMVResult(parsed)) {
+                  return (
+                    <Paper variant="outlined" sx={{ p: 1.5, maxHeight: 500, overflow: 'auto', bgcolor: 'background.default' }}>
+                      <UCMVResultViewer
+                        result={editedUCMV ?? parsed}
+                        editable
+                        onResultChange={setEditedUCMV}
+                      />
+                    </Paper>
+                  );
+                }
+                // Detect Genie Space Config output (has space_title + text_instructions)
+                if (parsed && typeof parsed === 'object' && 'space_title' in parsed && 'text_instructions' in parsed) {
+                  const genieConfig = editedGenieConfig ?? (parsed as GenieSpaceConfig);
+                  return (
+                    <Paper variant="outlined" sx={{ p: 2, maxHeight: 600, overflow: 'auto', bgcolor: 'background.default' }}>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                        Review and edit the auto-generated Genie Space configuration before approving:
+                      </Typography>
+                      <GenieSpaceConfigSelector
+                        value={genieConfig}
+                        onChange={(config) => setEditedGenieConfig(config)}
+                      />
+                    </Paper>
+                  );
+                }
+              } catch { /* not JSON, fall through to raw display */ }
+              return (
+                <CrewOutputRenderer
+                  content={approval.previous_crew_output}
+                  maxHeight={320}
+                />
+              );
+            })()}
 
             {/* Full-screen view of the crew output */}
             <Dialog
@@ -370,6 +521,47 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
             </Dialog>
           </Box>
         )}
+
+        {/* Review in Config Editor — detect pipeline_config in previous_crew_output */}
+        {(() => {
+          if (!approval?.previous_crew_output) return null;
+          const configKeys = ['join_key_map', 'enrichment_joins', 'switch_decompositions', 'filter_sets', 'measure_resolutions'];
+          let configData: Record<string, unknown> | null = null;
+
+          // Try parsing previous_crew_output as JSON containing config keys
+          try {
+            const parsed = JSON.parse(approval.previous_crew_output);
+            if (parsed?.proposed_config) {
+              configData = parsed.proposed_config;
+            } else if (configKeys.some(k => k in (parsed || {}))) {
+              configData = parsed;
+            }
+          } catch { /* not JSON, skip */ }
+
+          if (!configData) return null;
+
+          return (
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<EditNoteIcon />}
+              onClick={() => {
+                onClose();
+                navigate('/config-editor', {
+                  state: {
+                    config: configData,
+                    source: `HITL Review: ${approval.previous_crew_name || 'Unknown crew'}`,
+                    jobId: approval.execution_id,
+                    approvalId: approval.id,
+                  },
+                });
+              }}
+              sx={{ mb: 2 }}
+            >
+              Review &amp; Edit in Config Editor
+            </Button>
+          );
+        })()}
 
         {/* Metadata */}
         <Box display="flex" flexWrap="wrap" gap={2} sx={{ fontSize: '0.85rem' }}>
@@ -469,24 +661,54 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
         >
           Reject
         </Button>
-        <Button
-          variant="contained"
-          color="success"
-          startIcon={<ApproveIcon />}
-          onClick={() => setActionType('approve')}
-          disabled={approval.is_expired}
-        >
-          Approve
-        </Button>
+        {editedUCMV ? (
+          <Button
+            variant="contained"
+            color="success"
+            startIcon={actionLoading ? <CircularProgress size={16} /> : <SaveIcon />}
+            onClick={handleSaveAndApproveUCMV}
+            disabled={actionLoading || approval.is_expired}
+          >
+            Save &amp; Approve
+          </Button>
+        ) : editedGenieConfig ? (
+          <Button
+            variant="contained"
+            color="success"
+            startIcon={actionLoading ? <CircularProgress size={16} /> : <SaveIcon />}
+            onClick={handleSaveAndApproveGenieConfig}
+            disabled={actionLoading || approval.is_expired}
+          >
+            Save Config &amp; Approve
+          </Button>
+        ) : (
+          <Button
+            variant="contained"
+            color="success"
+            startIcon={<ApproveIcon />}
+            onClick={() => setActionType('approve')}
+            disabled={approval.is_expired}
+          >
+            Approve
+          </Button>
+        )}
       </>
     );
   };
+
+  // Detect UCMV output to size dialog appropriately
+  const hasUCMVOutput = useMemo(() => {
+    if (!approval?.previous_crew_output) return false;
+    try {
+      return isUCMVResult(JSON.parse(approval.previous_crew_output));
+    } catch { return false; }
+  }, [approval?.previous_crew_output]);
 
   return (
     <Dialog
       open={open}
       onClose={onClose}
-      maxWidth="lg"
+      maxWidth={hasUCMVOutput ? 'lg' : 'sm'}
       fullWidth
       PaperProps={{
         sx: { minHeight: 300 },

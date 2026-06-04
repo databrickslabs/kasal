@@ -442,6 +442,9 @@ def run_crew_in_process(
                 user_token = crew_config.get("user_token")
                 if user_token:
                     UserContext.set_user_token(user_token)
+                    # Also set for LiteLLM callback fallback (contextvars don't propagate to callback threads)
+                    from src.core.llm_manager import set_subprocess_user_token
+                    set_subprocess_user_token(user_token)
                     subprocess_logger.info(
                         f"[SUBPROCESS] ✓ UserContext initialized with group_id={group_id} and OBO token"
                     )
@@ -799,10 +802,18 @@ def run_crew_in_process(
                     async_logger.info(
                         f"[SUBPROCESS] OTel pipeline: provider has {proc_count} span processor(s) for {execution_id}"
                     )
-                except ImportError:
-                    async_logger.debug(
-                        "[SUBPROCESS] OTel packages not available, skipping"
-                    )
+                except ImportError as otel_import_err:
+                    if otel_provider is None:
+                        async_logger.debug(
+                            "[SUBPROCESS] OTel SDK packages not available, skipping"
+                        )
+                    else:
+                        async_logger.warning(
+                            "[SUBPROCESS] OTel processor setup ImportError "
+                            "(provider created but processors NOT attached — traces will be lost): %s",
+                            otel_import_err,
+                            exc_info=True,
+                        )
                 except Exception as otel_err:
                     async_logger.warning(
                         f"[SUBPROCESS] OTel initialization error (non-fatal): {otel_err}"
@@ -1089,6 +1100,7 @@ def run_crew_in_process(
                         logging.getLogger("src.services.otel_tracing.db_exporter"),
                         logging.getLogger("src.services.otel_tracing.otel_config"),
                         logging.getLogger("src.services.otel_tracing.sse_processor"),
+                        logging.getLogger("src.services.otel_tracing.event_bridge"),
                     ]
 
                     for logger_obj in loggers_to_configure:
@@ -1903,16 +1915,39 @@ class ProcessCrewExecutor:
                 self._relay_task_events(log_queue, execution_id)
             )
 
-            # Wait for the process to complete with optional timeout
+            # Wait for the process to complete, draining result_queue concurrently.
+            #
+            # CRITICAL: Never call process.join() before draining result_queue.
+            # The subprocess calls result_queue.put(result) which uses a pipe
+            # internally. On Linux the pipe buffer is ~65 KB. If the result is
+            # larger (e.g. a 149 KB LLM response), put() BLOCKS until the
+            # reader consumes data — but if the main process is sitting on
+            # process.join(), nobody reads → classic deadlock.
+            #
+            # Fix: drain the result_queue in a background thread while joining.
+            import threading as _threading
+
+            drained_result: list = []
+
+            def _drain_queue():
+                """Read result_queue in a background thread so the pipe never fills."""
+                try:
+                    r = result_queue.get(timeout=(timeout or 3700))
+                    drained_result.append(r)
+                except Exception:
+                    pass
+
+            drain_thread = _threading.Thread(target=_drain_queue, daemon=True)
+            drain_thread.start()
+
+            loop = asyncio.get_event_loop()
             if timeout:
-                # Use asyncio to wait with timeout
-                loop = asyncio.get_event_loop()
                 future = loop.run_in_executor(None, process.join, timeout)
                 await asyncio.wait_for(future, timeout=timeout)
             else:
-                # Wait indefinitely
-                loop = asyncio.get_event_loop()
                 await loop.run_in_executor(None, process.join)
+
+            drain_thread.join(timeout=10)  # give it a moment to finish
 
             # Stop the relay task now that the subprocess has finished
             relay_task.cancel()
@@ -1940,8 +1975,11 @@ class ProcessCrewExecutor:
                     "message": f"Execution was stopped by user",
                     "exit_code": process.exitcode,
                 }
+            elif drained_result:
+                # Result was pre-drained from queue by background thread (avoids pipe deadlock)
+                result = drained_result[0]
             elif not result_queue.empty():
-                # Process completed and returned a result
+                # Fallback: result wasn't drained yet, read now
                 result = result_queue.get_nowait()
                 logger.info(
                     f"Process {process.pid} completed with result status: {result.get('status', 'UNKNOWN')}"

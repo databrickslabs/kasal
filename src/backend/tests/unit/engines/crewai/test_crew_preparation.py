@@ -896,54 +896,57 @@ class TestCrewPreparation:
     async def test_execute_success(self, crew_preparation):
         """Test successful crew execution."""
         mock_crew = MagicMock()
-        mock_crew.kickoff = AsyncMock(return_value="execution result")
+        # crew_preparation.py now calls await self.crew.kickoff_async()
+        mock_crew.kickoff_async = AsyncMock(return_value="execution result")
         crew_preparation.crew = mock_crew
-        
+
         mock_processed_output = {"result": "processed"}
-        
+
         with patch('src.engines.crewai.crew_preparation.process_crew_output', return_value=mock_processed_output), \
              patch('src.engines.crewai.crew_preparation.is_data_missing', return_value=False):
-            
+
             result = await crew_preparation.execute()
-            
+
             assert result == mock_processed_output
-    
+
     @pytest.mark.asyncio
     async def test_execute_without_crew(self, crew_preparation):
         """Test execution when crew is not prepared."""
         crew_preparation.crew = None
-        
+
         result = await crew_preparation.execute()
         assert result == {"error": "Crew not prepared"}
-    
+
     @pytest.mark.asyncio
     async def test_execute_with_missing_data_warning(self, crew_preparation):
         """Test execution with missing data warning."""
         mock_crew = MagicMock()
-        mock_crew.kickoff = AsyncMock(return_value="execution result")
+        # crew_preparation.py now calls await self.crew.kickoff_async()
+        mock_crew.kickoff_async = AsyncMock(return_value="execution result")
         crew_preparation.crew = mock_crew
-        
+
         mock_processed_output = {"result": "processed"}
-        
+
         with patch('src.engines.crewai.crew_preparation.process_crew_output', return_value=mock_processed_output), \
              patch('src.engines.crewai.crew_preparation.is_data_missing', return_value=True), \
              patch('src.engines.crewai.crew_preparation.logger') as mock_logger:
-            
+
             result = await crew_preparation.execute()
-            
+
             assert result == mock_processed_output
             mock_logger.warning.assert_called_with("Crew execution completed but data may be missing")
-    
+
     @pytest.mark.asyncio
     async def test_execute_exception_handling(self, crew_preparation):
         """Test execution handles exceptions."""
         mock_crew = MagicMock()
-        mock_crew.kickoff = AsyncMock(side_effect=Exception("Execution error"))
+        # crew_preparation.py now calls await self.crew.kickoff_async()
+        mock_crew.kickoff_async = AsyncMock(side_effect=Exception("Execution error"))
         crew_preparation.crew = mock_crew
-        
+
         with patch('src.engines.crewai.crew_preparation.handle_crew_error') as mock_handle_error:
             result = await crew_preparation.execute()
-            
+
             assert result == {"error": "Execution error"}
             mock_handle_error.assert_called_once()
     

@@ -1,130 +1,130 @@
 """
-Unit tests for disabled memory backend configuration behavior.
+Unit tests for memory backend schema configuration.
 
-Tests the schema and configuration logic when all memory types are disabled.
+Updated for app-modes: The concept of "disabled configuration" via enable_short_term/
+enable_long_term/enable_entity flags has been removed. Now memory is either:
+- DEFAULT backend (CrewAI uses its built-in LanceDB)
+- DATABRICKS backend (Databricks Vector Search, unified index)
+- LAKEBASE backend (pgvector, unified table)
+
+The system falls back to DEFAULT when no active backend is configured.
 """
 import pytest
 from src.schemas.memory_backend import (
-    MemoryBackendConfig, 
+    MemoryBackendConfig,
     MemoryBackendType,
-    DatabricksMemoryConfig
+    DatabricksMemoryConfig,
+    LakebaseMemoryConfig,
+    CognitiveMemoryConfig,
 )
 
 
-class TestDisabledMemoryConfiguration:
-    """Test cases for disabled memory backend configuration."""
-    
-    def test_all_memory_types_disabled_is_disabled_config(self):
-        """Test that a config with all memory types disabled is considered disabled."""
+class TestMemoryBackendConfigSchema:
+    """Test MemoryBackendConfig Pydantic schema validation."""
+
+    def test_default_backend_config(self):
+        """Default backend requires no extra configuration."""
+        config = MemoryBackendConfig(backend_type=MemoryBackendType.DEFAULT)
+        assert config.backend_type == MemoryBackendType.DEFAULT
+        assert config.databricks_config is None
+        assert config.lakebase_config is None
+        assert config.cognitive_config is None
+        assert config.custom_config is None
+
+    def test_databricks_backend_config_with_required_fields(self):
+        """Databricks backend requires endpoint_name and memory_index."""
         config = MemoryBackendConfig(
             backend_type=MemoryBackendType.DATABRICKS,
             databricks_config=DatabricksMemoryConfig(
-                workspace_url="https://test.databricks.com",
-                endpoint_name="test-endpoint",
-                document_endpoint_name="test-endpoint",
-                short_term_index="test.short_term",
-                long_term_index="test.long_term",
-                entity_index="test.entity",
-                document_index="test.document"
+                endpoint_name="my-endpoint",
+                memory_index="catalog.schema.unified",
             ),
-            enable_short_term=False,
-            enable_long_term=False,
-            enable_entity=False
         )
-        
-        # This configuration should be considered "disabled"
-        is_disabled = (
-            not config.enable_short_term and 
-            not config.enable_long_term and 
-            not config.enable_entity
-        )
-        
-        assert is_disabled is True
-    
-    def test_some_memory_types_enabled_is_not_disabled(self):
-        """Test that a config with some memory types enabled is not disabled."""
-        config = MemoryBackendConfig(
-            backend_type=MemoryBackendType.DATABRICKS,
-            databricks_config=DatabricksMemoryConfig(
-                workspace_url="https://test.databricks.com",
-                endpoint_name="test-endpoint",
-                document_endpoint_name="test-endpoint",
-                short_term_index="test.short_term",
-                long_term_index="test.long_term",
-                entity_index="test.entity",
-                document_index="test.document"
-            ),
-            enable_short_term=True,
-            enable_long_term=False,
-            enable_entity=True
-        )
-        
-        # This configuration should NOT be considered "disabled"
-        is_disabled = (
-            not config.enable_short_term and 
-            not config.enable_long_term and 
-            not config.enable_entity
-        )
-        
-        assert is_disabled is False
-    
-    def test_memory_backend_config_validation(self):
-        """Test that memory backend configs validate properly."""
-        # Test valid config
-        config = MemoryBackendConfig(
-            backend_type=MemoryBackendType.DATABRICKS,
-            databricks_config=DatabricksMemoryConfig(
-                workspace_url="https://test.databricks.com",
-                endpoint_name="test-endpoint",
-                document_endpoint_name="test-endpoint",
-                short_term_index="test.short_term",
-                long_term_index="test.long_term",
-                entity_index="test.entity",
-                document_index="test.document"
-            ),
-            enable_short_term=True,
-            enable_long_term=True,
-            enable_entity=True
-        )
-        
         assert config.backend_type == MemoryBackendType.DATABRICKS
-        assert config.databricks_config.workspace_url == "https://test.databricks.com"
-        assert config.enable_short_term is True
-    
-    def test_disabled_config_should_use_default_memory(self):
-        """Test the logic for when a disabled config should fall back to default."""
+        assert config.databricks_config is not None
+        assert config.databricks_config.endpoint_name == "my-endpoint"
+        assert config.databricks_config.memory_index == "catalog.schema.unified"
+
+    def test_lakebase_backend_config(self):
+        """Lakebase backend requires memory_table."""
+        config = MemoryBackendConfig(
+            backend_type=MemoryBackendType.LAKEBASE,
+            lakebase_config=LakebaseMemoryConfig(
+                memory_table="crew_memory",
+            ),
+        )
+        assert config.backend_type == MemoryBackendType.LAKEBASE
+        assert config.lakebase_config is not None
+        assert config.lakebase_config.memory_table == "crew_memory"
+
+    def test_cognitive_config_is_optional(self):
+        """cognitive_config is optional in all backend types."""
         config = MemoryBackendConfig(
             backend_type=MemoryBackendType.DATABRICKS,
             databricks_config=DatabricksMemoryConfig(
-                workspace_url="https://test.databricks.com",
-                endpoint_name="test-endpoint",
-                document_endpoint_name="test-endpoint",
-                short_term_index="test.short_term",
-                long_term_index="test.long_term",
-                entity_index="test.entity",
-                document_index="test.document"
+                endpoint_name="ep",
+                memory_index="cat.sch.unified",
             ),
-            enable_short_term=False,
-            enable_long_term=False,
-            enable_entity=False
+            cognitive_config=CognitiveMemoryConfig(
+                semantic_weight=0.5,
+                recency_weight=0.3,
+                importance_weight=0.2,
+            ),
         )
-        
-        # When all memory types are disabled, the system should:
-        # 1. Recognize this as a "disabled configuration"
-        # 2. Fall back to default memory (ChromaDB + SQLite)
-        # 3. Store data in /Library/Application Support/kasal_default_[crew_id]/
-        
-        # Check if this is a disabled configuration
-        is_disabled_config = (
-            config.backend_type == MemoryBackendType.DATABRICKS and
-            not config.enable_short_term and
-            not config.enable_long_term and
-            not config.enable_entity
+        assert config.cognitive_config is not None
+        assert config.cognitive_config.semantic_weight == 0.5
+
+    def test_default_backend_is_system_fallback(self):
+        """DEFAULT backend signals the system to use CrewAI's built-in LanceDB."""
+        config = MemoryBackendConfig()  # defaults to DEFAULT
+        assert config.backend_type == MemoryBackendType.DEFAULT
+        # System uses this to determine "no custom backend configured"
+        is_using_default = config.backend_type == MemoryBackendType.DEFAULT
+        assert is_using_default is True
+
+    def test_databricks_config_requires_memory_index(self):
+        """DatabricksMemoryConfig raises ValidationError without memory_index."""
+        with pytest.raises(Exception):  # pydantic ValidationError
+            DatabricksMemoryConfig(endpoint_name="ep")  # memory_index missing
+
+    def test_databricks_config_workspace_url_optional(self):
+        """workspace_url is optional (can be sourced from env/OBO)."""
+        config = DatabricksMemoryConfig(
+            endpoint_name="ep",
+            memory_index="cat.sch.unified",
+            # workspace_url omitted
         )
-        
-        assert is_disabled_config is True
-        
-        # In the actual implementation, when is_disabled_config is True:
-        # - The system ignores the Databricks configuration
-        # - Falls back to default ChromaDB + SQLite memory
-        # - Creates storage in the default location
+        assert config.workspace_url is None
+
+    def test_databricks_config_with_all_auth_fields(self):
+        """DatabricksMemoryConfig accepts all authentication options."""
+        config = DatabricksMemoryConfig(
+            endpoint_name="ep",
+            memory_index="cat.sch.unified",
+            workspace_url="https://example.databricks.com",
+            auth_type="pat",
+            personal_access_token="dapi-test-token",
+        )
+        assert config.personal_access_token == "dapi-test-token"
+        assert config.auth_type == "pat"
+
+    def test_lakebase_memory_table_default(self):
+        """LakebaseMemoryConfig has 'crew_memory' as default table name."""
+        config = LakebaseMemoryConfig()
+        assert config.memory_table == "crew_memory"
+
+    def test_memory_backend_type_values(self):
+        """MemoryBackendType has the expected string values."""
+        assert MemoryBackendType.DEFAULT == "default"
+        assert MemoryBackendType.DATABRICKS == "databricks"
+        assert MemoryBackendType.LAKEBASE == "lakebase"
+
+    def test_config_custom_config_is_dict(self):
+        """custom_config accepts arbitrary key-value pairs."""
+        config = MemoryBackendConfig(
+            backend_type=MemoryBackendType.DEFAULT,
+            custom_config={"custom_key": "custom_value", "number": 42},
+        )
+        assert config.custom_config is not None
+        assert config.custom_config["custom_key"] == "custom_value"
+        assert config.custom_config["number"] == 42

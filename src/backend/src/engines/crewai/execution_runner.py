@@ -347,8 +347,13 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
                         logger.info(f"Passing user inputs to crew.kickoff: {user_inputs}")
                     else:
                         logger.info("No user inputs found after filtering system inputs")
-                
-                
+
+                # SECURITY: Scan user inputs for prompt injection patterns (log-only, non-blocking)
+                from src.engines.crewai.security.scanner_pipeline import security_scanner
+                for _input_key, _input_val in user_inputs.items():
+                    if isinstance(_input_val, str):
+                        security_scanner.scan(_input_val, context=f"user_input:{_input_key}:{execution_id}")
+
                 # Call crew start callback
                 crew_callbacks['on_start']()
                 
@@ -601,7 +606,16 @@ async def run_crew_in_process(
                 logger.info(f"Passing user inputs to process execution: {user_inputs}")
             else:
                 logger.info("No user inputs found after filtering system inputs")
-        
+
+        # SECURITY: Scan user inputs for prompt injection patterns (log-only, non-blocking)
+        try:
+            from src.engines.crewai.security.scanner_pipeline import security_scanner
+            for _input_key, _input_val in user_inputs.items():
+                if isinstance(_input_val, str):
+                    security_scanner.scan(_input_val, context=f"user_input:{_input_key}:{execution_id}")
+        except Exception as _pi_err:
+            logger.warning("[SECURITY] Prompt injection scan failed: %s", _pi_err)
+
         # Use ProcessCrewExecutor for isolated execution
         logger.info(f"[run_crew_in_process] Starting process-based execution for {execution_id}")
 
@@ -705,6 +719,38 @@ async def run_crew_in_process(
             else:
                 logger.error(f"[run_crew_in_process] Failed to update status for {execution_id} to {final_status}")
 
-        except Exception as cleanup_error:
+        except BaseException as cleanup_error:
+            # Catch BaseException (not just Exception) so CancelledError is also caught.
+            # If the asyncio task is cancelled, the DB write would otherwise be skipped
+            # silently, leaving the status stuck at RUNNING.
             logger.error(f"Error during cleanup for process execution {execution_id}: {str(cleanup_error)}")
             logger.error(f"Cleanup error traceback: {traceback.format_exc()}")
+            # For CancelledError: use a thread with its own event loop to write the status
+            # (cannot await in a cancelled asyncio task)
+            if isinstance(cleanup_error, asyncio.CancelledError):
+                try:
+                    import concurrent.futures
+                    from src.utils.asyncio_utils import execute_db_operation_with_fresh_engine
+                    from src.services.execution_status_service import ExecutionStatusService
+
+                    async def _recovery():
+                        async def _op(session):
+                            from src.repositories.execution_history_repository import ExecutionHistoryRepository
+                            repo = ExecutionHistoryRepository(session)
+                            rec = await repo.get_execution_by_job_id(execution_id)
+                            if rec and rec.status and rec.status.upper() == 'RUNNING':
+                                await ExecutionStatusService.update_status(
+                                    job_id=execution_id,
+                                    status=final_status,
+                                    message=final_message + ' (task-cancel recovery)',
+                                )
+                        await execute_db_operation_with_fresh_engine(_op)
+
+                    def _run_recovery():
+                        asyncio.run(_recovery())
+
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                        ex.submit(_run_recovery).result(timeout=30)
+                except Exception as rec_err:
+                    logger.error(f"[run_crew_in_process] CancelledError recovery also failed: {rec_err}")
+                raise  # re-raise CancelledError so the task is properly marked cancelled

@@ -73,6 +73,13 @@ class FlowStateManager:
         """
         state_updates = {}
 
+        # SECURITY: Scan inter-crew output for injection patterns (log-only, non-blocking)
+        try:
+            from src.engines.crewai.security.scanner_pipeline import security_scanner
+            security_scanner.scan(crew_output, context="flow_state:parse_crew_output")
+        except Exception as _sec_err:
+            logger.debug("[SECURITY] Flow injection scan skipped: %s", _sec_err)
+
         try:
             # Try to parse the entire output as JSON first
             try:

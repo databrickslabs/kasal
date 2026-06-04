@@ -15,6 +15,7 @@ from src.utils.databricks_auth import (
     is_scope_error,
     get_databricks_auth_headers
 )
+from src.utils.telemetry import get_user_agent_header, KasalProduct
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
@@ -281,7 +282,8 @@ class DatabricksVolumeRepository:
 
             headers = {
                 "Authorization": f"Bearer {token}",
-                "Content-Type": "application/octet-stream"
+                "Content-Type": "application/octet-stream",
+                **get_user_agent_header(KasalProduct.VOLUME),
             }
 
             logger.info(f"[REST API] PUT {upload_url}")
@@ -360,7 +362,8 @@ class DatabricksVolumeRepository:
             download_url = f"{workspace_url}/api/2.0/fs/files{file_path}"
 
             headers = {
-                "Authorization": f"Bearer {token}"
+                "Authorization": f"Bearer {token}",
+                **get_user_agent_header(KasalProduct.VOLUME),
             }
 
             logger.info(f"[REST API] GET {download_url}")

@@ -92,6 +92,14 @@ class FlowBuilder:
             # Log the flow configuration for debugging
             logger.info(f"Flow configuration for processing: {flow_config}")
 
+            # Inject top-level edges and nodes into flow_config so that
+            # downstream code (HITL gate detection, checkpoint checks) can find them.
+            # The flow JSON stores edges/nodes at the top level, not inside flow_config.
+            if 'edges' not in flow_config and flow_data.get('edges'):
+                flow_config['edges'] = flow_data['edges']
+            if 'nodes' not in flow_config and flow_data.get('nodes'):
+                flow_config['nodes'] = flow_data['nodes']
+
             # Check edges for checkpoint flag and enable persistence if any edge has checkpoint=true
             # This allows checkpoint/resume functionality when users enable checkpoints on edges
             edges = flow_data.get('edges', [])
@@ -1225,6 +1233,15 @@ class FlowBuilder:
                                 process=Process.sequential
                             )
                             logger.info(f"Crew instance '{route_crew_name}' created for route")
+
+                            # SECURITY: Same assembly-time checks as all other crew creation paths.
+                            try:
+                                from src.engines.crewai.security.tool_capability_manifest import (
+                                    run_crew_security_checks as _run_security_checks,
+                                )
+                                _run_security_checks(crew, context=f"flow router crew '{route_crew_name}'")
+                            except Exception as _sec_err:
+                                logger.debug("[SECURITY] Flow router crew security checks skipped: %s", _sec_err)
 
                             # CRITICAL: Set up execution callbacks like regular crew execution
                             # Extract job_id directly from callbacks dict

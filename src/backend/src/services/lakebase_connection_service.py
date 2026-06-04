@@ -14,6 +14,7 @@ import time
 from typing import Optional, Tuple, Dict, Any
 
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.useragent import with_product
 from sqlalchemy import create_engine, text, event
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine
 from sqlalchemy.pool import NullPool
@@ -21,6 +22,7 @@ from sqlalchemy.engine import Engine
 
 from src.core.base_service import BaseService
 from src.utils.databricks_auth import get_workspace_client
+from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +77,8 @@ class LakebaseConnectionService(BaseService):
             # after — same pattern as mlflow_setup.py.
             if client_id and client_secret and host:
                 logger.info("[LAKEBASE AUTH] Using SPN OAuth (client credentials) — required for postgres scope")
+                # Set custom User-Agent for Lakebase operations
+                with_product(f"{KASAL_BASE}_{KasalProduct.LAKEBASE}", VERSION)
                 _pat_backup = {}
                 for _k in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY"):
                     if _k in os.environ:
@@ -92,6 +96,8 @@ class LakebaseConnectionService(BaseService):
 
             # Local dev fallback — PAT/OBO via generic auth chain
             logger.info("[LAKEBASE AUTH] No SPN credentials, falling back to PAT/OBO (local dev)")
+            # Set custom User-Agent for Lakebase operations
+            with_product(f"{KASAL_BASE}_{KasalProduct.LAKEBASE}", VERSION)
             self._workspace_client = await get_workspace_client(self.user_token)
             if not self._workspace_client:
                 raise ValueError(

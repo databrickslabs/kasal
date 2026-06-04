@@ -778,7 +778,11 @@ async def seed_task(session: AsyncSession, task_data: Dict[str, Any]) -> None:
 
 async def seed_crew(session: AsyncSession, crew_data: Dict[str, Any]) -> None:
     """Seed a single crew if it doesn't exist."""
-    crew_id = uuid.UUID(crew_data["id"]) if isinstance(crew_data["id"], str) else crew_data["id"]
+    try:
+        crew_id = uuid.UUID(crew_data["id"]) if isinstance(crew_data["id"], str) else crew_data["id"]
+    except ValueError:
+        # Non-UUID string ID — generate a deterministic UUID from it
+        crew_id = uuid.uuid5(uuid.NAMESPACE_DNS, crew_data["id"])
 
     result = await session.execute(
         select(Crew).where(Crew.id == crew_id)

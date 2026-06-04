@@ -69,19 +69,21 @@ def _make_backend(
     created_at=None,
     databricks_config=None,
     group_id="test-group",
-    enable_short_term=True,
-    enable_long_term=True,
-    enable_entity=True,
+    cognitive_config=None,
     custom_config=None,
 ):
-    """Create a mock MemoryBackend model object."""
+    """Create a mock MemoryBackend model object.
+
+    Updated for app-modes: uses memory_index (not short_term_index) and
+    removed enable_short_term/enable_long_term/enable_entity fields.
+    """
     backend = SimpleNamespace(
         is_active=is_active,
         backend_type=backend_type,
         created_at=created_at or datetime(2024, 6, 1),
         databricks_config=databricks_config or {
             "endpoint_name": "test-endpoint",
-            "short_term_index": "catalog.schema.short_term",
+            "memory_index": "catalog.schema.crew_memory",
             "document_index": "catalog.schema.documents",
             "workspace_url": "https://example.com",
             "embedding_dimension": 1024,
@@ -91,9 +93,7 @@ def _make_backend(
             "document_endpoint_name": None,
         },
         group_id=group_id,
-        enable_short_term=enable_short_term,
-        enable_long_term=enable_long_term,
-        enable_entity=enable_entity,
+        cognitive_config=cognitive_config,
         custom_config=custom_config,
     )
     return backend
@@ -140,11 +140,14 @@ def _make_doc_embedding_model(
 
 
 def _make_databricks_config_object(**overrides):
-    """Create a SimpleNamespace mimicking DatabricksMemoryConfig as an object."""
+    """Create a SimpleNamespace mimicking DatabricksMemoryConfig as an object.
+
+    Updated for app-modes: uses memory_index (not short_term_index).
+    """
     defaults = dict(
         endpoint_name="test-endpoint",
         document_endpoint_name=None,
-        short_term_index="catalog.schema.short_term",
+        memory_index="catalog.schema.crew_memory",
         document_index="catalog.schema.documents",
         workspace_url="https://example.com",
         embedding_dimension=1024,
@@ -380,12 +383,12 @@ class TestGetDatabricksStorage:
         assert svc._databricks_storage is mock_storage_instance
 
     @pytest.mark.asyncio
-    async def test_derives_index_name_from_short_term_when_no_document_index(self):
-        """When no document_index, derive from short_term_index."""
+    async def test_derives_index_name_from_memory_index_when_no_document_index(self):
+        """When no document_index, derive documentation_embeddings from memory_index."""
         svc = _make_service()
         db_config = _make_databricks_config_object(
             document_index=None,
-            short_term_index="catalog.schema.short_term",
+            memory_index="catalog.schema.crew_memory",
         )
         svc._memory_config = _make_memory_config(databricks_config=db_config)
         svc._check_databricks_config = AsyncMock(return_value=True)
@@ -412,7 +415,7 @@ class TestGetDatabricksStorage:
         dict_config = {
             "endpoint_name": "test-endpoint",
             "document_index": "catalog.schema.dict_docs",
-            "short_term_index": "catalog.schema.short_term",
+            "memory_index": "catalog.schema.crew_memory",
             "workspace_url": "https://example.com",
             "embedding_dimension": 1024,
             "personal_access_token": "dapi-test",
@@ -515,12 +518,12 @@ class TestGetDatabricksStorage:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_fallback_index_name_when_no_short_term_index(self):
-        """When both document_index and short_term_index are missing, use default name."""
+    async def test_fallback_index_name_when_no_memory_index(self):
+        """When both document_index and memory_index are missing/empty, use default name."""
         svc = _make_service()
         db_config = _make_databricks_config_object(
             document_index=None,
-            short_term_index="",
+            memory_index="",
         )
         svc._memory_config = _make_memory_config(databricks_config=db_config)
         svc._check_databricks_config = AsyncMock(return_value=True)
@@ -540,12 +543,12 @@ class TestGetDatabricksStorage:
         assert call_kwargs["index_name"] == "documentation_embeddings"
 
     @pytest.mark.asyncio
-    async def test_dict_config_without_document_index_derives_from_short_term(self):
-        """When dict config has no document_index, derive from short_term_index."""
+    async def test_dict_config_without_document_index_derives_from_memory_index(self):
+        """When dict config has no document_index, derive from memory_index."""
         svc = _make_service()
         dict_config = {
             "endpoint_name": "ep",
-            "short_term_index": "cat.sch.st",
+            "memory_index": "cat.sch.crew_memory",
             "workspace_url": "https://example.com",
             "embedding_dimension": 1024,
             "personal_access_token": None,
@@ -573,12 +576,12 @@ class TestGetDatabricksStorage:
         assert call_kwargs["index_name"] == "cat.sch.documentation_embeddings"
 
     @pytest.mark.asyncio
-    async def test_dict_config_empty_short_term_index_uses_default(self):
-        """When dict config has empty short_term_index, use bare default name."""
+    async def test_dict_config_empty_memory_index_uses_default(self):
+        """When dict config has empty memory_index, use bare default name."""
         svc = _make_service()
         dict_config = {
             "endpoint_name": "ep",
-            "short_term_index": "",
+            "memory_index": "",
             "workspace_url": "https://example.com",
             "embedding_dimension": 1024,
             "personal_access_token": None,

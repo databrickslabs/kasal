@@ -754,6 +754,23 @@ export class RunService {
     this.runsCache = null;
   }
 
+  /**
+   * Update the result data for an execution by job_id.
+   * Used by the Config Editor to persist edited pipeline configs back to the DB.
+   */
+  public async updateExecutionResult(
+    jobId: string,
+    result: Record<string, unknown>
+  ): Promise<{ success: boolean; job_id: string; updated_at: string }> {
+    const response = await apiClient.patch<{
+      success: boolean;
+      job_id: string;
+      updated_at: string;
+    }>(`/executions/${jobId}/result`, { result });
+    this.invalidateRunsCache();
+    return response.data;
+  }
+
   // Public method to manually refresh API availability status
   public resetApiAvailability(): void {
     this.apiAvailable = null;

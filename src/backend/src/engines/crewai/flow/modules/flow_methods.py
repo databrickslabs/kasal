@@ -432,6 +432,18 @@ class FlowMethodFactory:
             crew = Crew(**crew_kwargs)
             logger.info(f"Crew instance '{crew_name}' created successfully with {len(task_list)} tasks, kwargs: {list(crew_kwargs.keys())}")
 
+            # SECURITY: Run all assembly-time security checks (spotlighting, trifecta,
+            # mixed-task anti-pattern, destructive tools).  Flow crews are built here
+            # directly — they bypass CrewPreparation — so we must call the shared helper
+            # explicitly to ensure identical protection on both execution paths.
+            try:
+                from src.engines.crewai.security.tool_capability_manifest import (
+                    run_crew_security_checks as _run_security_checks,
+                )
+                _run_security_checks(crew, context=f"flow crew '{crew_name}'")
+            except Exception as _sec_err:
+                logger.debug("[SECURITY] Flow crew security checks skipped: %s", _sec_err)
+
             # Set up execution callbacks
             job_id = None
             if callbacks:
@@ -513,6 +525,43 @@ class FlowMethodFactory:
                         self.state[method_name] = serializable_result
                         self.state[crew_name] = serializable_result
                         logger.info(f"📦 Stored crew output in state['{method_name}'] and state['{crew_name}'] for checkpoint support")
+
+                        # ── CI/CD artifact aggregation ─────────────────────────
+                        # If this crew produced a cicd_download_url, append it to
+                        # the shared _cicd_artifacts list in the flow state so
+                        # backend_flow.py can inject ALL artifacts into the final
+                        # result (not just the last crew's output).
+                        try:
+                            _parsed_result = None
+                            if isinstance(serializable_result, dict):
+                                _parsed_result = serializable_result
+                            elif isinstance(serializable_result, str) and serializable_result.strip().startswith('{'):
+                                import json as _json
+                                _parsed_result = _json.loads(serializable_result)
+
+                            if _parsed_result and isinstance(_parsed_result, dict):
+                                _url = _parsed_result.get('cicd_download_url')
+                                if _url:
+                                    _artifact = {
+                                        'cicd_download_url': _url,
+                                        'cicd_type': _parsed_result.get('cicd_type', ''),
+                                        'cicd_name': _parsed_result.get('cicd_name', ''),
+                                    }
+                                    if 'cicd_serialized_space' in _parsed_result:
+                                        _artifact['cicd_serialized_space'] = _parsed_result['cicd_serialized_space']
+
+                                    # Initialise or extend the shared list
+                                    existing = self.state.get('_cicd_artifacts', [])
+                                    if not isinstance(existing, list):
+                                        existing = []
+                                    # Deduplicate by URL
+                                    if not any(a.get('cicd_download_url') == _url for a in existing):
+                                        existing.append(_artifact)
+                                    self.state['_cicd_artifacts'] = existing
+                                    logger.info(f"📥 [CI/CD] Captured artifact from '{crew_name}': {_artifact.get('cicd_type')} — {_url}")
+                        except Exception as _ce:
+                            logger.debug(f"[CI/CD] Could not capture artifact from '{crew_name}': {_ce}")
+                        # ── end CI/CD aggregation ──────────────────────────────
 
                 return serializable_result
             except asyncio.TimeoutError:
@@ -600,34 +649,24 @@ class FlowMethodFactory:
             previous_output_context = ""
 
             if results:
-                # Get the first agent to determine context limits
-                first_agent = listener_tasks[0].agent if listener_tasks else None
-
-                # Get model's context window and max output tokens using ModelConfigService
-                context_window_tokens, max_output_tokens = await get_model_context_limits(first_agent, group_context) if first_agent else (128000, 16000)
-
-                # Calculate available input budget (subtract output reservation)
-                available_input_tokens = context_window_tokens - max_output_tokens
-
-                # Allocate 60% of available input for previous output
-                # This leaves 40% for system prompts, tools, conversation history, and safety buffer
-                max_context_tokens = int(available_input_tokens * 0.6)
-
-                # Convert tokens to characters (using 3.5 chars/token for safety)
-                # This conservative ratio accounts for code and structured data
-                max_context_length = int(max_context_tokens * 3.5)
-
-                logger.info(f"Model limits: context={context_window_tokens} tokens, max_output={max_output_tokens} tokens")
-                logger.info(f"Available input: {available_input_tokens} tokens, allocating {max_context_tokens} tokens ({max_context_length} chars) for previous output")
-
-                # Create a concise context string to inject into task descriptions
-                # Use extract_final_answer to get only the final answer, not the full thinking process
                 previous_output_str = extract_final_answer(results)
-                if len(previous_output_str) > max_context_length:
-                    previous_output_context = f"\n\nContext from previous step:\n{previous_output_str[:max_context_length]}...\n(Output truncated for brevity)"
+                full_len = len(previous_output_str)
+
+                # For large outputs (>2K chars), skip task-description injection entirely.
+                # The data is already injected directly into tool._default_config (below),
+                # so the LLM doesn't need to see it — it just needs to call the tool.
+                # Injecting large context causes LLM timeouts (297s) with no benefit.
+                MAX_CONTEXT_CHARS = 2_000
+
+                if full_len > MAX_CONTEXT_CHARS:
+                    previous_output_context = (
+                        f"\n\nContext from previous step: {full_len:,} chars of data are "
+                        f"pre-loaded into your tool's config_json parameter. "
+                        f"Call the tool without passing config_json — it already has the data."
+                    )
                 else:
                     previous_output_context = f"\n\nContext from previous step:\n{previous_output_str}"
-                logger.info(f"📤 Injecting previous output context into task descriptions ({len(previous_output_context)} chars)")
+                logger.info(f"📤 Context injection: {len(previous_output_context)} chars in task description (original: {full_len:,} chars)")
 
             # Create new Task objects with modified descriptions
             for task in listener_tasks:
@@ -776,6 +815,15 @@ class FlowMethodFactory:
             crew = Crew(**crew_kwargs)
             logger.info(f"Crew instance '{listener_crew_name}' created for listener, kwargs: {list(crew_kwargs.keys())}")
 
+            # SECURITY: Same assembly-time checks as starting-point crews.
+            try:
+                from src.engines.crewai.security.tool_capability_manifest import (
+                    run_crew_security_checks as _run_security_checks,
+                )
+                _run_security_checks(crew, context=f"flow listener crew '{listener_crew_name}'")
+            except Exception as _sec_err:
+                logger.debug("[SECURITY] Flow listener crew security checks skipped: %s", _sec_err)
+
             # Set up execution callbacks
             job_id = None
             if callbacks:
@@ -817,6 +865,96 @@ class FlowMethodFactory:
                     logger.info(f"📊 Listener LLM Configuration: {llm_info}")
 
                 logger.info(f"📝 Listener tasks: {len(runtime_tasks)}")
+
+                # ── Inject previous crew output into tool _default_config ──
+                # Use the most recent previous crew output from flow state.
+                # When multiple crews are chained, `results` may contain stale
+                # output from an earlier crew (passed through HITL gates).
+                # The flow state stores each crew's output by name and by
+                # listener index — use the latest one.
+                _inject_source = None
+                if results:
+                    _inject_source = extract_final_answer(results)
+                # Also check flow state for a more recent output from the
+                # immediately preceding crew (stored at listener_N keys)
+                if hasattr(self, 'state') and isinstance(self.state, dict):
+                    # Find the highest listener_N key that has data
+                    _latest_listener = None
+                    for _sk, _sv in self.state.items():
+                        if _sk.startswith('listener_') and _sv:
+                            idx = _sk.replace('listener_', '')
+                            if idx.isdigit():
+                                if _latest_listener is None or int(idx) > _latest_listener[0]:
+                                    _latest_listener = (int(idx), str(_sv))
+                    if _latest_listener and _latest_listener[1]:
+                        _candidate = _latest_listener[1]
+                        # Extract raw string from CrewOutput if needed
+                        if hasattr(_candidate, 'raw'):
+                            _candidate = _candidate.raw
+                        _candidate = str(_candidate) if not isinstance(_candidate, str) else _candidate
+                        # Prefer the state output if it contains UCMV data (yaml key)
+                        # or is from a more recent crew than what results provided
+                        _is_ucmv_output = '"yaml"' in _candidate[:500] or "'yaml'" in _candidate[:500]
+                        _is_different = _inject_source is None or _candidate != _inject_source
+                        if _is_different and (_is_ucmv_output or len(_candidate) > len(_inject_source or '')):
+                            logger.info(
+                                f"📥 Using flow state listener_{_latest_listener[0]} output "
+                                f"({len(_candidate):,} chars, has_yaml={_is_ucmv_output}) "
+                                f"instead of results ({len(_inject_source or ''):,} chars)"
+                            )
+                            _inject_source = _candidate
+
+                if _inject_source:
+                    try:
+                        import json as _json
+                        first_result_str = _inject_source
+                        prev_data = _json.loads(first_result_str) if first_result_str.strip().startswith('{') else None
+                        if prev_data and isinstance(prev_data, dict):
+                            # Detect pipeline config shape (from Config Proposer / Config Editor)
+                            is_pipeline_config = any(
+                                k in prev_data for k in ('join_key_map', 'enrichment_joins', 'filter_sets', 'measure_resolutions')
+                            )
+                            injected_count = 0
+                            for agent in agents:
+                                for tool in (agent.tools or []):
+                                    if hasattr(tool, '_default_config') and isinstance(tool._default_config, dict):
+                                        # If previous output is a pipeline config and tool has config_json,
+                                        # inject ONLY when user hasn't already provided a config override
+                                        if is_pipeline_config and 'config_json' in tool._default_config:
+                                            existing_config = tool._default_config.get('config_json') or ''
+                                            if existing_config and len(existing_config) > 10:
+                                                logger.info(
+                                                    f"⏭️ Skipping pipeline config injection into {type(tool).__name__}.config_json "
+                                                    f"— user-provided config already present ({len(existing_config):,} chars)"
+                                                )
+                                            else:
+                                                tool._default_config['config_json'] = first_result_str
+                                                injected_count += 1
+                                                logger.info(f"📥 Injected pipeline config ({len(first_result_str):,} chars) into {type(tool).__name__}.config_json")
+                                        elif 'ucmv_output' in tool._default_config and 'yaml' in prev_data:
+                                            # Skip injection if tool already has manual yaml_specs_json override
+                                            has_manual_yaml = bool(
+                                                tool._default_config.get('yaml_specs_json') and
+                                                tool._default_config['yaml_specs_json'] not in ('{}', None, '')
+                                            )
+                                            if has_manual_yaml:
+                                                logger.info(f"⏭️ Skipping UCMV output injection into {type(tool).__name__} — yaml_specs_json override already set")
+                                            else:
+                                                # UCMV Generator output → Validator/Deployer: inject full output as ucmv_output
+                                                tool._default_config['ucmv_output'] = first_result_str
+                                                injected_count += 1
+                                                logger.info(f"📥 Injected UCMV output ({len(first_result_str):,} chars) into {type(tool).__name__}.ucmv_output")
+                                        else:
+                                            # Generic injection: inject matching keys
+                                            for key, value in prev_data.items():
+                                                if key in tool._default_config:
+                                                    tool._default_config[key] = value if isinstance(value, str) else _json.dumps(value)
+                                                    injected_count += 1
+                            if injected_count > 0:
+                                logger.info(f"📥 Total: injected {injected_count} key(s) from previous output into tool _default_config(s)")
+                    except (_json.JSONDecodeError, Exception) as inject_err:
+                        logger.debug(f"Previous output is not injectable JSON (ok): {inject_err}")
+
                 logger.info("⏱️ Calling listener crew.kickoff_async() with 10 minute timeout...")
 
                 result = await asyncio.wait_for(crew.kickoff_async(), timeout=600.0)
@@ -1199,7 +1337,24 @@ class FlowMethodFactory:
                     logger.info(f"   Approved at: {approved_for_gate.responded_at}")
                     logger.info("   Passing through to next step...")
                     logger.info("="*80)
-                    # Return the previous output to continue the flow
+
+                    # Check if the user edited the config in the Config Editor.
+                    # If so, pass the edited version to the next crew instead of
+                    # the original crew output.
+                    try:
+                        from src.repositories.execution_history_repository import ExecutionHistoryRepository
+                        exec_repo = ExecutionHistoryRepository(session)
+                        execution = await exec_repo.get_execution_by_job_id(job_id)
+                        if execution and execution.checkpoint_data:
+                            edited_config = execution.checkpoint_data.get("edited_config")
+                            if edited_config:
+                                import json
+                                logger.info(f"   📝 Found edited_config in checkpoint_data — using user edits")
+                                return json.dumps(edited_config)
+                    except Exception as e:
+                        logger.warning(f"   Could not check for edited_config: {e}")
+
+                    # No edited config — pass original output
                     return previous_output
 
             # Get previous crew name and output

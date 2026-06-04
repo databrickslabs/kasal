@@ -22,8 +22,12 @@ from contextlib import asynccontextmanager
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.useragent import with_product
+from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
 
 from src.core.logger import LoggerManager
+from src.utils.databricks_auth import get_current_databricks_user, get_workspace_client
+from src.utils.telemetry import get_application_name
 
 logger_manager = LoggerManager.get_instance()
 logger = logging.getLogger(__name__)
@@ -86,6 +90,7 @@ class LakebaseSessionFactory:
                     if _k in os.environ:
                         _pat_backup[_k] = os.environ.pop(_k)
                 try:
+                    with_product(f"{KASAL_BASE}_{KasalProduct.LAKEBASE}", VERSION)
                     self._workspace_client = WorkspaceClient(
                         host=host,
                         client_id=client_id,
@@ -313,7 +318,8 @@ class LakebaseSessionFactory:
                         # type and the vector_cosine_ops opclass live in public,
                         # so HNSW indexes and the embedding column only resolve
                         # when public is searchable alongside the kasal schema.
-                        "search_path": "kasal, public"
+                        "search_path": "kasal, public",
+                        "application_name": get_application_name()  # Kasal/0.1.0
                     }
                 },
                 **pool_kwargs

@@ -261,6 +261,9 @@ class CrewDeploymentService:
             ServedEntityInput,
             AutoCaptureConfigInput
         )
+        from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
+        from databricks.sdk.useragent import with_product
+        with_product(f"{KASAL_BASE}_{KasalProduct.DEPLOYMENT}", VERSION)
 
         w = WorkspaceClient()
 

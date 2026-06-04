@@ -415,6 +415,43 @@ class BackendFlow:
 
                 logger.info(f"Flow result processed, type: {type(result_value)}")
 
+                # ── CI/CD artifact aggregation ─────────────────────────────────
+                # flow_methods.py accumulates cicd_download_url entries from every
+                # crew into state['_cicd_artifacts'] as the flow runs.  Read that
+                # list here and inject it into result_value so ShowResult shows
+                # download buttons for ALL artifacts (Genie Space + Dashboard),
+                # not just the last crew's output.
+                try:
+                    cicd_artifacts: List[Dict[str, Any]] = []
+                    if hasattr(crewai_flow, 'state') and crewai_flow.state is not None:
+                        try:
+                            cicd_artifacts = crewai_flow.state.get('_cicd_artifacts') or []
+                        except Exception:
+                            cicd_artifacts = []
+
+                    if cicd_artifacts:
+                        if isinstance(result_value, dict):
+                            result_value['_cicd_all'] = cicd_artifacts
+                        elif isinstance(result_value, str):
+                            try:
+                                _rv = json.loads(result_value)
+                                _rv['_cicd_all'] = cicd_artifacts
+                                result_value = json.dumps(_rv, indent=2)
+                            except Exception:
+                                result_value = json.dumps(
+                                    {'_result': result_value, '_cicd_all': cicd_artifacts},
+                                    indent=2
+                                )
+                        logger.info(
+                            f"[BackendFlow] Injected {len(cicd_artifacts)} CI/CD artifacts "
+                            f"into flow result: {[a.get('cicd_type') for a in cicd_artifacts]}"
+                        )
+                    else:
+                        logger.info("[BackendFlow] No CI/CD artifacts found in flow state.")
+                except Exception as _cicd_err:
+                    logger.warning(f"[BackendFlow] CI/CD artifact injection failed: {_cicd_err}")
+                # ── end CI/CD aggregation ──────────────────────────────────────
+
                 # Extract flow_uuid (state.id) for checkpoint/resume functionality
                 # This is CrewAI's internal state identifier when using @persist
                 flow_uuid = None
