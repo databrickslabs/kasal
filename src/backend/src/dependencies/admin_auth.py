@@ -82,7 +82,6 @@ async def _create_user_from_forwarded_email(session: AsyncSession, email: str) -
         user = User(
             username=username,
             email=email,
-            hashed_password="auto_generated_from_forwarded_email",  # Placeholder password
             role=default_role,
             status=UserStatus.ACTIVE
         )

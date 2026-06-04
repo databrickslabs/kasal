@@ -3,10 +3,17 @@ Pydantic schemas for group management API.
 
 These schemas define the request and response models for group-related endpoints.
 """
+import os
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
+from pydantic import BaseModel, Field, EmailStr, ConfigDict, TypeAdapter, field_validator
 from src.models.enums import GroupStatus, GroupUserRole, GroupUserStatus
+
+
+def _is_local_dev() -> bool:
+    """Local-dev environments issue synthetic emails (e.g. dev@localhost) that
+    have no TLD. Mirror the ENVIRONMENT convention used in admin_auth."""
+    return os.getenv("ENVIRONMENT", "development").lower() in ("development", "dev", "local")
 
 
 class GroupBase(BaseModel):
@@ -58,8 +65,22 @@ class GroupUserBase(BaseModel):
 
 class GroupUserCreateRequest(BaseModel):
     """Schema for assigning a user to a group."""
-    user_email: EmailStr = Field(..., description="Email of user to assign to group")
+    user_email: str = Field(..., description="Email of user to assign to group")
     role: GroupUserRole = Field(GroupUserRole.OPERATOR, description="Role to assign to user")
+
+    @field_validator("user_email")
+    @classmethod
+    def validate_user_email(cls, v: str) -> str:
+        """Strict RFC email validation in production / Databricks Apps; in local
+        dev also accept synthetic no-TLD emails (e.g. dev@localhost) that the app
+        itself issues, so locally-created users can be assigned to workspaces."""
+        v = (v or "").strip()
+        if _is_local_dev():
+            local, sep, domain = v.partition("@")
+            if not sep or not local or not domain:
+                raise ValueError("value is not a valid email address")
+            return v
+        return str(TypeAdapter(EmailStr).validate_python(v))
 
 
 class GroupUserUpdateRequest(BaseModel):

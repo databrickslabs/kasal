@@ -12,6 +12,13 @@ import { createTheme } from '@mui/material/styles';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import HITLApprovalDialog from '../HITLApprovalDialog';
+
+// The dialog now uses react-router's useNavigate (config-editor deep-link). These
+// unit tests don't exercise navigation, so stub the hook to avoid needing a Router.
+vi.mock('react-router-dom', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('react-router-dom')>()),
+  useNavigate: () => vi.fn(),
+}));
 import {
   HITLApprovalStatus,
   HITLRejectionAction,

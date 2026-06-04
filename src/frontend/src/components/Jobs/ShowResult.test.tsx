@@ -8,6 +8,13 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import ShowResult from './ShowResult';
 
+// ShowResult now uses react-router's useNavigate; these tests don't exercise
+// navigation, so stub the hook to avoid needing a Router wrapper.
+vi.mock('react-router-dom', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('react-router-dom')>()),
+  useNavigate: () => vi.fn(),
+}));
+
 // Capture blob content passed to URL.createObjectURL
 let capturedBlobContent: string | null = null;
 

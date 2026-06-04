@@ -356,7 +356,6 @@ class GroupService:
                 id=str(uuid4()),
                 username=user_id,
                 email=user_email,
-                hashed_password="",  # No password for group-assigned users
                 role=UserRole.REGULAR,
                 status=UserStatus.ACTIVE,
                 created_at=datetime.utcnow(),

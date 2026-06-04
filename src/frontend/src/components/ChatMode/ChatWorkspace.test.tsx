@@ -149,7 +149,7 @@ vi.mock('./components/Preview/PreviewPanel', () => ({
     <div data-testid="preview-panel">
       <button data-testid="preview-close" onClick={props.onClose}>x</button>
       <button data-testid="preview-toggle" onClick={props.onToggleChat}>t</button>
-      <button data-testid="preview-refine" onClick={() => props.onRefine?.('make it pop')}>r</button>
+      <button data-testid="preview-refine" onClick={() => props.onRefine?.((globalThis as { __refineMsg?: string }).__refineMsg ?? 'make it pop')}>r</button>
     </div>
   ),
   parsePreviewContent: (...a: unknown[]) => h.parsePreview(...a),
@@ -178,13 +178,16 @@ vi.mock('./utils/crewConfigBuilder', () => ({
   buildCrewConfigFromGenerated: vi.fn(() => ({ cfg: 'gen' })),
 }));
 vi.mock('./components/InputVariablesDialog', () => ({
-  default: (props: { open: boolean; onConfirm: (v: Record<string, string>) => void; onCancel: () => void }) =>
-    props.open ? (
+  default: (props: { open: boolean; onConfirm: (v: Record<string, string>) => void; onCancel: () => void }) => {
+    // Capture onConfirm so a test can invoke it directly (e.g. with no pending execution).
+    (h as { varsConfirm?: (v: Record<string, string>) => void }).varsConfirm = props.onConfirm;
+    return props.open ? (
       <div data-testid="vars-dialog">
         <button data-testid="vars-confirm" onClick={() => props.onConfirm({ topic: 'AI' })}>ok</button>
         <button data-testid="vars-cancel" onClick={props.onCancel}>cancel</button>
       </div>
-    ) : null,
+    ) : null;
+  },
 }));
 
 import ChatWorkspace, {
@@ -235,6 +238,9 @@ describe('summarizeArgs', () => {
   });
   it('returns undefined when no string values present', () => {
     expect(summarizeArgs('{"n":1}')).toBeUndefined();
+  });
+  it('returns undefined for args that are neither string nor object', () => {
+    expect(summarizeArgs(5 as unknown)).toBeUndefined();
   });
 });
 
@@ -357,9 +363,20 @@ describe('ChatWorkspace component', () => {
     h.getSessionPreview.mockResolvedValue(null);
     h.stopExecution.mockResolvedValue(undefined);
     h.listExecutions.mockResolvedValue([]);
+    h.saveGeneratedCrew.mockResolvedValue({ id: 'crew-1', name: 'Saved Crew' });
+    // Reset shared execution flags so per-test toggles don't leak across tests.
+    h.exec.isExecuting = false;
+    h.exec.isGenerating = false;
+    h.exec.isLoading = false;
+    h.exec.chatCollapsed = false;
+    h.exec.activeExecution = null;
+    h.exec.hasActiveExecution = vi.fn(() => false);
+    h.app.selectedModel = 'm1';
+    h.theme.isDarkMode = false;
     (globalThis as { __ccMsg?: string }).__ccMsg = 'hello world';
     delete (globalThis as { __crewPlan?: unknown }).__crewPlan;
     delete (globalThis as { __genData?: unknown }).__genData;
+    delete (globalThis as { __refineMsg?: string }).__refineMsg;
     Element.prototype.scrollIntoView = vi.fn();
   });
 
@@ -1055,5 +1072,287 @@ describe('ChatWorkspace component', () => {
     act(() => { h.dispatcherOpts.onStartGenerationStream('gen-2', ''); });
     act(() => { h.dispatcherOpts.onStartExecutionStream('job-y'); });
     expect(h.startStream).toHaveBeenCalled();
+  });
+
+  // =========================================================================
+  // Full branch coverage — owned-run flags, fallbacks, and error arms
+  // =========================================================================
+
+  it('reflects owned execution/generation/loading flags and hides chat when collapsed with a preview', () => {
+    h.exec.isExecuting = true;
+    h.exec.isGenerating = true;
+    h.exec.isLoading = true;
+    h.exec.chatCollapsed = true;
+    h.exec.previewContent = { type: 'html', data: '<p>x</p>' };
+    h.exec.previewOwnerSessionId = 's1';
+    h.exec.executionOwnerSessionId = 's1';
+    render(<ChatWorkspace />);
+    // chatCollapsed && previewContent -> the chat main panel is hidden
+    expect(screen.queryByTestId('chat-container')).not.toBeInTheDocument();
+    expect(screen.getByTestId('preview-panel')).toBeInTheDocument();
+  });
+
+  it('applies the dark theme when Kasal is in dark mode', () => {
+    h.theme.isDarkMode = true;
+    render(<ChatWorkspace />);
+    expect(h.app.setTheme).toHaveBeenCalledWith('dark');
+  });
+
+  it('onTaskOutput persists a preview but does not set the live one when viewing another session', () => {
+    h.parsePreview.mockReturnValue({ type: 'html', data: '<p>x</p>' });
+    h.session.currentSessionId = 's1';
+    h.exec.executionOwnerSessionId = 's2';
+    render(<ChatWorkspace />);
+    act(() => { h.streamOpts.onTaskOutput('Build', '<p>x</p>'); });
+    expect(h.saveSessionPreview).toHaveBeenCalledWith('s2', expect.anything());
+    expect(h.exec.setPreviewContent).not.toHaveBeenCalled();
+  });
+
+  it('onTaskOutput with a preview but no owner session neither sets nor persists it', () => {
+    h.parsePreview.mockReturnValue({ type: 'html', data: '<p>x</p>' });
+    h.exec.executionOwnerSessionId = null;
+    h.session.currentSessionId = 's1';
+    render(<ChatWorkspace />);
+    act(() => { h.streamOpts.onTaskOutput('Build', '<p>x</p>'); });
+    expect(h.exec.setPreviewContent).not.toHaveBeenCalled();
+    expect(h.saveSessionPreview).not.toHaveBeenCalled();
+  });
+
+  it('onTaskOutput skips the chat summary when the output is pure status noise', () => {
+    h.parsePreview.mockReturnValue(null);
+    h.exec.executionOwnerSessionId = 's1';
+    render(<ChatWorkspace />);
+    h.session.addMessageToTargetSession.mockClear();
+    act(() => { h.streamOpts.onTaskOutput('Task', 'Calling tools.'); });
+    expect(h.session.addMessageToTargetSession).not.toHaveBeenCalled();
+  });
+
+  it('onComplete falls back to the raw string when parsed JSON has neither result nor content', () => {
+    render(<ChatWorkspace />);
+    act(() => { h.streamOpts.onComplete({ result: '{"foo":"bar"}' }); });
+    expect(h.exec.completeExecution).toHaveBeenCalledWith('{"foo":"bar"}');
+  });
+
+  it('wires the generation no-op callbacks (onPlanReady/onAgentDetail/onTaskDetail)', () => {
+    render(<ChatWorkspace />);
+    act(() => {
+      h.genOpts.onPlanReady();
+      h.genOpts.onAgentDetail();
+      h.genOpts.onTaskDetail();
+    });
+    expect(h.genOpts.onPlanReady).toBeTypeOf('function');
+  });
+
+  it('starts generation/execution streams with an undefined origin when there is no session at all', () => {
+    h.session.currentSessionId = null;
+    render(<ChatWorkspace />);
+    act(() => { h.dispatcherOpts.onStartGenerationStream('g', ''); });
+    act(() => { h.dispatcherOpts.onStartExecutionStream('j', ''); });
+    expect(h.exec.startGeneration).toHaveBeenCalledWith(undefined);
+    expect(h.exec.startExecution).toHaveBeenCalledWith('j', undefined, undefined);
+  });
+
+  it('executes a crew with missing nodes/name, no model, and an execution_id fallback', async () => {
+    h.app.selectedModel = '';
+    h.createExecution.mockResolvedValue({ execution_id: 'exec-9' });
+    (globalThis as { __crewPlan?: unknown }).__crewPlan = { edges: [] };
+    render(<ChatWorkspace />);
+    await act(async () => { fireEvent.click(screen.getByTestId('cc-exec-crew')); });
+    expect(h.exec.setExecutionContext).toHaveBeenCalledWith(expect.objectContaining({ crewName: 'Crew' }));
+    expect(h.exec.startExecution).toHaveBeenCalledWith('exec-9', 's1', undefined);
+  });
+
+  it('crew execution that throws a non-Error reports the generic failure', async () => {
+    h.createExecution.mockRejectedValue('weird');
+    render(<ChatWorkspace />);
+    await act(async () => { fireEvent.click(screen.getByTestId('cc-exec-crew')); });
+    expect(h.session.addMessage).toHaveBeenCalledWith('assistant', expect.stringContaining('Failed to start execution'));
+  });
+
+  it('executes a generated crew with a Genie space, missing agents/tasks, and undefined origin', async () => {
+    h.session.currentSessionId = null;
+    render(<ChatWorkspace />);
+    await act(async () => { await h.dispatcherOpts.onExecuteGenerated({}, 'space-1'); });
+    expect(h.createExecution).toHaveBeenCalled();
+    expect(h.exec.startExecution).toHaveBeenCalledWith('job-1', undefined, { originSession: undefined });
+  });
+
+  it('generated execution that throws a non-Error reports the generic failure', async () => {
+    h.createExecution.mockRejectedValue('boom-str');
+    render(<ChatWorkspace />);
+    await act(async () => { fireEvent.click(screen.getByTestId('cc-exec-gen')); });
+    expect(h.session.addMessage).toHaveBeenCalledWith('assistant', expect.stringContaining('Failed to start execution'));
+  });
+
+  it('refining via the preview pane with an empty instruction is a no-op', async () => {
+    (globalThis as { __refineMsg?: string }).__refineMsg = '   ';
+    h.exec.previewContent = { type: 'html', data: 'x' };
+    h.exec.previewOwnerSessionId = 's1';
+    render(<ChatWorkspace />);
+    await act(async () => { fireEvent.click(screen.getByTestId('preview-refine')); });
+    expect(h.createExecution).not.toHaveBeenCalled();
+  });
+
+  it('refining with no artifact and no current session tells the user to run a crew first', async () => {
+    // No live preview AND no session id -> handleRefine skips the persisted-preview
+    // lookup (sid is falsy) and reports there is nothing to refine.
+    h.exec.previewContent = null;
+    h.session.currentSessionId = null;
+    render(<ChatWorkspace />);
+    await send('/refine do it');
+    expect(h.session.addMessage).toHaveBeenCalledWith('assistant', expect.stringContaining('no result to refine'));
+    expect(h.getSessionPreview).not.toHaveBeenCalled();
+  });
+
+  it('executes a flow with no name/model, falling back to execution_id', async () => {
+    h.app.selectedModel = '';
+    h.createExecution.mockResolvedValue({ execution_id: 'flow-exec' });
+    render(<ChatWorkspace />);
+    await act(async () => { await h.dispatcherOpts.onExecuteFlow({}); });
+    expect(h.exec.setExecutionContext).toHaveBeenCalledWith(expect.objectContaining({ crewName: 'Flow' }));
+    expect(h.exec.startExecution).toHaveBeenCalledWith('flow-exec', 's1', undefined);
+  });
+
+  it('flow execution that throws a non-Error reports the generic failure', async () => {
+    h.createExecution.mockRejectedValue('flow-str');
+    render(<ChatWorkspace />);
+    await act(async () => { await h.dispatcherOpts.onExecuteFlow({ name: 'F' }); });
+    expect(h.session.addMessage).toHaveBeenCalledWith('assistant', expect.stringContaining('Failed to start execution'));
+  });
+
+  it('/jobs renders rows using id / unknown / dash fallbacks', async () => {
+    h.listExecutions.mockResolvedValue([{ id: 'fallbackid123' }, {}]);
+    render(<ChatWorkspace />);
+    await send('/jobs');
+    expect(h.session.addMessage).toHaveBeenCalledWith('assistant', expect.stringContaining('unknown'));
+  });
+
+  it('/jobs reports a generic error on a non-Error rejection', async () => {
+    h.listExecutions.mockRejectedValue('list-str');
+    render(<ChatWorkspace />);
+    await send('/jobs');
+    expect(h.session.addMessage).toHaveBeenCalledWith('assistant', expect.stringContaining('Failed to list executions'));
+  });
+
+  it('/stop matches by jobId prefix, and ignores a non-matching active execution', async () => {
+    h.exec.activeExecution = { jobId: 'job-prefix-123', status: 'running' };
+    render(<ChatWorkspace />);
+    await send('/stop job-prefix'); // startsWith arm (not strict equality)
+    expect(h.exec.updateExecutionStatus).toHaveBeenCalledWith('stopped');
+    h.exec.activeExecution = { jobId: 'totally-different', status: 'running' };
+    h.exec.updateExecutionStatus = vi.fn();
+    await send('/stop nomatch'); // neither equals nor prefixes -> no status change
+    expect(h.exec.updateExecutionStatus).not.toHaveBeenCalled();
+  });
+
+  it('/stop reports a generic error on a non-Error rejection', async () => {
+    h.stopExecution.mockRejectedValue('stop-str');
+    render(<ChatWorkspace />);
+    await send('/stop job-x');
+    expect(h.session.addMessage).toHaveBeenCalledWith('assistant', expect.stringContaining('Failed to stop'));
+  });
+
+  it('/save reports a generic error on a non-Error rejection', async () => {
+    render(<ChatWorkspace />);
+    await act(async () => { h.genOpts.onComplete({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }); });
+    h.saveGeneratedCrew.mockRejectedValueOnce('save-str'); // non-Error -> generic message
+    await send('/save');
+    expect(h.session.addMessage).toHaveBeenCalledWith('assistant', expect.stringContaining('Failed to save crew'));
+  });
+
+  it('sends a message with an undefined model when none is selected', async () => {
+    h.app.selectedModel = '';
+    render(<ChatWorkspace />);
+    await send('hello there');
+    expect(h.dispatcherSend).toHaveBeenCalledWith('hello there', undefined);
+  });
+
+  it('handleStopExecution reports a generic error on a non-Error rejection', async () => {
+    h.exec.activeExecution = { jobId: 'j', status: 'running' };
+    h.stopExecution.mockRejectedValue('hs-str');
+    render(<ChatWorkspace />);
+    await act(async () => { fireEvent.click(screen.getByTestId('cc-stop')); });
+    expect(h.session.addMessage).toHaveBeenCalledWith('assistant', expect.stringContaining('Failed to stop'));
+  });
+
+  it('New Chat and session switch skip saving when there is no current session', async () => {
+    h.session.currentSessionId = null;
+    render(<ChatWorkspace />);
+    await act(async () => { fireEvent.click(screen.getByText('New Chat')); });
+    expect(h.exec.saveSessionState).not.toHaveBeenCalled();
+    expect(h.session.createNewSession).toHaveBeenCalled();
+    await act(async () => { fireEvent.click(screen.getByTitle('Two')); });
+    expect(h.session.switchSession).toHaveBeenCalledWith('s2');
+    expect(h.exec.saveSessionState).not.toHaveBeenCalled();
+  });
+
+  it('finishing a rename with a blank value does not call renameSession', async () => {
+    render(<ChatWorkspace />);
+    fireEvent.click(screen.getAllByTitle('Options')[0]);
+    fireEvent.click(screen.getByText('Rename'));
+    const input = document.querySelector('input') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '   ' } });
+    await act(async () => { fireEvent.blur(input); });
+    expect(h.session.renameSession).not.toHaveBeenCalled();
+  });
+
+  it('crew and flow executions started with no current session pass an undefined origin', async () => {
+    h.session.currentSessionId = null;
+    render(<ChatWorkspace />);
+    await act(async () => { fireEvent.click(screen.getByTestId('cc-exec-crew')); });
+    expect(h.exec.startExecution).toHaveBeenCalledWith('job-1', undefined, undefined);
+    h.exec.startExecution = vi.fn();
+    await act(async () => { await h.dispatcherOpts.onExecuteFlow({ name: 'F' }); });
+    expect(h.exec.startExecution).toHaveBeenCalledWith('job-1', undefined, undefined);
+  });
+
+  it('the preview backfill scan skips non-assistant and empty-content messages', async () => {
+    h.exec.previewContent = null;
+    h.getSessionPreview.mockResolvedValue(null);
+    h.parsePreview.mockReturnValue(null); // no message is previewable
+    h.session.messages = [
+      { id: 'u', role: 'user', content: 'hi', timestamp: new Date() },
+      { id: 'e', role: 'assistant', content: '', timestamp: new Date() },
+      { id: 'a', role: 'assistant', content: 'plain text', timestamp: new Date() },
+    ] as unknown[];
+    render(<ChatWorkspace />);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.queryByText('Show preview')).not.toBeInTheDocument();
+  });
+
+  it('onTrace ignores noise events that yield no trace entry', () => {
+    render(<ChatWorkspace />);
+    h.session.addMessage.mockClear();
+    h.session.addMessageToTargetSession.mockClear();
+    act(() => { h.streamOpts.onTrace('', { event_type: 'llm_retry' }); });
+    expect(h.session.addMessage).not.toHaveBeenCalled();
+    expect(h.session.addMessageToTargetSession).not.toHaveBeenCalled();
+  });
+
+  it('confirming the variables dialog with no pending execution is a no-op', async () => {
+    render(<ChatWorkspace />);
+    // Invoke the captured onConfirm directly without ever opening a pending run.
+    await act(async () => {
+      (h as { varsConfirm?: (v: Record<string, string>) => void }).varsConfirm?.({ topic: 'AI' });
+    });
+    expect(h.createExecution).not.toHaveBeenCalled();
+  });
+
+  it('the context-menu Rename is a no-op when its session no longer exists', () => {
+    const { rerender } = render(<ChatWorkspace />);
+    // Open the context menu for session s1...
+    fireEvent.contextMenu(screen.getByTitle('One'));
+    expect(screen.getByText('Rename')).toBeInTheDocument();
+    // ...then the session list loses s1 (re-render) before Rename is clicked, so the
+    // find() inside the handler returns undefined and the guard short-circuits.
+    h.session.sessions = [{ id: 's2', title: 'Two', updatedAt: new Date(), createdAt: new Date() }] as unknown[];
+    rerender(<ChatWorkspace />);
+    fireEvent.click(screen.getByText('Rename'));
+    expect(h.session.renameSession).not.toHaveBeenCalled();
+    // restore for later tests
+    h.session.sessions = [
+      { id: 's1', title: 'One', updatedAt: new Date(), createdAt: new Date() },
+      { id: 's2', title: 'Two', updatedAt: new Date(), createdAt: new Date() },
+    ] as unknown[];
   });
 });

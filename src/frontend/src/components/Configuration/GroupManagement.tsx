@@ -591,6 +591,7 @@ const GroupManagement: React.FC = () => {
                           </Avatar>
                         </ListItemAvatar>
                         <ListItemText
+                          primaryTypographyProps={{ component: 'div' }}
                           primary={
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                               <Typography variant="subtitle1" fontWeight="medium">
@@ -710,6 +711,7 @@ const GroupManagement: React.FC = () => {
                               </Avatar>
                             </ListItemAvatar>
                             <ListItemText
+                              secondaryTypographyProps={{ component: 'div' }}
                               primary={
                                 <Typography variant="subtitle2">
                                   {user.email}
