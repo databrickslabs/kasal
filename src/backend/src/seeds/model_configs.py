@@ -107,43 +107,7 @@ DEFAULT_MODELS = {
         "context_window": 1000000,
         "max_output_tokens": 64000
     },
-    # --- Anthropic ---
-    "claude-3-5-sonnet-20241022": {
-        "name": "claude-3-5-sonnet-20241022",
-        "temperature": 0.7,
-        "provider": "anthropic",
-        "context_window": 200000,
-        "max_output_tokens": 8192
-    },
-    "claude-3-5-haiku-20241022": {
-        "name": "claude-3-5-haiku-20241022",
-        "temperature": 0.7,
-        "provider": "anthropic",
-        "context_window": 200000,
-        "max_output_tokens": 8192
-    },
-    "claude-3-7-sonnet-20250219": {
-        "name": "claude-3-7-sonnet-20250219",
-        "temperature": 0.7,
-        "provider": "anthropic",
-        "context_window": 200000,
-        "max_output_tokens": 64000
-    },
-    "claude-3-7-sonnet-20250219-thinking": {
-        "name": "claude-3-7-sonnet-20250219",
-        "temperature": 0.7,
-        "provider": "anthropic",
-        "extended_thinking": True,
-        "context_window": 200000,
-        "max_output_tokens": 64000
-    },
-    "claude-3-opus-20240229": {
-        "name": "claude-3-opus-20240229",
-        "temperature": 0.7,
-        "provider": "anthropic",
-        "context_window": 200000,
-        "max_output_tokens": 4096
-    },
+    # --- Anthropic (Claude 3 models removed — retired/superseded by Claude 4.x) ---
     "claude-opus-4-20250514": {
         "name": "claude-opus-4-20250514",
         "temperature": 0.7,
@@ -259,13 +223,6 @@ DEFAULT_MODELS = {
         "max_output_tokens": 4096
     },
     # --- Databricks (sorted alphabetically) ---
-    "databricks-claude-3-7-sonnet": {
-        "name": "databricks-claude-3-7-sonnet",
-        "temperature": 0.7,
-        "provider": "databricks",
-        "context_window": 200000,
-        "max_output_tokens": 64000
-    },
     "databricks-claude-haiku-4-5": {
         "name": "databricks-claude-haiku-4-5",
         "temperature": 0.7,
@@ -293,6 +250,20 @@ DEFAULT_MODELS = {
         "provider": "databricks",
         "context_window": 200000,
         "max_output_tokens": 32000
+    },
+    "databricks-claude-opus-4-7": {
+        "name": "databricks-claude-opus-4-7",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1000000,
+        "max_output_tokens": 64000
+    },
+    "databricks-claude-opus-4-8": {
+        "name": "databricks-claude-opus-4-8",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1000000,
+        "max_output_tokens": 64000
     },
     "databricks-claude-sonnet-4": {
         "name": "databricks-claude-sonnet-4",
@@ -392,6 +363,27 @@ DEFAULT_MODELS = {
         "context_window": 400000,
         "max_output_tokens": 128000
     },
+    "databricks-gpt-5-4": {
+        "name": "databricks-gpt-5-4",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 400000,
+        "max_output_tokens": 128000
+    },
+    "databricks-gpt-5-5": {
+        "name": "databricks-gpt-5-5",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 400000,
+        "max_output_tokens": 128000
+    },
+    "databricks-gpt-5-5-pro": {
+        "name": "databricks-gpt-5-5-pro",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 400000,
+        "max_output_tokens": 128000
+    },
     "databricks-gpt-5-mini": {
         "name": "databricks-gpt-5-mini",
         "temperature": 0.7,
@@ -459,6 +451,18 @@ DEFAULT_MODELS = {
 
 # Alias for backwards compatibility - some modules import MODEL_CONFIGS
 MODEL_CONFIGS = DEFAULT_MODELS
+
+# Model keys that have been removed from the catalog and must be pruned from the
+# DB on seed (the upsert loop alone never deletes). Claude 3 is retired/superseded
+# by Claude 4.x (Databricks no longer serves Claude 3.7 Sonnet either).
+REMOVED_MODEL_KEYS = [
+    "claude-3-5-sonnet-20241022",
+    "claude-3-5-haiku-20241022",
+    "claude-3-7-sonnet-20250219",
+    "claude-3-7-sonnet-20250219-thinking",
+    "claude-3-opus-20240229",
+    "databricks-claude-3-7-sonnet",
+]
 
 async def seed_async():
     """Seed model configurations into the database using async session."""
@@ -541,10 +545,27 @@ async def seed_async():
                 except Exception as model_error:
                     logger.error(f"Error processing model {model_key}: {str(model_error)}")
                     models_error += 1
-            
+
+            # Prune retired models (e.g. Claude 3) from existing installations —
+            # the upsert loop above never deletes, so removed keys would linger.
+            # Resilient per-key: a prune failure must never break seeding.
+            models_removed = 0
+            for removed_key in REMOVED_MODEL_KEYS:
+                try:
+                    result = await session.execute(
+                        select(ModelConfig).filter(ModelConfig.key == removed_key)
+                    )
+                    stale = result.scalars().first()
+                    if stale is not None:
+                        await session.delete(stale)
+                        models_removed += 1
+                        logger.debug(f"Removed retired model: {removed_key}")
+                except Exception as prune_error:
+                    logger.warning(f"Could not prune model {removed_key}: {str(prune_error)}")
+
             # Commit all changes at once
             await session.commit()
-            logger.info(f"Model configs seeding summary: Added {models_added}, Updated {models_updated}, Skipped {models_skipped}, Errors {models_error}")
+            logger.info(f"Model configs seeding summary: Added {models_added}, Updated {models_updated}, Removed {models_removed}, Skipped {models_skipped}, Errors {models_error}")
             
         except Exception as e:
             logger.error(f"Error seeding model configs: {str(e)}")
@@ -637,10 +658,26 @@ def seed_sync():
                     else:
                         logger.error(f"Error processing model {model_key}: {str(model_error)}")
                         models_error += 1
-            
+
+            # Prune retired models (e.g. Claude 3) from existing installations.
+            # Resilient per-key: a prune failure must never break seeding.
+            models_removed = 0
+            for removed_key in REMOVED_MODEL_KEYS:
+                try:
+                    result = session.execute(
+                        select(ModelConfig).filter(ModelConfig.key == removed_key)
+                    )
+                    stale = result.scalars().first()
+                    if stale is not None:
+                        session.delete(stale)
+                        models_removed += 1
+                        logger.debug(f"Removed retired model: {removed_key}")
+                except Exception as prune_error:
+                    logger.warning(f"Could not prune model {removed_key}: {str(prune_error)}")
+
             # Commit all changes at once
             session.commit()
-            logger.info(f"Model configs seeding summary: Added {models_added}, Updated {models_updated}, Skipped {models_skipped}, Errors {models_error}")
+            logger.info(f"Model configs seeding summary: Added {models_added}, Updated {models_updated}, Removed {models_removed}, Skipped {models_skipped}, Errors {models_error}")
             
         except Exception as e:
             logger.error(f"Error seeding model configs: {str(e)}")

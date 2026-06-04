@@ -47,14 +47,9 @@ SUPPORTED_MODELS = {
         "milkey/QwQ-32B-0305:q4_K_M"
     ],
     ModelProvider.ANTHROPIC: [
-        "claude-3-opus-20240229",
-        "claude-3-5-sonnet-20241022",
-        "claude-3-5-haiku-20241022",
-        "claude-3-7-sonnet-20250219",
-        "claude-3-7-sonnet-20250219-thinking",
-        "claude-3-sonnet",
-        "claude-2.1",
-        "claude-2.0",
+        # Claude 3 (and older Claude 2) models removed — superseded by Claude 4.x.
+        "claude-opus-4-20250514",
+        "claude-sonnet-4-20250514",
     ],
     ModelProvider.DATABRICKS: [
         "databricks-meta-llama-3-3-70b-instruct",

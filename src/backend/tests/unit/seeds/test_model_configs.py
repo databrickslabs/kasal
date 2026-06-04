@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch, call
 from src.seeds.model_configs import (
     DEFAULT_MODELS,
     MODEL_CONFIGS,
+    REMOVED_MODEL_KEYS,
     seed_async,
     seed_sync,
     seed,
@@ -34,10 +35,35 @@ class TestDefaultModelsDataStructure:
         """Test that well-known model keys are present."""
         assert "gpt-4-turbo" in DEFAULT_MODELS
         assert "gpt-4o" in DEFAULT_MODELS
-        assert "claude-3-5-sonnet-20241022" in DEFAULT_MODELS
         assert "databricks-llama-4-maverick" in DEFAULT_MODELS
         assert "deepseek-chat" in DEFAULT_MODELS
         assert "databricks-gpt-5-3-codex" in DEFAULT_MODELS
+
+    def test_new_frontier_models_present(self):
+        """The latest Databricks Claude (>4.6) and GPT (>5.3) models are seeded."""
+        for key in (
+            "databricks-claude-opus-4-7",
+            "databricks-claude-opus-4-8",
+            "databricks-gpt-5-4",
+            "databricks-gpt-5-5",
+            "databricks-gpt-5-5-pro",
+        ):
+            assert key in DEFAULT_MODELS, f"expected new model {key}"
+            assert DEFAULT_MODELS[key]["provider"] == "databricks"
+
+    def test_claude_3_models_removed(self):
+        """All Claude 3 models are removed from the catalog and listed for pruning."""
+        claude_3 = [k for k in DEFAULT_MODELS if "claude-3" in k]
+        assert claude_3 == [], f"Claude 3 models must be removed, found: {claude_3}"
+        assert "databricks-claude-3-7-sonnet" not in DEFAULT_MODELS
+        # Every removed key must be registered for DB pruning.
+        for key in (
+            "claude-3-5-sonnet-20241022",
+            "claude-3-7-sonnet-20250219",
+            "claude-3-opus-20240229",
+            "databricks-claude-3-7-sonnet",
+        ):
+            assert key in REMOVED_MODEL_KEYS
 
     def test_databricks_gpt_5_3_codex_config(self):
         """Test that databricks-gpt-5-3-codex has correct configuration."""
@@ -128,14 +154,14 @@ class TestDefaultModelsDataStructure:
                 f"Model '{model_key}' has empty name"
             )
 
-    def test_extended_thinking_models(self):
-        """Test that at least one model has extended_thinking enabled."""
-        extended_models = [
-            k for k, v in DEFAULT_MODELS.items()
-            if v.get("extended_thinking", False)
-        ]
-        assert len(extended_models) > 0
-        assert "claude-3-7-sonnet-20250219-thinking" in extended_models
+    def test_extended_thinking_field_is_optional_boolean(self):
+        """extended_thinking is optional (the Claude 3.7 thinking model was
+        removed); when a model declares it, it must be a boolean."""
+        for k, v in DEFAULT_MODELS.items():
+            if "extended_thinking" in v:
+                assert isinstance(v["extended_thinking"], bool), (
+                    f"Model {k} extended_thinking must be a bool"
+                )
 
     def test_databricks_models_exist(self):
         """Test that Databricks models are present."""
@@ -196,6 +222,25 @@ class TestSeedAsyncFunction:
         mock_session.commit.assert_awaited_once()
         # Should not add since all models exist
         mock_session.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_seed_async_prunes_removed_models(self):
+        """Retired models found in the DB are deleted (one delete per removed key)."""
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        # Every lookup returns a row, so each removed key gets deleted.
+        mock_result.scalars.return_value.first.return_value = MagicMock()
+        mock_session.execute.return_value = mock_result
+
+        mock_context = AsyncMock()
+        mock_context.__aenter__.return_value = mock_session
+        mock_context.__aexit__.return_value = None
+
+        with patch("src.seeds.model_configs.async_session_factory", return_value=mock_context):
+            await seed_async()
+
+        assert mock_session.delete.await_count == len(REMOVED_MODEL_KEYS)
+        mock_session.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_seed_async_handles_db_error(self):

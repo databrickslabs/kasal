@@ -112,12 +112,13 @@ class TestGetMaxRpmForModel:
         assert get_max_rpm_for_model("gpt-3.5-turbo") == 200
     
     def test_get_max_rpm_for_known_anthropic_models(self):
-        """Test RPM limits for known Anthropic models."""
-        assert get_max_rpm_for_model("claude-3-opus-20240229") == 5
-        assert get_max_rpm_for_model("claude-3-5-sonnet-20241022") == 10
-        assert get_max_rpm_for_model("claude-3-5-haiku-20241022") == 20
-        assert get_max_rpm_for_model("claude-3-7-sonnet-20250219") == 10
-        assert get_max_rpm_for_model("claude-3-7-sonnet-20250219-thinking") == 5
+        """Test RPM limits for Anthropic Claude models (Claude 4.x; Claude 3 retired)."""
+        # Explicit dict entries.
+        assert get_max_rpm_for_model("claude-opus-4-20250514") == 5
+        assert get_max_rpm_for_model("claude-sonnet-4-20250514") == 10
+        # Any other Claude model falls through to the generic Claude heuristic.
+        assert get_max_rpm_for_model("databricks-claude-opus-4-8") == 10
+        assert get_max_rpm_for_model("databricks-claude-sonnet-4-6") == 10
     
     def test_get_max_rpm_for_known_ollama_models(self):
         """Test RPM limits for known Ollama models."""
@@ -157,13 +158,13 @@ class TestGetMaxRpmForModel:
         assert get_max_rpm_for_model("gpt3-turbo") == 200
     
     def test_get_max_rpm_for_unknown_model_with_claude_opus_pattern(self):
-        """Test RPM limits for unknown models with Claude Opus pattern."""
-        assert get_max_rpm_for_model("claude-3-opus-custom") == 5
-    
+        """Unknown Claude Opus models use the generic Claude heuristic (10)."""
+        assert get_max_rpm_for_model("claude-opus-custom") == 10
+
     def test_get_max_rpm_for_unknown_model_with_claude_35_pattern(self):
-        """Test RPM limits for unknown models with Claude 3.5 pattern."""
-        assert get_max_rpm_for_model("claude-3-5-custom") == 20
-        assert get_max_rpm_for_model("claude-3-haiku-custom") == 20
+        """Any unknown Claude model uses the generic Claude heuristic (10)."""
+        assert get_max_rpm_for_model("claude-sonnet-custom") == 10
+        assert get_max_rpm_for_model("claude-haiku-custom") == 10
     
     def test_get_max_rpm_for_unknown_model_with_claude_37_pattern(self):
         """Test RPM limits for unknown models with Claude 3.7 pattern."""
