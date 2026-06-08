@@ -22,7 +22,9 @@ from src.core.llm_manager import (
     LLMManager,
     log_file_path,
     log_dir,
+    _configure_litellm_caching,
 )
+import src.config.settings as settings_module
 
 
 # ---------------------------------------------------------------------------
@@ -1098,3 +1100,126 @@ class TestModuleRegistration:
         # Just verify the module loaded successfully even if registration failed
         from src.core.llm_manager import LLMManager
         assert LLMManager is not None
+
+
+# ---------------------------------------------------------------------------
+# _configure_litellm_caching
+# ---------------------------------------------------------------------------
+
+
+class TestConfigureLiteLLMCaching:
+    """Cover LiteLLM response-cache configuration based on settings."""
+
+    @staticmethod
+    def _settings_patches(**overrides):
+        """Build patch.object context managers for the cache-related settings."""
+        defaults = {
+            "LITELLM_CACHE_ENABLED": True,
+            "LITELLM_CACHE_TYPE": "local",
+            "LITELLM_CACHE_TTL": 3600,
+            "LITELLM_CACHE_REDIS_HOST": None,
+            "LITELLM_CACHE_REDIS_PORT": None,
+            "LITELLM_CACHE_REDIS_PASSWORD": None,
+        }
+        defaults.update(overrides)
+        return [
+            patch.object(settings_module.settings, key, value)
+            for key, value in defaults.items()
+        ]
+
+    def test_disabled_does_not_enable_cache(self):
+        """When caching is disabled, litellm.enable_cache is never called."""
+        patches = self._settings_patches(LITELLM_CACHE_ENABLED=False)
+        with patch("src.core.llm_manager.litellm.enable_cache") as mock_enable:
+            for p in patches:
+                p.start()
+            try:
+                _configure_litellm_caching()
+            finally:
+                for p in patches:
+                    p.stop()
+            mock_enable.assert_not_called()
+
+    def test_local_cache_enabled_with_ttl(self):
+        """Default 'local' backend enables an in-memory cache with the configured TTL."""
+        patches = self._settings_patches(LITELLM_CACHE_TYPE="local", LITELLM_CACHE_TTL=1234)
+        with patch("src.core.llm_manager.litellm.enable_cache") as mock_enable:
+            for p in patches:
+                p.start()
+            try:
+                _configure_litellm_caching()
+            finally:
+                for p in patches:
+                    p.stop()
+            mock_enable.assert_called_once_with(type="local", ttl=1234)
+
+    def test_cache_type_is_case_insensitive(self):
+        """An uppercase cache type is normalized to lowercase."""
+        patches = self._settings_patches(LITELLM_CACHE_TYPE="LOCAL", LITELLM_CACHE_TTL=60)
+        with patch("src.core.llm_manager.litellm.enable_cache") as mock_enable:
+            for p in patches:
+                p.start()
+            try:
+                _configure_litellm_caching()
+            finally:
+                for p in patches:
+                    p.stop()
+            mock_enable.assert_called_once_with(type="local", ttl=60)
+
+    def test_redis_cache_with_host(self):
+        """A configured Redis host enables a Redis-backed cache with connection params."""
+        patches = self._settings_patches(
+            LITELLM_CACHE_TYPE="redis",
+            LITELLM_CACHE_TTL=60,
+            LITELLM_CACHE_REDIS_HOST="redis.example.com",
+            LITELLM_CACHE_REDIS_PORT="6379",
+            LITELLM_CACHE_REDIS_PASSWORD="secret",
+        )
+        with patch("src.core.llm_manager.litellm.enable_cache") as mock_enable:
+            for p in patches:
+                p.start()
+            try:
+                _configure_litellm_caching()
+            finally:
+                for p in patches:
+                    p.stop()
+            mock_enable.assert_called_once_with(
+                type="redis",
+                host="redis.example.com",
+                port="6379",
+                password="secret",
+                ttl=60,
+            )
+
+    def test_redis_without_host_falls_back_to_local(self):
+        """Redis selected but no host configured -> graceful fallback to in-memory."""
+        patches = self._settings_patches(
+            LITELLM_CACHE_TYPE="redis",
+            LITELLM_CACHE_TTL=99,
+            LITELLM_CACHE_REDIS_HOST=None,
+        )
+        with patch("src.core.llm_manager.litellm.enable_cache") as mock_enable:
+            for p in patches:
+                p.start()
+            try:
+                _configure_litellm_caching()
+            finally:
+                for p in patches:
+                    p.stop()
+            mock_enable.assert_called_once_with(type="local", ttl=99)
+
+    def test_enable_cache_failure_is_swallowed(self):
+        """Caching is best-effort: a backend error must not propagate."""
+        patches = self._settings_patches(LITELLM_CACHE_TYPE="local")
+        with patch(
+            "src.core.llm_manager.litellm.enable_cache",
+            side_effect=RuntimeError("boom"),
+        ):
+            for p in patches:
+                p.start()
+            try:
+                # Should not raise despite enable_cache blowing up.
+                _configure_litellm_caching()
+            finally:
+                for p in patches:
+                    p.stop()

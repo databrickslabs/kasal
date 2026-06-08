@@ -243,6 +243,52 @@ litellm.modify_params = True  # This helps with Anthropic API compatibility
 litellm.num_retries = 5  # Global retries setting
 litellm.retry_on = ["429", "timeout", "rate_limit_error"]  # Retry on these error types
 
+
+def _configure_litellm_caching() -> None:
+    """Enable LiteLLM response caching based on environment settings.
+
+    Caches completions/embeddings to cut latency and cost on repeated identical
+    calls. Backend and TTL are env-configurable (see ``Settings``); defaults to
+    in-memory ("local"). Failures degrade gracefully — caching is best-effort
+    and must never break an LLM call.
+    """
+    from src.config.settings import settings
+
+    if not settings.LITELLM_CACHE_ENABLED:
+        logger.info("LiteLLM caching disabled (LITELLM_CACHE_ENABLED=false)")
+        return
+
+    cache_type = (settings.LITELLM_CACHE_TYPE or "local").lower()
+    ttl = settings.LITELLM_CACHE_TTL
+
+    try:
+        if cache_type == "redis":
+            host = settings.LITELLM_CACHE_REDIS_HOST
+            if not host:
+                logger.warning(
+                    "LITELLM_CACHE_TYPE=redis but LITELLM_CACHE_REDIS_HOST is not set; "
+                    "falling back to in-memory ('local') cache"
+                )
+                cache_type = "local"
+            else:
+                litellm.enable_cache(
+                    type="redis",
+                    host=host,
+                    port=settings.LITELLM_CACHE_REDIS_PORT,
+                    password=settings.LITELLM_CACHE_REDIS_PASSWORD,
+                    ttl=ttl,
+                )
+                logger.info(f"LiteLLM Redis cache enabled (host={host}, ttl={ttl}s)")
+                return
+
+        litellm.enable_cache(type=cache_type, ttl=ttl)
+        logger.info(f"LiteLLM cache enabled (type={cache_type}, ttl={ttl}s)")
+    except Exception as e:
+        logger.warning(f"Failed to configure LiteLLM caching ({cache_type}): {e}")
+
+
+_configure_litellm_caching()
+
 # Configure MLflow integration for Databricks observability
 _mlflow_configured = False
 # Default to disabled globally; we enable per-workspace dynamically
