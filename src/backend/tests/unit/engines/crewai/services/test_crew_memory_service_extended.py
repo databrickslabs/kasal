@@ -848,3 +848,68 @@ class TestEmitIndexValidationTraceOtherType:
 
                 # Should still create a trace even for unknown error_type
                 mock_trace_service.create_trace.assert_called_once()
+
+
+class TestMemoryLlmOverride:
+    """``memory_llm_model`` must resolve to a CONFIGURED LLM instance, never a
+    bare model string — a bare string makes CrewAI build an unconfigured OpenAI
+    LLM and 401 on the placeholder key (regression for the memory-LLM override)."""
+
+    @pytest.mark.asyncio
+    async def test_resolve_returns_none_without_override(self):
+        service = CrewMemoryService({"group_id": "grp1"})
+        mem_cfg = MagicMock()
+        mem_cfg.cognitive_config = MagicMock(memory_llm_model=None)
+        assert await service.resolve_memory_llm_override(mem_cfg) is None
+
+    @pytest.mark.asyncio
+    async def test_resolve_builds_configured_instance_for_override(self):
+        service = CrewMemoryService({"group_id": "grp1"})
+        mem_cfg = MagicMock()
+        mem_cfg.cognitive_config = MagicMock(
+            memory_llm_model="databricks-claude-haiku-4-5"
+        )
+        fake_llm = MagicMock(name="ConfiguredLLM")
+        with patch(
+            "src.core.llm_manager.LLMManager.configure_crewai_llm",
+            new=AsyncMock(return_value=fake_llm),
+        ) as mock_cfg:
+            result = await service.resolve_memory_llm_override(mem_cfg)
+        mock_cfg.assert_awaited_once_with("databricks-claude-haiku-4-5", "grp1")
+        assert result is fake_llm
+
+    @pytest.mark.asyncio
+    async def test_resolve_falls_back_to_none_on_error(self):
+        service = CrewMemoryService({"group_id": "grp1"})
+        mem_cfg = MagicMock()
+        mem_cfg.cognitive_config = MagicMock(memory_llm_model="databricks-bad")
+        with patch(
+            "src.core.llm_manager.LLMManager.configure_crewai_llm",
+            new=AsyncMock(side_effect=RuntimeError("model not found")),
+        ):
+            assert await service.resolve_memory_llm_override(mem_cfg) is None
+
+    def test_build_kwargs_uses_override_instance_not_bare_string(self):
+        """The fix: the configured instance is used as Memory's llm, and the bare
+        model key never leaks into the Memory kwargs."""
+        service = CrewMemoryService({"group_id": "grp1"})
+        mem_cfg = MagicMock()
+        cog = MagicMock()
+        cog.model_dump.return_value = {
+            "memory_llm_model": "databricks-claude-haiku-4-5",
+            "exploration_budget": 0,
+        }
+        mem_cfg.cognitive_config = cog
+        configured = MagicMock(name="ConfiguredLLM")
+
+        kwargs = service._build_memory_kwargs(
+            crew_kwargs={"agents": []},
+            custom_embedder=None,
+            crew_id="c",
+            memory_config=mem_cfg,
+            memory_llm_override=configured,
+        )
+
+        assert kwargs["llm"] is configured  # configured instance, not the string
+        assert "memory_llm_model" not in kwargs  # bare key never passed to Memory
+        assert kwargs.get("exploration_budget") == 0  # other cognitive knobs still map

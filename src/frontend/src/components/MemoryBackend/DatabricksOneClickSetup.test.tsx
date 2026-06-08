@@ -1,6 +1,6 @@
 import { vi, beforeEach, afterEach, describe, it, expect } from 'vitest';
 import React from 'react';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { AxiosError } from 'axios';
@@ -52,9 +52,17 @@ vi.mock('../../config/api/ApiConfig', () => ({
 }));
 
 vi.mock('../../store/memoryBackend', () => ({
-  useMemoryBackendStore: () => ({
-    updateConfig: mockUpdateConfig,
-  }),
+  // Support both the no-arg destructure (DatabricksOneClickSetup) and the
+  // selector form used by CognitiveMemoryPanel (state => state.updateCognitiveConfig).
+  useMemoryBackendStore: (selector?: (state: unknown) => unknown) => {
+    const state = {
+      updateConfig: mockUpdateConfig,
+      updateCognitiveConfig: vi.fn(),
+      config: { cognitive_config: {} },
+    };
+    return selector ? selector(state) : state;
+  },
+  useCognitiveMemoryConfig: () => ({}),
 }));
 
 vi.mock('../../api/DatabricksVectorSearchService', () => ({
@@ -63,6 +71,17 @@ vi.mock('../../api/DatabricksVectorSearchService', () => ({
 
 vi.mock('../../api/MemoryBackendService', () => ({
   MemoryBackendService: mockMBService,
+}));
+
+// CognitiveMemoryPanel (rendered inside this component) fetches enabled models;
+// stub it so the model dropdown resolves deterministically without real API churn.
+vi.mock('../../api/ModelService', () => ({
+  ModelService: {
+    getInstance: () => ({
+      getActiveModels: vi.fn().mockResolvedValue({}),
+      getActiveModelsSync: vi.fn().mockReturnValue({}),
+    }),
+  },
 }));
 
 vi.mock('./databricksVectorSearchUtils', () => ({
@@ -287,7 +306,14 @@ describe('DatabricksOneClickSetup', () => {
   let confirmSpy: ReturnType<typeof vi.spyOn>;
   let alertSpy: ReturnType<typeof vi.spyOn>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // Drain any still-pending async work from the previous test (e.g. a late
+    // updateBackendConfiguration PUT whose verify→detect→PUT chain outlives the
+    // test) BEFORE clearing mocks, so it can't bleed into this test's call
+    // assertions. Several cycles cover the multi-await chain.
+    for (let i = 0; i < 5; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
     vi.clearAllMocks();
     capturedProps.current = {};
     confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
@@ -304,6 +330,9 @@ describe('DatabricksOneClickSetup', () => {
   });
 
   afterEach(() => {
+    // Unmount components between tests so a prior test's still-mounted component
+    // can't react to the next test's mock changes (was leaking a stray PUT).
+    cleanup();
     vi.restoreAllMocks();
   });
 

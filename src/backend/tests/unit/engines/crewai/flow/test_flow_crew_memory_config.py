@@ -62,6 +62,7 @@ async def test_backend_config_wires_unified_memory():
         svc.generate_crew_id = MagicMock(return_value="g_crew_abc")
         storage = MagicMock(name="LakebaseStorageBackend")
         svc.create_unified_storage = AsyncMock(return_value=storage)
+        svc.resolve_memory_llm_override = AsyncMock(return_value=None)
         svc.configure_crew_memory_components = MagicMock(return_value=configured_kwargs)
         emb = MockEmb.return_value
         emb.configure_embedder = AsyncMock(
