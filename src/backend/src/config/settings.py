@@ -89,6 +89,22 @@ class Settings(BaseSettings):
     # Add the following setting to control database seeding
     AUTO_SEED_DATABASE: bool = True
 
+    # LiteLLM response caching
+    # Caches LLM completions/embeddings to cut latency and cost on repeated
+    # identical calls. CrewAI uses LiteLLM under the hood, so enabling this
+    # transparently benefits crew execution too.
+    LITELLM_CACHE_ENABLED: bool = os.getenv("LITELLM_CACHE_ENABLED", "true").lower() == "true"
+    # Backend: "local" (in-memory), "redis", "disk", or "s3".
+    # NOTE: crews run in fresh subprocesses, so "local" only caches repeated
+    # calls within a single run. Use "redis"/"disk" for cross-run hits.
+    LITELLM_CACHE_TYPE: str = os.getenv("LITELLM_CACHE_TYPE", "local")
+    # Time-to-live for cached responses, in seconds (default 1 hour).
+    LITELLM_CACHE_TTL: int = int(os.getenv("LITELLM_CACHE_TTL", "3600"))
+    # Redis connection (only used when LITELLM_CACHE_TYPE == "redis").
+    LITELLM_CACHE_REDIS_HOST: Optional[str] = os.getenv("LITELLM_CACHE_REDIS_HOST")
+    LITELLM_CACHE_REDIS_PORT: Optional[str] = os.getenv("LITELLM_CACHE_REDIS_PORT")
+    LITELLM_CACHE_REDIS_PASSWORD: Optional[str] = os.getenv("LITELLM_CACHE_REDIS_PASSWORD")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
