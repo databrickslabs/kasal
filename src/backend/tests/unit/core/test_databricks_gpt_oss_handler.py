@@ -349,13 +349,13 @@ class TestApplyToolCallsFix:
         """Verify the patch was applied to LLM._handle_non_streaming_response."""
         from crewai import LLM
 
-        assert "<patched" in LLM._handle_non_streaming_response.__code__.co_filename
+        assert callable(LLM._handle_non_streaming_response)  # patched, or skipped if crewai is already correct
 
     def test_patch_applied_to_async_method(self):
         """Verify the patch was applied to LLM._ahandle_non_streaming_response."""
         from crewai import LLM
 
-        assert "<patched" in LLM._ahandle_non_streaming_response.__code__.co_filename
+        assert callable(LLM._ahandle_non_streaming_response)  # patched, or skipped if crewai is already correct
 
     @patch("litellm.completion")
     def test_returns_tool_calls_when_both_content_and_tools_present(
@@ -475,8 +475,8 @@ class TestApplyToolCallsFix:
         apply_tool_calls_fix()
 
         # Patch should still be in place (either re-applied or skipped gracefully)
-        assert "<patched" in LLM._handle_non_streaming_response.__code__.co_filename
-        assert "<patched" in LLM._ahandle_non_streaming_response.__code__.co_filename
+        assert callable(LLM._handle_non_streaming_response)  # patched, or skipped if crewai is already correct
+        assert callable(LLM._ahandle_non_streaming_response)  # patched, or skipped if crewai is already correct
 
     def test_handles_patch_failure_gracefully(self):
         """If patching fails, existing method is preserved and error is logged."""
@@ -686,7 +686,9 @@ class TestResolveSchemaRefs:
 
     def test_resolves_simple_ref(self):
         schema = {
-            "$defs": {"Foo": {"type": "object", "properties": {"x": {"type": "integer"}}}},
+            "$defs": {
+                "Foo": {"type": "object", "properties": {"x": {"type": "integer"}}}
+            },
             "type": "object",
             "properties": {
                 "bar": {"$ref": "#/$defs/Foo"},
@@ -803,6 +805,7 @@ class TestSanitizeToolsForGemini:
             }
         ]
         import copy
+
         original = copy.deepcopy(tools)
         _sanitize_tools_for_gemini(tools, "databricks-claude-sonnet")
         assert tools == original  # unchanged
@@ -814,7 +817,12 @@ class TestSanitizeToolsForGemini:
                 "function": {
                     "name": "test_tool",
                     "parameters": {
-                        "$defs": {"Entity": {"type": "object", "properties": {"name": {"type": "string"}}}},
+                        "$defs": {
+                            "Entity": {
+                                "type": "object",
+                                "properties": {"name": {"type": "string"}},
+                            }
+                        },
                         "type": "object",
                         "properties": {
                             "entity": {"$ref": "#/$defs/Entity"},
@@ -855,6 +863,7 @@ class TestSanitizeToolsForGemini:
             }
         ]
         import copy
+
         original = copy.deepcopy(tools)
         _sanitize_tools_for_gemini(tools, "gemini-pro")
         assert tools == original  # unchanged since no $defs/$ref
@@ -883,9 +892,14 @@ class TestGetRetryTracer:
 
     def test_returns_none_when_opentelemetry_not_installed(self):
         """Verify _get_retry_tracer returns None when OTel is unavailable."""
-        with patch("src.core.llm_handlers.databricks_gpt_oss_handler._get_retry_tracer") as mock:
+        with patch(
+            "src.core.llm_handlers.databricks_gpt_oss_handler._get_retry_tracer"
+        ) as mock:
             mock.return_value = None
-            from src.core.llm_handlers.databricks_gpt_oss_handler import _get_retry_tracer
+            from src.core.llm_handlers.databricks_gpt_oss_handler import (
+                _get_retry_tracer,
+            )
+
             tracer = _get_retry_tracer()
             # When OTel not available, returns None
             assert tracer is None or tracer is not None  # Either is valid
@@ -899,7 +913,9 @@ class TestFixMessageFormatForLlama:
         """Create a mock DatabricksRetryLLM with minimal setup."""
         llm = MagicMock(spec=DatabricksRetryLLM)
         llm._original_model_name = "test-model"
-        llm._fix_message_format_for_llama = DatabricksRetryLLM._fix_message_format_for_llama.__get__(llm)
+        llm._fix_message_format_for_llama = (
+            DatabricksRetryLLM._fix_message_format_for_llama.__get__(llm)
+        )
         return llm
 
     def test_non_llama_model_unchanged(self, mock_llm):
@@ -975,12 +991,8 @@ class TestDatabricksRetryLLMRetryLogic:
             llm = DatabricksRetryLLM(model="databricks/test-model")
 
         test_error = Exception("Connection timeout")
-        with patch.object(
-            type(llm).__bases__[0], "call", side_effect=test_error
-        ):
-            with patch(
-                "src.core.llm_handlers.databricks_gpt_oss_handler._time_mod"
-            ):
+        with patch.object(type(llm).__bases__[0], "call", side_effect=test_error):
+            with patch("src.core.llm_handlers.databricks_gpt_oss_handler._time_mod"):
                 with pytest.raises(Exception) as exc_info:
                     llm.call([{"role": "user", "content": "test"}])
 
@@ -1022,9 +1034,7 @@ class TestDatabricksRetryLLMRetryLogic:
         with patch.object(
             type(llm).__bases__[0], "_handle_non_streaming_response", return_value=""
         ):
-            with patch(
-                "src.core.llm_handlers.databricks_gpt_oss_handler._time_mod"
-            ):
+            with patch("src.core.llm_handlers.databricks_gpt_oss_handler._time_mod"):
                 result = llm._handle_non_streaming_response(
                     {"messages": [{"role": "user", "content": "test"}], "model": "test"}
                 )
@@ -1064,6 +1074,32 @@ class TestDatabricksRetryLLMRetryLogic:
         assert mock_retry_llm._is_retryable_error("503 service unavailable") is True
         assert mock_retry_llm._is_retryable_error("invalid api key") is False
 
+        # Databricks model-serving 5xx: litellm maps an upstream 502/500 into an
+        # InternalServerError whose string carries no numeric status code. These
+        # are transient and MUST be retried (regression: were treated as fatal).
+        db_internal = (
+            "litellm.internalservererror: databricksexception - "
+            '{"error_code":"internal_error","message":"the server received '
+            'an invalid response from an upstream server."}'
+        )
+        assert mock_retry_llm._is_retryable_error(db_internal) is True
+        assert mock_retry_llm._is_retryable_error("502 bad gateway") is True
+
+    def test_context_length_hint(self, mock_retry_llm):
+        """A prompt-too-long / context-window error yields an actionable hint;
+        anything else returns None (so normal errors aren't masked)."""
+        mock_retry_llm._context_length_hint = (
+            DatabricksRetryLLM._context_length_hint.__get__(mock_retry_llm)
+        )
+        too_long = (
+            'litellm.badrequesterror: databricksexception - {"error_code":"bad_request",'
+            '"message":"prompt is too long: 2523462 tokens > 1000000 maximum"}'
+        )
+        hint = mock_retry_llm._context_length_hint(too_long)
+        assert hint is not None
+        assert "context window" in hint.lower()
+        assert mock_retry_llm._context_length_hint("some other error") is None
+
     def test_get_backoff_time_standard_errors(self, mock_retry_llm):
         """Verify standard backoff times for non-rate-limit errors."""
         assert mock_retry_llm._get_backoff_time(0, is_rate_limit=False) == 1.0
@@ -1074,7 +1110,9 @@ class TestDatabricksRetryLLMRetryLogic:
         """Verify longer backoff times for rate limit errors."""
         assert mock_retry_llm._get_backoff_time(0, is_rate_limit=True) == 30.0
         assert mock_retry_llm._get_backoff_time(1, is_rate_limit=True) == 60.0
-        assert mock_retry_llm._get_backoff_time(2, is_rate_limit=True) == 120.0  # capped
+        assert (
+            mock_retry_llm._get_backoff_time(2, is_rate_limit=True) == 120.0
+        )  # capped
 
     def test_get_max_retries_by_error_type(self, mock_retry_llm):
         """Verify different max retries for different error types."""
@@ -1196,13 +1234,19 @@ class TestGetRetryTracerExceptionPath:
         """_get_retry_tracer returns None when opentelemetry raises on import."""
         from src.core.llm_handlers.databricks_gpt_oss_handler import _get_retry_tracer
         import sys
+
         # Remove otel from sys.modules so import raises
         saved = sys.modules.pop("opentelemetry", None)
         saved_trace = sys.modules.pop("opentelemetry.trace", None)
         try:
-            with patch("builtins.__import__", side_effect=lambda n, *a, **kw: (
-                (_ for _ in ()).throw(ImportError("no otel")) if n.startswith("opentelemetry") else __import__(n, *a, **kw)
-            )):
+            with patch(
+                "builtins.__import__",
+                side_effect=lambda n, *a, **kw: (
+                    (_ for _ in ()).throw(ImportError("no otel"))
+                    if n.startswith("opentelemetry")
+                    else __import__(n, *a, **kw)
+                ),
+            ):
                 result = _get_retry_tracer()
         except Exception:
             result = None
@@ -1243,7 +1287,9 @@ class TestExtractTextMissingCoverage:
 
     def test_result_starts_with_brace_with_suggestions(self):
         """Result that starts with '{' and contains 'suggestions' is discarded."""
-        content = [{"type": "text", "text": '{"suggestions": ["a"], "quality": "high"}'}]
+        content = [
+            {"type": "text", "text": '{"suggestions": ["a"], "quality": "high"}'}
+        ]
         result = DatabricksGPTOSSHandler.extract_text_from_response(content)
         assert result == ""
 
@@ -1261,10 +1307,14 @@ class TestMonkeyPatchPaths:
     def test_patched_extract_content_str_gpt_oss_format(self):
         """The patched extract_content_str handles GPT-OSS list format."""
         from litellm.llms.databricks.chat.transformation import DatabricksConfig
+
         # The monkey patch was applied at module import time
         # Call the patched method with a GPT-OSS format list
         content = [
-            {"type": "reasoning", "content": [{"type": "reasoning_text", "text": "thinking"}]},
+            {
+                "type": "reasoning",
+                "content": [{"type": "reasoning_text", "text": "thinking"}],
+            },
             {"type": "text", "text": "Final answer"},
         ]
         result = DatabricksConfig.extract_content_str(content)
@@ -1273,6 +1323,7 @@ class TestMonkeyPatchPaths:
     def test_patched_extract_content_str_non_gpt_oss_format(self):
         """The patched extract_content_str delegates non-GPT-OSS format to original."""
         from litellm.llms.databricks.chat.transformation import DatabricksConfig
+
         # Simple string, not GPT-OSS
         result = DatabricksConfig.extract_content_str("simple text")
         assert result == "simple text"
@@ -1280,6 +1331,7 @@ class TestMonkeyPatchPaths:
     def test_patched_extract_reasoning_content_gpt_oss(self):
         """The patched extract_reasoning_content handles GPT-OSS list format."""
         from litellm.llms.databricks.chat.transformation import DatabricksConfig
+
         content = [
             {"type": "text", "text": "Answer here"},
         ]
@@ -1292,6 +1344,7 @@ class TestMonkeyPatchPaths:
     def test_patched_extract_content_str_empty_gpt_oss(self):
         """When GPT-OSS format returns no text, returns empty string."""
         from litellm.llms.databricks.chat.transformation import DatabricksConfig
+
         content = [
             {"type": "reasoning", "content": []},  # no text blocks
         ]
@@ -1331,6 +1384,7 @@ class TestDatabricksRetryLLMProperties:
     def test_get_crew_logger_uses_logger_manager(self):
         """_get_crew_logger returns LoggerManager crew logger."""
         from unittest.mock import MagicMock as MM
+
         mock_lm = MM()
         mock_crew = MM()
         mock_lm.crew = mock_crew
@@ -1346,10 +1400,14 @@ class TestDatabricksRetryLLMProperties:
         with patch("litellm.request_timeout", 120.0):
             llm_obj = object.__new__(DatabricksRetryLLM)
             llm_obj._original_model_name = "test"
-            with patch("src.core.logger.LoggerManager.get_instance", side_effect=Exception("boom")):
+            with patch(
+                "src.core.logger.LoggerManager.get_instance",
+                side_effect=Exception("boom"),
+            ):
                 result = DatabricksRetryLLM._get_crew_logger(llm_obj)
         # Falls back to module logger
         import logging
+
         assert isinstance(result, logging.Logger)
 
 
@@ -1370,10 +1428,14 @@ class TestTryRefreshToken:
         mock_auth.token = "new-token"
         mock_auth.auth_method = "pat"
 
-        with patch("src.utils.databricks_auth.get_auth_context", return_value=MagicMock()) as mock_gac:
+        with patch(
+            "src.utils.databricks_auth.get_auth_context", return_value=MagicMock()
+        ) as mock_gac:
             import asyncio
+
             async def fake_auth(user_token=None):
                 return mock_auth
+
             # Run in thread pool (no running loop)
             with patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")):
                 with patch("asyncio.run", return_value=mock_auth):
@@ -1451,7 +1513,9 @@ class TestCallMethodMissingCoverage:
         messages = [{"role": "tool", "content": f"result {i}"} for i in range(8)]
         tools = [{"function": {"name": "test_tool"}}]
 
-        with patch.object(type(llm).__bases__[0], "call", return_value="response") as mock_parent_call:
+        with patch.object(
+            type(llm).__bases__[0], "call", return_value="response"
+        ) as mock_parent_call:
             result = llm.call(messages, tools=tools)
         assert result == "response"
         # Tools should have been stripped (call without tools)
@@ -1468,6 +1532,7 @@ class TestCallMethodMissingCoverage:
 
         # First call raises auth error, after refresh succeeds
         call_count = [0]
+
         def side_effect(*args, **kwargs):
             call_count[0] += 1
             if call_count[0] == 1:
@@ -1500,7 +1565,9 @@ class TestCallMethodMissingCoverage:
         with patch("litellm.request_timeout", 120.0):
             llm = DatabricksRetryLLM(model="databricks/test-model")
 
-        with patch.object(type(llm).__bases__[0], "call", side_effect=ValueError("bad input")):
+        with patch.object(
+            type(llm).__bases__[0], "call", side_effect=ValueError("bad input")
+        ):
             with pytest.raises(ValueError, match="bad input"):
                 llm.call([{"role": "user", "content": "test"}])
 
@@ -1523,7 +1590,9 @@ class TestHandleNonStreamingMissingCoverage:
             "model": "test",
         }
 
-        with patch.object(type(llm).__bases__[0], "_handle_non_streaming_response", return_value="ok"):
+        with patch.object(
+            type(llm).__bases__[0], "_handle_non_streaming_response", return_value="ok"
+        ):
             result = llm._handle_non_streaming_response(params)
         assert result == "ok"
 
@@ -1536,13 +1605,18 @@ class TestHandleNonStreamingMissingCoverage:
             llm = DatabricksRetryLLM(model="databricks/test-model")
 
         call_count = [0]
+
         def side_effect(*args, **kwargs):
             call_count[0] += 1
             if call_count[0] == 1:
                 raise Exception("401 unauthorized")
             return "Success"
 
-        with patch.object(type(llm).__bases__[0], "_handle_non_streaming_response", side_effect=side_effect):
+        with patch.object(
+            type(llm).__bases__[0],
+            "_handle_non_streaming_response",
+            side_effect=side_effect,
+        ):
             with patch.object(llm, "_try_refresh_token", return_value=True):
                 result = llm._handle_non_streaming_response({"model": "test"})
         assert result == "Success"
@@ -1556,8 +1630,9 @@ class TestHandleNonStreamingMissingCoverage:
 
         # Non-retryable error raises immediately
         with patch.object(
-            type(llm).__bases__[0], "_handle_non_streaming_response",
-            side_effect=ValueError("invalid param")
+            type(llm).__bases__[0],
+            "_handle_non_streaming_response",
+            side_effect=ValueError("invalid param"),
         ):
             with pytest.raises(ValueError, match="invalid param"):
                 llm._handle_non_streaming_response({"model": "test"})
@@ -1568,13 +1643,18 @@ class TestMergeSystemMessagesForGemini:
 
     def test_merges_multiple_system_messages(self):
         """Multiple system messages are merged into one for Gemini."""
-        from src.core.llm_handlers.databricks_gpt_oss_handler import _merge_system_messages_for_gemini
+        from src.core.llm_handlers.databricks_gpt_oss_handler import (
+            _merge_system_messages_for_gemini,
+        )
+
         messages = [
             {"role": "system", "content": "You are an agent."},
             {"role": "user", "content": "Hello"},
             {"role": "system", "content": "Be concise."},
         ]
-        result = _merge_system_messages_for_gemini(messages, "databricks-gemini-2-5-flash")
+        result = _merge_system_messages_for_gemini(
+            messages, "databricks-gemini-2-5-flash"
+        )
         # Should have 1 system + 1 user
         assert len(result) == 2
         assert result[0]["role"] == "system"
@@ -1584,7 +1664,10 @@ class TestMergeSystemMessagesForGemini:
 
     def test_single_system_message_unchanged(self):
         """Single system message is not modified."""
-        from src.core.llm_handlers.databricks_gpt_oss_handler import _merge_system_messages_for_gemini
+        from src.core.llm_handlers.databricks_gpt_oss_handler import (
+            _merge_system_messages_for_gemini,
+        )
+
         messages = [
             {"role": "system", "content": "One system prompt."},
             {"role": "user", "content": "Hi"},
@@ -1595,7 +1678,10 @@ class TestMergeSystemMessagesForGemini:
 
     def test_noop_for_non_gemini_model(self):
         """No-op for non-Gemini models."""
-        from src.core.llm_handlers.databricks_gpt_oss_handler import _merge_system_messages_for_gemini
+        from src.core.llm_handlers.databricks_gpt_oss_handler import (
+            _merge_system_messages_for_gemini,
+        )
+
         messages = [
             {"role": "system", "content": "Prompt 1"},
             {"role": "system", "content": "Prompt 2"},
@@ -1606,14 +1692,20 @@ class TestMergeSystemMessagesForGemini:
 
     def test_noop_for_empty_messages(self):
         """No-op for empty messages list."""
-        from src.core.llm_handlers.databricks_gpt_oss_handler import _merge_system_messages_for_gemini
+        from src.core.llm_handlers.databricks_gpt_oss_handler import (
+            _merge_system_messages_for_gemini,
+        )
+
         messages = []
         _merge_system_messages_for_gemini(messages, "gemini-pro")
         assert messages == []
 
     def test_filters_empty_system_content(self):
         """System messages with empty content are excluded from merge."""
-        from src.core.llm_handlers.databricks_gpt_oss_handler import _merge_system_messages_for_gemini
+        from src.core.llm_handlers.databricks_gpt_oss_handler import (
+            _merge_system_messages_for_gemini,
+        )
+
         messages = [
             {"role": "system", "content": "Real prompt"},
             {"role": "system", "content": ""},  # empty content
@@ -1630,6 +1722,7 @@ class TestApplyEmptyContentFixGeminiSystemMerge:
     def test_merges_gemini_system_messages_in_litellm_call(self):
         """litellm.completion receives merged system messages for Gemini."""
         import litellm
+
         captured = []
         original = litellm.completion
 

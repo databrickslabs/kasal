@@ -76,6 +76,14 @@ class GroupToolService:
             # Global availability is controlled by base tool enabled flag (for now)
             raise BadRequestError(detail="Tool is not globally available")
 
+        # Adding a tool to a workspace ENABLES it by default — the admin added
+        # it to use it, so a separate "enable" step is redundant. Callers may
+        # still override via ``defaults``.
+        if defaults is None:
+            defaults = {"enabled": True}
+        elif "enabled" not in defaults:
+            defaults = {**defaults, "enabled": True}
+
         mapping = await self.group_tool_repo.upsert(tool_id=tool_id, group_id=group_id, defaults=defaults)
         return GroupToolResponse.model_validate(mapping)
 

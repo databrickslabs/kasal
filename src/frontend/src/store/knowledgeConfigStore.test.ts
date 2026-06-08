@@ -91,12 +91,12 @@ describe('knowledgeConfigStore', () => {
   });
 
   describe('checkConfiguration', () => {
-    it('marks memory configured when databricks memory config is complete', async () => {
+    it('marks memory configured when lakebase memory config is complete', async () => {
       (MemoryBackendService.getConfig as Mock).mockResolvedValue({
-        backend_type: MemoryBackendType.DATABRICKS,
-        databricks_config: {
-          endpoint_name: 'ep',
-          memory_index: 'cat.schema.mem',
+        backend_type: MemoryBackendType.LAKEBASE,
+        lakebase_config: {
+          memory_table: 'crew_memory',
+          embedding_dimension: 1024,
         },
       });
       (DatabricksService.getConfiguration as Mock).mockResolvedValue({
@@ -117,7 +117,30 @@ describe('knowledgeConfigStore', () => {
       expect(result.current.lastNotFoundTime).toBe(0);
     });
 
-    it('marks memory NOT configured when backend type is not databricks', async () => {
+    it('marks memory NOT configured for a databricks (Vector Search) backend', async () => {
+      // Vector Search has been removed; knowledge embeddings need Lakebase pgvector.
+      (MemoryBackendService.getConfig as Mock).mockResolvedValue({
+        backend_type: MemoryBackendType.DATABRICKS,
+        databricks_config: {
+          endpoint_name: 'ep',
+          memory_index: 'cat.schema.mem',
+        },
+      });
+      (DatabricksService.getConfiguration as Mock).mockResolvedValue({
+        knowledge_volume_enabled: true,
+        knowledge_volume_path: '/Volumes/x',
+      });
+
+      const { result } = renderHook(() => useKnowledgeConfigStore());
+
+      await act(async () => {
+        await result.current.checkConfiguration();
+      });
+
+      expect(result.current.isMemoryBackendConfigured).toBe(false);
+    });
+
+    it('marks memory NOT configured when backend type is default', async () => {
       (MemoryBackendService.getConfig as Mock).mockResolvedValue({
         backend_type: MemoryBackendType.DEFAULT,
         databricks_config: {
@@ -292,8 +315,8 @@ describe('knowledgeConfigStore', () => {
     it('clears cache fields and forces a fresh check', async () => {
       const now = Date.now();
       (MemoryBackendService.getConfig as Mock).mockResolvedValue({
-        backend_type: MemoryBackendType.DATABRICKS,
-        databricks_config: { endpoint_name: 'ep', memory_index: 'idx' },
+        backend_type: MemoryBackendType.LAKEBASE,
+        lakebase_config: { memory_table: 'crew_memory' },
       });
       (DatabricksService.getConfiguration as Mock).mockResolvedValue(null);
 

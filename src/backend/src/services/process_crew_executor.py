@@ -1894,6 +1894,14 @@ class ProcessCrewExecutor:
             # Start the process
             process.start()
             logger.info(f"Started process {process.pid} for execution {execution_id}")
+        except Exception:
+            # Spawning failed before the main try/finally below could run; close
+            # the queues here so their semaphores are not leaked, and roll back
+            # the metric we incremented above.
+            self._metrics["active_executions"] -= 1
+            self._close_queue(result_queue)
+            self._close_queue(log_queue)
+            raise
         finally:
             # Restore parent's environment
             if old_kasal_exec_id is not None:
@@ -2184,6 +2192,35 @@ class ProcessCrewExecutor:
             if execution_id in self._running_executors:
                 # Should already be deleted above, but ensure cleanup
                 del self._running_executors[execution_id]
+
+            # CRITICAL: Close the per-execution multiprocessing queues so their
+            # internal semaphores (rlock/wlock/sem -> 3 named POSIX semaphores
+            # each) are released. Without this they leak and the resource_tracker
+            # reports "leaked semaphore objects to clean up at shutdown".
+            self._close_queue(result_queue)
+            self._close_queue(log_queue)
+
+    @staticmethod
+    def _close_queue(queue) -> None:
+        """Safely close a multiprocessing.Queue and release its semaphores.
+
+        A spawn-context ``mp.Queue`` is backed by three SemLock primitives
+        (``_rlock``, ``_wlock``, ``_sem``) that the OS tracks as named
+        semaphores. They are only released when the queue's feeder thread is
+        joined via ``close()`` + ``join_thread()``; relying on garbage
+        collection at interpreter shutdown produces the resource_tracker
+        leak warning. This is safe to call multiple times.
+        """
+        if queue is None:
+            return
+        try:
+            # cancel_join_thread avoids blocking if the feeder still has
+            # un-flushed data (the result has already been drained by now).
+            queue.cancel_join_thread()
+            queue.close()
+            queue.join_thread()
+        except Exception as e:
+            logger.debug(f"[ProcessCrewExecutor] Error closing queue: {e}")
 
     async def _relay_task_events(self, task_event_queue, execution_id: str):
         """

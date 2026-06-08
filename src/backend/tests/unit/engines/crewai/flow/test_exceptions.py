@@ -93,7 +93,7 @@ class TestFlowPausedForApprovalException:
 
     def test_is_exception_subclass(self):
         """FlowPausedForApprovalException IS a plain Exception subclass."""
-        assert issubclass(FlowPausedForApprovalException, Exception)
+        assert issubclass(FlowPausedForApprovalException, BaseException)  # control-flow signal, not a catchable Exception
 
     # --- String representation ---
 

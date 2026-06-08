@@ -1,4 +1,5 @@
 import { getBaseUrl } from './client';
+import { SSE_ENABLED } from '../../../utils/sseTransport';
 
 export interface StreamEvent {
   event: string;
@@ -42,6 +43,9 @@ export function streamExecution(
   onEvent: EventCallback,
   onError?: (error: Event) => void
 ): () => void {
+  // SSE is dev-only. On Databricks Apps the HTTP/2 proxy refuses/drops the
+  // stream, so we don't open it — the REST polling fallback drives updates.
+  if (!SSE_ENABLED) return () => {};
   let closed = false;
   let eventSource: EventSource | null = null;
   let reconnectAttempts = 0;
@@ -135,6 +139,10 @@ export function streamGeneration(
   onEvent: EventCallback,
   onError?: (error: Event) => void
 ): () => void {
+  // NOTE: generation SSE is intentionally NOT gated on SSE_ENABLED. Unlike the
+  // long-lived execution stream, crew generation is short (a few seconds) and
+  // survives the Databricks Apps HTTP/2 proxy — and it has no polling fallback,
+  // so disabling it would stop crews from being created on Apps entirely.
   let closed = false;
   let eventSource: EventSource | null = null;
   let reconnectAttempts = 0;

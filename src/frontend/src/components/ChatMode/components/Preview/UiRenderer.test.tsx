@@ -548,3 +548,395 @@ describe('UiRenderer — Quiz', () => {
     expect(container.textContent).toBe('');
   });
 });
+
+describe('UiRenderer — surface theme', () => {
+  const themed = (theme: object, comps?: Record<string, unknown>): UiSurface =>
+    ({
+      ...surface(comps || { root: { id: 'root', component: 'Text', text: 'Hi', variant: 'h1' } }),
+      theme,
+    }) as UiSurface;
+
+  it('applies a full theme as CSS vars, font and compact padding on the stage', () => {
+    const { container } = render(
+      <UiRenderer
+        surface={themed({
+          accent: '#ff0000', background: '#101010', surface: '#202020',
+          text: '#fefefe', heading: '#00ff00', muted: '#888888',
+          font: 'serif', density: 'compact',
+        })}
+      />,
+    );
+    const styleAttr = (container.firstChild as HTMLElement).getAttribute('style') || '';
+    expect(styleAttr).toContain('--ui-accent: #ff0000');
+    expect(styleAttr).toContain('--ui-stage: #101010');
+    expect(styleAttr).toContain('--ui-surface: #202020');
+    expect(styleAttr).toContain('--ui-surface-strong: #202020');
+    expect(styleAttr).toContain('--ui-text: #fefefe');
+    expect(styleAttr).toContain('--ui-heading: #00ff00');
+    expect(styleAttr).toContain('--ui-muted: #888888');
+    expect(styleAttr).toContain('--ui-border: rgba(128,128,128,0.30)');
+    expect(styleAttr).toContain('Georgia');
+    expect(styleAttr).toContain('padding: 22px 30px');
+  });
+
+  it('renders un-themed with no css vars and the default font/padding', () => {
+    const { container } = render(
+      <UiRenderer surface={surface({ root: { id: 'root', component: 'Text', text: 'Hi' } })} />,
+    );
+    const styleAttr = (container.firstChild as HTMLElement).getAttribute('style') || '';
+    // No custom-property *declarations* (var() *references* like `var(--ui-stage,…)`
+    // still appear in background/color — those carry the built-in fallbacks).
+    expect(styleAttr).not.toMatch(/--ui-[\w-]+:/);
+    expect(styleAttr).toContain('Inter');
+    expect(styleAttr).toContain('padding: 36px 48px');
+  });
+
+  it('sets only the accent var (no border) and falls back on an unknown font', () => {
+    const { container } = render(<UiRenderer surface={themed({ accent: '#abcabc', font: 'bogus' })} />);
+    const styleAttr = (container.firstChild as HTMLElement).getAttribute('style') || '';
+    expect(styleAttr).toContain('--ui-accent: #abcabc');
+    expect(styleAttr).not.toMatch(/--ui-border:/);
+    expect(styleAttr).not.toMatch(/--ui-stage:/);
+    expect(styleAttr).toContain('Inter'); // unknown font → sans fallback
+  });
+
+  it('sets the border var when only the background is themed', () => {
+    const { container } = render(<UiRenderer surface={themed({ background: '#ffffff' })} />);
+    const styleAttr = (container.firstChild as HTMLElement).getAttribute('style') || '';
+    expect(styleAttr).toContain('--ui-stage: #ffffff');
+    expect(styleAttr).toContain('--ui-border: rgba(128,128,128,0.30)');
+  });
+
+  it('body text inherits the themed text color (no hardcoded light color)', () => {
+    render(<UiRenderer surface={surface({ root: { id: 'root', component: 'Text', text: 'Body copy', variant: 'body' } })} />);
+    const style = screen.getByText('Body copy').getAttribute('style') || '';
+    // Must NOT carry the old dark-stage literal that overrode light themes.
+    expect(style).not.toContain('#dbe3ff');
+    // Resolves through the theme token so a light theme makes it dark/readable.
+    expect(style).toContain('var(--ui-text');
+  });
+});
+
+describe('UiRenderer — Album', () => {
+  const album = (extra: Record<string, unknown>): UiSurface =>
+    surface({ root: { id: 'root', component: 'Album', ...extra } });
+
+  it('renders a grid of images (string + object urls, captions, source links)', () => {
+    const { container } = render(
+      <UiRenderer
+        surface={album({
+          title: 'Trip',
+          images: [
+            { url: 'https://ex.com/a.jpg', caption: 'A', alt: 'alt-a' },
+            'https://ex.com/b.jpg', // plain string
+            { src: 'https://ex.com/c.jpg' }, // src alias
+            { link: 'https://ex.com/d.jpg', title: 'D' }, // link alias + title→caption
+            { nope: 1 }, // no url → filtered out
+          ],
+        })}
+      />,
+    );
+    const imgs = Array.from(container.querySelectorAll('img'));
+    expect(imgs.map((i) => i.getAttribute('src'))).toEqual([
+      'https://ex.com/a.jpg',
+      'https://ex.com/b.jpg',
+      'https://ex.com/c.jpg',
+      'https://ex.com/d.jpg',
+    ]);
+    expect(screen.getByText('Trip')).toBeInTheDocument();
+    expect(screen.getByText('A')).toBeInTheDocument();
+    const wrap = imgs[0].closest('a')!.parentElement as HTMLElement;
+    expect(wrap.style.display).toBe('grid'); // grid, not a scroller
+  });
+
+  it('carousel: one image per screen, navigable by ←/→ keys, buttons and dots', () => {
+    const { container } = render(
+      <UiRenderer
+        surface={album({
+          layout: 'carousel',
+          title: 'Alps',
+          images: [
+            { url: 'https://ex.com/1.jpg', caption: 'First' },
+            { url: 'https://ex.com/2.jpg', caption: 'Second' },
+            { url: 'https://ex.com/3.jpg' }, // no caption → caption branch false
+          ],
+        })}
+      />,
+    );
+    // one image at a time, with title + caption + counter
+    expect(container.querySelectorAll('img')).toHaveLength(1);
+    expect(screen.getByText('Alps')).toBeInTheDocument();
+    expect(screen.getByText('First')).toBeInTheDocument();
+    expect(screen.getByText('1 / 3')).toBeInTheDocument();
+    // prev disabled at the start, 3 dots
+    expect(screen.getByLabelText('Previous image')).toBeDisabled();
+    expect(screen.getByLabelText('Next image')).not.toBeDisabled();
+    expect(screen.getAllByLabelText(/Go to image/)).toHaveLength(3);
+
+    // → advances; ← goes back; a non-arrow key is ignored
+    fireEvent.keyDown(window, { key: 'ArrowRight' });
+    expect(screen.getByText('2 / 3')).toBeInTheDocument();
+    expect(screen.getByText('Second')).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'ArrowLeft' });
+    expect(screen.getByText('1 / 3')).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'a' });
+    expect(screen.getByText('1 / 3')).toBeInTheDocument();
+
+    // Next button, then jump to the last image via a dot → Next disabled at the end
+    fireEvent.click(screen.getByLabelText('Next image'));
+    expect(screen.getByText('2 / 3')).toBeInTheDocument();
+    fireEvent.click(screen.getAllByLabelText(/Go to image/)[2]);
+    expect(screen.getByText('3 / 3')).toBeInTheDocument();
+    expect(screen.getByLabelText('Next image')).toBeDisabled();
+    fireEvent.click(screen.getByLabelText('Previous image'));
+    expect(screen.getByText('2 / 3')).toBeInTheDocument();
+  });
+
+  it('carousel with a single image hides all navigation', () => {
+    render(<UiRenderer surface={album({ layout: 'carousel', urls: ['https://ex.com/only.jpg'] })} />);
+    expect(screen.queryByLabelText('Previous image')).toBeNull();
+    expect(screen.queryByLabelText('Next image')).toBeNull();
+    expect(screen.queryByLabelText(/Go to image/)).toBeNull();
+    expect(screen.queryByText('1 / 1')).toBeNull();
+  });
+
+  it('treats layout "slideshow" as a navigable carousel', () => {
+    render(<UiRenderer surface={album({ layout: 'slideshow', images: [{ url: 'https://ex.com/1.jpg' }, { url: 'https://ex.com/2.jpg' }] })} />);
+    expect(screen.getByText('1 / 2')).toBeInTheDocument();
+    expect(screen.getByLabelText('Next image')).toBeInTheDocument();
+  });
+
+  it('renders a grid without a title', () => {
+    render(<UiRenderer surface={album({ images: [{ url: 'https://ex.com/x.jpg', caption: 'cap' }] })} />);
+    expect(screen.getByText('cap')).toBeInTheDocument();
+    expect(screen.queryByText('1 / 1')).toBeNull(); // grid, not a carousel
+  });
+
+  it('renders nothing when there are no usable images', () => {
+    const { container, rerender } = render(<UiRenderer surface={album({ images: [{ nope: 1 }, 5] })} />);
+    expect(container.querySelector('img')).toBeNull();
+    // neither images nor urls present
+    rerender(<UiRenderer surface={album({})} />);
+    expect(container.querySelector('img')).toBeNull();
+  });
+});
+
+describe('UiRenderer — Mindmap', () => {
+  // A tree that exercises every layout branch:
+  //  - root (depth 0) with 4 usable children → first / middle / last connectors
+  //  - Branch A → single child (only-child connector), whose child A1 is at depth 2
+  //    (collapsed by default) and itself has a child A1a
+  //  - Branch B → leaf, supplied via `text` (not `label`)
+  //  - Branch C → two children with a null mixed in (filtered out)
+  //  - an empty-label branch (toggle aria falls back to "node")
+  //  - a null and a string child on root (both filtered out by mindmapChildren)
+  const tree = {
+    label: 'Center',
+    children: [
+      { label: 'Branch A', children: [{ label: 'A1', children: [{ label: 'A1a' }] }] },
+      { text: 'Branch B' },
+      // `{}` is a usable object node with neither label nor text → renders empty
+      { label: 'Branch C', children: [{ label: 'C1' }, null, { label: 'C2' }, {}] },
+      { label: '', children: [{ label: 'E1' }] },
+      null,
+      'junk',
+    ],
+  };
+  const mindmap = (extra: Record<string, unknown> = {}) =>
+    surface({ root: { id: 'root', component: 'Mindmap', ...extra } });
+
+  it('renders the title, the colourful tree, and collapses levels below depth 1 by default', () => {
+    render(<UiRenderer surface={mindmap({ title: 'My Map', root: tree })} />);
+    expect(screen.getByText('My Map')).toBeInTheDocument(); // title
+    expect(screen.getByText('Center')).toBeInTheDocument(); // root
+    expect(screen.getByText('Branch A')).toBeInTheDocument();
+    expect(screen.getByText('Branch B')).toBeInTheDocument(); // supplied via `text`
+    expect(screen.getByText('Branch C')).toBeInTheDocument();
+    expect(screen.getByText('A1')).toBeInTheDocument(); // depth 2 node shows (parent expanded)
+    expect(screen.getByText('C1')).toBeInTheDocument();
+    expect(screen.getByText('C2')).toBeInTheDocument();
+    expect(screen.getByText('E1')).toBeInTheDocument();
+    // A1 is at depth 2 → its OWN children start collapsed
+    expect(screen.queryByText('A1a')).toBeNull();
+    expect(screen.getByLabelText('Expand A1')).toHaveTextContent('+1'); // collapsed → count badge
+    // toggles present for nodes-with-children; an empty label falls back to "node"
+    expect(screen.getByLabelText('Collapse Center')).toBeInTheDocument();
+    expect(screen.getByLabelText('Collapse Branch A')).toBeInTheDocument();
+    expect(screen.getByLabelText('Collapse node')).toBeInTheDocument();
+    // a leaf has no toggle
+    expect(screen.queryByLabelText('Collapse Branch B')).toBeNull();
+    expect(screen.queryByLabelText('Expand Branch B')).toBeNull();
+  });
+
+  it('expands a deep node to reveal its hidden children', () => {
+    render(<UiRenderer surface={mindmap({ title: 'My Map', root: tree })} />);
+    fireEvent.click(screen.getByLabelText('Expand A1'));
+    expect(screen.getByText('A1a')).toBeInTheDocument();
+    expect(screen.getByLabelText('Collapse A1')).toBeInTheDocument(); // now expanded
+  });
+
+  it('collapsing the root hides the whole tree (and shows the hidden-child count)', () => {
+    render(<UiRenderer surface={mindmap({ title: 'My Map', root: tree })} />);
+    fireEvent.click(screen.getByLabelText('Collapse Center'));
+    expect(screen.queryByText('Branch A')).toBeNull();
+    expect(screen.queryByText('Branch C')).toBeNull();
+    expect(screen.getByText('Center')).toBeInTheDocument(); // root itself stays
+    expect(screen.getByLabelText('Expand Center')).toHaveTextContent('+4'); // 4 usable children
+    fireEvent.click(screen.getByLabelText('Expand Center'));
+    expect(screen.getByText('Branch A')).toBeInTheDocument();
+  });
+
+  it('reads the tree from `data` or `tree` and renders without a title', () => {
+    const { rerender } = render(<UiRenderer surface={mindmap({ data: { label: 'FromData' } })} />);
+    expect(screen.getByText('FromData')).toBeInTheDocument();
+    rerender(<UiRenderer surface={mindmap({ tree: { label: 'FromTree' } })} />);
+    expect(screen.getByText('FromTree')).toBeInTheDocument();
+  });
+
+  it('renders nothing when the tree is missing or not an object', () => {
+    const { container, rerender } = render(<UiRenderer surface={mindmap()} />); // no root/data/tree
+    expect(container.querySelector('button')).toBeNull();
+    rerender(<UiRenderer surface={mindmap({ root: 'not-an-object' })} />);
+    expect(container.querySelector('button')).toBeNull();
+  });
+});
+
+describe('UiRenderer — Mindmap canvas interactions (pan + drag)', () => {
+  // Root → A (→ A1 leaf) + B leaf. Root & A have children (toggles); A1/B are leaves.
+  const tree = { label: 'Root', children: [{ label: 'A', children: [{ label: 'A1' }] }, { label: 'B' }] };
+  const mindmap = () => surface({ root: { id: 'root', component: 'Mindmap', root: tree } });
+  const px = (v: string) => parseFloat(v || '0');
+  const node = (c: HTMLElement, id: string) => c.querySelector(`[data-mm-node="${id}"]`) as HTMLElement;
+  const canvasEl = (c: HTMLElement) => c.querySelector('[data-mm-canvas]') as HTMLElement;
+  const worldEl = (c: HTMLElement) => c.querySelector('[data-mm-world]') as HTMLElement;
+
+  it('draws one curved edge per visible non-root node', () => {
+    const { container } = render(<UiRenderer surface={mindmap()} />);
+    const nodeCount = container.querySelectorAll('[data-mm-node]').length;
+    expect(nodeCount).toBe(4); // Root, A, A1, B
+    expect(container.querySelectorAll('path').length).toBe(nodeCount - 1); // edges = nodes − root
+  });
+
+  it('drags a node and carries its whole subtree, toggling the grab cursor', () => {
+    const { container } = render(<UiRenderer surface={mindmap()} />);
+    const root = node(container, 'r');
+    const childA = node(container, 'r.0');
+    const rootLeft0 = px(root.style.left);
+    const rootTop0 = px(root.style.top);
+    const aLeft0 = px(childA.style.left);
+
+    fireEvent.pointerDown(root, { clientX: 200, clientY: 200 });
+    expect(canvasEl(container).style.cursor).toBe('grabbing');
+    fireEvent.pointerMove(canvasEl(container), { clientX: 260, clientY: 250 }); // delta (60, 50)
+    fireEvent.pointerUp(canvasEl(container));
+    expect(canvasEl(container).style.cursor).toBe('grab');
+
+    expect(px(node(container, 'r').style.left)).toBe(rootLeft0 + 60);
+    expect(px(node(container, 'r').style.top)).toBe(rootTop0 + 50);
+    // subtree moved with the root
+    expect(px(node(container, 'r.0').style.left)).toBe(aLeft0 + 60);
+  });
+
+  it('dragging one node leaves unrelated nodes where they were', () => {
+    const { container } = render(<UiRenderer surface={mindmap()} />);
+    const bLeft0 = px(node(container, 'r.1').style.left); // sibling B
+    const childA = node(container, 'r.0');
+    fireEvent.pointerDown(childA, { clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(canvasEl(container), { clientX: 25, clientY: 0 });
+    fireEvent.pointerUp(canvasEl(container));
+    expect(px(node(container, 'r.0').style.left)).toBe(px(childA.style.left)); // A unchanged ref reads post-move value
+    expect(px(node(container, 'r.1').style.left)).toBe(bLeft0); // B untouched
+  });
+
+  it('pans the whole canvas when dragging empty space', () => {
+    const { container } = render(<UiRenderer surface={mindmap()} />);
+    expect(worldEl(container).style.transform).toBe('translate(48px, 32px) scale(1)');
+    fireEvent.pointerDown(canvasEl(container), { clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(canvasEl(container), { clientX: 40, clientY: 22 }); // delta (30, 12)
+    fireEvent.pointerUp(canvasEl(container));
+    expect(worldEl(container).style.transform).toBe('translate(78px, 44px) scale(1)');
+  });
+
+  it('ignores pointer moves when nothing is being dragged', () => {
+    const { container } = render(<UiRenderer surface={mindmap()} />);
+    fireEvent.pointerMove(canvasEl(container), { clientX: 99, clientY: 99 });
+    expect(worldEl(container).style.transform).toBe('translate(48px, 32px) scale(1)'); // unchanged
+  });
+
+  it('pressing a node toggle does not start a drag (stops propagation)', () => {
+    const { container } = render(<UiRenderer surface={mindmap()} />);
+    fireEvent.pointerDown(screen.getByLabelText('Collapse A'));
+    expect(canvasEl(container).style.cursor).toBe('grab'); // no drag started
+  });
+
+  const scaleOf = (t: string) => parseFloat((t.match(/scale\(([^)]+)\)/) || [])[1] || '1');
+
+  it('zooms with the mouse wheel (in on scroll-up, out on scroll-down)', () => {
+    const { container } = render(<UiRenderer surface={mindmap()} />);
+    fireEvent.wheel(canvasEl(container), { deltaY: -100, clientX: 0, clientY: 0 });
+    expect(scaleOf(worldEl(container).style.transform)).toBeGreaterThan(1);
+    fireEvent.wheel(canvasEl(container), { deltaY: 100, clientX: 0, clientY: 0 });
+    fireEvent.wheel(canvasEl(container), { deltaY: 100, clientX: 0, clientY: 0 });
+    expect(scaleOf(worldEl(container).style.transform)).toBeLessThan(1);
+  });
+
+  it('zooms via the +/− buttons and restores with reset', () => {
+    const { container } = render(<UiRenderer surface={mindmap()} />);
+    // pressing a zoom button must not start a canvas pan
+    fireEvent.pointerDown(screen.getByLabelText('Zoom in'));
+    expect(canvasEl(container).style.cursor).toBe('grab');
+    fireEvent.click(screen.getByLabelText('Zoom in'));
+    expect(scaleOf(worldEl(container).style.transform)).toBeGreaterThan(1);
+    fireEvent.click(screen.getByLabelText('Reset view'));
+    expect(worldEl(container).style.transform).toBe('translate(48px, 32px) scale(1)');
+    fireEvent.click(screen.getByLabelText('Zoom out'));
+    expect(scaleOf(worldEl(container).style.transform)).toBeLessThan(1);
+  });
+
+  it('clamps zoom to the min/max bounds', () => {
+    const { container } = render(<UiRenderer surface={mindmap()} />);
+    for (let i = 0; i < 15; i += 1) fireEvent.click(screen.getByLabelText('Zoom out'));
+    expect(scaleOf(worldEl(container).style.transform)).toBe(0.3); // MM_MIN_ZOOM
+    for (let i = 0; i < 25; i += 1) fireEvent.click(screen.getByLabelText('Zoom in'));
+    expect(scaleOf(worldEl(container).style.transform)).toBe(2.5); // MM_MAX_ZOOM
+  });
+
+  it('detaches the wheel listener on unmount without error', () => {
+    const { unmount } = render(<UiRenderer surface={mindmap()} />);
+    expect(() => unmount()).not.toThrow(); // ref callback runs with null → cleanup
+  });
+});
+
+describe('UiRenderer — remaining visual branches', () => {
+  it('passes through a node style override and skips non-primitive style values', () => {
+    render(<UiRenderer surface={surface({
+      root: { id: 'root', component: 'Text', text: 'Styled', style: { color: '#ff0000', opacity: {} } },
+    })} />);
+    const el = screen.getByText('Styled');
+    expect(el).toBeInTheDocument();
+    expect(el.style.color).toBe('rgb(255, 0, 0)'); // string passthrough applied
+  });
+
+  it('rotates and truncates bar-chart labels when there are many bars', () => {
+    render(<UiRenderer surface={surface({
+      root: {
+        id: 'root', component: 'Chart', chartType: 'bar',
+        data: [
+          { label: 'Very Long City Name', value: 9 },
+          { label: 'B', value: 3 }, { label: 'C', value: 4 }, { label: 'D', value: 2 },
+          { label: 'E', value: 5 }, { label: 'F', value: 1 }, { label: 'G', value: 6 },
+        ],
+      },
+    })} />);
+    expect(screen.getByText('Very Long C…')).toBeInTheDocument(); // >6 bars → rotate + truncate
+  });
+
+  it('applies the theme font stack (and falls back to sans for an unknown font)', () => {
+    const themed = (font: string) =>
+      ({ rootId: 'root', components: { root: { id: 'root', component: 'Text', text: 'Fonted' } }, data: {}, theme: { font } }) as unknown as UiSurface;
+    const { container, rerender } = render(<UiRenderer surface={themed('serif')} />);
+    expect((container.firstChild as HTMLElement).style.fontFamily).toContain('Georgia');
+    rerender(<UiRenderer surface={themed('weird')} />); // unknown font → sans fallback
+    expect((container.firstChild as HTMLElement).style.fontFamily).toContain('Inter');
+  });
+});

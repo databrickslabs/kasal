@@ -314,7 +314,7 @@ class TestCreateNewSpace:
         )
         data = json.loads(result)
         assert "url" in data
-        assert "genie/spaces/new-space-001" in data["url"]
+        assert "genie/rooms/new-space-001" in data["url"]
 
     def test_create_operation_is_created(self):
         tool = GenieSpaceGeneratorTool()

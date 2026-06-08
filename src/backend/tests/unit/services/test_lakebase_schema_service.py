@@ -467,7 +467,13 @@ class TestCreateDocEmbeddingsSync:
 
         mock_engine.begin.return_value = SyncCtxMgr()
         service._create_doc_embeddings_sync(mock_engine)
-        assert mock_conn.execute.call_count == 2  # SET search_path + CREATE TABLE
+        # SET search_path + CREATE TABLE + idempotent column/index ensure
+        # (group_id, file_path, indexes, pgvector check, embedding column/index).
+        executed = " ".join(str(c.args[0]) for c in mock_conn.execute.call_args_list)
+        assert "SET search_path" in executed
+        assert "CREATE TABLE IF NOT EXISTS documentation_embeddings" in executed
+        assert "ADD COLUMN IF NOT EXISTS group_id" in executed
+        assert "ADD COLUMN IF NOT EXISTS file_path" in executed
 
 
 class TestCreateTablesSyncStream:

@@ -330,7 +330,19 @@ class CrewAIExecutionService:
                 "execution_id": execution_id,
                 "crew": crew_config_dict
             }
-            
+
+            # Memory scoping (chat): carry the chat session id + the recall-scope
+            # toggle through to the engine so CrewMemoryService can scope memory
+            # recall. This dict is built fresh here (not via adapt_config), so
+            # without these two lines the fields are dropped and recall always
+            # defaults to workspace-wide — even when the user picked "Session only".
+            session_id = getattr(config, "session_id", None)
+            if session_id:
+                execution_config["session_id"] = session_id
+            workspace_scope = getattr(config, "memory_workspace_scope", None)
+            if workspace_scope is not None:
+                execution_config["memory_workspace_scope"] = workspace_scope
+
             # Add group_id to config if group_context is provided
             if group_context and group_context.group_ids and len(group_context.group_ids) > 0:
                 execution_config["group_id"] = group_context.group_ids[0]

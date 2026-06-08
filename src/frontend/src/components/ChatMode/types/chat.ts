@@ -10,6 +10,8 @@ export interface ChatMessage {
   resultType?: string;
   resultData?: unknown;
   isStreaming?: boolean;
+  /** Names of knowledge files attached to a user message (shown as chips). */
+  attachments?: string[];
 }
 
 export interface ChatSession {
@@ -17,6 +19,10 @@ export interface ChatSession {
   title: string;
   createdAt: Date;
   updatedAt: Date;
+  /** Workspace (group) this session belongs to — chat sessions are per-workspace. */
+  groupId?: string;
+  /** In-flight crew job for refresh reconnect (set while running). */
+  runningJobId?: string;
 }
 
 export interface AppConfig {

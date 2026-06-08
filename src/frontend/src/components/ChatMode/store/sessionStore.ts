@@ -3,6 +3,7 @@ import { ChatMessage, ChatSession } from '../types/chat';
 import { generateId } from '../utils/markdown';
 import {
   initDb,
+  assignUngroupedSessions as dbAssignUngroupedSessions,
   createSession as dbCreateSession,
   listSessions as dbListSessions,
   deleteSession as dbDeleteSession,
@@ -15,6 +16,17 @@ import {
 
 const ACTIVE_SESSION_KEY = 'kasal-chat-active-session';
 
+// The selected workspace/group, mirrored to localStorage by the group store.
+// Chat sessions are scoped to it so switching workspace shows only that
+// workspace's chats.
+const currentGroupId = (): string | undefined => {
+  try {
+    return localStorage.getItem('selectedGroupId') || undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 interface SessionState {
   sessions: ChatSession[];
   currentSessionId: string | null;
@@ -24,6 +36,8 @@ interface SessionState {
 
 interface SessionActions {
   init: () => Promise<void>;
+  /** Re-list sessions for the now-current workspace and pick its active session. */
+  reloadForGroup: () => Promise<void>;
   switchSession: (sessionId: string) => Promise<void>;
   createNewSession: () => Promise<string>;
   deleteSession: (id: string) => Promise<void>;
@@ -65,20 +79,36 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   init: async () => {
     await initDb();
     set({ isDbReady: true });
+    // One-time: adopt any pre-workspace-scoping (untagged) sessions into the
+    // current workspace so strict filtering doesn't hide them. No-op once done.
+    const gid = currentGroupId();
+    if (gid) {
+      try {
+        await dbAssignUngroupedSessions(gid);
+      } catch {
+        /* non-fatal */
+      }
+    }
+    await get().reloadForGroup();
+  },
 
-    const allSessions = await dbListSessions();
-    set({ sessions: allSessions });
-
-    // Restore last active session
+  reloadForGroup: async () => {
+    // Only this workspace's sessions. The active-session pointer is global, so
+    // validate it against THIS group's sessions; if it belongs to another
+    // workspace (just switched), fall back to this group's most recent — or an
+    // empty state when the workspace has no chats yet.
+    const allSessions = await dbListSessions(currentGroupId());
     const lastId = localStorage.getItem(ACTIVE_SESSION_KEY);
     if (lastId && allSessions.some((s) => s.id === lastId)) {
       const msgs = await getSessionMessages(lastId);
-      set({ currentSessionId: lastId, messages: msgs });
+      set({ sessions: allSessions, currentSessionId: lastId, messages: msgs });
     } else if (allSessions.length > 0) {
       const recent = allSessions[0];
       localStorage.setItem(ACTIVE_SESSION_KEY, recent.id);
       const msgs = await getSessionMessages(recent.id);
-      set({ currentSessionId: recent.id, messages: msgs });
+      set({ sessions: allSessions, currentSessionId: recent.id, messages: msgs });
+    } else {
+      set({ sessions: allSessions, currentSessionId: null, messages: [] });
     }
   },
 
@@ -89,9 +119,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   createNewSession: async () => {
-    const session = await dbCreateSession('New Chat');
+    const session = await dbCreateSession('New Chat', currentGroupId());
     localStorage.setItem(ACTIVE_SESSION_KEY, session.id);
-    const allSessions = await dbListSessions();
+    const allSessions = await dbListSessions(currentGroupId());
     set({
       currentSessionId: session.id,
       messages: [],
@@ -102,7 +132,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   deleteSession: async (id: string) => {
     await dbDeleteSession(id);
-    const remaining = await dbListSessions();
+    const remaining = await dbListSessions(currentGroupId());
     const state = get();
 
     if (id === state.currentSessionId) {
@@ -113,7 +143,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         set({ sessions: remaining, currentSessionId: next.id, messages: msgs });
       } else {
         // No sessions left — create a new one
-        const session = await dbCreateSession('New Chat');
+        const session = await dbCreateSession('New Chat', currentGroupId());
         localStorage.setItem(ACTIVE_SESSION_KEY, session.id);
         set({
           sessions: [session],
@@ -128,7 +158,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   renameSession: async (id: string, title: string) => {
     await dbRenameSession(id, title);
-    const allSessions = await dbListSessions();
+    const allSessions = await dbListSessions(currentGroupId());
     set({ sessions: allSessions });
   },
 
@@ -147,10 +177,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const ensureAndPersist = async () => {
       let sessionId = get().currentSessionId;
       if (!sessionId) {
-        const session = await dbCreateSession('New Chat');
+        const session = await dbCreateSession('New Chat', currentGroupId());
         sessionId = session.id;
         localStorage.setItem(ACTIVE_SESSION_KEY, sessionId);
-        const allSessions = await dbListSessions();
+        const allSessions = await dbListSessions(currentGroupId());
         set({ currentSessionId: sessionId, sessions: allSessions });
       }
       await addMessageToSession(sessionId, { ...message, sessionId });
@@ -164,7 +194,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         autoTitled.add(sessionId);
         const title = content.slice(0, 40).trim() || 'New Chat';
         await dbRenameSession(sessionId, title);
-        const allSessions = await dbListSessions();
+        const allSessions = await dbListSessions(currentGroupId());
         set({ sessions: allSessions });
       }
     };

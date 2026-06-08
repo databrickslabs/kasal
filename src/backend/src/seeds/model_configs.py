@@ -462,6 +462,10 @@ REMOVED_MODEL_KEYS = [
     "claude-3-7-sonnet-20250219-thinking",
     "claude-3-opus-20240229",
     "databricks-claude-3-7-sonnet",
+    # Not a real serving endpoint — selecting it fails generation with
+    # ENDPOINT_NOT_FOUND. Never in DEFAULT_MODELS; prune it from any DB it was
+    # manually added to. Use databricks-gemini-3-flash / 2-5-flash instead.
+    "databricks-gemini-3-1-flash-lite",
 ]
 
 async def seed_async():

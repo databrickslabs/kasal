@@ -46,20 +46,27 @@ class MemoryBackendFactory:
         embedder: Optional[Any] = None,
         user_token: Optional[str] = None,
         job_id: Optional[str] = None,
+        workspace_wide: bool = True,
+        session_scope_id: Optional[str] = None,
     ) -> Optional[Any]:
         """Return a ``StorageBackend`` instance, or ``None`` for CrewAI's default.
 
         Args:
             config: Memory backend configuration loaded from the database.
-            crew_id: Deterministic crew identifier (group-scoped).
+            crew_id: Deterministic crew identifier (group-scoped). Used for
+                tracing/identity and write tagging — NOT for read scoping.
             group_id: Tenant group identifier used to isolate memories.
             embedder: Optional embedder used when ``MemoryRecord.embedding`` is
                 empty. Unified ``Memory`` usually embeds at the Memory layer
                 and passes embeddings down, but we pass this through as a
                 safety net.
             user_token: Optional user OBO token for Databricks.
-            job_id: Optional execution/job id used as ``session_id`` for
-                short-term-style queries.
+            job_id: Optional execution/job id (per run).
+            workspace_wide: READ scope. True = recall spans the whole workspace
+                (group_id); False = recall is confined to ``session_scope_id``.
+            session_scope_id: Stable chat-session id used as the backend
+                ``session_id`` so session-only recall stays within one
+                conversation across runs. Falls back to ``job_id``.
 
         Returns:
             A ``StorageBackend`` instance, or ``None`` when the unified
@@ -85,6 +92,8 @@ class MemoryBackendFactory:
                 group_id=group_id,
                 embedder=embedder,
                 job_id=job_id,
+                workspace_wide=workspace_wide,
+                session_scope_id=session_scope_id,
             )
         if config.backend_type == MemoryBackendType.DEFAULT:
             logger.info(
@@ -162,6 +171,8 @@ class MemoryBackendFactory:
         group_id: str,
         embedder: Optional[Any],
         job_id: Optional[str],
+        workspace_wide: bool = True,
+        session_scope_id: Optional[str] = None,
     ) -> Any:
         if not config.lakebase_config:
             raise ValueError(
@@ -190,10 +201,14 @@ class MemoryBackendFactory:
             table_name=table_name,
             crew_id=crew_id,
             group_id=group_id,
-            session_id=job_id,
+            # session_id is the memory-partition key for session-only recall.
+            # Prefer the stable chat-session id; fall back to the per-run job_id
+            # for non-chat executions (which run workspace-wide anyway).
+            session_id=session_scope_id or job_id,
             embedder=embedder,
             embedding_dimension=lakebase_cfg.embedding_dimension or 1024,
             instance_name=getattr(lakebase_cfg, "instance_name", None),
+            workspace_wide=workspace_wide,
         )
 
     # ------------------------------------------------------------------

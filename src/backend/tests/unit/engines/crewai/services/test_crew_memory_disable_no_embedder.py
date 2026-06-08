@@ -26,6 +26,14 @@ from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
 class TestDefaultBackendNoEmbedderDisablesMemory:
     """Tests for the guard that disables memory when DEFAULT backend has no embedder."""
 
+    @pytest.fixture(autouse=True)
+    def _clear_openai_key(self, monkeypatch):
+        # The no-embedder guard also checks os.environ["OPENAI_API_KEY"]; another
+        # test in the full suite can leak it into the environment, which would stop
+        # the guard from firing. Clear it so the "no embedder available" path is
+        # exercised deterministically regardless of suite ordering.
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
     def test_default_no_embedder_disables_memory(self):
         """DEFAULT + no custom_embedder + no crew_kwargs embedder → memory=False."""
         config = {'group_id': 'test', 'execution_id': 'job_1'}

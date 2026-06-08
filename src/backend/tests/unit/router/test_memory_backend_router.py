@@ -69,7 +69,7 @@ def mock_group_context():
 @pytest.fixture
 def sample_databricks_config():
     """Create a sample Databricks configuration."""
-    return DatabricksMemoryConfig(
+    return DatabricksMemoryConfig(memory_index="catalog.schema.memory_index", 
         endpoint_name="test-endpoint",
         short_term_index="test.catalog.short_term",
         long_term_index="test.catalog.long_term",

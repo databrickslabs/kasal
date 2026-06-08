@@ -457,3 +457,24 @@ describe('streamGeneration', () => {
 function RECONNECT_DELAY(attemptIndex: number): number {
   return 1000 * Math.pow(2, attemptIndex);
 }
+
+describe('streamExecution when SSE is disabled', () => {
+  it('returns a no-op cleanup and never opens an EventSource', async () => {
+    vi.resetModules();
+    vi.doMock('../../../utils/sseTransport', () => ({ SSE_ENABLED: false }));
+    vi.doMock('./client', () => ({
+      __esModule: true,
+      getBaseUrl: () => 'https://example.com/api/v1',
+    }));
+    const mod = await import('./streaming');
+    FakeEventSource.instances = [];
+
+    const cleanup = mod.streamExecution('job-x', vi.fn());
+    expect(FakeEventSource.instances.length).toBe(0); // SSE never opened
+    expect(() => cleanup()).not.toThrow(); // no-op cleanup
+
+    vi.doUnmock('../../../utils/sseTransport');
+    vi.doUnmock('./client');
+    vi.resetModules();
+  });
+});

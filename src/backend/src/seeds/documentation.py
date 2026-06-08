@@ -228,7 +228,7 @@ def create_best_practices_content(best_practices: Dict[str, Any]) -> List[Dict[s
 
 async def create_best_practices_chunks(content_docs: List[Dict[str, str]]) -> List[Dict[str, Any]]:
     """Create chunks from best practices content."""
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
 
     all_chunks = []
     text_splitter = RecursiveCharacterTextSplitter(
@@ -261,7 +261,7 @@ async def create_best_practices_chunks(content_docs: List[Dict[str, str]]) -> Li
 
 async def create_documentation_chunks(url: str) -> List[Dict[str, Any]]:
     """Create documentation chunks from a URL."""
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
     
     html_content = await fetch_url(url)
     if not html_content:

@@ -40,6 +40,10 @@ DOCUMENT_COLUMN_POSITIONS = {col: idx for idx, col in enumerate(DOCUMENT_SEARCH_
 # Patch targets - local imports require patching at the source module
 SCHEMAS_MODULE = "src.schemas.databricks_index_schemas.DatabricksIndexSchemas"
 LLM_MODULE = "src.core.llm_manager.LLMManager"
+# search() now queries the pgvector documentation_embeddings table via the
+# DocumentationEmbeddingService instead of the Databricks Vector Search index.
+# Knowledge search reads via DocumentationEmbeddingRepository(model=KnowledgeEmbedding).
+DOC_SVC_MODULE = "src.repositories.documentation_embedding_repository.DocumentationEmbeddingRepository"
 DVS_MODULE = "src.engines.crewai.memory.databricks_vector_storage.DatabricksVectorStorage"
 MBS_MODULE = "src.services.memory_backend_service.MemoryBackendService"
 MBC_MODULE = "src.schemas.memory_backend.MemoryBackendConfig"
@@ -84,6 +88,26 @@ def _make_search_response(rows: Optional[List[list]] = None) -> dict:
         },
         "message": "ok",
     }
+
+
+def _pg_row(
+    content: str = "Sample content",
+    title: str = "Doc Title",
+    source: str = "orig.md",
+    file_path: str = "/Volumes/catalog/schema/vol/doc.pdf",
+    group_id: str = GROUP_ID,
+    chunk_index: int = 0,
+    score: float = 0.92,
+) -> SimpleNamespace:
+    """Build a DocumentationEmbedding-like row as returned by the pgvector repo."""
+    return SimpleNamespace(
+        content=content,
+        title=title,
+        source=source,
+        file_path=file_path,
+        group_id=group_id,
+        doc_metadata={"chunk_index": chunk_index, "score": score},
+    )
 
 
 def _make_vector_storage(
@@ -193,33 +217,34 @@ class TestKnowledgeSearchServiceInit:
 class TestSearchSuccess:
     """Tests for the search() method returning valid results."""
 
+    @pytest.fixture(autouse=True)
+    def _force_app_session(self):
+        # Force the app-DB read path (no Lakebase) for these unit tests.
+        with patch(
+            "src.services.knowledge_embedding_session.resolve_lakebase_instance",
+            new=AsyncMock(return_value=None),
+        ):
+            yield
+
     def _setup_service(self):
         self.session = Mock()
         self.service = KnowledgeSearchService(self.session, GROUP_ID)
-        self.mock_storage = _make_vector_storage()
+
+    @staticmethod
+    def _doc_service(rows):
+        """A patched repository whose search_similar returns `rows`."""
+        repo = MagicMock()
+        repo.search_similar = AsyncMock(return_value=rows)
+        return repo
 
     @pytest.mark.asyncio
-    @patch(SCHEMAS_MODULE)
     @patch(LLM_MODULE)
-    async def test_search_returns_formatted_results(self, mock_llm_cls, mock_schemas_cls):
+    @patch(DOC_SVC_MODULE)
+    async def test_search_returns_formatted_results(self, mock_doc_cls, mock_llm_cls):
         self._setup_service()
-
-        # Mock _get_vector_storage to avoid all downstream Databricks setup
-        self.service._get_vector_storage = AsyncMock(return_value=self.mock_storage)
-
-        # Schema mocks
-        mock_schemas_cls.get_search_columns.return_value = DOCUMENT_SEARCH_COLUMNS
-        mock_schemas_cls.get_column_positions.return_value = DOCUMENT_COLUMN_POSITIONS
-
-        # Embedding
         mock_llm_cls.get_embedding = AsyncMock(return_value=EMBEDDING)
-
-        # Repo get_index -> ready; similarity_search -> results
-        index_info = _make_ready_index_info()
-        self.mock_storage.repository.get_index = AsyncMock(return_value=index_info)
-        self.mock_storage.repository.similarity_search = AsyncMock(
-            return_value=_make_search_response()
-        )
+        doc_svc = self._doc_service([_pg_row()])
+        mock_doc_cls.return_value = doc_svc
 
         results = await self.service.search(
             QUERY, execution_id=EXECUTION_ID, user_token=USER_TOKEN
@@ -227,6 +252,7 @@ class TestSearchSuccess:
 
         assert len(results) == 1
         assert results[0]["content"] == "Sample content"
+        # source prefers the file_path of the stored knowledge row
         assert results[0]["metadata"]["source"] == "/Volumes/catalog/schema/vol/doc.pdf"
         assert results[0]["metadata"]["title"] == "Doc Title"
         assert results[0]["metadata"]["chunk_index"] == 0
@@ -235,27 +261,17 @@ class TestSearchSuccess:
         assert results[0]["metadata"]["execution_id"] == EXECUTION_ID
 
     @pytest.mark.asyncio
-    @patch(SCHEMAS_MODULE)
     @patch(LLM_MODULE)
-    async def test_search_multiple_results(self, mock_llm_cls, mock_schemas_cls):
+    @patch(DOC_SVC_MODULE)
+    async def test_search_multiple_results(self, mock_doc_cls, mock_llm_cls):
         self._setup_service()
-        self.service._get_vector_storage = AsyncMock(return_value=self.mock_storage)
-
-        mock_schemas_cls.get_search_columns.return_value = DOCUMENT_SEARCH_COLUMNS
-        mock_schemas_cls.get_column_positions.return_value = DOCUMENT_COLUMN_POSITIONS
         mock_llm_cls.get_embedding = AsyncMock(return_value=EMBEDDING)
-
         rows = [
-            _make_data_row(content="First", score=0.95),
-            _make_data_row(content="Second", score=0.88),
-            _make_data_row(content="Third", score=0.72),
+            _pg_row(content="First", score=0.95),
+            _pg_row(content="Second", score=0.88),
+            _pg_row(content="Third", score=0.72),
         ]
-        self.mock_storage.repository.get_index = AsyncMock(
-            return_value=_make_ready_index_info()
-        )
-        self.mock_storage.repository.similarity_search = AsyncMock(
-            return_value=_make_search_response(rows)
-        )
+        mock_doc_cls.return_value = self._doc_service(rows)
 
         results = await self.service.search(QUERY, limit=3, user_token=USER_TOKEN)
 
@@ -264,80 +280,61 @@ class TestSearchSuccess:
         assert results[2]["metadata"]["score"] == 0.72
 
     @pytest.mark.asyncio
-    @patch(SCHEMAS_MODULE)
     @patch(LLM_MODULE)
-    async def test_search_with_file_paths_filter(self, mock_llm_cls, mock_schemas_cls):
-        """When file_paths are supplied, _resolve_file_paths is called and results used."""
+    @patch(DOC_SVC_MODULE)
+    async def test_search_with_file_paths_filter(self, mock_doc_cls, mock_llm_cls):
+        """file_paths + group_id are forwarded to the pgvector search for scoping."""
         self._setup_service()
-        self.service._get_vector_storage = AsyncMock(return_value=self.mock_storage)
-        resolved = ["/Volumes/cat/sch/vol/a.pdf"]
-        self.service._resolve_file_paths = AsyncMock(return_value=resolved)
-
-        mock_schemas_cls.get_search_columns.return_value = DOCUMENT_SEARCH_COLUMNS
-        mock_schemas_cls.get_column_positions.return_value = DOCUMENT_COLUMN_POSITIONS
         mock_llm_cls.get_embedding = AsyncMock(return_value=EMBEDDING)
-
-        self.mock_storage.repository.get_index = AsyncMock(
-            return_value=_make_ready_index_info()
-        )
-        self.mock_storage.repository.similarity_search = AsyncMock(
-            return_value=_make_search_response()
-        )
+        doc_svc = self._doc_service([_pg_row()])
+        mock_doc_cls.return_value = doc_svc
 
         results = await self.service.search(
-            QUERY, file_paths=["a.pdf"], user_token=USER_TOKEN
+            QUERY, file_paths=["/Volumes/cat/sch/vol/a.pdf"], user_token=USER_TOKEN
         )
 
         assert len(results) == 1
-        self.service._resolve_file_paths.assert_awaited_once()
+        _, kwargs = doc_svc.search_similar.call_args
+        assert kwargs["group_id"] == GROUP_ID
+        # The repo fetches by group only (file_paths=None); the service then
+        # filters the rows by basename in-memory (see search() lines 96-113).
+        assert kwargs["file_paths"] is None
 
     @pytest.mark.asyncio
-    @patch(SCHEMAS_MODULE)
     @patch(LLM_MODULE)
-    async def test_search_with_execution_id_in_metadata(
-        self, mock_llm_cls, mock_schemas_cls
-    ):
+    @patch(DOC_SVC_MODULE)
+    async def test_search_with_execution_id_in_metadata(self, mock_doc_cls, mock_llm_cls):
         """execution_id is passed through to each result's metadata."""
         self._setup_service()
-        self.service._get_vector_storage = AsyncMock(return_value=self.mock_storage)
-
-        mock_schemas_cls.get_search_columns.return_value = DOCUMENT_SEARCH_COLUMNS
-        mock_schemas_cls.get_column_positions.return_value = DOCUMENT_COLUMN_POSITIONS
         mock_llm_cls.get_embedding = AsyncMock(return_value=EMBEDDING)
-
-        self.mock_storage.repository.get_index = AsyncMock(
-            return_value=_make_ready_index_info()
-        )
-        self.mock_storage.repository.similarity_search = AsyncMock(
-            return_value=_make_search_response()
-        )
+        mock_doc_cls.return_value = self._doc_service([_pg_row()])
 
         results = await self.service.search(QUERY, execution_id="my-exec-id")
 
         assert results[0]["metadata"]["execution_id"] == "my-exec-id"
 
     @pytest.mark.asyncio
-    @patch(SCHEMAS_MODULE)
     @patch(LLM_MODULE)
-    async def test_search_index_ready_via_dict(self, mock_llm_cls, mock_schemas_cls):
-        """Index readiness detected from a dict response."""
+    @patch(DOC_SVC_MODULE)
+    async def test_search_defaults_chunk_and_score_when_metadata_missing(
+        self, mock_doc_cls, mock_llm_cls
+    ):
+        """Rows without chunk_index/score in metadata get safe defaults."""
         self._setup_service()
-        self.service._get_vector_storage = AsyncMock(return_value=self.mock_storage)
-
-        mock_schemas_cls.get_search_columns.return_value = DOCUMENT_SEARCH_COLUMNS
-        mock_schemas_cls.get_column_positions.return_value = DOCUMENT_COLUMN_POSITIONS
         mock_llm_cls.get_embedding = AsyncMock(return_value=EMBEDDING)
-
-        self.mock_storage.repository.get_index = AsyncMock(
-            return_value=_make_ready_index_info_dict()
+        row = SimpleNamespace(
+            content="c", title="t", source="s.md",
+            file_path=None, group_id=GROUP_ID, doc_metadata=None,
         )
-        self.mock_storage.repository.similarity_search = AsyncMock(
-            return_value=_make_search_response()
-        )
+        mock_doc_cls.return_value = self._doc_service([row])
 
         results = await self.service.search(QUERY)
 
         assert len(results) == 1
+        # file_path None -> falls back to source field
+        assert results[0]["metadata"]["source"] == "s.md"
+        assert results[0]["metadata"]["chunk_index"] == 0
+        assert results[0]["metadata"]["score"] == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -523,46 +520,6 @@ class TestGetVectorStorage:
     @patch(DVS_MODULE)
     @patch(MBC_MODULE)
     @patch(MBS_MODULE)
-    async def test_returns_storage_when_backend_configured(
-        self, mock_mbs_cls, mock_mbc_cls, mock_dvs_cls
-    ):
-        """Happy path: active Databricks backend with object-style config."""
-        self._setup_service()
-
-        db_config = _make_db_config_object()
-        backend = _make_backend(databricks_config=db_config)
-
-        mock_mbs_instance = MagicMock()
-        mock_mbs_instance.get_memory_backends = AsyncMock(return_value=[backend])
-        mock_mbs_cls.return_value = mock_mbs_instance
-
-        mock_config_obj = MagicMock()
-        mock_config_obj.databricks_config = db_config
-        mock_mbc_cls.return_value = mock_config_obj
-
-        mock_storage_instance = MagicMock()
-        mock_dvs_cls.return_value = mock_storage_instance
-
-        result = await self.service._get_vector_storage(USER_TOKEN)
-
-        assert result is mock_storage_instance
-        mock_dvs_cls.assert_called_once_with(
-            endpoint_name="vs-doc-endpoint",
-            index_name="catalog.schema.doc_index",
-            crew_id="knowledge_files",
-            memory_type="document",
-            embedding_dimension=1024,
-            workspace_url="https://example.com",
-            personal_access_token="pat-123",
-            service_principal_client_id="sp-id",
-            service_principal_client_secret="sp-secret",
-            user_token=USER_TOKEN,
-        )
-
-    @pytest.mark.asyncio
-    @patch(DVS_MODULE)
-    @patch(MBC_MODULE)
-    @patch(MBS_MODULE)
     async def test_returns_none_when_no_backends(
         self, mock_mbs_cls, mock_mbc_cls, mock_dvs_cls
     ):
@@ -596,46 +553,6 @@ class TestGetVectorStorage:
         result = await self.service._get_vector_storage(USER_TOKEN)
 
         assert result is None
-
-    @pytest.mark.asyncio
-    @patch(DVS_MODULE)
-    @patch(MBC_MODULE)
-    @patch(MBS_MODULE)
-    async def test_handles_config_as_dict(
-        self, mock_mbs_cls, mock_mbc_cls, mock_dvs_cls
-    ):
-        """When databricks_config is a plain dict rather than a Pydantic model."""
-        self._setup_service()
-
-        db_config_dict = _make_db_config_dict()
-        backend = _make_backend(databricks_config=db_config_dict)
-
-        mock_mbs_instance = MagicMock()
-        mock_mbs_instance.get_memory_backends = AsyncMock(return_value=[backend])
-        mock_mbs_cls.return_value = mock_mbs_instance
-
-        mock_config_obj = MagicMock()
-        mock_config_obj.databricks_config = db_config_dict
-        mock_mbc_cls.return_value = mock_config_obj
-
-        mock_storage_instance = MagicMock()
-        mock_dvs_cls.return_value = mock_storage_instance
-
-        result = await self.service._get_vector_storage(USER_TOKEN)
-
-        assert result is mock_storage_instance
-        mock_dvs_cls.assert_called_once_with(
-            endpoint_name="doc-ep",
-            index_name="catalog.schema.doc_idx",
-            crew_id="knowledge_files",
-            memory_type="document",
-            embedding_dimension=1024,
-            workspace_url="https://example.com",
-            personal_access_token="pat",
-            service_principal_client_id="sp-id",
-            service_principal_client_secret="sp-secret",
-            user_token=USER_TOKEN,
-        )
 
     @pytest.mark.asyncio
     @patch(DVS_MODULE)
@@ -898,3 +815,57 @@ class TestResolveFilePaths:
 
         # No match found => combined list is empty => returns None
         assert result is None
+
+
+# --- Legacy Vector-Search storage builder (_get_vector_storage internals) ---
+from datetime import datetime as _dt  # noqa: E402
+from src.schemas.memory_backend import DatabricksMemoryConfig, MemoryBackendType  # noqa: E402
+
+_SEARCH_DVS = "src.engines.crewai.memory.databricks_vector_storage.DatabricksVectorStorage"
+
+
+def _search_databricks_backend(db_config):
+    b = MagicMock()
+    b.is_active = True
+    b.backend_type = MemoryBackendType.DATABRICKS
+    b.created_at = _dt(2024, 1, 1)
+    b.databricks_config = db_config
+    b.cognitive_config = None
+    b.custom_config = None
+    return b
+
+
+class TestSearchGetVectorStorageInternals:
+    def _svc(self):
+        return KnowledgeSearchService(MagicMock(), GROUP_ID)
+
+    @pytest.mark.asyncio
+    async def test_builds_storage_from_databricks_backend(self):
+        svc = self._svc()
+        cfg = DatabricksMemoryConfig(
+            workspace_url="https://example.databricks.com",
+            endpoint_name="ep",
+            memory_index="cat.sch.mem",
+            document_index="cat.sch.doc",
+            embedding_dimension=1024,
+        )
+        svc._memory_backend_service = AsyncMock()
+        svc._memory_backend_service.get_memory_backends = AsyncMock(return_value=[_search_databricks_backend(cfg)])
+        with patch(_SEARCH_DVS) as MockStore:
+            result = await svc._get_vector_storage(user_token="tok")
+        assert result is MockStore.return_value
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_document_index(self):
+        svc = self._svc()
+        cfg = DatabricksMemoryConfig(workspace_url="https://example.databricks.com", endpoint_name="ep", memory_index="cat.sch.mem")
+        svc._memory_backend_service = AsyncMock()
+        svc._memory_backend_service.get_memory_backends = AsyncMock(return_value=[_search_databricks_backend(cfg)])
+        assert await svc._get_vector_storage() is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_databricks_config_missing(self):
+        svc = self._svc()
+        svc._memory_backend_service = AsyncMock()
+        svc._memory_backend_service.get_memory_backends = AsyncMock(return_value=[_search_databricks_backend(None)])
+        assert await svc._get_vector_storage() is None

@@ -161,31 +161,19 @@ class TestDocumentationEmbeddingRepositoryCreate:
     @pytest.mark.asyncio
     async def test_create_success(self, repository_with_async_session, sample_embedding_create):
         """Test create documentation embedding successfully."""
-        created_embedding = MockDocumentationEmbedding(
-            id=1,
-            source=sample_embedding_create.source,
-            title=sample_embedding_create.title,
-            content=sample_embedding_create.content,
-            embedding=sample_embedding_create.embedding,
-            doc_metadata=sample_embedding_create.doc_metadata
-        )
-        
-        with patch('src.repositories.documentation_embedding_repository.DocumentationEmbedding') as mock_model:
-            mock_model.return_value = created_embedding
-            
-            result = await repository_with_async_session.create(sample_embedding_create)
-            
-            assert result == created_embedding
-            repository_with_async_session.db.add.assert_called_once_with(created_embedding)
-            repository_with_async_session.db.flush.assert_called_once()
-            
-            # Verify DocumentationEmbedding was created with correct parameters
-            call_args = mock_model.call_args[1]
-            assert call_args['source'] == sample_embedding_create.source
-            assert call_args['title'] == sample_embedding_create.title
-            assert call_args['content'] == sample_embedding_create.content
-            assert call_args['embedding'] == sample_embedding_create.embedding
-            assert call_args['doc_metadata'] == sample_embedding_create.doc_metadata
+        # The repository builds an instance of its (parametrized) model and adds
+        # it to the session; assert on the object passed to db.add.
+        result = await repository_with_async_session.create(sample_embedding_create)
+
+        repository_with_async_session.db.add.assert_called_once()
+        added = repository_with_async_session.db.add.call_args[0][0]
+        assert result is added
+        assert added.source == sample_embedding_create.source
+        assert added.title == sample_embedding_create.title
+        assert added.content == sample_embedding_create.content
+        assert added.embedding == sample_embedding_create.embedding
+        assert added.doc_metadata == sample_embedding_create.doc_metadata
+        repository_with_async_session.db.flush.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_create_database_error(self, repository_with_async_session, sample_embedding_create):
@@ -427,10 +415,34 @@ class TestDocumentationEmbeddingRepositorySearchSimilar:
                 assert result == sample_embeddings
     
     @pytest.mark.asyncio
+    async def test_search_similar_forwards_scope_postgres(self, repository_with_async_session):
+        """group_id + file_paths are passed through to the postgres impl."""
+        query_embedding = [0.1, 0.2, 0.3]
+        pg = AsyncMock(return_value=[])
+        with patch.object(repository_with_async_session, '_get_database_type', AsyncMock(return_value='postgresql')):
+            with patch.object(repository_with_async_session, '_search_similar_postgres', pg):
+                await repository_with_async_session.search_similar(
+                    query_embedding, limit=4, group_id="grp-1", file_paths=["/Volumes/a/b.txt"]
+                )
+        pg.assert_awaited_once_with(query_embedding, 4, "grp-1", ["/Volumes/a/b.txt"])
+
+    @pytest.mark.asyncio
+    async def test_search_similar_forwards_scope_sqlite(self, repository_with_async_session):
+        """group_id + file_paths are passed through to the sqlite impl."""
+        query_embedding = [0.1, 0.2, 0.3]
+        sq = AsyncMock(return_value=[])
+        with patch.object(repository_with_async_session, '_get_database_type', AsyncMock(return_value='sqlite')):
+            with patch.object(repository_with_async_session, '_search_similar_sqlite', sq):
+                await repository_with_async_session.search_similar(
+                    query_embedding, limit=2, group_id="grp-2"
+                )
+        sq.assert_awaited_once_with(query_embedding, 2, "grp-2", None)
+
+    @pytest.mark.asyncio
     async def test_search_similar_empty_results(self, repository_with_async_session):
         """Test search similar when no similar embeddings found."""
         query_embedding = [0.1, 0.2, 0.3]
-        
+
         # Mock database type detection (async)
         with patch.object(repository_with_async_session, '_get_database_type', AsyncMock(return_value='postgresql')):
             # Mock the postgres search method (async)
@@ -584,14 +596,14 @@ class TestDocumentationEmbeddingRepositoryIntegration:
     @pytest.mark.asyncio
     async def test_full_crud_workflow(self, repository_with_async_session, sample_embedding_create):
         """Test complete CRUD workflow."""
-        # 1. Create embedding
+        # 1. Create embedding (repository builds + adds its model instance)
+        create_result = await repository_with_async_session.create(sample_embedding_create)
+        assert create_result is repository_with_async_session.db.add.call_args[0][0]
+        assert create_result.source == sample_embedding_create.source
+
+        # Reuse a mock object for the get/update/delete steps below.
         created_embedding = MockDocumentationEmbedding(id=1)
-        with patch('src.repositories.documentation_embedding_repository.DocumentationEmbedding') as mock_model:
-            mock_model.return_value = created_embedding
-            
-            create_result = await repository_with_async_session.create(sample_embedding_create)
-            assert create_result == created_embedding
-        
+
         # 2. Get by ID
         with patch.object(repository_with_async_session, 'get_by_id', AsyncMock(return_value=created_embedding)):
             get_result = await repository_with_async_session.get_by_id(1)

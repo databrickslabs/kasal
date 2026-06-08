@@ -157,7 +157,7 @@ class TestCrewPreparationExecute:
         cp = CrewPreparation(config=config)
         mock_crew = MagicMock()
         mock_result = {"result": "crew output", "type": "processed"}
-        mock_crew.kickoff = AsyncMock(return_value=mock_result)
+        mock_crew.kickoff_async = AsyncMock(return_value=mock_result)  # CrewAI 1.14.5 uses async kickoff
         cp.crew = mock_crew
 
         with patch("src.engines.crewai.crew_preparation.process_crew_output",

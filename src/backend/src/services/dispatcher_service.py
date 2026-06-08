@@ -1150,7 +1150,17 @@ Please analyze this message and provide your intent classification."""
                         tools_resp = await tool_svc.get_enabled_tools_for_group(group_context)
                     else:
                         tools_resp = await tool_svc.get_enabled_tools()
-                    effective_tools = [t.title for t in tools_resp.tools]
+                    # Exclude the knowledge-search tool from the default catalog:
+                    # it reads documents the user UPLOADED in this chat, so it's
+                    # only meaningful when files are attached. The frontend adds
+                    # it to request.tools ONLY when there are attachments (the
+                    # branch above), so when nothing is explicitly requested we
+                    # must not offer it — otherwise the generator picks it for
+                    # any "research" task and calls it with no documents.
+                    effective_tools = [
+                        t.title for t in tools_resp.tools
+                        if t.title != 'DatabricksKnowledgeSearchTool'
+                    ]
                 except Exception as e:
                     logger.warning(f"Failed to fetch workspace tools, falling back to suggested: {e}")
                     effective_tools = intent_result.get("suggested_tools", [])

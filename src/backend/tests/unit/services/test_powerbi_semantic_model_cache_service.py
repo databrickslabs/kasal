@@ -110,6 +110,7 @@ class TestGetCachedMetadata:
             workspace_id="ws",
             report_id="rpt-1",
             any_report_id=False,
+            cache_ttl_days=1,
         )
 
     @pytest.mark.asyncio

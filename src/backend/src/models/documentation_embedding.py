@@ -64,8 +64,39 @@ class DocumentationEmbedding(Base):
     content = Column(Text, nullable=False)
     embedding = Column(Vector(1024), nullable=False)
     doc_metadata = Column(JSON, nullable=True)
+    # Multi-tenant knowledge scoping: uploaded knowledge files live in this same
+    # pgvector table (Lakebase). Built-in CrewAI docs leave these NULL.
+    group_id = Column(String(100), index=True, nullable=True)  # workspace isolation
+    file_path = Column(String, index=True, nullable=True)  # source knowledge file
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     def __repr__(self):
-        return f"DocumentationEmbedding(id={self.id}, source={self.source}, title={self.title})" 
+        return f"DocumentationEmbedding(id={self.id}, source={self.source}, title={self.title})"
+
+
+class KnowledgeEmbedding(Base):
+    """Embeddings for user-uploaded knowledge files (RAG).
+
+    Same column layout as DocumentationEmbedding but a separate table so uploaded
+    knowledge is created and owned by the app principal on Lakebase — the legacy
+    documentation_embeddings table is owned by another role and can't be altered.
+    group_id (workspace isolation) and file_path (the crew's knowledge source)
+    are always populated here.
+    """
+
+    __tablename__ = "knowledge_embeddings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source = Column(String, index=True, nullable=False)
+    title = Column(String, index=True, nullable=False)
+    content = Column(Text, nullable=False)
+    embedding = Column(Vector(1024), nullable=False)
+    doc_metadata = Column(JSON, nullable=True)
+    group_id = Column(String(100), index=True, nullable=True)  # workspace isolation
+    file_path = Column(String, index=True, nullable=True)  # source knowledge file
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self):
+        return f"KnowledgeEmbedding(id={self.id}, group_id={self.group_id}, file_path={self.file_path})"

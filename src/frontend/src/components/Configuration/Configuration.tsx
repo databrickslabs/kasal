@@ -236,7 +236,7 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
         group: 'workspace'
       });
       baseNavItems.push({
-        label: t('configuration.memoryBackend.tab', { defaultValue: 'Memory Backend' }),
+        label: t('configuration.memoryBackend.tab', { defaultValue: 'Memory' }),
         icon: <MemoryIcon fontSize="small" />,
         index: currentIndex++,
         group: 'workspace'
@@ -743,7 +743,7 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
             }
 
             // Memory Backend
-            if (item.label === t('configuration.memoryBackend.tab', { defaultValue: 'Memory Backend' })) {
+            if (item.label === t('configuration.memoryBackend.tab', { defaultValue: 'Memory' })) {
               return (
                 <ContentPanel key={item.index} value={activeSection} index={item.index}>
                   <DatabricksOneClickSetup />

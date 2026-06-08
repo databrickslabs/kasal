@@ -54,22 +54,12 @@ class KnowledgeSearchService:
         logger.info(f"File paths parameter: {file_paths}")
 
         try:
-            # Get vector storage configuration
-            vector_storage = await self._get_vector_storage(user_token)
-            if not vector_storage:
-                logger.warning("Vector storage not configured")
-                return []
-
-            document_index = vector_storage.index_name
-            endpoint_name = vector_storage.endpoint_name
-
-            # Import dependencies
-            from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
             from src.core.llm_manager import LLMManager
+            from src.services.documentation_embedding_service import DocumentationEmbeddingService
 
-            # Get schema and generate query embedding
-            search_columns = DatabricksIndexSchemas.get_search_columns("document")
-
+            # Generate the query embedding with the same model used at ingest
+            # time (databricks-gte-large-en, 1024 dims) so it matches the stored
+            # vectors in the documentation_embeddings pgvector table.
             try:
                 query_embedding = await LLMManager.get_embedding(query, model="databricks-gte-large-en")
                 if not query_embedding:
@@ -79,120 +69,76 @@ class KnowledgeSearchService:
                 logger.error(f"Error generating embedding: {embed_error}")
                 return []
 
-            index_repo = vector_storage.repository
-
-            # Quick readiness check
+            # Uploaded knowledge lives in pgvector, scoped by group_id (tenant
+            # isolation) and optionally file_paths. When the active memory backend
+            # is Lakebase, that's the Lakebase memory instance; otherwise the app
+            # DB. Read from the same place ingest writes.
+            from src.services.knowledge_embedding_session import knowledge_embedding_session
+            from src.repositories.documentation_embedding_repository import (
+                DocumentationEmbeddingRepository,
+            )
+            from src.models.documentation_embedding import KnowledgeEmbedding
+            formatted_results = []
             try:
-                index_info = await asyncio.wait_for(
-                    index_repo.get_index(index_name=document_index, endpoint_name=endpoint_name, user_token=user_token),
-                    timeout=3
-                )
-                ready = False
-                try:
-                    if hasattr(index_info, 'success'):
-                        ready = bool(getattr(index_info, 'success', False) and getattr(getattr(index_info, 'index', None), 'ready', False))
-                    elif isinstance(index_info, dict):
-                        status = index_info.get('status') or {}
-                        ready = bool(status.get('ready') or index_info.get('ready'))
-                except Exception:
-                    ready = False
-                if not ready:
-                    logger.info("Databricks index not ready (provisioning)")
-                    return []
-            except Exception as e:
-                logger.info(f"Skipping search due to provisioning: {e}")
-                return []
+                async with knowledge_embedding_session(
+                    self.session, self.group_id, user_token
+                ) as (search_session, _is_lakebase):
+                    repo = DocumentationEmbeddingRepository(search_session, model=KnowledgeEmbedding)
+                    # Search GROUP-WIDE (no SQL file_path filter): the tool often
+                    # passes a bare filename ("test.txt") while the stored path is
+                    # the full "/Volumes/.../test.txt", so an exact-path filter
+                    # would wrongly match nothing. We soft-filter by basename below
+                    # and fall back to all group rows if nothing matches.
+                    rows = await repo.search_similar(
+                        query_embedding,
+                        limit=limit,
+                        group_id=self.group_id,
+                        file_paths=None,
+                    ) or []
+                    total_group_rows = len(rows)
 
-            # Build search filters
-            filters = {"group_id": self.group_id}
+                    if file_paths:
+                        wanted = {fp.rsplit('/', 1)[-1] for fp in file_paths if fp}
+                        narrowed = [
+                            r for r in rows
+                            if ((getattr(r, 'file_path', None) or '').rsplit('/', 1)[-1] in wanted)
+                        ]
+                        # Only narrow when at least one file matched; otherwise keep
+                        # the group-wide results (filename mismatch shouldn't blank it).
+                        if narrowed:
+                            rows = narrowed
 
-            if file_paths:
-                logger.info(f"[SEARCH SERVICE v2] About to resolve file_paths: {file_paths}")
-                # Resolve filenames to full paths if needed
-                resolved_paths = await self._resolve_file_paths(
-                    file_paths,
-                    index_repo,
-                    document_index,
-                    endpoint_name,
-                    query_embedding,
-                    search_columns,
-                    user_token
-                )
-
-                if resolved_paths:
-                    # Databricks Vector Search standard endpoint syntax:
-                    # Single value: {"source": "path"} or Multiple values: {"source": ["path1", "path2"]}
-                    # The list format works for both single and multiple files
-                    filters["source"] = resolved_paths
-                    logger.info(f"Resolved file paths for filtering: {resolved_paths}")
-                else:
-                    logger.warning(f"Could not resolve any paths from: {file_paths}")
-                    # Don't add source filter - will search all files for this group
-                    pass
-
-            # DISABLED: agent_ids filter with $contains doesn't work correctly in Databricks Vector Search
-            # Tested with direct API calls - returns 0 results even when agent_ids match
-            # See: /tmp/test_agent_ids_filter.py for proof
-            # Access control is still maintained via:
-            #   - group_id filter (tenant isolation)
-            #   - source filter (file-level access, path includes group_id)
-            # TODO: Re-enable when Databricks fixes the $contains operator for array fields
-            # if agent_id:
-            #     filters["agent_ids"] = {"$contains": agent_id}
-
-            # Perform similarity search
-            try:
-                search_results = await asyncio.wait_for(
-                    index_repo.similarity_search(
-                        index_name=document_index,
-                        endpoint_name=endpoint_name,
-                        query_vector=query_embedding,
-                        columns=search_columns,
-                        filters=filters,
-                        num_results=limit,
-                        user_token=user_token
-                    ),
-                    timeout=10
-                )
-            except asyncio.TimeoutError:
-                logger.warning("Search timed out")
-                return []
+                    logger.info(
+                        f"[KNOWLEDGE-SEARCH] table=knowledge_embeddings lakebase={_is_lakebase} "
+                        f"group={self.group_id} requested={file_paths} "
+                        f"group_rows={total_group_rows} -> {len(rows)} rows"
+                    )
+                    # Map rows to dicts INSIDE the session context: a Lakebase
+                    # session commits/expires on exit, so attributes must be read
+                    # before the context closes (else DetachedInstanceError).
+                    for row in rows or []:
+                        try:
+                            metadata = getattr(row, "doc_metadata", None) or {}
+                            source = getattr(row, "file_path", None) or getattr(row, "source", "") or ""
+                            formatted_results.append({
+                                "content": getattr(row, "content", "") or "",
+                                "metadata": {
+                                    "source": source,
+                                    "title": getattr(row, "title", "") or "",
+                                    "chunk_index": metadata.get("chunk_index", 0),
+                                    # pgvector orders by distance but does not return a
+                                    # similarity score column; results are already ranked.
+                                    "score": float(metadata.get("score", 0.0) or 0.0),
+                                    "group_id": getattr(row, "group_id", None) or self.group_id,
+                                    "execution_id": execution_id,
+                                },
+                            })
+                        except Exception as fmt_err:
+                            logger.error(f"Error formatting result: {fmt_err}")
+                            continue
             except Exception as search_error:
                 logger.error(f"Search failed: {search_error}")
                 return []
-
-            # Extract and format results
-            data_array = search_results.get('results', {}).get('result', {}).get('data_array', [])
-            if not data_array:
-                logger.warning("No results found")
-                return []
-
-            positions = DatabricksIndexSchemas.get_column_positions("document")
-            formatted_results = []
-
-            for idx, result in enumerate(data_array):
-                try:
-                    content = result[positions['content']] if 'content' in positions and len(result) > positions['content'] else ""
-                    source = result[positions['source']] if 'source' in positions and len(result) > positions['source'] else ""
-                    title = result[positions['title']] if 'title' in positions and len(result) > positions['title'] else ""
-                    chunk_index = result[positions['chunk_index']] if 'chunk_index' in positions and len(result) > positions['chunk_index'] else 0
-                    score = result[-1] if len(result) > len(positions) else 0.0
-
-                    formatted_results.append({
-                        "content": content,
-                        "metadata": {
-                            "source": source,
-                            "title": title,
-                            "chunk_index": chunk_index,
-                            "score": score,
-                            "group_id": self.group_id,
-                            "execution_id": execution_id
-                        }
-                    })
-
-                except Exception as e:
-                    logger.error(f"Error formatting result: {e}")
-                    continue
 
             logger.info(f"Found {len(formatted_results)} results")
             return formatted_results

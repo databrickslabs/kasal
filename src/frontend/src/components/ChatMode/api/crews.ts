@@ -71,17 +71,39 @@ export function normalizeGeneration(
  * crews need a Genie space picked before they can run, so the chat must not
  * auto-run them.
  */
+// GenieTool can be referenced by its display name, one of its aliases, or its
+// numeric tool id. Detection must NOT depend solely on toolNameMap being loaded:
+// in a chat-only deployment (e.g. Databricks Apps) the tools list may still be
+// loading — or have failed — when a crew finishes generating, leaving the map
+// empty. Relying on it then makes usesGenieTool return false, so the Genie-space
+// selector never appears and the crew auto-runs with NO space — Genie then runs
+// blind ("space ID not configured"). Matching the known name/aliases/id directly
+// makes detection work regardless of toolNameMap hydration.
+const GENIE_IDENTIFIERS = new Set([
+  'GenieTool', 'Genie', 'DatabricksGenie', 'DataSearch', '35',
+]);
+
+/**
+ * Whether a single tool reference (a name OR a tool id) is GenieTool. Robust to
+ * an unloaded toolNameMap: matches the known name/aliases/id directly. Shared by
+ * usesGenieTool (auto-run gate) and the card's space-selector gate so they agree
+ * regardless of the chosen output format.
+ */
+export function isGenieToolRef(
+  tool: unknown,
+  toolNameMap: Record<string, string> = {},
+): boolean {
+  const raw = String(tool);
+  return GENIE_IDENTIFIERS.has(raw) || (toolNameMap[raw] || raw) === 'GenieTool';
+}
+
 export function usesGenieTool(
   data: GenerationCompleteData | Record<string, unknown> | null | undefined,
   toolNameMap: Record<string, string>,
 ): boolean {
   const { agents, tasks } = normalizeGeneration(data);
-  const isGenie = (tool: unknown): boolean => {
-    const name = String(tool);
-    return (toolNameMap[name] || name) === 'GenieTool';
-  };
   const anyGenie = (items: { tools?: unknown }[]): boolean =>
-    items.some((it) => Array.isArray(it.tools) && it.tools.some(isGenie));
+    items.some((it) => Array.isArray(it.tools) && it.tools.some((t) => isGenieToolRef(t, toolNameMap)));
   return anyGenie(agents) || anyGenie(tasks);
 }
 

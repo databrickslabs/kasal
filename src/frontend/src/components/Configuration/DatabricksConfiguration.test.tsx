@@ -110,6 +110,11 @@ const databricksMemoryConfig = {
   databricks_config: { endpoint_name: 'ep-1', memory_index: 'idx-1' },
 };
 
+const lakebaseMemoryConfig = {
+  backend_type: MemoryBackendType.LAKEBASE,
+  lakebase_config: { memory_table: 'crew_memory', embedding_dimension: 1024 },
+};
+
 const setupServiceDefaults = () => {
   mockGetDatabricksEnvironment.mockResolvedValue({ databricks_host: 'https://example.com' });
   mockGetDatabricksConfig.mockResolvedValue({ ...baseConfig });
@@ -118,7 +123,7 @@ const setupServiceDefaults = () => {
   mockCheckDatabricksConnection.mockResolvedValue({ status: 'ok', message: 'Connected', connected: true });
   mockListTools.mockResolvedValue([{ id: KNOWLEDGE_TOOL_ID, enabled: false }]);
   mockToggleToolEnabled.mockResolvedValue({ enabled: true });
-  mockGetMemoryConfig.mockResolvedValue(databricksMemoryConfig);
+  mockGetMemoryConfig.mockResolvedValue(lakebaseMemoryConfig);
 
   mockGetInstance.mockReturnValue({
     getDatabricksEnvironment: mockGetDatabricksEnvironment,
@@ -245,21 +250,30 @@ describe('DatabricksConfiguration', () => {
   });
 
   describe('memory backend configuration check', () => {
-    it('marks memory backend configured for a valid databricks config', async () => {
-      mockGetMemoryConfig.mockResolvedValue(databricksMemoryConfig);
+    it('marks memory backend configured for a valid lakebase config', async () => {
+      mockGetMemoryConfig.mockResolvedValue(lakebaseMemoryConfig);
       await renderComponent();
       await waitFor(() => {
         expect(screen.queryByText('Loading Databricks configuration...')).not.toBeInTheDocument();
       });
-      // The warning about needing memory backend config should NOT appear.
-      expect(screen.queryByText(/Requires memory backend configuration/)).not.toBeInTheDocument();
+      // Lakebase pgvector stores knowledge embeddings, so the warning should NOT appear.
+      expect(screen.queryByText(/Requires a Lakebase memory backend/)).not.toBeInTheDocument();
+    });
+
+    it('marks memory backend unconfigured for a databricks (Vector Search) backend', async () => {
+      // Vector Search has been removed; knowledge sources need Lakebase pgvector.
+      mockGetMemoryConfig.mockResolvedValue(databricksMemoryConfig);
+      await renderComponent();
+      await waitFor(() => {
+        expect(screen.getByText(/Requires a Lakebase memory backend/)).toBeInTheDocument();
+      });
     });
 
     it('marks memory backend unconfigured for a default (ChromaDB) backend', async () => {
       mockGetMemoryConfig.mockResolvedValue({ backend_type: MemoryBackendType.DEFAULT });
       await renderComponent();
       await waitFor(() => {
-        expect(screen.getByText(/Requires memory backend configuration/)).toBeInTheDocument();
+        expect(screen.getByText(/Requires a Lakebase memory backend/)).toBeInTheDocument();
       });
     });
 
@@ -267,7 +281,7 @@ describe('DatabricksConfiguration', () => {
       mockGetMemoryConfig.mockResolvedValue(null);
       await renderComponent();
       await waitFor(() => {
-        expect(screen.getByText(/Requires memory backend configuration/)).toBeInTheDocument();
+        expect(screen.getByText(/Requires a Lakebase memory backend/)).toBeInTheDocument();
       });
     });
 
@@ -275,7 +289,7 @@ describe('DatabricksConfiguration', () => {
       mockGetMemoryConfig.mockRejectedValue(new Error('mem fail'));
       await renderComponent();
       await waitFor(() => {
-        expect(screen.getByText(/Requires memory backend configuration/)).toBeInTheDocument();
+        expect(screen.getByText(/Requires a Lakebase memory backend/)).toBeInTheDocument();
       });
     });
   });
@@ -450,7 +464,7 @@ describe('DatabricksConfiguration', () => {
     });
 
     it('enables the knowledge volume switch when memory backend is configured', async () => {
-      mockGetMemoryConfig.mockResolvedValue(databricksMemoryConfig);
+      mockGetMemoryConfig.mockResolvedValue(lakebaseMemoryConfig);
       await renderComponent();
       await waitFor(() => expect(screen.getByDisplayValue('wh-123')).toBeInTheDocument());
 
@@ -489,7 +503,7 @@ describe('DatabricksConfiguration', () => {
         ...baseConfig,
         knowledge_volume_enabled: true,
       });
-      mockGetMemoryConfig.mockResolvedValue(databricksMemoryConfig);
+      mockGetMemoryConfig.mockResolvedValue(lakebaseMemoryConfig);
       await renderComponent();
       await waitFor(() => expect(screen.getByDisplayValue('wh-123')).toBeInTheDocument());
 
@@ -503,7 +517,7 @@ describe('DatabricksConfiguration', () => {
         ...baseConfig,
         knowledge_volume_enabled: true,
       });
-      mockGetMemoryConfig.mockResolvedValue(databricksMemoryConfig);
+      mockGetMemoryConfig.mockResolvedValue(lakebaseMemoryConfig);
       await renderComponent();
       await waitFor(() => expect(screen.getByDisplayValue('wh-123')).toBeInTheDocument());
 
@@ -615,7 +629,7 @@ describe('DatabricksConfiguration', () => {
     it('toggles tool on save when knowledge volume enabled and memory configured', async () => {
       mockGetDatabricksConfig.mockResolvedValue({ ...baseConfig, knowledge_volume_enabled: true });
       mockSetDatabricksConfig.mockResolvedValue({ ...baseConfig, knowledge_volume_enabled: true });
-      mockGetMemoryConfig.mockResolvedValue(databricksMemoryConfig);
+      mockGetMemoryConfig.mockResolvedValue(lakebaseMemoryConfig);
       // load sees tool already enabled (matches), save expects enabled too -> but make it mismatch on save.
       mockListTools.mockResolvedValue([{ id: KNOWLEDGE_TOOL_ID, enabled: false }]);
       await renderComponent();

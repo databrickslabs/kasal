@@ -386,21 +386,25 @@ class MemoryBackendService:
         )
 
     async def get_lakebase_table_stats(
-        self, instance_name: Optional[str] = None
+        self, instance_name: Optional[str] = None, group_id: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Get row counts per memory table on Lakebase."""
-        return await self._get_lakebase_service(instance_name).get_table_stats()
+        """Get row counts per memory table on Lakebase (scoped to group_id)."""
+        return await self._get_lakebase_service(instance_name).get_table_stats(
+            group_id=group_id,
+        )
 
     async def get_lakebase_table_data(
         self,
         table_name: str,
         limit: int = 50,
         instance_name: Optional[str] = None,
+        group_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Fetch rows from a Lakebase memory table."""
+        """Fetch rows from a Lakebase memory table (scoped to group_id)."""
         return await self._get_lakebase_service(instance_name).get_table_data(
             table_name=table_name,
             limit=limit,
+            group_id=group_id,
         )
 
     async def get_lakebase_entity_data(
@@ -408,9 +412,11 @@ class MemoryBackendService:
         memory_table: str = "crew_memory",
         limit: int = 200,
         instance_name: Optional[str] = None,
+        group_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Fetch entity-like records from the unified memory table."""
+        """Fetch entity-like records from the unified memory table (scoped to group_id)."""
         return await self._get_lakebase_service(instance_name).get_entity_data(
             memory_table=memory_table,
             limit=limit,
+            group_id=group_id,
         )

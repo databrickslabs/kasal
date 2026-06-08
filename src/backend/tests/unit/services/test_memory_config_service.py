@@ -46,16 +46,12 @@ def databricks_backend():
         backend_type=MemoryBackendType.DATABRICKS,
         databricks_config={
             "endpoint_name": "test-endpoint",
-            "short_term_index": "ml.agents.short_term",
+            "memory_index": "catalog.schema.memory_index",            "short_term_index": "ml.agents.short_term",
             "long_term_index": "ml.agents.long_term",
             "entity_index": "ml.agents.entity",
             "workspace_url": "https://test.databricks.com",
             "embedding_dimension": 768
         },
-        enable_short_term=True,
-        enable_long_term=True,
-        enable_entity=True,
-        enable_relationship_retrieval=False,
         is_active=True,
         is_default=False,
         created_at=datetime.utcnow() - timedelta(days=2),
@@ -73,10 +69,6 @@ def default_backend():
         description="Default memory backend",
         backend_type=MemoryBackendType.DEFAULT,
         databricks_config=None,
-        enable_short_term=True,
-        enable_long_term=True,
-        enable_entity=False,
-        enable_relationship_retrieval=False,
         is_active=True,
         is_default=False,
         created_at=datetime.utcnow() - timedelta(days=5),
@@ -107,9 +99,6 @@ class TestMemoryConfigService:
         assert result.backend_type == MemoryBackendType.DATABRICKS
         assert isinstance(result.databricks_config, DatabricksMemoryConfig)
         assert result.databricks_config.endpoint_name == "test-endpoint"
-        assert result.enable_short_term is True
-        assert result.enable_long_term is True
-        assert result.enable_entity is True
     
     @pytest.mark.asyncio
     async def test_get_active_config_most_recent_when_no_databricks(
@@ -152,9 +141,6 @@ class TestMemoryConfigService:
         # Assert
         assert result is not None
         assert result.backend_type == MemoryBackendType.DEFAULT
-        assert result.enable_short_term is True
-        assert result.enable_long_term is True
-        assert result.enable_entity is True
     
     @pytest.mark.asyncio
     async def test_get_active_config_only_active_backends(
@@ -250,7 +236,6 @@ class TestMemoryConfigService:
         assert result.databricks_config is not None
         assert isinstance(result.databricks_config, DatabricksMemoryConfig)
         assert result.databricks_config.endpoint_name == "test-endpoint"
-        assert result.databricks_config.short_term_index == "ml.agents.short_term"
         assert result.databricks_config.workspace_url == "https://test.databricks.com"
         assert result.databricks_config.embedding_dimension == 768
     
@@ -266,7 +251,7 @@ class TestMemoryConfigService:
             is_active=True,
             updated_at=datetime.utcnow() - timedelta(days=5),
             name="Older Databricks",
-            databricks_config={"endpoint_name": "old-endpoint"},
+            databricks_config={"endpoint_name": "old-endpoint", "memory_index": "catalog.schema.memory_index"},
             enable_short_term=True,
             enable_long_term=True,
             enable_entity=True,
@@ -280,7 +265,7 @@ class TestMemoryConfigService:
             name="Newer Databricks",
             databricks_config={
                 "endpoint_name": "new-endpoint",
-                "short_term_index": "new.index",
+                "memory_index": "catalog.schema.memory_index",                "short_term_index": "new.index",
                 "workspace_url": "https://new.databricks.com",
                 "embedding_dimension": 1024
             },
@@ -303,7 +288,6 @@ class TestMemoryConfigService:
         assert result is not None
         assert result.backend_type == MemoryBackendType.DATABRICKS
         assert result.databricks_config.endpoint_name == "new-endpoint"
-        assert result.enable_short_term is False
     
     @pytest.mark.asyncio
     async def test_get_active_config_preserves_custom_config(self, service, mock_uow):

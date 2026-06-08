@@ -133,6 +133,20 @@ def adapt_config(config: CrewConfig) -> Dict[str, Any]:
             engine_config["crew"]["manager_agent"] = config.inputs["manager_agent"]
             logger.info("Using custom manager agent configuration for hierarchical process")
 
+    # Memory scoping (chat). These control which memories a run can recall and
+    # MUST be carried through to the engine config — the unified memory reads
+    # them from CrewMemoryService.config. Without this they are silently
+    # dropped here and the workspace/session toggle becomes a no-op.
+    #   - session_id: stable chat-session id; scopes session-only recall.
+    #   - memory_workspace_scope: True (default) = workspace-wide recall,
+    #     False = recall confined to this chat session.
+    session_id = getattr(config, "session_id", None)
+    if session_id:
+        engine_config["session_id"] = session_id
+    workspace_scope = getattr(config, "memory_workspace_scope", None)
+    if workspace_scope is not None:
+        engine_config["memory_workspace_scope"] = workspace_scope
+
     return engine_config
 
 def normalize_config(execution_config: Dict[str, Any]) -> Dict[str, Any]:

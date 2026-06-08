@@ -21,6 +21,9 @@ vi.mock('./sessionStore', () => {
 vi.mock('../db/sessionDb', () => ({
   saveSessionPreview: vi.fn(),
   getSessionPreview: vi.fn(() => Promise.resolve(undefined)),
+  setSessionRunningJob: vi.fn(() => Promise.resolve()),
+  getSessionRunningJob: vi.fn(() => Promise.resolve(null)),
+  clearSessionRunningJob: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock('../components/Preview/PreviewPanel', () => ({
@@ -102,6 +105,15 @@ describe('executionStore - basic setters & log', () => {
     expect(useExecutionStore.getState().chatCollapsed).toBe(false);
     store.toggleChatCollapsed();
     expect(useExecutionStore.getState().chatCollapsed).toBe(true);
+  });
+
+  it('setWorkspaceMemory toggles the recall scope (default workspace-wide)', () => {
+    // Defaults to workspace-wide so recall spans the whole workspace.
+    expect(useExecutionStore.getState().workspaceMemory).toBe(true);
+    useExecutionStore.getState().setWorkspaceMemory(false);
+    expect(useExecutionStore.getState().workspaceMemory).toBe(false);
+    useExecutionStore.getState().setWorkspaceMemory(true);
+    expect(useExecutionStore.getState().workspaceMemory).toBe(true);
   });
 
   it('setPreviewContent stamps owner with current session when content provided', () => {
@@ -248,6 +260,7 @@ describe('executionStore - preview history', () => {
   it('saveSessionState/restoreSessionState round-trips preview history', () => {
     useExecutionStore.setState({
       previewContent: b as any,
+      previewOwnerSessionId: 'sess-H',
       previewHistory: [a, b] as any,
       previewIndex: 1,
     });
@@ -349,6 +362,12 @@ describe('executionStore - startExecution & updateExecutionStatus', () => {
     setCurrentSessionId('sess-current');
     useExecutionStore.getState().startExecution('job-2');
     expect(useExecutionStore.getState().executionOwnerSessionId).toBe('sess-current');
+  });
+
+  it('startExecution with no session at all skips persisting an owner marker', () => {
+    setCurrentSessionId(null);
+    useExecutionStore.getState().startExecution('job-noowner');
+    expect(useExecutionStore.getState().executionOwnerSessionId).toBeNull(); // owner falsy → no persist
   });
 
   it('updateExecutionStatus updates when active execution exists', () => {
@@ -669,8 +688,11 @@ describe('executionStore - generation lifecycle', () => {
 
 describe('executionStore - saveSessionState / restoreSessionState / hasActiveExecution', () => {
   it('saveSessionState stores snapshot when executing', () => {
+    // The session being saved must OWN the run for it to be snapshotted (a run
+    // owned by another session must not leak into this session's snapshot).
     useExecutionStore.setState({
       isExecuting: true,
+      executionOwnerSessionId: 'sess-S',
       activeExecution: { jobId: 'j', status: 'running' },
     });
     useExecutionStore.getState().saveSessionState('sess-S');
@@ -678,13 +700,13 @@ describe('executionStore - saveSessionState / restoreSessionState / hasActiveExe
   });
 
   it('saveSessionState stores snapshot when generating', () => {
-    useExecutionStore.setState({ isGenerating: true });
+    useExecutionStore.setState({ isGenerating: true, executionOwnerSessionId: 'sess-S' });
     useExecutionStore.getState().saveSessionState('sess-S');
     expect(useExecutionStore.getState().hasActiveExecution('sess-S')).toBe(true);
   });
 
   it('saveSessionState stores snapshot when previewContent present', () => {
-    useExecutionStore.setState({ previewContent: preview as any });
+    useExecutionStore.setState({ previewContent: preview as any, previewOwnerSessionId: 'sess-S' });
     useExecutionStore.getState().saveSessionState('sess-S');
     // not running but snapshot exists with preview -> restore brings it back
     useExecutionStore.getState().restoreSessionState('sess-S');
@@ -710,29 +732,51 @@ describe('executionStore - saveSessionState / restoreSessionState / hasActiveExe
   });
 
   it('saveSessionState deletes snapshot when nothing active', () => {
-    // first create a snapshot
-    useExecutionStore.setState({ isExecuting: true });
+    // first create a snapshot (session owns the run)
+    useExecutionStore.setState({ isExecuting: true, executionOwnerSessionId: 'sess-S' });
     useExecutionStore.getState().saveSessionState('sess-S');
     expect(useExecutionStore.getState().hasActiveExecution('sess-S')).toBe(true);
-    // now save with nothing active -> deletes
+    // now save with nothing active (run finished, owner cleared) -> deletes
     useExecutionStore.setState({
       isExecuting: false,
       isGenerating: false,
       previewContent: null,
+      executionOwnerSessionId: null,
     });
     useExecutionStore.getState().saveSessionState('sess-S');
     expect(useExecutionStore.getState().hasActiveExecution('sess-S')).toBe(false);
   });
 
+  it('saveSessionState does NOT snapshot a run/preview owned by another session', () => {
+    // A run + preview owned by sess-OTHER is live in the single global slot.
+    // Saving sess-S must NOT capture them, or switching back to sess-S would
+    // surface a stale Stop / another chat's preview in the wrong UI.
+    useExecutionStore.setState({
+      isExecuting: true,
+      executionOwnerSessionId: 'sess-OTHER',
+      activeExecution: { jobId: 'j', status: 'running' },
+      previewContent: preview as any,
+      previewOwnerSessionId: 'sess-OTHER',
+    });
+    useExecutionStore.getState().saveSessionState('sess-S');
+    expect(useExecutionStore.getState().hasActiveExecution('sess-S')).toBe(false);
+    // Owner clears; restoring sess-S must come up clean (no leaked run/preview).
+    useExecutionStore.setState({ executionOwnerSessionId: null, isExecuting: false, previewContent: null });
+    useExecutionStore.getState().restoreSessionState('sess-S');
+    expect(useExecutionStore.getState().isExecuting).toBe(false);
+    expect(useExecutionStore.getState().previewContent).toBeNull();
+  });
+
   it('restoreSessionState restores running snapshot with no preview (owner null)', () => {
     useExecutionStore.setState({
       isExecuting: true,
+      executionOwnerSessionId: 'sess-S',
       activeExecution: { jobId: 'j', status: 'running' },
       previewContent: null,
     });
     useExecutionStore.getState().saveSessionState('sess-S');
-    // mutate live state then restore
-    useExecutionStore.setState({ isExecuting: false, activeExecution: null });
+    // mutate live state (run no longer owned/live) then restore the snapshot
+    useExecutionStore.setState({ isExecuting: false, activeExecution: null, executionOwnerSessionId: null });
     useExecutionStore.getState().restoreSessionState('sess-S');
     const s = useExecutionStore.getState();
     expect(s.isExecuting).toBe(true);

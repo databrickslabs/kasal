@@ -525,7 +525,7 @@ class TestAdditionalAgentParams:
             from src.engines.crewai.helpers.agent_helpers import create_agent
             await create_agent("k", agent_config, config=GLOBAL_CONFIG)
 
-        assert captured.get("memory") is True
+        assert "memory" not in captured  # memory deliberately not propagated to the Agent
 
     @pytest.mark.asyncio
     async def test_none_additional_params_not_passed(self):

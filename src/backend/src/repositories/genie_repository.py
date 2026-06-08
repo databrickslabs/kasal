@@ -39,6 +39,21 @@ from src.utils.telemetry import get_user_agent_header, KasalProduct
 logger = logging.getLogger(__name__)
 
 
+# The Genie spaces API has NO server-side name search, so filtering by name needs
+# the full list. Walking all ~50 pages on every keystroke (and concurrently) is
+# what made search slow and triggered HTTP 429. Instead we fetch the full list
+# ONCE per workspace host, cache it briefly, and filter in memory. Keyed by host
+# (the visible set is workspace-level for this app's PAT/SP auth); short TTL keeps
+# it fresh. The per-host lock serializes the (one-time) full fetch so concurrent
+# searches don't each scan.
+_SPACES_CACHE: Dict[str, Dict[str, Any]] = {}
+_SPACES_LOCKS: Dict[str, asyncio.Lock] = {}
+_SPACES_CACHE_TTL = 300          # seconds — full list cached this long
+_SPACES_PARTIAL_TTL = 30         # seconds — shorter when the walk didn't finish (retry sooner)
+_FULL_FETCH_PAGE_SIZE = 100      # bigger pages on the one-time full walk = far fewer round-trips
+_SPACES_MAX_RETRIES = 5          # 429 backoff attempts per page
+
+
 class GenieRepository:
     """
     Repository for interacting with Databricks Genie API.
@@ -199,88 +214,24 @@ class GenieRepository:
                 logger.error(f"Authentication failed: {error}")
                 return GenieSpacesResponse(spaces=[])
             
-            all_spaces = []
-            current_token = page_token
-            has_more = True
-            total_fetched = 0
-            pages_fetched = 0
-
             # Determine fetching strategy:
-            # - fetch_all: fetch every page (used when search/filter needs full dataset)
-            # - default: fetch one page and return next_page_token for client-side pagination
+            # - search/filter (or fetch_all): need the FULL list — served from the
+            #   per-host cache (fetched once), then filtered in memory.
+            # - default: fetch one page and return next_page_token for pagination.
             should_fetch_all = fetch_all or bool(search_query) or bool(space_ids)
 
-            if search_query:
-                logger.info(f"Searching for spaces with query: '{search_query}' (fetching all pages for client-side filtering)")
-            
-            while has_more:
-                # Build URL with pagination parameters
-                url = await self._make_url("/api/2.0/genie/spaces")
-                params = {"page_size": page_size}
-                if current_token:
-                    params["page_token"] = current_token
-                
-                logger.info(f"Fetching Genie spaces from: {url} with params: {params}")
-                
-                response = await self._client.get(url, headers=headers, params=params)
-                
-                if response.status_code == 403:
-                    logger.error(f"Permission denied: {response.text}")
-                    return GenieSpacesResponse(spaces=[])
-                
-                response.raise_for_status()
-                data = response.json()
-                
-                # Parse the response - API returns {"spaces": [...], "next_page_token": "..."}
-                spaces_list = []
-                next_token = None
-                
-                if isinstance(data, dict):
-                    spaces_list = data.get("spaces", [])
-                    next_token = data.get("next_page_token")
-                elif isinstance(data, list):
-                    # Fallback for non-paginated response
-                    spaces_list = data
-                
-                # Convert to GenieSpace objects
-                for space_data in spaces_list:
-                    if isinstance(space_data, dict):
-                        # Extract ID - it might be under different keys
-                        space_id = (
-                            space_data.get("id") or 
-                            space_data.get("space_id") or 
-                            space_data.get("spaceId") or 
-                            ""
-                        )
-                        
-                        space = GenieSpace(
-                            id=space_id,
-                            name=space_data.get("name", space_data.get("title", f"Space {space_id or 'Unknown'}")),
-                            description=space_data.get("description", ""),
-                            type=space_data.get("type", ""),
-                            enabled=space_data.get("enabled", True),
-                            owner=space_data.get("owner"),
-                            workspace_id=space_data.get("workspace_id")
-                        )
-                        all_spaces.append(space)
-                
-                total_fetched += len(spaces_list)
-                pages_fetched += 1
-                
-                # Check if we should continue fetching
-                if should_fetch_all:
-                    # Fetch all pages for search/filter (client-side filtering needs full dataset)
-                    has_more = bool(next_token)
-                else:
-                    # Normal pagination - return one page, let client paginate via next_page_token
-                    has_more = False
-                
-                current_token = next_token
-                
-                # Break if we shouldn't continue
-                if not has_more:
-                    break
-            
+            if should_fetch_all:
+                if search_query:
+                    logger.info(f"Searching spaces for '{search_query}' via cached full list (in-memory filter)")
+                all_spaces = await self._get_all_spaces_cached(headers)
+                current_token = None
+                total_fetched = len(all_spaces)
+            else:
+                all_spaces, current_token = await self._fetch_spaces_page(
+                    headers, page_size, page_token
+                )
+                total_fetched = len(all_spaces)
+
             # Apply filtering on complete list
             filtered_spaces = all_spaces
             filtered = False
@@ -333,7 +284,123 @@ class GenieRepository:
         except Exception as e:
             logger.error(f"Error fetching Genie spaces: {e}")
             return GenieSpacesResponse(spaces=[])
-    
+
+    def _space_from_data(self, space_data: dict) -> GenieSpace:
+        """Convert one API space dict into a GenieSpace (with deep link)."""
+        space_id = (
+            space_data.get("id")
+            or space_data.get("space_id")
+            or space_data.get("spaceId")
+            or ""
+        )
+        space_url = (
+            f"https://{self._host}/genie/rooms/{space_id}"
+            if self._host and space_id else None
+        )
+        return GenieSpace(
+            id=space_id,
+            name=space_data.get("name", space_data.get("title", f"Space {space_id or 'Unknown'}")),
+            description=space_data.get("description", ""),
+            type=space_data.get("type", ""),
+            enabled=space_data.get("enabled", True),
+            owner=space_data.get("owner"),
+            workspace_id=space_data.get("workspace_id"),
+            url=space_url,
+        )
+
+    async def _fetch_spaces_page(
+        self, headers: dict, page_size: int, token: Optional[str]
+    ) -> Tuple[List[GenieSpace], Optional[str]]:
+        """Fetch ONE page of spaces -> (spaces, next_page_token).
+
+        Retries on HTTP 429 (rate limit) with backoff — that's what previously
+        killed the full walk mid-way so only a partial list got cached. Falls
+        back to a conservative page_size if the larger one is rejected (400)."""
+        url = await self._make_url("/api/2.0/genie/spaces")
+        size = page_size
+        attempt = 0
+        while True:
+            params: Dict[str, Any] = {"page_size": size}
+            if token:
+                params["page_token"] = token
+            response = await self._client.get(url, headers=headers, params=params)
+
+            if response.status_code == 403:
+                logger.error(f"Permission denied: {response.text}")
+                return [], None
+            if response.status_code == 429 and attempt < _SPACES_MAX_RETRIES:
+                retry_after = (response.headers.get("Retry-After") or "").strip()
+                delay = float(retry_after) if retry_after.isdigit() else min(2 ** attempt, 8)
+                logger.warning(
+                    f"Genie spaces rate-limited (429); backing off {delay}s "
+                    f"(attempt {attempt + 1}/{_SPACES_MAX_RETRIES})"
+                )
+                await asyncio.sleep(delay)
+                attempt += 1
+                continue
+            if response.status_code == 400 and size != 50:
+                # Larger page_size not accepted — retry this page at the safe size.
+                logger.warning(f"Genie spaces 400 at page_size={size}; retrying at 50")
+                size = 50
+                continue
+
+            response.raise_for_status()
+            data = response.json()
+            if isinstance(data, dict):
+                spaces_list = data.get("spaces", []) or []
+                next_token = data.get("next_page_token")
+            elif isinstance(data, list):
+                spaces_list, next_token = data, None
+            else:
+                spaces_list, next_token = [], None
+            spaces = [self._space_from_data(s) for s in spaces_list if isinstance(s, dict)]
+            return spaces, next_token
+
+    async def _fetch_all_spaces_uncached(
+        self, headers: dict
+    ) -> Tuple[List[GenieSpace], bool]:
+        """Walk every page of spaces sequentially -> (spaces, complete). On an
+        unrecoverable error mid-walk, returns what was fetched with complete=False
+        so the caller can cache the partial list (and re-attempt soon) instead of
+        discarding everything and re-walking from scratch on the next search."""
+        all_spaces: List[GenieSpace] = []
+        token: Optional[str] = None
+        while True:
+            try:
+                page, token = await self._fetch_spaces_page(headers, _FULL_FETCH_PAGE_SIZE, token)
+            except Exception as e:  # noqa: BLE001 — keep partial results
+                logger.warning(
+                    f"Genie spaces walk interrupted after {len(all_spaces)} spaces: {e}"
+                )
+                return all_spaces, False
+            all_spaces.extend(page)
+            if not token:
+                return all_spaces, True
+
+    async def _get_all_spaces_cached(self, headers: dict) -> List[GenieSpace]:
+        """Full spaces list for this host, fetched once and cached. A per-host lock
+        serializes the one-time full walk so concurrent searches don't each scan
+        (which caused 429). A complete list caches for the full TTL; a partial one
+        (walk interrupted) caches briefly so the next search re-attempts."""
+        host = await self._get_host()
+        cached = _SPACES_CACHE.get(host)
+        if cached and (time.time() - cached["ts"]) < cached.get("ttl", _SPACES_CACHE_TTL):
+            return cached["spaces"]
+        lock = _SPACES_LOCKS.setdefault(host, asyncio.Lock())
+        async with lock:
+            # Re-check inside the lock: another search may have just populated it.
+            cached = _SPACES_CACHE.get(host)
+            if cached and (time.time() - cached["ts"]) < cached.get("ttl", _SPACES_CACHE_TTL):
+                return cached["spaces"]
+            spaces, complete = await self._fetch_all_spaces_uncached(headers)
+            ttl = _SPACES_CACHE_TTL if complete else _SPACES_PARTIAL_TTL
+            _SPACES_CACHE[host] = {"spaces": spaces, "ts": time.time(), "ttl": ttl}
+            logger.info(
+                f"[GenieSpacesCache] cached {len(spaces)} spaces "
+                f"(complete={complete}, ttl={ttl}s) for host {host}"
+            )
+            return spaces
+
     async def get_space_details(self, space_id: str) -> Optional[GenieSpace]:
         """
         Get details for a specific Genie space.
@@ -355,14 +422,22 @@ class GenieRepository:
             response.raise_for_status()
             
             data = response.json()
+            # Deep link to the Genie space UI (self._host resolved by _make_url
+            # above; it has no scheme). Lets the chat open the space to validate it.
+            resolved_id = data.get("id", space_id)
+            space_url = (
+                f"https://{self._host}/genie/rooms/{resolved_id}"
+                if self._host and resolved_id else None
+            )
             return GenieSpace(
-                id=data.get("id", space_id),
+                id=resolved_id,
                 name=data.get("name", ""),
                 description=data.get("description", ""),
                 type=data.get("type", ""),
                 enabled=data.get("enabled", True),
                 owner=data.get("owner"),
-                workspace_id=data.get("workspace_id")
+                workspace_id=data.get("workspace_id"),
+                url=space_url,
             )
             
         except Exception as e:

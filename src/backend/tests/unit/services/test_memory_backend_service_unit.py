@@ -114,10 +114,10 @@ async def test_delegations_and_error_paths(monkeypatch):
         table_data = await svc.get_lakebase_table_data("crew_short_term_memory", limit=10, instance_name="inst1")
         assert table_data["success"] is True
         assert table_data["documents"][0]["id"] == "d1"
-        mock_lakebase_svc.get_table_data.assert_awaited_once_with(table_name="crew_short_term_memory", limit=10)
+        mock_lakebase_svc.get_table_data.assert_awaited_once_with(table_name="crew_short_term_memory", limit=10, group_id=None)
 
         # get_lakebase_entity_data delegation
-        entity_data = await svc.get_lakebase_entity_data(entity_table="crew_entity_memory", limit=100, instance_name="inst1")
+        entity_data = await svc.get_lakebase_entity_data(memory_table="crew_entity_memory", limit=100, instance_name="inst1")
         assert entity_data["entities"][0]["id"] == "e1"
-        mock_lakebase_svc.get_entity_data.assert_awaited_once_with(entity_table="crew_entity_memory", limit=100)
+        mock_lakebase_svc.get_entity_data.assert_awaited_once_with(memory_table="crew_entity_memory", limit=100, group_id=None)
 

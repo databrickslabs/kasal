@@ -200,11 +200,6 @@ export default function ToolsConfiguration({ mode = 'auto' }: { mode?: 'system' 
     await loadWorkspaceData();
   };
 
-  const handleToggleEnabled = async (toolId: number, enabled: boolean) => {
-    await GroupToolService.setEnabled(toolId, enabled);
-    await loadWorkspaceData();
-  };
-
   const handleRemove = async (toolId: number) => {
     await GroupToolService.remove(toolId);
     await loadWorkspaceData();
@@ -373,16 +368,11 @@ export default function ToolsConfiguration({ mode = 'auto' }: { mode?: 'system' 
                         <Box sx={{ mt: 0.5 }}>
                           <KeyReadinessChip ready={readiness.ready} onClick={!readiness.ready ? () => gotoLocalKeystore(readiness.keyName) : undefined} />
                         </Box>
-                        <Typography variant="caption" color="text.secondary">Enabled: {m.enabled ? 'Yes' : 'No'}</Typography>
                       </Box>
                       <Stack direction="row" spacing={1} alignItems="center">
                         <Button size="small" onClick={() => openConfigure(m)}>Configure</Button>
-                        <Tooltip title={m.enabled ? 'Disable' : 'Enable'}>
-                          <Switch
-                            checked={!!m.enabled}
-                            onChange={(e) => void handleToggleEnabled(m.tool_id, e.target.checked)}
-                          />
-                        </Tooltip>
+                        {/* Added tools are enabled by default — no separate enable step.
+                            To turn a tool off, remove it from the workspace. */}
                         <Tooltip title="Remove from workspace">
                           <IconButton size="small" onClick={() => void handleRemove(m.tool_id)}>
                             <DeleteIcon fontSize="small" />

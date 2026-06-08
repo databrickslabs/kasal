@@ -58,6 +58,7 @@ class LakebaseStorageBackend:
         embedder: Any = None,
         embedding_dimension: int = 1024,
         instance_name: str | None = None,
+        workspace_wide: bool = True,
     ) -> None:
         self.table_name = table_name
         self.crew_id = crew_id
@@ -66,12 +67,20 @@ class LakebaseStorageBackend:
         self.embedder = embedder
         self.embedding_dimension = embedding_dimension
         self.instance_name = instance_name
+        # Default READ scope: True = workspace-wide (group_id), False = this
+        # chat session only (session_id). Toggled per execution from the chat
+        # "Workspace memory" switch. crew_id is NOT a scoping key — it only tags
+        # rows for tracing. Deletes/consolidation stay crew-scoped.
+        self.workspace_wide = workspace_wide
 
         logger.info(
-            "LakebaseStorageBackend initialized (table=%s, crew_id=%s, group_id=%s)",
+            "LakebaseStorageBackend initialized (table=%s, crew_id=%s, "
+            "session_id=%s, group_id=%s, workspace_wide=%s)",
             table_name,
             crew_id,
+            session_id,
             group_id,
+            workspace_wide,
         )
 
     # ------------------------------------------------------------------
@@ -127,16 +136,17 @@ class LakebaseStorageBackend:
             async with get_lakebase_session(
                 instance_name=self.instance_name, group_id=self.group_id
             ) as session:
+                # Workspace-wide read: fetch by id within the workspace,
+                # regardless of which crew wrote it.
                 sql = text(
                     f"SELECT id, content, metadata, created_at, updated_at, agent "
                     f"FROM {self.table_name} "
-                    f"WHERE id = :id AND crew_id = :crew_id AND group_id = :group_id"
+                    f"WHERE id = :id AND group_id = :group_id"
                 )
                 result = await session.execute(
                     sql,
                     {
                         "id": record_id,
-                        "crew_id": self.crew_id,
                         "group_id": self.group_id,
                     },
                 )
@@ -368,7 +378,9 @@ class LakebaseStorageBackend:
         older_than: datetime | None = None,
         metadata_filter: dict[str, Any] | None = None,
     ) -> int:
-        where, params = self._tenant_where()
+        # Crew-scoped: a crew only deletes/consolidates memories it wrote, even
+        # though it can READ the whole workspace (or just its chat session).
+        where, params = self._crew_where()
         if record_ids:
             where.append("id = ANY(:record_ids)")
             params["record_ids"] = list(record_ids)
@@ -398,10 +410,41 @@ class LakebaseStorageBackend:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _tenant_where(self) -> tuple[list[str], dict[str, Any]]:
-        where = ["crew_id = :crew_id", "group_id = :group_id"]
-        params: dict[str, Any] = {"crew_id": self.crew_id, "group_id": self.group_id}
-        return where, params
+    def _tenant_where(self, workspace_wide: bool | None = None) -> tuple[list[str], dict[str, Any]]:
+        """WHERE fragment + params scoping a READ to this tenant.
+
+        Uses ``self.workspace_wide`` (the per-execution default from the chat
+        "Workspace memory" toggle): True = WORKSPACE-WIDE (group_id only) so any
+        crew recalls ALL context in the workspace; False = this chat
+        ``session_id`` only, so recall is confined to the current conversation.
+        group_id remains the tenant-isolation boundary either way.
+
+        NOTE: ``crew_id`` is deliberately NOT a scoping key. It is the
+        deterministic per-crew-structure hash used for tracing/identity and
+        changes every time the crew structure changes (e.g. each chat prompt),
+        so scoping reads by it would wall every run off from the rest of the
+        workspace. Memory partitioning is workspace-vs-session only.
+        """
+        if workspace_wide is None:
+            workspace_wide = self.workspace_wide
+        if workspace_wide:
+            return ["group_id = :group_id"], {"group_id": self.group_id}
+        return (
+            ["session_id = :session_id", "group_id = :group_id"],
+            {"session_id": self.session_id or "", "group_id": self.group_id},
+        )
+
+    def _crew_where(self) -> tuple[list[str], dict[str, Any]]:
+        """WHERE fragment + params scoping a WRITE/DELETE to this crew.
+
+        Deletes/consolidation are crew-scoped so a crew only prunes or merges
+        memories IT wrote — one crew's (or session's) consolidation must not
+        delete another's, even though reads can span the whole workspace.
+        """
+        return (
+            ["crew_id = :crew_id", "group_id = :group_id"],
+            {"crew_id": self.crew_id, "group_id": self.group_id},
+        )
 
     async def _list_child_scopes(self, parent: str) -> list[str]:
         where, params = self._tenant_where()

@@ -7,6 +7,10 @@ import {
   saveSessionPreview,
   getSessionPreview,
 } from '../db/sessionDb';
+import {
+  persistActiveExecution,
+  clearActiveExecution,
+} from './activeExecutionMarker';
 
 interface SessionExecSnapshot {
   activeExecution: { jobId: string; status: ExecutionStatus } | null;
@@ -53,6 +57,14 @@ interface ExecutionState {
   chatCollapsed: boolean;
   executionOwnerSessionId: string | null;
   executionLog: ExecutionLogEntry[];
+  /**
+   * "Workspace memory" recall scope for the next run. true (default) = recall
+   * workspace-wide; false = restrict recall to this chat session only. Lives in
+   * the store (not ChatInput local state) so the choice survives the
+   * empty→conversation input swap and any remount — otherwise toggling
+   * "Session only" silently reverts to workspace on the next message.
+   */
+  workspaceMemory: boolean;
 }
 
 interface ExecutionActions {
@@ -62,6 +74,7 @@ interface ExecutionActions {
   navigatePreview: (index: number) => void;
   setChatCollapsed: (collapsed: boolean) => void;
   toggleChatCollapsed: () => void;
+  setWorkspaceMemory: (value: boolean) => void;
   clearPreview: () => void;
   reopenPreview: () => void;
   appendLog: (entry: Omit<ExecutionLogEntry, 'id' | 'timestamp'>) => void;
@@ -106,6 +119,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   chatCollapsed: false,
   executionOwnerSessionId: null,
   executionLog: [],
+  workspaceMemory: true,
 
   appendLog: (entry) => set((s) => ({
     executionLog: [
@@ -148,6 +162,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
     }),
   setChatCollapsed: (collapsed) => set({ chatCollapsed: collapsed }),
   toggleChatCollapsed: () => set((s) => ({ chatCollapsed: !s.chatCollapsed })),
+  setWorkspaceMemory: (value) => set({ workspaceMemory: value }),
   clearPreview: () => {
     // Only hide the preview panel — keep history/data so the user can reopen
     set({ previewContent: null, previewOwnerSessionId: null, chatCollapsed: false });
@@ -200,6 +215,8 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       previewIndex: preserve ? s.previewIndex : 0,
       executionLog: [],
     });
+    // Persist so a page refresh can reconnect to this still-running job.
+    if (owner) persistActiveExecution(owner, jobId);
   },
 
   updateExecutionStatus: (status) => {
@@ -216,6 +233,9 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
     const currentSessionId = useSessionStore.getState().currentSessionId;
     const isViewingOwner = currentSessionId === ownerSession;
     const sessionStore = useSessionStore.getState();
+
+    // Run is over — drop the persisted reconnect marker.
+    if (ownerSession) clearActiveExecution(ownerSession);
 
     // Parse preview content if any
     let preview: PreviewContent | null = null;
@@ -300,6 +320,9 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
     const currentSessionId = useSessionStore.getState().currentSessionId;
     const isViewingOwner = currentSessionId === ownerSession;
     const sessionStore = useSessionStore.getState();
+
+    // Run is over — drop the persisted reconnect marker.
+    if (ownerSession) clearActiveExecution(ownerSession);
 
     if (ownerSession) {
       sessionStore.addMessageToTargetSession(
@@ -411,16 +434,27 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   // --- Session-aware state management ---
   saveSessionState: (sessionId: string) => {
     const state = get();
-    if (state.isExecuting || state.isGenerating || state.previewContent) {
+    // Only snapshot state that BELONGS to this session. The store has a single
+    // global execution/preview slot; if it currently holds a DIFFERENT
+    // session's run (you switched away from a running one), snapshotting it
+    // here would leak that run into this session and surface a stale Stop /
+    // preview in the wrong chat. Scope each by its owner so a session's
+    // snapshot only ever contains its own run + preview.
+    const ownsExec = state.executionOwnerSessionId === sessionId;
+    const ownsPreview = state.previewOwnerSessionId === sessionId;
+    const isExecuting = ownsExec && state.isExecuting;
+    const isGenerating = ownsExec && state.isGenerating;
+    const previewContent = ownsPreview ? state.previewContent : null;
+    if (isExecuting || isGenerating || previewContent) {
       sessionSnapshots.set(sessionId, {
-        activeExecution: state.activeExecution,
-        isExecuting: state.isExecuting,
-        isGenerating: state.isGenerating,
-        isLoading: state.isLoading,
-        executionContext: state.executionContext,
-        previewContent: state.previewContent,
-        previewHistory: state.previewHistory,
-        previewIndex: state.previewIndex,
+        activeExecution: ownsExec ? state.activeExecution : null,
+        isExecuting,
+        isGenerating,
+        isLoading: ownsExec ? state.isLoading : false,
+        executionContext: ownsExec ? state.executionContext : null,
+        previewContent,
+        previewHistory: ownsPreview ? state.previewHistory : [],
+        previewIndex: ownsPreview ? state.previewIndex : 0,
       });
     } else {
       sessionSnapshots.delete(sessionId);

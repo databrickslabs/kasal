@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { UiComponent, UiSurface, resolveValue } from '../../utils/uiDocument';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { UiComponent, UiSurface, UiTheme, resolveValue } from '../../utils/uiDocument';
 
 /**
  * Kasal React renderer for a structured UI document (A2UI-conformant — see
@@ -17,16 +17,24 @@ interface UiRendererProps {
 }
 
 // --- Presentation theme (self-contained; not the app tokens) ---------------
-const ACCENT = '#5aa2ff';
-const TEXT = '#eaf0ff';
-const MUTED = '#aab3d4';
-const GLASS = 'rgba(255,255,255,0.06)';
-const GLASS_STRONG = 'rgba(255,255,255,0.10)';
-const GLASS_BORDER = 'rgba(255,255,255,0.16)';
+// Tokens resolve through CSS custom properties so a surface theme (set from the
+// UI-Configurator palette) can override them once at the root. The second arg of
+// each var() is the built-in premium-dark fallback used when a doc is un-themed,
+// so an un-themed document renders exactly as it always did.
+const ACCENT = 'var(--ui-accent, #5aa2ff)';
+// Readable text/icon color drawn ON TOP of an accent fill (root mindmap node,
+// primary buttons). A token (not a literal) so a theme can override it.
+const ON_ACCENT = 'var(--ui-on-accent, #06122b)';
+const TEXT = 'var(--ui-text, #eaf0ff)';
+const MUTED = 'var(--ui-muted, #aab3d4)';
+const GLASS = 'var(--ui-surface, rgba(255,255,255,0.06))';
+const GLASS_STRONG = 'var(--ui-surface-strong, rgba(255,255,255,0.10))';
+const GLASS_BORDER = 'var(--ui-border, rgba(255,255,255,0.16))';
 const STAGE_BG =
+  'var(--ui-stage,' +
   'radial-gradient(1100px 560px at 12% -10%, rgba(90,162,255,0.20), transparent 60%),' +
   'radial-gradient(900px 520px at 92% 8%, rgba(167,139,250,0.18), transparent 55%),' +
-  'linear-gradient(135deg, #0b1020, #131a33 45%, #1b2347)';
+  'linear-gradient(135deg, #0b1020, #131a33 45%, #1b2347))';
 const TONE: Record<string, string> = {
   good: '#34d6b6',
   warn: '#fbbf24',
@@ -50,7 +58,10 @@ const TEXT_STYLES: Record<string, React.CSSProperties> = {
   h4: { fontSize: '1.3rem', fontWeight: 500, color: MUTED, lineHeight: 1.4 },
   h5: { fontSize: '1.1rem', fontWeight: 600, color: MUTED },
   caption: { fontSize: '0.95rem', color: MUTED },
-  body: { fontSize: '1.3rem', lineHeight: 1.55, color: '#dbe3ff' },
+  // No hardcoded color: body inherits the cascaded/themed text color (var(--ui-text)),
+  // so it stays light on the built-in dark stage AND dark on a light theme. A literal
+  // here (was #dbe3ff) overrode the theme and rendered light-on-light = unreadable.
+  body: { fontSize: '1.3rem', lineHeight: 1.55 },
 };
 
 const JUSTIFY: Record<string, string> = {
@@ -62,6 +73,38 @@ const ALIGN: Record<string, string> = {
 };
 
 const CHART_PALETTE = ['#5aa2ff', '#34d6b6', '#fbbf24', '#fb7185', '#a78bfa', '#38bdf8', '#f472b6'];
+
+// Font stacks the theme's `font` token maps to (applied at the stage root).
+const FONT_STACK: Record<string, string> = {
+  sans: 'Inter, system-ui, -apple-system, sans-serif',
+  serif: 'Georgia, "Times New Roman", Cambria, serif',
+  rounded: '"Nunito", "Quicksand", "Segoe UI", system-ui, sans-serif',
+  mono: '"JetBrains Mono", "SF Mono", Menlo, Consolas, monospace',
+};
+
+/**
+ * Map a surface theme → CSS custom properties consumed by the token constants
+ * above. Only tokens the palette actually defines are emitted, so anything it
+ * omits keeps the premium-dark fallback baked into each var(). Returned as a
+ * style object spread onto the stage root.
+ */
+function themeVars(theme?: UiTheme): React.CSSProperties {
+  if (!theme) return {};
+  const v: Record<string, string> = {};
+  if (theme.accent) v['--ui-accent'] = theme.accent;
+  if (theme.text) v['--ui-text'] = theme.text;
+  if (theme.muted) v['--ui-muted'] = theme.muted;
+  if (theme.heading) v['--ui-heading'] = theme.heading;
+  if (theme.surface) {
+    v['--ui-surface'] = theme.surface;
+    v['--ui-surface-strong'] = theme.surface;
+  }
+  if (theme.background) v['--ui-stage'] = theme.background;
+  // The default border is translucent white (for the dark stage); on a custom
+  // light OR dark surface a neutral grey reads correctly on both.
+  if (theme.surface || theme.background) v['--ui-border'] = 'rgba(128,128,128,0.30)';
+  return v as React.CSSProperties;
+}
 
 // Professional inline-SVG icons (Heroicons-style stroke paths), keyed by common
 // names + synonyms agents tend to use. Falls back to a neutral dot.
@@ -95,18 +138,33 @@ function iconPath(name: string): string | null {
   return ICON_PATHS[key] || ICON_PATHS[ICON_ALIASES[key]] || null;
 }
 
-interface ChartPoint {
+export interface ChartPoint {
   label: string;
   value: number;
 }
 
-/** Lightweight SVG chart (bar / line / pie) — no external chart dependency. */
-const ChartView: React.FC<{ chartType: string; data: ChartPoint[]; title?: string }> = ({ chartType, data, title }) => {
+/** Truncate long axis labels so they don't collide. */
+function shortLabel(s: string, max = 12): string {
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+/** Lightweight SVG chart (bar / line / pie) — no external chart dependency.
+ *  Exported so the Genie result renderer reuses the same advanced visuals.
+ *  `colors` overrides the (dark-stage) defaults so the same chart stays
+ *  readable on a LIGHT background (e.g. inline in the chat) — pass theme tokens. */
+export const ChartView: React.FC<{
+  chartType: string;
+  data: ChartPoint[];
+  title?: string;
+  colors?: { text?: string; muted?: string };
+}> = ({ chartType, data, title, colors }) => {
+  const text = colors?.text ?? TEXT;
+  const muted = colors?.muted ?? MUTED;
   const points = data.filter((d) => d && typeof d.value === 'number' && isFinite(d.value));
   if (points.length === 0) return null;
   const max = Math.max(1, ...points.map((p) => Math.abs(p.value)));
   const W = 520;
-  const H = 240;
+  const H = 260;
 
   let chart: React.ReactNode = null;
   if (chartType === 'pie') {
@@ -131,36 +189,58 @@ const ChartView: React.FC<{ chartType: string; data: ChartPoint[]; title?: strin
         {points.map((p, i) => (
           <g key={`l${i}`} transform={`translate(180, ${24 + i * 20})`}>
             <rect width="11" height="11" rx="2" fill={CHART_PALETTE[i % CHART_PALETTE.length]} />
-            <text x="17" y="10" fontSize="11.5" fill={MUTED}>{`${p.label} (${p.value})`}</text>
+            <text x="17" y="10" fontSize="11.5" fill={muted}>{`${shortLabel(p.label, 22)} (${p.value})`}</text>
           </g>
         ))}
       </svg>
     );
   } else if (chartType === 'line') {
-    const stepX = (W - 32) / Math.max(1, points.length - 1);
-    const coords = points.map((p, i) => [16 + i * stepX, H - 28 - (Math.abs(p.value) / max) * (H - 52)]);
+    const stepX = (W - 40) / Math.max(1, points.length - 1);
+    const coords = points.map((p, i) => [20 + i * stepX, H - 34 - (Math.abs(p.value) / max) * (H - 64)]);
     const poly = coords.map((c) => c.join(',')).join(' ');
-    const area = `16,${H - 28} ${poly} ${16 + (points.length - 1) * stepX},${H - 28}`;
+    const area = `20,${H - 34} ${poly} ${20 + (points.length - 1) * stepX},${H - 34}`;
     chart = (
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H}>
         <polygon points={area} fill="rgba(90,162,255,0.15)" />
         <polyline points={poly} fill="none" stroke={ACCENT} strokeWidth={2.5} />
         {coords.map((c, i) => <circle key={i} cx={c[0]} cy={c[1]} r={3.5} fill={ACCENT} />)}
         {points.map((p, i) => (
-          <text key={`t${i}`} x={coords[i][0]} y={H - 10} fontSize="10" textAnchor="middle" fill={MUTED}>{p.label}</text>
+          <text
+            key={`t${i}`}
+            x={coords[i][0]}
+            y={H - 12}
+            fontSize="9.5"
+            textAnchor="end"
+            fill={muted}
+            transform={`rotate(-35 ${coords[i][0]} ${H - 12})`}
+          >
+            {shortLabel(p.label)}
+          </text>
         ))}
       </svg>
     );
   } else {
     const bw = (W - 32) / points.length;
+    // Many bars → rotate the labels so long names (e.g. "Washington") don't overlap.
+    const rotate = points.length > 6;
     chart = (
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H}>
         {points.map((p, i) => {
-          const h = (Math.abs(p.value) / max) * (H - 44);
+          const h = (Math.abs(p.value) / max) * (H - 64);
+          const cx = 16 + i * bw + bw / 2;
+          const barY = H - 38 - h;
           return (
             <g key={i}>
-              <rect x={16 + i * bw + bw * 0.15} y={H - 26 - h} width={bw * 0.7} height={h} rx={4} fill={CHART_PALETTE[i % CHART_PALETTE.length]} />
-              <text x={16 + i * bw + bw / 2} y={H - 9} fontSize="10" textAnchor="middle" fill={MUTED}>{p.label}</text>
+              <rect x={16 + i * bw + bw * 0.15} y={barY} width={bw * 0.7} height={h} rx={4} fill={CHART_PALETTE[i % CHART_PALETTE.length]} />
+              {/* value on top of the bar */}
+              <text x={cx} y={barY - 4} fontSize="9.5" textAnchor="middle" fill={muted}>{p.value}</text>
+              {rotate ? (
+                <text x={cx} y={H - 20} fontSize="9.5" textAnchor="end" fill={muted} transform={`rotate(-35 ${cx} ${H - 20})`}>
+                  {shortLabel(p.label)}
+                </text>
+              ) : (
+                <text x={cx} y={H - 12} fontSize="10" textAnchor="middle" fill={muted}>{shortLabel(p.label, 16)}</text>
+              )}
             </g>
           );
         })}
@@ -170,7 +250,7 @@ const ChartView: React.FC<{ chartType: string; data: ChartPoint[]; title?: strin
 
   return (
     <div>
-      {title && <div style={{ color: TEXT, fontWeight: 600, marginBottom: 6 }}>{title}</div>}
+      {title && <div style={{ color: text, fontWeight: 600, marginBottom: 6, fontSize: '0.95rem' }}>{title}</div>}
       {chart}
     </div>
   );
@@ -289,7 +369,7 @@ const QuizNode: React.FC<{ title?: string; questions: QuizQuestion[] }> = ({ tit
           })}
         </div>
         <button type="button" onClick={() => { setSubmitted(false); setAnswers({}); setIdx(0); }}
-          style={{ background: ACCENT, color: '#06122b', fontWeight: 700, border: 'none', borderRadius: 10, padding: '10px 18px', alignSelf: 'center', cursor: 'pointer' }}>
+          style={{ background: ACCENT, color: ON_ACCENT, fontWeight: 700, border: 'none', borderRadius: 10, padding: '10px 18px', alignSelf: 'center', cursor: 'pointer' }}>
           Retake quiz
         </button>
       </div>
@@ -333,7 +413,7 @@ const QuizNode: React.FC<{ title?: string; questions: QuizQuestion[] }> = ({ tit
           </button>
           {current < count - 1 ? (
             <button type="button" onClick={() => setIdx((i) => Math.min(count - 1, i + 1))}
-              style={{ background: ACCENT, color: '#06122b', fontWeight: 700, border: 'none', borderRadius: 10, padding: '9px 18px', cursor: 'pointer' }}>
+              style={{ background: ACCENT, color: ON_ACCENT, fontWeight: 700, border: 'none', borderRadius: 10, padding: '9px 18px', cursor: 'pointer' }}>
               Next
             </button>
           ) : (
@@ -348,18 +428,487 @@ const QuizNode: React.FC<{ title?: string; questions: QuizQuestion[] }> = ({ tit
   );
 };
 
+/** A node in a Mindmap tree: a label plus optional nested children. */
+interface MindmapData {
+  label?: unknown;
+  text?: unknown;
+  children?: MindmapData[];
+}
+
+/** A node's children as a clean array (tolerant of missing / non-array). */
+function mindmapChildren(node: MindmapData): MindmapData[] {
+  return Array.isArray(node.children)
+    ? node.children.filter((c): c is MindmapData => Boolean(c) && typeof c === 'object')
+    : [];
+}
+
+// Auto-layout spacing: horizontal distance per depth level, vertical per leaf row.
+const MM_COL = 220;
+const MM_ROW = 76;
+const MM_MIN_ZOOM = 0.3;
+const MM_MAX_ZOOM = 2.5;
+
+interface MMNode {
+  id: string;
+  label: string;
+  depth: number;
+  parentId: string | null;
+  childIds: string[];
+  /** Branch color (root passes ACCENT; each top-level branch + its subtree share one). */
+  color: string;
+}
+
+type XY = { x: number; y: number };
+
+/** Flatten the tree into addressable nodes (id = path like "r.0.1"), assigning
+ *  each top-level branch its own palette color, inherited by its descendants. */
+function buildMindmap(root: MindmapData): { nodes: Record<string, MMNode>; rootId: string } {
+  const nodes: Record<string, MMNode> = {};
+  const walk = (node: MindmapData, id: string, depth: number, parentId: string | null, color: string) => {
+    const kids = mindmapChildren(node);
+    const childIds = kids.map((_, i) => `${id}.${i}`);
+    nodes[id] = { id, label: String(node.label ?? node.text ?? ''), depth, parentId, childIds, color };
+    kids.forEach((k, i) => {
+      const childColor = depth === 0 ? CHART_PALETTE[i % CHART_PALETTE.length] : color;
+      walk(k, childIds[i], depth + 1, id, childColor);
+    });
+  };
+  walk(root, 'r', 0, null, ACCENT);
+  return { nodes, rootId: 'r' };
+}
+
+/** Tidy horizontal tree layout → a center point per node. Computed once for the
+ *  full tree; positions are then user-editable (drag) and stable across collapse. */
+function layoutMindmap(nodes: Record<string, MMNode>, rootId: string): Record<string, XY> {
+  const pos: Record<string, XY> = {};
+  let nextLeaf = 0;
+  const place = (id: string): number => {
+    const node = nodes[id];
+    const x = node.depth * MM_COL;
+    let y: number;
+    if (node.childIds.length === 0) {
+      y = nextLeaf * MM_ROW;
+      nextLeaf += 1;
+    } else {
+      const ys = node.childIds.map(place);
+      y = (ys[0] + ys[ys.length - 1]) / 2; // center the parent on its children
+    }
+    pos[id] = { x, y };
+    return y;
+  };
+  place(rootId);
+  return pos;
+}
+
+/** All transitive descendants of a node (so dragging moves the whole subtree). */
+function descendantsOf(nodes: Record<string, MMNode>, id: string): string[] {
+  const out: string[] = [];
+  const stack = [...nodes[id].childIds];
+  while (stack.length) {
+    const cur = stack.pop() as string;
+    out.push(cur);
+    stack.push(...nodes[cur].childIds);
+  }
+  return out;
+}
+
+/**
+ * An interactive mindmap canvas: nodes are absolutely positioned from a tidy
+ * auto-layout, joined by curved SVG edges. The user can PAN the whole canvas
+ * (drag empty space) and DRAG any node (which carries its subtree). Nodes with
+ * children expand/collapse; deeper levels start collapsed so a big map stays
+ * tidy. All colors come from the themed tokens (UIConfigurator is the source of
+ * truth); branch accents reuse the shared chart palette.
+ */
+const MindmapCanvas: React.FC<{ root: MindmapData }> = ({ root }) => {
+  const { nodes, rootId } = useMemo(() => buildMindmap(root), [root]);
+  const initial = useMemo(() => layoutMindmap(nodes, rootId), [nodes, rootId]);
+
+  const [positions, setPositions] = useState<Record<string, XY>>(() => initial);
+  const [collapsed, setCollapsed] = useState<Set<string>>(
+    () => new Set(Object.values(nodes).filter((n) => n.depth >= 2 && n.childIds.length > 0).map((n) => n.id)),
+  );
+  // pan (x,y) + zoom (scale) in one object so a wheel-zoom updates both atomically.
+  const [view, setView] = useState({ scale: 1, x: 48, y: 32 });
+  const [grabbing, setGrabbing] = useState(false);
+
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const sizeRef = useRef({ w: 0, h: 0 }); // viewport size, for centering button-zoom
+  const wheelCleanup = useRef<(() => void) | null>(null);
+  const dragRef = useRef<
+    | { mode: 'pan'; startX: number; startY: number; panStart: XY }
+    | { mode: 'node'; startX: number; startY: number; ids: string[]; orig: Record<string, XY> }
+    | null
+  >(null);
+
+  const toggle = (id: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  // Visible = every node not hidden beneath a collapsed ancestor.
+  const visible = useMemo(() => {
+    const vis = new Set<string>();
+    const stack = [rootId];
+    while (stack.length) {
+      const id = stack.pop() as string;
+      vis.add(id);
+      if (!collapsed.has(id)) nodes[id].childIds.forEach((c) => stack.push(c));
+    }
+    return vis;
+  }, [nodes, rootId, collapsed]);
+
+  // Zoom around a viewport point (cx, cy): scale changes and pan shifts so the
+  // point under the cursor stays put. One functional update → no stale state.
+  const zoomAt = useCallback((factor: number, cx: number, cy: number) => {
+    setView((v) => {
+      const scale = Math.min(MM_MAX_ZOOM, Math.max(MM_MIN_ZOOM, v.scale * factor));
+      const k = scale / v.scale;
+      return { scale, x: cx - (cx - v.x) * k, y: cy - (cy - v.y) * k };
+    });
+  }, []);
+
+  // Callback ref: attach a NON-passive wheel listener (so we can preventDefault
+  // the page scroll) when the canvas mounts; detach on unmount. Also stash the
+  // element + size for the zoom buttons.
+  const canvasRefCb = useCallback(
+    (el: HTMLDivElement | null) => {
+      canvasRef.current = el;
+      if (wheelCleanup.current) {
+        wheelCleanup.current();
+        wheelCleanup.current = null;
+      }
+      if (el) {
+        sizeRef.current = { w: el.clientWidth, h: el.clientHeight };
+        const handler = (e: WheelEvent) => {
+          e.preventDefault();
+          const r = el.getBoundingClientRect();
+          zoomAt(e.deltaY < 0 ? 1.1 : 1 / 1.1, e.clientX - r.left, e.clientY - r.top);
+        };
+        el.addEventListener('wheel', handler, { passive: false });
+        wheelCleanup.current = () => el.removeEventListener('wheel', handler);
+      }
+    },
+    [zoomAt],
+  );
+
+  const zoomButton = (factor: number) => () => zoomAt(factor, sizeRef.current.w / 2, sizeRef.current.h / 2);
+  const resetView = () => setView({ scale: 1, x: 48, y: 32 });
+
+  const startNodeDrag = (id: string) => (e: React.PointerEvent) => {
+    e.stopPropagation(); // don't also pan the canvas
+    const ids = [id, ...descendantsOf(nodes, id)];
+    const orig: Record<string, XY> = {};
+    ids.forEach((d) => (orig[d] = positions[d]));
+    dragRef.current = { mode: 'node', startX: e.clientX, startY: e.clientY, ids, orig };
+    setGrabbing(true);
+  };
+  const startPan = (e: React.PointerEvent) => {
+    dragRef.current = { mode: 'pan', startX: e.clientX, startY: e.clientY, panStart: { x: view.x, y: view.y } };
+    setGrabbing(true);
+  };
+  const onMove = (e: React.PointerEvent) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const dx = e.clientX - d.startX;
+    const dy = e.clientY - d.startY;
+    if (d.mode === 'pan') {
+      setView((v) => ({ ...v, x: d.panStart.x + dx, y: d.panStart.y + dy }));
+    } else {
+      // Node positions live in world space; a screen delta is delta / scale there.
+      setPositions((prev) => {
+        const next = { ...prev };
+        d.ids.forEach((id) => (next[id] = { x: d.orig[id].x + dx / view.scale, y: d.orig[id].y + dy / view.scale }));
+        return next;
+      });
+    }
+  };
+  const endDrag = () => {
+    dragRef.current = null;
+    setGrabbing(false);
+  };
+
+  const visibleIds = Object.keys(positions).filter((id) => visible.has(id));
+  // SVG sized to the content bounds so the edge layer covers every node.
+  const maxX = visibleIds.reduce((m, id) => Math.max(m, positions[id].x), 0) + 240;
+  const maxY = visibleIds.reduce((m, id) => Math.max(m, positions[id].y), 0) + 140;
+
+  const gridSize = 22 * view.scale;
+
+  return (
+    <div
+      data-mm-canvas=""
+      ref={canvasRefCb}
+      onPointerDown={startPan}
+      onPointerMove={onMove}
+      onPointerUp={endDrag}
+      onPointerLeave={endDrag}
+      style={{
+        position: 'relative',
+        height: '74vh',
+        minHeight: 540,
+        overflow: 'hidden',
+        borderRadius: 14,
+        border: `1px solid ${GLASS_BORDER}`,
+        cursor: grabbing ? 'grabbing' : 'grab',
+        touchAction: 'none',
+        // faint dot grid that pans + zooms with the content
+        backgroundImage: `radial-gradient(${GLASS_BORDER} 1px, transparent 1px)`,
+        backgroundSize: `${gridSize}px ${gridSize}px`,
+        backgroundPosition: `${view.x}px ${view.y}px`,
+      }}
+    >
+      <div
+        data-mm-world=""
+        style={{ position: 'absolute', left: 0, top: 0, transformOrigin: '0 0', transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
+      >
+        <svg
+          width={maxX}
+          height={maxY}
+          style={{ position: 'absolute', left: 0, top: 0, overflow: 'visible', pointerEvents: 'none' }}
+        >
+          {visibleIds
+            .filter((id) => nodes[id].parentId !== null)
+            .map((id) => {
+              const a = positions[nodes[id].parentId as string];
+              const b = positions[id];
+              const midX = (a.x + b.x) / 2;
+              return (
+                <path
+                  key={id}
+                  d={`M ${a.x} ${a.y} C ${midX} ${a.y} ${midX} ${b.y} ${b.x} ${b.y}`}
+                  fill="none"
+                  stroke={nodes[id].color}
+                  strokeWidth={2}
+                  strokeOpacity={0.85}
+                />
+              );
+            })}
+        </svg>
+        {visibleIds.map((id) => {
+          const node = nodes[id];
+          const isRoot = node.parentId === null;
+          const p = positions[id];
+          const hasKids = node.childIds.length > 0;
+          const isCollapsed = collapsed.has(id);
+          return (
+            <div
+              key={id}
+              data-mm-node={id}
+              onPointerDown={startNodeDrag(id)}
+              style={{
+                position: 'absolute',
+                left: p.x,
+                top: p.y,
+                transform: 'translate(-50%, -50%)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                cursor: 'grab',
+                userSelect: 'none',
+                touchAction: 'none',
+                background: isRoot ? ACCENT : GLASS,
+                color: isRoot ? ON_ACCENT : TEXT,
+                border: `1px solid ${isRoot ? ACCENT : GLASS_BORDER}`,
+                borderLeft: isRoot ? `1px solid ${ACCENT}` : `3px solid ${node.color}`,
+                borderRadius: isRoot ? 14 : 11,
+                padding: isRoot ? '11px 17px' : '8px 13px',
+                fontWeight: isRoot ? 800 : 600,
+                fontSize: isRoot ? '1.02rem' : '0.9rem',
+                whiteSpace: 'nowrap',
+                boxShadow: isRoot ? '0 8px 26px rgba(0,0,0,0.30)' : '0 2px 10px rgba(0,0,0,0.16)',
+              }}
+            >
+              {!isRoot && (
+                <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: 99, background: node.color, flexShrink: 0 }} />
+              )}
+              <span>{node.label}</span>
+              {hasKids && (
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()} // click to toggle, don't start a drag
+                  onClick={() => toggle(id)}
+                  aria-expanded={!isCollapsed}
+                  aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${node.label || 'node'}`}
+                  title={isCollapsed ? `Expand (${node.childIds.length})` : 'Collapse'}
+                  style={{
+                    marginLeft: 2, minWidth: 20, height: 20, padding: '0 5px',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    borderRadius: 99, cursor: 'pointer', flexShrink: 0,
+                    fontSize: '0.72rem', fontWeight: 700, lineHeight: 1, fontVariantNumeric: 'tabular-nums',
+                    background: isRoot ? 'rgba(0,0,0,0.18)' : GLASS_STRONG,
+                    color: isRoot ? ON_ACCENT : node.color,
+                    border: `1px solid ${isRoot ? 'transparent' : GLASS_BORDER}`,
+                  }}
+                >
+                  {isCollapsed ? `+${node.childIds.length}` : '−'}
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {/* Zoom controls (don't start a pan when pressed). */}
+      <div style={{ position: 'absolute', top: 10, right: 10, display: 'flex', flexDirection: 'column', gap: 6, zIndex: 2 }}>
+        {[
+          { sym: '+', aria: 'Zoom in', on: zoomButton(1.2) },
+          { sym: '−', aria: 'Zoom out', on: zoomButton(1 / 1.2) },
+          { sym: '↺', aria: 'Reset view', on: resetView },
+        ].map((b) => (
+          <button
+            key={b.aria}
+            type="button"
+            aria-label={b.aria}
+            title={b.aria}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={b.on}
+            style={{
+              width: 30, height: 30, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              borderRadius: 8, cursor: 'pointer', fontSize: '1rem', fontWeight: 700, lineHeight: 1,
+              color: TEXT, background: GLASS, border: `1px solid ${GLASS_BORDER}`, boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
+            }}
+          >
+            {b.sym}
+          </button>
+        ))}
+      </div>
+      <div
+        style={{ position: 'absolute', left: 12, bottom: 10, fontSize: '0.7rem', color: MUTED, pointerEvents: 'none', userSelect: 'none' }}
+      >
+        Drag to pan · scroll to zoom · drag a node to move it
+      </div>
+    </div>
+  );
+};
+
+type AlbumImage = { url: string; alt: string; caption: string };
+
+/**
+ * An Album in "carousel" layout: ONE image per screen, navigated by the ← / →
+ * arrow keys (mirrors SlidesNode's keyboard model), plus on-image prev/next
+ * buttons, an "n / N" counter and clickable dots. Keyboard listener is only
+ * attached when there's more than one image.
+ */
+const AlbumCarousel: React.FC<{ title?: string; items: AlbumImage[] }> = ({ title, items }) => {
+  const [idx, setIdx] = useState(0);
+  const count = items.length;
+
+  useEffect(() => {
+    if (count <= 1) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowRight') setIdx((i) => Math.min(count - 1, i + 1));
+      else if (e.key === 'ArrowLeft') setIdx((i) => Math.max(0, i - 1));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [count]);
+
+  const current = Math.min(idx, count - 1);
+  const img = items[current];
+  const atStart = current === 0;
+  const atEnd = current === count - 1;
+  const navBtn: React.CSSProperties = {
+    position: 'absolute', top: '50%', transform: 'translateY(-50%)',
+    width: 38, height: 38, borderRadius: 999, border: `1px solid ${GLASS_BORDER}`,
+    background: GLASS_STRONG, color: TEXT, fontSize: 22, lineHeight: 1,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {title && <div style={{ color: TEXT, fontWeight: 700, fontSize: '1.05rem' }}>{title}</div>}
+      <div style={{ position: 'relative' }}>
+        <a href={img.url} target="_blank" rel="noopener noreferrer" style={{ display: 'block' }}>
+          <img
+            src={img.url}
+            alt={img.alt}
+            style={{ width: '100%', aspectRatio: '16 / 9', maxHeight: '70vh', objectFit: 'cover', borderRadius: 16, border: `1px solid ${GLASS_BORDER}`, display: 'block' }}
+          />
+        </a>
+        {count > 1 && (
+          <>
+            <button
+              type="button" aria-label="Previous image" disabled={atStart}
+              onClick={() => setIdx((i) => Math.max(0, i - 1))}
+              style={{ ...navBtn, left: 10, opacity: atStart ? 0.35 : 1, cursor: atStart ? 'default' : 'pointer' }}
+            >‹</button>
+            <button
+              type="button" aria-label="Next image" disabled={atEnd}
+              onClick={() => setIdx((i) => Math.min(count - 1, i + 1))}
+              style={{ ...navBtn, right: 10, opacity: atEnd ? 0.35 : 1, cursor: atEnd ? 'default' : 'pointer' }}
+            >›</button>
+            <div style={{ position: 'absolute', top: 10, right: 12, background: GLASS_STRONG, color: TEXT, fontSize: 12, fontWeight: 600, padding: '2px 8px', borderRadius: 999, border: `1px solid ${GLASS_BORDER}` }}>
+              {current + 1} / {count}
+            </div>
+          </>
+        )}
+      </div>
+      {img.caption && <div style={{ fontSize: 13, color: MUTED, textAlign: 'center' }}>{img.caption}</div>}
+      {count > 1 && (
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 8 }}>
+          {items.map((_, i) => (
+            <button
+              key={i} type="button" aria-label={`Go to image ${i + 1}`} onClick={() => setIdx(i)}
+              style={{ width: i === current ? 22 : 8, height: 8, borderRadius: 999, background: i === current ? ACCENT : GLASS_BORDER, border: 'none', padding: 0, cursor: 'pointer', transition: 'all 0.2s' }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/**
+ * A whitelisted, appearance-only subset of an agent-provided `style` object.
+ * The renderer imposes its own premium theme by default, but a node may
+ * intentionally override appearance — e.g. a "change the background to black"
+ * refine sets `style.background` on the Slides root. Without honoring it the
+ * refine produces a valid new document that renders identically, so it looks
+ * like "nothing happened". We pass through only visual props (color/background/
+ * typography) and never layout (display/position/width/height/margin/padding-
+ * flow) so an override can't break the deck's structure.
+ */
+const STYLE_PASSTHROUGH = [
+  'background', 'backgroundColor', 'color', 'border', 'borderColor',
+  'borderRadius', 'boxShadow', 'opacity', 'textAlign', 'fontWeight',
+  'fontSize', 'fontStyle', 'textDecoration', 'letterSpacing', 'lineHeight',
+] as const;
+
+function extractNodeStyle(node: UiComponent | undefined): React.CSSProperties {
+  const raw = node && typeof node.style === 'object' && node.style
+    ? (node.style as Record<string, unknown>)
+    : null;
+  if (!raw) return {};
+  const out: Record<string, unknown> = {};
+  for (const key of STYLE_PASSTHROUGH) {
+    const v = raw[key];
+    if (typeof v === 'string' || typeof v === 'number') out[key] = v;
+  }
+  return out as React.CSSProperties;
+}
+
 const Node: React.FC<{
   id: string;
   surface: UiSurface;
   data: Record<string, unknown>;
   setData: (path: string, value: unknown) => void;
   seen: Set<string>;
-}> = ({ id, surface, data, setData, seen }) => {
+  /** Text color cascaded from an ancestor that set `style.color` (default theme TEXT). */
+  inheritedColor?: string;
+}> = ({ id, surface, data, setData, seen, inheritedColor = TEXT }) => {
   const node: UiComponent | undefined = surface.components[id];
   if (!node || seen.has(id)) return null;
   const nextSeen = new Set(seen).add(id);
+  // Honor a node's own appearance overrides, and cascade its text color to
+  // descendants so a "black background / white text" override reads correctly.
+  const nodeStyle = extractNodeStyle(node);
+  const myColor = typeof nodeStyle.color === 'string' ? nodeStyle.color : inheritedColor;
   const renderChild = (childId: string) => (
-    <Node key={childId} id={childId} surface={surface} data={data} setData={setData} seen={nextSeen} />
+    <Node key={childId} id={childId} surface={surface} data={data} setData={setData} seen={nextSeen} inheritedColor={myColor} />
   );
   const pathOf = (v: unknown): string =>
     v && typeof v === 'object' && 'path' in (v as Record<string, unknown>)
@@ -369,8 +918,13 @@ const Node: React.FC<{
   switch (node.component) {
     case 'Text': {
       const variant = typeof node.variant === 'string' ? node.variant : 'body';
-      const style = TEXT_STYLES[variant] || TEXT_STYLES.body;
-      return <div style={{ color: TEXT, ...style }}>{String(resolveValue(node.text, data) ?? '')}</div>;
+      const variantStyle = TEXT_STYLES[variant] || TEXT_STYLES.body;
+      // Headings adopt the theme's heading color when set, else the cascaded text
+      // color (the nested var() keeps un-themed docs identical to before).
+      const isHeading = variant === 'h1' || variant === 'h2' || variant === 'h3';
+      const baseColor = isHeading ? `var(--ui-heading, ${myColor})` : myColor;
+      // Precedence: explicit node style > variant's own color (e.g. muted body) > inherited.
+      return <div style={{ color: baseColor, ...variantStyle, ...nodeStyle }}>{String(resolveValue(node.text, data) ?? '')}</div>;
     }
     case 'Row':
     case 'Column': {
@@ -382,6 +936,7 @@ const Node: React.FC<{
           justifyContent: JUSTIFY[String(node.justify)] || 'flex-start',
           alignItems: ALIGN[String(node.align)] || 'stretch',
           flexWrap: isRow ? 'wrap' : 'nowrap',
+          ...nodeStyle,
         }}>
           {/* Row children become equal, flexible columns so they fill the width
               (no dead space / tiny side element). Columns stack as-is. */}
@@ -398,7 +953,7 @@ const Node: React.FC<{
     case 'Button':
       return (
         <button type="button" className="transition-all hover:opacity-90"
-          style={{ background: ACCENT, color: '#06122b', fontWeight: 600, border: 'none', borderRadius: 10, padding: '9px 16px', alignSelf: 'flex-start', cursor: 'pointer' }}>
+          style={{ background: ACCENT, color: ON_ACCENT, fontWeight: 600, border: 'none', borderRadius: 10, padding: '9px 16px', alignSelf: 'flex-start', cursor: 'pointer' }}>
           {typeof node.child === 'string' ? renderChild(node.child) : 'Action'}
         </button>
       );
@@ -415,8 +970,8 @@ const Node: React.FC<{
     case 'Card': {
       const childIds = Array.isArray(node.children) ? node.children : [];
       return (
-        <div style={{ ...CARD_STYLE, padding: 18, display: 'flex', flexDirection: 'column', gap: 10, flex: node.weight ? String(node.weight) : undefined }}>
-          {node.title != null && <div style={{ color: TEXT, fontWeight: 700, fontSize: '1.05rem' }}>{String(resolveValue(node.title, data))}</div>}
+        <div style={{ ...CARD_STYLE, padding: 18, display: 'flex', flexDirection: 'column', gap: 10, flex: node.weight ? String(node.weight) : undefined, ...nodeStyle }}>
+          {node.title != null && <div style={{ color: myColor, fontWeight: 700, fontSize: '1.05rem' }}>{String(resolveValue(node.title, data))}</div>}
           {childIds.map(renderChild)}
         </div>
       );
@@ -437,6 +992,69 @@ const Node: React.FC<{
       const url = String(resolveValue(node.url, data) ?? '');
       if (!url) return null;
       return <img src={url} alt={node.alt ? String(node.alt) : ''} style={{ maxWidth: '100%', borderRadius: 12, display: 'block' }} />;
+    }
+    case 'Album': {
+      // A gallery of existing image links. Accepts `images: [{url, alt?, caption?}]`
+      // or a plain `urls: ["..."]`. Each tile links to its source. `layout:
+      // "carousel"` (aka "slideshow") shows ONE image per screen, navigable by the
+      // ← / → keys + prev/next buttons (see AlbumCarousel); default is a grid.
+      const rawItems = (Array.isArray(node.images)
+        ? node.images
+        : Array.isArray(node.urls)
+          ? node.urls
+          : []) as unknown[];
+      const items = rawItems
+        .map((it) => {
+          if (typeof it === 'string') return { url: it, alt: '', caption: '' };
+          if (it && typeof it === 'object') {
+            const o = it as Record<string, unknown>;
+            return {
+              url: String(resolveValue(o.url ?? o.src ?? o.link, data) ?? ''),
+              alt: String(o.alt ?? o.caption ?? o.title ?? ''),
+              caption: String(o.caption ?? o.title ?? ''),
+            };
+          }
+          return { url: '', alt: '', caption: '' };
+        })
+        .filter((i) => i.url);
+      if (items.length === 0) return null;
+      const isCarousel = node.layout === 'carousel' || node.layout === 'slideshow';
+      const titleText = node.title != null ? String(resolveValue(node.title, data)) : undefined;
+      // Carousel = one image per screen, keyboard / button navigable.
+      if (isCarousel) {
+        return (
+          <div style={{ ...nodeStyle }}>
+            <AlbumCarousel title={titleText} items={items} />
+          </div>
+        );
+      }
+      // Default = responsive grid of all images.
+      return (
+        <div style={{ ...nodeStyle }}>
+          {titleText != null && (
+            <div style={{ color: myColor, fontWeight: 700, fontSize: '1.05rem', marginBottom: 10 }}>{titleText}</div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
+            {items.map((img, i) => (
+              <a
+                key={i}
+                href={img.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ display: 'flex', flexDirection: 'column', gap: 6, textDecoration: 'none' }}
+              >
+                <img
+                  src={img.url}
+                  alt={img.alt}
+                  loading="lazy"
+                  style={{ width: '100%', aspectRatio: '4 / 3', objectFit: 'cover', borderRadius: 12, border: `1px solid ${GLASS_BORDER}`, display: 'block' }}
+                />
+                {img.caption && <span style={{ fontSize: 12, color: MUTED }}>{img.caption}</span>}
+              </a>
+            ))}
+          </div>
+        </div>
+      );
     }
     case 'Icon': {
       const d = iconPath(String(node.name ?? ''));
@@ -486,7 +1104,7 @@ const Node: React.FC<{
     case 'Dashboard': {
       const childIds = Array.isArray(node.children) ? node.children : [];
       return (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 14, ...nodeStyle }}>
           {childIds.map(renderChild)}
         </div>
       );
@@ -556,9 +1174,9 @@ const Node: React.FC<{
     case 'Slide': {
       const childIds = Array.isArray(node.children) ? node.children : [];
       return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 22, ...nodeStyle }}>
           {node.title != null && (
-            <div style={{ color: TEXT, fontWeight: 800, fontSize: '2.6rem', letterSpacing: '-0.02em', lineHeight: 1.1 }}>{String(resolveValue(node.title, data))}</div>
+            <div style={{ color: myColor, fontWeight: 800, fontSize: '2.6rem', letterSpacing: '-0.02em', lineHeight: 1.1 }}>{String(resolveValue(node.title, data))}</div>
           )}
           {childIds.map(renderChild)}
         </div>
@@ -580,6 +1198,22 @@ const Node: React.FC<{
         };
       }).filter((q) => q.question && q.options.length > 0);
       return <QuizNode title={node.title != null ? String(node.title) : undefined} questions={questions} />;
+    }
+    case 'Mindmap': {
+      // The tree lives in `root` (or `data`/`tree`): a nested
+      // { label, children:[{label, children:[…]}] } structure.
+      const rawRoot = (node.root ?? node.data ?? node.tree) as MindmapData | undefined;
+      if (!rawRoot || typeof rawRoot !== 'object') return null;
+      return (
+        <div style={{ ...nodeStyle }}>
+          {node.title != null && (
+            <div style={{ color: myColor, fontWeight: 700, fontSize: '1.05rem', marginBottom: 10 }}>
+              {String(resolveValue(node.title, data))}
+            </div>
+          )}
+          <MindmapCanvas root={rawRoot} />
+        </div>
+      );
     }
     default:
       return null;
@@ -605,10 +1239,22 @@ const UiRenderer: React.FC<UiRendererProps> = ({ surface }) => {
     });
   };
 
+  // The root node (typically Slides) drives the stage: a refine like "change the
+  // background to black" sets style.background/color there. Fall back to the
+  // built-in premium theme when the agent specifies nothing.
+  const rootStyle = extractNodeStyle(surface.components[surface.rootId]);
+  const theme = surface.theme;
+  // The surface theme defines the --ui-* CSS vars on the stage; an explicit
+  // root-node style override (e.g. a "make the background black" refine) still wins.
+  const stageBackground = rootStyle.background ?? rootStyle.backgroundColor ?? STAGE_BG;
+  const stageColor = typeof rootStyle.color === 'string' ? rootStyle.color : TEXT;
+  const fontFamily = (theme?.font && FONT_STACK[theme.font]) || FONT_STACK.sans;
+  const pad = theme?.density === 'compact' ? '22px 30px' : '36px 48px';
+
   return (
-    <div style={{ minHeight: '100%', background: STAGE_BG, padding: '36px 48px', color: TEXT, fontFamily: 'Inter, system-ui, sans-serif' }}>
+    <div style={{ ...themeVars(theme), minHeight: '100%', background: stageBackground, padding: pad, color: stageColor, fontFamily }}>
       <div style={{ maxWidth: 1280, margin: '0 auto' }}>
-        <Node id={surface.rootId} surface={surface} data={data} setData={setData} seen={new Set()} />
+        <Node id={surface.rootId} surface={surface} data={data} setData={setData} seen={new Set()} inheritedColor={stageColor} />
       </div>
     </div>
   );

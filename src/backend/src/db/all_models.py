@@ -39,7 +39,7 @@ from src.models.user import User
 from src.models.billing import LLMUsageBilling, BillingPeriod, BillingAlert
 
 # Documentation models
-from src.models.documentation_embedding import DocumentationEmbedding
+from src.models.documentation_embedding import DocumentationEmbedding, KnowledgeEmbedding
 
 # Database configuration models
 from src.models.database_config import LakebaseConfig

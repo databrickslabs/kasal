@@ -20,6 +20,7 @@
 
 import { useEffect, useRef, useCallback } from 'react';
 import { apiClient } from '../../config/api/ApiConfig';
+import { SSE_ENABLED } from '../../utils/sseTransport';
 import { useRunStatusStore } from '../../store/runStatus';
 import { useFlowExecutionStore } from '../../store/flowExecutionStore';
 import { useTaskExecutionStore } from '../../store/taskExecutionStore';
@@ -243,6 +244,14 @@ export const useTracePolling = () => {
       if (!jobId) return;
 
       console.log(`[TracePolling] jobCreated received | job=${jobId} | sseConnected=${useRunStatusStore.getState().sseConnected}`);
+
+      // SSE is disabled (Databricks Apps) — it's the primary transport now, so
+      // poll immediately instead of waiting out the SSE grace period.
+      if (!SSE_ENABLED) {
+        activeJobIdRef.current = jobId;
+        startPolling(jobId);
+        return;
+      }
 
       // Always schedule polling after a grace period.
       // If SSE proves it works (delivers a real message), we cancel.

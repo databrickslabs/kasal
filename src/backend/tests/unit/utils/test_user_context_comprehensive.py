@@ -735,9 +735,10 @@ class TestFromEmailUsesSmartSession:
 
         assert ctx.primary_group_id == "energy_0380b619"
         assert "energy_0380b619" in ctx.group_ids
-        # Personal workspace should also be included for data access
+        # Strict workspace isolation: only the selected group is in group_ids
+        # (personal workspace excluded; reachable when the user switches back to it).
         personal = GroupContext.generate_individual_group_id("nehme@databricks.com")
-        assert personal in ctx.group_ids
+        assert personal not in ctx.group_ids
 
     @pytest.mark.asyncio
     async def test_from_email_with_personal_workspace_sets_personal_primary(self):

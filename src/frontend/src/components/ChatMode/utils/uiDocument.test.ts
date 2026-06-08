@@ -35,6 +35,27 @@ describe('parseUiDocument', () => {
     expect(parseUiDocument('```json\n' + JSON.stringify(doc) + '\n```')).not.toBeNull();
   });
 
+  it('extracts a JSON object embedded in surrounding prose (with escaped quotes)', () => {
+    // Leading prose + a string value containing an escaped quote and backslash,
+    // so the balanced-block scanner walks the in-string / escape branches.
+    const json = JSON.stringify({
+      ...doc,
+      messages: [
+        { version: 'v0.10', createSurface: { surfaceId: 's1', catalogId: 'minimal' } },
+        { updateComponents: { components: [{ id: 'root', component: 'Text', text: 'a "b" \\ c' }] } },
+      ],
+    });
+    const surface = parseUiDocument(`Here is the UI document: ${json} — enjoy!`);
+    expect(surface).not.toBeNull();
+  });
+
+  it('returns null for prose with an embedded array (not a UI document) and for plain prose', () => {
+    // arrAt found before any object → the array branch of the embedded scan runs.
+    expect(parseUiDocument('preamble [1, 2, 3] trailing')).toBeNull();
+    // neither { nor [ → no embedded block
+    expect(parseUiDocument('just some words, no json here')).toBeNull();
+  });
+
   it('accepts a bare array of messages and a single message object', () => {
     expect(parseUiDocument(doc.messages as never)).not.toBeNull();
     const single = {
@@ -153,5 +174,36 @@ describe('resolveValue', () => {
   it('returns a literal value unchanged', () => {
     expect(resolveValue('literal', data)).toBe('literal');
     expect(resolveValue(undefined, data)).toBeUndefined();
+  });
+});
+
+describe('parseUiDocument — surface theme', () => {
+  const withRoot = (extra: object[]) => ({
+    messages: [
+      ...extra,
+      { updateComponents: { surfaceId: 's1', components: [{ id: 'root', component: 'Text', text: 'x', variant: 'h1' }] } },
+    ],
+  });
+
+  it('captures and merges a theme from createSurface.theme and a bare theme message', () => {
+    const s = parseUiDocument(withRoot([
+      { createSurface: { surfaceId: 's1', catalogId: 'basic', theme: { accent: '#111', font: 'serif' } } },
+      { theme: { background: '#fff' } },
+    ]) as never);
+    expect(s!.theme).toEqual({ accent: '#111', font: 'serif', background: '#fff' });
+  });
+
+  it('captures a bare theme message when createSurface is absent', () => {
+    const s = parseUiDocument(withRoot([{ theme: { accent: '#222' } }]) as never);
+    expect(s!.theme).toEqual({ accent: '#222' });
+  });
+
+  it('ignores a non-object createSurface and a non-object theme value', () => {
+    const s = parseUiDocument(withRoot([{ createSurface: 'nope' }, { theme: 'also-nope' }]) as never);
+    expect(s!.theme).toBeUndefined();
+  });
+
+  it('leaves theme undefined when no theme is provided', () => {
+    expect(parseUiDocument(doc as never)!.theme).toBeUndefined();
   });
 });
