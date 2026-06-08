@@ -224,8 +224,18 @@ async def configure_flow_crew_memory(
             memory_backend_config, crew_id, embedder_for_backend
         )
         memory_config = MemBackConfig(**memory_backend_config)
+        # Resolve the optional memory-analysis LLM override into a configured
+        # instance so CrewAI Memory doesn't fall back to OpenAI and 401.
+        memory_llm_override = await memory_service.resolve_memory_llm_override(
+            memory_config
+        )
         crew_kwargs = memory_service.configure_crew_memory_components(
-            crew_kwargs, memory_config, unified_storage, crew_id, custom_embedder
+            crew_kwargs,
+            memory_config,
+            unified_storage,
+            crew_id,
+            custom_embedder,
+            memory_llm_override=memory_llm_override,
         )
         logger.info(
             f"[FLOW MEMORY] Configured unified memory (backend={backend_type}, crew_id={crew_id})"

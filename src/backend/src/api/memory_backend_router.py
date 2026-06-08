@@ -224,18 +224,25 @@ async def save_lakebase_config(
 
     group_id = group_context.primary_group_id
     lakebase_config = request.get("lakebase_config", {})
+    # Cognitive tuning knobs (recall speed, exploration budget, memory LLM) are
+    # optional; persist them on the same config so crew execution picks them up
+    # via ``active_config.cognitive_config``.
+    cognitive_config = request.get("cognitive_config")
 
     # Create the new Lakebase config FIRST. Deleting the existing configs before
     # this hits the "Cannot delete the only memory backend configuration" guard
     # whenever exactly one config exists, leaving the setup half-done (warning +
     # a stale leftover config). Creating first keeps the count > 0 so the
     # subsequent cleanup of the OLD configs never trips that guard.
-    from src.schemas.memory_backend import LakebaseMemoryConfig
+    from src.schemas.memory_backend import CognitiveMemoryConfig, LakebaseMemoryConfig
 
     config = MemoryBackendCreate(
         name=f"Lakebase Setup {datetime.now().strftime('%Y-%m-%d %H:%M')}",
         backend_type=MemoryBackendType.LAKEBASE,
         lakebase_config=LakebaseMemoryConfig(**lakebase_config),
+        cognitive_config=(
+            CognitiveMemoryConfig(**cognitive_config) if cognitive_config else None
+        ),
     )
     backend = await service.create_memory_backend(group_id, config)
 

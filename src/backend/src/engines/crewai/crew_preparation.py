@@ -811,12 +811,20 @@ class CrewPreparation:
                 from src.schemas.memory_backend import MemoryBackendConfig as MemBackConfig
                 memory_config = MemBackConfig(**memory_backend_config)
 
+                # Resolve the optional memory-analysis LLM override into a fully
+                # configured instance (provider prefix + creds) so CrewAI Memory
+                # doesn't fall back to an unconfigured OpenAI LLM and 401.
+                memory_llm_override = await memory_service.resolve_memory_llm_override(
+                    memory_config
+                )
+
                 crew_kwargs = memory_service.configure_crew_memory_components(
                     crew_kwargs,
                     memory_config,
                     unified_storage,
                     crew_id,
                     custom_embedder,
+                    memory_llm_override=memory_llm_override,
                 )
 
             # 9. Add optional parameters

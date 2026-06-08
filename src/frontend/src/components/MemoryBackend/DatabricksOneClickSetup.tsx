@@ -42,6 +42,7 @@ import {
 import { AxiosError } from 'axios';
 import { apiClient } from '../../config/api/ApiConfig';
 import { useMemoryBackendStore } from '../../store/memoryBackend';
+import { CognitiveMemoryPanel } from './CognitiveMemoryPanel';
 import DatabricksVectorSearchService from '../../api/DatabricksVectorSearchService';
 import {
   MemoryBackendType,
@@ -53,6 +54,7 @@ import {
   ManualConfig,
   DatabricksMemoryConfig as DatabricksConfig,
   LakebaseMemoryConfig,
+  CognitiveMemoryConfig,
   DEFAULT_LAKEBASE_CONFIG,
 } from '../../types/memoryBackend';
 import { MemoryBackendService } from '../../api/MemoryBackendService';
@@ -121,7 +123,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
     endpointName: string;
   } | null>(null);
 
-  const { updateConfig } = useMemoryBackendStore();
+  const { updateConfig, config } = useMemoryBackendStore();
   
   
   // Load existing configuration and detect workspace URL on mount
@@ -283,10 +285,16 @@ export const DatabricksOneClickSetup: React.FC = () => {
     }
   };
   
-  const processConfigResponse = (configData: { backend_type?: string; databricks_config?: DatabricksConfig; lakebase_config?: LakebaseMemoryConfig; id?: string }) => {
+  const processConfigResponse = (configData: { backend_type?: string; databricks_config?: DatabricksConfig; lakebase_config?: LakebaseMemoryConfig; cognitive_config?: CognitiveMemoryConfig; id?: string }) => {
     console.log('processConfigResponse - Full configData:', configData);
     console.log('processConfigResponse - backend_type:', configData?.backend_type);
     console.log('processConfigResponse - databricks_config:', configData?.databricks_config);
+
+    // Hydrate cognitive tuning into the store so the tuning panel reflects the
+    // persisted values (recall speed knobs, exploration budget, memory LLM).
+    if (configData?.cognitive_config) {
+      updateConfig({ cognitive_config: configData.cognitive_config });
+    }
 
     if (configData && configData.backend_type === MemoryBackendType.DATABRICKS && configData.databricks_config) {
       const config = configData.databricks_config;
@@ -358,8 +366,9 @@ export const DatabricksOneClickSetup: React.FC = () => {
         const result = await DatabricksVectorSearchService.switchToDisabledMode();
         console.log('Switched to disabled mode:', result);
 
-        // Clear saved config
-        setSavedConfig(null);
+        // Keep the new disabled (local) config's id so memory tuning can be
+        // persisted against it via PUT /configs/{id}.
+        setSavedConfig(result?.id ? { backend_id: result.id } : null);
 
         // Show success message
         setError(''); // Clear any previous errors
@@ -424,6 +433,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
     try {
       const saveResult = await apiClient.post('/memory-backend/lakebase/save-config', {
         lakebase_config: lakebaseConfig,
+        cognitive_config: config.cognitive_config,
       });
       setSavedConfig({ backend_id: saveResult.data.backend_id });
       updateConfig({
@@ -436,6 +446,32 @@ export const DatabricksOneClickSetup: React.FC = () => {
         success: false,
         message: `Failed to save configuration: ${error instanceof Error ? error.message : 'Unknown error'}`,
       });
+    }
+  };
+
+  // Persist cognitive tuning against the active config, independent of backend
+  // type. Used by the local (DEFAULT) mode, where there is no backend-specific
+  // "Save Configuration" button to piggyback on. Lakebase mode saves the same
+  // cognitive_config through handleSaveLakebaseConfig / Initialize Tables.
+  const handleSaveCognitiveConfig = async () => {
+    const backendId = savedConfig?.backend_id;
+    if (!backendId) {
+      setError('No saved memory configuration yet — pick a memory mode first, then save tuning.');
+      return;
+    }
+    try {
+      await apiClient.put(`/memory-backend/configs/${backendId}`, {
+        cognitive_config: config.cognitive_config || {},
+      });
+      window.dispatchEvent(
+        new CustomEvent('show-notification', {
+          detail: { message: 'Memory tuning saved' },
+        }),
+      );
+    } catch (saveError) {
+      setError(
+        `Failed to save memory tuning: ${saveError instanceof Error ? saveError.message : 'Unknown error'}`,
+      );
     }
   };
 
@@ -1745,6 +1781,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
                           ...lakebaseConfig,
                           tables_initialized: true,
                         },
+                        cognitive_config: config.cognitive_config,
                       });
                       setSavedConfig({ backend_id: saveResult.data.backend_id });
                       updateConfig({
@@ -1895,6 +1932,10 @@ export const DatabricksOneClickSetup: React.FC = () => {
               </Box>
             </>
           )}
+
+          {/* Recall-speed & memory-LLM tuning. Persisted with the Lakebase
+              config via the Save Configuration / Initialize Tables buttons. */}
+          <CognitiveMemoryPanel />
         </Box>
       </Collapse>
 
@@ -1918,6 +1959,21 @@ export const DatabricksOneClickSetup: React.FC = () => {
           relative to the backend working directory. No external infrastructure required.
           Click &ldquo;Browse Memory&rdquo; to inspect the records your crews have persisted.
         </Alert>
+
+        {/* Recall-speed & memory-LLM tuning also applies to the local backend.
+            Local mode has no backend "Save Configuration" button, so persist the
+            tuning directly against the active config. */}
+        <CognitiveMemoryPanel />
+        <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
+          <Button
+            variant="outlined"
+            startIcon={<SaveIcon />}
+            disabled={!savedConfig?.backend_id}
+            onClick={handleSaveCognitiveConfig}
+          >
+            Save memory tuning
+          </Button>
+        </Box>
       </Collapse>
 
       <MemoryRecordsBrowser

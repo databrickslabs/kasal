@@ -7,13 +7,14 @@
  * ``useMemoryBackendStore`` Zustand store.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Accordion,
   AccordionDetails,
   AccordionSummary,
   Box,
   Grid,
+  MenuItem,
   Slider,
   TextField,
   Typography,
@@ -24,6 +25,8 @@ import {
   COGNITIVE_MEMORY_DEFAULTS,
   CognitiveMemoryConfig,
 } from '../../types/memoryBackend';
+import { Models } from '../../types/models';
+import { ModelService } from '../../api/ModelService';
 import {
   useCognitiveMemoryConfig,
   useMemoryBackendStore,
@@ -80,6 +83,33 @@ export const CognitiveMemoryPanel: React.FC = () => {
   );
   const [expanded, setExpanded] = useState<boolean>(false);
 
+  // Populate the memory-LLM dropdown from the workspace's enabled models, so the
+  // override matches the same catalog used everywhere else (agents, tasks).
+  const [models, setModels] = useState<Models>({});
+  useEffect(() => {
+    let active = true;
+    ModelService.getInstance()
+      .getActiveModels()
+      .then((m) => {
+        if (active) setModels(m);
+      })
+      .catch(() => {
+        /* leave list empty; the field still renders the saved value */
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const modelKeys = Object.keys(models);
+  const selectedModel = cognitive.memory_llm_model;
+  // Keep a previously-saved model selectable even if it was since disabled,
+  // so the Select never shows an out-of-range value.
+  const modelOptions =
+    selectedModel && !modelKeys.includes(selectedModel)
+      ? [selectedModel, ...modelKeys]
+      : modelKeys;
+
   const valueOrDefault = (key: keyof CognitiveMemoryConfig): number =>
     (cognitive[key] as number | undefined) ??
     (COGNITIVE_MEMORY_DEFAULTS[
@@ -96,7 +126,8 @@ export const CognitiveMemoryPanel: React.FC = () => {
         <Box>
           <Typography variant="subtitle1">Cognitive Memory Tuning</Typography>
           <Typography variant="caption" color="text.secondary">
-            Advanced — composite-score weights, consolidation threshold, recall depth.
+            Advanced — composite-score weights, consolidation threshold, and recall
+            speed (exploration budget, query-analysis threshold, memory LLM).
           </Typography>
         </Box>
       </AccordionSummary>
@@ -156,13 +187,39 @@ export const CognitiveMemoryPanel: React.FC = () => {
                   exploration_budget: parseInt(e.target.value, 10) || 0,
                 })
               }
-              helperText="LLM-driven recall rounds when confidence is low (0 = shallow only)."
+              helperText="LLM-driven recall rounds when confidence is low (0 = shallow only, fewest LLM calls)."
+              inputProps={{ min: 0 }}
+            />
+          </Grid>
+
+          <Grid item xs={12} md={6}>
+            <TextField
+              fullWidth
+              type="number"
+              label="Query-analysis threshold (chars)"
+              value={
+                cognitive.query_analysis_threshold ??
+                COGNITIVE_MEMORY_DEFAULTS.query_analysis_threshold
+              }
+              onChange={(e) => {
+                const parsed = parseInt(e.target.value, 10);
+                updateCognitiveConfig({
+                  query_analysis_threshold: Number.isNaN(parsed) ? undefined : parsed,
+                });
+              }}
+              helperText={
+                'Recall runs an extra LLM call to distill queries longer than this many ' +
+                'characters. Task descriptions usually exceed the 200-char default, so that ' +
+                'call fires on nearly every task. Raise it high (e.g. 100000) to skip it and ' +
+                'save ~1–3s per recall; 0 always runs it.'
+              }
               inputProps={{ min: 0 }}
             />
           </Grid>
 
           <Grid item xs={12}>
             <TextField
+              select
               fullWidth
               label="Memory LLM override (optional)"
               value={cognitive.memory_llm_model || ''}
@@ -171,12 +228,22 @@ export const CognitiveMemoryPanel: React.FC = () => {
                   memory_llm_model: e.target.value || undefined,
                 })
               }
-              placeholder="e.g. databricks-llama-4-maverick"
               helperText={
-                'Overrides the LLM used for memory analysis (scope, importance, ' +
-                "consolidation). Defaults to the crew's LLM so OPENAI_API_KEY isn't required."
+                'Pick the model used for memory analysis (scope, importance, ' +
+                "consolidation). Defaults to the crew's LLM — choose a fast model " +
+                '(e.g. Llama 4 Maverick or Claude Haiku) to keep recall cheap.'
               }
-            />
+            >
+              <MenuItem value="">
+                <em>Use the crew&apos;s LLM (default)</em>
+              </MenuItem>
+              {modelOptions.map((key) => (
+                <MenuItem key={key} value={key}>
+                  {models[key]?.name || key}
+                  {models[key]?.provider ? ` · ${models[key].provider}` : ''}
+                </MenuItem>
+              ))}
+            </TextField>
           </Grid>
         </Grid>
       </AccordionDetails>

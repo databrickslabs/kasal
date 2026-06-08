@@ -485,6 +485,7 @@ class CrewMemoryService:
         storage: Optional[Any],
         crew_id: str,
         custom_embedder: Any = None,
+        memory_llm_override: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """Configure the crew's unified ``Memory`` instance.
 
@@ -535,6 +536,7 @@ class CrewMemoryService:
                 custom_embedder=custom_embedder,
                 crew_id=crew_id,
                 memory_config=memory_config,
+                memory_llm_override=memory_llm_override,
             )
             try:
                 crew_kwargs["memory"] = Memory(**memory_kwargs)
@@ -554,6 +556,7 @@ class CrewMemoryService:
             custom_embedder=custom_embedder,
             crew_id=crew_id,
             memory_config=memory_config,
+            memory_llm_override=memory_llm_override,
         )
         memory_kwargs["storage"] = storage
         try:
@@ -600,6 +603,7 @@ class CrewMemoryService:
         custom_embedder: Any,
         crew_id: str,
         memory_config: MemoryBackendConfig,
+        memory_llm_override: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """Assemble keyword arguments for the unified ``Memory`` class.
 
@@ -630,11 +634,15 @@ class CrewMemoryService:
             else (cognitive or {})
         )
 
-        # ``memory_llm_model`` is a string override — everything else maps
-        # directly onto ``Memory`` constructor parameters.
-        llm_override = cognitive_dict.pop("memory_llm_model", None)
-        if llm_override:
-            kwargs["llm"] = llm_override
+        # ``memory_llm_model`` is a bare model key, NOT a Memory ctor param. Drop
+        # it from the cognitive kwargs and never pass it to Memory as a string:
+        # CrewAI would build an unconfigured ``LLM(model=<name>)`` with no provider
+        # prefix or credentials, which litellm routes to OpenAI (401 on the
+        # placeholder key). Use the pre-resolved, fully-configured instance from
+        # ``resolve_memory_llm_override``; otherwise fall back to the crew's LLM.
+        cognitive_dict.pop("memory_llm_model", None)
+        if memory_llm_override is not None:
+            kwargs["llm"] = memory_llm_override
         else:
             memory_llm = self._resolve_memory_llm(crew_kwargs)
             if memory_llm is not None:
@@ -674,6 +682,46 @@ class CrewMemoryService:
             if llm is not None:
                 return llm
         return None
+
+    async def resolve_memory_llm_override(
+        self, memory_config: "MemoryBackendConfig"
+    ) -> Optional[Any]:
+        """Build a fully-configured CrewAI ``LLM`` for the memory-analysis override.
+
+        ``cognitive_config.memory_llm_model`` is a bare model key (e.g.
+        ``databricks-claude-haiku-4-5``). Handing that string straight to CrewAI's
+        ``Memory`` makes it construct an unconfigured ``LLM(model=<name>)`` with no
+        provider prefix and no credentials, so litellm routes it to OpenAI and 401s
+        on the placeholder key. Resolve it through ``LLMManager`` here so ``Memory``
+        receives a ready-to-call instance (provider prefix + api_key + api_base).
+
+        Returns ``None`` when no override is set — callers then fall back to the
+        crew's own configured LLM instance via ``_resolve_memory_llm``.
+        """
+        cognitive = getattr(memory_config, "cognitive_config", None)
+        model_name = getattr(cognitive, "memory_llm_model", None) if cognitive else None
+        if not model_name:
+            return None
+
+        group_id = self.config.get("group_id") or "default"
+        try:
+            from src.core.llm_manager import LLMManager
+
+            llm = await LLMManager.configure_crewai_llm(model_name, group_id)
+            logger.info(
+                "Resolved memory LLM override '%s' to a configured instance (group=%s)",
+                model_name,
+                group_id,
+            )
+            return llm
+        except Exception as exc:  # noqa: BLE001 — degrade to the crew LLM, never break the run
+            logger.warning(
+                "Could not build memory LLM override '%s' (%s); "
+                "falling back to the crew's LLM instance",
+                model_name,
+                exc,
+            )
+            return None
 
     def attach_memory_trace_context(
         self,
