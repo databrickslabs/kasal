@@ -184,3 +184,9 @@ mlruns/
 
 # graphify knowledge graph output
 graphify-out/
+
+# Claude Code — local/personal config & runtime artifacts.
+# Shared team config (.claude/agents/, .claude/commands/) stays tracked.
+.claude/settings.local.json
+.claude/settings.json
+.claude/scheduled_tasks.lock
