@@ -182,7 +182,7 @@ class TestGetLakbaseTableStats:
             instance_name=None,
         )
         assert result["tables"]["st"] == 10
-        svc.get_lakebase_table_stats.assert_awaited_once_with(instance_name=None)
+        svc.get_lakebase_table_stats.assert_awaited_once_with(instance_name=None, group_id="g1")
 
     @pytest.mark.asyncio
     async def test_passes_instance_name(self):
@@ -195,7 +195,7 @@ class TestGetLakbaseTableStats:
             service=svc,
             instance_name="kasal-lb",
         )
-        svc.get_lakebase_table_stats.assert_awaited_once_with(instance_name="kasal-lb")
+        svc.get_lakebase_table_stats.assert_awaited_once_with(instance_name="kasal-lb", group_id="g1")
 
 
 # ---------------------------------------------------------------------------

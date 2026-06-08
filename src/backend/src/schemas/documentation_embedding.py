@@ -10,6 +10,9 @@ class DocumentationEmbeddingBase(BaseModel):
     content: str
     embedding: List[float]
     doc_metadata: Optional[Dict] = None
+    # Multi-tenant knowledge scoping (NULL for built-in CrewAI docs)
+    group_id: Optional[str] = None
+    file_path: Optional[str] = None
 
 
 class DocumentationEmbeddingCreate(DocumentationEmbeddingBase):

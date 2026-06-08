@@ -6,6 +6,7 @@ aiofiles>=23.0.0  # For async file I/O operations
 pydantic-settings==2.10.1
 cryptography
 python-multipart
+pdfminer.six  # MIT-licensed pure-Python PDF text extraction (knowledge-file uploads)
 databricks
 databricks-sdk==0.102.0  # Lakebase Autoscaling requires >=0.101.0 (X-Databricks-Org-Id header)
 databricks-vectorsearch==0.63  # Pinned from uv.lock to prevent pip backtracking
@@ -17,6 +18,7 @@ email-validator
 google-api-python-client
 pysendpulse
 langchain==1.2.15  # Pinned from uv.lock to prevent pip backtracking
+langchain-text-splitters  # langchain 1.x moved text splitters out of the core package
 nixtla
 greenlet
 wheel

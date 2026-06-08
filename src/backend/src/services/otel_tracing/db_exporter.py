@@ -327,8 +327,15 @@ class KasalDBSpanExporter(SpanExporter):
         self._group_context = group_context
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._total_exported = 0
+        self._shutdown = False
 
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        # During teardown the thread pool is shut down, but the crew/flow can
+        # still emit late spans (retries, memory recall, failure events). Submitting
+        # to a shut-down pool raises "cannot schedule new futures after shutdown"
+        # and floods the log with tracebacks — so drop late spans quietly.
+        if self._shutdown:
+            return SpanExportResult.SUCCESS
         logger.info(
             f"[OTel-DB][{self._job_id}] export() called with {len(spans)} span(s)"
         )
@@ -349,8 +356,15 @@ class KasalDBSpanExporter(SpanExporter):
                 )
 
         if records:
-            self._executor.submit(self._write_batch, records)
-            self._total_exported += len(records)
+            try:
+                self._executor.submit(self._write_batch, records)
+                self._total_exported += len(records)
+            except RuntimeError:
+                # Pool shut down between the guard above and here (teardown race).
+                logger.debug(
+                    f"[OTel-DB][{self._job_id}] dropped {len(records)} late span(s) "
+                    "— exporter already shut down"
+                )
         else:
             logger.warning(
                 f"[OTel-DB][{self._job_id}] export() produced 0 records from {len(spans)} spans"
@@ -475,6 +489,9 @@ class KasalDBSpanExporter(SpanExporter):
         queued trace batches — causing missing traces when the crew finished
         quickly or failed (e.g. MCP server errors).
         """
+        # Flip the flag FIRST so any late export() call (teardown race) drops the
+        # span instead of submitting to the about-to-close pool.
+        self._shutdown = True
         logger.info(
             f"[OTel-DB][{self._job_id}] shutdown() called, "
             f"total_exported={self._total_exported}, waiting for thread pool..."

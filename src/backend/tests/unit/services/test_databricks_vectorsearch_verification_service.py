@@ -73,7 +73,7 @@ class TestDatabricksVectorSearchVerificationService:
                 config = {
                     'databricks_config': {
                         'endpoint_name': 'test-endpoint',
-                        'short_term_index': 'ml.agents.test'
+                        'memory_index': 'ml.agents.test'
                     }
                 }
                 
@@ -240,24 +240,22 @@ class TestDatabricksVectorSearchVerificationService:
                     'databricks_config': {
                         'endpoint_name': 'endpoint1',
                         'document_endpoint_name': 'endpoint2',
-                        'short_term_index': 'index1',
-                        'long_term_index': 'index2',
-                        'entity_index': 'index3'
+                        'memory_index': 'index1',
+                        'document_index': 'index3'
                     }
                 }
-                
+
                 result = await service.verify_databricks_resources(
                     "https://test.databricks.com",
                     None,
                     config
                 )
-        
-        # Verify all resources found
+
+        # Verify all resources found (unified cognitive memory_index + document_index)
         assert result["success"] is True
         assert result["resources"]["endpoints"]["endpoint1"]["exists"] is True
         assert result["resources"]["endpoints"]["endpoint2"]["exists"] is True
         assert result["resources"]["indexes"]["index1"]["exists"] is True
-        assert result["resources"]["indexes"]["index2"]["exists"] is True
         assert result["resources"]["indexes"]["index3"]["exists"] is True
     
     @pytest.mark.asyncio

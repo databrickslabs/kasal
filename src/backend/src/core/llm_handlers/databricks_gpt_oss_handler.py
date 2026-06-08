@@ -320,7 +320,9 @@ class DatabricksRetryLLM(LLM):
 
     # Rate limit specific settings - longer backoffs to allow quota reset
     RATE_LIMIT_MAX_RETRIES: ClassVar[int] = 5
-    RATE_LIMIT_INITIAL_BACKOFF: ClassVar[float] = 30.0  # Databricks rate limits reset ~60s
+    RATE_LIMIT_INITIAL_BACKOFF: ClassVar[float] = (
+        30.0  # Databricks rate limits reset ~60s
+    )
     RATE_LIMIT_MAX_BACKOFF: ClassVar[float] = 120.0  # cap at 2 minutes
 
     # Request timeout - prevents hanging on unresponsive endpoints.
@@ -350,6 +352,7 @@ class DatabricksRetryLLM(LLM):
         self._group_id: str | None = None
         try:
             from src.utils.user_context import UserContext
+
             ctx = UserContext.get_group_context()
             if ctx and hasattr(ctx, "primary_group_id"):
                 self._group_id = ctx.primary_group_id
@@ -445,8 +448,41 @@ class DatabricksRetryLLM(LLM):
                 "504",
                 "gateway",
                 "request_limit_exceeded",
+                # Databricks model serving 5xx: litellm maps an upstream 502/500
+                # into an InternalServerError whose string is
+                # 'databricksException - {"error_code":"INTERNAL_ERROR", ...}' and
+                # contains none of the numeric codes above. These are transient
+                # (endpoint overload / cold start / upstream hiccup) and safe to
+                # retry — a completion is idempotent.
+                "internalservererror",
+                "internal_error",
+                "invalid response from an upstream server",
+                "bad gateway",
             ]
         )
+
+    def _context_length_hint(self, error_str: str) -> Optional[str]:
+        """Actionable message when the prompt exceeds the model's context window
+        (commonly a tool such as ScrapeWebsiteTool returning a whole web page).
+        Returns None when the error is not a context-length error. Retrying the
+        same oversized prompt can't help, so we surface guidance instead."""
+        markers = (
+            "prompt is too long",
+            "context length",
+            "context_length",
+            "maximum context",
+            "context window",
+            "tokens > ",
+            "too many tokens",
+        )
+        if any(m in error_str for m in markers):
+            return (
+                "The crew's input exceeded the model's context window. This usually "
+                "means a tool returned too much content (e.g. ScrapeWebsiteTool "
+                "scraped an entire web page). Reduce tool output — scrape fewer / "
+                "smaller pages, or split the work into more focused tasks — then retry."
+            )
+        return None
 
     def _is_auth_error(self, error_str: str) -> bool:
         """Check if an error indicates an expired or invalid token.
@@ -499,9 +535,12 @@ class DatabricksRetryLLM(LLM):
             if loop and loop.is_running():
                 # We're inside an async context — use a thread to avoid nesting
                 import concurrent.futures
+
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                     auth_ctx = pool.submit(
-                        lambda: asyncio.run(get_auth_context(user_token=None, group_id=gid))
+                        lambda: asyncio.run(
+                            get_auth_context(user_token=None, group_id=gid)
+                        )
                     ).result(timeout=15)
             else:
                 auth_ctx = asyncio.run(get_auth_context(user_token=None, group_id=gid))
@@ -515,10 +554,14 @@ class DatabricksRetryLLM(LLM):
                 self.api_key = auth_ctx.token
                 return True
             else:
-                crew_log.warning("[DatabricksRetryLLM] Token refresh: no alternative token available")
+                crew_log.warning(
+                    "[DatabricksRetryLLM] Token refresh: no alternative token available"
+                )
                 return False
         except Exception as refresh_err:
-            crew_log.warning(f"[DatabricksRetryLLM] Token refresh failed: {refresh_err}")
+            crew_log.warning(
+                f"[DatabricksRetryLLM] Token refresh failed: {refresh_err}"
+            )
             return False
 
     def _get_backoff_time(self, attempt: int, is_rate_limit: bool) -> float:
@@ -685,10 +728,9 @@ class DatabricksRetryLLM(LLM):
                 "[DatabricksRetryLLM] Claude model detected: conversation ends with assistant message. "
                 "Adding user continuation prompt to satisfy Claude API requirements."
             )
-            messages.append({
-                "role": "user",
-                "content": "Please continue with your response."
-            })
+            messages.append(
+                {"role": "user", "content": "Please continue with your response."}
+            )
 
         return messages
 
@@ -771,7 +813,8 @@ class DatabricksRetryLLM(LLM):
         MAX_TOOL_CALLS = 8
         if tools and isinstance(fixed_messages, list):
             tool_result_count = sum(
-                1 for m in fixed_messages
+                1
+                for m in fixed_messages
                 if (isinstance(m, dict) and m.get("role") == "tool")
                 or (hasattr(m, "role") and getattr(m, "role", None) == "tool")
             )
@@ -882,6 +925,12 @@ class DatabricksRetryLLM(LLM):
                         )
                         attempt += 1
                         continue
+                    hint = self._context_length_hint(error_str)
+                    if hint:
+                        crew_log.error(
+                            f"[DatabricksRetryLLM] Context window exceeded: {e}"
+                        )
+                        raise ValueError(hint) from e
                     crew_log.error(f"[DatabricksRetryLLM] Non-retryable error: {e}")
                     if attempt > 0:
                         self._record_retry_summary(attempt + 1, total_backoff, "call")
@@ -1021,6 +1070,12 @@ class DatabricksRetryLLM(LLM):
                         )
                         attempt += 1
                         continue
+                    hint = self._context_length_hint(error_str)
+                    if hint:
+                        crew_log.error(
+                            f"[DatabricksRetryLLM] Context window exceeded in _handle_non_streaming: {e}"
+                        )
+                        raise ValueError(hint) from e
                     crew_log.error(
                         f"[DatabricksRetryLLM] Non-retryable error in _handle_non_streaming: {e}"
                     )
@@ -1116,9 +1171,16 @@ def _resolve_schema_refs(schema):
                 ref_name = ref_path.rsplit("/", 1)[-1]
                 resolved = defs.get(ref_name, {})
                 # Merge any sibling keys (e.g. description) with the resolved def
-                merged = {**_resolve(resolved), **{k: v for k, v in node.items() if k != "$ref"}}
+                merged = {
+                    **_resolve(resolved),
+                    **{k: v for k, v in node.items() if k != "$ref"},
+                }
                 return merged
-            return {k: _resolve(v) for k, v in node.items() if k not in ("$defs", "definitions")}
+            return {
+                k: _resolve(v)
+                for k, v in node.items()
+                if k not in ("$defs", "definitions")
+            }
         if isinstance(node, list):
             return [_resolve(item) for item in node]
         return node
@@ -1152,7 +1214,9 @@ def _merge_system_messages_for_gemini(messages, model):
         if isinstance(msg, dict) and msg.get("role") == "system":
             content = msg.get("content", "")
             if content:
-                system_contents.append(content if isinstance(content, str) else str(content))
+                system_contents.append(
+                    content if isinstance(content, str) else str(content)
+                )
         else:
             non_system.append(msg)
 
@@ -1185,7 +1249,11 @@ def _sanitize_tools_for_gemini(tools, model):
             continue
         func = tool.get("function") or {}
         params = func.get("parameters")
-        if params and isinstance(params, dict) and ("$defs" in params or "$ref" in params or "definitions" in params):
+        if (
+            params
+            and isinstance(params, dict)
+            and ("$defs" in params or "$ref" in params or "definitions" in params)
+        ):
             func["parameters"] = _resolve_schema_refs(params)
 
 

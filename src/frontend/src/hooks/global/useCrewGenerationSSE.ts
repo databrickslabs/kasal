@@ -122,6 +122,9 @@ export function useCrewGenerationSSE(
       return;
     }
 
+    // NOTE: generation SSE is intentionally NOT gated on SSE_ENABLED — crew
+    // generation is short-lived and survives the Databricks Apps proxy, and it
+    // has no polling fallback, so disabling it would break crew creation.
     disconnect();
     setStatus('connecting');
 

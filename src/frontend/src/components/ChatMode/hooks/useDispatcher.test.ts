@@ -158,7 +158,7 @@ describe('useDispatcher', () => {
         await hook.current.sendMessage('/help');
       });
 
-      expect(mockedDispatch).toHaveBeenCalledWith('/help', undefined);
+      expect(mockedDispatch).toHaveBeenCalledWith('/help', undefined, undefined);
     });
 
     it('does NOT augment messages already containing a crew hint', async () => {
@@ -170,7 +170,7 @@ describe('useDispatcher', () => {
         await hook.current.sendMessage('build me a crew', 'my-model');
       });
 
-      expect(mockedDispatch).toHaveBeenCalledWith('build me a crew', 'my-model');
+      expect(mockedDispatch).toHaveBeenCalledWith('build me a crew', 'my-model', undefined);
     });
 
     it('augments plain messages with the crew steering prefix', async () => {
@@ -185,7 +185,46 @@ describe('useDispatcher', () => {
       expect(mockedDispatch).toHaveBeenCalledWith(
         'create a crew plan with agents and tasks: do something cool',
         undefined,
+        undefined,
       );
+    });
+
+    it('appends the hidden dispatchSuffix to the payload but shows the clean message', async () => {
+      const opts = makeOptions();
+      mockedDispatch.mockResolvedValue(result('generate_crew', { type: 'streaming', generation_id: 'g1' }));
+      const { result: hook } = renderHook(() => useDispatcher(opts));
+
+      await act(async () => {
+        await hook.current.sendMessage(
+          'build me a crew',
+          'm',
+          ['DatabricksKnowledgeSearchTool'],
+          '\n\n[Knowledge files attached: a.txt.]',
+        );
+      });
+
+      // The chat shows the clean message (no suffix, no attachments).
+      expect(opts.addMessage).toHaveBeenCalledWith('user', 'build me a crew', undefined);
+      // The dispatch payload carries the suffix + the tool.
+      expect(mockedDispatch).toHaveBeenCalledWith(
+        'build me a crew\n\n[Knowledge files attached: a.txt.]',
+        'm',
+        ['DatabricksKnowledgeSearchTool'],
+      );
+    });
+
+    it('records attachment names on the displayed user message', async () => {
+      const opts = makeOptions();
+      mockedDispatch.mockResolvedValue(result('generate_crew', { type: 'streaming', generation_id: 'g1' }));
+      const { result: hook } = renderHook(() => useDispatcher(opts));
+
+      await act(async () => {
+        await hook.current.sendMessage('build me a crew', 'm', undefined, undefined, ['a.txt', 'b.pdf']);
+      });
+
+      expect(opts.addMessage).toHaveBeenCalledWith('user', 'build me a crew', {
+        attachments: ['a.txt', 'b.pdf'],
+      });
     });
   });
 
@@ -238,7 +277,7 @@ describe('useDispatcher', () => {
     it('generate_* streaming result returns progressive message', async () => {
       const opts = await runIntent('generate_crew', { type: 'streaming', generation_id: 'g1' });
       const update = opts.updateMessageInTargetSession.mock.calls[0][2];
-      expect(update.content).toBe('Generating crew progressively...');
+      expect(update.content).toBe(''); // status text removed — shown by the run-activity container
       expect(update.resultType).toBe('streaming');
     });
 

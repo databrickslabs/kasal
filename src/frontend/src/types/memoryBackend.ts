@@ -169,6 +169,17 @@ export const isValidMemoryBackendConfig = (config: unknown): config is MemoryBac
   return true;
 };
 
+/**
+ * Knowledge sources (RAG) require a Lakebase pgvector memory backend, where
+ * knowledge-file embeddings are stored. The default (ChromaDB/LanceDB) backend
+ * cannot store/retrieve document embeddings.
+ */
+export const isKnowledgeCapableMemoryConfig = (config: unknown): boolean => {
+  if (!isValidMemoryBackendConfig(config)) return false;
+  const c = config as MemoryBackendConfig;
+  return c.backend_type === MemoryBackendType.LAKEBASE && Boolean(c.lakebase_config?.memory_table);
+};
+
 // Helper to get display name for backend type
 export const getBackendDisplayName = (type: MemoryBackendType): string => {
   const displayNames: Record<MemoryBackendType, string> = {

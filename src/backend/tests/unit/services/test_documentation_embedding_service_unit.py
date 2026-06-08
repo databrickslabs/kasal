@@ -617,87 +617,12 @@ class TestCreateDocumentationEmbedding:
     """Tests for create_documentation_embedding method."""
 
     @pytest.mark.asyncio
-    async def test_create_via_databricks_storage(self):
-        """When Databricks storage is available, save there and return model."""
-        session = _make_mock_session()
-        svc = _make_service(session=session)
-
-        mock_storage = AsyncMock()
-        mock_storage.index_name = "catalog.schema.docs"
-        mock_storage.save = AsyncMock()
-        mock_storage.get_stats = AsyncMock(return_value={"count": 1})
-        svc._get_databricks_storage = AsyncMock(return_value=mock_storage)
-
-        doc_create = _make_doc_embedding_create(doc_metadata={"key": "value"})
-
-        with patch.dict(os.environ, {"DATABASE_TYPE": "postgres", "POSTGRES_SERVER": "remote-host"}):
-            result = await svc.create_documentation_embedding(doc_create, user_token="token")
-
-        mock_storage.save.assert_awaited_once()
-        assert result.source == "crewai-docs"
-        assert result.title == "Test Document"
-        assert "key" in result.doc_metadata
-        assert "source" in result.doc_metadata
-        assert "title" in result.doc_metadata
-
-    @pytest.mark.asyncio
-    async def test_create_via_databricks_handles_not_ready_error(self):
-        """When Databricks raises 'not ready' error, return pending placeholder."""
-        session = _make_mock_session()
-        svc = _make_service(session=session)
-
-        mock_storage = AsyncMock()
-        mock_storage.index_name = "catalog.schema.docs"
-        mock_storage.save = AsyncMock(side_effect=RuntimeError("Index not ready"))
-        svc._get_databricks_storage = AsyncMock(return_value=mock_storage)
-
-        doc_create = _make_doc_embedding_create()
-
-        with patch.dict(os.environ, {"DATABASE_TYPE": "postgres", "POSTGRES_SERVER": "remote-host"}):
-            result = await svc.create_documentation_embedding(doc_create)
-
-        assert str(result.id).startswith("pending-")
-
-    @pytest.mark.asyncio
-    async def test_create_via_databricks_reraises_non_ready_error(self):
-        """When Databricks raises a non-ready error, re-raise it."""
-        session = _make_mock_session()
-        svc = _make_service(session=session)
-
-        mock_storage = AsyncMock()
-        mock_storage.index_name = "catalog.schema.docs"
-        mock_storage.save = AsyncMock(side_effect=ValueError("Permission denied"))
-        svc._get_databricks_storage = AsyncMock(return_value=mock_storage)
-
-        doc_create = _make_doc_embedding_create()
-
-        with patch.dict(os.environ, {"DATABASE_TYPE": "postgres", "POSTGRES_SERVER": "remote-host"}):
-            with pytest.raises(ValueError, match="Permission denied"):
-                await svc.create_documentation_embedding(doc_create)
-
-    @pytest.mark.asyncio
-    async def test_create_skips_db_in_non_local_dev(self):
-        """When not local dev and no Databricks, skip DB and return placeholder."""
-        session = _make_mock_session()
-        svc = _make_service(session=session)
-        svc._get_databricks_storage = AsyncMock(return_value=None)
-
-        doc_create = _make_doc_embedding_create()
-
-        with patch.dict(os.environ, {"DATABASE_TYPE": "postgres", "POSTGRES_SERVER": "remote-host"}):
-            result = await svc.create_documentation_embedding(doc_create)
-
-        assert str(result.id).startswith("skip-db-")
-
-    @pytest.mark.asyncio
     async def test_create_uses_sqlite_queue(self):
-        """When local dev with SQLite, use embedding queue."""
+        """SQLite: use the embedding queue (batched writes to reduce lock contention)."""
         session = _make_mock_session()
         svc = _make_service(session=session)
-        svc._get_databricks_storage = AsyncMock(return_value=None)
 
         mock_queue = AsyncMock()
-
         doc_create = _make_doc_embedding_create()
 
         with patch.dict(os.environ, {"DATABASE_TYPE": "sqlite"}), \
@@ -709,10 +634,9 @@ class TestCreateDocumentationEmbedding:
 
     @pytest.mark.asyncio
     async def test_create_uses_postgres_repository(self):
-        """When local dev with PostgreSQL, use repository directly."""
+        """PostgreSQL / Lakebase: store directly via the pgvector repository."""
         session = _make_mock_session()
         svc = _make_service(session=session)
-        svc._get_databricks_storage = AsyncMock(return_value=None)
 
         mock_repo = MagicMock()
         expected_model = _make_doc_embedding_model()
@@ -728,56 +652,36 @@ class TestCreateDocumentationEmbedding:
         assert result is expected_model
 
     @pytest.mark.asyncio
+    async def test_create_stores_in_pgvector_for_production_postgres(self):
+        """Production Postgres / Lakebase (remote host) now stores in the pgvector
+        repository too — it is no longer skipped, and Databricks Vector Search is
+        never used for document embeddings."""
+        session = _make_mock_session()
+        svc = _make_service(session=session)
+
+        mock_repo = MagicMock()
+        expected_model = _make_doc_embedding_model()
+        mock_repo.create = AsyncMock(return_value=expected_model)
+
+        doc_create = _make_doc_embedding_create()
+
+        with patch.dict(os.environ, {"DATABASE_TYPE": "postgres", "POSTGRES_SERVER": "remote-host"}), \
+             patch(_DOC_EMBEDDING_REPO_CLS, return_value=mock_repo):
+            result = await svc.create_documentation_embedding(doc_create, user_token="token")
+
+        mock_repo.create.assert_awaited_once_with(doc_create)
+        assert result is expected_model
+
+    @pytest.mark.asyncio
     async def test_create_raises_when_no_session_for_db_storage(self):
-        """When local dev but no session, raise ValueError."""
+        """When there is no DB session, raise ValueError."""
         svc = _make_service(session=None)
-        svc._get_databricks_storage = AsyncMock(return_value=None)
 
         doc_create = _make_doc_embedding_create()
 
         with patch.dict(os.environ, {"DATABASE_TYPE": "postgres", "POSTGRES_SERVER": "localhost"}):
             with pytest.raises(ValueError, match="Session is required"):
                 await svc.create_documentation_embedding(doc_create)
-
-    @pytest.mark.asyncio
-    async def test_create_via_databricks_with_none_metadata(self):
-        """When doc_metadata is None, default to empty dict for metadata merge."""
-        session = _make_mock_session()
-        svc = _make_service(session=session)
-
-        mock_storage = AsyncMock()
-        mock_storage.index_name = "catalog.schema.docs"
-        mock_storage.save = AsyncMock()
-        mock_storage.get_stats = AsyncMock(return_value={"count": 1})
-        svc._get_databricks_storage = AsyncMock(return_value=mock_storage)
-
-        doc_create = _make_doc_embedding_create(doc_metadata=None)
-
-        with patch.dict(os.environ, {"DATABASE_TYPE": "postgres", "POSTGRES_SERVER": "remote-host"}):
-            result = await svc.create_documentation_embedding(doc_create)
-
-        # Metadata should contain source and title even when doc_metadata was None
-        assert result.doc_metadata["source"] == "crewai-docs"
-        assert result.doc_metadata["title"] == "Test Document"
-
-    @pytest.mark.asyncio
-    async def test_create_via_databricks_handles_stats_error(self):
-        """When get_stats raises after save, the save result is still returned."""
-        session = _make_mock_session()
-        svc = _make_service(session=session)
-
-        mock_storage = AsyncMock()
-        mock_storage.index_name = "catalog.schema.docs"
-        mock_storage.save = AsyncMock()
-        mock_storage.get_stats = AsyncMock(side_effect=RuntimeError("stats error"))
-        svc._get_databricks_storage = AsyncMock(return_value=mock_storage)
-
-        doc_create = _make_doc_embedding_create()
-
-        with patch.dict(os.environ, {"DATABASE_TYPE": "postgres", "POSTGRES_SERVER": "remote-host"}):
-            result = await svc.create_documentation_embedding(doc_create)
-
-        assert result.source == "crewai-docs"
 
 
 # ===================================================================
@@ -970,117 +874,10 @@ class TestSearchSimilarEmbeddings:
     """Tests for search_similar_embeddings method."""
 
     @pytest.mark.asyncio
-    async def test_search_via_databricks_returns_converted_results(self):
-        """When Databricks is ready, search there and convert results."""
+    async def test_search_uses_pgvector_repository(self):
+        """Similarity search runs against the pgvector repository (Lakebase/SQLite)."""
         session = _make_mock_session()
         svc = _make_service(session=session)
-
-        mock_storage = AsyncMock()
-        mock_storage.index_name = "catalog.schema.docs"
-        mock_storage.endpoint_name = "ep"
-        mock_storage.user_token = None
-
-        # Mock repo.get_index to report ready
-        mock_idx_repo = AsyncMock()
-        mock_idx_repo.get_index = AsyncMock(return_value=SimpleNamespace(
-            success=True,
-            index=SimpleNamespace(ready=True),
-        ))
-        mock_storage.repository = mock_idx_repo
-
-        created_str = datetime(2024, 5, 1).isoformat()
-        mock_storage.search = AsyncMock(return_value=[
-            {
-                "id": "doc-1",
-                "content": "Hello world",
-                "metadata": {
-                    "source": "docs",
-                    "title": "Greeting",
-                    "created_at": created_str,
-                    "updated_at": created_str,
-                },
-            }
-        ])
-
-        svc._get_databricks_storage = AsyncMock(return_value=mock_storage)
-
-        query_emb = [0.1] * 10
-        results = await svc.search_similar_embeddings(query_emb, limit=5)
-
-        assert len(results) == 1
-        assert results[0].content == "Hello world"
-        assert results[0].source == "docs"
-
-    @pytest.mark.asyncio
-    async def test_search_databricks_index_not_ready_falls_to_db(self):
-        """When Databricks index is not ready, fall back to database search."""
-        session = _make_mock_session()
-        svc = _make_service(session=session)
-
-        mock_storage = AsyncMock()
-        mock_storage.index_name = "catalog.schema.docs"
-        mock_storage.endpoint_name = "ep"
-        mock_storage.user_token = None
-
-        mock_idx_repo = AsyncMock()
-        # Return not-ready index
-        mock_idx_repo.get_index = AsyncMock(return_value=SimpleNamespace(
-            success=True,
-            index=SimpleNamespace(ready=False),
-        ))
-        mock_storage.repository = mock_idx_repo
-
-        svc._get_databricks_storage = AsyncMock(return_value=mock_storage)
-
-        db_results = [_make_doc_embedding_model(id=10)]
-        mock_repo = MagicMock()
-        mock_repo.search_similar = AsyncMock(return_value=db_results)
-
-        query_emb = [0.1] * 10
-        with patch(_DOC_EMBEDDING_REPO_CLS, return_value=mock_repo):
-            results = await svc.search_similar_embeddings(query_emb, limit=5)
-
-        assert len(results) == 1
-        assert results[0].id == 10
-
-    @pytest.mark.asyncio
-    async def test_search_databricks_search_fails_falls_to_db(self):
-        """When Databricks search throws, fall back to database."""
-        session = _make_mock_session()
-        svc = _make_service(session=session)
-
-        mock_storage = AsyncMock()
-        mock_storage.index_name = "catalog.schema.docs"
-        mock_storage.endpoint_name = "ep"
-        mock_storage.user_token = None
-
-        mock_idx_repo = AsyncMock()
-        mock_idx_repo.get_index = AsyncMock(return_value=SimpleNamespace(
-            success=True,
-            index=SimpleNamespace(ready=True),
-        ))
-        mock_storage.repository = mock_idx_repo
-        mock_storage.search = AsyncMock(side_effect=RuntimeError("Search timeout"))
-
-        svc._get_databricks_storage = AsyncMock(return_value=mock_storage)
-
-        db_results = [_make_doc_embedding_model(id=20)]
-        mock_repo = MagicMock()
-        mock_repo.search_similar = AsyncMock(return_value=db_results)
-
-        query_emb = [0.1] * 10
-        with patch(_DOC_EMBEDDING_REPO_CLS, return_value=mock_repo):
-            results = await svc.search_similar_embeddings(query_emb, limit=5)
-
-        assert len(results) == 1
-        assert results[0].id == 20
-
-    @pytest.mark.asyncio
-    async def test_search_without_databricks_uses_db_repository(self):
-        """When no Databricks storage, use database repository."""
-        session = _make_mock_session()
-        svc = _make_service(session=session)
-        svc._get_databricks_storage = AsyncMock(return_value=None)
 
         db_results = [_make_doc_embedding_model(id=5)]
         mock_repo = MagicMock()
@@ -1090,229 +887,51 @@ class TestSearchSimilarEmbeddings:
         with patch(_DOC_EMBEDDING_REPO_CLS, return_value=mock_repo):
             results = await svc.search_similar_embeddings(query_emb, limit=3)
 
-        mock_repo.search_similar.assert_awaited_once_with(query_emb, 3)
+        # Default scope = built-in docs (group_id=None); no file_paths filter.
+        mock_repo.search_similar.assert_awaited_once_with(
+            query_emb, 3, group_id=None, file_paths=None
+        )
         assert len(results) == 1
+        assert results[0].id == 5
+
+    @pytest.mark.asyncio
+    async def test_search_scopes_by_group_and_file_paths(self):
+        """Workspace knowledge search forwards group_id + file_paths to the repo."""
+        session = _make_mock_session()
+        svc = _make_service(session=session)
+
+        mock_repo = MagicMock()
+        mock_repo.search_similar = AsyncMock(return_value=[])
+
+        query_emb = [0.2] * 10
+        with patch(_DOC_EMBEDDING_REPO_CLS, return_value=mock_repo):
+            await svc.search_similar_embeddings(
+                query_emb, limit=7, group_id="grp-1", file_paths=["/Volumes/a/b.txt"]
+            )
+
+        mock_repo.search_similar.assert_awaited_once_with(
+            query_emb, 7, group_id="grp-1", file_paths=["/Volumes/a/b.txt"]
+        )
 
     @pytest.mark.asyncio
     async def test_search_returns_empty_when_no_session(self):
-        """When no Databricks and no session, return empty list."""
+        """When there is no DB session, return an empty list."""
         svc = _make_service(session=None)
-        svc._get_databricks_storage = AsyncMock(return_value=None)
-
         results = await svc.search_similar_embeddings([0.1] * 10, limit=5)
         assert results == []
 
     @pytest.mark.asyncio
-    async def test_search_handles_top_level_exception(self):
-        """When the entire search method throws, return empty list."""
+    async def test_search_returns_empty_on_repository_error(self):
+        """When the repository search throws, swallow and return an empty list."""
         session = _make_mock_session()
         svc = _make_service(session=session)
-        svc._get_databricks_storage = AsyncMock(side_effect=RuntimeError("Total failure"))
 
-        results = await svc.search_similar_embeddings([0.1] * 10, limit=5)
+        mock_repo = MagicMock()
+        mock_repo.search_similar = AsyncMock(side_effect=RuntimeError("Total failure"))
+
+        with patch(_DOC_EMBEDDING_REPO_CLS, return_value=mock_repo):
+            results = await svc.search_similar_embeddings([0.1] * 10, limit=5)
         assert results == []
-
-    @pytest.mark.asyncio
-    async def test_search_databricks_with_none_results(self):
-        """When Databricks search returns None, handle gracefully."""
-        session = _make_mock_session()
-        svc = _make_service(session=session)
-
-        mock_storage = AsyncMock()
-        mock_storage.index_name = "catalog.schema.docs"
-        mock_storage.endpoint_name = "ep"
-        mock_storage.user_token = None
-
-        mock_idx_repo = AsyncMock()
-        mock_idx_repo.get_index = AsyncMock(return_value=SimpleNamespace(
-            success=True,
-            index=SimpleNamespace(ready=True),
-        ))
-        mock_storage.repository = mock_idx_repo
-        mock_storage.search = AsyncMock(return_value=None)
-
-        svc._get_databricks_storage = AsyncMock(return_value=mock_storage)
-
-        results = await svc.search_similar_embeddings([0.1] * 10, limit=5)
-        assert results == []
-
-    @pytest.mark.asyncio
-    async def test_search_databricks_readiness_check_timeout(self):
-        """When readiness check times out, skip Databricks and fall to DB."""
-        session = _make_mock_session()
-        svc = _make_service(session=session)
-
-        mock_storage = AsyncMock()
-        mock_storage.index_name = "catalog.schema.docs"
-        mock_storage.endpoint_name = "ep"
-        mock_storage.user_token = None
-
-        mock_idx_repo = AsyncMock()
-        mock_idx_repo.get_index = AsyncMock(side_effect=asyncio.TimeoutError())
-        mock_storage.repository = mock_idx_repo
-
-        svc._get_databricks_storage = AsyncMock(return_value=mock_storage)
-
-        db_results = [_make_doc_embedding_model(id=30)]
-        mock_repo = MagicMock()
-        mock_repo.search_similar = AsyncMock(return_value=db_results)
-
-        with patch(_DOC_EMBEDDING_REPO_CLS, return_value=mock_repo):
-            results = await svc.search_similar_embeddings([0.1] * 10, limit=5)
-
-        assert len(results) == 1
-        assert results[0].id == 30
-
-    @pytest.mark.asyncio
-    async def test_search_databricks_readiness_check_exception(self):
-        """When readiness check raises an unexpected error, skip Databricks."""
-        session = _make_mock_session()
-        svc = _make_service(session=session)
-
-        mock_storage = AsyncMock()
-        mock_storage.index_name = "catalog.schema.docs"
-        mock_storage.endpoint_name = "ep"
-        mock_storage.user_token = None
-
-        mock_idx_repo = AsyncMock()
-        mock_idx_repo.get_index = AsyncMock(side_effect=RuntimeError("Connection refused"))
-        mock_storage.repository = mock_idx_repo
-
-        svc._get_databricks_storage = AsyncMock(return_value=mock_storage)
-
-        db_results = [_make_doc_embedding_model(id=31)]
-        mock_repo = MagicMock()
-        mock_repo.search_similar = AsyncMock(return_value=db_results)
-
-        with patch(_DOC_EMBEDDING_REPO_CLS, return_value=mock_repo):
-            results = await svc.search_similar_embeddings([0.1] * 10, limit=5)
-
-        assert len(results) == 1
-        assert results[0].id == 31
-
-    @pytest.mark.asyncio
-    async def test_search_databricks_dict_shaped_index_info_ready(self):
-        """When index info is a dict with status.ready=True, proceed with Databricks."""
-        session = _make_mock_session()
-        svc = _make_service(session=session)
-
-        mock_storage = AsyncMock()
-        mock_storage.index_name = "catalog.schema.docs"
-        mock_storage.endpoint_name = "ep"
-        mock_storage.user_token = None
-
-        mock_idx_repo = AsyncMock()
-        mock_idx_repo.get_index = AsyncMock(return_value={
-            "status": {"ready": True}
-        })
-        mock_storage.repository = mock_idx_repo
-
-        mock_storage.search = AsyncMock(return_value=[
-            {
-                "id": "d1",
-                "content": "Dict check",
-                "metadata": {
-                    "source": "src",
-                    "title": "t",
-                    "created_at": datetime.utcnow().isoformat(),
-                },
-            }
-        ])
-
-        svc._get_databricks_storage = AsyncMock(return_value=mock_storage)
-
-        results = await svc.search_similar_embeddings([0.1] * 10, limit=5)
-        assert len(results) == 1
-        assert results[0].content == "Dict check"
-
-    @pytest.mark.asyncio
-    async def test_search_databricks_dict_shaped_index_info_not_ready(self):
-        """When index info is a dict with status.ready=False, skip Databricks."""
-        session = _make_mock_session()
-        svc = _make_service(session=session)
-
-        mock_storage = AsyncMock()
-        mock_storage.index_name = "catalog.schema.docs"
-        mock_storage.endpoint_name = "ep"
-        mock_storage.user_token = None
-
-        mock_idx_repo = AsyncMock()
-        mock_idx_repo.get_index = AsyncMock(return_value={
-            "status": {"ready": False}
-        })
-        mock_storage.repository = mock_idx_repo
-
-        svc._get_databricks_storage = AsyncMock(return_value=mock_storage)
-
-        db_results = [_make_doc_embedding_model(id=40)]
-        mock_repo = MagicMock()
-        mock_repo.search_similar = AsyncMock(return_value=db_results)
-
-        with patch(_DOC_EMBEDDING_REPO_CLS, return_value=mock_repo):
-            results = await svc.search_similar_embeddings([0.1] * 10, limit=5)
-
-        assert len(results) == 1
-        assert results[0].id == 40
-
-    @pytest.mark.asyncio
-    async def test_search_databricks_with_no_repo_attribute(self):
-        """When storage has no repository attribute, skip readiness check."""
-        session = _make_mock_session()
-        svc = _make_service(session=session)
-
-        mock_storage = AsyncMock()
-        mock_storage.index_name = "catalog.schema.docs"
-        mock_storage.endpoint_name = "ep"
-        mock_storage.user_token = None
-        # No 'repository' attribute at all
-        del mock_storage.repository
-
-        mock_storage.search = AsyncMock(return_value=[
-            {
-                "id": "nr1",
-                "content": "No repo",
-                "metadata": {"source": "s", "title": "t", "created_at": datetime.utcnow().isoformat()},
-            }
-        ])
-
-        svc._get_databricks_storage = AsyncMock(return_value=mock_storage)
-
-        results = await svc.search_similar_embeddings([0.1] * 10, limit=5)
-        # repo is None from getattr, so the readiness block is skipped entirely
-        # and use_databricks stays True, so search proceeds
-        assert len(results) == 1
-        assert results[0].content == "No repo"
-
-    @pytest.mark.asyncio
-    async def test_search_databricks_result_without_updated_at(self):
-        """When Databricks result metadata lacks updated_at, fallback to created_at."""
-        session = _make_mock_session()
-        svc = _make_service(session=session)
-
-        mock_storage = AsyncMock()
-        mock_storage.index_name = "catalog.schema.docs"
-        mock_storage.endpoint_name = "ep"
-        mock_storage.user_token = None
-        del mock_storage.repository
-
-        created_str = "2024-03-15T10:00:00"
-        mock_storage.search = AsyncMock(return_value=[
-            {
-                "id": "r1",
-                "content": "Content",
-                "metadata": {
-                    "source": "src",
-                    "title": "Title",
-                    "created_at": created_str,
-                    # No updated_at key
-                },
-            }
-        ])
-        svc._get_databricks_storage = AsyncMock(return_value=mock_storage)
-
-        results = await svc.search_similar_embeddings([0.1] * 10, limit=5)
-        assert len(results) == 1
-        assert results[0].updated_at == datetime.fromisoformat(created_str)
 
 
 # ===================================================================

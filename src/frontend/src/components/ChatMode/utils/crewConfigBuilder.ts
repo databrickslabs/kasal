@@ -35,6 +35,14 @@ export interface CrewExecutionConfig {
   model?: string;
   execution_type: string;
   schema_detection_enabled: boolean;
+  /**
+   * Stable chat-session id that scopes session-only memory recall. The backend
+   * keeps its own deterministic `crew_id` for tracing/identity; this is purely
+   * the memory partition for the conversation, stable across messages.
+   */
+  session_id?: string;
+  /** Memory READ scope: true = workspace-wide (default), false = this chat session only. */
+  memory_workspace_scope?: boolean;
 }
 
 export interface FlowExecutionConfig {
@@ -203,6 +211,8 @@ export function buildCrewConfigFromGenerated(
   toolConfigs?: Record<string, Record<string, unknown>>,
   inputs?: Record<string, string>,
   toolNameMap: Record<string, string> = {},
+  sessionId?: string | null,
+  workspaceMemory: boolean = true,
 ): CrewExecutionConfig {
   const agents_yaml: Record<string, Record<string, unknown>> = {};
   const tasks_yaml: Record<string, Record<string, unknown>> = {};
@@ -311,6 +321,13 @@ export function buildCrewConfigFromGenerated(
     model: model || undefined,
     execution_type: 'crew',
     schema_detection_enabled: true,
+    // Memory scoping for chat. The backend generates its own deterministic
+    // crew_id for tracing; we pass the chat session id purely as the memory
+    // partition. The READ scope is controlled by `memory_workspace_scope`:
+    //   - true (default): backend recalls workspace-wide (group_id) — all context;
+    //   - false: backend recalls only this chat session (session_id).
+    session_id: sessionId || undefined,
+    memory_workspace_scope: workspaceMemory,
   };
 }
 

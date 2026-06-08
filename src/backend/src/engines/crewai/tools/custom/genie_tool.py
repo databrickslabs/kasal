@@ -463,66 +463,114 @@ class GenieTool(BaseTool):
             # No running loop, safe to create one with asyncio.run
             return asyncio.run(self._run_async(question))
 
-    def _extract_response(self, message_status: dict, result_data: Optional[dict] = None) -> str:
-        """Extract the response from message status and query results."""
+    def _extract_response(
+        self,
+        message_status: dict,
+        result_data: Optional[dict] = None,
+        question: Optional[str] = None,
+        generated_sql: Optional[str] = None,
+        conversation_url: Optional[str] = None,
+    ) -> str:
+        """Build a labeled answer surfacing the full Genie chain: the NL QUESTION,
+        a plain-English description of the query, the generated SQL, the NL ANSWER,
+        the result table WITH column headers, suggested follow-ups, and a link to
+        open the space in Databricks. Pulls every useful field the Genie API
+        returns (not just the final data) so the trace shows the whole story."""
         response_parts = []
-        
-        # Extract text response
+
+        # Pull extras from the query/suggested-questions attachments.
+        description = None
+        suggested_questions: list = []
+        meta_row_count = None
+        meta_truncated = None
+        for attachment in (message_status.get("attachments") or []):
+            q = attachment.get("query")
+            if isinstance(q, dict):
+                if not description and q.get("description"):
+                    description = q.get("description")
+                qrm = q.get("query_result_metadata")
+                if isinstance(qrm, dict):
+                    if qrm.get("row_count") is not None:
+                        meta_row_count = qrm.get("row_count")
+                    if qrm.get("is_truncated") is not None:
+                        meta_truncated = qrm.get("is_truncated")
+            sq = attachment.get("suggested_questions")
+            if isinstance(sq, dict) and isinstance(sq.get("questions"), list):
+                suggested_questions.extend([str(x) for x in sq["questions"] if x])
+
+        # 1) The NL question that was asked
+        if question and str(question).strip():
+            response_parts.append(f"Question:\n{str(question).strip()}")
+
+        # 2) Plain-English description of what the query does
+        if description and str(description).strip():
+            response_parts.append(f"\nWhat the query does:\n{str(description).strip()}")
+
+        # 3) The SQL Genie generated/ran
+        if generated_sql and generated_sql.strip():
+            response_parts.append(f"\nSQL Query:\n{generated_sql.strip()}")
+
+        # 4) The natural-language answer
         text_response = ""
-        if "attachments" in message_status:
-            for attachment in message_status["attachments"]:
-                if "text" in attachment and attachment["text"].get("content"):
-                    text_response = attachment["text"]["content"]
-                    break
-        
+        for attachment in (message_status.get("attachments") or []):
+            text_att = attachment.get("text")
+            if isinstance(text_att, dict) and text_att.get("content"):
+                text_response = text_att["content"]
+                break
         if not text_response:
             for field in ["content", "response", "answer", "text"]:
                 if message_status.get(field):
                     text_response = message_status[field]
                     break
-        
-        # Add text response if it's meaningful (not empty and not just echoing the question)
-        if text_response.strip() and text_response.strip() != message_status.get("content", "").strip():
-            response_parts.append(text_response)
-        
-        # Process query results if available
+        has_answer = bool(
+            text_response.strip()
+            and text_response.strip() != message_status.get("content", "").strip()
+        )
+        if has_answer:
+            response_parts.append(f"\nAnswer:\n{text_response}")
+
+        # 5) Result table — WITH column headers + types from the manifest schema
         if result_data and "statement_response" in result_data:
-            result = result_data["statement_response"].get("result", {})
+            stmt = result_data["statement_response"]
+            result = stmt.get("result", {}) or {}
+            manifest = stmt.get("manifest", {}) or {}
+            columns = (manifest.get("schema", {}) or {}).get("columns", []) or []
+            header_cells = [str(c.get("name") or f"col{i}") for i, c in enumerate(columns)]
+
             if "data_typed_array" in result and result["data_typed_array"]:
                 data_array = result["data_typed_array"]
-                total_rows = len(data_array)
-
-                # Cap result rows to prevent excessive context growth
-                truncated = False
-                if total_rows > self._max_result_rows:
+                returned_rows = len(data_array)
+                # Prefer Genie's authoritative count/truncation flag over the
+                # length of the (already-capped) returned array.
+                total_rows = meta_row_count if meta_row_count is not None else returned_rows
+                truncated = bool(meta_truncated) or returned_rows > self._max_result_rows
+                if returned_rows > self._max_result_rows:
                     data_array = data_array[:self._max_result_rows]
-                    truncated = True
 
-                # If no meaningful text response but we have data, add a summary
-                if not response_parts:
-                    response_parts.append(f"Query returned {total_rows} rows.")
-                
+                if not has_answer:
+                    response_parts.append(f"\nQuery returned {total_rows} rows.")
                 response_parts.append("\nQuery Results:")
-                response_parts.append("-" * 20)
-                
-                # Format the results in a table
-                if data_array:
-                    first_row = data_array[0]
-                    # Calculate column widths
-                    widths = []
-                    for i in range(len(first_row["values"])):
-                        col_values = [str(row["values"][i].get("str", "")) for row in data_array]
-                        max_width = max(len(val) for val in col_values) + 2
-                        widths.append(max_width)
-                    
-                    # Format and add each row
-                    for row in data_array:
-                        row_values = []
-                        for i, value in enumerate(row["values"]):
-                            row_values.append(f"{value.get('str', ''):<{widths[i]}}")
-                        response_parts.append("".join(row_values))
-                
-                response_parts.append("-" * 20)
+
+                # Emit a MARKDOWN table — readable for the agent AND parsed by the
+                # chat UI into real visual components (a styled table + a bar chart).
+                ncols = len(header_cells) or max(
+                    (len(r.get("values", []) or []) for r in data_array), default=0
+                )
+                if not header_cells:
+                    header_cells = [f"col{i}" for i in range(ncols)]
+
+                def _md(value: object) -> str:
+                    return str(value if value is not None else "").replace("|", "\\|").replace("\n", " ")
+
+                response_parts.append("| " + " | ".join(_md(h) for h in header_cells) + " |")
+                response_parts.append("| " + " | ".join(["---"] * ncols) + " |")
+                for row in data_array:
+                    values = row.get("values", []) or []
+                    cells = [
+                        _md(values[i].get("str", "")) if i < len(values) else ""
+                        for i in range(ncols)
+                    ]
+                    response_parts.append("| " + " | ".join(cells) + " |")
 
                 if truncated:
                     response_parts.append(
@@ -530,6 +578,16 @@ class GenieTool(BaseTool):
                         "Consider rephrasing your question to use aggregations "
                         "(GROUP BY, SUM, COUNT, AVG, TOP N) to get a complete, summarized answer."
                     )
+
+        # 6) Genie's suggested follow-up questions
+        if suggested_questions:
+            response_parts.append("\nSuggested follow-up questions:")
+            for sq in suggested_questions[:5]:
+                response_parts.append(f"- {sq}")
+
+        # 7) Deep link to open/validate the space in Databricks Genie
+        if conversation_url:
+            response_parts.append(f"\nOpen in Genie: {conversation_url}")
 
         return "\n".join(response_parts) if response_parts else "No response content found"
 
@@ -605,6 +663,11 @@ Avoid broad questions like "show me all data" — use filters and aggregations t
 
                     if status in ["FAILED", "CANCELLED", "QUERY_RESULT_EXPIRED"]:
                         error_msg = status_messages.get(status, f"Query {status.lower()}")
+                        # Surface Genie's ACTUAL error (MessageError.error) instead of
+                        # only the generic status message — tells the agent/user WHY.
+                        err = status_data.get("error")
+                        if isinstance(err, dict) and err.get("error"):
+                            error_msg = f"{error_msg}\nGenie error: {err['error']}"
                         logger.error(error_msg)
                         return error_msg
 
@@ -627,10 +690,16 @@ Avoid broad questions like "show me all data" — use filters and aggregations t
                                     if content.strip() and content.strip() != question.strip():
                                         has_meaningful_response = True
 
-                                # Extract generated SQL query (NEW: 2025 feature)
-                                if "query" in attachment and "statement" in attachment["query"]:
-                                    generated_sql = attachment["query"]["statement"]
-                                    logger.info(f"Generated SQL: {generated_sql}")
+                                # Extract the SQL Genie generated. The field name
+                                # varies across Genie API versions ('statement' or
+                                # 'query'), so accept either.
+                                if "query" in attachment and isinstance(attachment["query"], dict):
+                                    generated_sql = (
+                                        attachment["query"].get("statement")
+                                        or attachment["query"].get("query")
+                                    )
+                                    if generated_sql:
+                                        logger.info(f"Generated SQL: {generated_sql}")
 
                         has_query_results = (
                             result_data is not None and
@@ -641,10 +710,23 @@ Avoid broad questions like "show me all data" — use filters and aggregations t
                         )
 
                         if has_meaningful_response or has_query_results:
-                            response = self._extract_response(status_data, result_data)
-                            # Optionally append SQL for debugging
-                            if generated_sql:
-                                response += f"\n\n[Generated SQL: {generated_sql}]"
+                            # Deep link to the Genie space so the result can be opened
+                            # and validated in the Databricks UI.
+                            conversation_url = None
+                            try:
+                                host = await self._get_workspace_url()
+                                if host and self._space_id:
+                                    base = host if str(host).startswith("http") else f"https://{host}"
+                                    conversation_url = f"{base}/genie/rooms/{self._space_id}"
+                            except Exception:
+                                conversation_url = None
+                            # Surface the full chain in the tool output (and trace):
+                            # question → SQL → answer → results (with headers) → follow-ups.
+                            response = self._extract_response(
+                                status_data, result_data,
+                                question=question, generated_sql=generated_sql,
+                                conversation_url=conversation_url,
+                            )
                             # Warn the agent on the final allowed call
                             if self._call_count == self._max_calls:
                                 response += (

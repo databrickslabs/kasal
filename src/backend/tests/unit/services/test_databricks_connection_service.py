@@ -28,11 +28,9 @@ def service(mock_uow):
 @pytest.fixture
 def databricks_config():
     """Create a sample Databricks configuration."""
-    return DatabricksMemoryConfig(
+    return DatabricksMemoryConfig(memory_index="catalog.schema.memory_index", 
         endpoint_name="test-endpoint",
-        short_term_index="ml.agents.short_term",
-        long_term_index="ml.agents.long_term",
-        entity_index="ml.agents.entity",
+        document_index="ml.agents.document",
         workspace_url="https://test.databricks.com",
         embedding_dimension=768,
         auth_type="pat",
@@ -93,24 +91,22 @@ class TestDatabricksConnectionService:
         )
         
         mock_index_repo.get_index.side_effect = [
-            short_term_response,  # short_term_index
-            long_term_response,   # long_term_index
-            entity_response       # entity_index
+            short_term_response,  # memory_index → found (source checks the unified memory_index only)
         ]
         mock_index_repo_class.return_value = mock_index_repo
-        
+
         # Act
         result = await service.test_databricks_connection(databricks_config, user_token)
-        
-        # Assert
+
+        # Assert (source verifies the unified memory_index only → 1 found, 0 missing)
         assert result["success"] is True
         assert "Successfully connected" in result["message"]
-        assert len(result["details"]["indexes_found"]) == 2
-        assert len(result["details"]["indexes_missing"]) == 1
+        assert len(result["details"]["indexes_found"]) == 1
+        assert len(result["details"]["indexes_missing"]) == 0
         
         # Verify repository methods were called
         mock_endpoint_repo.get_endpoint_status.assert_called_once_with("test-endpoint", user_token)
-        assert mock_index_repo.get_index.call_count == 3
+        assert mock_index_repo.get_index.call_count == 1  # unified memory_index only
     
     @pytest.mark.asyncio
     @patch('src.services.databricks_connection_service.DatabricksVectorEndpointRepository')

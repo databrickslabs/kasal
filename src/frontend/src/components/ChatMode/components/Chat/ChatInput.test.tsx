@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, act } from '@testing-library/react';
 import ChatInput from './ChatInput';
 import type { ModelConfigResponse } from '../../types/dispatcher';
+import { uploadKnowledgeFile } from '../../api/knowledge';
+
+vi.mock('../../api/knowledge', () => ({ uploadKnowledgeFile: vi.fn() }));
+const mockUpload = vi.mocked(uploadKnowledgeFile);
 
 const MODELS: ModelConfigResponse[] = [
   { key: 'm1', name: 'Model One', provider: 'databricks' } as ModelConfigResponse,
@@ -250,11 +254,14 @@ describe('ChatInput — format selector', () => {
     expect(screen.getByText('Interactive quiz')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Presentation')); // select → checkmark + close
     expect(screen.getByText('Presentation')).toBeInTheDocument(); // toggle now reflects it (accent)
-    // a natural-language prompt gets the directive appended
+    // a natural-language prompt gets the directive appended — to the dispatch
+    // payload (meta.dispatchSuffix), NOT the visible message.
     fireEvent.change(ta(), { target: { value: 'make slides' } });
     fireEvent.keyDown(ta(), { key: 'Enter' });
-    expect(onSend).toHaveBeenCalledWith(expect.stringContaining('make slides'));
-    expect(onSend).toHaveBeenCalledWith(expect.stringContaining('[Output format:'));
+    expect(onSend).toHaveBeenCalledWith(
+      'make slides',
+      expect.objectContaining({ dispatchSuffix: expect.stringContaining('[Output format:') }),
+    );
   });
 
   it('never appends a directive to slash commands', () => {
@@ -289,5 +296,278 @@ describe('ChatInput — format selector', () => {
     const option = screen.getByText('Report');
     fireEvent.mouseDown(option); // inside the picker → stays open
     expect(screen.getByText('Report')).toBeInTheDocument();
+  });
+});
+
+describe('ChatInput — knowledge attachments', () => {
+  const fileInput = () => screen.getByTestId('chat-file-input') as HTMLInputElement;
+  const selectFiles = (files: File[]) =>
+    fireEvent.change(fileInput(), { target: { files } });
+
+  beforeEach(() => {
+    mockUpload.mockReset();
+  });
+
+  it('uploads a selected file, shows a ready chip with size, and sends with the knowledge tool', async () => {
+    mockUpload.mockResolvedValue({ path: '/Volumes/x/a.txt', status: 'success', filename: 'a.txt' });
+    const onSend = vi.fn();
+    render(<ChatInput {...baseProps} onSend={onSend} />);
+
+    selectFiles([new File(['hi'], 'a.txt', { type: 'text/plain' })]);
+
+    expect(screen.getByText('a.txt')).toBeInTheDocument();
+    expect(mockUpload).toHaveBeenCalledWith(expect.any(File), expect.stringMatching(/^chat-/));
+    await screen.findByText('2 B'); // ready -> size shown
+
+    fireEvent.change(ta(), { target: { value: 'explain it' } });
+    fireEvent.keyDown(ta(), { key: 'Enter' });
+
+    expect(onSend).toHaveBeenCalledTimes(1);
+    const [message, meta] = onSend.mock.calls[0];
+    // Displayed message stays clean — the knowledge note is NOT shown in chat.
+    expect(message).toBe('explain it');
+    expect(message).not.toContain('Knowledge files attached');
+    // The note rides along as a hidden dispatch-only suffix, with the tool.
+    expect(meta.tools).toEqual(['DatabricksKnowledgeSearchTool']);
+    expect(meta.dispatchSuffix).toContain('Knowledge files attached: a.txt');
+    // Attachment names are surfaced for display on the message bubble.
+    expect(meta.attachments).toEqual(['a.txt']);
+    // Attachment stays in the composer after sending (reusable for follow-ups).
+    expect(screen.getByText('a.txt')).toBeInTheDocument();
+  });
+
+  it('shows a failed chip on upload error and does NOT attach the tool on send', async () => {
+    mockUpload.mockRejectedValue(new Error('boom'));
+    const onSend = vi.fn();
+    render(<ChatInput {...baseProps} onSend={onSend} />);
+
+    selectFiles([new File(['x'], 'bad.txt')]);
+    await screen.findByText('failed');
+
+    fireEvent.change(ta(), { target: { value: 'hi' } });
+    fireEvent.keyDown(ta(), { key: 'Enter' });
+    expect(onSend).toHaveBeenCalledWith('hi'); // single arg, no ready attachments
+  });
+
+  it('uses a generic error when the rejection is not an Error', async () => {
+    mockUpload.mockRejectedValue('weird');
+    render(<ChatInput {...baseProps} />);
+    selectFiles([new File(['x'], 'bad.txt')]);
+    await screen.findByText('failed');
+    // title carries the generic message
+    expect(screen.getByText('bad.txt').closest('div')?.getAttribute('title')).toBe('Upload failed');
+  });
+
+  it('removes an attachment via its remove button', async () => {
+    mockUpload.mockResolvedValue({ path: '/Volumes/x/a.txt', status: 'success', filename: 'a.txt' });
+    render(<ChatInput {...baseProps} />);
+    selectFiles([new File(['hi'], 'a.txt')]);
+    await screen.findByText('2 B');
+    fireEvent.click(screen.getByLabelText('Remove a.txt'));
+    expect(screen.queryByText('a.txt')).not.toBeInTheDocument();
+  });
+
+  it('ignores a change event with no files', () => {
+    render(<ChatInput {...baseProps} />);
+    fireEvent.change(fileInput(), { target: { files: [] } });
+    expect(mockUpload).not.toHaveBeenCalled();
+  });
+
+  it('clicking the attach button does not throw and shows the count once attached', async () => {
+    mockUpload.mockResolvedValue({ path: 'p', status: 'success', filename: 'a.txt' });
+    const { container } = render(<ChatInput {...baseProps} />);
+    fireEvent.click(screen.getByLabelText('Attach files'));
+    selectFiles([new File(['hi'], 'a.txt'), new File(['yo'], 'b.txt')]);
+    await screen.findAllByText('2 B');
+    // attach button shows the count "2"
+    expect(within(screen.getByLabelText('Attach files')).getByText('2')).toBeInTheDocument();
+    expect(container).toBeTruthy();
+  });
+
+  it('accepts files via drag-and-drop and shows then hides the overlay', async () => {
+    mockUpload.mockResolvedValue({ path: 'p', status: 'success', filename: 'd.txt' });
+    const { container } = render(<ChatInput {...baseProps} />);
+    const shell = container.querySelector('.kasal-input-shell') as HTMLElement;
+
+    fireEvent.dragEnter(shell, { dataTransfer: { types: ['Files'] } }); // depth 1
+    fireEvent.dragEnter(shell, { dataTransfer: { types: ['Files'] } }); // depth 2 (nested child)
+    expect(screen.getByText(/Drop files to attach/)).toBeInTheDocument();
+
+    fireEvent.dragLeave(shell); // depth -> 1, overlay stays
+    expect(screen.getByText(/Drop files to attach/)).toBeInTheDocument();
+    fireEvent.dragLeave(shell); // depth -> 0, overlay hides
+    expect(screen.queryByText(/Drop files to attach/)).not.toBeInTheDocument();
+
+    fireEvent.dragOver(shell, { dataTransfer: { types: ['Files'] } });
+    fireEvent.drop(shell, { dataTransfer: { files: [new File(['dd'], 'd.txt')] } });
+    await screen.findByText('d.txt');
+    expect(mockUpload).toHaveBeenCalled();
+  });
+
+  it('ignores drag enter when no files are present (e.g. text drag)', () => {
+    const { container } = render(<ChatInput {...baseProps} />);
+    const shell = container.querySelector('.kasal-input-shell') as HTMLElement;
+    fireEvent.dragEnter(shell, { dataTransfer: { types: ['text/plain'] } });
+    expect(screen.queryByText(/Drop files to attach/)).not.toBeInTheDocument();
+  });
+
+  it('drop with no files does not upload', () => {
+    render(<ChatInput {...baseProps} />);
+    const shell = screen.getByPlaceholderText('Ask a question...').closest('.kasal-input-shell') as HTMLElement;
+    fireEvent.drop(shell, { dataTransfer: { files: [] } });
+    expect(mockUpload).not.toHaveBeenCalled();
+  });
+
+  it('renders human-readable sizes (0 B and KB)', async () => {
+    mockUpload.mockResolvedValue({ path: 'p', status: 'success', filename: 'f' });
+    render(<ChatInput {...baseProps} />);
+    selectFiles([
+      new File([], 'empty.txt'),
+      new File([new Uint8Array(1536)], 'k.txt'),
+    ]);
+    await screen.findByText('0 B');
+    expect(screen.getByText('1.5 KB')).toBeInTheDocument();
+  });
+
+  it('blocks send while a file is still uploading, then allows it once ready', async () => {
+    let resolveUpload!: (v: { path: string; status: string; filename: string }) => void;
+    mockUpload.mockReturnValue(
+      new Promise((res) => {
+        resolveUpload = res;
+      })
+    );
+    const onSend = vi.fn();
+    const { container } = render(<ChatInput {...baseProps} onSend={onSend} />);
+
+    selectFiles([new File(['hi'], 'a.txt')]);
+    fireEvent.change(ta(), { target: { value: 'go' } });
+
+    // Send button disabled while uploading; Enter is a no-op.
+    const sendBtn = container.querySelectorAll('button')[
+      container.querySelectorAll('button').length - 1
+    ] as HTMLButtonElement;
+    expect(sendBtn).toBeDisabled();
+    fireEvent.keyDown(ta(), { key: 'Enter' });
+    expect(onSend).not.toHaveBeenCalled();
+
+    // Upload completes -> chip ready, send unblocked.
+    await act(async () => {
+      resolveUpload({ path: '/Volumes/x/a.txt', status: 'success', filename: 'a.txt' });
+    });
+    await screen.findByText('2 B');
+    fireEvent.keyDown(ta(), { key: 'Enter' });
+    expect(onSend).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not attach the knowledge tool to slash commands even with files', async () => {
+    mockUpload.mockResolvedValue({ path: 'p', status: 'success', filename: 'a.txt' });
+    const onSend = vi.fn();
+    render(<ChatInput {...baseProps} onSend={onSend} />);
+    selectFiles([new File(['hi'], 'a.txt')]);
+    await screen.findByText('2 B');
+    fireEvent.change(ta(), { target: { value: '/clear' } });
+    fireEvent.keyDown(ta(), { key: 'Enter' });
+    // slash path: single-arg onSend, no tools meta
+    expect(onSend).toHaveBeenCalledWith('/clear');
+  });
+});
+
+describe('ChatInput — attachment persistence (per session)', () => {
+  const fileInput = () => screen.getByTestId('chat-file-input') as HTMLInputElement;
+
+  beforeEach(() => {
+    mockUpload.mockReset();
+    localStorage.clear();
+  });
+
+  it('restores ready attachments stored for the session on mount', () => {
+    localStorage.setItem(
+      'kasal-chat-attachments-s1',
+      JSON.stringify([{ id: '1', name: 'kept.txt', size: 10, status: 'ready', path: '/Volumes/x/kept.txt' }]),
+    );
+    render(<ChatInput {...baseProps} sessionId="s1" />);
+    expect(screen.getByText('kept.txt')).toBeInTheDocument();
+  });
+
+  it('persists a ready upload to the session key and clears it on removal', async () => {
+    mockUpload.mockResolvedValue({ path: '/Volumes/x/a.txt', status: 'success', filename: 'a.txt' });
+    render(<ChatInput {...baseProps} sessionId="s2" />);
+    fireEvent.change(fileInput(), { target: { files: [new File(['hi'], 'a.txt')] } });
+    await screen.findByText('2 B');
+
+    const stored = JSON.parse(localStorage.getItem('kasal-chat-attachments-s2') || '[]');
+    expect(stored).toHaveLength(1);
+    expect(stored[0].name).toBe('a.txt');
+
+    fireEvent.click(screen.getByLabelText('Remove a.txt'));
+    expect(localStorage.getItem('kasal-chat-attachments-s2')).toBeNull();
+  });
+
+  it('ignores corrupt stored data without crashing', () => {
+    localStorage.setItem('kasal-chat-attachments-s3', 'not-json{');
+    render(<ChatInput {...baseProps} sessionId="s3" />);
+    expect(screen.queryByText(/\.txt/)).not.toBeInTheDocument();
+  });
+
+  it('ignores non-array stored data', () => {
+    localStorage.setItem('kasal-chat-attachments-s4', JSON.stringify({ not: 'an array' }));
+    render(<ChatInput {...baseProps} sessionId="s4" />);
+    expect(screen.queryByText(/\.txt/)).not.toBeInTheDocument();
+  });
+
+  it('does not persist when there is no session id', async () => {
+    mockUpload.mockResolvedValue({ path: 'p', status: 'success', filename: 'a.txt' });
+    render(<ChatInput {...baseProps} />);
+    fireEvent.change(fileInput(), { target: { files: [new File(['hi'], 'a.txt')] } });
+    await screen.findByText('2 B');
+    // No session-scoped key was written.
+    expect(Object.keys(localStorage).some((k) => k.startsWith('kasal-chat-attachments-'))).toBe(false);
+  });
+});
+
+describe('ChatInput — run / generation status (inline, replaces top banner)', () => {
+  it('has no Stop button while executing (Stop lives in the run-activity container); Send stays but is disabled', () => {
+    render(<ChatInput {...baseProps} isExecuting onStopExecution={vi.fn()} />);
+    // Stop moved out of the input — only the run-activity container has it now.
+    expect(screen.queryByRole('button', { name: 'Stop execution' })).not.toBeInTheDocument();
+    // Send is still present (submit kept) but disabled while a run is active.
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled();
+  });
+
+  it('shows a disabled (busy) send button while generating — no Stop, no text', () => {
+    render(<ChatInput {...baseProps} isGenerating />);
+    expect(screen.queryByText('Generating…')).not.toBeInTheDocument();
+    // Generating keeps the Send button (busy/disabled), not the Stop button.
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Stop execution' })).not.toBeInTheDocument();
+  });
+
+  it('falls back to the Send button when executing without a stop handler', () => {
+    render(<ChatInput {...baseProps} isExecuting />);
+    expect(screen.queryByRole('button', { name: 'Stop execution' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeInTheDocument();
+  });
+
+  it('shows no Stop control when idle', () => {
+    render(<ChatInput {...baseProps} />);
+    expect(screen.queryByRole('button', { name: 'Stop execution' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeInTheDocument();
+  });
+});
+
+describe('ChatInput — workspace memory toggle (controlled)', () => {
+  it('reflects the controlled value and calls onWorkspaceMemoryChange on click', () => {
+    const onWorkspaceMemoryChange = vi.fn();
+    const { rerender } = render(
+      <ChatInput {...baseProps} workspaceMemory onWorkspaceMemoryChange={onWorkspaceMemoryChange} />,
+    );
+    expect(screen.getByText('Workspace memory')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Workspace memory'));
+    expect(onWorkspaceMemoryChange).toHaveBeenCalledWith(false);
+    // Parent flips the value → label reflects "Session only".
+    rerender(
+      <ChatInput {...baseProps} workspaceMemory={false} onWorkspaceMemoryChange={onWorkspaceMemoryChange} />,
+    );
+    expect(screen.getByText('Session only')).toBeInTheDocument();
   });
 });

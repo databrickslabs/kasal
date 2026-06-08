@@ -137,7 +137,10 @@ async def get_lakebase_table_stats(
     Returns:
         Table statistics
     """
-    result = await service.get_lakebase_table_stats(instance_name=instance_name)
+    result = await service.get_lakebase_table_stats(
+        instance_name=instance_name,
+        group_id=group_context.primary_group_id,
+    )
     return result
 
 
@@ -164,6 +167,7 @@ async def get_lakebase_table_data(
         table_name=table_name,
         limit=limit,
         instance_name=instance_name,
+        group_id=group_context.primary_group_id,
     )
     return result
 
@@ -198,6 +202,7 @@ async def get_lakebase_entity_data(
         memory_table=memory_table,
         limit=limit,
         instance_name=instance_name,
+        group_id=group_context.primary_group_id,
     )
     return result
 
@@ -220,15 +225,11 @@ async def save_lakebase_config(
     group_id = group_context.primary_group_id
     lakebase_config = request.get("lakebase_config", {})
 
-    # Delete existing configs first
-    try:
-        existing = await service.get_memory_backends(group_id)
-        for backend in existing:
-            await service.delete_memory_backend(group_id, str(backend.id))
-    except Exception as e:
-        logger.warning(f"Error cleaning up existing configs: {e}")
-
-    # Create new Lakebase config
+    # Create the new Lakebase config FIRST. Deleting the existing configs before
+    # this hits the "Cannot delete the only memory backend configuration" guard
+    # whenever exactly one config exists, leaving the setup half-done (warning +
+    # a stale leftover config). Creating first keeps the count > 0 so the
+    # subsequent cleanup of the OLD configs never trips that guard.
     from src.schemas.memory_backend import LakebaseMemoryConfig
 
     config = MemoryBackendCreate(
@@ -237,6 +238,16 @@ async def save_lakebase_config(
         lakebase_config=LakebaseMemoryConfig(**lakebase_config),
     )
     backend = await service.create_memory_backend(group_id, config)
+
+    # Now remove the OLD configs (everything except the one we just created).
+    try:
+        existing = await service.get_memory_backends(group_id)
+        for old in existing:
+            if str(old.id) != str(backend.id):
+                await service.delete_memory_backend(group_id, str(old.id))
+    except Exception as e:
+        logger.warning(f"Error cleaning up existing configs: {e}")
+
     await service.set_default_backend(group_id, str(backend.id))
 
     return {

@@ -308,7 +308,9 @@ class TestRunCrewIsolated:
         mock_process.join = MagicMock()
 
         mock_queue = MagicMock()
-        mock_queue.empty.return_value = True
+        # The drain thread does result_queue.get(timeout=...); raising → no result,
+        # so run_crew_isolated falls back to FAILED based on the non-zero exit code.
+        mock_queue.get.side_effect = Exception("queue empty")
 
         executor._ctx.Process.return_value = mock_process
         executor._ctx.Queue.return_value = mock_queue
@@ -335,8 +337,8 @@ class TestRunCrewIsolated:
         mock_process.join = MagicMock()
 
         mock_queue = MagicMock()
-        mock_queue.empty.return_value = False
-        mock_queue.get_nowait.return_value = {
+        # The drain thread reads the result via result_queue.get(timeout=...).
+        mock_queue.get.return_value = {
             "status": "COMPLETED",
             "execution_id": "test-exec-6",
             "result": "Test result"

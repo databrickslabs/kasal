@@ -445,6 +445,12 @@ class DatabricksService:
                     }
 
                 headers = auth.get_headers()
+                if not headers:
+                    return {
+                        "status": "error",
+                        "message": "No authentication credentials available (PAT or OAuth)",
+                        "connected": False
+                    }
                 headers.update(get_user_agent_header(KasalProduct.CONNECTION_TEST))  # Kasal User-Agent
 
             except Exception as e:

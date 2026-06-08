@@ -140,7 +140,7 @@ class TestMCPAdapter:
                 assert tools[0]['description'] == 'Test tool description'
                 assert tools[0]['adapter'] == adapter
 
-                mock_connect.assert_called_once_with(adapter.server_url, headers={'Authorization': 'Bearer token'}, timeout=30)
+                mock_connect.assert_called_once_with(adapter.server_url, headers={'Authorization': 'Bearer token', 'User-Agent': 'kasal_mcp/0.1.0'}, timeout=30)
                 mock_session.initialize.assert_called_once()
                 mock_session.list_tools.assert_called_once()
     
@@ -538,7 +538,7 @@ class TestMCPAdapterRetry:
 
                 mock_connect.assert_called_once_with(
                     adapter.server_url,
-                    headers={'Authorization': 'Bearer test-token'},
+                    headers={'Authorization': 'Bearer test-token', 'User-Agent': 'kasal_mcp/0.1.0'},
                     timeout=5
                 )
 

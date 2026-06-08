@@ -37,7 +37,8 @@ class GenieSpace(BaseModel):
     enabled: Optional[bool] = Field(True, description="Whether the space is enabled")
     owner: Optional[str] = Field(None, description="Owner of the space")
     workspace_id: Optional[str] = Field(None, description="Workspace ID")
-    
+    url: Optional[str] = Field(None, description="Deep link to open the space in the Databricks Genie UI")
+
     class Config:
         json_encoders = {
             datetime: lambda v: v.isoformat() if v else None

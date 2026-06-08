@@ -367,7 +367,7 @@ class TestLakeviewJsonBuilding:
         """Visuals from same page_name are on the same page."""
         tool = DatabricksDashboardCreatorTool()
         result = tool._build_lakeview_json(SAMPLE_VISUAL_MAPPINGS, "wh-123")
-        page_names = {p["display_name"] for p in result["pages"]}
+        page_names = {p["displayName"] for p in result["pages"]}
         assert "Sales Overview" in page_names
         assert "KPIs" in page_names
 

@@ -105,6 +105,19 @@ class CrewGenerationService:
         if not system_message:
             raise ValueError("Required prompt template 'generate_crew' not found in database")
 
+        # When Predefined UI (UIConfigurator) is enabled, prepend a directive that
+        # stops the generator from baking "output raw HTML" into any task — the
+        # platform renders the final deliverable through the design-system UI
+        # renderer, so HTML instructions only create a conflict downstream.
+        from src.services.ui_config_service import (
+            UIConfigService,
+            UI_DOCUMENT_GENERATION_DIRECTIVE,
+        )
+        gen_group_id = group_context.primary_group_id if group_context else None
+        if await UIConfigService.is_predefined_ui_enabled(gen_group_id):
+            system_message = f"{UI_DOCUMENT_GENERATION_DIRECTIVE}\n\n{system_message}"
+            logger.info("[UIEmission] generate_crew: applied design-system UI directive")
+
         # Build tools context for the prompt with detailed descriptions
         tools_context = ""
         if tools:
@@ -130,6 +143,14 @@ class CrewGenerationService:
             # Add specific usage example for the NL2SQLTool if it's in the tools list
             if any(tool.get('name') == 'NL2SQLTool' for tool in tools):
                 tools_context += "\n\nFor NL2SQLTool, use the following format for input: {'sql_query': <your_query>}"
+
+        # Bias the generator toward GenieTool for internal-data questions when it's
+        # available — otherwise Auto-format prompts ("most effective campaign") get a
+        # web-research crew (Perplexity) and never surface the Genie-space picker.
+        if any(tool.get('name') == 'GenieTool' for tool in (tools or [])):
+            from src.seeds.prompt_templates import GENIE_ROUTING_DIRECTIVE
+            tools_context += f"\n{GENIE_ROUTING_DIRECTIVE}"
+            logger.info("[GenieRouting] generate_crew: applied Genie routing directive (GenieTool available)")
 
         # Add tools context to the system message
         return system_message + tools_context

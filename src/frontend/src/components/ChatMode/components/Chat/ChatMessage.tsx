@@ -11,6 +11,8 @@ import {
 import { PlanData, FlowData } from '../../hooks/useDispatcher';
 import { GenerationCompleteData } from '../../hooks/useGenerationStream';
 import { useAppStore } from '../../store/appStore';
+import { isGenieToolRef } from '../../api/crews';
+import { TraceDetail, findInlineTraceRenderer } from './traces';
 import MessageContent from './MessageContent';
 import AgentCard from '../Cards/AgentCard';
 import TaskCard from '../Cards/TaskCard';
@@ -130,6 +132,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
         return (
           <GenerationCompleteCard
             data={message.resultData as GenerationCompleteData}
+            messageId={message.id}
             onExecute={onExecuteGenerated}
             onSaveCrew={onSaveCrew}
           />
@@ -170,15 +173,35 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
   }
 
   if (isUser) {
+    const attachments = message.attachments || [];
     return (
       <div className="flex justify-end mb-5 px-4 animate-fade-in">
-        <div
-          className="max-w-[75%] rounded-3xl rounded-br-lg px-5 py-3"
-          style={{ backgroundColor: 'var(--bg-user-msg)' }}
-        >
-          <div className="text-[15px] leading-relaxed" style={{ color: 'var(--text-primary)' }}>
-            {message.content}
+        <div className="max-w-[75%] flex flex-col items-end gap-1.5">
+          <div
+            className="rounded-3xl rounded-br-lg px-5 py-3"
+            style={{ backgroundColor: 'var(--bg-user-msg)' }}
+          >
+            <div className="text-[15px] leading-relaxed" style={{ color: 'var(--text-primary)' }}>
+              {message.content}
+            </div>
           </div>
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 justify-end">
+              {attachments.map((name, i) => (
+                <span
+                  key={`${name}-${i}`}
+                  className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium"
+                  style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}
+                  title={name}
+                >
+                  <svg className="w-3 h-3 flex-shrink-0" style={{ color: 'var(--accent)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                  </svg>
+                  <span className="max-w-[160px] truncate">{name}</span>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -206,9 +229,11 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
           </div>
         )}
 
-        <div className="text-[15px] leading-[1.7]" style={{ color: 'var(--text-primary)' }}>
-          <MessageContent content={message.content} />
-        </div>
+        {message.content && (
+          <div className="text-[15px] leading-[1.7]" style={{ color: 'var(--text-primary)' }}>
+            <MessageContent content={message.content} />
+          </div>
+        )}
 
         {renderRichContent()}
       </div>
@@ -250,17 +275,17 @@ function normalizeGenerationData(raw: unknown): { agents: Record<string, unknown
   return { agents: findArray('agents'), tasks: findArray('tasks') };
 }
 
-/** Check whether any agent or task in the generation data references GenieTool */
+/** Check whether any agent or task in the generation data references GenieTool.
+ *  Uses the shared, toolNameMap-independent detector so the space selector shows
+ *  whenever the crew uses Genie — by name, alias, or tool id — regardless of the
+ *  chosen output format (Auto, Data answer (Genie), …) or whether the tool list
+ *  has loaded yet. */
 function hasGenieTool(
   agents: Record<string, unknown>[],
   tasks: Record<string, unknown>[],
   toolNameMap: Record<string, string>,
 ): boolean {
-  const isGenie = (t: unknown) => {
-    const name = String(t);
-    const resolved = toolNameMap[name] || name;
-    return resolved === 'GenieTool' || name === 'GenieTool';
-  };
+  const isGenie = (t: unknown) => isGenieToolRef(t, toolNameMap);
   for (const a of agents) {
     if (Array.isArray(a.tools) && a.tools.some(isGenie)) return true;
   }
@@ -270,16 +295,61 @@ function hasGenieTool(
   return false;
 }
 
-/** Sub-component for the generation_complete card with optional Genie Space selector */
-const GenerationCompleteCard: React.FC<{
+type IndexedTask = { task: Record<string, unknown>; taskIndex: number };
+type AgentGroup = { agent: Record<string, unknown>; agentIndex: number; tasks: IndexedTask[] };
+
+/** Group each task under the agent it's assigned to (by assigned_agent/agent
+ *  name or agent_id), so the crew card reads as "agent → its tasks" instead of
+ *  two disconnected lists. Tasks with no resolvable agent fall into `orphanTasks`
+ *  (rendered separately), so nothing is ever dropped. */
+function groupTasksUnderAgents(
+  agents: Record<string, unknown>[],
+  tasks: Record<string, unknown>[],
+): { groups: AgentGroup[]; orphanTasks: IndexedTask[] } {
+  const norm = (s: unknown) => String(s ?? '').trim().toLowerCase();
+  const indexFor = new Map<string, number>();
+  agents.forEach((a, i) => {
+    for (const key of [norm(a.name), norm(a.role), norm(a.id)]) {
+      if (key && !indexFor.has(key)) indexFor.set(key, i);
+    }
+  });
+  const groups: AgentGroup[] = agents.map((agent, agentIndex) => ({ agent, agentIndex, tasks: [] }));
+  const orphanTasks: IndexedTask[] = [];
+  tasks.forEach((task, taskIndex) => {
+    const idx = [norm(task.assigned_agent), norm(task.agent), norm(task.agent_id)]
+      .map((k) => (k ? indexFor.get(k) : undefined))
+      .find((v) => v !== undefined);
+    if (idx !== undefined) groups[idx].tasks.push({ task, taskIndex });
+    else orphanTasks.push({ task, taskIndex });
+  });
+  return { groups, orphanTasks };
+}
+
+// Persist the Genie-space selection (+ whether the crew was already run) per
+// generation_complete message, so the choice survives the card remounting when
+// the run streams messages in / opens the preview pane (local useState alone
+// resets, which looked like "I lost the space I selected" after running).
+const genieSelectionStore = new Map<string, { spaceId: string; ran: boolean }>();
+
+/** Sub-component for the generation_complete card with optional Genie Space selector.
+ *  Exported so the ChatContainer can mount it inside the run-activity container. */
+export const GenerationCompleteCard: React.FC<{
   data: GenerationCompleteData;
+  messageId: string;
   onExecute?: (data: GenerationCompleteData, spaceId?: string) => void;
   onSaveCrew?: (data: GenerationCompleteData) => Promise<{ id: string; name: string }>;
-}> = ({ data, onExecute, onSaveCrew }) => {
+}> = ({ data, messageId, onExecute, onSaveCrew }) => {
   const { agents, tasks } = normalizeGenerationData(data);
   const toolNameMap = useAppStore((s) => s.toolNameMap);
-  const [selectedSpaceId, setSelectedSpaceId] = useState('');
-  const [ran, setRan] = useState(false);
+  const [selectedSpaceId, setSelectedSpaceId] = useState(
+    () => genieSelectionStore.get(messageId)?.spaceId ?? '',
+  );
+  const [ran, setRan] = useState(() => genieSelectionStore.get(messageId)?.ran ?? false);
+
+  const persistGenie = (next: { spaceId?: string; ran?: boolean }) => {
+    const prev = genieSelectionStore.get(messageId) ?? { spaceId: selectedSpaceId, ran };
+    genieSelectionStore.set(messageId, { ...prev, ...next });
+  };
   // idle → saving → saved (terminal); error returns to idle with a hint.
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [savedName, setSavedName] = useState('');
@@ -300,17 +370,21 @@ const GenerationCompleteCard: React.FC<{
   };
 
   const showGenieSelector = hasGenieTool(agents, tasks, toolNameMap);
+  const { groups, orphanTasks } = groupTasksUnderAgents(agents, tasks);
 
   return (
     <div className="mt-3 space-y-3">
       {/* Header: agent count + subtle "save to catalog" bookmark */}
       <div className="flex items-center justify-between px-1">
-        {agents.length > 0 ? (
+        {agents.length > 0 || tasks.length > 0 ? (
           <div
             className="text-[10px] font-semibold uppercase tracking-wider"
             style={{ color: 'var(--text-muted)' }}
           >
-            {agents.length} Agent{agents.length > 1 ? 's' : ''}
+            {[
+              agents.length > 0 ? `${agents.length} Agent${agents.length > 1 ? 's' : ''}` : '',
+              tasks.length > 0 ? `${tasks.length} Task${tasks.length > 1 ? 's' : ''}` : '',
+            ].filter(Boolean).join(' · ')}
           </div>
         ) : <span />}
 
@@ -356,42 +430,60 @@ const GenerationCompleteCard: React.FC<{
         )}
       </div>
 
-      {/* Agent details */}
-      {agents.map((agent, i) => (
-        <AgentRow key={i} agent={agent} index={i} toolNameMap={toolNameMap} />
-      ))}
-
-      {/* Tasks section label */}
-      {tasks.length > 0 && (
-        <div
-          className="text-[10px] font-semibold uppercase tracking-wider px-1 mt-1"
-          style={{ color: 'var(--text-muted)' }}
-        >
-          {tasks.length} Task{tasks.length > 1 ? 's' : ''}
+      {/* Crew: each agent with its assigned task(s) nested beneath it */}
+      {groups.map(({ agent, agentIndex, tasks: agentTasks }) => (
+        <div key={`agent-${agentIndex}`} className="space-y-2">
+          <AgentRow agent={agent} index={agentIndex} toolNameMap={toolNameMap} taskCount={agentTasks.length} />
+          {agentTasks.length > 0 && (
+            <div className="ml-3 pl-3 space-y-2" style={{ borderLeft: '2px solid var(--border-color)' }}>
+              {agentTasks.map(({ task, taskIndex }) => (
+                <TaskRow key={`task-${taskIndex}`} task={task} index={taskIndex} toolNameMap={toolNameMap} />
+              ))}
+            </div>
+          )}
         </div>
-      )}
-
-      {/* Task details */}
-      {tasks.map((task, i) => (
-        <TaskRow key={i} task={task} index={i} toolNameMap={toolNameMap} />
       ))}
+
+      {/* Tasks with no resolvable agent (or a tasks-only crew) — never dropped */}
+      {orphanTasks.length > 0 && (
+        <>
+          <div
+            className="text-[10px] font-semibold uppercase tracking-wider px-1 mt-1"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            {agents.length > 0
+              ? 'Other tasks'
+              : `${orphanTasks.length} Task${orphanTasks.length > 1 ? 's' : ''}`}
+          </div>
+          {orphanTasks.map(({ task, taskIndex }) => (
+            <TaskRow key={`orphan-${taskIndex}`} task={task} index={taskIndex} toolNameMap={toolNameMap} />
+          ))}
+        </>
+      )}
 
       {/* Genie Space selector + Run — only when GenieTool is in the crew's tools.
           Genie crews aren't auto-run; the user picks a space here then runs. */}
       {showGenieSelector && onExecute && (
         <div className="pt-1 space-y-2">
-          <GenieSpaceSelector value={selectedSpaceId} onChange={setSelectedSpaceId} />
+          <GenieSpaceSelector
+            value={selectedSpaceId}
+            onChange={(v) => {
+              setSelectedSpaceId(v);
+              persistGenie({ spaceId: v });
+            }}
+          />
           <button
             type="button"
             onClick={() => {
               // Button is disabled until a space is chosen and after it runs,
               // so a fired click always has a space and hasn't run yet.
               setRan(true);
+              persistGenie({ ran: true });
               onExecute(data, selectedSpaceId);
             }}
             disabled={!selectedSpaceId || ran}
-            className="w-full flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ backgroundColor: 'var(--accent)' }}
+            className="w-full flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)' }}
           >
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
               <path d="M8 5v14l11-7z" />
@@ -404,7 +496,7 @@ const GenerationCompleteCard: React.FC<{
   );
 };
 
-interface TraceEntryData {
+export interface TraceEntryData {
   label: string;
   sublabel?: string;
   durationMs?: number;
@@ -414,9 +506,40 @@ interface TraceEntryData {
   timestamp: number;
 }
 
+/** Format a duration in ms as "2.93s" (>=1s) or "640ms". */
+export function formatDurationMs(durationMs: number | undefined): string | null {
+  if (typeof durationMs !== 'number') return null;
+  return durationMs >= 1000
+    ? `${(durationMs / 1000).toFixed(2)}s`
+    : `${Math.round(durationMs)}ms`;
+}
+
+
 const TraceMessage: React.FC<{ data: TraceEntryData }> = ({ data }) => {
   const [open, setOpen] = useState(false);
   const hasDetail = Boolean(data.detail && data.detail.trim().length > 0);
+
+  // Some tools render their RESULT directly in the chat instead of behind the
+  // collapsed pill (e.g. Genie shows its answer Perplexity-style, with the
+  // question + SQL tucked into a collapsible). When a tool_result has such an
+  // inline renderer, use it.
+  const Inline =
+    data.kind === 'tool_result' && hasDetail
+      ? findInlineTraceRenderer(data.detail as string, data.label)
+      : undefined;
+  if (Inline) {
+    return (
+      <div className="px-4 my-1 animate-fade-in">
+        <Inline
+          detail={data.detail as string}
+          label={data.label}
+          sublabel={data.sublabel}
+          durationMs={data.durationMs}
+        />
+      </div>
+    );
+  }
+
   const isPending = data.kind === 'tool_call' && data.durationMs === undefined;
   const durationLabel =
     typeof data.durationMs === 'number'
@@ -430,7 +553,7 @@ const TraceMessage: React.FC<{ data: TraceEntryData }> = ({ data }) => {
       <button
         type="button"
         onClick={() => hasDetail && setOpen((v) => !v)}
-        className="flex items-center gap-2 text-left rounded-lg px-3 py-1.5 max-w-[85%] transition-colors hover:opacity-90"
+        className="flex items-center gap-2 text-left rounded-lg px-3 py-1.5 w-full max-w-[85%] transition-colors hover:opacity-90"
         disabled={!hasDetail}
         style={{
           backgroundColor: 'var(--bg-secondary)',
@@ -467,18 +590,67 @@ const TraceMessage: React.FC<{ data: TraceEntryData }> = ({ data }) => {
             {data.sublabel}
           </span>
         )}
+        <div className="flex items-center gap-2 ml-auto flex-shrink-0">
+          {durationLabel && (
+            <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>
+              · {durationLabel}
+            </span>
+          )}
+          {hasDetail && (
+            <svg
+              className="w-3 h-3 flex-shrink-0 transition-transform"
+              style={{
+                color: 'var(--text-muted)',
+                transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+              }}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+            </svg>
+          )}
+        </div>
+      </button>
+      {open && data.detail && <TraceDetail detail={data.detail} label={data.label} indentClass="ml-3" />}
+    </div>
+  );
+};
+
+/** One row inside an expanded trace group: the call's query + duration, with
+ *  an optional expandable detail (the tool's raw result). Compact — the tool
+ *  name lives once on the group header, not repeated per row. */
+const TraceGroupChild: React.FC<{ data: TraceEntryData }> = ({ data }) => {
+  const [open, setOpen] = useState(false);
+  const hasDetail = Boolean(data.detail && data.detail.trim().length > 0);
+  const durationLabel = formatDurationMs(data.durationMs);
+  const text = data.sublabel || data.label;
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => hasDetail && setOpen((v) => !v)}
+        disabled={!hasDetail}
+        className="flex items-center gap-2 text-left rounded-md px-2 py-1 w-full transition-colors hover:opacity-90"
+        style={{ cursor: hasDetail ? 'pointer' : 'default' }}
+      >
+        <span
+          className="text-xs font-mono truncate flex-1"
+          style={{ color: 'var(--text-primary)' }}
+        >
+          {text}
+        </span>
         {durationLabel && (
-          <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>
+          <span className="text-[10px] font-mono flex-shrink-0" style={{ color: 'var(--text-muted)' }}>
             · {durationLabel}
           </span>
         )}
         {hasDetail && (
           <svg
-            className="w-3 h-3 flex-shrink-0 transition-transform ml-1"
-            style={{
-              color: 'var(--text-muted)',
-              transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
-            }}
+            className="w-3 h-3 flex-shrink-0 transition-transform"
+            style={{ color: 'var(--text-muted)', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -488,17 +660,89 @@ const TraceMessage: React.FC<{ data: TraceEntryData }> = ({ data }) => {
           </svg>
         )}
       </button>
-      {open && data.detail && (
-        <pre
-          className="mt-1 ml-3 text-[11px] whitespace-pre-wrap break-words rounded p-2 max-w-[85%] max-h-72 overflow-y-auto"
-          style={{
-            color: 'var(--text-primary)',
-            backgroundColor: 'var(--bg-primary)',
-            border: '1px solid var(--border-color)',
-          }}
+      {open && data.detail && <TraceDetail detail={data.detail} label={data.label} indentClass="ml-2" />}
+    </div>
+  );
+};
+
+/** Collapses a run of consecutive same-tool traces into ONE line
+ *  ("PerplexityTool · 10 calls · 27.34s") that expands to list every call.
+ *  Keeps the chat readable when an agent fires a tool many times in a row. */
+export const TraceGroupMessage: React.FC<{ label: string; traces: TraceEntryData[] }> = ({
+  label,
+  traces,
+}) => {
+  const [open, setOpen] = useState(false);
+  const count = traces.length;
+  const totalMs = traces.reduce(
+    (sum, t) => sum + (typeof t.durationMs === 'number' ? t.durationMs : 0),
+    0,
+  );
+  const totalLabel = formatDurationMs(totalMs);
+  const anyPending = traces.some((t) => t.kind === 'tool_call' && t.durationMs === undefined);
+
+  return (
+    <div className="px-4 my-1 animate-fade-in">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 text-left rounded-lg px-3 py-1.5 w-full max-w-[85%] transition-colors hover:opacity-90"
+        style={{
+          backgroundColor: 'var(--bg-secondary)',
+          border: '1px solid var(--border-color)',
+          cursor: 'pointer',
+        }}
+      >
+        {anyPending ? (
+          <div
+            className="w-3 h-3 rounded-full border-2 border-t-transparent animate-spin flex-shrink-0"
+            style={{ borderColor: 'var(--border-color)', borderTopColor: 'var(--accent)' }}
+          />
+        ) : (
+          <svg
+            className="w-3.5 h-3.5 flex-shrink-0"
+            style={{ color: 'var(--accent)' }}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+          </svg>
+        )}
+        <span className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
+          {label}
+        </span>
+        <div className="flex items-center gap-2 ml-auto flex-shrink-0">
+          <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>
+            · {count} calls
+          </span>
+          {totalMs > 0 && totalLabel && (
+            <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>
+              · {totalLabel}
+            </span>
+          )}
+          <svg
+            className="w-3 h-3 flex-shrink-0 transition-transform"
+            style={{ color: 'var(--text-muted)', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+          </svg>
+        </div>
+      </button>
+      {open && (
+        <div
+          className="mt-1 ml-3 flex flex-col gap-0.5 max-w-[85%] rounded-lg p-1"
+          style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}
         >
-          {data.detail}
-        </pre>
+          {traces.map((t, i) => (
+            <TraceGroupChild key={i} data={t} />
+          ))}
+        </div>
       )}
     </div>
   );
@@ -521,7 +765,8 @@ const AgentRow: React.FC<{
   agent: Record<string, unknown>;
   index: number;
   toolNameMap: Record<string, string>;
-}> = ({ agent, index, toolNameMap }) => {
+  taskCount?: number;
+}> = ({ agent, index, toolNameMap, taskCount }) => {
   const [open, setOpen] = useState(false);
   const name = (agent.name as string) || (agent.role as string) || `Agent ${index + 1}`;
   const role = (agent.role as string) || '';
@@ -546,9 +791,19 @@ const AgentRow: React.FC<{
         <svg className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--accent)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0" />
         </svg>
-        <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{name}</span>
-        {role && role !== name && (
-          <span className="text-xs px-1.5 py-0.5 rounded" style={{ color: 'var(--text-muted)', backgroundColor: 'var(--bg-primary)' }}>{role}</span>
+        <span className="flex flex-col min-w-0">
+          <span className="text-sm font-semibold leading-snug" style={{ color: 'var(--text-primary)' }}>{name}</span>
+          {role && role !== name && (
+            <span className="text-xs leading-snug" style={{ color: 'var(--text-muted)' }}>{role}</span>
+          )}
+        </span>
+        {taskCount != null && taskCount > 0 && (
+          <span
+            className="text-[10px] px-2 py-0.5 rounded-full ml-auto flex-shrink-0 self-start"
+            style={{ color: 'var(--text-muted)', backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}
+          >
+            {taskCount} task{taskCount > 1 ? 's' : ''}
+          </span>
         )}
       </button>
       {open && (

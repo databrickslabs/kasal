@@ -35,6 +35,10 @@ import pathlib
 # Import custom model handlers (applied early for monkey patches)
 # This ensures the monkey patches are applied to handle model-specific responses
 from src.core.llm_handlers.databricks_gpt_oss_handler import DatabricksGPTOSSHandler, DatabricksRetryLLM
+# Make CrewAI cognitive-memory models tolerate stringified-JSON metadata that
+# Databricks/Bedrock models return (avoids the "1 validation error for
+# MemoryAnalysis" retry spam). Import for its module-level patch side effect.
+import src.core.llm_handlers.crewai_memory_patch  # noqa: F401
 
 
 # Get the absolute path to the logs directory
@@ -798,6 +802,116 @@ class LLMManager:
             raise ValueError("group_id is REQUIRED for get_llm (multi-tenant isolation)")
 
         return await LLMManager.configure_crewai_llm(model_name, group_id, temperature)
+
+    @staticmethod
+    async def get_embeddings(
+        texts: List[str],
+        model: str = "databricks-gte-large-en",
+        embedder_config: Optional[Dict[str, Any]] = None,
+        batch_size: Optional[int] = None,
+    ) -> List[Optional[List[float]]]:
+        """
+        Get embedding vectors for many texts efficiently.
+
+        Resolves Databricks auth ONCE and sends texts in batched requests, instead
+        of one auth lookup + one HTTP round-trip per text. Returns a list aligned
+        with ``texts`` (None for any text that failed). For non-Databricks
+        providers, falls back to sequential ``get_embedding`` calls.
+        """
+        if not texts:
+            return []
+
+        provider = 'databricks'
+        embedding_model = model
+        if embedder_config:
+            provider = embedder_config.get('provider', 'databricks')
+            embedding_model = embedder_config.get('config', {}).get('model', model)
+
+        # Only the Databricks serving endpoint supports the batched payload here;
+        # other providers fall back to the existing per-text path.
+        if not (provider == 'databricks' or 'databricks' in embedding_model):
+            return [
+                await LLMManager.get_embedding(t, model=model, embedder_config=embedder_config)
+                for t in texts
+            ]
+
+        if batch_size is None:
+            batch_size = int(os.getenv("EMBEDDING_BATCH_SIZE", "32"))
+
+        try:
+            from src.utils.databricks_auth import get_auth_context
+            from src.utils.user_context import UserContext
+
+            # Resolve auth ONCE for the whole file (this is the per-chunk cost we
+            # are eliminating — each get_auth_context() opens a DB session).
+            user_token = UserContext.get_user_token()
+            emb_group_id = LLMManager._get_group_id_from_context(required=False)
+            auth = await get_auth_context(user_token=user_token, group_id=emb_group_id)
+            if not auth:
+                embedding_logger.warning("No Databricks auth available for batch embeddings")
+                return [None] * len(texts)
+
+            if auth.auth_method in ("OBO", "OAuth"):
+                request_headers = auth.get_headers().copy()
+                request_headers.setdefault("Content-Type", "application/json")
+            else:
+                request_headers = {
+                    "Authorization": f"Bearer {auth.token}",
+                    "Content-Type": "application/json",
+                }
+
+            api_base = DatabricksURLUtils.construct_serving_endpoints_url(auth.workspace_url)
+            workspace_url = DatabricksURLUtils.extract_workspace_from_endpoint(api_base)
+            model_for_url = (
+                embedding_model if embedding_model.startswith('databricks/')
+                else f"databricks/{embedding_model}"
+            )
+            endpoint_url = DatabricksURLUtils.construct_model_invocation_url(workspace_url, model_for_url)
+
+            import aiohttp
+            timeout = aiohttp.ClientTimeout(
+                total=float(os.getenv("EMBEDDING_HTTP_TIMEOUT_SECONDS", "60"))
+            )
+            results: List[Optional[List[float]]] = []
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                for start in range(0, len(texts), batch_size):
+                    batch = texts[start:start + batch_size]
+                    payload = {"input": batch}
+                    try:
+                        async with session.post(
+                            endpoint_url, headers=request_headers, json=payload, timeout=timeout
+                        ) as response:
+                            if response.status == 200:
+                                result = await response.json()
+                                data = result.get('data', [])
+                                try:
+                                    data = sorted(data, key=lambda d: d.get('index', 0))
+                                except Exception:
+                                    pass
+                                if len(data) == len(batch):
+                                    results.extend([d.get('embedding', d) for d in data])
+                                else:
+                                    embedding_logger.warning(
+                                        f"Batch embedding size mismatch: got {len(data)} for {len(batch)}"
+                                    )
+                                    results.extend(
+                                        [data[i].get('embedding') if i < len(data) else None
+                                         for i in range(len(batch))]
+                                    )
+                            else:
+                                error_text = await response.text()
+                                embedding_logger.error(
+                                    f"Batch embedding API error {response.status}: {error_text}"
+                                )
+                                results.extend([None] * len(batch))
+                    except Exception as batch_err:
+                        embedding_logger.error(f"Batch embedding request failed: {batch_err}")
+                        results.extend([None] * len(batch))
+            return results
+
+        except Exception as e:
+            embedding_logger.error(f"Error in batch embeddings: {e}")
+            return [None] * len(texts)
 
     @staticmethod
     async def get_embedding(text: str, model: str = "databricks-gte-large-en", embedder_config: Optional[Dict[str, Any]] = None) -> Optional[List[float]]:

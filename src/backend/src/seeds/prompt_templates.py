@@ -11,6 +11,33 @@ from src.models.template import PromptTemplate
 # Configure logging
 logger = logging.getLogger(__name__)
 
+
+# Injected into the crew/task GENERATION prompt at runtime ONLY when GenieTool is
+# among the workspace's available tools. Biases the generator toward Genie for
+# questions about the org's OWN data/metrics (instead of defaulting to web search),
+# so an Auto-format prompt like "the most effective marketing campaign" produces a
+# Genie crew (and therefore the Genie-space picker) rather than a Perplexity crew.
+GENIE_ROUTING_DIRECTIVE = "\n".join([
+    "",
+    "=== TOOL ROUTING — READ CAREFULLY (GenieTool is available) ===",
+    "GenieTool answers questions from the ORGANIZATION'S OWN structured data (its data",
+    "warehouse) using natural language. It is the DEFAULT tool for any question about",
+    "the organization's data, metrics, or business performance, INCLUDING:",
+    "- marketing campaigns, campaign effectiveness, ROI, CTR, conversions, spend",
+    "- sales, revenue, pipeline, orders; customers, segments, churn, retention",
+    "- products, inventory, operations; any KPI / analytics question",
+    "- any 'top N', 'most/least', 'best', 'highest/lowest', 'trend', or 'by <dimension>' question",
+    "For ALL such questions you MUST assign ONLY GenieTool to the data task, and you",
+    "MUST NOT assign PerplexityTool or ScrapeWebsiteTool.",
+    "Use web-search tools ONLY when the user EXPLICITLY asks for EXTERNAL / public",
+    "information (news, competitor research, market trends, facts not in the org's data).",
+    "EXAMPLES:",
+    "- 'what is the most effective marketing campaign' -> GenieTool (the org's campaign data)",
+    "- 'top customers by revenue this quarter' -> GenieTool",
+    "- 'latest AI news' / 'what are competitors doing' -> PerplexityTool (external)",
+    "When in doubt for a business/metrics question, choose GenieTool.",
+])
+
 # Define template contents
 GENERATE_AGENT_TEMPLATE = """You are an expert at creating AI agents. Based on the user's description, generate a complete agent setup.
 

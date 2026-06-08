@@ -36,6 +36,9 @@ dependencies = [
     "cryptography",
     "python-multipart>=0.0.9",
 
+    # Document parsing
+    "pdfminer.six",  # MIT-licensed pure-Python PDF text extraction (knowledge-file uploads)
+
     # Databricks
     "databricks",
     "databricks-sdk>=0.102.0",

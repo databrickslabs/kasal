@@ -64,67 +64,109 @@ class KnowledgeEmbeddingService:
 
             logger.info(f"[EMBEDDING] Generated {len(chunks)} context-enriched chunks")
 
-            # Get vector storage
-            vector_storage = await self._get_vector_storage(user_token)
-            if not vector_storage:
-                logger.warning(f"[EMBEDDING] Vector search not configured")
-                return {"status": "skipped", "reason": "Vector search not configured"}
+            # Knowledge embeddings are stored in the application's pgvector
+            # documentation_embeddings table (Lakebase pgvector in production,
+            # SQLite locally), scoped by group_id (tenant isolation) and file_path
+            # (so the search tool can narrow to a crew's knowledge sources). The
+            # raw file still lives in the Databricks Volume; only the vector is
+            # stored here. This replaces the Databricks Vector Search index.
+            from src.core.llm_manager import LLMManager
+            from src.schemas.documentation_embedding import DocumentationEmbeddingCreate
+            from src.repositories.documentation_embedding_repository import (
+                DocumentationEmbeddingRepository,
+            )
+            from src.models.documentation_embedding import KnowledgeEmbedding
 
-            logger.info(f"[EMBEDDING] Using vector index: {vector_storage.index_name}")
-
-            # Process each chunk
-            embedded_chunks = 0
             filename = file_path.split('/')[-1]
 
+            # Embed ALL chunks in batches with a single auth resolution. Doing this
+            # per-chunk previously re-opened a DB session + re-resolved the PAT for
+            # every chunk (243 lookups for a 243-chunk file) and issued one HTTP
+            # round-trip each — the dominant cost. Same model as the search side
+            # (databricks-gte-large-en, 1024 dims) so query/stored vectors match.
+            chunk_texts = [c['content'] for c in chunks]
+            embeddings = await LLMManager.get_embeddings(
+                chunk_texts, model="databricks-gte-large-en"
+            )
+
+            creates: List[DocumentationEmbeddingCreate] = []
             for i, chunk_data in enumerate(chunks):
-                try:
-                    chunk_content = chunk_data['content']
-                    raw_content = chunk_data.get('raw_content', chunk_content)
-                    section = chunk_data.get('section', f'Section {i+1}')
-                    document_summary = chunk_data.get('document_summary', '')
+                chunk_content = chunk_data['content']
+                raw_content = chunk_data.get('raw_content', chunk_content)
+                section = chunk_data.get('section', f'Section {i+1}')
+                document_summary = chunk_data.get('document_summary', '')
 
-                    # Prepare metadata
-                    metadata = {
-                        'source': file_path,
-                        'filename': filename,
-                        'execution_id': execution_id,
-                        'group_id': self.group_id,
-                        'chunk_index': i,
-                        'total_chunks': len(chunks),
-                        'section': section,
-                        'parent_document_id': f"{self.group_id}:{execution_id}:{filename}",
-                        'document_summary': document_summary,
-                        'file_path': file_path,
-                        'created_at': datetime.utcnow().isoformat(),
-                        'type': 'knowledge_source',
-                        'content_type': self._detect_content_type(filename)
-                    }
-
-                    # Convert agent_ids to JSON string for storage
-                    import json
-                    agent_ids_json = json.dumps(agent_ids) if agent_ids else json.dumps([])
-
-                    data = {
-                        'content': chunk_content,
-                        'agent_ids': agent_ids_json,
-                        'group_id': self.group_id,
-                        'metadata': metadata,
-                        'context': {
-                            'query_text': f"Knowledge file: {filename}",
-                            'session_id': execution_id,
-                            'interaction_sequence': i
-                        }
-                    }
-
-                    # Save to vector storage
-                    await vector_storage.save(data)
-                    embedded_chunks += 1
-
-                    logger.info(f"[EMBEDDING] Embedded chunk {i+1}/{len(chunks)} for file: {file_path}")
-
-                except Exception as chunk_error:
-                    logger.error(f"[EMBEDDING] Error embedding chunk {i}: {chunk_error}")
+                embedding = embeddings[i] if i < len(embeddings) else None
+                if not embedding:
+                    logger.warning(f"[EMBEDDING] No embedding produced for chunk {i}; skipping")
                     continue
+
+                # Prepare metadata (kept in the doc_metadata JSON column)
+                metadata = {
+                    'source': file_path,
+                    'filename': filename,
+                    'execution_id': execution_id,
+                    'group_id': self.group_id,
+                    'agent_ids': agent_ids or [],
+                    'chunk_index': i,
+                    'total_chunks': len(chunks),
+                    'section': section,
+                    'parent_document_id': f"{self.group_id}:{execution_id}:{filename}",
+                    'document_summary': document_summary,
+                    'raw_content': raw_content,
+                    'file_path': file_path,
+                    'created_at': datetime.utcnow().isoformat(),
+                    'type': 'knowledge_source',
+                    'content_type': self._detect_content_type(filename)
+                }
+
+                creates.append(DocumentationEmbeddingCreate(
+                    source=file_path,
+                    title=f"{filename} ({section})",
+                    content=chunk_content,
+                    embedding=embedding,
+                    doc_metadata=metadata,
+                    group_id=self.group_id,
+                    file_path=file_path,
+                ))
+
+            # Store all chunk rows in ONE bulk insert. When the active memory
+            # backend is Lakebase, this writes to the Lakebase memory instance
+            # (kasal.documentation_embeddings) — the same pgvector instance as
+            # crew memory — otherwise to the app DB. We bulk-insert on a single
+            # session (never the SQLite per-row queue, whose separate session
+            # deadlocks against this upload's open transaction).
+            from src.services.knowledge_embedding_session import (
+                knowledge_embedding_session,
+                ensure_lakebase_doc_table,
+            )
+
+            embedded_chunks = len(creates)
+            if creates:
+                async with knowledge_embedding_session(
+                    self.session, self.group_id, user_token
+                ) as (store_session, is_lakebase):
+                    repository = DocumentationEmbeddingRepository(store_session, model=KnowledgeEmbedding)
+                    try:
+                        if is_lakebase:
+                            # Self-heal the Lakebase table (add embedding/group_id/
+                            # file_path columns if it pre-dates the pgvector schema)
+                            # before inserting.
+                            await ensure_lakebase_doc_table(store_session)
+                        await repository.bulk_create(creates)
+                        if not is_lakebase:
+                            # Lakebase sessions commit on context exit; the app
+                            # session must be committed explicitly.
+                            await store_session.commit()
+                        logger.info(
+                            f"[EMBEDDING] Stored {embedded_chunks} chunks in knowledge_embeddings "
+                            f"(lakebase={is_lakebase}, group={self.group_id}, file={file_path})"
+                        )
+                    except Exception as store_error:
+                        logger.error(f"[EMBEDDING] Failed to store knowledge embeddings: {store_error}")
+                        if not is_lakebase:
+                            await store_session.rollback()
+                        raise
 
             logger.info(f"[EMBEDDING] Successfully embedded {embedded_chunks}/{len(chunks)} chunks")
 
@@ -132,7 +174,7 @@ class KnowledgeEmbeddingService:
                 "status": "success",
                 "chunks_processed": len(chunks),
                 "chunks_embedded": embedded_chunks,
-                "index_name": vector_storage.index_name,
+                "index_name": "knowledge_embeddings (pgvector)",
                 "message": f"Successfully embedded {embedded_chunks} chunks from {file_path}"
             }
 

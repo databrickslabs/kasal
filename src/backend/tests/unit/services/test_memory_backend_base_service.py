@@ -61,9 +61,6 @@ def sample_backend():
             "workspace_url": "https://test.databricks.com",
             "embedding_dimension": 768
         },
-        enable_short_term=True,
-        enable_long_term=True,
-        enable_entity=True,
         is_active=True,
         is_default=False,
         created_at=datetime.utcnow(),
@@ -74,7 +71,7 @@ def sample_backend():
 @pytest.fixture
 def databricks_config():
     """Create a sample Databricks configuration."""
-    return DatabricksMemoryConfig(
+    return DatabricksMemoryConfig(memory_index="catalog.schema.memory_index", 
         endpoint_name="test-endpoint",
         short_term_index="test.schema.short_term",
         long_term_index="test.schema.long_term",
@@ -97,9 +94,6 @@ class TestMemoryBackendBaseService:
             description="Test Description",
             backend_type=MemoryBackendType.DATABRICKS,
             databricks_config=databricks_config,
-            enable_short_term=True,
-            enable_long_term=True,
-            enable_entity=True
         )
         
         mock_uow.memory_backend_repository.get_by_name.return_value = None
@@ -231,31 +225,7 @@ class TestMemoryBackendBaseService:
         # Assert
         assert result == sample_backend
         mock_uow.memory_backend_repository.get_default_by_group_id.assert_called_once_with(group_id)
-    
-    @pytest.mark.asyncio
-    async def test_update_memory_backend_success(self, service, mock_uow, sample_backend):
-        """Test successful update of a memory backend."""
-        # Arrange
-        group_id = "test-group-123"
-        backend_id = sample_backend.id
-        update_data = MemoryBackendUpdate(
-            name="Updated Backend",
-            description="Updated Description",
-            enable_short_term=False
-        )
-        
-        mock_uow.memory_backend_repository.get.return_value = sample_backend
-        
-        # Act
-        result = await service.update_memory_backend(group_id, backend_id, update_data)
-        
-        # Assert
-        assert result == sample_backend
-        assert sample_backend.name == "Updated Backend"
-        assert sample_backend.description == "Updated Description"
-        assert sample_backend.enable_short_term == False
-        service.session.commit.assert_not_called()  # get_db() auto-commits
-    
+
     @pytest.mark.asyncio
     async def test_update_backend_type_clears_databricks_config(self, service, mock_uow, sample_backend):
         """Test updating backend type clears databricks config."""

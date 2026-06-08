@@ -256,7 +256,7 @@ async def test_validate_memory_config_databricks_valid():
     from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType, DatabricksMemoryConfig
     config = MemoryBackendConfig(
         backend_type=MemoryBackendType.DATABRICKS,
-        databricks_config=DatabricksMemoryConfig(
+        databricks_config=DatabricksMemoryConfig(memory_index="catalog.schema.memory_index", 
             workspace_url="https://example.com",
             endpoint_name="my-endpoint",
             short_term_index="st_idx",
@@ -291,7 +291,7 @@ async def test_get_databricks_indexes():
     svc.get_available_indexes = AsyncMock(return_value={"indexes": ["idx1"]})
     ctx = AdminCtx()
     from src.schemas.memory_backend import DatabricksMemoryConfig
-    config = DatabricksMemoryConfig(
+    config = DatabricksMemoryConfig(memory_index="catalog.schema.memory_index", 
         workspace_url="https://example.com",
         endpoint_name="my-endpoint",
         short_term_index="st_idx",

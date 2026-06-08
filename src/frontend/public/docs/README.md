@@ -97,20 +97,36 @@ What Kasal provides out of the box to build, operate, and govern AI workflows.
 
 ---
 
+## Power BI → Unity Catalog Metric View Migration
+End-to-end automation of PBI semantic model translation to UC Metric Views.
+
+### [UCMV Pipeline Config Guide](./UCMV_PIPELINE_CONFIG_GUIDE.md)
+**For Data Engineers and Analytics Engineers**
+
+Explains every config key in the pipeline — what is auto-extracted from PBI APIs and what requires human domain knowledge.
+
+### [PowerBI Tools Reference](./powerbi/README.md)
+**For Platform Engineers and Power BI Admins**
+
+Full reference for all 18 Power BI tools (Tools 72–90) and their configuration.
+
+---
 ## Documentation Structure
 How this folder is organized and where to find topics.
 
 ```
 docs/
-├── README.md                    # This file - Documentation hub
-├── CODE_STRUCTURE_GUIDE.md      # Code structure documentation
-├── DEVELOPER_GUIDE.md           # Developer documentation
-├── ARCHITECTURE_GUIDE.md        # Architecture documentation
-├── API_REFERENCE.md             # API reference
-└── archive/                     # Legacy documentation
-    ├── technical/               # Technical deep-dives
-    ├── security/                # Security documentation
-    └── guides/                  # Various guides
+├── README.md                         # This file — Documentation hub
+├── UCMV_PIPELINE_CONFIG_GUIDE.md     # Pipeline config reference
+├── CODE_STRUCTURE_GUIDE.md           # Code structure documentation
+├── DEVELOPER_GUIDE.md                # Developer documentation
+├── ARCHITECTURE_GUIDE.md             # Architecture documentation
+├── API_REFERENCE.md                  # API reference
+├── WHY_KASAL.md                      # What problems Kasal solves
+└── archive/                          # Legacy documentation
+    ├── technical/
+    ├── security/
+    └── guides/
 ```
 
 ---

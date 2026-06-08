@@ -1,9 +1,10 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { ExecutionStatus } from './types/execution';
-import { createExecution, stopExecution, listExecutions } from './api/executions';
+import { createExecution, stopExecution, listExecutions, getExecutionStatus } from './api/executions';
 import { saveGeneratedCrew, usesGenieTool } from './api/crews';
 import { useSessionStore } from './store/sessionStore';
 import { useExecutionStore } from './store/executionStore';
+import { readActiveExecution, clearActiveExecution } from './store/activeExecutionMarker';
 import { useAppStore } from './store/appStore';
 import { useDispatcher, PlanData, FlowData } from './hooks/useDispatcher';
 import { useExecutionStream } from './hooks/useExecutionStream';
@@ -79,8 +80,25 @@ export function buildTraceEntry(
 ): TraceEntry | null {
   const eventType = (data?.event_type as string) || '';
   const eventSource = (data?.event_source as string) || '';
-  const output = (data?.output as Record<string, unknown>) || {};
-  const extra = (output.extra_data as Record<string, unknown>) || {};
+  // `output` (and its nested `extra_data`) is a JSON column. Over the SSE path
+  // (local dev) it arrives as a dict; over the REST polling fallback on
+  // Postgres/asyncpg (Lakebase, deployed) the same column comes back as a JSON
+  // STRING. Parse strings so memory + tool content render identically on both —
+  // otherwise polled traces (the only transport on Databricks Apps, where SSE
+  // is dead) would show no memory/tool results.
+  const asObject = (v: unknown): Record<string, unknown> => {
+    if (typeof v === 'string') {
+      try {
+        const parsed = JSON.parse(v);
+        return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+      } catch {
+        return {};
+      }
+    }
+    return (v as Record<string, unknown>) || {};
+  };
+  const output = asObject(data?.output);
+  const extra = asObject(output.extra_data);
   const duration = typeof output.duration_ms === 'number' ? (output.duration_ms as number) : undefined;
   const now = Date.now();
 
@@ -117,6 +135,27 @@ export function buildTraceEntry(
       detail: content || undefined,
       timestamp: now,
       matchKey: toolMatchKey(toolName, input),
+    };
+  }
+
+  // Memory retrieval — surface the RETRIEVED memories (the context), not just a
+  // "searching…" ping. CrewAI's recall emits these with the matched memories in
+  // output.content; without this branch they fall to the generic handler below
+  // and the context is hidden (or dropped as JSON noise). The matching "Search
+  // memory" tool result still shows the empty case on its own.
+  if (eventType === 'memory_retrieval' || eventType === 'memory_retrieval_completed') {
+    const content = typeof output.content === 'string' ? (output.content as string).trim() : '';
+    const foundNothing = !content || /no relevant memories|no memories found|^\[\]$/i.test(content);
+    if (foundNothing) return null; // nothing retrieved — don't add a redundant pill
+    return {
+      kind: 'tool_result',
+      // Same label so consecutive recalls group under one "Memory" line.
+      label: 'Memory',
+      sublabel: 'context retrieved',
+      durationMs: duration,
+      source: eventSource || undefined,
+      detail: content,
+      timestamp: now,
     };
   }
 
@@ -178,7 +217,11 @@ export function summarizeTaskOutput(
   }
 
   if (preview) {
-    const kind = preview.type === 'html' ? 'HTML output' : preview.type === 'markdown' ? 'report' : 'result';
+    const kind =
+      preview.type === 'html' ? 'an HTML output'
+        : preview.type === 'markdown' ? 'a report'
+          : preview.type === 'ui' ? 'an app'
+            : 'a result';
     return `Generated ${kind}. View it in the preview pane.`;
   }
 
@@ -188,6 +231,58 @@ export function summarizeTaskOutput(
   }
 
   return trimmed;
+}
+
+/**
+ * Extract the final answer text from the various result shapes the backend
+ * returns ("text", {result}, {result:{result}}, {content}, {output}, …).
+ * Shared by the live SSE completion path AND the REST polling fallback so both
+ * render the answer identically.
+ */
+export function extractResultText(data: Record<string, unknown>): string {
+  let resultText = '';
+  try {
+    const rawResult = data.result;
+    if (typeof rawResult === 'string') {
+      try {
+        const parsed = JSON.parse(rawResult);
+        if (parsed && typeof parsed === 'object') {
+          resultText = (typeof parsed.result === 'string' ? parsed.result : '')
+            || (typeof parsed.content === 'string' ? parsed.content : '')
+            || rawResult;
+        } else {
+          resultText = rawResult;
+        }
+      } catch {
+        resultText = rawResult;
+      }
+    } else if (rawResult && typeof rawResult === 'object') {
+      const nested = rawResult as Record<string, unknown>;
+      const inner = nested.result ?? nested.content ?? nested.raw;
+      if (typeof inner === 'string') {
+        resultText = inner;
+      } else if (inner && typeof inner === 'object') {
+        const deepContent = (inner as Record<string, unknown>).content;
+        if (typeof deepContent === 'string') {
+          resultText = deepContent;
+        } else {
+          resultText = JSON.stringify(inner);
+        }
+      } else {
+        resultText = JSON.stringify(nested);
+      }
+    }
+    if (!resultText && typeof data.content === 'string') {
+      resultText = data.content;
+    }
+    if (!resultText) {
+      const output = data.output;
+      resultText = typeof output === 'string' ? output : '';
+    }
+  } catch {
+    resultText = '';
+  }
+  return resultText;
 }
 
 const ChatWorkspace: React.FC = () => {
@@ -211,6 +306,10 @@ const ChatWorkspace: React.FC = () => {
   const previewIndex = useExecutionStore((s) => s.previewIndex);
   const navigatePreview = useExecutionStore((s) => s.navigatePreview);
   const chatCollapsed = useExecutionStore((s) => s.chatCollapsed);
+  // "Workspace memory" recall scope, owned by the store so it persists across
+  // the empty→conversation input swap (local state would reset to ON).
+  const workspaceMemory = useExecutionStore((s) => s.workspaceMemory);
+  const setWorkspaceMemory = useExecutionStore((s) => s.setWorkspaceMemory);
 
   // Render-time isolation guard: only show a preview that belongs to the
   // session currently on screen. This is the backstop that prevents a preview
@@ -310,23 +409,120 @@ const ChatWorkspace: React.FC = () => {
     });
   }, []);
 
+  // Chat sessions are per workspace. When the user switches workspace (the
+  // group store fires 'group-changed'), re-list sessions for the new group and
+  // rehydrate that group's active session — so the sidebar + chat only ever
+  // show the current workspace's conversations.
+  useEffect(() => {
+    const onGroupChange = () => {
+      void useSessionStore.getState().reloadForGroup().then(() => {
+        const sid = useSessionStore.getState().currentSessionId;
+        if (sid) {
+          useExecutionStore.getState().restoreSessionState(sid);
+        } else {
+          useExecutionStore.getState().resetForSession();
+        }
+      });
+    };
+    window.addEventListener('group-changed', onGroupChange);
+    return () => window.removeEventListener('group-changed', onGroupChange);
+  }, []);
+
   // Collapse paired tool events (tool_usage + matching *_run) into a single
   // chat pill keyed by matchKey, regardless of which order they arrive in.
   const traceMessageIdsRef = useRef<Map<string, { messageId: string; resolved: boolean }>>(
     new Map(),
   );
-
+  // Trace DB ids already rendered this run. The live SSE stream and the REST
+  // polling fallback (Job-History style) can both deliver the same trace; this
+  // guarantees each trace renders exactly once regardless of transport.
+  const seenTraceIdsRef = useRef<Set<number>>(new Set());
+  // jobId → the session that STARTED that job. Every trace/output carries its
+  // job_id, so we attribute it to the right session even when runs overlap or
+  // the user switched away — instead of trusting the single global "current
+  // owner" slot, which mis-routes one session's output into another.
+  const jobOwnerRef = useRef<Map<string, string>>(new Map());
   // The most recent generated crew in this session — the target for `/save`.
   // (The bookmark on each crew card saves its own specific crew directly.)
   const lastGeneratedRef = useRef<GenerationCompleteData | null>(null);
 
-  // --- Execution Stream ---
-  const executionStream = useExecutionStream({
-    onTrace: (message, data) => {
-      const trace = buildTraceEntry(message, data);
-      if (!trace) return;
-      const ownerSession = useExecutionStore.getState().executionOwnerSessionId;
+  // Render a task's output: surface previewable content in the preview pane
+  // (scoped to the owning session) and append a concise chat message. Shared by
+  // the live SSE stream and the REST polling fallback.
+  const handleTaskOutput = useCallback((taskName: string, output: string, ownerSession: string | null) => {
+    const execState = useExecutionStore.getState();
+    const sessionStore = useSessionStore.getState();
+
+    // Try to extract renderable content from various result shapes
+    let displayContent = output;
+    try {
+      // The output may be JSON with a "content" field wrapping the actual result
+      const parsed = typeof output === 'string' && output.trim().startsWith('{')
+        ? JSON.parse(output) as Record<string, unknown>
+        : null;
+      if (parsed?.content && typeof parsed.content === 'string') {
+        displayContent = parsed.content;
+      }
+    } catch { /* not JSON, use raw */ }
+
+    // Check if the content is previewable (HTML, structured markdown, A2UI
+    // surface, …). A UI document renders as a dashboard in the PREVIEW pane.
+    const preview = parsePreviewContent(displayContent);
+    const currentSession = sessionStore.currentSessionId;
+    if (preview) {
+      if (currentSession === ownerSession) {
+        execState.setPreviewContent(preview);
+      }
+      // Always persist to IndexedDB so it's available when switching back
+      if (ownerSession) {
+        saveSessionPreview(ownerSession, preview);
+      }
+    }
+
+    // Build a concise chat-message body. Raw task output (HTML dumps, status
+    // pings like "Calling tools.", or echoed task descriptions) clutters the
+    // chat; the real content lives in the preview pane.
+    const chatBody = summarizeTaskOutput(displayContent, preview);
+    if (chatBody !== null) {
+      const msg = `**${cleanTaskLabel(taskName)}** — ${chatBody}`;
+      if (ownerSession) {
+        sessionStore.addMessageToTargetSession(ownerSession, 'assistant', msg);
+      } else {
+        sessionStore.addMessage('assistant', msg);
+      }
+    }
+
+    // NOTE: we intentionally do NOT auto-complete the execution on a timer.
+    // The crew keeps running in the UI (appending each task's output to the
+    // preview) until the real completion/error arrives — via SSE or, when the
+    // Databricks Apps HTTP/2 proxy kills SSE, via the polling fallback's
+    // 'jobCompleted'/'jobFailed' window events.
+  }, []);
+
+  // Render a single trace event (tool pill / memory / task output) into the
+  // chat. Deduped by trace DB id so the live SSE stream and the REST polling
+  // fallback never render the same trace twice. This is THE seam that lets
+  // memory + Genie + tool traces appear in chat even when SSE is dead
+  // (Databricks Apps), exactly like crew-mode Job History does via polling.
+  const processTrace = useCallback((message: string, data?: Record<string, unknown>) => {
+    const traceId = data?.id;
+    if (typeof traceId === 'number') {
+      if (seenTraceIdsRef.current.has(traceId)) return;
+      seenTraceIdsRef.current.add(traceId);
+    }
+
+    // Attribute this trace to the session that STARTED its job (from job_id),
+    // not the session currently on screen — so a still-running run's output
+    // never lands in the session you switched to.
+    const jobId = data?.job_id as string | undefined;
+    const ownerSession =
+      (jobId && jobOwnerRef.current.get(jobId)) ||
+      useExecutionStore.getState().executionOwnerSessionId;
+
+    const trace = buildTraceEntry(message, data);
+    if (trace) {
       const sessionStore = useSessionStore.getState();
+      let handled = false;
 
       if (trace.matchKey) {
         const existing = traceMessageIdsRef.current.get(trace.matchKey);
@@ -346,142 +542,115 @@ const ChatWorkspace: React.FC = () => {
               resolved: true,
             });
           }
-          return;
+          handled = true;
         }
       }
 
-      const extra = { resultType: 'trace', resultData: trace };
-      const id = ownerSession
-        ? sessionStore.addMessageToTargetSession(ownerSession, 'assistant', '', extra)
-        : sessionStore.addMessage('assistant', '', extra);
-
-      if (trace.matchKey) {
-        traceMessageIdsRef.current.set(trace.matchKey, {
-          messageId: id,
-          resolved: trace.kind === 'tool_result',
-        });
-      }
-    },
-    onTaskOutput: (taskName, output) => {
-      const execState = useExecutionStore.getState();
-      const ownerSession = execState.executionOwnerSessionId;
-      const sessionStore = useSessionStore.getState();
-
-      // Try to extract renderable content from various result shapes
-      let displayContent = output;
-      try {
-        // The output may be JSON with a "content" field wrapping the actual result
-        const parsed = typeof output === 'string' && output.trim().startsWith('{')
-          ? JSON.parse(output) as Record<string, unknown>
-          : null;
-        if (parsed?.content && typeof parsed.content === 'string') {
-          displayContent = parsed.content;
-        }
-      } catch { /* not JSON, use raw */ }
-
-      // Check if the content is previewable (HTML, structured markdown, etc.)
-      const preview = parsePreviewContent(displayContent);
-      const currentSession = sessionStore.currentSessionId;
-      console.log(
-        '[Preview] onTaskOutput — preview:', preview ? `${preview.type} (${preview.data.length} chars)` : 'null',
-        '| currentSession:', currentSession,
-        '| ownerSession:', ownerSession,
-        '| match:', currentSession === ownerSession,
-        '| displayContent preview:', displayContent.slice(0, 120),
-      );
-      if (preview) {
-        if (currentSession === ownerSession) {
-          execState.setPreviewContent(preview);
-        }
-        // Always persist to IndexedDB so it's available when switching back
-        if (ownerSession) {
-          saveSessionPreview(ownerSession, preview);
+      if (!handled) {
+        const extra = { resultType: 'trace', resultData: trace };
+        const id = ownerSession
+          ? sessionStore.addMessageToTargetSession(ownerSession, 'assistant', '', extra)
+          : sessionStore.addMessage('assistant', '', extra);
+        if (trace.matchKey) {
+          traceMessageIdsRef.current.set(trace.matchKey, {
+            messageId: id,
+            resolved: trace.kind === 'tool_result',
+          });
         }
       }
+    }
 
-      // Build a concise chat-message body. Raw task output (HTML dumps, status
-      // pings like "Calling tools.", or echoed task descriptions) clutters the
-      // chat; the real content lives in the preview pane.
-      const chatBody = summarizeTaskOutput(displayContent, preview);
-      if (chatBody !== null) {
-        const msg = `**${cleanTaskLabel(taskName)}** — ${chatBody}`;
-        if (ownerSession) {
-          sessionStore.addMessageToTargetSession(ownerSession, 'assistant', msg);
-        } else {
-          sessionStore.addMessage('assistant', msg);
-        }
-      }
+    // task_completed carries a task's full output — render it (preview + chat).
+    if ((data?.event_type as string) === 'task_completed') {
+      const metadata = data?.trace_metadata as Record<string, unknown> | undefined;
+      const taskName = (metadata?.task_name as string) || (data?.event_context as string) || 'Task';
+      const rawOutput = data?.output ?? data?.result ?? message;
+      const taskOutput = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput);
+      handleTaskOutput(taskName, taskOutput, ownerSession);
+    }
+  }, [handleTaskOutput]);
 
-      // NOTE: we intentionally do NOT auto-complete the execution on a timer.
-      // The "Running crew..." banner stays until the real SSE completion/error
-      // event, so a multi-task crew keeps running in the UI (and keeps appending
-      // each task's output to the preview) instead of being cut short after an
-      // intermediate task. If a completion event is genuinely never received the
-      // user can dismiss with /dismiss; the crew-mode job history remains the
-      // source of truth for run status.
-    },
+  // De-dupe completion across the SSE path and the polling fallback so a run is
+  // finished exactly once (completeExecution/failExecution are NOT idempotent —
+  // a double call double-posts the result and to the wrong session). Keyed by
+  // job id; a no-op when there is no active job, so the callbacks still fire in
+  // isolation.
+  const finishedJobsRef = useRef<Set<string>>(new Set());
+  const finishOnce = useCallback((run: () => void) => {
+    const jobId = useExecutionStore.getState().activeExecution?.jobId;
+    if (jobId) {
+      if (finishedJobsRef.current.has(jobId)) return;
+      finishedJobsRef.current.add(jobId);
+    }
+    run();
+  }, []);
+  const completeExecutionOnce = useCallback((resultText: string) => {
+    finishOnce(() => useExecutionStore.getState().completeExecution(resultText));
+  }, [finishOnce]);
+  const failExecutionOnce = useCallback((error: string) => {
+    finishOnce(() => useExecutionStore.getState().failExecution(error));
+  }, [finishOnce]);
+
+  // --- Execution Stream ---
+  const executionStream = useExecutionStream({
+    onTrace: processTrace,
     onStatusChange: (status) => {
       useExecutionStore.getState().updateExecutionStatus(status as ExecutionStatus);
     },
     onComplete: (data) => {
-      // Extract result text from potentially nested structures.
-      // The backend may return the result in various shapes:
-      //   { result: "text" }
-      //   { result: { result: "text" } }
-      //   { result: { content: "text" } }
-      //   { content: "text" }
-      //   { output: "text" }
-      let resultText = '';
-      try {
-        const rawResult = data.result;
-        if (typeof rawResult === 'string') {
-          try {
-            const parsed = JSON.parse(rawResult);
-            if (parsed && typeof parsed === 'object') {
-              resultText = (typeof parsed.result === 'string' ? parsed.result : '')
-                || (typeof parsed.content === 'string' ? parsed.content : '')
-                || rawResult;
-            } else {
-              resultText = rawResult;
-            }
-          } catch {
-            resultText = rawResult;
-          }
-        } else if (rawResult && typeof rawResult === 'object') {
-          const nested = rawResult as Record<string, unknown>;
-          const inner = nested.result ?? nested.content ?? nested.raw;
-          if (typeof inner === 'string') {
-            resultText = inner;
-          } else if (inner && typeof inner === 'object') {
-            // Check one more level for content field
-            const deepContent = (inner as Record<string, unknown>).content;
-            if (typeof deepContent === 'string') {
-              resultText = deepContent;
-            } else {
-              resultText = JSON.stringify(inner);
-            }
-          } else {
-            resultText = JSON.stringify(nested);
-          }
-        }
-        // Fallback: check top-level content or output
-        if (!resultText && typeof data.content === 'string') {
-          resultText = data.content;
-        }
-        if (!resultText) {
-          const output = data.output;
-          resultText = typeof output === 'string' ? output : '';
-        }
-      } catch {
-        resultText = '';
-      }
-
-      useExecutionStore.getState().completeExecution(resultText);
+      completeExecutionOnce(extractResultText(data));
     },
     onError: (error) => {
-      useExecutionStore.getState().failExecution(error);
+      failExecutionOnce(error);
     },
   });
+
+  // REST polling fallback (Job-History style). The globally-mounted
+  // useTracePolling (SSEConnectionManager) polls /traces + /executions for any
+  // job announced via the 'jobCreated' event (dispatched in
+  // handleStartExecutionStream) and re-emits the results as window events.
+  // ChatMode consumes them here so memory/Genie/tool traces + completion show
+  // up even when the Databricks Apps HTTP/2 proxy kills the SSE stream.
+  useEffect(() => {
+    const onTraceUpdate = (e: Event) => {
+      const { jobId, trace } = (e as CustomEvent).detail || {};
+      const active = useExecutionStore.getState().activeExecution;
+      if (!active || active.jobId !== jobId || !trace) return;
+      const msg =
+        (trace.message as string) ||
+        (trace.trace as string) ||
+        JSON.stringify(trace);
+      processTrace(msg, trace as Record<string, unknown>);
+    };
+    const onJobCompleted = (e: Event) => {
+      const { jobId, result } = (e as CustomEvent).detail || {};
+      const st = useExecutionStore.getState();
+      if (!st.isExecuting || st.activeExecution?.jobId !== jobId) return;
+      completeExecutionOnce(extractResultText({ result }));
+    };
+    const onJobFailed = (e: Event) => {
+      const { jobId, error } = (e as CustomEvent).detail || {};
+      const st = useExecutionStore.getState();
+      if (!st.isExecuting || st.activeExecution?.jobId !== jobId) return;
+      failExecutionOnce((error as string) || 'Execution failed');
+    };
+    const onJobStopped = (e: Event) => {
+      const { jobId } = (e as CustomEvent).detail || {};
+      const st = useExecutionStore.getState();
+      if (!st.isExecuting || st.activeExecution?.jobId !== jobId) return;
+      failExecutionOnce('Execution stopped');
+    };
+    window.addEventListener('traceUpdate', onTraceUpdate as EventListener);
+    window.addEventListener('jobCompleted', onJobCompleted as EventListener);
+    window.addEventListener('jobFailed', onJobFailed as EventListener);
+    window.addEventListener('jobStopped', onJobStopped as EventListener);
+    return () => {
+      window.removeEventListener('traceUpdate', onTraceUpdate as EventListener);
+      window.removeEventListener('jobCompleted', onJobCompleted as EventListener);
+      window.removeEventListener('jobFailed', onJobFailed as EventListener);
+      window.removeEventListener('jobStopped', onJobStopped as EventListener);
+    };
+  }, [processTrace, completeExecutionOnce, failExecutionOnce]);
 
   // --- Generation Stream ---
   const generationStream = useGenerationStream({
@@ -495,9 +664,9 @@ const ChatWorkspace: React.FC = () => {
       // A Genie crew can't run until the user picks a Genie space, so don't
       // auto-run it — surface the space selector + a Run button on the card.
       const needsGenieSpace = usesGenieTool(data, useAppStore.getState().toolNameMap);
-      const msgContent = needsGenieSpace
-        ? 'Crew generated. Pick a Genie space below, then run it.'
-        : 'Crew generated. Starting run...';
+      // No status text — the run-activity container + the crew card carry the
+      // state; the card itself shows the Genie space selector when needed.
+      const msgContent = '';
 
       if (ownerSession) {
         sessionStore.addMessageToTargetSession(ownerSession, 'assistant', msgContent, {
@@ -547,12 +716,85 @@ const ChatWorkspace: React.FC = () => {
   const handleStartExecutionStream = useCallback(
     (jobId: string, sessionId?: string, opts?: { preservePreview?: boolean }) => {
       const origin = sessionId || useSessionStore.getState().currentSessionId;
+      // Remember which session owns this job, so its traces/output are routed
+      // back to it by job_id even if the user switches sessions mid-run.
+      if (origin) jobOwnerRef.current.set(jobId, origin);
       useExecutionStore.getState().startExecution(jobId, origin || undefined, opts);
       traceMessageIdsRef.current.clear();
+      seenTraceIdsRef.current.clear();
+      finishedJobsRef.current.clear();
       executionStream.startStream(jobId);
+      // Announce the job so the globally-mounted useTracePolling
+      // (SSEConnectionManager) starts its REST polling fallback for it. When the
+      // Databricks Apps HTTP/2 proxy kills SSE, the poller delivers traces +
+      // completion via 'traceUpdate'/'jobCompleted' window events (see the
+      // listener effect above), so memory/Genie/tool traces still render.
+      window.dispatchEvent(new CustomEvent('jobCreated', { detail: { jobId } }));
     },
     [executionStream],
   );
+
+  // Reconnect to a still-running crew after a page refresh. The in-memory store
+  // is wiped on reload, so without this the Stop button (and live updates)
+  // vanish even though the backend job is still running. The running job is
+  // persisted per session in IndexedDB; when a session becomes active we read
+  // it (async), re-attach the SSE stream + execution state, and verify status.
+  // Attempted once per session id (covers refresh on the running session, and
+  // switching to it afterwards).
+  const reconnectAttemptedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const sid = currentSessionId;
+    if (!sid || reconnectAttemptedRef.current.has(sid)) return;
+    // Mark BEFORE the async work so a re-render (handleStartExecutionStream /
+    // executionStream change identity) can't start a second attempt. We
+    // intentionally do NOT use a cleanup "cancelled" flag: the reconnect drives
+    // the GLOBAL store (not component-local state), so it's safe to complete
+    // even across re-renders/unmounts — and a cleanup flag was aborting the one
+    // in-flight read before it resolved, so the Stop button never came back.
+    reconnectAttemptedRef.current.add(sid);
+    (async () => {
+      const jobId = await readActiveExecution(sid);
+      if (!jobId) return;
+      // Reconnect ONLY restores a run into an EMPTY store (post-refresh). If any
+      // execution is already active — the user started a new run, or another
+      // reconnect ran while this one awaited the marker read — bail. Otherwise a
+      // late-resolving reconnect would swap the live SSE stream + owner back to
+      // this (older) job, leaking its output into whatever session is now on
+      // screen. (This is what made one session's output appear in another.)
+      if (useExecutionStore.getState().activeExecution) return;
+
+      // Restore the running state OPTIMISTICALLY so the Stop button reappears
+      // immediately, and re-attach the SSE stream (its replay buffer + future
+      // events drive live updates and completion). We deliberately do NOT gate
+      // this on a status fetch — if that fetch failed or returned an unexpected
+      // shape, the Stop button would vanish even though the crew is still
+      // running, which is exactly the bug we're fixing.
+      handleStartExecutionStream(jobId, sid, { preservePreview: true });
+
+      // Backstop: if the job had ALREADY finished before the refresh, drop the
+      // (now stale) running state so the Stop button doesn't linger. Only acts
+      // on a definitively-terminal status; anything else keeps the optimistic
+      // state and lets the SSE stream resolve it.
+      try {
+        const exec = await getExecutionStatus(jobId);
+        const status = String(exec?.status || '').toLowerCase();
+        const finished = ['completed', 'failed', 'stopped', 'cancelled', 'error'].includes(status);
+        if (finished && useExecutionStore.getState().activeExecution?.jobId === jobId) {
+          executionStream.stopStream();
+          useExecutionStore.setState({
+            isExecuting: false,
+            isLoading: false,
+            activeExecution: null,
+            executionOwnerSessionId: null,
+          });
+          clearActiveExecution(sid);
+        }
+      } catch {
+        // Status check failed (offline / transient) — keep the optimistic
+        // running state; the SSE stream remains the source of truth.
+      }
+    })();
+  }, [currentSessionId, handleStartExecutionStream, executionStream]);
 
   const doExecuteCrew = useCallback(
     async (plan: PlanData, inputs?: Record<string, string>) => {
@@ -657,6 +899,10 @@ const ChatWorkspace: React.FC = () => {
           toolConfigs,
           inputs,
           useAppStore.getState().toolNameMap,
+          originSessionId,
+          // Read the recall scope from the store at execution time so the value
+          // is always the user's current choice (not a stale closure capture).
+          useExecutionStore.getState().workspaceMemory,
         );
         const execution = await createExecution(crewConfig);
         const jobId = execution.job_id || execution.execution_id;
@@ -964,13 +1210,22 @@ const ChatWorkspace: React.FC = () => {
   );
 
   const handleSend = useCallback(
-    async (message: string) => {
+    async (
+      message: string,
+      meta?: { tools?: string[]; dispatchSuffix?: string; attachments?: string[] },
+    ) => {
       const handled = await handleLocalCommand(message);
       if (handled) return;
 
       useExecutionStore.getState().setIsLoading(true);
       try {
-        await dispatcher.sendMessage(message, selectedModel || undefined);
+        await dispatcher.sendMessage(
+          message,
+          selectedModel || undefined,
+          meta?.tools,
+          meta?.dispatchSuffix,
+          meta?.attachments,
+        );
       } finally {
         useExecutionStore.getState().setIsLoading(false);
       }
@@ -1220,6 +1475,9 @@ const ChatWorkspace: React.FC = () => {
               models={models}
               selectedModel={selectedModel}
               onModelChange={(m) => useAppStore.getState().setSelectedModel(m)}
+              sessionId={currentSessionId}
+              workspaceMemory={workspaceMemory}
+              onWorkspaceMemoryChange={setWorkspaceMemory}
             />
           </div>
         </main>

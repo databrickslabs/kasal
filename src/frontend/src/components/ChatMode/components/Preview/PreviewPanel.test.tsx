@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import PreviewPanel, { parsePreviewContent, PreviewContent } from './PreviewPanel';
 
@@ -348,5 +348,67 @@ describe('PreviewPanel component', () => {
     renderPanel({ type: 'ui', data: uiDoc });
     expect(screen.getByText('App')).toBeInTheDocument();
     expect(screen.getByText('Hello App')).toBeInTheDocument();
+  });
+});
+
+describe('PreviewPanel — full screen', () => {
+  const content: PreviewContent = { type: 'markdown', data: '# Hi\n\nsome text' };
+  let fsEl: Element | null;
+  const origReq = Element.prototype.requestFullscreen;
+  const origExit = document.exitFullscreen;
+
+  beforeEach(() => {
+    fsEl = null;
+    Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => fsEl });
+    Element.prototype.requestFullscreen = vi.fn(function (this: Element) {
+      fsEl = this;
+      document.dispatchEvent(new Event('fullscreenchange'));
+      return Promise.resolve();
+    });
+    document.exitFullscreen = vi.fn(() => {
+      fsEl = null;
+      document.dispatchEvent(new Event('fullscreenchange'));
+      return Promise.resolve();
+    });
+  });
+  afterEach(() => {
+    Element.prototype.requestFullscreen = origReq;
+    document.exitFullscreen = origExit;
+  });
+
+  it('hides the ENTIRE header bar in full screen; the browser (Esc) restores it', () => {
+    renderPanel(content, { onRefine: vi.fn() });
+    // header visible: title, type chip, Refine, full-screen toggle, close
+    expect(screen.getByText('Report')).toBeInTheDocument();
+    expect(screen.getByText('MARKDOWN')).toBeInTheDocument();
+    expect(screen.getByText('Refine')).toBeInTheDocument();
+    expect(screen.getByTitle('Close preview')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Full screen'));
+    expect(Element.prototype.requestFullscreen).toHaveBeenCalled();
+    // the whole bar is gone — no header controls at all
+    expect(screen.queryByText('Report')).toBeNull();
+    expect(screen.queryByText('MARKDOWN')).toBeNull();
+    expect(screen.queryByText('Refine')).toBeNull();
+    expect(screen.queryByTitle('Close preview')).toBeNull();
+    expect(screen.queryByLabelText('Full screen')).toBeNull();
+    // ...but the content keeps rendering
+    expect(screen.getByTestId('md')).toBeInTheDocument();
+
+    // browser exits full screen (Esc) → the bar returns
+    fsEl = null;
+    fireEvent(document, new Event('fullscreenchange'));
+    expect(screen.getByText('Report')).toBeInTheDocument();
+    expect(screen.getByLabelText('Full screen')).toBeInTheDocument();
+  });
+
+  it('swallows a rejected requestFullscreen (e.g. blocked in an iframe) and keeps the bar', async () => {
+    Element.prototype.requestFullscreen = vi.fn(() => Promise.reject(new Error('blocked')));
+    renderPanel(content, { onRefine: vi.fn() });
+    fireEvent.click(screen.getByLabelText('Full screen'));
+    await Promise.resolve();
+    // no fullscreenchange fired → bar stays, no unhandled rejection
+    expect(screen.getByLabelText('Full screen')).toBeInTheDocument();
+    expect(screen.getByText('Report')).toBeInTheDocument();
   });
 });

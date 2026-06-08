@@ -302,6 +302,25 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [refineOpen, setRefineOpen] = useState(false);
   const [refineValue, setRefineValue] = useState('');
+  const asideRef = useRef<HTMLElement>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+
+  // TRUE browser full screen (hides the browser chrome / top menu) via the
+  // Fullscreen API, kept in sync so an Esc / browser-driven exit also flips the
+  // toggle back.
+  useEffect(() => {
+    const onChange = () => setFullscreen(document.fullscreenElement === asideRef.current);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  // The toggle only shows when NOT full screen (the whole header is hidden in
+  // full screen), so it always *enters*; exiting is the browser's Esc (synced
+  // back via the fullscreenchange listener above).
+  const enterFullscreen = () => {
+    setRefineOpen(false);
+    void asideRef.current!.requestFullscreen().catch(() => {});
+  };
 
   const submitRefine = () => {
     const trimmed = refineValue.trim();
@@ -346,6 +365,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
 
   return (
     <aside
+      ref={asideRef}
       className="flex flex-col h-full"
       style={{
         flex: chatCollapsed ? '1 1 100%' : '1 1 50%',
@@ -354,7 +374,8 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
         borderLeft: chatCollapsed ? 'none' : '1px solid var(--border-color)',
       }}
     >
-      {/* Header */}
+      {/* Header — hidden entirely in full screen for a chrome-free view (exit with Esc) */}
+      {!fullscreen && (
       <div
         className="flex items-center justify-between px-4 py-3 flex-shrink-0"
         style={{ borderBottom: '1px solid var(--border-color)' }}
@@ -478,6 +499,17 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
             </button>
           )}
           <button
+            onClick={enterFullscreen}
+            className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:opacity-70"
+            style={{ color: 'var(--text-muted)' }}
+            title="Full screen"
+            aria-label="Full screen"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9m11.25-5.25h-4.5m4.5 0v4.5m0-4.5L15 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15m11.25 5.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+            </svg>
+          </button>
+          <button
             onClick={onClose}
             className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:opacity-70"
             style={{ color: 'var(--text-muted)' }}
@@ -499,6 +531,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
           </button>
         </div>
       </div>
+      )}
 
       {/* Refine instruction bar */}
       {onRefine && refineOpen && (
@@ -563,7 +596,13 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
         )}
 
         {content.type === 'ui' && uiSurface && (
-          <UiRenderer surface={uiSurface} />
+          // Key on the displayed content so a refine (or history navigation)
+          // REMOUNTS the renderer instead of reusing the instance. The refined
+          // deck reuses the same component ids (root/slide1…), so without a key
+          // React keeps the old instance — and its internal useState (slide
+          // index, surface.data model) — leaving the preview on the stale
+          // version. Index + content length changes whenever the artifact does.
+          <UiRenderer key={`ui-${index ?? 0}-${displayData.length}`} surface={uiSurface} />
         )}
       </div>
     </aside>

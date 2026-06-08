@@ -561,7 +561,7 @@ class TestCreateAgentAdditionalParams:
         cfg = _base_config(memory=True)
         agent, mock_cls, _ = await _make_agent(agent_config=cfg)
         call_kwargs = mock_cls.call_args[1]
-        assert call_kwargs.get("memory") is True
+        assert "memory" not in call_kwargs  # memory is deliberately NOT propagated to the Agent
 
     @pytest.mark.asyncio
     async def test_reasoning_param(self):

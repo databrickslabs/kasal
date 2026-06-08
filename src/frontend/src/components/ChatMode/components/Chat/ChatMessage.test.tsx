@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import ChatMessage from './ChatMessage';
+import ChatMessage, { TraceGroupMessage } from './ChatMessage';
 import type { ChatMessage as ChatMessageType } from '../../types/chat';
 
 // --- Mock leaf children so we isolate ChatMessage's routing logic ---
@@ -57,6 +57,16 @@ describe('ChatMessage — roles', () => {
   it('renders a user bubble', () => {
     render(<ChatMessage message={msg({ role: 'user', content: 'hi user' })} />);
     expect(screen.getByText('hi user')).toBeInTheDocument();
+  });
+  it('renders attachment chips on a user message', () => {
+    render(
+      <ChatMessage
+        message={msg({ role: 'user', content: 'analyze these', attachments: ['a.txt', 'b.pdf'] })}
+      />,
+    );
+    expect(screen.getByText('analyze these')).toBeInTheDocument();
+    expect(screen.getByText('a.txt')).toBeInTheDocument();
+    expect(screen.getByText('b.pdf')).toBeInTheDocument();
   });
   it('renders a system pill', () => {
     render(<ChatMessage message={msg({ role: 'system', content: 'system note' })} />);
@@ -193,6 +203,31 @@ describe('ChatMessage — trace messages', () => {
     expect(screen.getByText('big output')).toBeInTheDocument();
     fireEvent.click(screen.getByText('search').closest('button')!);
   });
+  it('renders a Genie tool_result inline (answer shown, question + SQL collapsed)', () => {
+    const genieDetail = [
+      'Question:',
+      'Top countries?',
+      '',
+      'SQL Query:',
+      'SELECT country FROM customers',
+      '',
+      'Answer:',
+      'Switzerland leads the customer base.',
+    ].join('\n');
+    render(
+      <ChatMessage
+        message={msg({
+          resultType: 'trace',
+          resultData: { label: 'GenieTool', kind: 'tool_result', durationMs: 4200, detail: genieDetail },
+        })}
+      />,
+    );
+    // The answer renders inline — no expand needed.
+    expect(screen.getByText(/Switzerland leads the customer base/)).toBeInTheDocument();
+    // Question + SQL are collapsed behind the toggle.
+    expect(screen.getByText('Show question & SQL')).toBeInTheDocument();
+    expect(screen.queryByText(/SELECT country FROM customers/)).not.toBeInTheDocument();
+  });
   it('renders an event with seconds duration and whitespace-only detail (not expandable)', () => {
     render(
       <ChatMessage
@@ -207,31 +242,45 @@ describe('ChatMessage — trace messages', () => {
 });
 
 describe('ChatMessage — generation_complete card', () => {
-  it('renders agent/task rows and expands them', () => {
+  it('groups each task under its assigned agent with a per-agent task count', () => {
     render(
       <ChatMessage
         message={msg({
           resultType: 'generation_complete',
           resultData: {
-            agents: [{ name: 'Researcher', role: 'Researcher', goal: 'find', backstory: 'bg', tools: ['t1'] }],
-            tasks: [{ name: 'Gather', description: 'desc', expected_output: 'out', tools: ['t2'] }],
+            agents: [
+              { name: 'Researcher', role: 'Senior Researcher', goal: 'find', backstory: 'bg', tools: ['t1'] },
+              { name: 'Writer' },
+            ],
+            tasks: [
+              { name: 'Gather', assigned_agent: 'Researcher', description: 'desc', expected_output: 'out', tools: ['t2'] },
+              { name: 'Review', assigned_agent: 'Researcher' },
+              { name: 'Draft', assigned_agent: 'Writer' },
+            ],
           },
         })}
       />,
     );
-    expect(screen.getByText('1 Agent')).toBeInTheDocument();
-    expect(screen.getByText('1 Task')).toBeInTheDocument();
-    // expand the agent row
+    // Combined summary, per-agent task badges (Researcher: 2, Writer: 1)
+    expect(screen.getByText('2 Agents · 3 Tasks')).toBeInTheDocument();
+    expect(screen.getByText('2 tasks')).toBeInTheDocument();
+    expect(screen.getByText('1 task')).toBeInTheDocument();
+    // role shown as a subtitle only when it differs from the name
+    expect(screen.getByText('Senior Researcher')).toBeInTheDocument();
+    // expand the agent + a nested task
     fireEvent.click(screen.getByText('Researcher').closest('button')!);
     expect(screen.getByText(/find/)).toBeInTheDocument();
     expect(screen.getByText(/bg/)).toBeInTheDocument();
-    // expand the task row (use exact text to avoid matching the field labels)
     fireEvent.click(screen.getByText('Gather').closest('button')!);
     expect(screen.getByText('desc')).toBeInTheDocument();
     expect(screen.getByText('out')).toBeInTheDocument();
+    // all tasks nested under their agent — no orphan section
+    expect(screen.getByText('Review')).toBeInTheDocument();
+    expect(screen.getByText('Draft')).toBeInTheDocument();
+    expect(screen.queryByText('Other tasks')).not.toBeInTheDocument();
   });
 
-  it('pluralizes multiple agents/tasks and uses index fallbacks for unnamed entries', () => {
+  it('pluralizes the summary, uses index fallbacks, and lists agent-less tasks under "Other tasks"', () => {
     render(
       <ChatMessage
         message={msg({
@@ -240,11 +289,50 @@ describe('ChatMessage — generation_complete card', () => {
         })}
       />,
     );
-    expect(screen.getByText('2 Agents')).toBeInTheDocument();
-    expect(screen.getByText('2 Tasks')).toBeInTheDocument();
-    // index fallback names
+    expect(screen.getByText('2 Agents · 2 Tasks')).toBeInTheDocument();
     expect(screen.getByText('Agent 1')).toBeInTheDocument();
     expect(screen.getByText('Task 1')).toBeInTheDocument();
+    // unassigned tasks grouped separately (agents present → "Other tasks")
+    expect(screen.getByText('Other tasks')).toBeInTheDocument();
+  });
+
+  it('matches a task to its agent by agent_id or the "agent" field', () => {
+    render(
+      <ChatMessage
+        message={msg({
+          resultType: 'generation_complete',
+          resultData: {
+            agents: [{ name: 'Alpha', id: 'a1', role: 'Alpha' }, { name: 'Beta' }],
+            tasks: [{ name: 'ById', agent_id: 'a1' }, { name: 'ByAgentField', agent: 'Beta' }],
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText('ById')).toBeInTheDocument();
+    expect(screen.getByText('ByAgentField')).toBeInTheDocument();
+    expect(screen.queryByText('Other tasks')).not.toBeInTheDocument();
+    // each agent resolves exactly one task
+    expect(screen.getAllByText('1 task')).toHaveLength(2);
+  });
+
+  it('labels a tasks-only crew (no agents) with the task count — singular and plural', () => {
+    const { unmount } = render(
+      <ChatMessage
+        message={msg({ resultType: 'generation_complete', resultData: { agents: [], tasks: [{ name: 'Solo' }] } })}
+      />,
+    );
+    // no agents → orphan-section header uses the count, not "Other tasks"
+    // (both the top summary and the orphan header render the singular label)
+    expect(screen.getAllByText('1 Task').length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText('Other tasks')).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <ChatMessage
+        message={msg({ resultType: 'generation_complete', resultData: { agents: [], tasks: [{ name: 'One' }, { name: 'Two' }] } })}
+      />,
+    );
+    expect(screen.getAllByText('2 Tasks').length).toBeGreaterThanOrEqual(2);
   });
 
   it('shows the Genie selector when an agent uses GenieTool (resolved via toolNameMap)', () => {
@@ -412,5 +500,30 @@ describe('ChatMessage — Genie crew run button', () => {
   it('does not render the Run button when onExecute is not provided', () => {
     render(<ChatMessage message={genieMsg()} />);
     expect(screen.queryByText(/Run crew|Select a Genie space/)).not.toBeInTheDocument();
+  });
+});
+
+describe('TraceGroupMessage (collapsed run of same-tool traces)', () => {
+  it('summarizes a resolved run (check icon + total) and expands each call + detail', () => {
+    const traces = [
+      // resolved tool call: has sublabel (text=sublabel) + duration → header shows total + check icon
+      { label: 'PerplexityTool', sublabel: 'first query', durationMs: 1200, kind: 'tool_call', detail: 'answer one' },
+      // no sublabel (text falls back to label) and no duration (formatDurationMs → null);
+      // kind is not a still-running tool_call so the group stays "done" (no spinner)
+      { label: 'ScrapeTool', kind: 'memory' },
+    ] as never;
+    render(<TraceGroupMessage label="PerplexityTool" traces={traces} />);
+    fireEvent.click(screen.getByText('PerplexityTool').closest('button')!);
+    expect(screen.getByText('first query')).toBeInTheDocument();
+    expect(screen.getByText('ScrapeTool')).toBeInTheDocument(); // sublabel || label fallback
+    // expand the call that has a detail → its output renders
+    fireEvent.click(screen.getByText('first query').closest('button')!);
+    expect(screen.getByText('answer one')).toBeInTheDocument();
+  });
+
+  it('shows a spinner while any call is still pending (no duration yet)', () => {
+    const pending = [{ label: 'X', sublabel: 'q', kind: 'tool_call' }] as never; // no durationMs
+    const { container } = render(<TraceGroupMessage label="X" traces={pending} />);
+    expect(container.querySelector('.animate-spin')).toBeTruthy();
   });
 });

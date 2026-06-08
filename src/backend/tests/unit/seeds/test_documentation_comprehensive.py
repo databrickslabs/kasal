@@ -220,7 +220,7 @@ class TestCreateBestPracticesChunks:
         docs = [{"source": "s", "title": "T", "content": "word " * 200}]
         splitter = MagicMock()
         splitter.split_text.return_value = ["c1", "c2"]
-        with patch('langchain.text_splitter.RecursiveCharacterTextSplitter', return_value=splitter):
+        with patch('langchain_text_splitters.RecursiveCharacterTextSplitter', return_value=splitter):
             result = await create_best_practices_chunks(docs)
         assert len(result) == 2
         assert result[0]["doc_type"] == "best_practices"
@@ -231,7 +231,7 @@ class TestCreateBestPracticesChunks:
         from src.seeds.documentation import create_best_practices_chunks
         docs = [{"source": "s", "title": "T", "content": ""}]
         splitter = MagicMock()
-        with patch('langchain.text_splitter.RecursiveCharacterTextSplitter', return_value=splitter):
+        with patch('langchain_text_splitters.RecursiveCharacterTextSplitter', return_value=splitter):
             assert await create_best_practices_chunks(docs) == []
 
 
@@ -246,7 +246,7 @@ class TestCreateDocumentationChunks:
         splitter.split_text.return_value = ["a", "b"]
         with patch('src.seeds.documentation.fetch_url', new_callable=AsyncMock, return_value="<html>x</html>"), \
              patch('src.seeds.documentation.extract_content', return_value="content"), \
-             patch('langchain.text_splitter.RecursiveCharacterTextSplitter', return_value=splitter):
+             patch('langchain_text_splitters.RecursiveCharacterTextSplitter', return_value=splitter):
             r = await create_documentation_chunks("https://example.com/concepts/tasks")
         assert len(r) == 2
         assert r[0]["source"] == "https://example.com/concepts/tasks"

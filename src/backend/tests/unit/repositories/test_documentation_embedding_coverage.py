@@ -200,7 +200,7 @@ async def test_search_similar_sqlite_path():
         with patch.object(repo, '_search_similar_sqlite', new_callable=AsyncMock, return_value=items) as mock_sqlite:
             result = await repo.search_similar([0.1, 0.2], limit=5)
     assert result == items
-    mock_sqlite.assert_called_once_with([0.1, 0.2], 5)
+    mock_sqlite.assert_called_once_with([0.1, 0.2], 5, None, None)
 
 
 @pytest.mark.asyncio
@@ -212,7 +212,7 @@ async def test_search_similar_postgres_path():
         with patch.object(repo, '_search_similar_postgres', new_callable=AsyncMock, return_value=items) as mock_pg:
             result = await repo.search_similar([0.1, 0.2], limit=5)
     assert result == items
-    mock_pg.assert_called_once_with([0.1, 0.2], 5)
+    mock_pg.assert_called_once_with([0.1, 0.2], 5, None, None)
 
 
 @pytest.mark.asyncio
@@ -324,3 +324,35 @@ async def test_delete_not_found():
     with patch.object(repo, 'get_by_id', new_callable=AsyncMock, return_value=None):
         result = await repo.delete(99)
     assert result is False
+
+
+@pytest.mark.asyncio
+async def test_delete_by_file_async_returns_rowcount():
+    async_session = make_async_session()
+    result = MagicMock()
+    result.rowcount = 3
+    async_session.execute.return_value = result
+    repo = DocumentationEmbeddingRepository(db=async_session)
+    deleted = await repo.delete_by_file('g1', 'exec-1', 'file.txt')
+    assert deleted == 3
+    async_session.execute.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_by_file_async_handles_none_rowcount():
+    async_session = make_async_session()
+    result = MagicMock()
+    result.rowcount = None
+    async_session.execute.return_value = result
+    repo = DocumentationEmbeddingRepository(db=async_session)
+    deleted = await repo.delete_by_file('g1', 'exec-1', 'file.txt')
+    assert deleted == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_by_file_sync_path():
+    sync_session = make_sync_session()
+    sync_session.query.return_value.filter.return_value.delete.return_value = 2
+    repo = DocumentationEmbeddingRepository(db=sync_session)
+    deleted = await repo.delete_by_file('g1', 'exec-1', 'file.txt')
+    assert deleted == 2

@@ -24,7 +24,7 @@ import StorageIcon from '@mui/icons-material/Storage';
 import { useTranslation } from 'react-i18next';
 import { DatabricksService, DatabricksConfig, DatabricksTokenStatus, DatabricksConnectionStatus } from '../../api/DatabricksService';
 import { MemoryBackendService } from '../../api/MemoryBackendService';
-import { MemoryBackendType, isValidMemoryBackendConfig } from '../../types/memoryBackend';
+import { MemoryBackendType, isValidMemoryBackendConfig, isKnowledgeCapableMemoryConfig } from '../../types/memoryBackend';
 import { useKnowledgeConfigStore } from '../../store/knowledgeConfigStore';
 import { ToolService } from '../../api/ToolService';
 
@@ -81,10 +81,9 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
     try {
       const memoryConfig = await MemoryBackendService.getConfig();
       if (memoryConfig && isValidMemoryBackendConfig(memoryConfig)) {
-        // Knowledge sources ONLY work with Databricks Vector Search, not with ChromaDB
-        const isConfigured = memoryConfig.backend_type === MemoryBackendType.DATABRICKS &&
-          memoryConfig.databricks_config?.endpoint_name &&
-          memoryConfig.databricks_config?.memory_index;
+        // Knowledge sources require a Lakebase pgvector backend (where knowledge
+        // embeddings are stored); the default ChromaDB backend is not supported.
+        const isConfigured = isKnowledgeCapableMemoryConfig(memoryConfig);
 
         setIsMemoryBackendConfigured(!!isConfigured);
         setMemoryBackendType(memoryConfig.backend_type);
@@ -130,13 +129,9 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
             const knowledgeTool = tools.find(t => t.id === DATABRICKS_KNOWLEDGE_SEARCH_TOOL_ID);
 
             if (knowledgeTool) {
-              // Check memory backend configuration
+              // Check memory backend configuration (Lakebase pgvector)
               const memoryConfig = await MemoryBackendService.getConfig();
-              const isMemoryConfigured = memoryConfig &&
-                isValidMemoryBackendConfig(memoryConfig) &&
-                memoryConfig.backend_type === MemoryBackendType.DATABRICKS &&
-                memoryConfig.databricks_config?.endpoint_name &&
-                memoryConfig.databricks_config?.memory_index;
+              const isMemoryConfigured = isKnowledgeCapableMemoryConfig(memoryConfig);
 
               const shouldBeEnabled = savedConfig.enabled && savedConfig.knowledge_volume_enabled && isMemoryConfigured;
 
@@ -652,7 +647,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
           <Tooltip
             title={
               !isMemoryBackendConfigured
-                ? `Knowledge sources require Databricks Vector Search memory backend configuration. ${memoryBackendType === MemoryBackendType.DEFAULT ? 'ChromaDB backend does not support knowledge sources.' : 'Vector Search backend is not properly configured.'}`
+                ? `Knowledge sources require a Lakebase memory backend. ${memoryBackendType === MemoryBackendType.DEFAULT ? 'The default (ChromaDB) backend does not support knowledge sources.' : 'Configure and initialize a Lakebase memory backend first.'}`
                 : ''
             }
             placement="right"
@@ -677,7 +672,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
                   </Typography>
                   {!isMemoryBackendConfigured && (
                     <Typography variant="caption" color="warning.main" sx={{ display: 'block', mt: 0.5 }}>
-                      ⚠️ Requires memory backend configuration (Vector Search or default ChromaDB)
+                      ⚠️ Requires a Lakebase memory backend (the default ChromaDB backend is not supported)
                     </Typography>
                   )}
                 </Box>

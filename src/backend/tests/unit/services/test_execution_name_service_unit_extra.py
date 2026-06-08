@@ -26,7 +26,7 @@ async def test_generate_execution_name_success(monkeypatch):
     # Stub LLMManager (now uses LLMManager.completion which returns a string directly)
     class FakeLLMManager:
         @staticmethod
-        async def completion(messages, model, temperature=0.7, max_tokens=4000):
+        async def completion(messages, model, temperature=0.7, max_tokens=4000, extra_headers=None):
             return "My Nice Name"
 
     monkeypatch.setattr(module, "LLMManager", FakeLLMManager, raising=True)
@@ -54,7 +54,7 @@ async def test_generate_execution_name_fallback_on_exception(monkeypatch):
 
     class FakeLLMManager:
         @staticmethod
-        async def completion(messages, model, temperature=0.7, max_tokens=4000):
+        async def completion(messages, model, temperature=0.7, max_tokens=4000, extra_headers=None):
             raise RuntimeError("boom")
 
     monkeypatch.setattr(module, "LLMManager", FakeLLMManager, raising=True)

@@ -1113,6 +1113,14 @@ class ProcessFlowExecutor:
             # Start the process
             process.start()
             logger.info(f"[ProcessFlowExecutor] Started flow process {process.pid} for execution {execution_id}")
+        except Exception:
+            # Spawning failed before the main try/finally below could run; close
+            # the queues here so their semaphores are not leaked, and roll back
+            # the metric we incremented above.
+            self._metrics['active_executions'] -= 1
+            self._close_queue(result_queue)
+            self._close_queue(log_queue)
+            raise
         finally:
             # Restore parent's environment
             if old_kasal_exec_id is not None:
@@ -1169,6 +1177,33 @@ class ProcessFlowExecutor:
             # Clean up tracking
             self._running_processes.pop(execution_id, None)
             self._running_futures.pop(execution_id, None)
+
+            # CRITICAL: Close the per-execution multiprocessing queues so their
+            # internal semaphores (rlock/wlock/sem -> 3 named POSIX semaphores
+            # each) are released. Without this they leak and the resource_tracker
+            # reports "leaked semaphore objects to clean up at shutdown".
+            self._close_queue(result_queue)
+            self._close_queue(log_queue)
+
+    @staticmethod
+    def _close_queue(queue) -> None:
+        """Safely close a multiprocessing.Queue and release its semaphores.
+
+        A spawn-context ``mp.Queue`` is backed by three SemLock primitives
+        (``_rlock``, ``_wlock``, ``_sem``) that the OS tracks as named
+        semaphores. They are only released when the queue's feeder thread is
+        joined via ``close()`` + ``join_thread()``; relying on garbage
+        collection at interpreter shutdown produces the resource_tracker
+        leak warning. This is safe to call multiple times.
+        """
+        if queue is None:
+            return
+        try:
+            queue.cancel_join_thread()
+            queue.close()
+            queue.join_thread()
+        except Exception as e:
+            logger.debug(f"[ProcessFlowExecutor] Error closing queue: {e}")
 
     def _wait_for_result(self, execution_id: str, process: mp.Process,
                          result_queue: mp.Queue, timeout: Optional[float]) -> Dict[str, Any]:
@@ -1589,6 +1624,37 @@ class ProcessFlowExecutor:
     def get_metrics(self) -> Dict[str, int]:
         """Get executor metrics."""
         return self._metrics.copy()
+
+    def shutdown(self, wait: bool = True) -> None:
+        """Terminate any running flow processes at application shutdown.
+
+        Per-execution queues are normally closed in run_flow_isolated's finally
+        block; this is a best-effort safety net for processes still in flight
+        when the app is shutting down, so we don't leave orphaned subprocesses
+        or leaked semaphores behind.
+        """
+        logger.info("Shutting down ProcessFlowExecutor")
+        for execution_id, process in list(self._running_processes.items()):
+            try:
+                if process.is_alive():
+                    logger.info(
+                        f"Terminating flow process {process.pid} for execution {execution_id}"
+                    )
+                    process.terminate()
+                    if wait:
+                        process.join(timeout=2)
+                        if process.is_alive():
+                            process.kill()
+                            process.join(timeout=1)
+            except Exception as e:
+                logger.error(f"Error terminating flow process for {execution_id}: {e}")
+
+        self._running_processes.clear()
+        self._running_futures.clear()
+        self._running_executors.clear()
+        logger.info(
+            f"ProcessFlowExecutor shutdown complete. Final metrics: {self.get_metrics()}"
+        )
 
 
 # Global executor instance

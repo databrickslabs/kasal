@@ -41,7 +41,9 @@ export type UiComponentType =
   | 'Table'
   | 'Quiz'
   | 'Slides'
-  | 'Slide';
+  | 'Slide'
+  | 'Album'
+  | 'Mindmap';
 
 /** The component names available in each catalog (for the configurator UI). */
 export const CATALOG_COMPONENTS: Record<string, UiComponentType[]> = {
@@ -49,7 +51,7 @@ export const CATALOG_COMPONENTS: Record<string, UiComponentType[]> = {
   basic: [
     'Text', 'Row', 'Column', 'Card', 'List', 'Divider', 'Image', 'Icon',
     'Badge', 'Button', 'TextField', 'CheckBox', 'Slider', 'ChoicePicker',
-    'Dashboard', 'Stat', 'Chart', 'Table', 'Quiz', 'Slides', 'Slide',
+    'Dashboard', 'Stat', 'Chart', 'Table', 'Quiz', 'Slides', 'Slide', 'Album', 'Mindmap',
   ],
 };
 
@@ -69,35 +71,101 @@ export interface UiComponent {
   [key: string]: unknown;
 }
 
+/** Branding tokens carried on the surface, set by the agent from the workspace
+ *  UI-Configurator palette. The renderer derives its stage / accent / text /
+ *  surface colors and font from these; any omitted token falls back to the
+ *  built-in premium dark theme, so an un-themed doc renders exactly as before. */
+export interface UiTheme {
+  accent?: string;
+  background?: string; // stage background
+  surface?: string; // card / panel background
+  text?: string;
+  heading?: string;
+  muted?: string;
+  font?: 'sans' | 'serif' | 'rounded' | 'mono';
+  density?: 'comfortable' | 'compact';
+}
+
 export interface UiSurface {
   rootId: string;
   /** Components keyed by id for O(1) child resolution. */
   components: Record<string, UiComponent>;
   /** Data model for `{ path: "/x" }` bindings (best-effort; may be empty). */
   data: Record<string, unknown>;
+  /** Branding tokens (accent/background/text/font…); undefined = built-in theme. */
+  theme?: UiTheme;
 }
 
 const VALID_TYPES: ReadonlySet<string> = new Set<UiComponentType>([
   'Text', 'Row', 'Column', 'Card', 'List', 'Divider', 'Image', 'Icon',
   'Badge', 'Button', 'TextField', 'CheckBox', 'Slider', 'ChoicePicker',
-  'Dashboard', 'Stat', 'Chart', 'Table', 'Quiz', 'Slides', 'Slide',
+  'Dashboard', 'Stat', 'Chart', 'Table', 'Quiz', 'Slides', 'Slide', 'Album', 'Mindmap',
 ]);
 
-/** Read a JSON value that may be a raw object or a JSON string. */
+/** Scan from the first `open` char to its balanced `close` (string-aware) and
+ *  return the enclosed substring, or null. Used to pull a JSON object/array out
+ *  of surrounding prose. */
+function balancedBlock(text: string, open: string, close: string): string | null {
+  // Callers only invoke this once they've found `open` in the text, so `start`
+  // is always >= 0 here.
+  const start = text.indexOf(open);
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === '\\') esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === open) depth++;
+    else if (ch === close) {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+/**
+ * Read a JSON value that may be a raw object, a JSON string, a ```json fenced
+ * block, or JSON EMBEDDED in surrounding prose. Agents frequently add a
+ * preamble ("Here is the UI document: { … }") despite a "JSON only" instruction;
+ * we still want to render the document instead of dumping raw text into the chat.
+ */
 function coerceJson(raw: string | Record<string, unknown>): Record<string, unknown> | null {
   if (raw && typeof raw === 'object') return raw as Record<string, unknown>;
   if (typeof raw !== 'string') return null;
   const trimmed = raw.trim();
   // Tolerate a ```json fence around the document.
   const fence = trimmed.match(/^```(?:json|ui)?\s*\n([\s\S]*?)\n\s*```$/);
-  const body = fence ? fence[1] : trimmed;
-  if (!body.startsWith('{') && !body.startsWith('[')) return null;
-  try {
-    // body starts with { or [, so a successful parse is always an object/array.
-    return JSON.parse(body) as Record<string, unknown>;
-  } catch {
-    return null;
+  const fenced = fence ? fence[1].trim() : null;
+
+  // Try, in order: the fenced body, the whole string, and the first balanced
+  // {…}/[…] block found in the text (so a prose preamble doesn't defeat us).
+  const objAt = trimmed.indexOf('{');
+  const arrAt = trimmed.indexOf('[');
+  const embedded =
+    objAt >= 0 && (arrAt < 0 || objAt < arrAt)
+      ? balancedBlock(trimmed, '{', '}')
+      : arrAt >= 0
+        ? balancedBlock(trimmed, '[', ']')
+        : null;
+
+  for (const cand of [fenced, trimmed, embedded]) {
+    if (!cand) continue;
+    const c = cand.trim();
+    if (!c.startsWith('{') && !c.startsWith('[')) continue;
+    try {
+      return JSON.parse(c) as Record<string, unknown>;
+    } catch {
+      /* try the next candidate */
+    }
   }
+  return null;
 }
 
 /** Extract the message array from any of the shapes a document may arrive in.
@@ -120,9 +188,18 @@ export function parseUiDocument(raw: string | Record<string, unknown>): UiSurfac
 
   const components: Record<string, UiComponent> = {};
   let data: Record<string, unknown> = {};
+  let theme: UiTheme | undefined;
 
   for (const msg of messages) {
     if (!msg || typeof msg !== 'object') continue;
+
+    // Optional branding carried on the surface declaration (createSurface.theme)
+    // or as a bare { theme: {...} } message. Tokens accumulate across messages.
+    const surf = msg.createSurface as { theme?: unknown } | undefined;
+    const themeBlock = (surf && typeof surf === 'object' && surf.theme) || msg.theme;
+    if (themeBlock && typeof themeBlock === 'object') {
+      theme = { ...(theme || {}), ...(themeBlock as UiTheme) };
+    }
 
     const update = msg.updateComponents as { components?: unknown } | undefined;
     if (update && Array.isArray(update.components)) {
@@ -150,7 +227,7 @@ export function parseUiDocument(raw: string | Record<string, unknown>): UiSurfac
   if (ids.length === 0) return null;
 
   const rootId = components.root ? 'root' : ids[0];
-  return { rootId, components, data };
+  return { rootId, components, data, theme };
 }
 
 /* NOTE: the crew "emit a UI document" instruction is built BACKEND-side

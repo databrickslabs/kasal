@@ -232,7 +232,7 @@ class LakebaseSchemaService(BaseService):
                 logger.info("Set kasal schema as default search path")
 
                 # Tables with vector columns that need special handling
-                tables_to_skip = ['documentation_embeddings']
+                tables_to_skip = ['documentation_embeddings', 'knowledge_embeddings']
 
                 # Get all table objects from metadata
                 for table in Base.metadata.sorted_tables:
@@ -248,12 +248,15 @@ class LakebaseSchemaService(BaseService):
                                 title VARCHAR NOT NULL,
                                 content TEXT NOT NULL,
                                 doc_metadata JSON,
+                                group_id VARCHAR(100),
+                                file_path VARCHAR,
                                 created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
                                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
                             )
                             """
                             await conn.execute(text(create_sql))
-                            logger.info("Created documentation_embeddings table without vector column")
+                            await self._ensure_doc_embeddings_columns_async(conn)
+                            logger.info("Created documentation_embeddings table (pgvector embedding + scoping columns ensured)")
                     else:
                         # Create table normally using SQLAlchemy metadata
                         await conn.run_sync(table.create, checkfirst=True)
@@ -278,7 +281,7 @@ class LakebaseSchemaService(BaseService):
             Exception: If table creation fails
         """
         try:
-            tables_to_skip = {'documentation_embeddings'}
+            tables_to_skip = {'documentation_embeddings', 'knowledge_embeddings'}
             all_tables = Base.metadata.sorted_tables
             waves, table_map = self._get_dependency_waves(all_tables)
             max_parallel = 10
@@ -349,7 +352,7 @@ class LakebaseSchemaService(BaseService):
                 yield {"type": "success", "message": "Set kasal schema as default search path"}
 
                 # Tables with vector columns that need special handling
-                tables_to_skip = ['documentation_embeddings']
+                tables_to_skip = ['documentation_embeddings', 'knowledge_embeddings']
 
                 # Get all table objects from metadata
                 for table in Base.metadata.sorted_tables:
@@ -367,14 +370,17 @@ class LakebaseSchemaService(BaseService):
                                 title VARCHAR NOT NULL,
                                 content TEXT NOT NULL,
                                 doc_metadata JSON,
+                                group_id VARCHAR(100),
+                                file_path VARCHAR,
                                 created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
                                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
                             )
                             """
                             await conn.execute(text(create_sql))
+                            await self._ensure_doc_embeddings_columns_async(conn)
                             yield {
                                 "type": "success",
-                                "message": f"Created {table.name} without vector column"
+                                "message": f"Created {table.name} (pgvector embedding + scoping columns ensured)"
                             }
                     else:
                         # Create table normally
@@ -456,8 +462,61 @@ class LakebaseSchemaService(BaseService):
                     results.append((name, False, str(e)))
         return results
 
+    # SQL statements that bring an existing documentation_embeddings table up to
+    # the current schema. Idempotent (IF NOT EXISTS), so safe to run on every
+    # init. group_id/file_path scope uploaded knowledge per workspace; the
+    # embedding column + HNSW index back pgvector similarity search (this table
+    # was historically created WITHOUT the vector column when Databricks Vector
+    # Search was the document-embedding backend).
+    _DOC_EMB_PLAIN_DDL = (
+        "ALTER TABLE documentation_embeddings ADD COLUMN IF NOT EXISTS group_id VARCHAR(100)",
+        "ALTER TABLE documentation_embeddings ADD COLUMN IF NOT EXISTS file_path VARCHAR",
+        "CREATE INDEX IF NOT EXISTS idx_doc_emb_group_id ON documentation_embeddings (group_id)",
+        "CREATE INDEX IF NOT EXISTS idx_doc_emb_file_path ON documentation_embeddings (file_path)",
+    )
+    _DOC_EMB_VECTOR_DDL = (
+        "ALTER TABLE documentation_embeddings ADD COLUMN IF NOT EXISTS embedding vector(1024)",
+        "CREATE INDEX IF NOT EXISTS idx_doc_emb_embedding ON documentation_embeddings "
+        "USING hnsw (embedding vector_cosine_ops)",
+    )
+    _DOC_EMB_PGVECTOR_CHECK = (
+        "SELECT 1 FROM pg_extension WHERE extname IN ('vector', 'pgvector')"
+    )
+
+    async def _ensure_doc_embeddings_columns_async(self, conn) -> None:
+        """Bring the documentation_embeddings table up to the pgvector schema (async)."""
+        for stmt in self._DOC_EMB_PLAIN_DDL:
+            await conn.execute(text(stmt))
+        # The vector column requires the pgvector extension; only add it when the
+        # extension is present so we don't poison the surrounding transaction.
+        result = await conn.execute(text(self._DOC_EMB_PGVECTOR_CHECK))
+        if result.fetchone():
+            for stmt in self._DOC_EMB_VECTOR_DDL:
+                await conn.execute(text(stmt))
+        else:
+            logger.warning(
+                "pgvector extension not found; documentation_embeddings.embedding "
+                "column not added. Have the instance owner run "
+                "'CREATE EXTENSION IF NOT EXISTS vector;' then re-run initialization."
+            )
+
+    def _ensure_doc_embeddings_columns_sync(self, conn) -> None:
+        """Bring the documentation_embeddings table up to the pgvector schema (sync)."""
+        for stmt in self._DOC_EMB_PLAIN_DDL:
+            conn.execute(text(stmt))
+        result = conn.execute(text(self._DOC_EMB_PGVECTOR_CHECK))
+        if result.fetchone():
+            for stmt in self._DOC_EMB_VECTOR_DDL:
+                conn.execute(text(stmt))
+        else:
+            logger.warning(
+                "pgvector extension not found; documentation_embeddings.embedding "
+                "column not added. Have the instance owner run "
+                "'CREATE EXTENSION IF NOT EXISTS vector;' then re-run initialization."
+            )
+
     def _create_doc_embeddings_sync(self, engine: Engine) -> None:
-        """Create documentation_embeddings table without vector column."""
+        """Create documentation_embeddings table and ensure pgvector schema."""
         create_sql = """
         CREATE TABLE IF NOT EXISTS documentation_embeddings (
             id SERIAL PRIMARY KEY,
@@ -465,6 +524,8 @@ class LakebaseSchemaService(BaseService):
             title VARCHAR NOT NULL,
             content TEXT NOT NULL,
             doc_metadata JSON,
+            group_id VARCHAR(100),
+            file_path VARCHAR,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
         )
@@ -472,6 +533,7 @@ class LakebaseSchemaService(BaseService):
         with engine.begin() as conn:
             conn.execute(text("SET search_path TO kasal"))
             conn.execute(text(create_sql))
+            self._ensure_doc_embeddings_columns_sync(conn)
 
     def create_tables_sync_stream(self, engine: Engine) -> Generator[Dict[str, Any], None, None]:
         """Create all tables with streaming progress using parallel dependency waves.
@@ -488,7 +550,7 @@ class LakebaseSchemaService(BaseService):
             Dict with event type and progress information
         """
         try:
-            tables_to_skip = {'documentation_embeddings'}
+            tables_to_skip = {'documentation_embeddings', 'knowledge_embeddings'}
             all_tables = Base.metadata.sorted_tables
             waves, table_map = self._get_dependency_waves(all_tables)
 

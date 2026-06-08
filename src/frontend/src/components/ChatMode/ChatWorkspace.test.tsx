@@ -27,6 +27,7 @@ const h = vi.hoisted(() => {
       updateMessageInTargetSession: vi.fn(),
       clearMessages: vi.fn(),
       init: vi.fn(async () => {}),
+      reloadForGroup: vi.fn(async () => {}),
       switchSession: vi.fn(async () => {}),
       createNewSession: vi.fn(async () => 's-new'),
       deleteSession: vi.fn(async () => {}),
@@ -85,9 +86,13 @@ const h = vi.hoisted(() => {
     createExecution: vi.fn(async () => ({ job_id: 'job-1' })),
     listExecutions: vi.fn(async () => []),
     stopExecution: vi.fn(async () => {}),
+    getExecutionStatus: vi.fn(async () => ({ status: 'running' })),
     saveGeneratedCrew: vi.fn(async () => ({ id: 'crew-1', name: 'Saved Crew' })),
     saveSessionPreview: vi.fn(),
     getSessionPreview: vi.fn(async () => null),
+    setSessionRunningJob: vi.fn(async () => {}),
+    getSessionRunningJob: vi.fn(async () => null),
+    clearSessionRunningJob: vi.fn(async () => {}),
     parsePreview: vi.fn(() => null),
     detectVars: vi.fn(() => [] as unknown[]),
     fn,
@@ -98,8 +103,15 @@ function storeHook(obj: Record<string, unknown>) {
   const hook = ((sel: (s: unknown) => unknown) => sel(obj)) as unknown as {
     (sel: (s: unknown) => unknown): unknown;
     getState: () => unknown;
+    setState: (patch: unknown) => void;
   };
   hook.getState = () => obj;
+  hook.setState = (patch: unknown) => {
+    const next = typeof patch === 'function'
+      ? (patch as (s: unknown) => Record<string, unknown>)(obj)
+      : patch;
+    Object.assign(obj, next as Record<string, unknown>);
+  };
   return hook;
 }
 
@@ -130,6 +142,7 @@ vi.mock('./api/executions', () => ({
   createExecution: (...a: unknown[]) => h.createExecution(...a),
   listExecutions: (...a: unknown[]) => h.listExecutions(...a),
   stopExecution: (...a: unknown[]) => h.stopExecution(...a),
+  getExecutionStatus: (...a: unknown[]) => h.getExecutionStatus(...a),
 }));
 vi.mock('./api/crews', () => ({
   saveGeneratedCrew: (...a: unknown[]) => h.saveGeneratedCrew(...a),
@@ -143,6 +156,9 @@ vi.mock('./api/crews', () => ({
 vi.mock('./db/sessionDb', () => ({
   saveSessionPreview: (...a: unknown[]) => h.saveSessionPreview(...a),
   getSessionPreview: (...a: unknown[]) => h.getSessionPreview(...a),
+  setSessionRunningJob: (...a: unknown[]) => h.setSessionRunningJob(...a),
+  getSessionRunningJob: (...a: unknown[]) => h.getSessionRunningJob(...a),
+  clearSessionRunningJob: (...a: unknown[]) => h.clearSessionRunningJob(...a),
 }));
 vi.mock('./components/Preview/PreviewPanel', () => ({
   default: (props: { onClose: () => void; onToggleChat: () => void; onRefine?: (i: string) => void }) => (
@@ -262,6 +278,21 @@ describe('buildTraceEntry', () => {
     const e = buildTraceEntry('', { event_type: 'tool_usage', output: {} });
     expect(e?.label).toBe('tool');
   });
+  it('tolerates a non-JSON string output (asObject parse failure)', () => {
+    const e = buildTraceEntry('', { event_type: 'tool_usage', output: 'not valid json {' });
+    expect(e?.label).toBe('tool'); // parse failed → treated as empty object
+  });
+  it('parses a JSON-string output into an object (asObject string→object)', () => {
+    const e = buildTraceEntry('', {
+      event_type: 'tool_usage',
+      output: '{"extra_data":{"tool_name":"Zed","tool_args":"{}"}}',
+    });
+    expect(e?.label).toBe('Zed'); // parsed object is used
+  });
+  it('treats a JSON-string output that parses to a non-object as empty', () => {
+    const e = buildTraceEntry('', { event_type: 'tool_usage', output: '42' });
+    expect(e?.label).toBe('tool'); // 42 is not an object → {}
+  });
   it('builds a tool_result from a *_run event', () => {
     const e = buildTraceEntry('', {
       event_type: 'perplexitytool_run',
@@ -298,6 +329,32 @@ describe('buildTraceEntry', () => {
     expect(e?.kind).toBe('event');
     expect(e?.detail).toBeUndefined();
   });
+  it('surfaces retrieved memory context as a Memory pill', () => {
+    const e = buildTraceEntry('', {
+      event_type: 'memory_retrieval',
+      event_source: 'agent',
+      output: { content: 'remembered: the latest Swiss news', duration_ms: 7 },
+    });
+    expect(e?.kind).toBe('tool_result');
+    expect(e?.label).toBe('Memory');
+    expect(e?.detail).toContain('Swiss news');
+  });
+  it('surfaces a memory pill with no event_source (source falls back to undefined)', () => {
+    const e = buildTraceEntry('', {
+      event_type: 'memory_retrieval',
+      output: { content: 'remembered fact' },
+    });
+    expect(e?.label).toBe('Memory');
+    expect(e?.source).toBeUndefined();
+  });
+  it('drops a memory_retrieval that found nothing (no redundant pill)', () => {
+    expect(
+      buildTraceEntry('', { event_type: 'memory_retrieval_completed', output: { content: 'No relevant memories found' } }),
+    ).toBeNull();
+    expect(
+      buildTraceEntry('', { event_type: 'memory_retrieval', output: {} }),
+    ).toBeNull();
+  });
 });
 
 describe('summarizeTaskOutput', () => {
@@ -311,6 +368,7 @@ describe('summarizeTaskOutput', () => {
   it('describes a preview when present (html/markdown/other)', () => {
     expect(summarizeTaskOutput('x', { type: 'html', data: 'd' })).toMatch(/HTML output/);
     expect(summarizeTaskOutput('x', { type: 'markdown', data: 'd' })).toMatch(/report/);
+    expect(summarizeTaskOutput('x', { type: 'ui', data: 'd' })).toMatch(/app/);
     expect(summarizeTaskOutput('x', { type: 'json', data: 'd' })).toMatch(/result/);
   });
   it('truncates long plain text', () => {
@@ -405,7 +463,8 @@ describe('ChatWorkspace component', () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId('cc-send'));
     });
-    expect(h.dispatcherSend).toHaveBeenCalledWith('hello world', 'm1');
+    // dispatcher signature: (message, model, tools?, dispatchSuffix?, attachments?)
+    expect(h.dispatcherSend).toHaveBeenCalledWith('hello world', 'm1', undefined, undefined, undefined);
   });
 
   it('invokes execution-stream callbacks (trace/taskOutput/status/complete/error)', () => {
@@ -434,7 +493,7 @@ describe('ChatWorkspace component', () => {
     h.parsePreview.mockReturnValue({ type: 'html', data: '<p>x</p>' });
     render(<ChatWorkspace />);
     act(() => {
-      h.streamOpts.onTaskOutput('Build', '<p>x</p>');
+      h.streamOpts.onTrace('', { event_type: 'task_completed', trace_metadata: { task_name: 'Build' }, output: '<p>x</p>' });
     });
     expect(h.saveSessionPreview).toHaveBeenCalled();
   });
@@ -748,7 +807,7 @@ describe('ChatWorkspace component', () => {
     expect(h.session.addMessageToTargetSession).toHaveBeenCalledWith(
       's1',
       'assistant',
-      'Crew generated. Pick a Genie space below, then run it.',
+      '', // status text removed — the crew card (with the Genie space selector) carries it
       expect.objectContaining({ resultType: 'generation_complete' }),
     );
   });
@@ -855,8 +914,8 @@ describe('ChatWorkspace component', () => {
     render(<ChatWorkspace />);
     act(() => {
       // intermediate task output, then a later one — neither schedules a timer
-      h.streamOpts.onTaskOutput('Task 1', JSON.stringify({ content: 'intermediate markdown brief' }));
-      h.streamOpts.onTaskOutput('Task 2', 'a later task output');
+      h.streamOpts.onTrace('', { event_type: 'task_completed', trace_metadata: { task_name: 'Task 1' }, output: JSON.stringify({ content: 'intermediate markdown brief' }) });
+      h.streamOpts.onTrace('', { event_type: 'task_completed', trace_metadata: { task_name: 'Task 2' }, output: 'a later task output' });
     });
     // advancing far past any old window must NOT trigger a completion
     act(() => { vi.advanceTimersByTime(120000); });
@@ -875,8 +934,8 @@ describe('ChatWorkspace component', () => {
     h.session.currentSessionId = 's1';
     render(<ChatWorkspace />);
     act(() => {
-      h.streamOpts.onTaskOutput('Task 1', '# first');
-      h.streamOpts.onTaskOutput('Task 2', '<p>second</p>');
+      h.streamOpts.onTrace('', { event_type: 'task_completed', trace_metadata: { task_name: 'Task 1' }, output: '# first' });
+      h.streamOpts.onTrace('', { event_type: 'task_completed', trace_metadata: { task_name: 'Task 2' }, output: '<p>second</p>' });
     });
     expect(h.exec.setPreviewContent).toHaveBeenCalledWith(first);
     expect(h.exec.setPreviewContent).toHaveBeenCalledWith(second);
@@ -886,7 +945,7 @@ describe('ChatWorkspace component', () => {
     h.exec.executionOwnerSessionId = 's1';
     render(<ChatWorkspace />);
     act(() => {
-      h.streamOpts.onTaskOutput('Task', 'some intermediate output');
+      h.streamOpts.onTrace('', { event_type: 'task_completed', trace_metadata: { task_name: 'Task' }, output: 'some intermediate output' });
       h.streamOpts.onComplete({ result: 'real final' });
     });
     expect(h.exec.completeExecution).toHaveBeenCalledWith('real final');
@@ -896,7 +955,7 @@ describe('ChatWorkspace component', () => {
     h.exec.executionOwnerSessionId = 's1';
     render(<ChatWorkspace />);
     act(() => {
-      h.streamOpts.onTaskOutput('Task', 'some intermediate output');
+      h.streamOpts.onTrace('', { event_type: 'task_completed', trace_metadata: { task_name: 'Task' }, output: 'some intermediate output' });
       h.streamOpts.onError('stream failed');
     });
     expect(h.exec.failExecution).toHaveBeenCalledWith('stream failed');
@@ -970,7 +1029,7 @@ describe('ChatWorkspace component', () => {
     h.session.currentSessionId = 's1';
     h.exec.executionOwnerSessionId = 's1';
     render(<ChatWorkspace />);
-    act(() => { h.streamOpts.onTaskOutput('Build', '<p>x</p>'); });
+    act(() => { h.streamOpts.onTrace('', { event_type: 'task_completed', trace_metadata: { task_name: 'Build' }, output: '<p>x</p>' }); });
     expect(h.exec.setPreviewContent).toHaveBeenCalled();
   });
 
@@ -999,10 +1058,24 @@ describe('ChatWorkspace component', () => {
       h.streamOpts.onTrace('', { event_type: 'tool_usage', output: { extra_data: { tool_name: 'S', tool_args: '{"q":"a"}' } } });
       h.streamOpts.onTrace('', { event_type: 's_run', output: { tool_name: 'S', input: '{"q":"a"}', content: 'r', duration_ms: 5 } });
       // task output with no owner -> addMessage
-      h.streamOpts.onTaskOutput('Task', 'a normal textual result');
+      h.streamOpts.onTrace('', { event_type: 'task_completed', trace_metadata: { task_name: 'Task' }, output: 'a normal textual result' });
     });
     expect(h.session.addMessage).toHaveBeenCalled();
     expect(h.session.updateMessage).toHaveBeenCalled();
+  });
+
+  it('resolves trace ownership from the trace job_id when present', () => {
+    h.exec.executionOwnerSessionId = 's1';
+    h.session.addMessageToTargetSession.mockClear();
+    render(<ChatWorkspace />);
+    act(() => {
+      h.streamOpts.onTrace('', {
+        event_type: 'tool_usage',
+        job_id: 'job-x', // present → exercises the `jobId && jobOwnerRef.get(jobId)` branch
+        output: { extra_data: { tool_name: 'S', tool_args: '{"q":"a"}' } },
+      });
+    });
+    expect(h.session.addMessageToTargetSession).toHaveBeenCalled();
   });
 
   it('generation onComplete adds to addMessage when no owner session', async () => {
@@ -1103,7 +1176,7 @@ describe('ChatWorkspace component', () => {
     h.session.currentSessionId = 's1';
     h.exec.executionOwnerSessionId = 's2';
     render(<ChatWorkspace />);
-    act(() => { h.streamOpts.onTaskOutput('Build', '<p>x</p>'); });
+    act(() => { h.streamOpts.onTrace('', { event_type: 'task_completed', trace_metadata: { task_name: 'Build' }, output: '<p>x</p>' }); });
     expect(h.saveSessionPreview).toHaveBeenCalledWith('s2', expect.anything());
     expect(h.exec.setPreviewContent).not.toHaveBeenCalled();
   });
@@ -1113,7 +1186,7 @@ describe('ChatWorkspace component', () => {
     h.exec.executionOwnerSessionId = null;
     h.session.currentSessionId = 's1';
     render(<ChatWorkspace />);
-    act(() => { h.streamOpts.onTaskOutput('Build', '<p>x</p>'); });
+    act(() => { h.streamOpts.onTrace('', { event_type: 'task_completed', trace_metadata: { task_name: 'Build' }, output: '<p>x</p>' }); });
     expect(h.exec.setPreviewContent).not.toHaveBeenCalled();
     expect(h.saveSessionPreview).not.toHaveBeenCalled();
   });
@@ -1123,7 +1196,7 @@ describe('ChatWorkspace component', () => {
     h.exec.executionOwnerSessionId = 's1';
     render(<ChatWorkspace />);
     h.session.addMessageToTargetSession.mockClear();
-    act(() => { h.streamOpts.onTaskOutput('Task', 'Calling tools.'); });
+    act(() => { h.streamOpts.onTrace('', { event_type: 'task_completed', trace_metadata: { task_name: 'Task' }, output: 'Calling tools.' }); });
     expect(h.session.addMessageToTargetSession).not.toHaveBeenCalled();
   });
 
@@ -1264,7 +1337,7 @@ describe('ChatWorkspace component', () => {
     h.app.selectedModel = '';
     render(<ChatWorkspace />);
     await send('hello there');
-    expect(h.dispatcherSend).toHaveBeenCalledWith('hello there', undefined);
+    expect(h.dispatcherSend).toHaveBeenCalledWith('hello there', undefined, undefined, undefined, undefined);
   });
 
   it('handleStopExecution reports a generic error on a non-Error rejection', async () => {
@@ -1354,5 +1427,254 @@ describe('ChatWorkspace component', () => {
       { id: 's1', title: 'One', updatedAt: new Date(), createdAt: new Date() },
       { id: 's2', title: 'Two', updatedAt: new Date(), createdAt: new Date() },
     ] as unknown[];
+  });
+
+  // --- REST polling fallback (Job-History style) ---------------------------
+  // ChatMode renders trace pills / completion from the live SSE stream, but the
+  // Databricks Apps HTTP/2 proxy frequently kills SSE. So it also announces each
+  // job via a 'jobCreated' window event (picked up by the globally-mounted
+  // useTracePolling) and consumes the poller's 'traceUpdate' / 'jobCompleted' /
+  // 'jobFailed' / 'jobStopped' window events — the same path crew-mode Job
+  // History uses. These tests cover that wiring.
+  it('announces the job via a jobCreated window event so the global poller polls it', async () => {
+    const seen: (string | undefined)[] = [];
+    const onCreated = (e: Event) => seen.push((e as CustomEvent).detail?.jobId);
+    window.addEventListener('jobCreated', onCreated as EventListener);
+    render(<ChatWorkspace />);
+    await act(async () => { fireEvent.click(screen.getByTestId('cc-exec-crew')); });
+    window.removeEventListener('jobCreated', onCreated as EventListener);
+    expect(seen).toContain('job-1');
+  });
+
+  it('renders a polled trace (traceUpdate) for the active job through the same pipeline', () => {
+    h.exec.activeExecution = { jobId: 'job-poll', status: 'running' };
+    render(<ChatWorkspace />);
+    act(() => {
+      window.dispatchEvent(new CustomEvent('traceUpdate', {
+        detail: {
+          jobId: 'job-poll',
+          trace: { id: 1, event_type: 'tool_usage', output: { extra_data: { tool_name: 'S', tool_args: '{"q":"a"}' } } },
+        },
+      }));
+    });
+    expect(h.session.addMessageToTargetSession).toHaveBeenCalled();
+  });
+
+  it('ignores a traceUpdate whose jobId is not the active execution', () => {
+    h.exec.activeExecution = { jobId: 'job-poll', status: 'running' };
+    render(<ChatWorkspace />);
+    act(() => {
+      window.dispatchEvent(new CustomEvent('traceUpdate', {
+        detail: { jobId: 'other-job', trace: { id: 2, event_type: 'tool_usage', output: { extra_data: { tool_name: 'S', tool_args: '{}' } } } },
+      }));
+    });
+    expect(h.session.addMessageToTargetSession).not.toHaveBeenCalled();
+  });
+
+  it('ignores a traceUpdate when there is no active execution', () => {
+    h.exec.activeExecution = null;
+    render(<ChatWorkspace />);
+    act(() => {
+      window.dispatchEvent(new CustomEvent('traceUpdate', {
+        detail: { jobId: 'x', trace: { id: 3, event_type: 'tool_usage', output: {} } },
+      }));
+    });
+    expect(h.session.addMessageToTargetSession).not.toHaveBeenCalled();
+  });
+
+  it('completes the run from the polling-fallback jobCompleted event', () => {
+    h.exec.isExecuting = true;
+    h.exec.activeExecution = { jobId: 'job-done', status: 'running' };
+    render(<ChatWorkspace />);
+    act(() => {
+      window.dispatchEvent(new CustomEvent('jobCompleted', { detail: { jobId: 'job-done', result: 'final answer' } }));
+    });
+    expect(h.exec.completeExecution).toHaveBeenCalledWith('final answer');
+  });
+
+  it('ignores jobCompleted when it is not the active job', () => {
+    h.exec.isExecuting = true;
+    h.exec.activeExecution = { jobId: 'job-A', status: 'running' };
+    render(<ChatWorkspace />);
+    act(() => {
+      window.dispatchEvent(new CustomEvent('jobCompleted', { detail: { jobId: 'job-B', result: 'x' } }));
+    });
+    expect(h.exec.completeExecution).not.toHaveBeenCalled();
+  });
+
+  it('completes a run only once even if jobCompleted is delivered twice (SSE + poll)', () => {
+    h.exec.isExecuting = true;
+    h.exec.activeExecution = { jobId: 'job-dupe', status: 'running' };
+    render(<ChatWorkspace />);
+    act(() => {
+      window.dispatchEvent(new CustomEvent('jobCompleted', { detail: { jobId: 'job-dupe', result: 'one' } }));
+      window.dispatchEvent(new CustomEvent('jobCompleted', { detail: { jobId: 'job-dupe', result: 'one' } }));
+    });
+    expect(h.exec.completeExecution).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails the run from the polling-fallback jobFailed event', () => {
+    h.exec.isExecuting = true;
+    h.exec.activeExecution = { jobId: 'job-bad', status: 'running' };
+    render(<ChatWorkspace />);
+    act(() => {
+      window.dispatchEvent(new CustomEvent('jobFailed', { detail: { jobId: 'job-bad', error: 'kaboom' } }));
+    });
+    expect(h.exec.failExecution).toHaveBeenCalledWith('kaboom');
+  });
+
+  it('jobFailed with no error message falls back to a default', () => {
+    h.exec.isExecuting = true;
+    h.exec.activeExecution = { jobId: 'job-bad2', status: 'running' };
+    render(<ChatWorkspace />);
+    act(() => {
+      window.dispatchEvent(new CustomEvent('jobFailed', { detail: { jobId: 'job-bad2' } }));
+    });
+    expect(h.exec.failExecution).toHaveBeenCalledWith('Execution failed');
+  });
+
+  it('ignores jobFailed when not executing', () => {
+    h.exec.isExecuting = false;
+    h.exec.activeExecution = { jobId: 'job-bad3', status: 'running' };
+    render(<ChatWorkspace />);
+    act(() => {
+      window.dispatchEvent(new CustomEvent('jobFailed', { detail: { jobId: 'job-bad3', error: 'x' } }));
+    });
+    expect(h.exec.failExecution).not.toHaveBeenCalled();
+  });
+
+  it('stops the run from the polling-fallback jobStopped event', () => {
+    h.exec.isExecuting = true;
+    h.exec.activeExecution = { jobId: 'job-stop', status: 'running' };
+    render(<ChatWorkspace />);
+    act(() => {
+      window.dispatchEvent(new CustomEvent('jobStopped', { detail: { jobId: 'job-stop', status: 'stopped' } }));
+    });
+    expect(h.exec.failExecution).toHaveBeenCalledWith('Execution stopped');
+  });
+
+  it('ignores jobStopped when it is not the active job', () => {
+    h.exec.isExecuting = true;
+    h.exec.activeExecution = { jobId: 'job-stop-A', status: 'running' };
+    render(<ChatWorkspace />);
+    act(() => {
+      window.dispatchEvent(new CustomEvent('jobStopped', { detail: { jobId: 'job-stop-B' } }));
+    });
+    expect(h.exec.failExecution).not.toHaveBeenCalled();
+  });
+
+  it('renders a polled trace only once even if delivered twice (dedup by trace id)', () => {
+    h.exec.activeExecution = { jobId: 'job-dd', status: 'running' };
+    render(<ChatWorkspace />);
+    const trace = { id: 99, event_type: 'tool_usage', output: { extra_data: { tool_name: 'S', tool_args: '{"q":"a"}' } } };
+    act(() => {
+      window.dispatchEvent(new CustomEvent('traceUpdate', { detail: { jobId: 'job-dd', trace } }));
+      window.dispatchEvent(new CustomEvent('traceUpdate', { detail: { jobId: 'job-dd', trace } }));
+    });
+    expect(h.session.addMessageToTargetSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('handles polling-fallback events dispatched without a detail payload', () => {
+    h.exec.activeExecution = null;
+    h.exec.isExecuting = false;
+    render(<ChatWorkspace />);
+    act(() => {
+      window.dispatchEvent(new Event('traceUpdate'));
+      window.dispatchEvent(new Event('jobCompleted'));
+      window.dispatchEvent(new Event('jobFailed'));
+      window.dispatchEvent(new Event('jobStopped'));
+    });
+    expect(h.session.addMessageToTargetSession).not.toHaveBeenCalled();
+    expect(h.exec.completeExecution).not.toHaveBeenCalled();
+    expect(h.exec.failExecution).not.toHaveBeenCalled();
+  });
+
+  it('a polled task_completed falls back to event_context name and stringifies non-string output', () => {
+    h.exec.activeExecution = { jobId: 'job-tc', status: 'running' };
+    render(<ChatWorkspace />);
+    act(() => {
+      window.dispatchEvent(new CustomEvent('traceUpdate', {
+        detail: { jobId: 'job-tc', trace: { id: 7, event_type: 'task_completed', event_context: 'My Task', result: { foo: 'bar' } } },
+      }));
+    });
+    expect(h.session.addMessageToTargetSession).toHaveBeenCalled();
+  });
+
+  it('a task_completed with no output/result uses the message and a default task name', () => {
+    render(<ChatWorkspace />);
+    act(() => {
+      h.streamOpts.onTrace('the message body', { event_type: 'task_completed' });
+    });
+    expect(h.session.addMessageToTargetSession).toHaveBeenCalled();
+  });
+
+  // --- group switching + reconnect-after-refresh (window-driven) ---
+  it('group-changed reloads the workspace sessions and restores the active one', async () => {
+    h.session.currentSessionId = 's1';
+    render(<ChatWorkspace />);
+    await act(async () => {
+      window.dispatchEvent(new Event('group-changed'));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(h.session.reloadForGroup).toHaveBeenCalled();
+    expect(h.exec.restoreSessionState).toHaveBeenCalledWith('s1');
+  });
+
+  it('group-changed with no active session resets per-session state', async () => {
+    h.session.currentSessionId = null;
+    render(<ChatWorkspace />);
+    await act(async () => {
+      window.dispatchEvent(new Event('group-changed'));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(h.exec.resetForSession).toHaveBeenCalled();
+  });
+
+  it('reconnects to a still-running job after refresh, then clears it once finished', async () => {
+    h.getSessionRunningJob.mockResolvedValueOnce('job-rc');
+    h.exec.activeExecution = null;
+    h.exec.startExecution.mockImplementationOnce((jobId: string) => {
+      h.exec.activeExecution = { jobId, status: 'running' };
+      h.exec.isExecuting = true;
+    });
+    h.getExecutionStatus.mockResolvedValueOnce({ status: 'completed' });
+    h.session.currentSessionId = 's1';
+    await act(async () => {
+      render(<ChatWorkspace />);
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(h.exec.startExecution).toHaveBeenCalledWith('job-rc', 's1', { preservePreview: true });
+    expect(h.getExecutionStatus).toHaveBeenCalledWith('job-rc');
+    expect(h.clearSessionRunningJob).toHaveBeenCalledWith('s1');
+  });
+
+  it('reconnect keeps the optimistic running state when status is missing/not terminal', async () => {
+    h.getSessionRunningJob.mockResolvedValueOnce('job-rc2');
+    h.exec.activeExecution = null;
+    h.exec.startExecution.mockImplementationOnce((jobId: string) => {
+      h.exec.activeExecution = { jobId, status: 'running' };
+      h.exec.isExecuting = true;
+    });
+    // No status field -> String(exec?.status || '') falls back to '' (not finished).
+    h.getExecutionStatus.mockResolvedValueOnce({});
+    h.session.currentSessionId = 's1';
+    await act(async () => {
+      render(<ChatWorkspace />);
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(h.getExecutionStatus).toHaveBeenCalledWith('job-rc2');
+    // not finished -> the marker is NOT cleared
+    expect(h.clearSessionRunningJob).not.toHaveBeenCalled();
+  });
+
+  it('reconnect bails when a run is already active (no hijack)', async () => {
+    h.getSessionRunningJob.mockResolvedValueOnce('job-other');
+    h.exec.activeExecution = { jobId: 'already-running', status: 'running' };
+    h.session.currentSessionId = 's1';
+    await act(async () => {
+      render(<ChatWorkspace />);
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(h.exec.startExecution).not.toHaveBeenCalledWith('job-other', 's1', { preservePreview: true });
   });
 });

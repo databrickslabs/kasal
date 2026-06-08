@@ -23,7 +23,7 @@ class TestAadService:
     def service_with_token(self, mock_logger):
         """Create AadService with pre-obtained token"""
         return AadService(
-            access_token="dummy_access_token_for_testing",  # gitleaks:allow
+            access_token="eyJ.test.token",  # gitleaks:allow JWT-shaped dummy for format checks
             logger=mock_logger
         )
 

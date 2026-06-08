@@ -169,6 +169,19 @@ class TaskGenerationService:
         
         logger.info("Using prompt template for generate_task from database")
 
+        # When the workspace renders via the Predefined UI (UIConfigurator), steer
+        # the generator away from baking "output raw HTML" into the task. Otherwise
+        # the generated task conflicts with the UI-document instruction at execution
+        # time and weaker models emit HTML or stall asking which format to use.
+        from src.services.ui_config_service import (
+            UIConfigService,
+            UI_DOCUMENT_GENERATION_DIRECTIVE,
+        )
+        gen_group_id = group_context.primary_group_id if group_context else None
+        if await UIConfigService.is_predefined_ui_enabled(gen_group_id):
+            base_message = f"{UI_DOCUMENT_GENERATION_DIRECTIVE}\n\n{base_message}"
+            logger.info("[UIEmission] generate_task: applied design-system UI directive")
+
         # Include agent context inline in the system prompt if provided (no external retrieval)
         if request.agent:
             agent = request.agent
@@ -188,6 +201,12 @@ class TaskGenerationService:
                 "\n\nRefer to the TOOL CATALOG above for when to use each tool."
                 " Assign at most 1-2 tools. If none are essential, return an empty tools array."
             )
+            # Prefer GenieTool for internal-data questions when it's available, so a
+            # data prompt yields a Genie task (→ space picker) not a web-search task.
+            if any(t.get('name') == 'GenieTool' for t in request.available_tools):
+                from src.seeds.prompt_templates import GENIE_ROUTING_DIRECTIVE
+                base_message += f"\n{GENIE_ROUTING_DIRECTIVE}"
+                logger.info("[GenieRouting] generate_task: applied Genie routing directive (GenieTool available)")
 
         # Documentation context disabled: skip vector search/embedding for task generation
         # (No documentation context injected)

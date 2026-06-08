@@ -10,6 +10,7 @@ vi.mock('../utils/markdown', () => ({
 // --- Mock sessionDb ---
 vi.mock('../db/sessionDb', () => ({
   initDb: vi.fn(),
+  assignUngroupedSessions: vi.fn(),
   createSession: vi.fn(),
   listSessions: vi.fn(),
   deleteSession: vi.fn(),
@@ -150,7 +151,7 @@ describe('createNewSession', () => {
     const returnedId = await useSessionStore.getState().createNewSession();
 
     expect(returnedId).toBe('new-sess');
-    expect(db.createSession).toHaveBeenCalledWith('New Chat');
+    expect(db.createSession).toHaveBeenCalledWith('New Chat', undefined);
     expect(localStorage.getItem(ACTIVE_SESSION_KEY)).toBe('new-sess');
     const state = useSessionStore.getState();
     expect(state.currentSessionId).toBe('new-sess');
@@ -199,7 +200,7 @@ describe('deleteSession', () => {
 
     await useSessionStore.getState().deleteSession('current');
 
-    expect(db.createSession).toHaveBeenCalledWith('New Chat');
+    expect(db.createSession).toHaveBeenCalledWith('New Chat', undefined);
     expect(localStorage.getItem(ACTIVE_SESSION_KEY)).toBe('fresh');
     const state = useSessionStore.getState();
     expect(state.sessions).toEqual([created]);
@@ -304,7 +305,7 @@ describe('addMessage', () => {
     useSessionStore.getState().addMessage('user', 'kick off a chat');
     await flush();
 
-    expect(db.createSession).toHaveBeenCalledWith('New Chat');
+    expect(db.createSession).toHaveBeenCalledWith('New Chat', undefined);
     expect(localStorage.getItem(ACTIVE_SESSION_KEY)).toBe('auto-created');
     const state = useSessionStore.getState();
     expect(state.currentSessionId).toBe('auto-created');
@@ -481,5 +482,66 @@ describe('clearMessages', () => {
 
     expect(useSessionStore.getState().messages).toEqual([]);
     expect(db.clearSessionMessages).not.toHaveBeenCalled();
+  });
+});
+
+describe('workspace scoping (per-group sessions)', () => {
+  it('createNewSession tags the session with the current group', async () => {
+    localStorage.setItem('selectedGroupId', 'group-x');
+    (db.createSession as ReturnType<typeof vi.fn>).mockResolvedValue(makeSession('s-x'));
+    (db.listSessions as ReturnType<typeof vi.fn>).mockResolvedValue([makeSession('s-x')]);
+    await useSessionStore.getState().createNewSession();
+    expect(db.createSession).toHaveBeenCalledWith('New Chat', 'group-x');
+    expect(db.listSessions).toHaveBeenCalledWith('group-x');
+  });
+
+  it('reloadForGroup lists only the current group and picks its most recent session', async () => {
+    localStorage.setItem('selectedGroupId', 'group-y');
+    (db.listSessions as ReturnType<typeof vi.fn>).mockResolvedValue([makeSession('y1'), makeSession('y2')]);
+    (db.getSessionMessages as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    await useSessionStore.getState().reloadForGroup();
+    expect(db.listSessions).toHaveBeenCalledWith('group-y');
+    const s = useSessionStore.getState();
+    expect(s.sessions.map((x) => x.id)).toEqual(['y1', 'y2']);
+    expect(s.currentSessionId).toBe('y1');
+  });
+
+  it('reloadForGroup yields an empty state when the workspace has no sessions', async () => {
+    localStorage.setItem('selectedGroupId', 'group-empty');
+    (db.listSessions as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    await useSessionStore.getState().reloadForGroup();
+    const s = useSessionStore.getState();
+    expect(s.currentSessionId).toBeNull();
+    expect(s.messages).toEqual([]);
+  });
+
+  it('init adopts ungrouped sessions into the current workspace', async () => {
+    localStorage.setItem('selectedGroupId', 'group-z');
+    (db.initDb as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (db.assignUngroupedSessions as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (db.listSessions as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    await useSessionStore.getState().init();
+    expect(db.assignUngroupedSessions).toHaveBeenCalledWith('group-z');
+  });
+
+  it('init tolerates a failure while adopting ungrouped sessions', async () => {
+    localStorage.setItem('selectedGroupId', 'group-z');
+    (db.initDb as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (db.assignUngroupedSessions as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('migrate fail'));
+    (db.listSessions as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    await expect(useSessionStore.getState().init()).resolves.toBeUndefined();
+  });
+
+  it('falls back to no group when reading selectedGroupId from localStorage throws', async () => {
+    const orig = Storage.prototype.getItem;
+    const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+      if (key === 'selectedGroupId') throw new Error('storage blocked');
+      return orig.call(this, key);
+    });
+    (db.createSession as ReturnType<typeof vi.fn>).mockResolvedValue(makeSession('s-nogroup'));
+    (db.listSessions as ReturnType<typeof vi.fn>).mockResolvedValue([makeSession('s-nogroup')]);
+    await useSessionStore.getState().createNewSession();
+    expect(db.createSession).toHaveBeenCalledWith('New Chat', undefined);
+    spy.mockRestore();
   });
 });

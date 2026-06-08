@@ -215,130 +215,26 @@ class DocumentationEmbeddingService:
             doc_embedding: The documentation embedding to create
             user_token: Optional user access token for OBO authentication
         """
-        # Check if we should use Databricks
-        databricks_storage = await self._get_databricks_storage(user_token=user_token)
-
-        # Determine if we're in local development mode (SQLite or local PostgreSQL)
-        import os
-        database_type = os.getenv("DATABASE_TYPE", "postgres").lower()
-        is_local_dev = (
-            database_type == "sqlite" or
-            (database_type == "postgres" and os.getenv("POSTGRES_SERVER", "localhost") == "localhost")
-        )
-
-        if databricks_storage:
-            try:
-                # Create a unique ID for the document
-                doc_id = str(uuid.uuid4())
-
-                # Prepare metadata
-                metadata = doc_embedding.doc_metadata or {}
-                metadata.update({
-                    'source': doc_embedding.source,
-                    'title': doc_embedding.title,
-                    'created_at': datetime.utcnow().isoformat()
-                })
-
-                # Save to Databricks
-                logger.info(f"Attempting to save to Databricks index: {databricks_storage.index_name}")
-                logger.info(f"Document ID: {doc_id}, Content length: {len(doc_embedding.content)}, Embedding dimensions: {len(doc_embedding.embedding)}")
-
-                # DatabricksVectorStorage.save() expects a single 'data' dict parameter
-                # that includes content, embedding, and metadata
-                data = {
-                    'content': doc_embedding.content,
-                    'embedding': doc_embedding.embedding,
-                    'metadata': metadata,
-                    'context': {
-                        'query_text': doc_embedding.title or '',
-                        'session_id': str(doc_id),
-                        'interaction_sequence': 0
-                    }
-                }
-
-                # Save using the correct method signature
-                await databricks_storage.save(data)
-
-                logger.info(f"Successfully saved documentation embedding to Databricks with ID: {doc_id} in index: {databricks_storage.index_name}")
-
-                # Verify the document was saved by getting stats
-                try:
-                    stats = await databricks_storage.get_stats()
-                    logger.info(f"Current index stats after save: {stats}")
-                except Exception as e:
-                    logger.error(f"Error getting stats after save: {e}")
-
-                # Return a DocumentationEmbedding object for consistency
-                return DocumentationEmbedding(
-                    id=doc_id,  # Using string ID from Databricks
-                    source=doc_embedding.source,
-                    title=doc_embedding.title,
-                    content=doc_embedding.content,
-                    doc_metadata=metadata,
-                    embedding=doc_embedding.embedding,
-                    created_at=datetime.utcnow(),
-                    updated_at=datetime.utcnow()
-                )
-            except Exception as e:
-                error_str = str(e)
-                logger.error(f"Failed to save to Databricks: {e}")
-                logger.error(f"Exception type: {type(e).__name__}")
-                logger.error(f"Exception details: {error_str}")
-
-                # Check if it's a "not ready" error
-                if "not ready" in error_str.lower():
-                    logger.warning("Databricks Vector Search index is not ready yet. Documentation will be seeded when the index becomes available.")
-                    # Return a placeholder object to indicate partial success
-                    return DocumentationEmbedding(
-                        id="pending-" + str(uuid.uuid4()),
-                        source=doc_embedding.source,
-                        title=doc_embedding.title,
-                        content=doc_embedding.content,
-                        doc_metadata=doc_embedding.doc_metadata or {},
-                        embedding=doc_embedding.embedding,
-                        created_at=datetime.utcnow(),
-                        updated_at=datetime.utcnow()
-                    )
-
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                # Re-raise the exception for other errors
-                raise
-
-        # Only use database storage in local development (SQLite or local PostgreSQL)
-        # Skip database storage entirely when:
-        # 1. Databricks/Lakebase is configured (even if it failed above)
-        # 2. Production PostgreSQL is being used
-        if not is_local_dev:
-            # In production or with Databricks configured, don't store in database
-            logger.info("Skipping database storage (not in local development mode)")
-            # Return a placeholder object to indicate the operation was handled
-            return DocumentationEmbedding(
-                id="skip-db-" + str(uuid.uuid4()),
-                source=doc_embedding.source,
-                title=doc_embedding.title,
-                content=doc_embedding.content,
-                doc_metadata=doc_embedding.doc_metadata or {},
-                embedding=doc_embedding.embedding,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
-            )
-
-        # Use traditional database storage through repository only in local development
+        # Document embeddings are stored in the application database's pgvector
+        # table (Lakebase pgvector in production, SQLite locally). Databricks Vector
+        # Search is no longer used for document embeddings.
         if not self.session:
             raise ValueError("Session is required for database operations")
 
-        # Use batching service for SQLite to reduce lock contention
         import os
+        database_type = os.getenv("DATABASE_TYPE", "postgres").lower()
+
+        # Use the batching queue for SQLite to reduce write-lock contention.
         if database_type == "sqlite":
             logger.info("Using embedding queue service for batch processing")
-            # Add to queue for batch processing
             await embedding_queue.add_embedding(
                 source=doc_embedding.source,
                 title=doc_embedding.title,
                 content=doc_embedding.content,
                 embedding=doc_embedding.embedding,
-                doc_metadata=doc_embedding.doc_metadata
+                doc_metadata=doc_embedding.doc_metadata,
+                group_id=getattr(doc_embedding, "group_id", None),
+                file_path=getattr(doc_embedding, "file_path", None),
             )
             # Return a placeholder immediately to avoid blocking
             return DocumentationEmbedding(
@@ -347,15 +243,17 @@ class DocumentationEmbeddingService:
                 title=doc_embedding.title,
                 content=doc_embedding.content,
                 doc_metadata=doc_embedding.doc_metadata or {},
+                group_id=getattr(doc_embedding, "group_id", None),
+                file_path=getattr(doc_embedding, "file_path", None),
                 embedding=doc_embedding.embedding,
                 created_at=datetime.utcnow(),
                 updated_at=datetime.utcnow()
             )
-        else:
-            # Create the embedding in the database directly for PostgreSQL
-            from src.repositories.documentation_embedding_repository import DocumentationEmbeddingRepository
-            repository = DocumentationEmbeddingRepository(self.session)
-            return await repository.create(doc_embedding)
+
+        # PostgreSQL / Lakebase pgvector — store directly via the repository.
+        from src.repositories.documentation_embedding_repository import DocumentationEmbeddingRepository
+        repository = DocumentationEmbeddingRepository(self.session)
+        return await repository.create(doc_embedding)
 
     async def get_documentation_embedding(
         self,
@@ -406,108 +304,46 @@ class DocumentationEmbeddingService:
     async def search_similar_embeddings(
         self,
         query_embedding: List[float],
-        limit: int = 5
+        limit: int = 5,
+        group_id: Optional[str] = None,
+        file_paths: Optional[List[str]] = None,
     ) -> List[DocumentationEmbedding]:
         """
-        Search for similar embeddings using cosine similarity.
+        Search for similar embeddings using cosine similarity against the app
+        database's pgvector table (Lakebase pgvector in production, SQLite locally).
 
-        This method automatically detects the storage backend and uses the appropriate
-        similarity search implementation:
-        - Databricks: Uses Vector Search API
-        - PostgreSQL: Uses pgvector extension with <=> operator
-        - SQLite: Uses pure SQL implementation with JSON functions
+        Scoping:
+        - group_id is None  -> built-in CrewAI documentation only (group_id IS NULL).
+        - group_id is set    -> that workspace's uploaded knowledge, optionally
+          narrowed to file_paths (the crew's knowledge sources).
 
         Args:
             query_embedding: The embedding vector to search for
             limit: Maximum number of results to return
-            db: Database session (can be AsyncSession or Session)
+            group_id: Workspace scope (None = built-in docs)
+            file_paths: Optional knowledge-file filter (only with group_id)
 
         Returns:
             List of DocumentationEmbedding objects sorted by similarity
         """
         try:
-            # Check if we should use Databricks
-            databricks_storage = await self._get_databricks_storage()
-            if databricks_storage:
-                # Fast readiness gate: skip Databricks search if index/endpoint is not ready (e.g., PROVISIONING)
-                use_databricks = True
-                try:
-                    repo = getattr(databricks_storage, 'repository', None)
-                    index_name = getattr(databricks_storage, 'index_name', None)
-                    endpoint_name = getattr(databricks_storage, 'endpoint_name', None)
-                    user_token = getattr(databricks_storage, 'user_token', None)
-                    if repo and index_name and endpoint_name:
-                        # Bound the readiness check to a very short timeout to avoid blocking generation
-                        index_info = await asyncio.wait_for(
-                            repo.get_index(index_name, endpoint_name, user_token),
-                            timeout=3
-                        )
-                        # Determine readiness defensively for both object and dict shapes
-                        ready = False
-                        try:
-                            if hasattr(index_info, 'success'):
-                                ready = bool(getattr(index_info, 'success', False) and getattr(getattr(index_info, 'index', None), 'ready', False))
-                            elif isinstance(index_info, dict):
-                                status = index_info.get('status') or {}
-                                ready = bool(status.get('ready') or index_info.get('ready'))
-                        except Exception:
-                            ready = False
-                        if not ready:
-                            logger.info("Databricks documentation index not ready (provisioning). Skipping Databricks for docs search.")
-                            use_databricks = False
-                except Exception as e:
-                    logger.info(f"Skipping Databricks docs search due to provisioning/unavailable: {e}")
-                    use_databricks = False
-
-                if use_databricks:
-                    try:
-                        # Search in Databricks with a tight timeout to avoid blocking generation
-                        results = await asyncio.wait_for(
-                            databricks_storage.search(
-                                query_embedding,  # First positional argument
-                                k=limit  # Named argument for number of results
-                            ),
-                            timeout=4
-                        )
-
-                        # Convert results to DocumentationEmbedding objects
-                        similar_docs = []
-                        for result in results or []:
-                            # Extract metadata
-                            metadata = result.get('metadata', {})
-
-                            doc = DocumentationEmbedding(
-                                id=result.get('id', ''),
-                                source=metadata.get('source', ''),
-                                title=metadata.get('title', ''),
-                                content=result.get('content', ''),
-                                doc_metadata=metadata,
-                                embedding=[],  # Don't return embeddings in search results
-                                created_at=datetime.fromisoformat(metadata.get('created_at', datetime.utcnow().isoformat())),
-                                updated_at=datetime.fromisoformat(metadata.get('updated_at', metadata.get('created_at', datetime.utcnow().isoformat())))
-                            )
-                            similar_docs.append(doc)
-
-                        logger.info(f"Found {len(similar_docs)} similar documents in Databricks")
-                        return similar_docs
-
-                    except Exception as e:
-                        logger.error(f"Failed to search in Databricks, falling back to database: {e}")
-                        # Fall through to database search
-
-            # Traditional database search
+            # Similarity search runs against the app DB's pgvector table
+            # (Lakebase pgvector in production, SQLite locally). Databricks Vector
+            # Search is no longer used for document embeddings.
             if not self.session:
                 logger.warning("No session provided to search_similar_embeddings")
                 return []
 
             logger.debug(f"Session type: {type(self.session)}")
 
-            # Use the repository method for similarity search
+            # Use the repository method for pgvector similarity search
             from src.repositories.documentation_embedding_repository import DocumentationEmbeddingRepository
             repository = DocumentationEmbeddingRepository(self.session)
 
-            logger.info("Using repository for similarity search")
-            return await repository.search_similar(query_embedding, limit)
+            logger.info("Using pgvector repository for similarity search")
+            return await repository.search_similar(
+                query_embedding, limit, group_id=group_id, file_paths=file_paths
+            )
 
         except Exception as e:
             logger.error(f"Error in search_similar_embeddings: {str(e)}")

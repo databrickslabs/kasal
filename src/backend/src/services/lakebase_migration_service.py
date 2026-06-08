@@ -519,6 +519,31 @@ class LakebaseMigrationService(BaseService):
                 logger.info(f"  ↳ Table {table_name} is empty (0 rows)")
                 return 0, None
 
+            # Only migrate columns that ALSO exist in the Lakebase target table.
+            # The source (legacy SQLite) may carry columns since dropped from the
+            # model — e.g. the unified-memory refactor removed memory_backends.
+            # enable_short_term / enable_long_term / enable_entity /
+            # enable_relationship_retrieval. Inserting those into the new table
+            # fails with: column "enable_short_term" ... does not exist.
+            insert_columns = list(columns)
+            async with lakebase_session.begin():
+                target_cols_result = await lakebase_session.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_name = :t"
+                    ),
+                    {"t": table_name},
+                )
+                target_columns = {r[0] for r in target_cols_result.fetchall()}
+            if target_columns:
+                dropped = [c for c in columns if c not in target_columns]
+                if dropped:
+                    logger.warning(
+                        f"  ↳ {table_name}: skipping column(s) absent in Lakebase target "
+                        f"(legacy/removed): {dropped}"
+                    )
+                insert_columns = [c for c in columns if c in target_columns]
+
             # Clear existing data in Lakebase to avoid duplicates
             async with lakebase_session.begin():
                 safe_table = _validate_identifier(table_name, "table name")
@@ -528,24 +553,27 @@ class LakebaseMigrationService(BaseService):
 
             # Insert into Lakebase
             async with lakebase_session.begin():
-                # Build insert statement - escape column names for PostgreSQL
-                col_names = ", ".join([f'"{col}"' for col in columns])
-                placeholders = ", ".join([f":{col}" for col in columns])
+                # Build insert statement - escape column names for PostgreSQL.
+                # Only target-present columns (see insert_columns above).
+                col_names = ", ".join([f'"{col}"' for col in insert_columns])
+                placeholders = ", ".join([f":{col}" for col in insert_columns])
                 insert_sql = (
                     f"INSERT INTO {safe_table} ({col_names}) VALUES ({placeholders})"
                 )
 
                 # Batch insert with proper type conversion
                 for row in rows:
+                    # Build the full source row (indices match `columns`), convert
+                    # types, then pass only the params the target INSERT expects.
                     row_dict = {}
                     for idx, col in enumerate(columns):
                         row_dict[col] = row[idx]
 
-                    # Convert types for PostgreSQL compatibility
                     converted_row = self.convert_row_types(
                         row_dict, table_name, columns
                     )
-                    await lakebase_session.execute(text(insert_sql), converted_row)
+                    params = {col: converted_row[col] for col in insert_columns}
+                    await lakebase_session.execute(text(insert_sql), params)
 
             logger.info(f"  ✓ Migrated {len(rows)} rows from {table_name}")
             return len(rows), None
@@ -669,12 +697,41 @@ class LakebaseMigrationService(BaseService):
             # pg8000's executemany sends one INSERT per row which is very slow
             # over SSL.  Building a single INSERT … VALUES (…),(…),… per batch
             # sends one statement for the whole batch — much faster.
-            column_list = ", ".join([f'"{col}"' for col in columns])
             batch_size = 200
             total_inserted = 0
             with lakebase_engine.connect() as lakebase_conn:
                 lakebase_conn.execute(text("SET search_path TO kasal"))
                 lakebase_conn.commit()
+
+                # Only insert columns that ALSO exist in the Lakebase target —
+                # drop legacy/removed source columns (e.g. memory_backends.
+                # enable_short_term/long_term/entity/relationship_retrieval,
+                # dropped in the unified-memory refactor). Otherwise the INSERT
+                # fails with: column "enable_short_term" ... does not exist.
+                insert_columns = list(columns)
+                try:
+                    tcol = lakebase_conn.execute(
+                        text(
+                            "SELECT column_name FROM information_schema.columns "
+                            "WHERE table_schema = 'kasal' AND table_name = :t"
+                        ),
+                        {"t": table_name},
+                    )
+                    target_columns = {r[0] for r in tcol.fetchall()}
+                    if target_columns:
+                        dropped = [c for c in columns if c not in target_columns]
+                        if dropped:
+                            logger.warning(
+                                f"  ↳ {table_name}: skipping column(s) absent in Lakebase "
+                                f"target (legacy/removed): {dropped}"
+                            )
+                        insert_columns = [c for c in columns if c in target_columns]
+                except Exception as col_err:
+                    logger.warning(
+                        f"  ↳ {table_name}: could not introspect target columns "
+                        f"({col_err}); inserting all source columns"
+                    )
+                column_list = ", ".join([f'"{col}"' for col in insert_columns])
 
                 # Clear existing data to avoid duplicate key errors
                 # (e.g. seed data inserted by a previous schema-only migration).
@@ -704,7 +761,7 @@ class LakebaseMigrationService(BaseService):
                     params: Dict[str, Any] = {}
                     for row_idx, row_dict in enumerate(batch):
                         row_placeholders = []
-                        for col in columns:
+                        for col in insert_columns:
                             param_name = f"{col}_{row_idx}"
                             row_placeholders.append(f":{param_name}")
                             params[param_name] = row_dict.get(col)

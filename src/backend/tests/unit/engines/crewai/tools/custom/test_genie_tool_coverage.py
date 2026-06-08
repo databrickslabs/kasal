@@ -186,7 +186,8 @@ class TestGetAuthHeaders:
                    AsyncMock(return_value=mock_auth_ctx)):
             with patch("src.utils.user_context.UserContext"):
                 headers = await tool._get_auth_headers()
-        assert headers == {"Authorization": "Bearer tok"}
+        assert headers["Authorization"] == "Bearer tok"
+        assert "User-Agent" in headers
 
     @pytest.mark.asyncio
     async def test_returns_none_when_no_auth(self):

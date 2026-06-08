@@ -23,60 +23,6 @@ from src.schemas.memory_backend import (
 class TestDisabledMemoryBackendSimple:
     """Test cases for disabled memory backend configuration."""
     
-    def test_all_memory_types_disabled_is_disabled_config(self):
-        """Test that a config with all memory types disabled is considered disabled."""
-        config = MemoryBackendConfig(
-            backend_type=MemoryBackendType.DATABRICKS,
-            databricks_config=DatabricksMemoryConfig(
-                workspace_url="https://test.databricks.com",
-                endpoint_name="test-endpoint",
-                document_endpoint_name="test-endpoint",
-                short_term_index="test.short_term",
-                long_term_index="test.long_term",
-                entity_index="test.entity",
-                document_index="test.document"
-            ),
-            enable_short_term=False,
-            enable_long_term=False,
-            enable_entity=False
-        )
-        
-        # This configuration should be considered "disabled"
-        is_disabled = (
-            not config.enable_short_term and 
-            not config.enable_long_term and 
-            not config.enable_entity
-        )
-        
-        assert is_disabled is True
-    
-    def test_some_memory_types_enabled_is_not_disabled(self):
-        """Test that a config with some memory types enabled is not disabled."""
-        config = MemoryBackendConfig(
-            backend_type=MemoryBackendType.DATABRICKS,
-            databricks_config=DatabricksMemoryConfig(
-                workspace_url="https://test.databricks.com",
-                endpoint_name="test-endpoint",
-                document_endpoint_name="test-endpoint",
-                short_term_index="test.short_term",
-                long_term_index="test.long_term",
-                entity_index="test.entity",
-                document_index="test.document"
-            ),
-            enable_short_term=True,
-            enable_long_term=False,
-            enable_entity=True
-        )
-        
-        # This configuration should NOT be considered "disabled"
-        is_disabled = (
-            not config.enable_short_term and 
-            not config.enable_long_term and 
-            not config.enable_entity
-        )
-        
-        assert is_disabled is False
-    
     def test_storage_directory_naming_for_default(self):
         """Test that default memory uses correct storage directory naming."""
         crew_id = "test_crew_123"

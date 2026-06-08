@@ -460,6 +460,55 @@ sync_session_factory = sync_sessionmaker(
 )
 
 # Database initialization
+async def _ensure_documentation_embeddings_columns(conn) -> None:
+    """Idempotently add group_id/file_path to documentation_embeddings.
+
+    create_all never ALTERs an existing table, so app DBs created before these
+    columns existed are missing them — which breaks knowledge ingest fallback,
+    built-in doc seeding, and group-scoped search (all reference the columns).
+    Safe to run on every startup; the embedding column is unchanged here.
+    """
+    is_sqlite = str(settings.DATABASE_URI).startswith('sqlite')
+    try:
+        if is_sqlite:
+            res = await conn.exec_driver_sql("PRAGMA table_info(documentation_embeddings)")
+            cols = {row[1] for row in res.fetchall()}
+            if not cols:
+                return  # table not created yet
+            if "group_id" not in cols:
+                await conn.exec_driver_sql(
+                    "ALTER TABLE documentation_embeddings ADD COLUMN group_id VARCHAR(100)"
+                )
+            if "file_path" not in cols:
+                await conn.exec_driver_sql(
+                    "ALTER TABLE documentation_embeddings ADD COLUMN file_path VARCHAR"
+                )
+        else:
+            await conn.exec_driver_sql(
+                "ALTER TABLE documentation_embeddings ADD COLUMN IF NOT EXISTS group_id VARCHAR(100)"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE documentation_embeddings ADD COLUMN IF NOT EXISTS file_path VARCHAR"
+            )
+        logger.info("Ensured documentation_embeddings group_id/file_path columns")
+    except Exception as e:
+        logger.warning(f"Could not ensure documentation_embeddings columns: {e}")
+
+    # Ensure the dedicated knowledge_embeddings table exists (uploaded-knowledge
+    # fallback when no Lakebase backend is active). create_all is skipped on
+    # existing DBs, so create it explicitly here.
+    try:
+        from src.models.documentation_embedding import KnowledgeEmbedding
+
+        def _create_knowledge_table(sync_conn):
+            KnowledgeEmbedding.__table__.create(sync_conn, checkfirst=True)
+
+        await conn.run_sync(_create_knowledge_table)
+        logger.info("Ensured knowledge_embeddings table exists")
+    except Exception as e:
+        logger.warning(f"Could not ensure knowledge_embeddings table: {e}")
+
+
 async def init_db() -> None:
     """Initialize database tables if they don't exist."""
     try:
@@ -628,6 +677,20 @@ async def init_db() -> None:
             await engine_for_init.dispose()
 
             logger.info("Database tables initialized successfully")
+
+        # Self-heal: ensure documentation_embeddings has the group_id/file_path
+        # columns even when the tables already existed (create_all is skipped
+        # then). DBs created before these columns were added would otherwise be
+        # missing them, breaking built-in doc seeding + group-scoped search.
+        try:
+            ensure_engine = create_async_engine(str(settings.DATABASE_URI), future=True, echo=SQL_DEBUG)
+            try:
+                async with ensure_engine.begin() as conn:
+                    await _ensure_documentation_embeddings_columns(conn)
+            finally:
+                await ensure_engine.dispose()
+        except Exception as ensure_err:
+            logger.warning(f"documentation_embeddings column ensure skipped: {ensure_err}")
 
         # Verify tables were created for SQLite
         if str(settings.DATABASE_URI).startswith('sqlite'):

@@ -87,6 +87,10 @@ class FakeUpgradeDb {
 class FakeDb {
   constructor(public stores: Map<string, StoreDef>) {}
 
+  close() {
+    // no-op (exercised by the `blocking` callback)
+  }
+
   private store(name: string): StoreDef {
     const s = this.stores.get(name);
     if (!s) throw new Error(`unknown store ${name}`);
@@ -121,6 +125,9 @@ class FakeDb {
     const def = this.store(storeName);
     return {
       store: {
+        put: async (value: Record<string, unknown>) => {
+          def.records.set(value[def.keyPath], value);
+        },
         index: (name: string) => {
           const field = def.indexes.get(name);
           if (!field) throw new Error(`unknown index ${name}`);
@@ -137,18 +144,22 @@ let mockStores: Map<string, StoreDef>;
 const openDBMock = vi.fn(
   async (
     _name: string,
-    _version: number,
-    opts: { upgrade: (db: FakeUpgradeDb) => void },
+    _version: number | undefined,
+    opts: { upgrade?: (db: FakeUpgradeDb) => void },
   ) => {
     // Run the upgrade callback against a fresh upgrade view of the stores.
-    opts.upgrade(new FakeUpgradeDb(mockStores));
+    // Reopen-at-current-version passes no `upgrade`, so it's optional.
+    if (opts.upgrade) opts.upgrade(new FakeUpgradeDb(mockStores));
     return new FakeDb(mockStores) as unknown as import('idb').IDBPDatabase;
   },
 );
+const deleteDBMock = vi.fn(async () => undefined);
 
 vi.mock('idb', () => ({
   openDB: (...args: unknown[]) =>
     (openDBMock as unknown as (...a: unknown[]) => unknown)(...args),
+  deleteDB: (...args: unknown[]) =>
+    (deleteDBMock as unknown as (...a: unknown[]) => unknown)(...args),
 }));
 
 // Import AFTER mocks are registered. Because initDb caches a module-level
@@ -159,6 +170,12 @@ let sessionDb: typeof import('./sessionDb');
 beforeEach(async () => {
   mockStores = new Map();
   openDBMock.mockClear();
+  openDBMock.mockReset();
+  openDBMock.mockImplementation(async (_n: unknown, _v: unknown, opts: { upgrade?: (db: FakeUpgradeDb) => void }) => {
+    if (opts.upgrade) opts.upgrade(new FakeUpgradeDb(mockStores));
+    return new FakeDb(mockStores) as unknown as import('idb').IDBPDatabase;
+  });
+  deleteDBMock.mockClear();
   vi.resetModules();
   sessionDb = await import('./sessionDb');
 });
@@ -470,5 +487,129 @@ describe('preview persistence', () => {
   it('getSessionPreview returns undefined when absent', async () => {
     await sessionDb.initDb();
     expect(await sessionDb.getSessionPreview('nope')).toBeUndefined();
+  });
+});
+
+describe('initDb — recovery paths', () => {
+  it('reopens at the current version when the versioned open fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    openDBMock.mockRejectedValueOnce(new Error('VersionError')); // first (versioned) open
+    const db = await sessionDb.initDb();
+    expect(db).toBeDefined();
+    expect(openDBMock).toHaveBeenCalledTimes(2);
+    expect(openDBMock.mock.calls[1][1]).toBeUndefined(); // reopen passes version=undefined
+    warn.mockRestore();
+  });
+
+  it('resets the DB when both the versioned open and the reopen fail', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    openDBMock.mockRejectedValueOnce(new Error('e1')); // versioned
+    openDBMock.mockRejectedValueOnce(new Error('e2')); // reopen
+    const db = await sessionDb.initDb(); // third call (recreate) succeeds
+    expect(db).toBeDefined();
+    expect(deleteDBMock).toHaveBeenCalledTimes(1);
+    expect(openDBMock).toHaveBeenCalledTimes(3);
+    warn.mockRestore();
+  });
+
+  it('still recovers when deleteDB itself fails during reset', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    openDBMock.mockRejectedValueOnce(new Error('e1')); // versioned
+    openDBMock.mockRejectedValueOnce(new Error('e2')); // reopen
+    deleteDBMock.mockRejectedValueOnce(new Error('del fail')); // .catch(() => {}) swallows it
+    const db = await sessionDb.initDb(); // openVersioned() retry still succeeds
+    expect(db).toBeDefined();
+    warn.mockRestore();
+  });
+
+  it('runs the blocked / blocking / terminated lifecycle callbacks', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // Throw from close() so BOTH the `.then(db => db.close())` and its
+    // `.catch(() => {})` swallow-arrow on the same line are exercised.
+    const closeSpy = vi.spyOn(FakeDb.prototype, 'close').mockImplementation(() => {
+      throw new Error('close failed');
+    });
+    await sessionDb.initDb();
+    const opts = openDBMock.mock.calls[0][2] as {
+      blocked: () => void;
+      blocking: () => void;
+      terminated: () => void;
+    };
+    opts.blocked();
+    expect(warn).toHaveBeenCalled();
+    opts.blocking(); // closes the cached db + clears the singleton
+    await vi.waitFor(() => expect(closeSpy).toHaveBeenCalled()); // db.close() ran
+    await sessionDb.initDb(); // singleton was cleared → re-opens
+    expect(openDBMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+    opts.terminated(); // also clears the singleton (no throw)
+    closeSpy.mockRestore();
+    warn.mockRestore();
+  });
+});
+
+describe('createSession / listSessions — workspace scoping', () => {
+  it('createSession includes groupId when provided', async () => {
+    const s = await sessionDb.createSession('t', 'g9');
+    expect(s.groupId).toBe('g9');
+    expect(mockStores.get('sessions')!.records.get(s.id)).toMatchObject({ groupId: 'g9' });
+  });
+
+  it('listSessions returns only the given workspace when groupId is provided', async () => {
+    await sessionDb.initDb();
+    const store = mockStores.get('sessions')!;
+    store.records.set('x', { id: 'x', title: 'x', groupId: 'g1', createdAt: '2023-01-01', updatedAt: '2023-01-01' });
+    store.records.set('y', { id: 'y', title: 'y', groupId: 'g2', createdAt: '2023-01-02', updatedAt: '2023-01-02' });
+    const result = await sessionDb.listSessions('g1');
+    expect(result.map((s) => s.id)).toEqual(['x']);
+  });
+});
+
+describe('assignUngroupedSessions', () => {
+  it('tags sessions without a groupId for the given workspace', async () => {
+    await sessionDb.initDb();
+    const store = mockStores.get('sessions')!;
+    store.records.set('a', { id: 'a', title: 'a' }); // ungrouped
+    store.records.set('b', { id: 'b', title: 'b', groupId: 'g1' }); // already tagged
+    await sessionDb.assignUngroupedSessions('g1');
+    expect(store.records.get('a')!.groupId).toBe('g1');
+    expect(store.records.get('b')!.groupId).toBe('g1');
+  });
+
+  it('is a no-op for an empty groupId or when nothing is ungrouped', async () => {
+    await sessionDb.initDb();
+    const store = mockStores.get('sessions')!;
+    store.records.set('a', { id: 'a', groupId: 'g1' });
+    await sessionDb.assignUngroupedSessions(''); // empty → early return
+    await sessionDb.assignUngroupedSessions('g2'); // all grouped → nothing ungrouped
+    expect(store.records.get('a')!.groupId).toBe('g1'); // unchanged
+  });
+});
+
+describe('session running-job marker', () => {
+  it('sets, reads and clears the in-flight job on the session record', async () => {
+    await sessionDb.initDb();
+    const store = mockStores.get('sessions')!;
+    store.records.set('s1', { id: 's1', title: 't' });
+
+    expect(await sessionDb.getSessionRunningJob('s1')).toBeNull(); // none yet
+    await sessionDb.setSessionRunningJob('s1', 'job-1');
+    expect(store.records.get('s1')!.runningJobId).toBe('job-1');
+    expect(await sessionDb.getSessionRunningJob('s1')).toBe('job-1');
+
+    await sessionDb.clearSessionRunningJob('s1');
+    expect('runningJobId' in store.records.get('s1')!).toBe(false);
+  });
+
+  it('set/clear are no-ops when the session is missing or has no marker', async () => {
+    await sessionDb.initDb();
+    const store = mockStores.get('sessions')!;
+    await sessionDb.setSessionRunningJob('missing', 'j'); // session missing → no write
+    expect(store.records.has('missing')).toBe(false);
+    expect(await sessionDb.getSessionRunningJob('missing')).toBeNull(); // undefined session → null
+
+    store.records.set('s2', { id: 's2', title: 't' }); // present, no runningJobId
+    await sessionDb.clearSessionRunningJob('s2'); // 'runningJobId' not in session → no-op
+    expect(store.records.get('s2')).toMatchObject({ id: 's2' });
+    await sessionDb.clearSessionRunningJob('gone'); // missing session → no-op
   });
 });

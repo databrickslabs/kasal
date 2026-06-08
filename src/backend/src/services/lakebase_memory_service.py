@@ -298,8 +298,10 @@ class LakebaseMemoryService:
     async def get_table_stats(
         self,
         memory_table: str = "crew_memory",
+        group_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Get row-count statistics for the unified memory table."""
+        """Get row-count statistics for the unified memory table (scoped to the
+        workspace when group_id is given)."""
         tables = {"memory": memory_table}
         stats = {}
 
@@ -325,8 +327,10 @@ class LakebaseMemoryService:
 
                         row_count = 0
                         if exists:
+                            where, gparams = self._group_where(group_id)
                             count_result = await session.execute(
-                                text(f"SELECT COUNT(*) FROM {table_name}")
+                                text(f"SELECT COUNT(*) FROM {table_name} {where}"),
+                                gparams,
                             )
                             row_count = count_result.scalar() or 0
 
@@ -355,10 +359,27 @@ class LakebaseMemoryService:
 
         return stats
 
+    @staticmethod
+    def _group_where(group_id: Optional[str]) -> tuple[str, Dict[str, Any]]:
+        """SQL WHERE fragment + bound params that scope a memory query to ONE
+        workspace. Lakebase memory tables are shared across all workspaces on the
+        instance, so without this the browser leaks every group's rows. Matches
+        the ``group_id`` column, and as a fallback legacy rows that predate the
+        column (empty group_id) whose ``crew_id`` carries the ``{group_id}_``
+        prefix. Returns ('', {}) when no group_id is given (admin/global view)."""
+        if not group_id:
+            return "", {}
+        return (
+            "WHERE (group_id = :gid OR "
+            "(COALESCE(group_id, '') = '' AND crew_id LIKE :gid_like))",
+            {"gid": group_id, "gid_like": f"{group_id}_%"},
+        )
+
     async def get_table_data(
         self,
         table_name: str,
         limit: int = 50,
+        group_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Fetch rows from a Lakebase memory table.
@@ -366,6 +387,7 @@ class LakebaseMemoryService:
         Args:
             table_name: Name of the memory table to query
             limit: Maximum number of rows to return
+            group_id: Workspace to scope rows to (None = all, for admin views)
 
         Returns:
             Dict with success, documents list, and total count
@@ -389,9 +411,12 @@ class LakebaseMemoryService:
             ) as session:
                 from sqlalchemy import text
 
-                # Get total count
+                where, gparams = self._group_where(group_id)
+
+                # Get total count (scoped to the workspace)
                 count_result = await session.execute(
-                    text(f"SELECT COUNT(*) FROM {table_name}")
+                    text(f"SELECT COUNT(*) FROM {table_name} {where}"),
+                    gparams,
                 )
                 total = count_result.scalar() or 0
 
@@ -401,10 +426,11 @@ class LakebaseMemoryService:
                         SELECT id, crew_id, group_id, session_id, agent,
                                content, metadata, score, created_at, updated_at
                         FROM {table_name}
+                        {where}
                         ORDER BY created_at DESC
                         LIMIT :limit
                     """),
-                    {"limit": limit},
+                    {**gparams, "limit": limit},
                 )
                 rows = result.fetchall()
 
@@ -449,6 +475,7 @@ class LakebaseMemoryService:
         self,
         memory_table: str = "crew_memory",
         limit: int = 200,
+        group_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Fetch entity-like memory records and format them for graph visualization.
@@ -477,14 +504,16 @@ class LakebaseMemoryService:
                 from sqlalchemy import text
                 import json
 
+                where, gparams = self._group_where(group_id)
                 result = await session.execute(
                     text(f"""
                         SELECT id, crew_id, agent, content, metadata, score
                         FROM {entity_table}
+                        {where}
                         ORDER BY created_at DESC
                         LIMIT :limit
                     """),
-                    {"limit": limit},
+                    {**gparams, "limit": limit},
                 )
                 rows = result.fetchall()
 

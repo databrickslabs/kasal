@@ -439,7 +439,7 @@ class TestGenerateTask:
         request = TaskGenerationRequest(text="analyze sales", agent=agent)
         captured_messages = []
 
-        async def capture_completion(messages, model, temperature=0.7, max_tokens=4000):
+        async def capture_completion(messages, model, temperature=0.7, max_tokens=4000, **kwargs):
             captured_messages.extend(messages)
             return _valid_task_json()
 
@@ -892,7 +892,7 @@ class TestGenerateTask:
         request = TaskGenerationRequest(text="task")
         captured_kwargs = {}
 
-        async def capture_completion(messages, model, temperature=0.7, max_tokens=4000):
+        async def capture_completion(messages, model, temperature=0.7, max_tokens=4000, **kwargs):
             captured_kwargs.update(dict(messages=messages, model=model, temperature=temperature, max_tokens=max_tokens))
             return _valid_task_json()
 
@@ -912,7 +912,7 @@ class TestGenerateTask:
         request = TaskGenerationRequest(text="task")
         captured_kwargs = {}
 
-        async def capture_completion(messages, model, temperature=0.7, max_tokens=4000):
+        async def capture_completion(messages, model, temperature=0.7, max_tokens=4000, **kwargs):
             captured_kwargs.update(dict(messages=messages, model=model, temperature=temperature, max_tokens=max_tokens))
             return _valid_task_json()
 
@@ -1063,7 +1063,7 @@ class TestGenerateAndSaveTask:
 
         captured_kwargs = {}
 
-        async def capture_completion(messages, model, temperature=0.7, max_tokens=4000):
+        async def capture_completion(messages, model, temperature=0.7, max_tokens=4000, **kwargs):
             captured_kwargs.update(dict(messages=messages, model=model, temperature=temperature, max_tokens=max_tokens))
             return _valid_task_json()
 
@@ -1346,7 +1346,7 @@ class TestMessageConstruction:
         request = TaskGenerationRequest(text="task")
         captured_kwargs = {}
 
-        async def capture_completion(messages, model, temperature=0.7, max_tokens=4000):
+        async def capture_completion(messages, model, temperature=0.7, max_tokens=4000, **kwargs):
             captured_kwargs.update(dict(messages=messages, model=model, temperature=temperature, max_tokens=max_tokens))
             return _valid_task_json()
 
@@ -1391,7 +1391,7 @@ class TestAvailableTools:
         request = TaskGenerationRequest(text="research task", available_tools=available)
         captured_messages = []
 
-        async def capture_completion(messages, model, temperature=0.7, max_tokens=4000):
+        async def capture_completion(messages, model, temperature=0.7, max_tokens=4000, **kwargs):
             captured_messages.extend(messages)
             return _valid_task_json()
 

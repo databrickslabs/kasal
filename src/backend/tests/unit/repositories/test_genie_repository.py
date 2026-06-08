@@ -33,6 +33,18 @@ from src.schemas.genie import (
 AUTH_PATCH = 'src.utils.databricks_auth.get_auth_context'
 
 
+@pytest.fixture(autouse=True)
+def _clear_spaces_cache():
+    """The full-spaces list is cached per host in a MODULE-LEVEL dict; clear it
+    between tests so each test's mocked HTTP responses are actually fetched."""
+    import src.repositories.genie_repository as _gr
+    _gr._SPACES_CACHE.clear()
+    _gr._SPACES_LOCKS.clear()
+    yield
+    _gr._SPACES_CACHE.clear()
+    _gr._SPACES_LOCKS.clear()
+
+
 def _make_auth_mock():
     """Helper to create a standard mock auth context."""
     from src.utils.databricks_auth import AuthContext
@@ -791,7 +803,8 @@ class TestGetAuthHeaders:
 
         headers, error = await repo_with_obo._get_auth_headers()
 
-        assert headers == {"Authorization": "Bearer test-token"}
+        assert headers["Authorization"] == "Bearer test-token"
+        assert "User-Agent" in headers
         assert error is None
         mock_get_auth.assert_called_once_with(user_token="user-obo-token")
 

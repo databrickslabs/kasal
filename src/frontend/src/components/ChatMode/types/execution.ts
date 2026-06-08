@@ -14,6 +14,11 @@ export interface ExecutionConfig {
   model?: string;
   execution_type?: string;
   schema_detection_enabled?: boolean;
+  // Memory scoping (chat). crew_id is generated backend-side for tracing.
+  /** Chat session id — scopes session-only memory recall. */
+  session_id?: string;
+  /** Memory read scope: true = workspace-wide (default), false = this chat session only. */
+  memory_workspace_scope?: boolean;
   // Flow-specific fields
   nodes?: unknown[];
   edges?: unknown[];

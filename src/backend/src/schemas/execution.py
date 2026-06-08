@@ -81,6 +81,10 @@ class CrewConfig(BaseModel):
     resume_from_flow_uuid: Optional[str] = Field(None, description="CrewAI state.id to resume flow from checkpoint")
     resume_from_execution_id: Optional[int] = Field(None, description="Execution ID of checkpoint to resume from")
     resume_from_crew_sequence: Optional[int] = Field(None, description="Crew sequence to resume from (skip crews up to this sequence)")
+    # Memory scoping (chat). crew_id stays the deterministic tracing id; these
+    # two control memory RECALL only.
+    session_id: Optional[str] = Field(None, description="Chat session id — scopes session-only memory recall (stable across messages in a conversation)")
+    memory_workspace_scope: Optional[bool] = Field(None, description="Memory read scope: True/None = workspace-wide recall, False = restrict recall to this chat session")
 
     @property
     def tasks(self) -> Dict:

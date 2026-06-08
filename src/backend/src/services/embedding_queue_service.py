@@ -61,7 +61,9 @@ class EmbeddingQueueService:
         title: str,
         content: str,
         embedding: List[float],
-        doc_metadata: Optional[Dict[str, Any]] = None
+        doc_metadata: Optional[Dict[str, Any]] = None,
+        group_id: Optional[str] = None,
+        file_path: Optional[str] = None,
     ):
         """Add an embedding to the queue for batch processing."""
         async with self.lock:
@@ -71,6 +73,8 @@ class EmbeddingQueueService:
                 "content": content,
                 "embedding": embedding,
                 "doc_metadata": doc_metadata or {},
+                "group_id": group_id,
+                "file_path": file_path,
                 "created_at": datetime.utcnow()
             })
 

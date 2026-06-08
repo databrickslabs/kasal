@@ -40,4 +40,4 @@ class TestMetricViewDeployerTool:
         tool = MetricViewDeployerTool()
         result = tool._run(yaml_specs_json='{}', sql_specs_json='{}', dry_run=True)
         data = json.loads(result)
-        assert data['summary']['total'] == 0
+        assert 'error' in data  # empty specs now returns an explicit error

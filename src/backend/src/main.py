@@ -436,6 +436,20 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 system_logger.error(f"Error during scheduler shutdown: {e}")
 
+        # Shut down the per-execution process executors. This terminates any
+        # lingering crew/flow subprocesses and releases their multiprocessing
+        # queue semaphores so the resource_tracker does not report leaked
+        # semaphore objects at interpreter shutdown.
+        try:
+            from src.services.process_crew_executor import process_crew_executor
+            from src.services.process_flow_executor import process_flow_executor
+
+            process_crew_executor.shutdown(wait=True)
+            process_flow_executor.shutdown(wait=True)
+            system_logger.info("Process executors shut down successfully.")
+        except Exception as e:
+            system_logger.warning(f"Error during process executor shutdown: {e}")
+
         # Shutdown OTel App Telemetry provider (flush pending logs)
         try:
             logger_manager.shutdown_otel_app_telemetry()

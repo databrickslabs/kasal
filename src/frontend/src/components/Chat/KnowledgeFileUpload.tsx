@@ -513,7 +513,7 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
         title={
           !isKnowledgeEnabled
             ? !isMemoryBackendConfigured
-              ? 'Knowledge sources require Databricks Vector Search memory backend configuration'
+              ? 'Knowledge sources require a Lakebase memory backend'
               : 'Knowledge volume is not enabled in Databricks configuration'
             : !hasAgents
             ? 'Add at least one agent to the canvas before uploading knowledge files'
@@ -575,7 +575,7 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
           {!isKnowledgeEnabled && (
             <Alert severity="warning" sx={{ mb: 2 }}>
               {!isMemoryBackendConfigured
-                ? 'Knowledge sources require Databricks Vector Search memory backend configuration. Please configure memory backend in Settings.'
+                ? 'Knowledge sources require a Lakebase memory backend. Please configure the memory backend in Settings.'
                 : 'Knowledge volume is not enabled. Please configure it in the Databricks settings.'}
             </Alert>
           )}

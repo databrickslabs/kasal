@@ -145,6 +145,7 @@ async def test_get_lakebase_table_data():
         table_name="crew_memory",
         limit=50,
         instance_name=None,
+        group_id="g1",
     )
 
 
@@ -171,6 +172,7 @@ async def test_get_lakebase_table_data_with_instance():
         table_name="crew_memory",
         limit=10,
         instance_name="kasal-lakebase1",
+        group_id="g1",
     )
 
 
@@ -201,6 +203,7 @@ async def test_get_lakebase_entity_data():
         memory_table="crew_memory",
         limit=200,
         instance_name=None,
+        group_id="g1",
     )
 
 

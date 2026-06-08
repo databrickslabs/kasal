@@ -326,6 +326,22 @@ class CrewMemoryService:
         if not group_id and crew_id and "_crew_" in crew_id:
             group_id = crew_id.split("_crew_")[0]
 
+        # Memory READ scope from the chat "Workspace memory" toggle (default ON =
+        # workspace-wide). When the user turns it off, the frontend sends
+        # memory_workspace_scope=False, so recall is restricted to this chat
+        # SESSION (session_id) instead of the whole workspace. crew_id is only
+        # used for tracing/identity — never for read scoping.
+        workspace_wide = bool(self.config.get("memory_workspace_scope", True))
+        # Stable chat-session id used to partition session-only recall. Falls
+        # back to the per-run job_id for non-chat runs (always workspace-wide).
+        session_scope_id = self.config.get("session_id") or job_id
+        logger.info(
+            "Memory read scope: %s (session_id=%s, crew_id=%s)",
+            "workspace" if workspace_wide else "session-only",
+            session_scope_id,
+            crew_id,
+        )
+
         try:
             return await MemoryBackendFactory.create_unified_storage(
                 config=memory_config,
@@ -334,6 +350,8 @@ class CrewMemoryService:
                 embedder=embedder,
                 user_token=self.user_token,
                 job_id=job_id,
+                workspace_wide=workspace_wide,
+                session_scope_id=session_scope_id,
             )
         except DatabricksIndexValidationError as e:
             await self._emit_index_validation_trace(e)
@@ -594,9 +612,16 @@ class CrewMemoryService:
         if embedder is not None:
             kwargs["embedder"] = embedder
 
-        # Structural root scope: one namespace per crew inside the tenant.
+        # Structural root scope: the tenant/workspace namespace ONLY — we do not
+        # nest per crew_id here. Recall isolation (workspace-wide vs this chat
+        # session) is enforced at the column level by the backend's tenant WHERE
+        # (group_id, or crew_id+group_id when the user opts into session-only).
+        # A crew_id subtree in the scope prefix would wall every run off from the
+        # rest of the workspace — a second crew could never recall the first
+        # crew's memories even though both share the workspace — which is the
+        # legacy per-crew partitioning the unified memory replaces.
         group_id = self.config.get("group_id") or "default"
-        kwargs["root_scope"] = f"/{group_id}/{crew_id}"
+        kwargs["root_scope"] = f"/{group_id}"
 
         cognitive = getattr(memory_config, "cognitive_config", None)
         cognitive_dict = (

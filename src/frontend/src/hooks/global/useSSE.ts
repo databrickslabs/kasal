@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { config } from '../../config/api/ApiConfig';
+import { SSE_ENABLED } from '../../utils/sseTransport';
 
 export interface SSEOptions {
   /**
@@ -91,7 +92,10 @@ export const useSSE = <T = any>(
   }, [onError]);
 
   const connect = useCallback(() => {
-    if (!enabled) return;
+    // SSE is dev-only. On Databricks Apps (the default deployment) the HTTP/2
+    // proxy refuses/drops these streams, so we never open them and let REST
+    // polling drive live updates instead.
+    if (!enabled || !SSE_ENABLED) return;
 
     // Clean up existing connection
     if (eventSourceRef.current) {

@@ -363,7 +363,7 @@ class TestGenieTool:
         }
 
         response = tool._extract_response(message_status)
-        assert response == "This is the response"
+        assert "This is the response" in response
 
     def test_extract_response_with_query_results(self):
         """Test extracting response with query results."""

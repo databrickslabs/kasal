@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { DatabricksService } from '../api/DatabricksService';
 import { MemoryBackendService } from '../api/MemoryBackendService';
-import { MemoryBackendType } from '../types/memoryBackend';
+import { isKnowledgeCapableMemoryConfig } from '../types/memoryBackend';
 
 interface KnowledgeConfigState {
   // Configuration states
@@ -59,13 +59,11 @@ export const useKnowledgeConfigStore = create<KnowledgeConfigState>()(
       set({ isLoading: true, lastChecked: now });
 
       try {
-        // Check memory backend configuration
+        // Check memory backend configuration. Knowledge embeddings live in
+        // Lakebase pgvector, so a configured Lakebase backend enables knowledge
+        // sources (Vector Search has been removed).
         const memoryConfig = await MemoryBackendService.getConfig();
-        const memoryConfigured = !!(
-          memoryConfig?.backend_type === MemoryBackendType.DATABRICKS &&
-          memoryConfig.databricks_config?.endpoint_name &&
-          memoryConfig.databricks_config?.memory_index
-        );
+        const memoryConfigured = isKnowledgeCapableMemoryConfig(memoryConfig);
 
         // Check Databricks knowledge source configuration
         const databricksConfig = await DatabricksService.getConfiguration();

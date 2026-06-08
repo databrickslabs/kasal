@@ -230,15 +230,16 @@ class TestAddToolToGroup:
         mock_tool_repo.get.return_value = tool
 
         created_mapping = _make_group_tool(
-            id=200, tool_id=5, group_id="group-abc", enabled=False
+            id=200, tool_id=5, group_id="group-abc", enabled=True
         )
         mock_group_tool_repo.upsert.return_value = created_mapping
 
         result = await service.add_tool_to_group(5, group_context)
 
         mock_tool_repo.get.assert_called_once_with(5)
+        # Adding a tool now enables it by default (no separate enable step).
         mock_group_tool_repo.upsert.assert_called_once_with(
-            tool_id=5, group_id="group-abc", defaults=None
+            tool_id=5, group_id="group-abc", defaults={"enabled": True}
         )
         assert result.tool_id == 5
         assert result.group_id == "group-abc"

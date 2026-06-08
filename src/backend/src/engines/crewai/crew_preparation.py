@@ -451,9 +451,31 @@ class CrewPreparation:
                 # If this is the first task and it has the Databricks knowledge tool, add context
                 try:
                     if i == 0 and agent is not None:
-                        # Check if DatabricksKnowledgeSearchTool is in the task's tools list
-                        task_tools = task_config.get('tools', [])
+                        # Check if DatabricksKnowledgeSearchTool is in the task's tools list.
+                        # IMPORTANT: the tool can be referenced by NAME or by any of its
+                        # numeric IDs (the seed registers it as 36, but the dispatcher-
+                        # generated crew may reference a duplicate row, e.g. 83). Hardcoding
+                        # a single ID misses those, so resolve IDs -> names via the tool
+                        # service first. This is what makes weaker models (e.g. Haiku) get
+                        # the "you MUST call the tool" nudge — Opus calls it unprompted, Haiku
+                        # does not, so a missed nudge looks like a model bug.
+                        task_tools = task_config.get('tools', []) or task_config.get('_original_tools', [])
+                        resolved_task_tool_names = []
+                        if task_tools and self.tool_service:
+                            try:
+                                from src.engines.crewai.helpers.tool_helpers import (
+                                    resolve_tool_ids_to_names,
+                                )
+                                resolved_task_tool_names = await resolve_tool_ids_to_names(
+                                    task_tools, self.tool_service
+                                )
+                            except Exception as _resolve_err:
+                                logger.warning(
+                                    f"[CrewPreparation] Could not resolve task tool names "
+                                    f"for nudge detection: {_resolve_err}"
+                                )
                         has_db_knowledge_tool = (
+                            'DatabricksKnowledgeSearchTool' in resolved_task_tool_names or
                             'DatabricksKnowledgeSearchTool' in task_tools or
                             '36' in [str(t) for t in task_tools]
                         )
@@ -496,14 +518,19 @@ class CrewPreparation:
                                 files_list = "\n".join([f"  - {fname}" for fname in available_files])
                                 files_info = f"\n\n**Available Knowledge Files:**\n{files_list}\n"
 
-                            # Prepend a STRONG instruction to REQUIRE tool use with file context
+                            # Prepend a STRONG instruction to REQUIRE tool use with file context.
+                            # The "already uploaded / do NOT ask for paths" wording matters for
+                            # the chat/dispatched path, where available_files is empty (the
+                            # generated agent has no knowledge_sources). Without it, weaker
+                            # models reply "please provide file paths" instead of calling the tool.
                             nudge = (
-                                "**CRITICAL INSTRUCTION**: You MUST use the DatabricksKnowledgeSearchTool BEFORE answering. "
+                                "**CRITICAL INSTRUCTION**: You MUST call the DatabricksKnowledgeSearchTool BEFORE answering. "
                                 f"{files_info}"
-                                "Search the uploaded documents for relevant information first, then use ONLY the retrieved content "
-                                "to formulate your answer. DO NOT proceed without calling this tool. "
-                                "Formulate your search query to find specific information from these files. "
-                                "Cite the specific passages you found.\n\n"
+                                "The user's documents are ALREADY uploaded and indexed in the knowledge base — "
+                                "you do NOT need file paths and you MUST NOT ask the user to provide any files or paths. "
+                                "Call DatabricksKnowledgeSearchTool with a search query derived from the request, read the "
+                                "retrieved passages, then base your answer ONLY on that retrieved content and cite the specific "
+                                "passages. DO NOT answer from your own knowledge and DO NOT proceed without calling this tool first.\n\n"
                             )
                             # Only inject once, and keep original description intact after the nudge
                             original_desc = task_config.get('description', '') or ''
@@ -512,9 +539,12 @@ class CrewPreparation:
                                 t_name_for_log = task_config.get('name', 'first_task')
                                 logger.info(f"[CrewPreparation] Injected STRONG knowledge-search requirement with {len(available_files)} files into first task '{t_name_for_log}' for agent '{agent_name}'")
 
-                            # Also ensure DatabricksKnowledgeSearchTool is in the task's tools list
-                            task_tools = task_config.get('tools', [])
-                            if 'DatabricksKnowledgeSearchTool' not in task_tools and '36' not in [str(t) for t in task_tools]:
+                            # Also ensure DatabricksKnowledgeSearchTool is in the task's tools
+                            # list — but only if it isn't already present under a name OR a
+                            # numeric id (e.g. 83). has_db_knowledge_tool already accounts for
+                            # the resolved names, so appending here would only duplicate the tool.
+                            if not has_db_knowledge_tool:
+                                task_tools = task_config.get('tools', [])
                                 task_tools.append('DatabricksKnowledgeSearchTool')
                                 task_config['tools'] = task_tools
                                 logger.info(f"[CrewPreparation] Added DatabricksKnowledgeSearchTool to task '{t_name_for_log}' tools list")

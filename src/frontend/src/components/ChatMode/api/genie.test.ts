@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { searchGenieSpaces } from './genie';
+import { searchGenieSpaces, getGenieSpace } from './genie';
 import { getClient } from './client';
 
 vi.mock('./client', () => ({
@@ -51,5 +51,34 @@ describe('searchGenieSpaces', () => {
     const result = await searchGenieSpaces('whatever');
 
     expect(result).toEqual([]);
+  });
+});
+
+describe('getGenieSpace', () => {
+  const get = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (getClient as unknown as ReturnType<typeof vi.fn>).mockReturnValue({ get });
+  });
+
+  it('fetches a single space by id (url-encoded) and returns it', async () => {
+    const space = { id: 's 1', name: 'Space', url: 'https://example.com/genie/s' };
+    get.mockResolvedValue({ data: space });
+
+    const result = await getGenieSpace('s 1');
+
+    expect(get).toHaveBeenCalledWith('/api/genie/spaces/s%201');
+    expect(result).toEqual(space);
+  });
+
+  it('returns null when the response has no data', async () => {
+    get.mockResolvedValue({ data: null });
+    expect(await getGenieSpace('s1')).toBeNull();
+  });
+
+  it('returns null on error', async () => {
+    get.mockRejectedValue(new Error('boom'));
+    expect(await getGenieSpace('s1')).toBeNull();
   });
 });

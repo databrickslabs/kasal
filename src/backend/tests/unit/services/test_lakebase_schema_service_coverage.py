@@ -632,21 +632,30 @@ class TestCreateDocEmbeddingsSyncDetailed:
         return LakebaseSchemaService()
 
     def test_executes_set_search_path_and_create_table(self, service):
-        """Exactly 2 execute calls: SET search_path and CREATE TABLE."""
+        """SET search_path + CREATE TABLE + idempotent column/index ensure run."""
         conn = MagicMock()
         engine = _sync_engine(conn)
         service._create_doc_embeddings_sync(engine)
-        assert conn.execute.call_count == 2
+        executed = " ".join(str(c.args[0]) for c in conn.execute.call_args_list)
+        assert "SET search_path" in executed
+        assert "CREATE TABLE IF NOT EXISTS documentation_embeddings" in executed
 
     def test_create_sql_contains_documentation_embeddings(self, service):
-        """The DDL contains the expected table name."""
+        """The DDL contains the expected table name and scoping columns."""
         conn = MagicMock()
         executed_sqls = []
-        conn.execute = MagicMock(side_effect=lambda sql: executed_sqls.append(str(sql)))
+
+        def _capture(sql):
+            executed_sqls.append(str(sql))
+            # The column ensure issues a pgvector check whose .fetchone() is read.
+            return MagicMock()
+
+        conn.execute = MagicMock(side_effect=_capture)
         engine = _sync_engine(conn)
         service._create_doc_embeddings_sync(engine)
-        # Second call should be the CREATE TABLE statement
         assert any("documentation_embeddings" in s for s in executed_sqls)
+        assert any("ADD COLUMN IF NOT EXISTS group_id" in s for s in executed_sqls)
+        assert any("ADD COLUMN IF NOT EXISTS file_path" in s for s in executed_sqls)
 
 
 # ---------------------------------------------------------------------------

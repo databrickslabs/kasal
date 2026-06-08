@@ -335,7 +335,7 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
               <MemoryIcon sx={{ mr: 1, color: 'primary.main' }} />
               <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>
-                Memory Backend
+                Memory
               </Typography>
               {getStatusLabel(!!memoryConfig)}
             </Box>

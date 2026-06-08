@@ -241,7 +241,8 @@ class TestGetAuthHeaders:
 
             headers, error = await repo._get_auth_headers()
 
-            assert headers == {"Authorization": "Bearer token123"}
+            assert headers["Authorization"] == "Bearer token123"
+            assert "User-Agent" in headers  # Kasal telemetry UA (required)
             assert error is None
 
     @pytest.mark.asyncio

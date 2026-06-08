@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import GenieSpaceSelector from './GenieSpaceSelector';
-import { searchGenieSpaces, GenieSpace } from '../../api/genie';
+import { searchGenieSpaces, getGenieSpace, GenieSpace } from '../../api/genie';
 
 vi.mock('../../api/genie', () => ({
   searchGenieSpaces: vi.fn(),
+  getGenieSpace: vi.fn(async () => null),
 }));
 
 const mockedSearch = vi.mocked(searchGenieSpaces);
@@ -207,6 +208,62 @@ describe('GenieSpaceSelector', () => {
 
     // still open
     expect(screen.getByPlaceholderText('Search spaces...')).toBeInTheDocument();
+  });
+
+  it('resolves the selected space deep link from the loaded list and renders open-in-Databricks links', async () => {
+    mockedSearch.mockResolvedValue([
+      { id: 'space-1', name: 'Sales Space', url: 'https://dbx.example/genie/space-1' },
+    ]);
+    render(<GenieSpaceSelector value="space-1" onChange={() => {}} />);
+    const toggle = screen.getByText('space-1').closest('button') as HTMLButtonElement;
+    fireEvent.click(toggle); // open → fetch → spaces (with url) populate the list
+
+    // per-row "open in Databricks" link (space.url present)
+    await waitFor(() => {
+      expect(screen.getByLabelText('Open Sales Space in Databricks')).toBeInTheDocument();
+    });
+    // clicking it stops propagation (doesn't select the row) — exercises onClick
+    const onChange = vi.fn();
+    fireEvent.click(screen.getByLabelText('Open Sales Space in Databricks'));
+    expect(onChange).not.toHaveBeenCalled();
+    // selected-space deep link resolved from the loaded list (value && selectedUrl)
+    await waitFor(() => {
+      const link = screen.getByLabelText('Open the selected space in Databricks');
+      expect(link).toHaveAttribute('href', 'https://dbx.example/genie/space-1');
+    });
+  });
+
+  it('fetches the selected space deep link via getGenieSpace when it is not in the list', async () => {
+    vi.mocked(getGenieSpace).mockResolvedValueOnce({
+      id: 'space-9',
+      name: 'Remote',
+      url: 'https://dbx.example/genie/space-9',
+    });
+    render(<GenieSpaceSelector value="space-9" onChange={() => {}} />);
+    await waitFor(() => {
+      expect(screen.getByLabelText('Open the selected space in Databricks')).toHaveAttribute(
+        'href',
+        'https://dbx.example/genie/space-9',
+      );
+    });
+  });
+
+  it('ignores a late getGenieSpace result after the effect is cleaned up', async () => {
+    let resolveFn: (s: GenieSpace | null) => void = () => {};
+    vi.mocked(getGenieSpace).mockReturnValueOnce(
+      new Promise<GenieSpace | null>((r) => {
+        resolveFn = r;
+      }),
+    );
+    const { rerender } = render(<GenieSpaceSelector value="space-x" onChange={() => {}} />);
+    // value change → the space-x effect is cleaned up (cancelled = true)
+    rerender(<GenieSpaceSelector value="" onChange={() => {}} />);
+    await act(async () => {
+      resolveFn({ id: 'space-x', name: 'X', url: 'https://late.example' }); // stale result
+      await Promise.resolve();
+    });
+    // stale result ignored → no selected-space link
+    expect(screen.queryByLabelText('Open the selected space in Databricks')).toBeNull();
   });
 
   it('toggles open then closed via the toggle button', async () => {

@@ -72,7 +72,8 @@ function getAssistantResponse(result: DispatchResult): string {
         'type' in genResult &&
         genResult.type === 'streaming'
       ) {
-        return 'Generating crew progressively...';
+        // No status text — the run-activity container shows "Generating crew…".
+        return '';
       }
       // Non-streaming result — use the robust converter to detect shape
       const genData = crewToGenerationData(generation_result);
@@ -227,7 +228,13 @@ export function useDispatcher(options: UseDispatcherOptions) {
   const lastGeneratedRef = useRef<GenerationCompleteData | null>(null);
 
   const sendMessage = useCallback(
-    async (message: string, model?: string) => {
+    async (
+      message: string,
+      model?: string,
+      tools?: string[],
+      dispatchSuffix?: string,
+      attachments?: string[],
+    ) => {
       if (isDispatchingRef.current) return;
       isDispatchingRef.current = true;
 
@@ -249,7 +256,11 @@ export function useDispatcher(options: UseDispatcherOptions) {
         return;
       }
 
-      options.addMessage('user', message);
+      options.addMessage(
+        'user',
+        message,
+        attachments && attachments.length > 0 ? { attachments } : undefined,
+      );
 
       const assistantId = generateId();
       options.addMessage('assistant', 'Thinking...', {
@@ -268,9 +279,14 @@ export function useDispatcher(options: UseDispatcherOptions) {
       if (!isSlashCommand && !alreadyHasCrewHint) {
         dispatchMessage = `create a crew plan with agents and tasks: ${message}`;
       }
+      // Hidden steering text (e.g. attached-knowledge note): sent to the crew
+      // but never shown in the chat (addMessage above used the clean message).
+      if (dispatchSuffix) {
+        dispatchMessage += dispatchSuffix;
+      }
 
       try {
-        const result = await dispatch(dispatchMessage, model);
+        const result = await dispatch(dispatchMessage, model, tools);
 
         const content = getAssistantResponse(result);
         const resultType = getResultType(result);

@@ -84,4 +84,5 @@ class PowerBISemanticModelCache(Base):
             cache_ttl_days: How many days back to accept a cached entry (default 1 = today only)
         """
         cutoff = date.today() - timedelta(days=cache_ttl_days - 1)
-        return self.cached_date >= cutoff
+        # A future-dated cache is never valid for today (clock skew / bad data).
+        return cutoff <= self.cached_date <= date.today()
