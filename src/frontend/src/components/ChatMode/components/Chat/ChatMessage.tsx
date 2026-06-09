@@ -65,20 +65,23 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
             onCommand={onCommand}
           />
         );
-      case 'catalog_load':
-        return (
-          <CrewDetailCard
-            data={message.resultData as CatalogLoadResult}
-            onExecute={
-              (message.resultData as CatalogLoadResult).plan
-                ? () =>
-                    onExecuteCrew?.(
-                      (message.resultData as CatalogLoadResult).plan!
-                    )
-                : undefined
-            }
-          />
-        );
+      case 'catalog_load': {
+        // Render a loaded crew with the SAME business-friendly card as a freshly
+        // generated crew (agents + tasks with descriptions), not the technical
+        // Process/Memory/RPM summary.
+        const loadData = message.resultData as CatalogLoadResult;
+        if (loadData.plan) {
+          // No save bookmark + no Run button: a loaded crew is already in the
+          // catalog, and it's run via the chat submit button.
+          return (
+            <GenerationCompleteCard
+              data={planToGenerationData(loadData.plan)}
+              messageId={message.id}
+            />
+          );
+        }
+        return <CrewDetailCard data={loadData} />;
+      }
       case 'flow_list':
         return (
           <FlowListCard
@@ -323,6 +326,53 @@ function groupTasksUnderAgents(
     else orphanTasks.push({ task, taskIndex });
   });
   return { groups, orphanTasks };
+}
+
+/**
+ * Convert a loaded catalog plan (ReactFlow nodes/edges) into the same
+ * { agents, tasks } shape a freshly generated crew uses, so a loaded crew renders
+ * with the identical business-friendly card (agents + tasks with descriptions),
+ * not a technical Process/Memory/RPM summary. Task→agent links come from the
+ * agent→task edges.
+ */
+function planToGenerationData(
+  plan: { nodes?: unknown[]; edges?: unknown[] } | undefined | null,
+): GenerationCompleteData {
+  const nodes = (plan?.nodes || []) as Array<{ id?: string; type?: string; data?: Record<string, unknown> }>;
+  const edges = (plan?.edges || []) as Array<{ source?: string; target?: string }>;
+  const agentNodeName = new Map<string, string>();
+  const agents: Record<string, unknown>[] = [];
+  const tasks: Record<string, unknown>[] = [];
+
+  for (const n of nodes) {
+    if (n.type !== 'agentNode') continue;
+    const d = (n.data || {}) as Record<string, unknown>;
+    const name = String(d.label ?? d.name ?? d.role ?? '');
+    if (n.id) agentNodeName.set(n.id, name);
+    agents.push({
+      id: d.agentId ?? d.id,
+      name,
+      role: d.role ?? '',
+      goal: d.goal ?? '',
+      backstory: d.backstory ?? '',
+      tools: Array.isArray(d.tools) ? d.tools : [],
+    });
+  }
+  for (const n of nodes) {
+    if (n.type !== 'taskNode') continue;
+    const d = (n.data || {}) as Record<string, unknown>;
+    const owningEdge = edges.find((e) => e.target === n.id && String(e.source || '').startsWith('agent-'));
+    const ownerName = owningEdge?.source ? agentNodeName.get(owningEdge.source) : undefined;
+    tasks.push({
+      id: d.taskId ?? d.id,
+      name: d.label ?? d.name ?? '',
+      description: d.description ?? '',
+      expected_output: d.expected_output ?? '',
+      tools: Array.isArray(d.tools) ? d.tools : [],
+      ...(ownerName ? { agent: ownerName } : {}),
+    });
+  }
+  return { agents, tasks };
 }
 
 // Persist the Genie-space selection (+ whether the crew was already run) per

@@ -69,10 +69,13 @@ const h = vi.hoisted(() => {
       selectedModel: 'm1',
       sidebarOpen: true,
       toolNameMap: {} as Record<string, string>,
+      savedCrews: [] as { id: string; name: string }[],
+      savedFlows: [] as { id: string; name: string }[],
       init: vi.fn(),
       setTheme: vi.fn(),
       loadModels: vi.fn(),
       loadTools: vi.fn(),
+      loadCatalog: vi.fn(async () => {}),
       setSelectedModel: vi.fn(),
     },
     theme: { isDarkMode: false },
@@ -188,6 +191,10 @@ vi.mock('./components/Chat/ChatContainer', () => ({
       <button data-testid="cc-exec-gen" onClick={() => props.onExecuteGenerated?.((globalThis as { __genData?: unknown }).__genData ?? { agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] })}>gen</button>
       <button data-testid="cc-save" onClick={() => props.onSaveCrew?.({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] })}>save</button>
       <button data-testid="cc-model" onClick={() => props.onModelChange?.('m2')}>model</button>
+      {/* Surfaces the pending-run affordance: the label only renders when armed
+          for the current session, and the button drives onRunPending. */}
+      <span data-testid="cc-pending-label">{(props as { pendingRunLabel?: string }).pendingRunLabel ?? ''}</span>
+      <button data-testid="cc-run-pending" onClick={() => props.onRunPending?.()}>run-pending</button>
     </div>
   ),
 }));
@@ -472,7 +479,7 @@ describe('ChatWorkspace component', () => {
       fireEvent.click(screen.getByTestId('cc-send'));
     });
     // dispatcher signature: (message, model, tools?, dispatchSuffix?, attachments?)
-    expect(h.dispatcherSend).toHaveBeenCalledWith('hello world', 'm1', undefined, undefined, undefined);
+    expect(h.dispatcherSend).toHaveBeenCalledWith('hello world', 'm1', undefined, undefined, undefined, undefined);
   });
 
   it('invokes execution-stream callbacks (trace/taskOutput/status/complete/error)', () => {
@@ -1345,7 +1352,7 @@ describe('ChatWorkspace component', () => {
     h.app.selectedModel = '';
     render(<ChatWorkspace />);
     await send('hello there');
-    expect(h.dispatcherSend).toHaveBeenCalledWith('hello there', undefined, undefined, undefined, undefined);
+    expect(h.dispatcherSend).toHaveBeenCalledWith('hello there', undefined, undefined, undefined, undefined, undefined);
   });
 
   it('handleStopExecution reports a generic error on a non-Error rejection', async () => {
@@ -1684,5 +1691,166 @@ describe('ChatWorkspace component', () => {
       await new Promise((r) => setTimeout(r, 0));
     });
     expect(h.exec.startExecution).not.toHaveBeenCalledWith('job-other', 's1', { preservePreview: true });
+  });
+
+  // =========================================================================
+  // Rail catalog library + pending-run (loaded crew/flow) wiring
+  // =========================================================================
+
+  it('refreshes the rail catalog library on mount', () => {
+    render(<ChatWorkspace />);
+    expect(h.app.loadCatalog).toHaveBeenCalled();
+  });
+
+  it('refreshes the catalog library when the workspace (group) changes', async () => {
+    render(<ChatWorkspace />);
+    h.app.loadCatalog.mockClear();
+    await act(async () => {
+      window.dispatchEvent(new Event('group-changed'));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(h.app.loadCatalog).toHaveBeenCalled();
+  });
+
+  it('refreshes the catalog after a card-bookmark save (onSaveCrew)', async () => {
+    render(<ChatWorkspace />);
+    h.app.loadCatalog.mockClear();
+    await act(async () => { fireEvent.click(screen.getByTestId('cc-save')); });
+    expect(h.app.loadCatalog).toHaveBeenCalled();
+  });
+
+  it('passes the chat memory toggle through to buildCrewConfig when executing a loaded crew', async () => {
+    const { buildCrewConfig } = await import('./utils/crewConfigBuilder');
+    const mockedBuildCrew = buildCrewConfig as unknown as ReturnType<typeof vi.fn>;
+    (h.exec as { memoryEnabled?: boolean }).memoryEnabled = false;
+    render(<ChatWorkspace />);
+    await act(async () => { fireEvent.click(screen.getByTestId('cc-exec-crew')); });
+    // signature: (plan, model, inputs, memoryEnabled)
+    expect(mockedBuildCrew.mock.calls.at(-1)?.[3]).toBe(false);
+    delete (h.exec as { memoryEnabled?: boolean }).memoryEnabled;
+  });
+
+  it('arms a pending run when a crew is loaded for the current session, then runs it', async () => {
+    render(<ChatWorkspace />);
+    // dispatcher reports a loaded crew scoped to the current session
+    await act(async () => {
+      h.dispatcherOpts.onCrewLoaded({ name: 'Loaded Crew', nodes: [], edges: [] }, 's1');
+    });
+    // the label surfaces in the chat container for the matching session
+    expect(screen.getByTestId('cc-pending-label')).toHaveTextContent('Loaded Crew');
+    // running it executes the crew and clears the pending state
+    await act(async () => { fireEvent.click(screen.getByTestId('cc-run-pending')); });
+    expect(h.createExecution).toHaveBeenCalled();
+    expect(screen.getByTestId('cc-pending-label')).toHaveTextContent('');
+  });
+
+  it('falls back to the "crew"/"flow" label when the loaded plan has no name', async () => {
+    render(<ChatWorkspace />);
+    await act(async () => { h.dispatcherOpts.onCrewLoaded({ nodes: [], edges: [] }, 's1'); });
+    expect(screen.getByTestId('cc-pending-label')).toHaveTextContent('crew');
+    await act(async () => { h.dispatcherOpts.onFlowLoaded({ nodes: [], edges: [] }, 's1'); });
+    expect(screen.getByTestId('cc-pending-label')).toHaveTextContent('flow');
+  });
+
+  it('arms a pending run for a loaded flow and runs it', async () => {
+    render(<ChatWorkspace />);
+    await act(async () => { h.dispatcherOpts.onFlowLoaded({ name: 'Loaded Flow', nodes: [], edges: [] }, 's1'); });
+    expect(screen.getByTestId('cc-pending-label')).toHaveTextContent('Loaded Flow');
+    await act(async () => { fireEvent.click(screen.getByTestId('cc-run-pending')); });
+    expect(h.createExecution).toHaveBeenCalled();
+  });
+
+  it('hides the pending-run label when it was armed for a different session', async () => {
+    render(<ChatWorkspace />);
+    // armed for s2 while viewing s1 -> not surfaced, and running is a no-op
+    await act(async () => { h.dispatcherOpts.onCrewLoaded({ name: 'Other Crew', nodes: [], edges: [] }, 's2'); });
+    expect(screen.getByTestId('cc-pending-label')).toHaveTextContent('');
+    await act(async () => { fireEvent.click(screen.getByTestId('cc-run-pending')); });
+    expect(h.createExecution).not.toHaveBeenCalled();
+  });
+
+  it('a genuine user message clears a pending loaded run', async () => {
+    render(<ChatWorkspace />);
+    await act(async () => { h.dispatcherOpts.onCrewLoaded({ name: 'Armed', nodes: [], edges: [] }, 's1'); });
+    expect(screen.getByTestId('cc-pending-label')).toHaveTextContent('Armed');
+    await send('just chatting');
+    expect(screen.getByTestId('cc-pending-label')).toHaveTextContent('');
+  });
+
+  it('switching sessions clears a pending loaded run', async () => {
+    render(<ChatWorkspace />);
+    await act(async () => { h.dispatcherOpts.onCrewLoaded({ name: 'Armed', nodes: [], edges: [] }, 's1'); });
+    expect(screen.getByTestId('cc-pending-label')).toHaveTextContent('Armed');
+    await act(async () => { fireEvent.click(screen.getByTitle('Two')); });
+    expect(h.session.switchSession).toHaveBeenCalledWith('s2');
+    expect(screen.getByTestId('cc-pending-label')).toHaveTextContent('');
+  });
+
+  it('loads a saved crew from the rail library into a fresh session', async () => {
+    h.app.savedCrews = [{ id: 'c1', name: 'My Saved Crew' }];
+    h.app.savedFlows = [];
+    render(<ChatWorkspace />);
+    // open the collapsible "Agents Catalog" section
+    fireEvent.click(screen.getByText('Agents Catalog'));
+    await act(async () => { fireEvent.click(screen.getByTitle('Open crew “My Saved Crew”')); });
+    // saves current state, spins up a new session, restores it, and sends /load
+    expect(h.exec.saveSessionState).toHaveBeenCalledWith('s1');
+    expect(h.session.createNewSession).toHaveBeenCalled();
+    expect(h.exec.restoreSessionState).toHaveBeenCalledWith('s-new');
+    expect(h.dispatcherSend).toHaveBeenCalledWith(
+      '/load crew My Saved Crew', 'm1', undefined, undefined, undefined, 'Open crew: My Saved Crew',
+    );
+    h.app.savedCrews = [];
+  });
+
+  it('loads a saved flow from the rail library (and skips save when no current session)', async () => {
+    h.session.currentSessionId = null;
+    h.app.savedCrews = [];
+    h.app.savedFlows = [{ id: 'f1', name: 'My Saved Flow' }];
+    render(<ChatWorkspace />);
+    fireEvent.click(screen.getByText('Agents Catalog'));
+    await act(async () => { fireEvent.click(screen.getByTitle('Open flow “My Saved Flow”')); });
+    expect(h.exec.saveSessionState).not.toHaveBeenCalled();
+    expect(h.dispatcherSend).toHaveBeenCalledWith(
+      '/load flow My Saved Flow', 'm1', undefined, undefined, undefined, 'Open flow: My Saved Flow',
+    );
+    h.app.savedFlows = [];
+  });
+
+  // --- /save overwrite + name-conflict ------------------------------------
+  it('/save overwrite replaces an existing crew and confirms with "Updated … in"', async () => {
+    render(<ChatWorkspace />);
+    await act(async () => { h.genOpts.onComplete({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }); });
+    h.app.loadCatalog.mockClear();
+    await send('/save overwrite');
+    expect(h.saveGeneratedCrew).toHaveBeenCalledWith(
+      expect.anything(), undefined, expect.objectContaining({ overwrite: true }),
+    );
+    expect(h.app.loadCatalog).toHaveBeenCalled();
+    expect(h.session.addMessage).toHaveBeenCalledWith(
+      'assistant',
+      expect.stringContaining('Updated **Saved Crew** in the catalog'),
+    );
+  });
+
+  it('/save overwrite <name> forwards the explicit name', async () => {
+    render(<ChatWorkspace />);
+    await act(async () => { h.genOpts.onComplete({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }); });
+    await send('/save overwrite Renamed Crew');
+    expect(h.saveGeneratedCrew).toHaveBeenCalledWith(
+      expect.anything(), 'Renamed Crew', expect.objectContaining({ overwrite: true }),
+    );
+  });
+
+  it('/save surfaces a name-conflict message when the crew already exists', async () => {
+    const { CrewNameConflictError } = await import('./api/crews');
+    h.saveGeneratedCrew.mockRejectedValueOnce(new CrewNameConflictError('Dup Crew'));
+    render(<ChatWorkspace />);
+    await act(async () => { h.genOpts.onComplete({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }); });
+    await send('/save');
+    expect(h.session.addMessage).toHaveBeenCalledWith(
+      'assistant',
+      expect.stringContaining('**Dup Crew** is already in the catalog'),
+    );
   });
 });

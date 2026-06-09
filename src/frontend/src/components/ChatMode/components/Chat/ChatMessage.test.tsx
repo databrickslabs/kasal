@@ -99,17 +99,85 @@ describe('ChatMessage — rich content routing', () => {
     fireEvent.click(screen.getByTestId('crew-list'));
     expect(onCommand).toHaveBeenCalled();
   });
-  it('catalog_load with plan -> CrewDetailCard fires onExecuteCrew', () => {
-    const onExecuteCrew = vi.fn();
+  it('catalog_load with plan -> renders the generated-style crew card (no bookmark, no crew-detail)', () => {
     render(
       <ChatMessage
-        message={msg({ resultType: 'catalog_load', resultData: { plan: { id: 'p', nodes: [], edges: [] } } })}
-        onExecuteCrew={onExecuteCrew}
+        message={msg({
+          resultType: 'catalog_load',
+          resultData: {
+            plan: {
+              id: 'p',
+              name: 'My Crew',
+              nodes: [{ id: 'agent-1', type: 'agentNode', data: { agentId: '1', label: 'Analyst', role: 'Data Analyst' } }],
+              edges: [],
+            },
+          },
+        })}
       />,
     );
-    fireEvent.click(screen.getByTestId('crew-detail'));
-    expect(onExecuteCrew).toHaveBeenCalled();
+    // Loaded crews render like generated crews (agent shown), not the technical
+    // CrewDetailCard, and carry no save bookmark (they're already in the catalog).
+    expect(screen.getByText('Analyst')).toBeInTheDocument();
+    expect(screen.queryByTestId('crew-detail')).toBeNull();
   });
+  it('catalog_load with plan converts nodes/edges to agents + tasks, exercising every name/id fallback', () => {
+    render(
+      <ChatMessage
+        message={msg({
+          resultType: 'catalog_load',
+          resultData: {
+            plan: {
+              id: 'p',
+              name: 'My Crew',
+              nodes: [
+                // agent named via `label`, identified by `agentId`, full fields
+                { id: 'agent-1', type: 'agentNode', data: { agentId: '1', label: 'Analyst', role: 'Data Analyst', goal: 'g', backstory: 'bg', tools: ['t1'] } },
+                // agent with NO label → name falls back to `name`; id falls back to `id`
+                { id: 'agent-2', type: 'agentNode', data: { id: '2', name: 'Writer' } },
+                // agent with NO label/name → name falls back to `role`
+                { id: 'agent-3', type: 'agentNode', data: { role: 'Reviewer' } },
+                // agent with NO data at all → `n.data || {}` right side; name '' fallback
+                { id: 'agent-4', type: 'agentNode' },
+                // task owned by agent-1 via the agent-…→task-… edge; named via `label`
+                { id: 'task-1', type: 'taskNode', data: { taskId: 't1', label: 'Crunch Numbers', description: 'd', expected_output: 'o', tools: ['t2'] } },
+                // task with NO label → name falls back to `name`; orphan (no owning edge)
+                { id: 'task-2', type: 'taskNode', data: { name: 'Lonely Task' } },
+                // task with NO data at all → `n.data || {}` right side; name '' fallback; orphan
+                { id: 'task-3', type: 'taskNode' },
+                // a non-agent/non-task node is skipped by both loops
+                { id: 'other-1', type: 'noteNode', data: { label: 'ignore me' } },
+              ],
+              edges: [
+                { source: 'agent-1', target: 'task-1' },
+                // edge with NO source → `e.source || ''` right side (still ignored for task-2)
+                { target: 'task-2' },
+                // a non-agent source edge into task-2 is ignored (stays orphan)
+                { source: 'note-1', target: 'task-2' },
+              ],
+            },
+          },
+        })}
+      />,
+    );
+    // Agent names render across all fallbacks; the linked + orphan tasks render too.
+    expect(screen.getByText('Analyst')).toBeInTheDocument();
+    expect(screen.getByText('Writer')).toBeInTheDocument();
+    expect(screen.getByText('Reviewer')).toBeInTheDocument();
+    expect(screen.getByText('Crunch Numbers')).toBeInTheDocument();
+    expect(screen.getByText('Lonely Task')).toBeInTheDocument();
+    // Orphan tasks (no owning agent) land under the "Other tasks" group.
+    expect(screen.getByText('Other tasks')).toBeInTheDocument();
+    expect(screen.queryByTestId('crew-detail')).toBeNull();
+  });
+
+  it('catalog_load with an empty plan (no nodes/edges) renders the generated card with no agents/tasks', () => {
+    // `plan` is truthy but has neither nodes nor edges → planToGenerationData hits
+    // the `plan?.nodes || []` / `plan?.edges || []` fallbacks and yields empty lists.
+    render(<ChatMessage message={msg({ resultType: 'catalog_load', resultData: { plan: {} } })} />);
+    expect(screen.queryByTestId('crew-detail')).toBeNull();
+    expect(screen.queryByText('Other tasks')).not.toBeInTheDocument();
+  });
+
   it('catalog_load without plan -> CrewDetailCard with no execute', () => {
     render(<ChatMessage message={msg({ resultType: 'catalog_load', resultData: { plan: null } })} />);
     expect(screen.getByTestId('crew-detail')).toBeDisabled();
@@ -496,6 +564,28 @@ describe('ChatMessage — save crew bookmark', () => {
     expect(await screen.findByText(/Couldn.t save/i)).toBeInTheDocument();
     expect(screen.queryByText(/Already in catalog/i)).not.toBeInTheDocument();
     expect(screen.queryByText('Overwrite')).not.toBeInTheDocument();
+  });
+
+  it('carries the selected Genie space into the save payload', async () => {
+    const onSaveCrew = vi.fn().mockResolvedValue({ id: 'c1', name: 'Genie Crew' });
+    render(
+      <ChatMessage
+        message={msg({
+          // Unique id: genieSelectionStore is module-level + keyed by message id,
+          // so a shared id would leak this picked space into sibling tests.
+          id: 'genie-save-msg',
+          resultType: 'generation_complete',
+          resultData: { agents: [{ id: 'a1', name: 'A', tools: ['GenieTool'] }], tasks: [] },
+        })}
+        onSaveCrew={onSaveCrew}
+        onExecuteGenerated={vi.fn()}
+      />,
+    );
+    // Pick a Genie space, then save → the picked space rides along in the payload.
+    fireEvent.click(screen.getByTestId('genie-pick'));
+    fireEvent.click(screen.getByLabelText('Save crew to catalog'));
+    expect(await screen.findByText(/Saved .*Genie Crew.* to catalog/)).toBeInTheDocument();
+    expect(onSaveCrew).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ spaceId: 'space-123' }));
   });
 });
 
