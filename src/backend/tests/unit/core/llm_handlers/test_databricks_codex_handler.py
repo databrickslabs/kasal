@@ -824,3 +824,110 @@ class TestMinRequiredToolCalls:
         params = {"model": "test", "input": []}
         handler._handle_responses(params)
         assert handler._tool_call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# TestResponsesCache — litellm response cache reused for the Responses API
+# ---------------------------------------------------------------------------
+
+class TestResponsesCache:
+    """codex bypasses litellm.completion, so it reuses the litellm.cache object
+    directly as a key/value store to cache identical Responses API requests."""
+
+    def test_cache_key_stable_and_distinct(self, handler):
+        p1 = {"model": "m", "input": [{"role": "user", "content": "a"}]}
+        p2 = {"model": "m", "input": [{"role": "user", "content": "b"}]}
+        k1 = handler._responses_cache_key(p1)
+        assert k1.startswith("codex-responses:")
+        assert k1 == handler._responses_cache_key(dict(p1))  # stable
+        assert k1 != handler._responses_cache_key(p2)  # content-sensitive
+
+    def test_no_cache_configured_calls_live(self, handler):
+        import litellm
+        resp = MagicMock()
+        handler.client.responses.create.reset_mock()
+        handler.client.responses.create.return_value = resp
+        with patch.object(litellm, "cache", None):
+            out = handler._cached_responses_create({"model": "m", "input": []})
+        assert out is resp
+        handler.client.responses.create.assert_called_once()
+
+    def test_miss_then_hit(self, handler, tmp_path):
+        import litellm
+        from openai.types.responses import Response
+
+        cache = litellm.Cache(type="disk", disk_cache_dir=str(tmp_path / "c"), ttl=600)
+        params = {"model": "databricks-gpt-5-3-codex", "input": [{"role": "user", "content": "hi"}]}
+        resp = MagicMock()
+        resp.model_dump.return_value = {"stored": True}
+        handler.client.responses.create.reset_mock()
+        handler.client.responses.create.return_value = resp
+        sentinel = object()
+
+        with patch.object(litellm, "cache", cache), patch.object(
+            Response, "construct", return_value=sentinel
+        ) as mock_construct:
+            # First call: cache miss -> live request + stored.
+            out1 = handler._cached_responses_create(params)
+            assert out1 is resp
+            assert handler.client.responses.create.call_count == 1
+
+            # Second identical call: cache hit -> NO live request, reconstructed.
+            out2 = handler._cached_responses_create(params)
+            assert handler.client.responses.create.call_count == 1  # not called again
+            assert out2 is sentinel
+            mock_construct.assert_called_once_with(stored=True)
+
+    def test_hit_reconstructs_databricks_specific_fields(self, handler, tmp_path):
+        """Regression: Databricks returns ``prompt_cache_retention='in_memory'``,
+        which is NOT one of the OpenAI SDK ``Response`` literals. Strict
+        ``model_validate`` raises on it, so every cache hit silently fell through
+        to a live call. Lenient ``construct`` (the SDK's own live-parse path) must
+        reconstruct it without error."""
+        import litellm
+        from openai.types.responses import Response
+
+        cache = litellm.Cache(type="disk", disk_cache_dir=str(tmp_path / "c"), ttl=600)
+        params = {"model": "databricks-gpt-5-3-codex", "input": [{"role": "user", "content": "hi"}]}
+        # A realistic Databricks codex response dump, including the field that
+        # breaks strict validation.
+        stored_dump = {
+            "id": "resp_x", "object": "response", "created_at": 1.0,
+            "model": "databricks-gpt-5-3-codex", "status": "completed",
+            "parallel_tool_calls": False, "tool_choice": "auto", "tools": [],
+            "prompt_cache_retention": "in_memory",  # <-- breaks strict model_validate
+            "output": [{
+                "type": "message", "id": "msg_1", "role": "assistant", "status": "completed",
+                "content": [{"type": "output_text", "text": "cached answer", "annotations": []}],
+            }],
+        }
+        # Sanity: strict validation would indeed reject this payload.
+        with pytest.raises(Exception):
+            Response.model_validate(stored_dump)
+
+        resp = MagicMock()
+        resp.model_dump.return_value = stored_dump
+        handler.client.responses.create.reset_mock()
+        handler.client.responses.create.return_value = resp
+
+        with patch.object(litellm, "cache", cache):
+            handler._cached_responses_create(params)  # miss -> store
+            hit = handler._cached_responses_create(params)  # hit -> reconstruct
+
+        assert handler.client.responses.create.call_count == 1  # served from cache
+        assert isinstance(hit, Response)
+        assert hit.output[0].content[0].text == "cached answer"
+        assert hit.prompt_cache_retention == "in_memory"
+
+    def test_cache_error_falls_through_to_live(self, handler):
+        import litellm
+        broken = MagicMock()
+        broken.get_cache.side_effect = RuntimeError("cache down")
+        resp = MagicMock()
+        handler.client.responses.create.reset_mock()
+        handler.client.responses.create.return_value = resp
+        with patch.object(litellm, "cache", broken):
+            out = handler._cached_responses_create({"model": "m", "input": []})
+        # Cache failure must never break the call.
+        assert out is resp
+        handler.client.responses.create.assert_called_once()

@@ -1245,6 +1245,16 @@ class TestConfigureLiteLLMCaching:
             assert kwargs["type"] == "disk"
             assert kwargs["disk_cache_dir"].endswith("llm_cache")
 
+    def test_default_cache_type_is_disk(self, monkeypatch):
+        """Regression guard: the production default backend is 'disk'. Crews run
+        in fresh subprocesses, so an in-memory ('local') cache is cold on every
+        run — only 'disk' persists for cross-run hits. Reverting the default to
+        'local' silently disables cross-run caching."""
+        from src.config.settings import Settings
+
+        monkeypatch.delenv("LITELLM_CACHE_TYPE", raising=False)
+        assert Settings().LITELLM_CACHE_TYPE == "disk"
+
     def test_enable_cache_failure_is_swallowed(self):
         """Caching is best-effort: a backend error must not propagate."""
         patches = self._settings_patches(LITELLM_CACHE_TYPE="local")

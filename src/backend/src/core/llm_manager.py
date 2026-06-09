@@ -249,10 +249,10 @@ def _configure_litellm_caching() -> None:
 
     Caches completions/embeddings to cut latency and cost on repeated identical
     calls. Backend and TTL are env-configurable (see ``Settings``); defaults to
-    in-memory ("local"). "disk" (opt-in) persists across the subprocess model for
-    cross-run hits, but its SQLite-backed store can block under concurrent
-    generation/execution calls — investigate before defaulting to it. Failures
-    degrade gracefully — caching is best-effort and must never break an LLM call.
+    on-disk ("disk") so the cache persists across the subprocess-per-execution
+    model and is shared between the API process and crew subprocesses (cross-run
+    hits). Failures degrade gracefully — caching is best-effort and must never
+    break an LLM call.
     """
     from src.config.settings import settings
 
