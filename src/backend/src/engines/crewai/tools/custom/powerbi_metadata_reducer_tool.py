@@ -31,7 +31,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
-import httpx
 
 from src.services.powerbi_semantic_model_cache_service import PowerBISemanticModelCacheService
 from src.db.session import async_session_factory
@@ -1160,14 +1159,8 @@ Return ONLY valid JSON (no markdown, no explanation):
         llm_temperature = config.get("llm_temperature", 0.1)
         llm_confidence_threshold = config.get("llm_confidence_threshold", 0.0)
 
+        from src.core.llm_manager import LLMManager
         from src.utils.telemetry import get_user_agent_header, KasalProduct
-        url = f"{llm_workspace_url.rstrip('/')}/serving-endpoints/{llm_model}/invocations"
-        headers = {"Authorization": f"Bearer {llm_token}", "Content-Type": "application/json", **get_user_agent_header(KasalProduct.POWERBI)}
-        payload = {
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 2000,
-            "temperature": llm_temperature,
-        }
 
         logger.info(
             f"[MetadataReducer] LLM call: model={llm_model}, "
@@ -1177,28 +1170,29 @@ Return ONLY valid JSON (no markdown, no explanation):
 
         try:
             t_llm = time.time()
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(url, headers=headers, json=payload)
-                response.raise_for_status()
-                result = response.json()
-                content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-                usage = result.get("usage", {})
+            content = await LLMManager.completion(
+                messages=[{"role": "user", "content": prompt}],
+                model=llm_model,
+                temperature=llm_temperature,
+                max_tokens=2000,
+                extra_headers=get_user_agent_header(KasalProduct.POWERBI),
+            )
 
-                logger.info(
-                    f"[MetadataReducer] LLM responded in {time.time()-t_llm:.2f}s — "
-                    f"{len(content)} chars, tokens: {usage}"
-                )
+            logger.info(
+                f"[MetadataReducer] LLM responded in {time.time()-t_llm:.2f}s — "
+                f"{len(content)} chars"
+            )
 
-                parsed = self._extract_json_from_response(content)
-                if parsed and "tables" in parsed:
-                    # Normalize: handle both plain strings and {name, confidence} objects
-                    parsed = self._normalize_llm_selection(parsed, llm_confidence_threshold)
-                    return parsed
+            parsed = self._extract_json_from_response(content)
+            if parsed and "tables" in parsed:
+                # Normalize: handle both plain strings and {name, confidence} objects
+                parsed = self._normalize_llm_selection(parsed, llm_confidence_threshold)
+                return parsed
 
-                logger.warning(
-                    f"[MetadataReducer] LLM response did not contain valid selection JSON. "
-                    f"Response preview: {content[:300]}"
-                )
+            logger.warning(
+                f"[MetadataReducer] LLM response did not contain valid selection JSON. "
+                f"Response preview: {content[:300]}"
+            )
 
         except Exception as e:
             logger.warning(f"[MetadataReducer] LLM selection failed, falling back to fuzzy: {e}")

@@ -1523,20 +1523,15 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         measures = model_context.get("measures", [])
         sample_data = model_context.get("sample_data", {})
 
-        from src.utils.telemetry import get_user_agent_header, KasalProduct
-        serving_url = f"{workspace_url}/serving-endpoints/{endpoint}/invocations"
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json", **get_user_agent_header(KasalProduct.POWERBI)}
-
         logger.info(
             f"[SemanticEnrichment] Starting — {len(tables)} tables, "
             f"{len(measures)} measures via endpoint '{endpoint}'"
         )
 
-        async with httpx.AsyncClient(timeout=90.0) as client:
-            await self._enrich_tables_semantic(client, serving_url, headers, tables)
-            await self._enrich_columns_and_measures_semantic(
-                client, serving_url, headers, tables, measures, sample_data
-            )
+        await self._enrich_tables_semantic(endpoint, tables)
+        await self._enrich_columns_and_measures_semantic(
+            endpoint, tables, measures, sample_data
+        )
 
         total_cols = sum(
             len([c for c in t.get("columns", []) if isinstance(c, dict)])
@@ -1549,13 +1544,14 @@ class PowerBISemanticModelFetcherTool(BaseTool):
 
     async def _enrich_tables_semantic(
         self,
-        client: "httpx.AsyncClient",
-        serving_url: str,
-        headers: Dict[str, str],
+        endpoint: str,
         tables: List[Dict[str, Any]],
         batch_size: int = 5,
     ) -> None:
         """Batch-enrich tables with grain and purpose via LLM. Mutates in-place."""
+        from src.core.llm_manager import LLMManager
+        from src.utils.telemetry import get_user_agent_header, KasalProduct
+
         _SYSTEM = (
             "You are a senior data architect specialising in Power BI semantic models. "
             "Analyse each table and output strict JSON only — no markdown, no prose."
@@ -1586,16 +1582,17 @@ class PowerBISemanticModelFetcherTool(BaseTool):
             )
 
             try:
-                resp = await client.post(
-                    serving_url,
-                    headers=headers,
-                    json={"messages": [
+                content = await LLMManager.completion(
+                    messages=[
                         {"role": "system", "content": _SYSTEM},
                         {"role": "user", "content": prompt},
-                    ]},
+                    ],
+                    model=endpoint,
+                    temperature=0.7,
+                    max_tokens=4000,
+                    extra_headers=get_user_agent_header(KasalProduct.POWERBI),
                 )
-                resp.raise_for_status()
-                result = self._parse_llm_json(resp.json()["choices"][0]["message"]["content"])
+                result = self._parse_llm_json(content)
                 table_map = {t["name"]: t for t in batch}
                 for item in result.get("tables", []):
                     target = table_map.get(item.get("name"))
@@ -1616,15 +1613,16 @@ class PowerBISemanticModelFetcherTool(BaseTool):
 
     async def _enrich_columns_and_measures_semantic(
         self,
-        client: "httpx.AsyncClient",
-        serving_url: str,
-        headers: Dict[str, str],
+        endpoint: str,
         tables: List[Dict[str, Any]],
         measures: List[Dict[str, Any]],
         sample_data: Dict[str, Any],
         batch_size: int = 10,
     ) -> None:
         """Batch-enrich columns and measures with descriptions + synonyms. Mutates in-place."""
+        from src.core.llm_manager import LLMManager
+        from src.utils.telemetry import get_user_agent_header, KasalProduct
+
         _SYSTEM_COL = (
             "You are a senior data architect specialising in Power BI semantic models. "
             "Understand how business users refer to data fields differently from technical names. "
@@ -1635,6 +1633,8 @@ class PowerBISemanticModelFetcherTool(BaseTool):
             "You can read DAX expressions and explain what they compute in plain business language. "
             "Output strict JSON only — no markdown, no prose."
         )
+
+        pbi_headers = get_user_agent_header(KasalProduct.POWERBI)
 
         # ── Column enrichment (per table, batched) ────────────────────────────
         for table in tables:
@@ -1669,16 +1669,17 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 )
 
                 try:
-                    resp = await client.post(
-                        serving_url,
-                        headers=headers,
-                        json={"messages": [
+                    content = await LLMManager.completion(
+                        messages=[
                             {"role": "system", "content": _SYSTEM_COL},
                             {"role": "user", "content": prompt},
-                        ]},
+                        ],
+                        model=endpoint,
+                        temperature=0.7,
+                        max_tokens=4000,
+                        extra_headers=pbi_headers,
                     )
-                    resp.raise_for_status()
-                    result = self._parse_llm_json(resp.json()["choices"][0]["message"]["content"])
+                    result = self._parse_llm_json(content)
                     col_map = {c.get("name", ""): c for c in batch}
                     for item in result.get("columns", []):
                         target = col_map.get(item.get("name"))
@@ -1717,16 +1718,17 @@ class PowerBISemanticModelFetcherTool(BaseTool):
             )
 
             try:
-                resp = await client.post(
-                    serving_url,
-                    headers=headers,
-                    json={"messages": [
+                content = await LLMManager.completion(
+                    messages=[
                         {"role": "system", "content": _SYSTEM_MEAS},
                         {"role": "user", "content": prompt},
-                    ]},
+                    ],
+                    model=endpoint,
+                    temperature=0.7,
+                    max_tokens=4000,
+                    extra_headers=pbi_headers,
                 )
-                resp.raise_for_status()
-                result = self._parse_llm_json(resp.json()["choices"][0]["message"]["content"])
+                result = self._parse_llm_json(content)
                 measure_map = {m["name"]: m for m in batch}
                 for item in result.get("measures", []):
                     target = measure_map.get(item.get("name"))

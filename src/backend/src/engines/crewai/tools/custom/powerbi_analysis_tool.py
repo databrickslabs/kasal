@@ -2498,89 +2498,79 @@ CALCULATETABLE(...)
             operation="generate_dax"
         )
 
-        # Call Databricks LLM
+        # Call LLM via LLMManager
+        from src.core.llm_manager import LLMManager
         from src.utils.telemetry import get_user_agent_header, KasalProduct
-        url = f"{llm_workspace_url.rstrip('/')}/serving-endpoints/{llm_model}/invocations"
-        headers = {
-            "Authorization": f"Bearer {llm_token}",
-            "Content-Type": "application/json",
-            **get_user_agent_header(KasalProduct.POWERBI),
-        }
-        payload = {
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 1000,
-            "temperature": 0.1
-        }
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            try:
-                response = await client.post(url, headers=headers, json=payload)
-                response.raise_for_status()
-                result = response.json()
+        try:
+            content = await LLMManager.completion(
+                messages=[{"role": "user", "content": prompt}],
+                model=llm_model,
+                temperature=0.1,
+                max_tokens=1000,
+                extra_headers=get_user_agent_header(KasalProduct.POWERBI),
+            )
 
-                # Extract DAX from response
-                content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            # Log the raw LLM response
+            logger.info("=" * 80)
+            logger.info("[DAX Generation] LLM Raw Response:")
+            logger.info(content)
+            logger.info("=" * 80)
 
-                # Log the raw LLM response
-                logger.info("=" * 80)
-                logger.info("[DAX Generation] LLM Raw Response:")
-                logger.info(content)
-                logger.info("=" * 80)
+            # Emit trace event for LLM response (appears in UI technical trace)
+            self._emit_llm_trace(
+                event_context="DAX Generation - Response",
+                prompt=prompt,
+                response=content,
+                model=llm_model,
+                operation="generate_dax"
+            )
 
-                # Emit trace event for LLM response (appears in UI technical trace)
-                self._emit_llm_trace(
-                    event_context="DAX Generation - Response",
-                    prompt=prompt,
-                    response=content,
-                    model=llm_model,
-                    operation="generate_dax"
-                )
+            # Clean up: extract just the DAX query
+            dax = self._extract_dax_from_llm_response(content)
 
-                # Clean up: extract just the DAX query
-                dax = self._extract_dax_from_llm_response(content)
+            # Log the extracted DAX
+            logger.info(f"[DAX Generation] Extracted DAX Query:")
+            logger.info(dax)
+            logger.info("=" * 80)
 
-                # Log the extracted DAX
-                logger.info(f"[DAX Generation] Extracted DAX Query:")
-                logger.info(dax)
-                logger.info("=" * 80)
+            # Validate that generated DAX uses only available measures
+            available_measure_names = [m["name"] for m in model_context.get("measures", [])]
 
-                # Validate that generated DAX uses only available measures
-                available_measure_names = [m["name"] for m in model_context.get("measures", [])]
+            # Check for hallucinated measures - extract all [measure] references
+            dax_pattern = r'\[([^\]]+)\]'
+            all_references = re.findall(dax_pattern, dax)
 
-                # Check for hallucinated measures - extract all [measure] references
-                dax_pattern = r'\[([^\]]+)\]'
-                all_references = re.findall(dax_pattern, dax)
+            # Filter to get only measure references (not table[column] references)
+            table_columns = set()
+            for table in model_context.get("tables", []):
+                table_name = table["name"]
+                for col in table.get("columns", []):
+                    table_columns.add(f"{table_name}[{col}]")
 
-                # Filter to get only measure references (not table[column] references)
-                table_columns = set()
-                for table in model_context.get("tables", []):
-                    table_name = table["name"]
-                    for col in table.get("columns", []):
-                        table_columns.add(f"{table_name}[{col}]")
+            # Find references that look like measures (not part of table[column])
+            potential_measures = []
+            for ref in all_references:
+                # Check if this is part of a table[column] pattern
+                is_table_column = any(f"{table['name']}[{ref}]" in dax for table in model_context.get("tables", []))
+                if not is_table_column:
+                    potential_measures.append(ref)
 
-                # Find references that look like measures (not part of table[column])
-                potential_measures = []
-                for ref in all_references:
-                    # Check if this is part of a table[column] pattern
-                    is_table_column = any(f"{table['name']}[{ref}]" in dax for table in model_context.get("tables", []))
-                    if not is_table_column:
-                        potential_measures.append(ref)
+            # Check for measures not in available list
+            hallucinated = [m for m in potential_measures if m not in available_measure_names]
+            if hallucinated:
+                logger.warning(f"[DAX Generation] LLM may have used non-existent measures: {hallucinated}")
+                logger.warning(f"[DAX Generation] Available measures are: {available_measure_names[:10]}")
 
-                # Check for measures not in available list
-                hallucinated = [m for m in potential_measures if m not in available_measure_names]
-                if hallucinated:
-                    logger.warning(f"[DAX Generation] LLM may have used non-existent measures: {hallucinated}")
-                    logger.warning(f"[DAX Generation] Available measures are: {available_measure_names[:10]}")
+            # Auto-wrap with report-level filters if present
+            dax = self._auto_wrap_with_report_filters(dax, config)
 
-                # Auto-wrap with report-level filters if present
-                dax = self._auto_wrap_with_report_filters(dax, config)
+            return dax
 
-                return dax
-
-            except Exception as e:
-                logger.error(f"LLM DAX generation error: {e}")
-                # Fallback to simple generation
-                return self._generate_simple_dax(user_question, model_context)
+        except Exception as e:
+            logger.error(f"LLM DAX generation error: {e}")
+            # Fallback to simple generation
+            return self._generate_simple_dax(user_question, model_context)
 
     def _emit_llm_trace(
         self,
@@ -2843,61 +2833,52 @@ Your previous attempt(s) to generate a DAX query failed. Analyze the errors and 
         logger.info(prompt)
         logger.info("=" * 80)
 
-        # Call LLM
+        # Call LLM via LLMManager
+        from src.core.llm_manager import LLMManager
         from src.utils.telemetry import get_user_agent_header, KasalProduct
-        url = f"{llm_workspace_url.rstrip('/')}/serving-endpoints/{llm_model}/invocations"
-        headers = {
-            "Authorization": f"Bearer {llm_token}",
-            "Content-Type": "application/json",
-            **get_user_agent_header(KasalProduct.POWERBI),
-        }
-        payload = {
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 1000,
-            "temperature": 0.1
-        }
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            try:
-                response = await client.post(url, headers=headers, json=payload)
-                response.raise_for_status()
-                result = response.json()
+        try:
+            content = await LLMManager.completion(
+                messages=[{"role": "user", "content": prompt}],
+                model=llm_model,
+                temperature=0.1,
+                max_tokens=1000,
+                extra_headers=get_user_agent_header(KasalProduct.POWERBI),
+            )
 
-                content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            # Log response
+            logger.info("=" * 80)
+            logger.info("[DAX Self-Correction] LLM Response:")
+            logger.info(content)
+            logger.info("=" * 80)
 
-                # Log response
-                logger.info("=" * 80)
-                logger.info("[DAX Self-Correction] LLM Response:")
-                logger.info(content)
-                logger.info("=" * 80)
+            # Extract DAX
+            dax = self._extract_dax_from_llm_response(content)
 
-                # Extract DAX
-                dax = self._extract_dax_from_llm_response(content)
+            # Validate against available measures
+            available_measure_names = [m["name"] for m in model_context.get("measures", [])]
 
-                # Validate against available measures
-                available_measure_names = [m["name"] for m in model_context.get("measures", [])]
+            # Check for hallucinated measures - extract all [measure] references
+            dax_pattern = r'\[([^\]]+)\]'
+            all_references = re.findall(dax_pattern, dax)
 
-                # Check for hallucinated measures - extract all [measure] references
-                dax_pattern = r'\[([^\]]+)\]'
-                all_references = re.findall(dax_pattern, dax)
+            # Find references that look like measures (not part of table[column])
+            potential_measures = []
+            for ref in all_references:
+                is_table_column = any(f"{table['name']}[{ref}]" in dax for table in model_context.get("tables", []))
+                if not is_table_column:
+                    potential_measures.append(ref)
 
-                # Find references that look like measures (not part of table[column])
-                potential_measures = []
-                for ref in all_references:
-                    is_table_column = any(f"{table['name']}[{ref}]" in dax for table in model_context.get("tables", []))
-                    if not is_table_column:
-                        potential_measures.append(ref)
+            hallucinated = [m for m in potential_measures if m not in available_measure_names]
+            if hallucinated:
+                logger.warning(f"[DAX Self-Correction] LLM may have used non-existent measures: {hallucinated}")
 
-                hallucinated = [m for m in potential_measures if m not in available_measure_names]
-                if hallucinated:
-                    logger.warning(f"[DAX Self-Correction] LLM may have used non-existent measures: {hallucinated}")
+            logger.info(f"[DAX Self-Correction] Extracted DAX: {dax[:100]}...")
+            return dax
 
-                logger.info(f"[DAX Self-Correction] Extracted DAX: {dax[:100]}...")
-                return dax
-
-            except Exception as e:
-                logger.error(f"LLM self-correction error: {e}")
-                return None
+        except Exception as e:
+            logger.error(f"LLM self-correction error: {e}")
+            return None
 
     def _generate_simple_dax(self, user_question: str, model_context: Dict[str, Any]) -> Optional[str]:
         """Generate a simple DAX query without LLM."""
