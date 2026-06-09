@@ -3,9 +3,10 @@ from src.schemas.ui_config import UIConfigBase, UIConfigUpdate, UIConfigResponse
 from src.models.ui_config import UIConfig
 
 
-def test_base_defaults_are_disabled_minimal():
+def test_base_defaults_are_enabled_minimal():
+    # UI is enabled by default — the UI-document emission owns output formatting.
     b = UIConfigBase()
-    assert b.enabled is False
+    assert b.enabled is True
     assert b.catalog_type == "minimal"
     assert b.catalog_json is None
     assert b.style_json is None

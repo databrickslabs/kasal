@@ -8,8 +8,10 @@ from src.models.ui_config import UIConfig
 
 
 @pytest.mark.asyncio
-async def test_get_config_returns_disabled_default_when_missing():
-    """A workspace that never configured UI gets a disabled default."""
+async def test_get_config_returns_enabled_default_when_missing():
+    """A workspace that never configured UI gets an ENABLED default — output
+    formatting is owned by the UI-document emission, so UI rendering is on
+    unless an admin explicitly disables it."""
     session = AsyncMock()
     session.add = MagicMock()
     with patch("src.services.ui_config_service.UIConfigRepository") as Repo:
@@ -20,7 +22,7 @@ async def test_get_config_returns_disabled_default_when_missing():
         svc = UIConfigService(session, group_id="g1")
         out = await svc.get_config()
 
-    assert out.enabled is False
+    assert out.enabled is True
     assert out.group_id == "g1"
     assert out.catalog_type == "minimal"
 

@@ -6,7 +6,10 @@ from pydantic import BaseModel, ConfigDict
 
 class UIConfigBase(BaseModel):
     """Shared fields for the per-workspace Predefined UI configuration."""
-    enabled: bool = False
+    # Enabled by default: output formatting is owned by the UI-document emission
+    # (apply_ui_emission), so every workspace renders through the design-system
+    # UI renderer unless an admin explicitly disables it.
+    enabled: bool = True
     catalog_type: str = "minimal"  # "minimal" | "basic" | "custom"
     catalog_json: Optional[str] = None  # used only when catalog_type == "custom"
     style_json: Optional[str] = None  # renderer style overrides (accent/density/theme)

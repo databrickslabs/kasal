@@ -20,8 +20,10 @@ class UIConfig(Base):
 
     id = Column(Integer, primary_key=True)
 
-    # Master switch — off by default (crews keep returning HTML/markdown).
-    enabled = Column(Boolean, default=False, nullable=False)
+    # Master switch — ON by default. Output formatting is handled by the
+    # UI-document emission, so workspaces render through the design-system UI
+    # renderer unless an admin explicitly turns this off.
+    enabled = Column(Boolean, default=True, nullable=False)
 
     # Which component catalog agents may use: "minimal" | "basic" | "custom".
     catalog_type = Column(String(50), default="minimal", nullable=False)
