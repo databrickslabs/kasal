@@ -1524,7 +1524,10 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         sample_data = model_context.get("sample_data", {})
 
         from src.utils.telemetry import get_user_agent_header, KasalProduct
-        serving_url = f"{workspace_url}/serving-endpoints/{endpoint}/invocations"
+        from src.utils.databricks_url_utils import DatabricksURLUtils
+        # AI Gateway on  -> /ai-gateway/mlflow/v1/chat/completions (model in body via gw_model)
+        # AI Gateway off -> /serving-endpoints/<endpoint>/invocations (model in path)
+        serving_url, gw_model = DatabricksURLUtils.construct_chat_completions_url(workspace_url, endpoint)
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json", **get_user_agent_header(KasalProduct.POWERBI)}
 
         logger.info(
@@ -1533,9 +1536,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         )
 
         async with httpx.AsyncClient(timeout=90.0) as client:
-            await self._enrich_tables_semantic(client, serving_url, headers, tables)
+            await self._enrich_tables_semantic(client, serving_url, headers, tables, gw_model=gw_model)
             await self._enrich_columns_and_measures_semantic(
-                client, serving_url, headers, tables, measures, sample_data
+                client, serving_url, headers, tables, measures, sample_data, gw_model=gw_model
             )
 
         total_cols = sum(
@@ -1554,8 +1557,13 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         headers: Dict[str, str],
         tables: List[Dict[str, Any]],
         batch_size: int = 5,
+        gw_model: Optional[str] = None,
     ) -> None:
-        """Batch-enrich tables with grain and purpose via LLM. Mutates in-place."""
+        """Batch-enrich tables with grain and purpose via LLM. Mutates in-place.
+
+        gw_model: when set (AI Gateway mode), injected as the request body's
+        "model" field since the gateway URL carries no model in its path.
+        """
         _SYSTEM = (
             "You are a senior data architect specialising in Power BI semantic models. "
             "Analyse each table and output strict JSON only — no markdown, no prose."
@@ -1589,7 +1597,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 resp = await client.post(
                     serving_url,
                     headers=headers,
-                    json={"messages": [
+                    json={**({"model": gw_model} if gw_model else {}), "messages": [
                         {"role": "system", "content": _SYSTEM},
                         {"role": "user", "content": prompt},
                     ]},
@@ -1623,8 +1631,13 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         measures: List[Dict[str, Any]],
         sample_data: Dict[str, Any],
         batch_size: int = 10,
+        gw_model: Optional[str] = None,
     ) -> None:
-        """Batch-enrich columns and measures with descriptions + synonyms. Mutates in-place."""
+        """Batch-enrich columns and measures with descriptions + synonyms. Mutates in-place.
+
+        gw_model: when set (AI Gateway mode), injected as the request body's
+        "model" field since the gateway URL carries no model in its path.
+        """
         _SYSTEM_COL = (
             "You are a senior data architect specialising in Power BI semantic models. "
             "Understand how business users refer to data fields differently from technical names. "
@@ -1672,7 +1685,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                     resp = await client.post(
                         serving_url,
                         headers=headers,
-                        json={"messages": [
+                        json={**({"model": gw_model} if gw_model else {}), "messages": [
                             {"role": "system", "content": _SYSTEM_COL},
                             {"role": "user", "content": prompt},
                         ]},
@@ -1720,7 +1733,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 resp = await client.post(
                     serving_url,
                     headers=headers,
-                    json={"messages": [
+                    json={**({"model": gw_model} if gw_model else {}), "messages": [
                         {"role": "system", "content": _SYSTEM_MEAS},
                         {"role": "user", "content": prompt},
                     ]},

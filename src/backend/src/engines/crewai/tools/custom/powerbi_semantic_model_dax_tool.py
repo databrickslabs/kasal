@@ -1253,7 +1253,8 @@ OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text, no explanatio
         self._emit_llm_trace(event_context="DAX Generation - Prompt", prompt=prompt, model=llm_model, operation="generate_dax")
 
         from src.utils.telemetry import get_user_agent_header, KasalProduct
-        url = f"{llm_workspace_url.rstrip('/')}/serving-endpoints/{llm_model}/invocations"
+        from src.utils.databricks_url_utils import DatabricksURLUtils
+        url, _gw_model = DatabricksURLUtils.construct_chat_completions_url(llm_workspace_url, llm_model)
         headers = {"Authorization": f"Bearer {llm_token}", "Content-Type": "application/json", **get_user_agent_header(KasalProduct.POWERBI)}
 
         # Try system+user first; fall back to single user message if endpoint rejects system role
@@ -1277,6 +1278,8 @@ OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text, no explanatio
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             for i, payload in enumerate(payloads):
+                if _gw_model:
+                    payload["model"] = _gw_model
                 try:
                     response = await client.post(url, headers=headers, json=payload)
                     response.raise_for_status()
@@ -1397,7 +1400,8 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
         logger.info(f"[DaxTool] PROMPT START ═══\n{prompt}\n═══ PROMPT END")
 
         from src.utils.telemetry import get_user_agent_header, KasalProduct
-        url = f"{llm_workspace_url.rstrip('/')}/serving-endpoints/{llm_model}/invocations"
+        from src.utils.databricks_url_utils import DatabricksURLUtils
+        url, _gw_model = DatabricksURLUtils.construct_chat_completions_url(llm_workspace_url, llm_model)
         headers = {"Authorization": f"Bearer {llm_token}", "Content-Type": "application/json", **get_user_agent_header(KasalProduct.POWERBI)}
 
         # Try system+user first; fall back to single user message if endpoint rejects system role
@@ -1421,6 +1425,8 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             for i, payload in enumerate(payloads):
+                if _gw_model:
+                    payload["model"] = _gw_model
                 try:
                     response = await client.post(url, headers=headers, json=payload)
                     response.raise_for_status()

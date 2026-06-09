@@ -2500,7 +2500,8 @@ CALCULATETABLE(...)
 
         # Call Databricks LLM
         from src.utils.telemetry import get_user_agent_header, KasalProduct
-        url = f"{llm_workspace_url.rstrip('/')}/serving-endpoints/{llm_model}/invocations"
+        from src.utils.databricks_url_utils import DatabricksURLUtils
+        url, _gw_model = DatabricksURLUtils.construct_chat_completions_url(llm_workspace_url, llm_model)
         headers = {
             "Authorization": f"Bearer {llm_token}",
             "Content-Type": "application/json",
@@ -2511,6 +2512,8 @@ CALCULATETABLE(...)
             "max_tokens": 1000,
             "temperature": 0.1
         }
+        if _gw_model:
+            payload["model"] = _gw_model
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             try:
@@ -2845,7 +2848,8 @@ Your previous attempt(s) to generate a DAX query failed. Analyze the errors and 
 
         # Call LLM
         from src.utils.telemetry import get_user_agent_header, KasalProduct
-        url = f"{llm_workspace_url.rstrip('/')}/serving-endpoints/{llm_model}/invocations"
+        from src.utils.databricks_url_utils import DatabricksURLUtils
+        url, _gw_model = DatabricksURLUtils.construct_chat_completions_url(llm_workspace_url, llm_model)
         headers = {
             "Authorization": f"Bearer {llm_token}",
             "Content-Type": "application/json",
@@ -2856,6 +2860,8 @@ Your previous attempt(s) to generate a DAX query failed. Analyze the errors and 
             "max_tokens": 1000,
             "temperature": 0.1
         }
+        if _gw_model:
+            payload["model"] = _gw_model
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             try:

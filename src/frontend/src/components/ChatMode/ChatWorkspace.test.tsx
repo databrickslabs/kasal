@@ -146,6 +146,14 @@ vi.mock('./api/executions', () => ({
 }));
 vi.mock('./api/crews', () => ({
   saveGeneratedCrew: (...a: unknown[]) => h.saveGeneratedCrew(...a),
+  CrewNameConflictError: class CrewNameConflictError extends Error {
+    crewName: string;
+    constructor(crewName: string) {
+      super(`A crew named "${crewName}" already exists.`);
+      this.name = 'CrewNameConflictError';
+      this.crewName = crewName;
+    }
+  },
   // Faithful-enough stand-in (the real impl is covered in crews.test.ts):
   // true when any agent/task lists the GenieTool by name.
   usesGenieTool: (data: { agents?: { tools?: unknown }[]; tasks?: { tools?: unknown }[] }) => {
@@ -764,7 +772,7 @@ describe('ChatWorkspace component', () => {
     // a generation completes → becomes the /save target
     await act(async () => { h.genOpts.onComplete({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }); });
     await send('/save');
-    expect(h.saveGeneratedCrew).toHaveBeenCalledWith({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }, undefined);
+    expect(h.saveGeneratedCrew).toHaveBeenCalledWith({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }, undefined, expect.anything());
     expect(h.session.addMessage).toHaveBeenCalledWith(
       'assistant',
       expect.stringContaining('Saved **Saved Crew** to the catalog'),
@@ -775,7 +783,7 @@ describe('ChatWorkspace component', () => {
     render(<ChatWorkspace />);
     await act(async () => { h.genOpts.onComplete({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }); });
     await send('/save Oil Crew');
-    expect(h.saveGeneratedCrew).toHaveBeenCalledWith(expect.anything(), 'Oil Crew');
+    expect(h.saveGeneratedCrew).toHaveBeenCalledWith(expect.anything(), 'Oil Crew', expect.anything());
   });
 
   it('/save reports an error when the save fails', async () => {
@@ -792,7 +800,7 @@ describe('ChatWorkspace component', () => {
   it('saves a crew via the card bookmark (onSaveCrew handler)', async () => {
     render(<ChatWorkspace />);
     await act(async () => { fireEvent.click(screen.getByTestId('cc-save')); });
-    expect(h.saveGeneratedCrew).toHaveBeenCalledWith({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] });
+    expect(h.saveGeneratedCrew).toHaveBeenCalledWith({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }, undefined, expect.anything());
   });
 
   // --- Genie crews are not auto-run ---

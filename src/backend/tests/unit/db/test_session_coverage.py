@@ -344,6 +344,113 @@ class TestInitDb:
 
 
 # ---------------------------------------------------------------------------
+# _ensure_databricks_config_columns: idempotent ai_gateway_enabled ALTER
+# ---------------------------------------------------------------------------
+
+def _make_pragma_result(column_names):
+    """Build a fake PRAGMA table_info result.
+
+    PRAGMA rows are (cid, name, type, notnull, dflt_value, pk); the source only
+    reads row[1] (name). fetchall() is synchronous on the result object even
+    though exec_driver_sql itself is awaited.
+    """
+    rows = [(i, name, "BOOLEAN", 0, None, 0) for i, name in enumerate(column_names)]
+    res = MagicMock()
+    res.fetchall.return_value = rows
+    return res
+
+
+class TestEnsureDatabricksConfigColumns:
+    """Tests for _ensure_databricks_config_columns (SQLite self-heal ALTER)."""
+
+    @pytest.mark.asyncio
+    async def test_adds_column_when_absent_sqlite(self):
+        """Column missing -> PRAGMA read, then ALTER TABLE ADD COLUMN is issued."""
+        from src.db.session import _ensure_databricks_config_columns
+
+        conn = MagicMock()
+        # First call: PRAGMA returns existing cols (no ai_gateway_enabled).
+        # Second call: the ALTER statement (returns a throwaway).
+        conn.exec_driver_sql = AsyncMock(
+            side_effect=[_make_pragma_result(["id", "workspace_url"]), MagicMock()]
+        )
+
+        with patch("src.db.session.settings") as mock_settings:
+            mock_settings.DATABASE_URI = "sqlite+aiosqlite:///test.db"
+            await _ensure_databricks_config_columns(conn)
+
+        sql_calls = [c.args[0] for c in conn.exec_driver_sql.await_args_list]
+        assert sql_calls[0] == "PRAGMA table_info(databricksconfig)"
+        assert any(
+            "ALTER TABLE databricksconfig ADD COLUMN ai_gateway_enabled" in s
+            for s in sql_calls
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_alter_when_column_present_sqlite(self):
+        """Column already present -> only the PRAGMA read, no ALTER."""
+        from src.db.session import _ensure_databricks_config_columns
+
+        conn = MagicMock()
+        conn.exec_driver_sql = AsyncMock(
+            return_value=_make_pragma_result(["id", "workspace_url", "ai_gateway_enabled"])
+        )
+
+        with patch("src.db.session.settings") as mock_settings:
+            mock_settings.DATABASE_URI = "sqlite+aiosqlite:///test.db"
+            await _ensure_databricks_config_columns(conn)
+
+        # Only the PRAGMA was issued; no ALTER.
+        assert conn.exec_driver_sql.await_count == 1
+        sql_calls = [c.args[0] for c in conn.exec_driver_sql.await_args_list]
+        assert sql_calls == ["PRAGMA table_info(databricksconfig)"]
+
+    @pytest.mark.asyncio
+    async def test_no_alter_when_table_absent_sqlite(self):
+        """Empty PRAGMA (table not created yet) -> early return, no ALTER."""
+        from src.db.session import _ensure_databricks_config_columns
+
+        conn = MagicMock()
+        conn.exec_driver_sql = AsyncMock(return_value=_make_pragma_result([]))
+
+        with patch("src.db.session.settings") as mock_settings:
+            mock_settings.DATABASE_URI = "sqlite+aiosqlite:///test.db"
+            await _ensure_databricks_config_columns(conn)
+
+        assert conn.exec_driver_sql.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_postgres_uses_add_column_if_not_exists(self):
+        """Non-SQLite URI -> single idempotent ADD COLUMN IF NOT EXISTS, no PRAGMA."""
+        from src.db.session import _ensure_databricks_config_columns
+
+        conn = MagicMock()
+        conn.exec_driver_sql = AsyncMock(return_value=MagicMock())
+
+        with patch("src.db.session.settings") as mock_settings:
+            mock_settings.DATABASE_URI = "postgresql+asyncpg://u@h/db"
+            await _ensure_databricks_config_columns(conn)
+
+        sql_calls = [c.args[0] for c in conn.exec_driver_sql.await_args_list]
+        assert len(sql_calls) == 1
+        assert "ADD COLUMN IF NOT EXISTS ai_gateway_enabled" in sql_calls[0]
+        assert not any("PRAGMA" in s for s in sql_calls)
+
+    @pytest.mark.asyncio
+    async def test_exception_is_swallowed(self):
+        """Driver errors are caught and logged, not propagated."""
+        from src.db.session import _ensure_databricks_config_columns
+
+        conn = MagicMock()
+        conn.exec_driver_sql = AsyncMock(side_effect=RuntimeError("driver boom"))
+
+        with patch("src.db.session.settings") as mock_settings:
+            mock_settings.DATABASE_URI = "sqlite+aiosqlite:///test.db"
+            # Must not raise.
+            await _ensure_databricks_config_columns(conn)
+
+
+# ---------------------------------------------------------------------------
 # get_db: OperationalError retry paths and token reset ValueError
 # ---------------------------------------------------------------------------
 

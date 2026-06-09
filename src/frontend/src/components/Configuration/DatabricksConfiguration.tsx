@@ -45,6 +45,9 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
 
     enabled: false,
 
+    // AI Gateway configuration
+    ai_gateway_enabled: false,
+
     // MLflow configuration
     mlflow_enabled: false,
     mlflow_experiment_name: 'kasal-crew-execution-traces',
@@ -323,6 +326,31 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
     }
   };
 
+  const handleAiGatewayToggle = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const newEnabled = event.target.checked;
+    // Optimistically update UI state
+    setConfig(prev => ({ ...prev, ai_gateway_enabled: newEnabled }));
+
+    // Persist immediately (doesn't require the full config payload), mirroring
+    // the MLflow toggle — otherwise the flag is lost unless the user also clicks
+    // the main Save button.
+    try {
+      await apiClient.post('/databricks/ai-gateway-status', { enabled: newEnabled });
+    } catch (error) {
+      const axErr = error as AxiosError;
+      // No Databricks config yet → backend returns 404; prompt to save main config.
+      if (axErr?.response?.status === 404) {
+        setNotification({
+          open: true,
+          message: t('configuration.databricks.aiGateway.saveFirst', { defaultValue: 'Please save Databricks settings first to persist the AI Gateway setting.' }),
+          severity: 'error',
+        });
+      } else {
+        console.error('Failed to persist AI Gateway toggle:', error);
+      }
+    }
+  };
+
   const handleCloseNotification = () => {
     setNotification({ ...notification, open: false });
   };
@@ -510,6 +538,32 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
           required
         />
 
+        <Divider sx={{ my: 2 }} />
+
+        {/* AI Gateway Section */}
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Box>
+            <Typography variant="subtitle2" color="text.secondary">
+              {t('configuration.databricks.aiGateway.title', { defaultValue: 'AI Gateway' })}
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', maxWidth: 460 }}>
+              {t('configuration.databricks.aiGateway.description', {
+                defaultValue: 'Route all LLM and embedding traffic through the workspace AI Gateway (/ai-gateway/mlflow/v1) instead of per-model serving-endpoints invocations. Same models and tokens; centralized governance, rate limits, and usage tracking.'
+              })}
+            </Typography>
+          </Box>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={!!config.ai_gateway_enabled}
+                onChange={handleAiGatewayToggle}
+                color="primary"
+                disabled={loading || !config.enabled}
+              />
+            }
+            label={config.ai_gateway_enabled ? t('common.enabled') : t('common.disabled')}
+          />
+        </Box>
 
       </Stack>
 

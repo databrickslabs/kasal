@@ -350,7 +350,7 @@ class MLflowEvaluationRunner:
         os.environ["DATABRICKS_HOST"] = auth_ctx.workspace_url
         os.environ["DATABRICKS_TOKEN"] = auth_ctx.token
 
-        api_base = DatabricksURLUtils.construct_serving_endpoints_url(auth_ctx.workspace_url) or ""
+        api_base = DatabricksURLUtils.construct_llm_base_url(auth_ctx.workspace_url) or ""
         if api_base:
             os.environ["DATABRICKS_BASE_URL"] = api_base
             os.environ["DATABRICKS_API_BASE"] = api_base

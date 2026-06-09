@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import ChatMessage, { TraceGroupMessage } from './ChatMessage';
+import { CrewNameConflictError } from '../../api/crews';
 import type { ChatMessage as ChatMessageType } from '../../types/chat';
 
 // --- Mock leaf children so we isolate ChatMessage's routing logic ---
@@ -466,6 +467,35 @@ describe('ChatMessage — save crew bookmark', () => {
     expect(await screen.findByText(/Couldn.t save/i)).toBeInTheDocument();
     // still re-clickable after an error
     expect(screen.getByLabelText('Save crew to catalog')).not.toBeDisabled();
+  });
+
+  it('offers Overwrite when the name already exists, then retries with { overwrite: true }', async () => {
+    const onSaveCrew = vi
+      .fn()
+      .mockRejectedValueOnce(new CrewNameConflictError('My Crew'))
+      .mockResolvedValueOnce({ id: 'c1', name: 'My Crew' });
+    render(<ChatMessage message={genMsg()} onSaveCrew={onSaveCrew} />);
+    fireEvent.click(screen.getByLabelText('Save crew to catalog'));
+
+    // conflict → "Already in catalog" hint + an Overwrite affordance
+    expect(await screen.findByText(/Already in catalog/i)).toBeInTheDocument();
+    const overwriteBtn = screen.getByText('Overwrite');
+    expect(onSaveCrew).toHaveBeenNthCalledWith(1, expect.anything(), expect.not.objectContaining({ overwrite: true }));
+
+    // clicking Overwrite re-saves, this time forcing overwrite
+    fireEvent.click(overwriteBtn);
+    expect(await screen.findByText(/Saved .*My Crew.* to catalog/)).toBeInTheDocument();
+    expect(onSaveCrew).toHaveBeenCalledTimes(2);
+    expect(onSaveCrew).toHaveBeenNthCalledWith(2, expect.anything(), expect.objectContaining({ overwrite: true }));
+  });
+
+  it('falls into the error state (not "exists") for a non-conflict rejection', async () => {
+    const onSaveCrew = vi.fn().mockRejectedValue(new Error('boom'));
+    render(<ChatMessage message={genMsg()} onSaveCrew={onSaveCrew} />);
+    fireEvent.click(screen.getByLabelText('Save crew to catalog'));
+    expect(await screen.findByText(/Couldn.t save/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Already in catalog/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('Overwrite')).not.toBeInTheDocument();
   });
 });
 

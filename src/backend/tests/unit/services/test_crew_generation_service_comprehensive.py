@@ -555,6 +555,114 @@ class TestProcessCrewSetup:
         # The final loop sets both to 'A' (because agent='A')
         assert result["tasks"][0]["agent"] == "A"
 
+    # --- disable_memory ---
+    def test_disable_memory_sets_memory_false_on_all_agents(self):
+        """disable_memory=True sets memory=False on every agent."""
+        setup = _minimal_setup(
+            agents=[
+                {"name": "A1", "role": "r", "goal": "g", "backstory": "b", "tools": []},
+                {"name": "A2", "role": "r", "goal": "g", "backstory": "b", "tools": []},
+            ],
+            tasks=[
+                {"name": "T1", "agent": "A1", "tools": []},
+                {"name": "T2", "agent": "A2", "tools": []},
+            ],
+        )
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map(), disable_memory=True
+        )
+        assert all(agent["memory"] is False for agent in result["agents"])
+
+    def test_disable_memory_default_does_not_add_memory(self):
+        """Default (disable_memory=False) does NOT add a memory key to agents."""
+        setup = _minimal_setup(
+            agents=[{"name": "A1", "role": "r", "goal": "g", "backstory": "b", "tools": []}],
+            tasks=[{"name": "T1", "agent": "A1", "tools": []}],
+        )
+        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
+        for agent in result["agents"]:
+            assert "memory" not in agent
+
+
+# ===========================================================================
+# _has_persistent_memory_backend
+# ===========================================================================
+
+class TestHasPersistentMemoryBackend:
+    def setup_method(self):
+        self.service, self.session, *_ = _build_service()
+
+    def _patch_repo(self, get_by_type):
+        """Patch MemoryBackendRepository (lazily imported) and return the patcher.
+
+        get_by_type is installed as an AsyncMock (return_value or side_effect).
+        """
+        mock_repo = Mock()
+        mock_repo.get_by_type = get_by_type
+        mock_repo_cls = Mock(return_value=mock_repo)
+        return patch(
+            "src.repositories.memory_backend_repository.MemoryBackendRepository",
+            mock_repo_cls,
+        ), mock_repo
+
+    @pytest.mark.asyncio
+    async def test_returns_true_when_databricks_backend_exists(self):
+        gc = Mock()
+        gc.primary_group_id = "grp1"
+        # First call (DATABRICKS) returns a backend -> True, never checks LAKEBASE
+        patcher, mock_repo = self._patch_repo(AsyncMock(return_value=[Mock()]))
+        with patcher:
+            result = await self.service._has_persistent_memory_backend(self.session, gc)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_returns_true_when_lakebase_backend_exists(self):
+        gc = Mock()
+        gc.primary_group_id = "grp1"
+        # DATABRICKS -> empty, LAKEBASE -> backend present
+        patcher, mock_repo = self._patch_repo(
+            AsyncMock(side_effect=[[], [Mock()]])
+        )
+        with patcher:
+            result = await self.service._has_persistent_memory_backend(self.session, gc)
+        assert result is True
+        assert mock_repo.get_by_type.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_returns_false_when_no_backend(self):
+        gc = Mock()
+        gc.primary_group_id = "grp1"
+        patcher, mock_repo = self._patch_repo(AsyncMock(return_value=[]))
+        with patcher:
+            result = await self.service._has_persistent_memory_backend(self.session, gc)
+        assert result is False
+        # Both DATABRICKS and LAKEBASE checked
+        assert mock_repo.get_by_type.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_returns_false_when_group_context_none(self):
+        # group_context is None -> short-circuits to False, repo never instantiated
+        result = await self.service._has_persistent_memory_backend(self.session, None)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_returns_false_when_primary_group_id_missing(self):
+        gc = Mock()
+        gc.primary_group_id = None
+        result = await self.service._has_persistent_memory_backend(self.session, gc)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_returns_false_when_repo_raises(self):
+        gc = Mock()
+        gc.primary_group_id = "grp1"
+        patcher, mock_repo = self._patch_repo(
+            AsyncMock(side_effect=RuntimeError("db down"))
+        )
+        with patcher:
+            result = await self.service._has_persistent_memory_backend(self.session, gc)
+        assert result is False
+
 
 # ===========================================================================
 # _safe_get_attr

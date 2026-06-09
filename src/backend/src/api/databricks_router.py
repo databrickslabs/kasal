@@ -2,11 +2,12 @@ from typing import Annotated, Dict, List
 
 from fastapi import APIRouter, Depends, Query
 
-from src.core.exceptions import ForbiddenError
+from src.core.exceptions import ForbiddenError, NotFoundError
 
 from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.permissions import check_role_in_context, is_workspace_admin
 from src.schemas.databricks_config import (
+    AIGatewayStatusUpdate,
     DatabricksConfigCreate,
     DatabricksConfigResponse,
 )
@@ -90,6 +91,27 @@ async def set_databricks_config(
     return await service.set_databricks_config(
         request, created_by_email=created_by_email
     )
+
+
+@router.post("/ai-gateway-status", response_model=Dict)
+async def set_ai_gateway_status(
+    payload: AIGatewayStatusUpdate,
+    group_context: GroupContextDep,
+    service: DatabricksServiceDep,
+):
+    """Persist just the AI Gateway routing flag on the active Databricks config.
+
+    Immediate toggle that doesn't require re-POSTing the full config payload
+    (mirrors POST /mlflow/status). Workspace admins only. Returns 404 when there
+    is no Databricks config to attach the flag to, so the UI can prompt the user
+    to save the main settings first.
+    """
+    if not is_workspace_admin(group_context):
+        raise ForbiddenError("Only workspace admins can change AI Gateway settings")
+    ok = await service.set_ai_gateway_enabled(payload.enabled)
+    if not ok:
+        raise NotFoundError("No Databricks configuration to attach the AI Gateway setting to")
+    return {"ai_gateway_enabled": payload.enabled}
 
 
 @router.get("/config", response_model=DatabricksConfigResponse)

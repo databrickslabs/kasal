@@ -11,6 +11,9 @@ class DatabricksConfigBase(BaseModel):
     db_schema: str = Field("", alias="schema")
     enabled: bool = True
 
+    # AI Gateway: route LLM/embedding traffic through /ai-gateway/mlflow/v1
+    ai_gateway_enabled: bool = False
+
     # MLflow configuration
     mlflow_enabled: bool = False
     mlflow_experiment_name: Optional[str] = "kasal-crew-execution-traces"
@@ -76,6 +79,9 @@ class DatabricksConfigUpdate(DatabricksConfigBase):
     db_schema: Optional[str] = Field(None, alias="schema")
     enabled: Optional[bool] = None
 
+    # AI Gateway
+    ai_gateway_enabled: Optional[bool] = None
+
     # MLflow configuration
     mlflow_enabled: Optional[bool] = None
     mlflow_experiment_name: Optional[str] = None
@@ -117,4 +123,10 @@ class DatabricksConfigResponse(DatabricksConfigBase):
 class DatabricksTokenStatus(BaseModel):
     """Schema for Databricks token status response."""
     personal_token_required: bool
-    message: str 
+    message: str
+
+
+class AIGatewayStatusUpdate(BaseModel):
+    """Lightweight payload for the AI Gateway toggle — persists just the flag
+    on the active Databricks config without a full config payload."""
+    enabled: bool

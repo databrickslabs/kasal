@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { saveGeneratedCrew, deriveCrewName, normalizeGeneration, usesGenieTool } from './crews';
+import { saveGeneratedCrew, deriveCrewName, normalizeGeneration, usesGenieTool, CrewNameConflictError } from './crews';
 import { getClient } from './client';
 
 vi.mock('./client', () => ({
@@ -148,6 +148,102 @@ describe('ChatMode crews api', () => {
       await saveGeneratedCrew(lopsided as never);
       const edges = post.mock.calls[0][1].edges as Array<{ source: string; target: string }>;
       expect(edges).toContainEqual(expect.objectContaining({ source: 'agent-a1', target: 'task-t2' }));
+    });
+
+    describe('overwrite + name-conflict handling', () => {
+      it('POSTs to /crews?overwrite=true when opts.overwrite is set', async () => {
+        await saveGeneratedCrew(data as never, undefined, { overwrite: true });
+        expect(post.mock.calls[0][0]).toBe('/crews?overwrite=true');
+      });
+
+      it('POSTs to /crews by default (no overwrite)', async () => {
+        await saveGeneratedCrew(data as never);
+        expect(post.mock.calls[0][0]).toBe('/crews');
+      });
+
+      it('throws CrewNameConflictError with the payload name on a 409', async () => {
+        post.mockRejectedValue({ response: { status: 409 } });
+        const err = await saveGeneratedCrew(data as never, 'Taken Name').catch((e) => e);
+        expect(err).toBeInstanceOf(CrewNameConflictError);
+        expect((err as CrewNameConflictError).crewName).toBe('Taken Name');
+      });
+
+      it('rethrows a non-409 error as-is', async () => {
+        const boom = { response: { status: 500 }, message: 'server blew up' };
+        post.mockRejectedValueOnce(boom);
+        await expect(saveGeneratedCrew(data as never)).rejects.toBe(boom);
+      });
+    });
+
+    describe('agent config + memory carry-through', () => {
+      const withLlm = {
+        agents: [{ id: 'a1', name: 'Researcher', role: 'Analyst', llm: 'gpt-4o', allow_delegation: true }],
+        tasks: [{ id: 't1', name: 'Gather', agent_id: 'a1' }],
+      };
+
+      it('carries the full agent record (llm + advanced config) into the node data', async () => {
+        await saveGeneratedCrew(withLlm as never);
+        const nodes = post.mock.calls[0][1].nodes as Array<{ type: string; data: Record<string, unknown> }>;
+        const agentNode = nodes.find((n) => n.type === 'agentNode')!;
+        expect(agentNode.data.llm).toBe('gpt-4o');
+        expect(agentNode.data.allow_delegation).toBe(true);
+      });
+
+      it('sets agent + crew memory to true when opts.memoryEnabled is true', async () => {
+        await saveGeneratedCrew(withLlm as never, undefined, { memoryEnabled: true });
+        const payload = post.mock.calls[0][1] as Record<string, unknown>;
+        expect(payload.memory).toBe(true);
+        const nodes = payload.nodes as Array<{ type: string; data: Record<string, unknown> }>;
+        expect(nodes.find((n) => n.type === 'agentNode')!.data.memory).toBe(true);
+      });
+
+      it('sets agent + crew memory to false when opts.memoryEnabled is false', async () => {
+        await saveGeneratedCrew(withLlm as never, undefined, { memoryEnabled: false });
+        const payload = post.mock.calls[0][1] as Record<string, unknown>;
+        expect(payload.memory).toBe(false);
+        const nodes = payload.nodes as Array<{ type: string; data: Record<string, unknown> }>;
+        expect(nodes.find((n) => n.type === 'agentNode')!.data.memory).toBe(false);
+      });
+
+      it('omits crew-level memory when opts.memoryEnabled is not provided', async () => {
+        await saveGeneratedCrew(withLlm as never);
+        const payload = post.mock.calls[0][1] as Record<string, unknown>;
+        expect('memory' in payload).toBe(false);
+      });
+    });
+
+    describe('Genie space injection', () => {
+      const genieData = {
+        agents: [{ id: 'a1', name: 'GenieAgent', tools: ['35'] }],
+        tasks: [{ id: 't1', name: 'Ask', tools: ['GenieTool'], agent_id: 'a1' }],
+      };
+
+      it('injects tool_configs on Genie-using agent and task nodes when spaceId is set', async () => {
+        await saveGeneratedCrew(genieData as never, undefined, { spaceId: 'space-xyz' });
+        const nodes = post.mock.calls[0][1].nodes as Array<{ type: string; data: Record<string, unknown> }>;
+        const agentNode = nodes.find((n) => n.type === 'agentNode')!;
+        const taskNode = nodes.find((n) => n.type === 'taskNode')!;
+        expect(agentNode.data.tool_configs).toEqual({ GenieTool: { spaceId: 'space-xyz' } });
+        expect(taskNode.data.tool_configs).toEqual({ GenieTool: { spaceId: 'space-xyz' } });
+      });
+
+      it('does not inject tool_configs when no spaceId is provided', async () => {
+        await saveGeneratedCrew(genieData as never);
+        const nodes = post.mock.calls[0][1].nodes as Array<{ type: string; data: Record<string, unknown> }>;
+        expect(nodes.find((n) => n.type === 'agentNode')!.data.tool_configs).toBeUndefined();
+        expect(nodes.find((n) => n.type === 'taskNode')!.data.tool_configs).toBeUndefined();
+      });
+
+      it('does not inject tool_configs on nodes that do not use GenieTool, even with a spaceId', async () => {
+        const mixed = {
+          agents: [{ id: 'a1', name: 'Plain', tools: ['SomeOtherTool'] }],
+          tasks: [{ id: 't1', name: 'Plain task', tools: [], agent_id: 'a1' }],
+        };
+        await saveGeneratedCrew(mixed as never, undefined, { spaceId: 'space-xyz' });
+        const nodes = post.mock.calls[0][1].nodes as Array<{ type: string; data: Record<string, unknown> }>;
+        expect(nodes.find((n) => n.type === 'agentNode')!.data.tool_configs).toBeUndefined();
+        expect(nodes.find((n) => n.type === 'taskNode')!.data.tool_configs).toBeUndefined();
+      });
     });
   });
 });

@@ -172,6 +172,7 @@ class UCMVGenieConfigGeneratorTool(BaseTool):
     def _call_llm(self, prompt: str, auth, model: str) -> str:
         """Call the LLM and return the response text."""
         import litellm
+        from src.utils.databricks_url_utils import DatabricksURLUtils
 
         workspace_url = (auth.workspace_url or '').rstrip('/')
         headers = auth.get_headers()
@@ -194,7 +195,7 @@ class UCMVGenieConfigGeneratorTool(BaseTool):
                 },
                 {"role": "user", "content": prompt}
             ],
-            api_base=f"{workspace_url}/serving-endpoints",
+            api_base=DatabricksURLUtils.construct_llm_base_url(workspace_url),
             api_key=token,
             max_tokens=4000,
             temperature=0.3,

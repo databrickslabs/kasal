@@ -173,7 +173,8 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
             return {"content": None, "usage": {}, "error": "LLM not configured"}
 
         base_url = self.workspace_url.rstrip("/")
-        url = f"{base_url}/serving-endpoints/{self.model}/invocations"
+        from src.utils.databricks_url_utils import DatabricksURLUtils
+        url, _gw_model = DatabricksURLUtils.construct_chat_completions_url(base_url, self.model)
 
         from src.utils.telemetry import get_user_agent_header, KasalProduct
         headers = {
@@ -190,6 +191,8 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
             "max_tokens": 4000,
             "temperature": 0.1
         }
+        if _gw_model:
+            payload["model"] = _gw_model
 
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:

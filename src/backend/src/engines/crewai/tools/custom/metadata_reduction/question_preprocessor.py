@@ -327,13 +327,16 @@ Return JSON:
 {{"measures": ["measure names from question"], "dimensions": ["dimension/grouping columns"], "time_grain": "year|quarter|month|week|day|null", "output_shape": "single_value|top_n|trend|comparison|list"}}"""
 
             from src.utils.telemetry import get_user_agent_header, KasalProduct
-            url = f"{llm_workspace_url.rstrip('/')}/serving-endpoints/{llm_model}/invocations"
+            from src.utils.databricks_url_utils import DatabricksURLUtils
+            url, _gw_model = DatabricksURLUtils.construct_chat_completions_url(llm_workspace_url, llm_model)
             headers = {"Authorization": f"Bearer {llm_token}", "Content-Type": "application/json", **get_user_agent_header(KasalProduct.POWERBI)}
             payload = {
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": 500,
                 "temperature": 0.0,
             }
+            if _gw_model:
+                payload["model"] = _gw_model
 
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.post(url, headers=headers, json=payload)
