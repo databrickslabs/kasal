@@ -522,6 +522,23 @@ class MLflowTrackedLLM:
 # Export functions for external use
 __all__ = ['LLMManager', 'DatabricksGPTOSSHandler', 'DatabricksRetryLLM']
 
+
+def _is_http_400(exc: Exception) -> bool:
+    """Check if an exception represents an HTTP 400 error."""
+    # litellm raises BadRequestError (subclass of openai.BadRequestError)
+    exc_name = type(exc).__name__
+    if exc_name in ("BadRequestError",):
+        return True
+    # Also check status_code attribute (litellm exceptions carry it)
+    if getattr(exc, "status_code", None) == 400:
+        return True
+    # Fallback: check string representation
+    exc_str = str(exc)
+    if "400" in exc_str and ("bad request" in exc_str.lower() or "BadRequest" in exc_str):
+        return True
+    return False
+
+
 class LLMManager:
     """Manager for LLM configurations and interactions."""
 
@@ -570,6 +587,7 @@ class LLMManager:
         temperature: float = 0.7,
         max_tokens: int = 4000,
         extra_headers: Optional[Dict[str, str]] = None,
+        fallback_drop_system_on_400: bool = False,
     ) -> str:
         """
         Unified async completion method that routes through CrewAI's LLM class.
@@ -580,6 +598,9 @@ class LLMManager:
             temperature: Sampling temperature (default 0.7)
             max_tokens: Maximum tokens in response (default 4000)
             extra_headers: Optional extra HTTP headers (e.g. User-Agent for telemetry)
+            fallback_drop_system_on_400: If True and the call raises an HTTP 400,
+                retry once with system messages removed (user messages only).
+                Handles models that reject system+user dual-message payloads.
 
         Returns:
             str: The LLM response content string
@@ -606,6 +627,24 @@ class LLMManager:
             return result
         except Exception as e:
             duration = time.time() - start_time
+            # On HTTP 400 with fallback enabled, retry without system messages
+            if fallback_drop_system_on_400 and _is_http_400(e):
+                user_only = [m for m in messages if m.get("role") != "system"]
+                if user_only and len(user_only) < len(messages):
+                    logger.warning(
+                        f"LLM completion got 400, retrying without system message: model={model}"
+                    )
+                    try:
+                        result = await asyncio.to_thread(llm.call, user_only)
+                        fallback_duration = time.time() - start_time
+                        logger.info(
+                            f"LLM completion (user-only fallback): model={model}, "
+                            f"duration={fallback_duration:.2f}s, response_length={len(result) if result else 0}"
+                        )
+                        return result
+                    except Exception as retry_err:
+                        logger.error(f"LLM completion user-only fallback also failed: {retry_err}")
+                        raise retry_err
             logger.error(f"LLM completion failed: model={model}, duration={duration:.2f}s, error={e}")
             raise
 
