@@ -1162,7 +1162,10 @@ const Node: React.FC<{
               {rows.map((cells, ri) => (
                 <tr key={ri}>
                   {cells.map((val, ci) => (
-                    <td key={ci} style={{ padding: '9px 12px', color: '#dbe3ff', borderBottom: `1px solid rgba(255,255,255,0.07)` }}>{val}</td>
+                    // Themed tokens (not a hardcoded light color): TEXT falls back to
+                    // the dark-theme default when unthemed, but follows --ui-text on a
+                    // light theme so cells stay readable instead of washing out.
+                    <td key={ci} style={{ padding: '9px 12px', color: TEXT, borderBottom: `1px solid ${GLASS_BORDER}` }}>{val}</td>
                   ))}
                 </tr>
               ))}
