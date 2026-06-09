@@ -249,8 +249,10 @@ def _configure_litellm_caching() -> None:
 
     Caches completions/embeddings to cut latency and cost on repeated identical
     calls. Backend and TTL are env-configurable (see ``Settings``); defaults to
-    in-memory ("local"). Failures degrade gracefully — caching is best-effort
-    and must never break an LLM call.
+    on-disk ("disk") so the cache persists across the subprocess-per-execution
+    model and is shared between the API process and crew subprocesses (cross-run
+    hits). Failures degrade gracefully — caching is best-effort and must never
+    break an LLM call.
     """
     from src.config.settings import settings
 
@@ -280,6 +282,16 @@ def _configure_litellm_caching() -> None:
                 )
                 logger.info(f"LiteLLM Redis cache enabled (host={host}, ttl={ttl}s)")
                 return
+
+        if cache_type == "disk":
+            # Disk cache persists across the subprocess-per-execution model and is
+            # shared between the API process and crew subprocesses, so identical
+            # calls hit across runs. Use a controlled dir (default under logs)
+            # instead of litellm's ".litellm_cache" in the current directory.
+            disk_dir = settings.LITELLM_CACHE_DIR or os.path.join(log_dir, "llm_cache")
+            litellm.enable_cache(type="disk", disk_cache_dir=disk_dir, ttl=ttl)
+            logger.info(f"LiteLLM disk cache enabled (dir={disk_dir}, ttl={ttl}s)")
+            return
 
         litellm.enable_cache(type=cache_type, ttl=ttl)
         logger.info(f"LiteLLM cache enabled (type={cache_type}, ttl={ttl}s)")

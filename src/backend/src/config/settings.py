@@ -94,12 +94,19 @@ class Settings(BaseSettings):
     # identical calls. CrewAI uses LiteLLM under the hood, so enabling this
     # transparently benefits crew execution too.
     LITELLM_CACHE_ENABLED: bool = os.getenv("LITELLM_CACHE_ENABLED", "true").lower() == "true"
-    # Backend: "local" (in-memory), "redis", "disk", or "s3".
-    # NOTE: crews run in fresh subprocesses, so "local" only caches repeated
-    # calls within a single run. Use "redis"/"disk" for cross-run hits.
-    LITELLM_CACHE_TYPE: str = os.getenv("LITELLM_CACHE_TYPE", "local")
+    # Backend: "disk" (default), "local" (in-memory), "redis", or "s3".
+    # Defaults to "disk" because crews run in fresh subprocesses — an in-memory
+    # ("local") cache is cold on every run and only helps repeats within a single
+    # process. "disk" persists and is shared across the API process and crew
+    # subprocesses, so identical calls hit across runs (no Redis infra required).
+    LITELLM_CACHE_TYPE: str = os.getenv("LITELLM_CACHE_TYPE", "disk")
     # Time-to-live for cached responses, in seconds (default 1 hour).
     LITELLM_CACHE_TTL: int = int(os.getenv("LITELLM_CACHE_TTL", "3600"))
+    # On-disk cache directory (only used when LITELLM_CACHE_TYPE == "disk").
+    # Defaults to <logs>/llm_cache so the cache lives in a controlled, shared
+    # location across the API process and crew subprocesses (enabling cross-run
+    # hits) instead of litellm's default ".litellm_cache" in the current dir.
+    LITELLM_CACHE_DIR: Optional[str] = os.getenv("LITELLM_CACHE_DIR")
     # Redis connection (only used when LITELLM_CACHE_TYPE == "redis").
     LITELLM_CACHE_REDIS_HOST: Optional[str] = os.getenv("LITELLM_CACHE_REDIS_HOST")
     LITELLM_CACHE_REDIS_PORT: Optional[str] = os.getenv("LITELLM_CACHE_REDIS_PORT")

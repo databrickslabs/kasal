@@ -1117,6 +1117,7 @@ class TestConfigureLiteLLMCaching:
             "LITELLM_CACHE_ENABLED": True,
             "LITELLM_CACHE_TYPE": "local",
             "LITELLM_CACHE_TTL": 3600,
+            "LITELLM_CACHE_DIR": None,
             "LITELLM_CACHE_REDIS_HOST": None,
             "LITELLM_CACHE_REDIS_PORT": None,
             "LITELLM_CACHE_REDIS_PASSWORD": None,
@@ -1207,6 +1208,42 @@ class TestConfigureLiteLLMCaching:
                 for p in patches:
                     p.stop()
             mock_enable.assert_called_once_with(type="local", ttl=99)
+
+    def test_disk_cache_uses_configured_dir(self):
+        """'disk' backend enables a persistent cache at the configured directory."""
+        patches = self._settings_patches(
+            LITELLM_CACHE_TYPE="disk",
+            LITELLM_CACHE_TTL=120,
+            LITELLM_CACHE_DIR="/var/cache/kasal-llm",
+        )
+        with patch("src.core.llm_manager.litellm.enable_cache") as mock_enable:
+            for p in patches:
+                p.start()
+            try:
+                _configure_litellm_caching()
+            finally:
+                for p in patches:
+                    p.stop()
+            mock_enable.assert_called_once_with(
+                type="disk", disk_cache_dir="/var/cache/kasal-llm", ttl=120
+            )
+
+    def test_disk_cache_defaults_dir_under_logs(self):
+        """'disk' backend with no configured dir falls back to a controlled
+        <logs>/llm_cache directory (not litellm's cwd default)."""
+        patches = self._settings_patches(LITELLM_CACHE_TYPE="disk", LITELLM_CACHE_DIR=None)
+        with patch("src.core.llm_manager.litellm.enable_cache") as mock_enable:
+            for p in patches:
+                p.start()
+            try:
+                _configure_litellm_caching()
+            finally:
+                for p in patches:
+                    p.stop()
+            assert mock_enable.call_count == 1
+            kwargs = mock_enable.call_args.kwargs
+            assert kwargs["type"] == "disk"
+            assert kwargs["disk_cache_dir"].endswith("llm_cache")
 
     def test_enable_cache_failure_is_swallowed(self):
         """Caching is best-effort: a backend error must not propagate."""
