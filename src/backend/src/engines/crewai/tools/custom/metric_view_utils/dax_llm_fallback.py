@@ -120,40 +120,22 @@ async def _call_llm(
     workspace_url: str,
     token: str,
 ) -> dict:
-    """Call Databricks serving endpoint directly via HTTP."""
-    import httpx
-
-    if not workspace_url or not token:
-        return {'content': None, 'error': 'LLM not configured'}
-
-    base_url = workspace_url.rstrip('/')
-    url = f"{base_url}/serving-endpoints/{model}/invocations"
-
+    """Call LLM via LLMManager.completion()."""
+    from src.core.llm_manager import LLMManager
     from src.utils.telemetry import get_user_agent_header, KasalProduct
-    headers = {
-        'Authorization': f'Bearer {token}',
-        'Content-Type': 'application/json',
-        **get_user_agent_header(KasalProduct.POWERBI),
-    }
-
-    payload = {
-        'messages': [
-            {'role': 'system', 'content': system_prompt},
-            {'role': 'user', 'content': prompt},
-        ],
-        'max_tokens': 2000,
-        'temperature': 0.1,
-    }
 
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-            result = response.json()
-            return {
-                'content': result['choices'][0]['message']['content'],
-                'usage': result.get('usage', {}),
-            }
+        content = await LLMManager.completion(
+            messages=[
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': prompt},
+            ],
+            model=model,
+            temperature=0.1,
+            max_tokens=2000,
+            extra_headers=get_user_agent_header(KasalProduct.POWERBI),
+        )
+        return {'content': content, 'usage': {}}
     except Exception as e:
         logger.warning(f"[DAX_LLM] API call failed: {e}")
         return {'content': None, 'error': str(e)}

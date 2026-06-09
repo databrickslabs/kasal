@@ -224,35 +224,33 @@ class PBIVisualUCMVMapperTool(BaseTool):
 
     def _call_llm(self, prompt: str, auth, model: str) -> str:
         """Call the LLM and return the response text."""
-        import litellm
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+        from src.core.llm_manager import LLMManager
+        from src.utils.telemetry import get_user_agent_header, KasalProduct
 
-        workspace_url = (auth.workspace_url or '').rstrip('/')
-        headers = auth.get_headers()
-        token = headers.get('Authorization', '').replace('Bearer ', '')
+        async def _run():
+            return await LLMManager.completion(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a data engineering expert who maps Power BI report visuals "
+                            "to Databricks UC Metric Views. You match PBI measure names to UCMV "
+                            "SQL measure names and generate SQL using the MEASURE() syntax. "
+                            "You output only valid JSON arrays."
+                        )
+                    },
+                    {"role": "user", "content": prompt}
+                ],
+                model=model,
+                temperature=0.1,
+                max_tokens=8000,
+                extra_headers=get_user_agent_header(KasalProduct.POWERBI),
+            )
 
-        if not workspace_url or not token:
-            raise ValueError("No workspace URL or token available for LLM call")
-
-        response = litellm.completion(
-            model=model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a data engineering expert who maps Power BI report visuals "
-                        "to Databricks UC Metric Views. You match PBI measure names to UCMV "
-                        "SQL measure names and generate SQL using the MEASURE() syntax. "
-                        "You output only valid JSON arrays."
-                    )
-                },
-                {"role": "user", "content": prompt}
-            ],
-            api_base=f"{workspace_url}/serving-endpoints",
-            api_key=token,
-            max_tokens=8000,
-            temperature=0.1,
-        )
-        return response.choices[0].message.content or ""
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(asyncio.run, _run()).result(timeout=300)
 
     def _build_prompt(
         self,

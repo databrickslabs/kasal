@@ -19,8 +19,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set
 
-import httpx
-
 logger = logging.getLogger(__name__)
 
 
@@ -311,6 +309,9 @@ class QuestionPreprocessor:
         import asyncio
 
         async def _call():
+            from src.core.llm_manager import LLMManager
+            from src.utils.telemetry import get_user_agent_header, KasalProduct
+
             measure_hint = ""
             if known_measures:
                 measure_hint = f"\nKnown measures: {', '.join(known_measures[:30])}"
@@ -326,19 +327,13 @@ Question: "{question}"
 Return JSON:
 {{"measures": ["measure names from question"], "dimensions": ["dimension/grouping columns"], "time_grain": "year|quarter|month|week|day|null", "output_shape": "single_value|top_n|trend|comparison|list"}}"""
 
-            from src.utils.telemetry import get_user_agent_header, KasalProduct
-            url = f"{llm_workspace_url.rstrip('/')}/serving-endpoints/{llm_model}/invocations"
-            headers = {"Authorization": f"Bearer {llm_token}", "Content-Type": "application/json", **get_user_agent_header(KasalProduct.POWERBI)}
-            payload = {
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 500,
-                "temperature": 0.0,
-            }
-
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.post(url, headers=headers, json=payload)
-                resp.raise_for_status()
-                content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+            content = await LLMManager.completion(
+                messages=[{"role": "user", "content": prompt}],
+                model=llm_model,
+                temperature=0.0,
+                max_tokens=500,
+                extra_headers=get_user_agent_header(KasalProduct.POWERBI),
+            )
 
             # Parse LLM response
             try:

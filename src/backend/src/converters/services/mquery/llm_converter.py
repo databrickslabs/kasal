@@ -168,39 +168,21 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
         Returns:
             Dict with response content and usage
         """
-        if not self.workspace_url or not self.token:
-            logger.warning("LLM credentials not configured, using rule-based conversion")
-            return {"content": None, "usage": {}, "error": "LLM not configured"}
-
-        base_url = self.workspace_url.rstrip("/")
-        url = f"{base_url}/serving-endpoints/{self.model}/invocations"
-
+        from src.core.llm_manager import LLMManager
         from src.utils.telemetry import get_user_agent_header, KasalProduct
-        headers = {
-            "Authorization": f"Bearer {self.token}",
-            "Content-Type": "application/json",
-            **get_user_agent_header(KasalProduct.POWERBI),
-        }
-
-        payload = {
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ],
-            "max_tokens": 4000,
-            "temperature": 0.1
-        }
 
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.post(url, headers=headers, json=payload)
-                response.raise_for_status()
-
-                result = response.json()
-                return {
-                    "content": result["choices"][0]["message"]["content"],
-                    "usage": result.get("usage", {})
-                }
+            content = await LLMManager.completion(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                model=self.model,
+                temperature=0.1,
+                max_tokens=4000,
+                extra_headers=get_user_agent_header(KasalProduct.POWERBI),
+            )
+            return {"content": content, "usage": {}}
         except Exception as e:
             logger.error(f"LLM API call failed: {e}")
             return {"content": None, "usage": {}, "error": str(e)}

@@ -171,35 +171,33 @@ class UCMVGenieConfigGeneratorTool(BaseTool):
 
     def _call_llm(self, prompt: str, auth, model: str) -> str:
         """Call the LLM and return the response text."""
-        import litellm
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+        from src.core.llm_manager import LLMManager
+        from src.utils.telemetry import get_user_agent_header, KasalProduct
 
-        workspace_url = (auth.workspace_url or '').rstrip('/')
-        headers = auth.get_headers()
-        token = headers.get('Authorization', '').replace('Bearer ', '')
+        async def _run():
+            return await LLMManager.completion(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a data analytics expert helping configure a Databricks Genie Space. "
+                            "Genie allows business users to ask natural language questions about data. "
+                            "Your job is to generate clear, business-friendly configuration based on "
+                            "UC Metric View definitions."
+                        )
+                    },
+                    {"role": "user", "content": prompt}
+                ],
+                model=model,
+                temperature=0.3,
+                max_tokens=4000,
+                extra_headers=get_user_agent_header(KasalProduct.POWERBI),
+            )
 
-        if not workspace_url or not token:
-            raise ValueError("No workspace URL or token available for LLM call")
-
-        response = litellm.completion(
-            model=model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a data analytics expert helping configure a Databricks Genie Space. "
-                        "Genie allows business users to ask natural language questions about data. "
-                        "Your job is to generate clear, business-friendly configuration based on "
-                        "UC Metric View definitions."
-                    )
-                },
-                {"role": "user", "content": prompt}
-            ],
-            api_base=f"{workspace_url}/serving-endpoints",
-            api_key=token,
-            max_tokens=4000,
-            temperature=0.3,
-        )
-        return response.choices[0].message.content or ""
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(asyncio.run, _run()).result(timeout=300)
 
     def _build_prompt(self, summaries: list, space_title: str) -> str:
         """Build the LLM prompt from metric view summaries."""

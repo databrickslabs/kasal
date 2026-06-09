@@ -1252,63 +1252,38 @@ OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text, no explanatio
 
         self._emit_llm_trace(event_context="DAX Generation - Prompt", prompt=prompt, model=llm_model, operation="generate_dax")
 
+        from src.core.llm_manager import LLMManager
         from src.utils.telemetry import get_user_agent_header, KasalProduct
-        url = f"{llm_workspace_url.rstrip('/')}/serving-endpoints/{llm_model}/invocations"
-        headers = {"Authorization": f"Bearer {llm_token}", "Content-Type": "application/json", **get_user_agent_header(KasalProduct.POWERBI)}
 
-        # Try system+user first; fall back to single user message if endpoint rejects system role
-        payloads = [
-            {
-                "messages": [
+        try:
+            content = await LLMManager.completion(
+                messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                "max_tokens": 1000,
-                "temperature": 0,
-            },
-            {
-                "messages": [
-                    {"role": "user", "content": f"{system_prompt}\n\nQUESTION: {user_prompt}"},
-                ],
-                "max_tokens": 1000,
-                "temperature": 0,
-            },
-        ]
+                model=llm_model,
+                temperature=0,
+                max_tokens=1000,
+                extra_headers=get_user_agent_header(KasalProduct.POWERBI),
+            )
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            for i, payload in enumerate(payloads):
-                try:
-                    response = await client.post(url, headers=headers, json=payload)
-                    response.raise_for_status()
-                    result = response.json()
-                    content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            logger.info(f"[DaxTool] RAW LLM RESPONSE ({len(content)} chars): {content[:500]}")
 
-                    if i > 0:
-                        logger.info(f"[DaxTool] system role not supported — fell back to single user message")
+            self._emit_llm_trace(
+                event_context="DAX Generation - Response", prompt=prompt,
+                response=content, model=llm_model, operation="generate_dax"
+            )
 
-                    logger.info(f"[DaxTool] RAW LLM RESPONSE ({len(content)} chars): {content[:500]}")
+            dax = self._extract_dax_from_llm_response(content)
+            if not dax:
+                logger.warning(f"[DaxTool] LLM returned no extractable DAX, trying deterministic fallback")
+                return self._generate_deterministic_dax(user_question, model_context, config)
+            dax = self._auto_wrap_with_report_filters(dax, config)
+            return dax
 
-                    self._emit_llm_trace(
-                        event_context="DAX Generation - Response", prompt=prompt,
-                        response=content, model=llm_model, operation="generate_dax"
-                    )
-
-                    dax = self._extract_dax_from_llm_response(content)
-                    if not dax:
-                        logger.warning(f"[DaxTool] LLM returned no extractable DAX, trying deterministic fallback")
-                        return self._generate_deterministic_dax(user_question, model_context, config)
-                    dax = self._auto_wrap_with_report_filters(dax, config)
-                    return dax
-
-                except httpx.HTTPStatusError as e:
-                    if e.response.status_code == 400 and i == 0:
-                        logger.warning(f"[DaxTool] system+user payload got 400, retrying with single user message...")
-                        continue
-                    logger.error(f"LLM DAX generation error: {e}")
-                    return self._generate_deterministic_dax(user_question, model_context, config)
-                except Exception as e:
-                    logger.error(f"LLM DAX generation error: {e}")
-                    return self._generate_deterministic_dax(user_question, model_context, config)
+        except Exception as e:
+            logger.error(f"LLM DAX generation error: {e}")
+            return self._generate_deterministic_dax(user_question, model_context, config)
 
     async def _generate_dax_with_self_correction(
         self, user_question: str, model_context: Dict[str, Any],
@@ -1396,54 +1371,32 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
         logger.info(f"[DaxTool] ═══ SELF-CORRECTION PROMPT (system={len(system_prompt)} chars, user={len(user_prompt)} chars) ═══")
         logger.info(f"[DaxTool] PROMPT START ═══\n{prompt}\n═══ PROMPT END")
 
+        from src.core.llm_manager import LLMManager
         from src.utils.telemetry import get_user_agent_header, KasalProduct
-        url = f"{llm_workspace_url.rstrip('/')}/serving-endpoints/{llm_model}/invocations"
-        headers = {"Authorization": f"Bearer {llm_token}", "Content-Type": "application/json", **get_user_agent_header(KasalProduct.POWERBI)}
 
-        # Try system+user first; fall back to single user message if endpoint rejects system role
-        payloads = [
-            {
-                "messages": [
+        try:
+            content = await LLMManager.completion(
+                messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                "max_tokens": 1000,
-                "temperature": 0,
-            },
-            {
-                "messages": [
-                    {"role": "user", "content": f"{system_prompt}\n\n{user_prompt}"},
-                ],
-                "max_tokens": 1000,
-                "temperature": 0,
-            },
-        ]
+                model=llm_model,
+                temperature=0,
+                max_tokens=1000,
+                extra_headers=get_user_agent_header(KasalProduct.POWERBI),
+            )
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            for i, payload in enumerate(payloads):
-                try:
-                    response = await client.post(url, headers=headers, json=payload)
-                    response.raise_for_status()
-                    result = response.json()
-                    content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-                    if i > 0:
-                        logger.info(f"[DaxTool] self-correction: system role not supported — fell back to single user message")
-                    logger.info(f"[DaxTool] RAW SELF-CORRECTION RESPONSE ({len(content)} chars): {content[:500]}")
-                    dax = self._extract_dax_from_llm_response(content)
-                    if dax:
-                        return dax
-                    # Empty extraction — LLM returned garbage, return None to trigger retry
-                    logger.warning(f"[DaxTool] Self-correction returned no extractable DAX")
-                    return None
-                except httpx.HTTPStatusError as e:
-                    if e.response.status_code == 400 and i == 0:
-                        logger.warning(f"[DaxTool] self-correction: system+user payload got 400, retrying with single user message...")
-                        continue
-                    logger.error(f"LLM self-correction error: {e}")
-                    return None
-                except Exception as e:
-                    logger.error(f"LLM self-correction error: {e}")
-                    return None
+            logger.info(f"[DaxTool] RAW SELF-CORRECTION RESPONSE ({len(content)} chars): {content[:500]}")
+            dax = self._extract_dax_from_llm_response(content)
+            if dax:
+                return dax
+            # Empty extraction — LLM returned garbage, return None to trigger retry
+            logger.warning(f"[DaxTool] Self-correction returned no extractable DAX")
+            return None
+
+        except Exception as e:
+            logger.error(f"LLM self-correction error: {e}")
+            return None
 
     def _patch_dax_with_active_filters(
         self, dax: str, config: Dict[str, Any], model_context: Dict[str, Any]
