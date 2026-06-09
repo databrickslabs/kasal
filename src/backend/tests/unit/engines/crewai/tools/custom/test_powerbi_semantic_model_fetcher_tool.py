@@ -364,7 +364,7 @@ class TestFetcherParseTmdl:
 # ===========================================================================
 
 class TestFetcherCacheInteraction:
-    @patch("src.engines.crewai.tools.tool_session_provider.async_session_factory")
+    @patch("src.db.session.async_session_factory")
     @patch("src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService")
     def test_cache_hit_returns_cached_data(self, mock_svc_cls, mock_factory):
         mock_service = MagicMock()
@@ -389,7 +389,7 @@ class TestFetcherCacheInteraction:
         assert len(result) > 0
 
     @patch(
-        "src.engines.crewai.tools.tool_session_provider.async_session_factory",
+        "src.db.session.async_session_factory",
         side_effect=Exception("DB connection failed"),
     )
     def test_db_error_returns_error_string(self, _mock_factory):
@@ -476,7 +476,7 @@ class TestFetcherPipelineAsync:
         }
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
              patch(
-                 "src.engines.crewai.tools.tool_session_provider.async_session_factory"
+                 "src.db.session.async_session_factory"
              ) as mock_factory, patch(
                  "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService"
              ) as mock_svc_cls:
@@ -516,7 +516,7 @@ class TestFetcherPipelineAsync:
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
              patch(
-                 "src.engines.crewai.tools.tool_session_provider.async_session_factory"
+                 "src.db.session.async_session_factory"
              ) as mock_factory, patch(
                  "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService"
              ) as mock_svc_cls, \
@@ -549,7 +549,7 @@ class TestFetcherPipelineAsync:
         }
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
              patch(
-                 "src.engines.crewai.tools.tool_session_provider.async_session_factory"
+                 "src.db.session.async_session_factory"
              ) as mock_factory, patch(
                  "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService"
              ) as mock_svc_cls:
@@ -2505,7 +2505,7 @@ class TestFetcherPipelineMarkdownOutput:
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
              patch(
-                 "src.engines.crewai.tools.tool_session_provider.async_session_factory"
+                 "src.db.session.async_session_factory"
              ) as mock_factory, patch(
                  "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService"
              ) as mock_svc_cls, \
@@ -2548,7 +2548,7 @@ class TestFetcherPipelineMarkdownOutput:
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
              patch(
-                 "src.engines.crewai.tools.tool_session_provider.async_session_factory"
+                 "src.db.session.async_session_factory"
              ) as mock_factory, patch(
                  "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService"
              ) as mock_svc_cls, \
@@ -2722,7 +2722,7 @@ class TestFetcherPipelineCacheHitBranches:
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
              patch(
-                 "src.engines.crewai.tools.tool_session_provider.async_session_factory"
+                 "src.db.session.async_session_factory"
              ) as mock_factory, patch(
                  "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService"
              ) as mock_svc_cls, \
@@ -2761,7 +2761,7 @@ class TestFetcherPipelineCacheHitBranches:
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
              patch(
-                 "src.engines.crewai.tools.tool_session_provider.async_session_factory"
+                 "src.db.session.async_session_factory"
              ) as mock_factory, patch(
                  "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService"
              ) as mock_svc_cls, \
@@ -2799,7 +2799,7 @@ class TestFetcherPipelineCacheHitBranches:
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
              patch(
-                 "src.engines.crewai.tools.tool_session_provider.async_session_factory"
+                 "src.db.session.async_session_factory"
              ) as mock_factory, patch(
                  "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService"
              ) as mock_svc_cls:
@@ -2837,7 +2837,7 @@ class TestFetcherPipelineCacheHitBranches:
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
              patch(
-                 "src.engines.crewai.tools.tool_session_provider.async_session_factory"
+                 "src.db.session.async_session_factory"
              ) as mock_factory, patch(
                  "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService"
              ) as mock_svc_cls:
@@ -2897,7 +2897,7 @@ class TestFetcherPipelineSlicerGapRecovery:
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
              patch(
-                 "src.engines.crewai.tools.tool_session_provider.async_session_factory"
+                 "src.db.session.async_session_factory"
              ) as mock_factory, patch(
                  "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService"
              ) as mock_svc_cls, \
@@ -2957,7 +2957,7 @@ class TestFetcherPipelineSPFallback:
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
              patch(
-                 "src.engines.crewai.tools.tool_session_provider.async_session_factory"
+                 "src.db.session.async_session_factory"
              ) as mock_factory, patch(
                  "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService"
              ) as mock_svc_cls, \
@@ -2997,7 +2997,7 @@ class TestFetcherPipelineSPFallback:
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
              patch(
-                 "src.engines.crewai.tools.tool_session_provider.async_session_factory"
+                 "src.db.session.async_session_factory"
              ) as mock_factory, patch(
                  "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService"
              ) as mock_svc_cls, \
@@ -3114,47 +3114,40 @@ class TestFetcherEnrichTablesSemantic:
 
     def test_successful_enrichment(self):
         tables = [{"name": "Sales", "columns": ["Amount", "Region"]}]
-        mock_resp = MagicMock()
-        mock_resp.raise_for_status = MagicMock()
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": '{"tables": [{"name": "Sales", "grain": "One row per order", "purpose": "Fact table"}]}'}}]
-        }
 
-        mock_client = MagicMock()
-        mock_client.post = AsyncMock(return_value=mock_resp)
-
-        self._run(
-            self.tool._enrich_tables_semantic(
-                mock_client,
-                "https://example.com/invocations",
-                {"Authorization": "Bearer tok"},
-                tables,
-            )
+        mock_completion = AsyncMock(
+            return_value='{"tables": [{"name": "Sales", "grain": "One row per order", "purpose": "Fact table"}]}'
         )
+
+        with patch("src.core.llm_manager.LLMManager.completion", mock_completion):
+            self._run(
+                self.tool._enrich_tables_semantic(
+                    "databricks-claude-sonnet-4",
+                    tables,
+                )
+            )
 
         assert tables[0].get("grain") == "One row per order"
         assert tables[0].get("purpose") == "Fact table"
 
     def test_llm_exception_skipped(self):
         tables = [{"name": "Sales"}]
-        mock_client = MagicMock()
-        mock_client.post = AsyncMock(side_effect=Exception("LLM error"))
+
+        mock_completion = AsyncMock(side_effect=Exception("LLM error"))
 
         # Should not raise
-        self._run(
-            self.tool._enrich_tables_semantic(
-                mock_client,
-                "https://example.com/invocations",
-                {"Authorization": "Bearer tok"},
-                tables,
+        with patch("src.core.llm_manager.LLMManager.completion", mock_completion):
+            self._run(
+                self.tool._enrich_tables_semantic(
+                    "databricks-claude-sonnet-4",
+                    tables,
+                )
             )
-        )
 
     def test_empty_tables_no_error(self):
-        mock_client = MagicMock()
         self._run(
             self.tool._enrich_tables_semantic(
-                mock_client, "https://example.com/invocations", {}, []
+                "databricks-claude-sonnet-4", []
             )
         )
 
