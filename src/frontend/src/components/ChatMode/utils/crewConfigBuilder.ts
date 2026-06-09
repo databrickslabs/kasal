@@ -81,7 +81,7 @@ export function buildCrewConfig(plan: {
   edges: unknown[];
   process?: string;
   planning?: boolean;
-}, model?: string, inputs?: Record<string, string>): CrewExecutionConfig {
+}, model?: string, inputs?: Record<string, string>, memoryEnabled: boolean = true): CrewExecutionConfig {
   const nodes = plan.nodes as FlowNode[];
   const edges = plan.edges as FlowEdge[];
 
@@ -115,6 +115,12 @@ export function buildCrewConfig(plan: {
           agentConfig[field] = d[field];
         }
       });
+
+      // "No memory" mode (chat toggle) overrides the loaded crew's saved memory:
+      // force every agent without memory so the backend disables crew memory.
+      if (!memoryEnabled) {
+        agentConfig.memory = false;
+      }
 
       agents_yaml[agentName] = agentConfig;
     } else if (isTaskNode(node)) {

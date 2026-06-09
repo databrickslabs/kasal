@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { saveGeneratedCrew, deriveCrewName, normalizeGeneration, usesGenieTool, CrewNameConflictError } from './crews';
+import { saveGeneratedCrew, deriveCrewName, normalizeGeneration, usesGenieTool, CrewNameConflictError, listSavedCrews, listSavedFlows } from './crews';
 import { getClient } from './client';
 
 vi.mock('./client', () => ({
@@ -244,6 +244,81 @@ describe('ChatMode crews api', () => {
         expect(nodes.find((n) => n.type === 'agentNode')!.data.tool_configs).toBeUndefined();
         expect(nodes.find((n) => n.type === 'taskNode')!.data.tool_configs).toBeUndefined();
       });
+    });
+  });
+
+  describe('listSavedCrews', () => {
+    let get: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      get = vi.fn();
+      mockedGetClient.mockReturnValue({ get } as unknown as ReturnType<typeof getClient>);
+    });
+
+    it('GETs /crews and maps valid rows to {id,name}', async () => {
+      get.mockResolvedValue({ data: [{ id: 1, name: 'Alpha' }, { id: 'c2', name: 'Beta' }] });
+      const result = await listSavedCrews();
+      expect(get).toHaveBeenCalledWith('/crews');
+      expect(result).toEqual([
+        { id: '1', name: 'Alpha' },
+        { id: 'c2', name: 'Beta' },
+      ]);
+    });
+
+    it('filters out rows missing id, name, or the row itself', async () => {
+      get.mockResolvedValue({
+        data: [
+          { id: 'c1', name: 'Keep' },
+          { id: 'c2' }, // missing name
+          { name: 'NoId' }, // missing id
+          null, // falsy row
+        ],
+      });
+      const result = await listSavedCrews();
+      expect(result).toEqual([{ id: 'c1', name: 'Keep' }]);
+    });
+
+    it('returns [] for an empty or undefined response data', async () => {
+      get.mockResolvedValue({ data: undefined });
+      expect(await listSavedCrews()).toEqual([]);
+      get.mockResolvedValue({ data: [] });
+      expect(await listSavedCrews()).toEqual([]);
+    });
+  });
+
+  describe('listSavedFlows', () => {
+    let get: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      get = vi.fn();
+      mockedGetClient.mockReturnValue({ get } as unknown as ReturnType<typeof getClient>);
+    });
+
+    it('GETs /flows and maps valid rows to {id,name}', async () => {
+      get.mockResolvedValue({ data: [{ id: 7, name: 'Flow A' }] });
+      const result = await listSavedFlows();
+      expect(get).toHaveBeenCalledWith('/flows');
+      expect(result).toEqual([{ id: '7', name: 'Flow A' }]);
+    });
+
+    it('filters out rows missing id, name, or the row itself', async () => {
+      get.mockResolvedValue({
+        data: [
+          { id: 'f1', name: 'Keep' },
+          { id: 'f2' }, // missing name
+          { name: 'NoId' }, // missing id
+          undefined, // falsy row
+        ],
+      });
+      const result = await listSavedFlows();
+      expect(result).toEqual([{ id: 'f1', name: 'Keep' }]);
+    });
+
+    it('returns [] for an empty or undefined response data', async () => {
+      get.mockResolvedValue({ data: undefined });
+      expect(await listSavedFlows()).toEqual([]);
+      get.mockResolvedValue({ data: [] });
+      expect(await listSavedFlows()).toEqual([]);
     });
   });
 });

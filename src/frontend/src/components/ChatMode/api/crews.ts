@@ -246,3 +246,28 @@ export async function saveGeneratedCrew(
     throw err;
   }
 }
+
+/** A saved catalog entry (crew or flow) for the library rail. */
+export interface CatalogItem {
+  id: string;
+  name: string;
+}
+
+/**
+ * List the workspace's saved crews for the library rail. Group/tenant scoping is
+ * applied by the shared client interceptors, same as the rest of chat mode.
+ */
+export async function listSavedCrews(): Promise<CatalogItem[]> {
+  const res = await getClient().get<Array<{ id?: string; name?: string }>>('/crews');
+  return (res.data || [])
+    .filter((c) => c && c.id && c.name)
+    .map((c) => ({ id: String(c.id), name: String(c.name) }));
+}
+
+/** List the workspace's saved flows for the library rail. */
+export async function listSavedFlows(): Promise<CatalogItem[]> {
+  const res = await getClient().get<Array<{ id?: string; name?: string }>>('/flows');
+  return (res.data || [])
+    .filter((f) => f && f.id && f.name)
+    .map((f) => ({ id: String(f.id), name: String(f.name) }));
+}

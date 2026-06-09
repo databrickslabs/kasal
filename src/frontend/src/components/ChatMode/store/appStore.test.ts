@@ -5,6 +5,8 @@ const updateClient = vi.fn();
 const fetchEnabledModels = vi.fn();
 const fetchEnabledTools = vi.fn();
 const fetchWorkspaces = vi.fn();
+const listSavedCrews = vi.fn();
+const listSavedFlows = vi.fn();
 
 vi.mock('../api/client', () => ({
   updateClient: (...args: unknown[]) => updateClient(...args),
@@ -17,6 +19,10 @@ vi.mock('../api/tools', () => ({
 }));
 vi.mock('../api/workspaces', () => ({
   fetchWorkspaces: (...args: unknown[]) => fetchWorkspaces(...args),
+}));
+vi.mock('../api/crews', () => ({
+  listSavedCrews: (...args: unknown[]) => listSavedCrews(...args),
+  listSavedFlows: (...args: unknown[]) => listSavedFlows(...args),
 }));
 
 const CONFIG_STORAGE_KEY = 'kasal-chat-config';
@@ -386,6 +392,46 @@ describe('appStore', () => {
       await store.getState().loadWorkspaces();
 
       expect(store.getState().workspaces).toEqual([]);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // loadCatalog branches
+  // ---------------------------------------------------------------------------
+  describe('loadCatalog', () => {
+    it('sets savedCrews and savedFlows from the api modules', async () => {
+      const store = await freshStore();
+      const crews = [{ id: 'c1', name: 'Crew One' }];
+      const flows = [{ id: 'f1', name: 'Flow One' }];
+      listSavedCrews.mockResolvedValue(crews);
+      listSavedFlows.mockResolvedValue(flows);
+
+      await store.getState().loadCatalog();
+
+      expect(store.getState().savedCrews).toBe(crews);
+      expect(store.getState().savedFlows).toBe(flows);
+    });
+
+    it('falls back to [] for crews when listSavedCrews rejects', async () => {
+      const store = await freshStore();
+      listSavedCrews.mockRejectedValue(new Error('no endpoint'));
+      listSavedFlows.mockResolvedValue([{ id: 'f1', name: 'Flow One' }]);
+
+      await expect(store.getState().loadCatalog()).resolves.toBeUndefined();
+
+      expect(store.getState().savedCrews).toEqual([]);
+      expect(store.getState().savedFlows).toEqual([{ id: 'f1', name: 'Flow One' }]);
+    });
+
+    it('falls back to [] for flows when listSavedFlows rejects', async () => {
+      const store = await freshStore();
+      listSavedCrews.mockResolvedValue([{ id: 'c1', name: 'Crew One' }]);
+      listSavedFlows.mockRejectedValue(new Error('no endpoint'));
+
+      await expect(store.getState().loadCatalog()).resolves.toBeUndefined();
+
+      expect(store.getState().savedCrews).toEqual([{ id: 'c1', name: 'Crew One' }]);
+      expect(store.getState().savedFlows).toEqual([]);
     });
   });
 

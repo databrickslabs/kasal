@@ -358,6 +358,52 @@ describe('crewConfigBuilder', () => {
       expect(config.agents_yaml).toEqual({});
       expect(config.tasks_yaml).toEqual({});
     });
+
+    it('forces every agent to memory:false when memoryEnabled is false ("No memory")', () => {
+      const config = buildCrewConfig(
+        {
+          nodes: [
+            { id: 'a1', type: 'agentNode', data: { role: 'r', goal: 'g', backstory: 'b', tools: [] } },
+            { id: 'a2', type: 'agentNode', data: { role: 'r2', goal: 'g2', backstory: 'b2', tools: [], memory: true } },
+          ],
+          edges: [],
+        },
+        undefined,
+        undefined,
+        false,
+      );
+      expect(config.agents_yaml.agent_a1.memory).toBe(false);
+      // Overrides the node's own saved memory value.
+      expect(config.agents_yaml.agent_a2.memory).toBe(false);
+    });
+
+    it('does NOT force memory when memoryEnabled is true (keeps the node value / absent)', () => {
+      const config = buildCrewConfig(
+        {
+          nodes: [
+            { id: 'a1', type: 'agentNode', data: { role: 'r', goal: 'g', backstory: 'b', tools: [] } },
+            { id: 'a2', type: 'agentNode', data: { role: 'r2', goal: 'g2', backstory: 'b2', tools: [], memory: true } },
+          ],
+          edges: [],
+        },
+        undefined,
+        undefined,
+        true,
+      );
+      // memory absent on a1 (not forced false), and a2 keeps its own value.
+      expect(config.agents_yaml.agent_a1).not.toHaveProperty('memory');
+      expect(config.agents_yaml.agent_a2.memory).toBe(true);
+    });
+
+    it('does NOT force memory when memoryEnabled is omitted (defaults to true)', () => {
+      const config = buildCrewConfig({
+        nodes: [
+          { id: 'a1', type: 'agentNode', data: { role: 'r', goal: 'g', backstory: 'b', tools: [] } },
+        ],
+        edges: [],
+      });
+      expect(config.agents_yaml.agent_a1).not.toHaveProperty('memory');
+    });
   });
 
   describe('buildCrewConfigFromGenerated', () => {

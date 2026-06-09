@@ -292,6 +292,9 @@ interface ChatContainerProps {
   /** "No memory" toggle — when false, crews run without memory. */
   memoryEnabled?: boolean;
   onMemoryEnabledChange?: (value: boolean) => void;
+  /** A crew/flow loaded from the catalog that the submit button will run. */
+  pendingRunLabel?: string;
+  onRunPending?: () => void;
 }
 
 const ChatContainer: React.FC<ChatContainerProps> = ({
@@ -314,6 +317,8 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   onWorkspaceMemoryChange,
   memoryEnabled,
   onMemoryEnabledChange,
+  pendingRunLabel,
+  onRunPending,
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -488,6 +493,8 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
           onWorkspaceMemoryChange={onWorkspaceMemoryChange}
           memoryEnabled={memoryEnabled}
           onMemoryEnabledChange={onMemoryEnabledChange}
+          pendingRunLabel={pendingRunLabel}
+          onRunPending={onRunPending}
         />
       </div>
     </div>
