@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { ExecutionStatus } from './types/execution';
 import { createExecution, stopExecution, listExecutions, getExecutionStatus } from './api/executions';
-import { saveGeneratedCrew, usesGenieTool } from './api/crews';
+import { saveGeneratedCrew, usesGenieTool, CrewNameConflictError } from './api/crews';
 import { useSessionStore } from './store/sessionStore';
 import { useExecutionStore } from './store/executionStore';
 import { readActiveExecution, clearActiveExecution } from './store/activeExecutionMarker';
@@ -1028,7 +1028,14 @@ const ChatWorkspace: React.FC = () => {
   // Used by the bookmark on each crew card (it owns its own saved-state UI), so
   // this just performs the save and resolves to the created crew.
   const handleSaveCrew = useCallback(
-    (data: GenerationCompleteData) => saveGeneratedCrew(data),
+    (data: GenerationCompleteData, opts?: { overwrite?: boolean; spaceId?: string }) =>
+      // Capture the chat's current memory choice so the saved crew matches what
+      // the user sees here (no-memory mode → saved crew has memory disabled).
+      // opts carries overwrite + the picked Genie space from the crew card.
+      saveGeneratedCrew(data, undefined, {
+        ...opts,
+        memoryEnabled: useExecutionStore.getState().memoryEnabled,
+      }),
     [],
   );
 
@@ -1194,16 +1201,31 @@ const ChatWorkspace: React.FC = () => {
           return true;
         }
         addMessage('user', message);
-        const name = message.trim().slice(5).trim();
+        // Allow "/save overwrite [name]" to replace an existing same-named crew.
+        let arg = message.trim().slice(5).trim();
+        let overwrite = false;
+        if (arg.toLowerCase() === 'overwrite' || arg.toLowerCase().startsWith('overwrite ')) {
+          overwrite = true;
+          arg = arg.slice('overwrite'.length).trim();
+        }
+        const name = arg;
+        const memoryEnabled = useExecutionStore.getState().memoryEnabled;
         try {
-          const saved = await saveGeneratedCrew(data, name || undefined);
+          const saved = await saveGeneratedCrew(data, name || undefined, { overwrite, memoryEnabled });
           addMessage(
             'assistant',
-            `✓ Saved **${saved.name}** to the catalog. Load it later with \`/list crews\`.`,
+            `✓ ${overwrite ? 'Updated' : 'Saved'} **${saved.name}** ${overwrite ? 'in' : 'to'} the catalog. Load it later with \`/list crews\`.`,
           );
         } catch (error) {
-          const errMsg = error instanceof Error ? error.message : 'Failed to save crew';
-          addMessage('assistant', `Failed to save crew: ${errMsg}`);
+          if (error instanceof CrewNameConflictError) {
+            addMessage(
+              'assistant',
+              `**${error.crewName}** is already in the catalog. Type \`/save overwrite\` to replace it, or \`/save <a different name>\`.`,
+            );
+          } else {
+            const errMsg = error instanceof Error ? error.message : 'Failed to save crew';
+            addMessage('assistant', `Failed to save crew: ${errMsg}`);
+          }
         }
         return true;
       }
@@ -1223,6 +1245,8 @@ const ChatWorkspace: React.FC = () => {
 
       useExecutionStore.getState().setIsLoading(true);
       try {
+        // Send the picker selection; when none is set the backend falls back to a
+        // working default (gpt-5.3-codex), so we don't force a model here.
         await dispatcher.sendMessage(
           message,
           selectedModel || undefined,

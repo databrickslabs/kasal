@@ -685,7 +685,9 @@ class LLMManager:
                 if auth:
                     # Pass authentication directly to CrewAI LLM (thread-safe)
                     api_key = auth.token
-                    api_base = DatabricksURLUtils.construct_serving_endpoints_url(auth.workspace_url)
+                    # Routes to /serving-endpoints or /ai-gateway/mlflow/v1 based on the
+                    # AI Gateway toggle; LiteLLM appends /chat/completions either way.
+                    api_base = DatabricksURLUtils.construct_llm_base_url(auth.workspace_url)
                     logger.info(f"Using Databricks {auth.auth_method} authentication for CrewAI LLM")
                 else:
                     logger.warning("No Databricks authentication available for CrewAI LLM")
@@ -759,11 +761,18 @@ class LLMManager:
             #  - diagnostic logging for tool-calling debugging
             if "gpt-5-3-codex" in model_name_value.lower():
                 from src.core.llm_handlers.databricks_codex_handler import DatabricksCodexCompletion
-                logger.info(f"Using DatabricksCodexCompletion for Responses API model: {model_name_value}")
+                # The Responses API is served under a DIFFERENT base path than chat:
+                # /ai-gateway/openai/v1 (gateway) or /serving-endpoints (otherwise).
+                # `api_base` here is the CHAT base (/ai-gateway/mlflow/v1 when the
+                # gateway is on), which has no /responses route — using it yields a
+                # 404 "Supervisor API is not enabled". Build the Responses base instead.
+                responses_workspace = DatabricksURLUtils.extract_workspace_from_endpoint(api_base)
+                responses_base_url = DatabricksURLUtils.construct_responses_base_url(responses_workspace)
+                logger.info(f"Using DatabricksCodexCompletion for Responses API model: {model_name_value} (base_url={responses_base_url})")
                 return DatabricksCodexCompletion(
                     model=model_name_value,
                     api_key=api_key,
-                    base_url=api_base,
+                    base_url=responses_base_url,
                     timeout=300,
                     max_tokens=llm_params.get("max_completion_tokens") or llm_params.get("max_tokens"),
                 )
@@ -918,13 +927,11 @@ class LLMManager:
                     "Content-Type": "application/json",
                 }
 
-            api_base = DatabricksURLUtils.construct_serving_endpoints_url(auth.workspace_url)
-            workspace_url = DatabricksURLUtils.extract_workspace_from_endpoint(api_base)
-            model_for_url = (
-                embedding_model if embedding_model.startswith('databricks/')
-                else f"databricks/{embedding_model}"
+            # AI Gateway on  -> /ai-gateway/mlflow/v1/embeddings (model in body)
+            # AI Gateway off -> /serving-endpoints/<model>/invocations (model in path)
+            endpoint_url, body_model = DatabricksURLUtils.construct_embeddings_url(
+                auth.workspace_url, embedding_model
             )
-            endpoint_url = DatabricksURLUtils.construct_model_invocation_url(workspace_url, model_for_url)
 
             import aiohttp
             timeout = aiohttp.ClientTimeout(
@@ -935,6 +942,8 @@ class LLMManager:
                 for start in range(0, len(texts), batch_size):
                     batch = texts[start:start + batch_size]
                     payload = {"input": batch}
+                    if body_model:
+                        payload["model"] = body_model
                     try:
                         async with session.post(
                             endpoint_url, headers=request_headers, json=payload, timeout=timeout
@@ -1038,7 +1047,7 @@ class LLMManager:
                             # For PAT, use API key approach
                             api_key = auth.token
                             headers = None
-                        api_base = DatabricksURLUtils.construct_serving_endpoints_url(auth.workspace_url)
+                        api_base = DatabricksURLUtils.construct_llm_base_url(auth.workspace_url)
                     else:
                         embedding_logger.warning("No Databricks authentication available for embeddings")
                         return None
@@ -1061,10 +1070,11 @@ class LLMManager:
                 import aiohttp
                 
                 try:
-                    # Construct the direct API endpoint using centralized utility
-                    # Extract workspace URL from api_base (which contains /serving-endpoints)
+                    # Construct the direct API endpoint using centralized utility.
+                    # AI Gateway on  -> /ai-gateway/mlflow/v1/embeddings (model in body)
+                    # AI Gateway off -> /serving-endpoints/<model>/invocations (model in path)
                     workspace_url = DatabricksURLUtils.extract_workspace_from_endpoint(api_base)
-                    endpoint_url = DatabricksURLUtils.construct_model_invocation_url(workspace_url, embedding_model)
+                    endpoint_url, body_model = DatabricksURLUtils.construct_embeddings_url(workspace_url, embedding_model)
 
                     # Use OAuth headers if available, otherwise fall back to API key
                     if headers:
@@ -1080,6 +1090,8 @@ class LLMManager:
                     payload = {
                         "input": [text] if isinstance(text, str) else text
                     }
+                    if body_model:
+                        payload["model"] = body_model
 
                     timeout = aiohttp.ClientTimeout(total=float(os.getenv("EMBEDDING_HTTP_TIMEOUT_SECONDS", "30")))
                     async with aiohttp.ClientSession(timeout=timeout) as session:

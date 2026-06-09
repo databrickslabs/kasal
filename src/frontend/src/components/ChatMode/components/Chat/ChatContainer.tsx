@@ -276,7 +276,7 @@ interface ChatContainerProps {
   onExecuteCrew?: (plan: PlanData) => void;
   onExecuteFlow?: (flow: FlowData) => void;
   onExecuteGenerated?: (data: GenerationCompleteData, spaceId?: string) => void;
-  onSaveCrew?: (data: GenerationCompleteData) => Promise<{ id: string; name: string }>;
+  onSaveCrew?: (data: GenerationCompleteData, opts?: { overwrite?: boolean; spaceId?: string }) => Promise<{ id: string; name: string }>;
   onStopExecution?: () => void;
   isLoading: boolean;
   isExecuting?: boolean;

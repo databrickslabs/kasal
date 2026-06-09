@@ -40,7 +40,42 @@ class DatabricksService:
             from src.services.databricks_secrets_service import DatabricksSecretsService
             self._secrets_service = DatabricksSecretsService(self.session)
         return self._secrets_service
-    
+
+    @staticmethod
+    def _apply_ai_gateway_env(enabled: bool) -> None:
+        """
+        Mirror the DatabricksConfig.ai_gateway_enabled flag into the process
+        environment so DatabricksURLUtils routes LLM/embedding traffic correctly,
+        and invalidate the cached Databricks auth config so the change takes
+        effect without a restart.
+
+        Args:
+            enabled: Whether the AI Gateway should be used.
+        """
+        from src.utils.databricks_url_utils import DatabricksURLUtils
+        os.environ[DatabricksURLUtils.AI_GATEWAY_ENV_VAR] = "true" if enabled else "false"
+        logger.info(f"AI Gateway routing {'enabled' if enabled else 'disabled'} "
+                    f"(env {DatabricksURLUtils.AI_GATEWAY_ENV_VAR}={os.environ[DatabricksURLUtils.AI_GATEWAY_ENV_VAR]})")
+        # Invalidate cached auth config so workspace host + gateway flag reload.
+        try:
+            from src.utils.databricks_auth import reset_auth_config_cache
+            reset_auth_config_cache()
+        except Exception as e:
+            logger.debug(f"Could not reset Databricks auth config cache: {e}")
+
+    async def set_ai_gateway_enabled(self, enabled: bool) -> bool:
+        """Persist just the AI Gateway routing flag on the active config.
+
+        Immediate toggle (no full config payload needed), mirroring the MLflow
+        status endpoint. Also propagates the flag to the runtime so subsequent
+        LLM / embedding calls route correctly without a restart. Returns False
+        when there is no active Databricks config to attach the flag to.
+        """
+        ok = await self.repository.set_ai_gateway_enabled(enabled, group_id=self.group_id)
+        if ok:
+            self._apply_ai_gateway_env(enabled)
+        return ok
+
     async def set_databricks_config(self, config_in: DatabricksConfigCreate, created_by_email: Optional[str] = None) -> Dict:
         """
         Set Databricks configuration.
@@ -61,6 +96,7 @@ class DatabricksService:
                 "schema": config_in.db_schema,
                 "is_active": True,
                 "is_enabled": config_in.enabled,
+                "ai_gateway_enabled": getattr(config_in, "ai_gateway_enabled", False),
                 "mlflow_enabled": getattr(config_in, "mlflow_enabled", False),
                 "mlflow_experiment_name": getattr(config_in, "mlflow_experiment_name", "kasal-crew-execution-traces"),
                 "evaluation_enabled": getattr(config_in, "evaluation_enabled", False),
@@ -81,7 +117,12 @@ class DatabricksService:
             
             # Create the new configuration through repository
             new_config = await self.repository.create_config(config_data)
-            
+
+            # Propagate the AI Gateway toggle to the runtime so subsequent LLM /
+            # embedding calls route correctly without a restart, and invalidate the
+            # cached Databricks auth config so the new flag/workspace reload.
+            self._apply_ai_gateway_env(config_data.get("ai_gateway_enabled", False))
+
             # Return the response
             return {
                 "status": "success",
@@ -92,6 +133,7 @@ class DatabricksService:
                     catalog=new_config.catalog,
                     schema=new_config.schema,
                     enabled=new_config.is_enabled,
+                    ai_gateway_enabled=new_config.ai_gateway_enabled if hasattr(new_config, 'ai_gateway_enabled') else False,
                     mlflow_enabled=new_config.mlflow_enabled if hasattr(new_config, 'mlflow_enabled') else False,
                     mlflow_experiment_name=new_config.mlflow_experiment_name if hasattr(new_config, 'mlflow_experiment_name') else "kasal-crew-execution-traces",
                     evaluation_enabled=new_config.evaluation_enabled if hasattr(new_config, 'evaluation_enabled') else False,
@@ -133,6 +175,8 @@ class DatabricksService:
                 catalog=config.catalog,
                 schema=config.schema,
                 enabled=config.is_enabled,
+                # AI Gateway configuration
+                ai_gateway_enabled=config.ai_gateway_enabled if hasattr(config, 'ai_gateway_enabled') else False,
                 # MLflow configuration
                 mlflow_enabled=config.mlflow_enabled if hasattr(config, 'mlflow_enabled') else False,
                 mlflow_experiment_name=config.mlflow_experiment_name if hasattr(config, 'mlflow_experiment_name') else "kasal-crew-execution-traces",

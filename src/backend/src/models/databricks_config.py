@@ -18,6 +18,10 @@ class DatabricksConfig(Base):
     is_enabled = Column(Boolean, default=True)  # To enable/disable Databricks integration
     encrypted_personal_access_token = Column(String, nullable=True)  # Encrypted personal access token
 
+    # AI Gateway: route LLM/embedding traffic through /ai-gateway/mlflow/v1
+    # (OpenAI-compatible, model in body) instead of /serving-endpoints invocations.
+    ai_gateway_enabled = Column(Boolean, default=False)
+
     # MLflow configuration
     mlflow_enabled = Column(Boolean, default=False)  # Enable/disable MLflow tracking for this workspace
     mlflow_experiment_name = Column(String, nullable=True, default="kasal-crew-execution-traces")  # MLflow experiment name

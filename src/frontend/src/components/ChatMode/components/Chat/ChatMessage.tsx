@@ -11,7 +11,7 @@ import {
 import { PlanData, FlowData } from '../../hooks/useDispatcher';
 import { GenerationCompleteData } from '../../hooks/useGenerationStream';
 import { useAppStore } from '../../store/appStore';
-import { isGenieToolRef } from '../../api/crews';
+import { isGenieToolRef, CrewNameConflictError } from '../../api/crews';
 import { TraceDetail, findInlineTraceRenderer } from './traces';
 import MessageContent from './MessageContent';
 import AgentCard from '../Cards/AgentCard';
@@ -30,7 +30,7 @@ interface ChatMessageProps {
   onExecuteFlow?: (flow: FlowData) => void;
   onExecuteGenerated?: (data: GenerationCompleteData, spaceId?: string) => void;
   /** Save this generated crew's plan to the catalog. Resolves to the saved name. */
-  onSaveCrew?: (data: GenerationCompleteData) => Promise<{ id: string; name: string }>;
+  onSaveCrew?: (data: GenerationCompleteData, opts?: { overwrite?: boolean; spaceId?: string }) => Promise<{ id: string; name: string }>;
 }
 
 /** Resolve a tool identifier (ID or name) to its display name */
@@ -337,7 +337,7 @@ export const GenerationCompleteCard: React.FC<{
   data: GenerationCompleteData;
   messageId: string;
   onExecute?: (data: GenerationCompleteData, spaceId?: string) => void;
-  onSaveCrew?: (data: GenerationCompleteData) => Promise<{ id: string; name: string }>;
+  onSaveCrew?: (data: GenerationCompleteData, opts?: { overwrite?: boolean; spaceId?: string }) => Promise<{ id: string; name: string }>;
 }> = ({ data, messageId, onExecute, onSaveCrew }) => {
   const { agents, tasks } = normalizeGenerationData(data);
   const toolNameMap = useAppStore((s) => s.toolNameMap);
@@ -350,22 +350,27 @@ export const GenerationCompleteCard: React.FC<{
     const prev = genieSelectionStore.get(messageId) ?? { spaceId: selectedSpaceId, ran };
     genieSelectionStore.set(messageId, { ...prev, ...next });
   };
-  // idle → saving → saved (terminal); error returns to idle with a hint.
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  // idle → saving → saved (terminal). 'exists' offers Overwrite; error → hint.
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'exists' | 'error'>('idle');
   const [savedName, setSavedName] = useState('');
 
   const canSave = Boolean(onSaveCrew) && (agents.length > 0 || tasks.length > 0);
 
-  const handleSave = async () => {
+  const handleSave = async (overwrite = false) => {
     // The button only renders when canSave (onSaveCrew present) and is disabled
     // while saving/once saved, so re-entry is prevented at the DOM level.
     setSaveState('saving');
     try {
-      const result = await onSaveCrew!(data);
+      // Carry the picked Genie space so the saved crew runs against it.
+      const result = await onSaveCrew!(data, {
+        ...(overwrite ? { overwrite: true } : {}),
+        ...(selectedSpaceId ? { spaceId: selectedSpaceId } : {}),
+      });
       setSavedName(result.name);
       setSaveState('saved');
-    } catch {
-      setSaveState('error');
+    } catch (err) {
+      // Name already taken → offer to overwrite instead of a dead-end error.
+      setSaveState(err instanceof CrewNameConflictError ? 'exists' : 'error');
     }
   };
 
@@ -395,6 +400,19 @@ export const GenerationCompleteCard: React.FC<{
                 Saved “{savedName}” to catalog
               </span>
             )}
+            {saveState === 'exists' && (
+              <span className="text-[10px] flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
+                Already in catalog
+                <button
+                  type="button"
+                  onClick={() => handleSave(true)}
+                  className="font-medium transition-opacity hover:opacity-70"
+                  style={{ color: 'var(--accent)' }}
+                >
+                  Overwrite
+                </button>
+              </span>
+            )}
             {saveState === 'error' && (
               <span className="text-[10px]" style={{ color: 'var(--bad, #fb7185)' }}>
                 Couldn’t save — try again
@@ -402,7 +420,7 @@ export const GenerationCompleteCard: React.FC<{
             )}
             <button
               type="button"
-              onClick={handleSave}
+              onClick={() => handleSave()}
               disabled={saveState === 'saving' || saveState === 'saved'}
               title={saveState === 'saved' ? 'Saved to catalog' : 'Save this crew to the catalog'}
               aria-label={saveState === 'saved' ? 'Saved to catalog' : 'Save crew to catalog'}

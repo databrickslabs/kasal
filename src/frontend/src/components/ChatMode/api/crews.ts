@@ -21,6 +21,11 @@ interface GenAgent {
   goal?: string;
   backstory?: string;
   tools?: string[];
+  llm?: string;
+  memory?: boolean;
+  // Generated agents are full DB records; keep any extra config (advanced
+  // settings) so the saved crew round-trips faithfully.
+  [key: string]: unknown;
 }
 
 interface GenTask {
@@ -35,6 +40,18 @@ interface GenTask {
 export interface SavedCrew {
   id: string;
   name: string;
+}
+
+/**
+ * Thrown when a crew with the same name already exists in the catalog and the
+ * caller didn't ask to overwrite. Lets the UI offer an "Overwrite" choice
+ * instead of surfacing a raw 409.
+ */
+export class CrewNameConflictError extends Error {
+  constructor(public crewName: string) {
+    super(`A crew named "${crewName}" already exists.`);
+    this.name = 'CrewNameConflictError';
+  }
 }
 
 /**
@@ -126,7 +143,13 @@ export function deriveCrewName(
 export async function saveGeneratedCrew(
   data: GenerationCompleteData | Record<string, unknown>,
   name?: string,
+  opts?: { overwrite?: boolean; memoryEnabled?: boolean; spaceId?: string },
 ): Promise<SavedCrew> {
+  // When a Genie space was picked in chat, persist it as a GenieTool override on
+  // any agent/task that uses GenieTool so the saved crew runs against that space.
+  const genieToolConfig = opts?.spaceId ? { GenieTool: { spaceId: opts.spaceId } } : undefined;
+  const usesGenie = (tools: unknown): boolean =>
+    Array.isArray(tools) && tools.some((t) => isGenieToolRef(t));
   const { agents, tasks } = normalizeGeneration(data);
   const agent_ids = agents.map((a) => a.id).filter((id): id is string => Boolean(id));
   const task_ids = tasks.map((t) => t.id).filter((id): id is string => Boolean(id));
@@ -144,12 +167,21 @@ export async function saveGeneratedCrew(
       type: 'agentNode',
       position: { x: 80, y: 100 + i * 220 },
       data: {
+        // Carry the full agent record (llm + advanced behaviour settings) so the
+        // saved crew round-trips faithfully instead of falling back to defaults.
+        ...a,
         label: a.name || a.role || `Agent ${i + 1}`,
         agentId: String(a.id),
+        id: String(a.id),
+        type: 'agent',
         role: a.role || '',
         goal: a.goal || '',
         backstory: a.backstory || '',
         tools: Array.isArray(a.tools) ? a.tools : [],
+        // Honour the chat's memory choice when provided, else keep the agent's own.
+        ...(opts?.memoryEnabled !== undefined ? { memory: opts.memoryEnabled } : {}),
+        // Persist the picked Genie space on Genie-using agents.
+        ...(genieToolConfig && usesGenie(a.tools) ? { tool_configs: genieToolConfig } : {}),
       },
     });
   });
@@ -165,6 +197,8 @@ export async function saveGeneratedCrew(
         description: t.description || '',
         expected_output: t.expected_output || '',
         tools: Array.isArray(t.tools) ? t.tools : [],
+        // Persist the picked Genie space on Genie-using tasks.
+        ...(genieToolConfig && usesGenie(t.tools) ? { tool_configs: genieToolConfig } : {}),
       },
     });
 
@@ -193,8 +227,22 @@ export async function saveGeneratedCrew(
     task_ids,
     nodes,
     edges,
+    // Crew-level memory mirrors the chat's memory choice when provided.
+    ...(opts?.memoryEnabled !== undefined ? { memory: opts.memoryEnabled } : {}),
   };
 
-  const res = await getClient().post<{ id: string; name: string }>('/crews', payload);
-  return { id: res.data.id, name: res.data.name };
+  try {
+    const res = await getClient().post<{ id: string; name: string }>(
+      opts?.overwrite ? '/crews?overwrite=true' : '/crews',
+      payload,
+    );
+    return { id: res.data.id, name: res.data.name };
+  } catch (err) {
+    // Surface a name clash as a typed error so the UI can offer "Overwrite".
+    const status = (err as { response?: { status?: number } })?.response?.status;
+    if (status === 409) {
+      throw new CrewNameConflictError(payload.name);
+    }
+    throw err;
+  }
 }

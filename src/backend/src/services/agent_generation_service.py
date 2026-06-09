@@ -158,7 +158,7 @@ class AgentGenerationService:
             Exception: For any other errors during generation
         """
         # Default values
-        model = model or os.getenv("AGENT_MODEL", "databricks-llama-4-maverick")
+        model = model or os.getenv("AGENT_MODEL", "databricks-gpt-5-3-codex")
         tools = tools or []
 
         logger.info(f"Generating agent with model: {model}")

@@ -127,7 +127,8 @@ async def _call_llm(
         return {'content': None, 'error': 'LLM not configured'}
 
     base_url = workspace_url.rstrip('/')
-    url = f"{base_url}/serving-endpoints/{model}/invocations"
+    from src.utils.databricks_url_utils import DatabricksURLUtils
+    url, _gw_model = DatabricksURLUtils.construct_chat_completions_url(base_url, model)
 
     from src.utils.telemetry import get_user_agent_header, KasalProduct
     headers = {
@@ -144,6 +145,8 @@ async def _call_llm(
         'max_tokens': 2000,
         'temperature': 0.1,
     }
+    if _gw_model:
+        payload["model"] = _gw_model
 
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:

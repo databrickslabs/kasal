@@ -448,6 +448,94 @@ class TestCrewServiceCreateWithGroup:
 
                 mock_logger.error.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_create_with_group_no_existing_creates(self, crew_service, mock_repository,
+                                                         sample_crew_create, sample_group_context):
+        """When no crew with the same name exists, the create path runs and sets created_by_email."""
+        mock_repository.find_by_name_and_group.return_value = None
+        created_crew = MockCrew(name=sample_crew_create.name, group_id="group-123")
+        mock_repository.create.return_value = created_crew
+
+        result = await crew_service.create_with_group(
+            sample_crew_create, sample_group_context, overwrite=True
+        )
+
+        assert result == created_crew
+        mock_repository.create.assert_called_once()
+        mock_repository.update.assert_not_called()
+        call_args = mock_repository.create.call_args[0][0]
+        assert call_args["group_id"] == "group-123"
+        assert call_args["created_by_email"] == "test@example.com"
+
+    @pytest.mark.asyncio
+    async def test_create_with_group_existing_no_overwrite_conflict(self, crew_service, mock_repository,
+                                                                    sample_crew_create, sample_group_context):
+        """Existing crew + overwrite=False raises ConflictError and never writes."""
+        existing_crew = MockCrew(name=sample_crew_create.name, group_id="group-123")
+        mock_repository.find_by_name_and_group.return_value = existing_crew
+
+        with pytest.raises(ConflictError) as exc_info:
+            await crew_service.create_with_group(
+                sample_crew_create, sample_group_context, overwrite=False
+            )
+
+        assert exc_info.value.status_code == 409
+        assert "already exists" in str(exc_info.value.detail)
+        mock_repository.create.assert_not_called()
+        mock_repository.update.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_create_with_group_existing_overwrite_updates(self, crew_service, mock_repository,
+                                                                sample_crew_create, sample_group_context):
+        """Existing crew + overwrite=True updates the existing crew, preserving its id.
+
+        The update path must NOT call create and must NOT set created_by_email.
+        """
+        existing_id = uuid4()
+        existing_crew = MockCrew(
+            id=existing_id, name=sample_crew_create.name, group_id="group-123",
+            created_by_email="original@example.com"
+        )
+        updated_crew = MockCrew(
+            id=existing_id, name=sample_crew_create.name, group_id="group-123",
+            created_by_email="original@example.com"
+        )
+        mock_repository.find_by_name_and_group.return_value = existing_crew
+        mock_repository.update.return_value = updated_crew
+
+        result = await crew_service.create_with_group(
+            sample_crew_create, sample_group_context, overwrite=True
+        )
+
+        assert result == updated_crew
+        mock_repository.update.assert_called_once()
+        # Update is called with the existing crew's id (preserved)
+        update_args = mock_repository.update.call_args[0]
+        assert update_args[0] == existing_id
+        # created_by_email must NOT be set on overwrite
+        assert "created_by_email" not in update_args[1]
+        assert update_args[1]["group_id"] == "group-123"
+        mock_repository.create.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_create_with_group_overwrite_update_returns_none_falls_back(self, crew_service, mock_repository,
+                                                                              sample_crew_create, sample_group_context):
+        """overwrite=True where repository.update returns None falls back to the existing crew."""
+        existing_id = uuid4()
+        existing_crew = MockCrew(
+            id=existing_id, name=sample_crew_create.name, group_id="group-123"
+        )
+        mock_repository.find_by_name_and_group.return_value = existing_crew
+        mock_repository.update.return_value = None
+
+        result = await crew_service.create_with_group(
+            sample_crew_create, sample_group_context, overwrite=True
+        )
+
+        assert result == existing_crew
+        mock_repository.update.assert_called_once()
+        mock_repository.create.assert_not_called()
+
 
 class TestCrewServiceFindByGroup:
     """Test cases for find_by_group method."""

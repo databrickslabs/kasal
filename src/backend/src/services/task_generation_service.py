@@ -25,8 +25,9 @@ from src.utils.user_context import GroupContext
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Default model for task generation
-DEFAULT_TASK_MODEL = os.getenv("DEFAULT_TASK_MODEL", "databricks-llama-4-maverick")
+# Default model for task generation (gpt-5.3-codex fallback; llama-4-maverick can
+# hit the Supervisor API beta gate on some workspaces)
+DEFAULT_TASK_MODEL = os.getenv("DEFAULT_TASK_MODEL", "databricks-gpt-5-3-codex")
 
 class TaskGenerationService:
     """Service for task generation operations."""

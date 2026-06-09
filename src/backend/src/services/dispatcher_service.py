@@ -42,9 +42,11 @@ from src.utils.user_context import GroupContext
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Default model for intent detection
+# Default model for intent detection (fallback when no model is selected in the
+# chat; gpt-5.3-codex is the safe default — llama-4-maverick can hit the
+# Supervisor API beta gate on some workspaces).
 DEFAULT_DISPATCHER_MODEL = os.getenv(
-    "DEFAULT_DISPATCHER_MODEL", "databricks-llama-4-maverick"
+    "DEFAULT_DISPATCHER_MODEL", "databricks-gpt-5-3-codex"
 )
 
 
