@@ -309,13 +309,15 @@ class TestUcmvSummaries:
 
 class TestLLMIntegration:
     def test_llm_called_for_mapping(self):
-        """Mock litellm, verify it's called with visual + UCMV summaries."""
+        """Mock LLMManager, verify it's called with visual + UCMV summaries."""
+        from unittest.mock import AsyncMock
         tool = PBIVisualUCMVMapperTool()
         auth = _mock_auth()
-        llm_resp = _mock_litellm_response()
+
+        mock_completion = AsyncMock(return_value=SAMPLE_LLM_RESPONSE)
 
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("litellm.completion", return_value=llm_resp) as mock_llm:
+             patch("src.core.llm_manager.LLMManager.completion", mock_completion) as mock_llm:
             tool._run(
                 report_references_json=SAMPLE_REPORT_REFERENCES,
                 ucmv_output=SAMPLE_UCMV_OUTPUT,
@@ -327,12 +329,12 @@ class TestLLMIntegration:
 
     def test_llm_response_parsed_correctly(self):
         """Mock LLM returns JSON array → visual_mappings populated."""
+        from unittest.mock import AsyncMock
         tool = PBIVisualUCMVMapperTool()
         auth = _mock_auth()
-        llm_resp = _mock_litellm_response(SAMPLE_LLM_RESPONSE)
 
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("litellm.completion", return_value=llm_resp):
+             patch("src.core.llm_manager.LLMManager.completion", AsyncMock(return_value=SAMPLE_LLM_RESPONSE)):
             result = tool._run(
                 report_references_json=SAMPLE_REPORT_REFERENCES,
                 ucmv_output=SAMPLE_UCMV_OUTPUT,

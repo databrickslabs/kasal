@@ -303,8 +303,8 @@ class MetricViewValidatorTool(BaseTool):
         from sqlalchemy import text
 
         async def _query():
-            from src.db.session import async_session_factory
-            async with async_session_factory() as session:
+            from src.engines.crewai.tools.tool_session_provider import ToolSessionProvider
+            async with ToolSessionProvider.session() as session:
                 # The UCMV tool output contains the full result with yaml/sql/stats
                 # The stats section has per-table measure info, but we need the raw
                 # DAX measures. Try fetching from the UCMV tool's input (execution inputs).
@@ -369,8 +369,8 @@ class MetricViewValidatorTool(BaseTool):
         from sqlalchemy import text
 
         async def _query():
-            from src.db.session import async_session_factory
-            async with async_session_factory() as session:
+            from src.engines.crewai.tools.tool_session_provider import ToolSessionProvider
+            async with ToolSessionProvider.session() as session:
                 # Look for the dedicated UCMV yaml edits key written by the
                 # save button in the UI (separate from Config Generator's
                 # edited_config to avoid collisions in a multi-step flow).
@@ -414,8 +414,8 @@ class MetricViewValidatorTool(BaseTool):
         from sqlalchemy import text
 
         async def _query():
-            from src.db.session import async_session_factory
-            async with async_session_factory() as session:
+            from src.engines.crewai.tools.tool_session_provider import ToolSessionProvider
+            async with ToolSessionProvider.session() as session:
                 # Strategy 1: Look in execution_trace for the latest UCMV Generator run span
                 result = await session.execute(text(
                     "SELECT et.output::text "

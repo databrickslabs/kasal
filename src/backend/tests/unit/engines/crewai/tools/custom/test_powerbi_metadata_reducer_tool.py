@@ -573,7 +573,7 @@ class TestCacheFallback:
             yield MagicMock()
 
         with patch(
-            "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.async_session_factory",
+            "src.engines.crewai.tools.tool_session_provider.async_session_factory",
             mock_session_factory,
         ), patch(
             "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.PowerBISemanticModelCacheService",
@@ -605,7 +605,7 @@ class TestCacheFallback:
             yield MagicMock()
 
         with patch(
-            "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.async_session_factory",
+            "src.engines.crewai.tools.tool_session_provider.async_session_factory",
             mock_session_factory,
         ), patch(
             "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.PowerBISemanticModelCacheService",
@@ -637,7 +637,7 @@ class TestCacheFallback:
             yield MagicMock()
 
         with patch(
-            "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.async_session_factory",
+            "src.engines.crewai.tools.tool_session_provider.async_session_factory",
             mock_session_factory,
         ), patch(
             "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.PowerBISemanticModelCacheService",
@@ -669,7 +669,7 @@ class TestCacheFallback:
             yield MagicMock()
 
         with patch(
-            "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.async_session_factory",
+            "src.engines.crewai.tools.tool_session_provider.async_session_factory",
             mock_session_factory,
         ), patch(
             "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.PowerBISemanticModelCacheService",
@@ -721,7 +721,7 @@ class TestCacheSaving:
             yield MagicMock()
 
         with patch(
-            "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.async_session_factory",
+            "src.engines.crewai.tools.tool_session_provider.async_session_factory",
             mock_session_factory,
         ), patch(
             "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.PowerBISemanticModelCacheService",
@@ -755,7 +755,7 @@ class TestCacheSaving:
             yield MagicMock()
 
         with patch(
-            "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.async_session_factory",
+            "src.engines.crewai.tools.tool_session_provider.async_session_factory",
             mock_session_factory,
         ), patch(
             "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.PowerBISemanticModelCacheService",
@@ -1132,7 +1132,7 @@ class TestParseModelContextEdgeCases:
             yield MagicMock()
 
         with patch(
-            "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.async_session_factory",
+            "src.engines.crewai.tools.tool_session_provider.async_session_factory",
             mock_session_factory,
         ), patch(
             "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.PowerBISemanticModelCacheService",

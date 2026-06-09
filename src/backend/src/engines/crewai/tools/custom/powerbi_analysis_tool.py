@@ -25,9 +25,9 @@ from crewai.tools import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 import httpx
 
-# Import cache service and database session factory
+# Import cache service and tool session provider
 from src.services.powerbi_semantic_model_cache_service import PowerBISemanticModelCacheService
-from src.db.session import async_session_factory
+from src.engines.crewai.tools.tool_session_provider import ToolSessionProvider
 
 logger = logging.getLogger(__name__)
 
@@ -551,7 +551,7 @@ class PowerBIAnalysisTool(BaseTool):
         }
 
         try:
-            async with async_session_factory() as session:
+            async with ToolSessionProvider.session() as session:
                 cache_service = PowerBISemanticModelCacheService(session)
                 cached_metadata = await cache_service.get_cached_metadata(
                     group_id=group_id,
@@ -638,7 +638,7 @@ class PowerBIAnalysisTool(BaseTool):
 
                 # Step 2d: Save to cache for next time (same day, same dataset)
                 try:
-                    async with async_session_factory() as session:
+                    async with ToolSessionProvider.session() as session:
                         cache_service = PowerBISemanticModelCacheService(session)
 
                         # Build metadata dict for caching

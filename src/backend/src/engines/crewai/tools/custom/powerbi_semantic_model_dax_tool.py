@@ -26,7 +26,7 @@ import httpx
 
 from src.services.powerbi_semantic_model_cache_service import PowerBISemanticModelCacheService
 from src.services.dax_rag_retriever import DaxRagRetriever
-from src.db.session import async_session_factory
+from src.engines.crewai.tools.tool_session_provider import ToolSessionProvider
 
 logger = logging.getLogger(__name__)
 
@@ -726,7 +726,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
                     .get("group_context", {}).get("primary_group_id")
             )
 
-            async with async_session_factory() as session:
+            async with ToolSessionProvider.session() as session:
                 repo = ConversionHistoryRepository(session)
                 record = await repo.create(history_data.model_dump())
                 if group_id:
@@ -784,7 +784,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
 
         # ── Priority 2: Reduced cache (saved by Metadata Reducer with report_id='reduced') ──
         try:
-            async with async_session_factory() as session:
+            async with ToolSessionProvider.session() as session:
                 cache_service = PowerBISemanticModelCacheService(session)
                 reduced = await cache_service.get_cached_metadata(
                     group_id=group_id, dataset_id=dataset_id,
@@ -809,7 +809,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
         use_any_report = not report_id
         logger.info(f"[DaxTool] _resolve_model_context: Full cache lookup — group={group_id}, dataset={dataset_id}, workspace={workspace_id[:12]}..., report_id={report_id or 'ANY'}")
         try:
-            async with async_session_factory() as session:
+            async with ToolSessionProvider.session() as session:
                 cache_service = PowerBISemanticModelCacheService(session)
                 cached = await cache_service.get_cached_metadata(
                     group_id=group_id, dataset_id=dataset_id,
@@ -857,7 +857,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
         if not dataset_id or not workspace_id:
             return None
 
-        async with async_session_factory() as session:
+        async with ToolSessionProvider.session() as session:
             cache_service = PowerBISemanticModelCacheService(session)
             cached = await cache_service.get_cached_metadata(
                 group_id=group_id, dataset_id=dataset_id,

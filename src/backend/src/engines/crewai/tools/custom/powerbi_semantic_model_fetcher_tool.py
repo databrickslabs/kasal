@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field, PrivateAttr
 import httpx
 
 from src.services.powerbi_semantic_model_cache_service import PowerBISemanticModelCacheService
-from src.db.session import async_session_factory
+from src.engines.crewai.tools.tool_session_provider import ToolSessionProvider
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -312,7 +312,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         cache_saved = False  # Tracks whether full metadata is available in cache
 
         try:
-            async with async_session_factory() as session:
+            async with ToolSessionProvider.session() as session:
                 cache_service = PowerBISemanticModelCacheService(session)
                 cached_metadata = await cache_service.get_cached_metadata(
                     group_id=group_id,
@@ -365,7 +365,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                         logger.info(f"[CACHE FIX] Fetched {len(sample_values)} sample value sets — persisting to cache")
                         # Persist updated cache so next run skips re-fetch
                         try:
-                            async with async_session_factory() as session:
+                            async with ToolSessionProvider.session() as session:
                                 cache_service = PowerBISemanticModelCacheService(session)
                                 updated_metadata = cache_service.build_metadata_dict(
                                     measures=model_context.get("measures", []),
@@ -409,7 +409,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                                 logger.warning(f"[CACHE FIX] Slicer distinct values failed: {e}")
                         # Persist updated cache so next run skips re-fetch
                         try:
-                            async with async_session_factory() as session:
+                            async with ToolSessionProvider.session() as session:
                                 cache_service = PowerBISemanticModelCacheService(session)
                                 updated_metadata = cache_service.build_metadata_dict(
                                     measures=model_context.get("measures", []),
@@ -446,7 +446,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                         )
                         # Re-persist cache with updated sample_data
                         try:
-                            async with async_session_factory() as session:
+                            async with ToolSessionProvider.session() as session:
                                 cache_service = PowerBISemanticModelCacheService(session)
                                 updated_metadata = cache_service.build_metadata_dict(
                                     measures=model_context.get("measures", []),
@@ -488,7 +488,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                         )
                         # Re-persist with validated filters + marker
                         try:
-                            async with async_session_factory() as session:
+                            async with ToolSessionProvider.session() as session:
                                 cache_service = PowerBISemanticModelCacheService(session)
                                 updated_metadata = cache_service.build_metadata_dict(
                                     measures=model_context.get("measures", []),
@@ -605,7 +605,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
 
                 # Step 2d: Save to cache
                 try:
-                    async with async_session_factory() as session:
+                    async with ToolSessionProvider.session() as session:
                         cache_service = PowerBISemanticModelCacheService(session)
                         cache_metadata = cache_service.build_metadata_dict(
                             measures=model_context.get("measures", []),
