@@ -295,4 +295,25 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
     // The Genie trace renders as a normal chat message (stubbed), not folded away.
     expect(screen.getByTestId('msg-g1')).toBeInTheDocument();
   });
+
+  it('keeps the crew card ABOVE the result after the run completes (does not drop below it)', () => {
+    // Regression: a completed run with an inline Genie answer + a result message
+    // but NO trace groups. The run container (crew card) must stay anchored above
+    // the result it produced, not pin to the bottom below it.
+    const genie = {
+      id: 'g1', role: 'assistant', content: '', timestamp: new Date(),
+      resultType: 'trace',
+      resultData: { label: 'GenieTool', kind: 'tool_result', detail: 'SQL Query:\nSELECT 1' },
+    } as unknown as ChatMessageType;
+    const result = msg('res', 'Generated an app. View it in the preview pane.');
+    render(
+      <ChatContainer {...baseProps} messages={[msg('u', 'q'), genMsg('gen1'), genie, result]} />,
+    );
+    const card = screen.getByTestId('crew-card-gen1');
+    const resultBubble = screen.getByTestId('msg-res');
+    // The result follows the crew card in document order (card is above it).
+    expect(
+      card.compareDocumentPosition(resultBubble) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
 });

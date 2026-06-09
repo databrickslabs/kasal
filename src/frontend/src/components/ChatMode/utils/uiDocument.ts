@@ -136,26 +136,41 @@ function balancedBlock(text: string, open: string, close: string): string | null
  * preamble ("Here is the UI document: { … }") despite a "JSON only" instruction;
  * we still want to render the document instead of dumping raw text into the chat.
  */
-function coerceJson(raw: string | Record<string, unknown>): Record<string, unknown> | null {
+function coerceJson(
+  raw: string | Record<string, unknown>,
+  depth = 0,
+): Record<string, unknown> | null {
   if (raw && typeof raw === 'object') return raw as Record<string, unknown>;
   if (typeof raw !== 'string') return null;
   const trimmed = raw.trim();
+
+  // The value may be a JSON-ENCODED string rather than raw JSON — e.g. an
+  // execution result is stored stringified ("\"{\\\"messages\\\": …}\""), so it
+  // arrives as a quoted, backslash-escaped blob. Decode the outer string
+  // layer(s) and re-attempt, so an over-encoded document still renders instead
+  // of dumping escaped JSON into the chat. Depth-capped to avoid any loop.
+  if (depth < 4 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    try {
+      const unwrapped = JSON.parse(trimmed);
+      if (typeof unwrapped === 'string') return coerceJson(unwrapped, depth + 1);
+    } catch {
+      /* not a JSON-encoded string; fall through to normal handling */
+    }
+  }
+
   // Tolerate a ```json fence around the document.
   const fence = trimmed.match(/^```(?:json|ui)?\s*\n([\s\S]*?)\n\s*```$/);
   const fenced = fence ? fence[1].trim() : null;
 
-  // Try, in order: the fenced body, the whole string, and the first balanced
-  // {…}/[…] block found in the text (so a prose preamble doesn't defeat us).
-  const objAt = trimmed.indexOf('{');
-  const arrAt = trimmed.indexOf('[');
-  const embedded =
-    objAt >= 0 && (arrAt < 0 || objAt < arrAt)
-      ? balancedBlock(trimmed, '{', '}')
-      : arrAt >= 0
-        ? balancedBlock(trimmed, '[', ']')
-        : null;
+  // Pull the first balanced {…} AND the first balanced […] out of the text. A
+  // prose preamble OR a bracketed prefix (e.g. a "[STEP] {…}" log marker) must
+  // not hide the document: whichever candidate parses into JSON wins. Trying
+  // only the earliest bracket would let "[STEP]" shadow the real {…} object.
+  const objBlock = trimmed.includes('{') ? balancedBlock(trimmed, '{', '}') : null;
+  const arrBlock = trimmed.includes('[') ? balancedBlock(trimmed, '[', ']') : null;
 
-  for (const cand of [fenced, trimmed, embedded]) {
+  // Order: fenced body, whole string, the {…} object, then the […] array.
+  for (const cand of [fenced, trimmed, objBlock, arrBlock]) {
     if (!cand) continue;
     const c = cand.trim();
     if (!c.startsWith('{') && !c.startsWith('[')) continue;

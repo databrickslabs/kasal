@@ -401,7 +401,6 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
             const items = groupChatItems(messages.filter((m) => m.resultType !== 'generation_complete'));
             const traceGroups = items.filter((i): i is TraceGroupItem => i.kind === 'traceGroup');
             const running = Boolean(isExecuting || isGenerating);
-            const firstTraceKey = items.find((i) => i.kind === 'traceGroup')?.key;
             const runProgress = (
               <RunProgress
                 key="run-progress"
@@ -412,17 +411,35 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
                 onStop={isExecuting && onStopExecution ? onStopExecution : undefined}
               />
             );
+
+            // The run container (crew card + folded trace activity) is anchored
+            // just ABOVE the first answer/result its generation produced, so it
+            // never drops below the result. `afterGenId` is the first message
+            // following the latest generation; a later run therefore anchors
+            // above its OWN result while staying below earlier runs' results.
+            const afterGenId = genMsg
+              ? messages
+                  .slice(messages.indexOf(genMsg) + 1)
+                  .find((m) => m.resultType !== 'generation_complete')?.id
+              : undefined;
+            let placed = false;
+            const placeRunProgress = () => {
+              if (placed) return null;
+              placed = true;
+              return runProgress;
+            };
+
             return (
               <>
                 {items.map((item) => {
-                  // All background trace activity folds into the single RunProgress
-                  // container (anchored at the first trace); everything else — incl.
-                  // the inline Genie answer — renders in the conversation as usual.
+                  // All background trace activity folds into the single run
+                  // container; everything else — incl. the inline Genie answer —
+                  // renders in the conversation as usual.
                   if (item.kind === 'traceGroup') {
-                    return item.key === firstTraceKey ? runProgress : null;
+                    return placeRunProgress();
                   }
                   const msg = item.msg;
-                  return (
+                  const bubble = (
                     <ChatMessageComponent
                       key={msg.id}
                       message={msg}
@@ -433,10 +450,21 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
                       onSaveCrew={onSaveCrew}
                     />
                   );
+                  // Anchor the container right above the first thing the
+                  // generation produced (Genie answer / final result).
+                  if (msg.id === afterGenId) {
+                    return (
+                      <React.Fragment key={`run-${msg.id}`}>
+                        {placeRunProgress()}
+                        {bubble}
+                      </React.Fragment>
+                    );
+                  }
+                  return bubble;
                 })}
-                {/* No trace activity yet, but we're generating/working or a crew
-                    is ready to run → the container sits at the end of the response. */}
-                {(running || crewCard) && traceGroups.length === 0 && runProgress}
+                {/* Crew ready / still working with nothing after it yet → the
+                    container sits at the end of the response. */}
+                {(running || crewCard) && placeRunProgress()}
                 <div ref={messagesEndRef} />
               </>
             );

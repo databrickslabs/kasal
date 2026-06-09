@@ -153,6 +153,27 @@ describe('parseUiDocument', () => {
     } as never);
     expect(surface!.components.r.text).toBe('t');
   });
+
+  it('renders a UI document delivered as a JSON-ENCODED string (over-encoded result)', () => {
+    // Execution results are stored stringified, so the document can arrive
+    // JSON-encoded one or more times — a quoted, backslash-escaped blob like
+    // "{\"messages\": …}". Strict parsing of that form fails (it starts with a
+    // quote), which previously dumped raw escaped JSON into the chat instead of
+    // rendering the preview. coerceJson must peel the string layer(s) first.
+    const raw = JSON.stringify(doc); //            {"messages": …}
+    const encodedOnce = JSON.stringify(raw); //    "{\"messages\": …}"
+    const encodedTwice = JSON.stringify(encodedOnce);
+    expect(parseUiDocument(encodedOnce)).not.toBeNull();
+    expect(parseUiDocument(encodedTwice)).not.toBeNull();
+  });
+
+  it('extracts the document when a bracketed log prefix precedes it ("[STEP] {…}")', () => {
+    // A step/log marker can prefix the output. The leading "[" must not shadow
+    // the real {…} object: coerceJson tries both the first {…} and first […]
+    // block, so the object still wins.
+    const json = JSON.stringify(doc);
+    expect(parseUiDocument(`[STEP] ${json}`)).not.toBeNull();
+  });
 });
 
 describe('resolveValue', () => {

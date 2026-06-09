@@ -615,6 +615,18 @@ describe('UiRenderer — surface theme', () => {
     // Resolves through the theme token so a light theme makes it dark/readable.
     expect(style).toContain('var(--ui-text');
   });
+
+  it('Table body cells use the themed text color, not a hardcoded light color', () => {
+    // Regression: cells were hardcoded #dbe3ff (a dark-theme light color), so on a
+    // light theme they washed out to near-invisible. They must follow --ui-text.
+    const { container } = render(<UiRenderer surface={surface({
+      root: { id: 'root', component: 'Table', columns: ['ZIP'], rows: [['1123']] },
+    })} />);
+    const td = container.querySelector('tbody td') as HTMLElement;
+    const style = td.getAttribute('style') || '';
+    expect(style).not.toContain('#dbe3ff');
+    expect(style).toContain('var(--ui-text');
+  });
 });
 
 describe('UiRenderer — Album', () => {
