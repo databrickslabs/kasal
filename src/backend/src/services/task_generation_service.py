@@ -169,18 +169,10 @@ class TaskGenerationService:
         
         logger.info("Using prompt template for generate_task from database")
 
-        # When the workspace renders via the Predefined UI (UIConfigurator), steer
-        # the generator away from baking "output raw HTML" into the task. Otherwise
-        # the generated task conflicts with the UI-document instruction at execution
-        # time and weaker models emit HTML or stall asking which format to use.
-        from src.services.ui_config_service import (
-            UIConfigService,
-            UI_DOCUMENT_GENERATION_DIRECTIVE,
-        )
-        gen_group_id = group_context.primary_group_id if group_context else None
-        if await UIConfigService.is_predefined_ui_enabled(gen_group_id):
-            base_message = f"{UI_DOCUMENT_GENERATION_DIRECTIVE}\n\n{base_message}"
-            logger.info("[UIEmission] generate_task: applied design-system UI directive")
+        # NOTE: the generation template is format-neutral (content/structure only,
+        # never HTML/CSS/JS). Output formatting is owned entirely by the UI-document
+        # emission (apply_ui_emission) at execution time, so no per-call directive is
+        # prepended here.
 
         # Include agent context inline in the system prompt if provided (no external retrieval)
         if request.agent:
