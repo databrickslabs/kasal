@@ -58,13 +58,22 @@ def _palette_str(theme: Dict[str, Any]) -> str:
     return ", ".join(parts)
 
 
-def _build_theme_block(themes: Dict[str, Any]) -> List[str]:
+def _build_theme_block(
+    themes: Dict[str, Any], deliverable: Optional[str] = None
+) -> List[str]:
     """Per-deliverable branding guidance: tell the agent to put a matching
-    `theme` on createSurface (the renderer applies it as the stage palette)."""
+    `theme` on createSurface (the renderer applies it as the stage palette).
+
+    When ``deliverable`` is known, emit only that deliverable's palette (plus the
+    ``default`` fallback) instead of all eight — a task builds exactly one
+    deliverable, so the other palettes are dead weight re-sent every iteration."""
     if not isinstance(themes, dict) or not themes:
         return []
+    keys = _THEME_ORDER
+    if deliverable:
+        keys = [k for k in _THEME_ORDER if k in (deliverable, "default")]
     palette_lines: List[str] = []
-    for key in _THEME_ORDER:
+    for key in keys:
         theme = themes.get(key)
         if isinstance(theme, dict):
             palette = _palette_str(theme)
@@ -87,16 +96,21 @@ def _build_theme_block(themes: Dict[str, Any]) -> List[str]:
     ]
 
 
-def _build_directives_block(directives: Dict[str, Any]) -> List[str]:
+def _build_directives_block(
+    directives: Dict[str, Any], deliverable: Optional[str] = None
+) -> List[str]:
     """Per-deliverable behavior settings, phrased on the frontend (UIConfigurator)
     and appended verbatim so each deliverable follows its configured options
-    (slide count, KPI layout, quiz length, mindmap depth, report tone, …)."""
+    (slide count, KPI layout, quiz length, mindmap depth, report tone, …).
+
+    When ``deliverable`` is known, emit only that deliverable's settings."""
     if not isinstance(directives, dict):
         return []
+    keys = [k for k in _THEME_ORDER if k != "default"]
+    if deliverable and deliverable != "default":
+        keys = [deliverable]
     lines: List[str] = []
-    for key in _THEME_ORDER:
-        if key == "default":
-            continue
+    for key in keys:
         text = directives.get(key)
         if isinstance(text, str) and text.strip():
             lines.append(f"- {_THEME_LABELS.get(key, key)}: {text.strip()}")
@@ -113,12 +127,17 @@ def build_ui_instruction(
     accent: Optional[str] = None,
     themes: Optional[Dict[str, Any]] = None,
     directives: Optional[Dict[str, Any]] = None,
+    deliverable: Optional[str] = None,
 ) -> str:
     """The instruction appended to the final task so the agent returns a
     renderable UI document instead of arbitrary HTML. When per-deliverable
     ``themes`` are configured they steer the surface palette and ``directives``
     steer each deliverable's behavior; otherwise a bare ``accent`` (legacy
-    single-color config) is used as a lightweight hint."""
+    single-color config) is used as a lightweight hint.
+
+    ``deliverable`` (one of the _THEME_ORDER keys, when it can be inferred from the
+    task) narrows the per-deliverable theme/directive guidance to just that type,
+    trimming ~550 tokens that would otherwise be re-sent every agent iteration."""
     accent_line = (
         f'\nUse "{accent}" as the accent color where relevant.'
         if accent and not themes
@@ -202,13 +221,58 @@ def build_ui_instruction(
             + accent_line,
         ]
     )
-    theme_block = _build_theme_block(themes) if themes else []
+    theme_block = _build_theme_block(themes, deliverable) if themes else []
     if theme_block:
         base = base + "\n" + "\n".join(theme_block)
-    directives_block = _build_directives_block(directives) if directives else []
+    directives_block = (
+        _build_directives_block(directives, deliverable) if directives else []
+    )
     if directives_block:
         base = base + "\n" + "\n".join(directives_block)
     return base
+
+
+# Keyword → deliverable key. Ordered by specificity; first match wins. Used to
+# infer which single deliverable a task builds so the UI instruction can carry
+# only that deliverable's theme/directive guidance instead of all eight.
+_DELIVERABLE_KEYWORDS = [
+    ("quiz", "quiz"),
+    ("mindmap", "mindmap"),
+    ("mind map", "mindmap"),
+    ("concept map", "mindmap"),
+    ("album", "album"),
+    ("gallery", "album"),
+    ("presentation", "presentation"),
+    ("slide", "presentation"),
+    ("deck", "presentation"),
+    ("dashboard", "dashboard"),
+    ("kpi", "dashboard"),
+    ("genie", "genie"),
+    ("data answer", "genie"),
+    ("report", "report"),
+    ("briefing", "report"),
+]
+
+
+def _infer_deliverable(text: str) -> Optional[str]:
+    """Best-effort guess of the deliverable type from the final task's text.
+
+    Returns a _THEME_ORDER key when EXACTLY ONE deliverable type is mentioned, so
+    the UI instruction can emit only that deliverable's theme/directive block.
+    Returns ``None`` when nothing matches or the text is ambiguous (multiple
+    distinct types), in which case the caller emits the full set — a safe
+    fallback that never narrows incorrectly."""
+    if not text:
+        return None
+    lowered = text.lower()
+    matches = {
+        deliverable
+        for keyword, deliverable in _DELIVERABLE_KEYWORDS
+        if keyword in lowered
+    }
+    if len(matches) == 1:
+        return next(iter(matches))
+    return None
 
 
 async def apply_ui_emission(
@@ -247,9 +311,17 @@ async def apply_ui_emission(
             except (ValueError, TypeError):
                 accent = None
 
-        instruction = build_ui_instruction(accent, themes, directives)
         last_task = tasks[-1]
         original = last_task.get("description", "") or ""
+
+        # Infer the deliverable from the final task so the per-deliverable theme/
+        # directive guidance is emitted for ONLY that type (a task builds one).
+        # This trims ~550 tokens that would otherwise be re-sent every iteration.
+        deliverable = _infer_deliverable(
+            f"{original}\n{last_task.get('expected_output', '') or ''}"
+        )
+
+        instruction = build_ui_instruction(accent, themes, directives, deliverable)
         last_task["description"] = f"{original}\n\n{instruction}"
 
         # The generated crew often bakes "produce raw HTML" into BOTH the task

@@ -105,18 +105,10 @@ class CrewGenerationService:
         if not system_message:
             raise ValueError("Required prompt template 'generate_crew' not found in database")
 
-        # When Predefined UI (UIConfigurator) is enabled, prepend a directive that
-        # stops the generator from baking "output raw HTML" into any task — the
-        # platform renders the final deliverable through the design-system UI
-        # renderer, so HTML instructions only create a conflict downstream.
-        from src.services.ui_config_service import (
-            UIConfigService,
-            UI_DOCUMENT_GENERATION_DIRECTIVE,
-        )
-        gen_group_id = group_context.primary_group_id if group_context else None
-        if await UIConfigService.is_predefined_ui_enabled(gen_group_id):
-            system_message = f"{UI_DOCUMENT_GENERATION_DIRECTIVE}\n\n{system_message}"
-            logger.info("[UIEmission] generate_crew: applied design-system UI directive")
+        # NOTE: the generation templates are format-neutral (content/structure only,
+        # never HTML/CSS/JS). Output formatting is owned entirely by the UI-document
+        # emission (apply_ui_emission) at execution time, so no per-call directive is
+        # prepended here.
 
         # Build tools context for the prompt with detailed descriptions
         tools_context = ""

@@ -8,34 +8,11 @@ from src.schemas.ui_config import UIConfigResponse, UIConfigUpdate
 logger = logging.getLogger(__name__)
 
 
-# Prepended to the crew/task GENERATION prompt when a workspace has Predefined UI
-# enabled. The base generation templates mandate "raw HTML <!DOCTYPE html>" for
-# presentations/dashboards; that conflicts with the UI renderer and, at execution
-# time, makes weaker models emit HTML (or stall asking which format to use). The
-# real fix is to never bake HTML into the generated task: this directive tells the
-# generator to produce a format-neutral, content/structure-only task so the
-# downstream UI-document instruction has nothing to conflict with.
-UI_DOCUMENT_GENERATION_DIRECTIVE = "\n".join([
-    "=== RENDERING MODE: DESIGN-SYSTEM UI (not HTML) ===",
-    "This workspace renders every final deliverable through a structured design-system",
-    "UI renderer, NOT a web browser. This mode OVERRIDES any 'output HTML' guidance below.",
-    "When generating tasks you MUST follow these rules:",
-    "- Do NOT instruct any task to produce raw HTML, \"<!DOCTYPE html>\", a web page, CSS,",
-    "  JavaScript, or a downloadable .html file. Do NOT mention HTML anywhere in a task.",
-    "- For a presentation / dashboard / report / quiz, the final task's `description` must",
-    "  describe only the CONTENT and STRUCTURE (sections, slides, bullet points, KPIs/metrics,",
-    "  chart data, quiz questions) — never the HTML/CSS/JS form or visual styling code.",
-    "- The final task's `expected_output` must describe that structured deliverable in a",
-    "  FORMAT-NEUTRAL way (e.g. \"a structured slide presentation: a title slide plus 6-9",
-    "  slides, each with a heading and 3-5 concise points, using metrics and charts where",
-    "  relevant\") and MUST NOT mention HTML, <!DOCTYPE html>, CSS or JavaScript.",
-    "- Keep the CONTENT-quality intent of any design guidance below (substantive points,",
-    "  clear sections, KPIs, charts) but IGNORE its HTML/CSS/JS form requirements — the",
-    "  platform builds the visual layout automatically.",
-    "- Do NOT set output_json or output_pydantic. Research/data-gathering tasks keep normal",
-    "  text output as usual.",
-    "",
-])
+# NOTE: the crew/task GENERATION templates are now format-neutral (they describe
+# content and structure, never HTML/CSS/JS), and output formatting is owned by the
+# UI-document emission (apply_ui_emission) at execution time. The former
+# UI_DOCUMENT_GENERATION_DIRECTIVE prepend was therefore redundant and has been
+# removed.
 
 
 class UIConfigService:

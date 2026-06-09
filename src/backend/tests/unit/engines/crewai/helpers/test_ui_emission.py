@@ -8,6 +8,7 @@ import pytest
 from src.engines.crewai.helpers.ui_emission import (
     _build_directives_block,
     _build_theme_block,
+    _infer_deliverable,
     _palette_str,
     apply_ui_emission,
     build_ui_instruction,
@@ -171,6 +172,40 @@ async def test_apply_ui_emission_appends_themes_and_directives():
 
 
 @pytest.mark.asyncio
+async def test_apply_ui_emission_narrows_theme_to_inferred_deliverable():
+    """When the final task names a deliverable, only that deliverable's theme/
+    directive guidance is emitted (the other types are dropped to save tokens)."""
+    style = {
+        "themes": {
+            "default": {"accent": "#222222"},
+            "dashboard": {"accent": "#DA5500"},
+            "presentation": {"accent": "#9911FF"},
+        },
+        "directives": {
+            "dashboard": "Lay out KPI tiles three per row.",
+            "presentation": "Aim for about eight slides.",
+        },
+    }
+    tasks = [{"description": "Create a metrics dashboard with KPI tiles."}]
+    rss, svc_patch = _patch_config(None)
+    with rss, svc_patch as Svc:
+        inst = MagicMock()
+        inst.get_config = AsyncMock(
+            return_value=MagicMock(enabled=True, style_json=json.dumps(style))
+        )
+        Svc.return_value = inst
+        await apply_ui_emission(tasks, "g1")
+    desc = tasks[0]["description"]
+    # dashboard (inferred) + default fallback palette kept; presentation dropped.
+    assert "#DA5500" in desc
+    assert "#222222" in desc
+    assert "#9911FF" not in desc
+    # only the dashboard directive survives.
+    assert "KPI tiles three per row" in desc
+    assert "about eight slides" not in desc
+
+
+@pytest.mark.asyncio
 async def test_apply_ui_emission_enabled_with_no_style_json():
     tasks = [{"description": "only"}]
     rss, svc_patch = _patch_config(None)
@@ -208,3 +243,62 @@ async def test_apply_ui_emission_swallows_errors():
     ):
         await apply_ui_emission(tasks, "g1")  # must not raise
     assert tasks[0]["description"] == "orig"
+
+
+# --- deliverable-specific narrowing (context-size optimization) -----------
+
+_ALL_THEMES = {
+    k: {"accent": "#111", "background": "#fff", "font": "sans"}
+    for k in ["default", "dashboard", "presentation", "genie", "mindmap", "album", "quiz", "report"]
+}
+_ALL_DIRECTIVES = {
+    k: f"settings for {k}"
+    for k in ["dashboard", "presentation", "genie", "mindmap", "album", "quiz", "report"]
+}
+
+
+def test_theme_block_emits_all_when_no_deliverable():
+    lines = _build_theme_block(_ALL_THEMES)
+    # one palette line per configured deliverable (all 8)
+    assert sum(1 for ln in lines if ln.startswith("- ")) == 8
+
+
+def test_theme_block_narrows_to_deliverable_plus_default():
+    lines = _build_theme_block(_ALL_THEMES, deliverable="dashboard")
+    palette_lines = [ln for ln in lines if ln.startswith("- ")]
+    # only the chosen deliverable + the default fallback palette
+    assert len(palette_lines) == 2
+    assert any("Dashboard" in ln for ln in palette_lines)
+    assert any("Default" in ln for ln in palette_lines)
+    assert not any("Presentation" in ln for ln in palette_lines)
+
+
+def test_directives_block_narrows_to_single_deliverable():
+    all_lines = [ln for ln in _build_directives_block(_ALL_DIRECTIVES) if ln.startswith("- ")]
+    assert len(all_lines) == 7
+    one = [ln for ln in _build_directives_block(_ALL_DIRECTIVES, deliverable="quiz") if ln.startswith("- ")]
+    assert len(one) == 1
+    assert "Quiz" in one[0]
+
+
+def test_build_ui_instruction_deliverable_is_smaller():
+    full = build_ui_instruction(themes=_ALL_THEMES, directives=_ALL_DIRECTIVES)
+    narrowed = build_ui_instruction(themes=_ALL_THEMES, directives=_ALL_DIRECTIVES, deliverable="dashboard")
+    assert len(narrowed) < len(full)
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("Create a metrics dashboard with KPI tiles", "dashboard"),
+        ("Build a slide presentation deck", "presentation"),
+        ("an interactive quiz that tracks score", "quiz"),
+        ("a concept map / mindmap of the topic", "mindmap"),
+        ("a data answer from Genie", "genie"),
+        ("a dashboard AND a report", None),  # ambiguous → safe fallback
+        ("just analyze the numbers", None),  # no match → safe fallback
+        ("", None),
+    ],
+)
+def test_infer_deliverable(text, expected):
+    assert _infer_deliverable(text) == expected
