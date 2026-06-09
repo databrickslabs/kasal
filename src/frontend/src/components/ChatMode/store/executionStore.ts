@@ -65,6 +65,13 @@ interface ExecutionState {
    * "Session only" silently reverts to workspace on the next message.
    */
   workspaceMemory: boolean;
+  /**
+   * Whether crews run WITH memory at all. true (default) = agents keep memory
+   * (recall scope governed by ``workspaceMemory``); false = "No memory" — agents
+   * are created without memory and nothing is recalled or persisted. Lives in the
+   * store for the same persistence reason as ``workspaceMemory``.
+   */
+  memoryEnabled: boolean;
 }
 
 interface ExecutionActions {
@@ -75,6 +82,7 @@ interface ExecutionActions {
   setChatCollapsed: (collapsed: boolean) => void;
   toggleChatCollapsed: () => void;
   setWorkspaceMemory: (value: boolean) => void;
+  setMemoryEnabled: (value: boolean) => void;
   clearPreview: () => void;
   reopenPreview: () => void;
   appendLog: (entry: Omit<ExecutionLogEntry, 'id' | 'timestamp'>) => void;
@@ -120,6 +128,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   executionOwnerSessionId: null,
   executionLog: [],
   workspaceMemory: true,
+  memoryEnabled: true,
 
   appendLog: (entry) => set((s) => ({
     executionLog: [
@@ -163,6 +172,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   setChatCollapsed: (collapsed) => set({ chatCollapsed: collapsed }),
   toggleChatCollapsed: () => set((s) => ({ chatCollapsed: !s.chatCollapsed })),
   setWorkspaceMemory: (value) => set({ workspaceMemory: value }),
+  setMemoryEnabled: (value) => set({ memoryEnabled: value }),
   clearPreview: () => {
     // Only hide the preview panel — keep history/data so the user can reopen
     set({ previewContent: null, previewOwnerSessionId: null, chatCollapsed: false });
