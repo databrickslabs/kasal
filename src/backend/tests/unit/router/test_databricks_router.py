@@ -11,14 +11,19 @@ from datetime import datetime
 
 from src.api.databricks_router import (
     set_databricks_config,
+    set_ai_gateway_status,
     get_databricks_config,
     check_personal_token_required,
     check_databricks_connection,
     get_databricks_environment,
     router,
 )
-from src.core.exceptions import ForbiddenError
-from src.schemas.databricks_config import DatabricksConfigCreate, DatabricksConfigResponse
+from src.core.exceptions import ForbiddenError, NotFoundError
+from src.schemas.databricks_config import (
+    AIGatewayStatusUpdate,
+    DatabricksConfigCreate,
+    DatabricksConfigResponse,
+)
 from src.utils.user_context import GroupContext
 
 
@@ -389,9 +394,48 @@ class TestRouterConfiguration:
         route_paths = [route.path for route in router.routes]
         expected = [
             "/databricks/config",
+            "/databricks/ai-gateway-status",
             "/databricks/status/personal-token-required",
             "/databricks/connection",
             "/databricks/environment",
         ]
         for path in expected:
             assert path in route_paths, f"Missing route: {path}"
+
+
+class TestSetAiGatewayStatus:
+    """Tests for the POST /databricks/ai-gateway-status toggle endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_persists_for_admin(self):
+        svc = AsyncMock()
+        svc.set_ai_gateway_enabled = AsyncMock(return_value=True)
+        result = await set_ai_gateway_status(
+            payload=AIGatewayStatusUpdate(enabled=True),
+            group_context=gc_admin(),
+            service=svc,
+        )
+        svc.set_ai_gateway_enabled.assert_awaited_once_with(True)
+        assert result == {"ai_gateway_enabled": True}
+
+    @pytest.mark.asyncio
+    async def test_forbidden_for_non_admin(self):
+        svc = AsyncMock()
+        with pytest.raises(ForbiddenError):
+            await set_ai_gateway_status(
+                payload=AIGatewayStatusUpdate(enabled=True),
+                group_context=gc_editor(),
+                service=svc,
+            )
+        svc.set_ai_gateway_enabled.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_404_when_no_databricks_config(self):
+        svc = AsyncMock()
+        svc.set_ai_gateway_enabled = AsyncMock(return_value=False)
+        with pytest.raises(NotFoundError):
+            await set_ai_gateway_status(
+                payload=AIGatewayStatusUpdate(enabled=False),
+                group_context=gc_admin(),
+                service=svc,
+            )

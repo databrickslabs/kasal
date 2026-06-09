@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { ExecutionStatus } from './types/execution';
 import { createExecution, stopExecution, listExecutions, getExecutionStatus } from './api/executions';
-import { saveGeneratedCrew, usesGenieTool } from './api/crews';
+import { saveGeneratedCrew, usesGenieTool, CrewNameConflictError } from './api/crews';
 import { useSessionStore } from './store/sessionStore';
 import { useExecutionStore } from './store/executionStore';
 import { readActiveExecution, clearActiveExecution } from './store/activeExecutionMarker';
@@ -13,6 +13,7 @@ import { generateId } from './utils/markdown';
 import { buildCrewConfig, buildFlowConfig, buildCrewConfigFromGenerated } from './utils/crewConfigBuilder';
 import { detectVariablesFromNodes, detectVariablesFromGenerated, DetectedVariable } from './utils/variableDetector';
 import ChatContainer from './components/Chat/ChatContainer';
+import CatalogLibrary from './components/CatalogLibrary';
 import PreviewPanel, { parsePreviewContent, PreviewContent } from './components/Preview/PreviewPanel';
 import InputVariablesDialog from './components/InputVariablesDialog';
 import { saveSessionPreview, getSessionPreview } from './db/sessionDb';
@@ -340,6 +341,14 @@ const ChatWorkspace: React.FC = () => {
 
   // --- Local UI state (sidebar-only concerns) ---
   const [contextMenu, setContextMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
+  // Saved-catalog library shown in the rail (replaces /list crews & /list flows).
+  // Lives in the Zustand appStore so it's shared + refreshed consistently.
+  const libraryCrews = useAppStore((s) => s.savedCrews);
+  const libraryFlows = useAppStore((s) => s.savedFlows);
+  const refreshLibrary = useAppStore((s) => s.loadCatalog);
+  // A crew/flow loaded from the catalog that the chat submit button will run.
+  // Session-scoped so it only applies to the session it was loaded into.
+  const [pendingRun, setPendingRun] = useState<{ sessionId: string | null; label: string; run: () => void } | null>(null);
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   // Track whether a persisted preview exists that could be reopened
@@ -425,10 +434,17 @@ const ChatWorkspace: React.FC = () => {
           useExecutionStore.getState().resetForSession();
         }
       });
+      void refreshLibrary();
     };
     window.addEventListener('group-changed', onGroupChange);
     return () => window.removeEventListener('group-changed', onGroupChange);
-  }, []);
+  }, [refreshLibrary]);
+
+  // Populate the catalog library (rail) on mount. It's refreshed on workspace
+  // change (above) and after each save (handleSaveCrew / /save).
+  useEffect(() => {
+    void refreshLibrary();
+  }, [refreshLibrary]);
 
   // Collapse paired tool events (tool_usage + matching *_run) into a single
   // chat pill keyed by matchKey, regardless of which order they arrive in.
@@ -821,7 +837,14 @@ const ChatWorkspace: React.FC = () => {
           tasks: taskNames,
         });
 
-        const crewConfig = buildCrewConfig(plan, selectedModel || undefined, inputs);
+        // Reflect the chat's current memory toggle on the loaded plan, so
+        // disabling memory in the chat runs the loaded crew without memory.
+        const crewConfig = buildCrewConfig(
+          plan,
+          selectedModel || undefined,
+          inputs,
+          useExecutionStore.getState().memoryEnabled,
+        );
         const execution = await createExecution(crewConfig);
         const jobId = execution.job_id || execution.execution_id;
         if (jobId) {
@@ -1028,8 +1051,19 @@ const ChatWorkspace: React.FC = () => {
   // Used by the bookmark on each crew card (it owns its own saved-state UI), so
   // this just performs the save and resolves to the created crew.
   const handleSaveCrew = useCallback(
-    (data: GenerationCompleteData) => saveGeneratedCrew(data),
-    [],
+    (data: GenerationCompleteData, opts?: { overwrite?: boolean; spaceId?: string }) =>
+      // Capture the chat's current memory choice so the saved crew matches what
+      // the user sees here (no-memory mode → saved crew has memory disabled).
+      // opts carries overwrite + the picked Genie space from the crew card.
+      saveGeneratedCrew(data, undefined, {
+        ...opts,
+        memoryEnabled: useExecutionStore.getState().memoryEnabled,
+      }).then((r) => {
+        // Surface the freshly saved crew in the rail library.
+        void refreshLibrary();
+        return r;
+      }),
+    [refreshLibrary],
   );
 
   const handleExecuteFlow = useCallback(
@@ -1102,6 +1136,10 @@ const ChatWorkspace: React.FC = () => {
     onExecuteCrew: handleExecuteCrew,
     onExecuteFlow: handleExecuteFlow,
     onExecuteGenerated: handleExecuteGenerated,
+    onCrewLoaded: (plan, sessionId) =>
+      setPendingRun({ sessionId, label: plan.name || 'crew', run: () => handleExecuteCrew(plan) }),
+    onFlowLoaded: (flow, sessionId) =>
+      setPendingRun({ sessionId, label: flow.name || 'flow', run: () => handleExecuteFlow(flow) }),
     getCurrentSessionId: () => useSessionStore.getState().currentSessionId,
   });
 
@@ -1194,16 +1232,32 @@ const ChatWorkspace: React.FC = () => {
           return true;
         }
         addMessage('user', message);
-        const name = message.trim().slice(5).trim();
+        // Allow "/save overwrite [name]" to replace an existing same-named crew.
+        let arg = message.trim().slice(5).trim();
+        let overwrite = false;
+        if (arg.toLowerCase() === 'overwrite' || arg.toLowerCase().startsWith('overwrite ')) {
+          overwrite = true;
+          arg = arg.slice('overwrite'.length).trim();
+        }
+        const name = arg;
+        const memoryEnabled = useExecutionStore.getState().memoryEnabled;
         try {
-          const saved = await saveGeneratedCrew(data, name || undefined);
+          const saved = await saveGeneratedCrew(data, name || undefined, { overwrite, memoryEnabled });
+          void refreshLibrary();
           addMessage(
             'assistant',
-            `✓ Saved **${saved.name}** to the catalog. Load it later with \`/list crews\`.`,
+            `✓ ${overwrite ? 'Updated' : 'Saved'} **${saved.name}** ${overwrite ? 'in' : 'to'} the catalog — find it in the **Crews** library on the left.`,
           );
         } catch (error) {
-          const errMsg = error instanceof Error ? error.message : 'Failed to save crew';
-          addMessage('assistant', `Failed to save crew: ${errMsg}`);
+          if (error instanceof CrewNameConflictError) {
+            addMessage(
+              'assistant',
+              `**${error.crewName}** is already in the catalog. Type \`/save overwrite\` to replace it, or \`/save <a different name>\`.`,
+            );
+          } else {
+            const errMsg = error instanceof Error ? error.message : 'Failed to save crew';
+            addMessage('assistant', `Failed to save crew: ${errMsg}`);
+          }
         }
         return true;
       }
@@ -1216,25 +1270,47 @@ const ChatWorkspace: React.FC = () => {
   const handleSend = useCallback(
     async (
       message: string,
-      meta?: { tools?: string[]; dispatchSuffix?: string; attachments?: string[] },
+      meta?: { tools?: string[]; dispatchSuffix?: string; attachments?: string[]; displayAs?: string },
     ) => {
+      // A genuine user message supersedes any pending loaded-crew run (the rail's
+      // own "/load …" send is exempt — it's what arms the pending run).
+      if (!message.startsWith('/load ')) setPendingRun(null);
+
       const handled = await handleLocalCommand(message);
       if (handled) return;
 
       useExecutionStore.getState().setIsLoading(true);
       try {
+        // Send the picker selection; when none is set the backend falls back to a
+        // working default (gpt-5.3-codex), so we don't force a model here.
         await dispatcher.sendMessage(
           message,
           selectedModel || undefined,
           meta?.tools,
           meta?.dispatchSuffix,
           meta?.attachments,
+          meta?.displayAs,
         );
       } finally {
         useExecutionStore.getState().setIsLoading(false);
       }
     },
     [dispatcher, handleLocalCommand, selectedModel],
+  );
+
+  // Load a saved crew/flow from the rail library into a FRESH chat session (so it
+  // never clobbers the current conversation). Reuses the deterministic /load
+  // command under the hood but shows a friendly label in the transcript.
+  const handleLoadFromLibrary = useCallback(
+    async (kind: 'crew' | 'flow', name: string) => {
+      if (currentSessionId) {
+        useExecutionStore.getState().saveSessionState(currentSessionId);
+      }
+      const newId = await useSessionStore.getState().createNewSession();
+      useExecutionStore.getState().restoreSessionState(newId);
+      void handleSend(`/load ${kind} ${name}`, { displayAs: `Open ${kind}: ${name}` });
+    },
+    [handleSend, currentSessionId],
   );
 
   const handleStopExecution = useCallback(async () => {
@@ -1265,6 +1341,7 @@ const ChatWorkspace: React.FC = () => {
     if (currentSessionId) {
       useExecutionStore.getState().saveSessionState(currentSessionId);
     }
+    setPendingRun(null);
     await useSessionStore.getState().switchSession(sessionId);
     useExecutionStore.getState().restoreSessionState(sessionId);
   }, [currentSessionId]);
@@ -1313,6 +1390,14 @@ const ChatWorkspace: React.FC = () => {
               New Chat
             </button>
           </div>
+
+          {/* Saved catalog library (Crews / Flows) — replaces /list commands */}
+          <CatalogLibrary
+            crews={libraryCrews}
+            flows={libraryFlows}
+            onLoadCrew={(name) => handleLoadFromLibrary('crew', name)}
+            onLoadFlow={(name) => handleLoadFromLibrary('flow', name)}
+          />
 
           {/* Section label */}
           {sessions.length > 0 && (
@@ -1484,6 +1569,14 @@ const ChatWorkspace: React.FC = () => {
               onWorkspaceMemoryChange={setWorkspaceMemory}
               memoryEnabled={memoryEnabled}
               onMemoryEnabledChange={setMemoryEnabled}
+              pendingRunLabel={pendingRun && pendingRun.sessionId === currentSessionId ? pendingRun.label : undefined}
+              onRunPending={() => {
+                if (pendingRun && pendingRun.sessionId === currentSessionId) {
+                  const run = pendingRun.run;
+                  setPendingRun(null);
+                  run();
+                }
+              }}
             />
           </div>
         </main>

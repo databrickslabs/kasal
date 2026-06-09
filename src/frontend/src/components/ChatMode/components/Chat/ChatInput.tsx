@@ -38,11 +38,7 @@ function formatBytes(bytes: number): string {
 
 const SLASH_COMMANDS = [
   { command: '/help', description: 'Show available commands' },
-  { command: '/list crews', description: 'List saved crews' },
-  { command: '/list flows', description: 'List saved flows' },
   { command: '/jobs', description: 'List recent executions' },
-  { command: '/load crew ', description: 'Load a crew by name' },
-  { command: '/load flow ', description: 'Load a flow by name' },
   { command: '/run crew ', description: 'Run a crew by name' },
   { command: '/run flow ', description: 'Run a flow by name' },
   { command: '/stop ', description: 'Stop an execution by job ID' },
@@ -94,6 +90,10 @@ interface ChatInputProps {
    */
   memoryEnabled?: boolean;
   onMemoryEnabledChange?: (value: boolean) => void;
+  /** A crew/flow loaded from the catalog; when set and the input is empty, the
+   *  submit button runs it instead of sending a message. */
+  pendingRunLabel?: string;
+  onRunPending?: () => void;
 }
 
 const attachmentsKey = (sessionId: string) => `kasal-chat-attachments-${sessionId}`;
@@ -111,6 +111,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
   onWorkspaceMemoryChange,
   memoryEnabled = true,
   onMemoryEnabledChange,
+  pendingRunLabel,
+  onRunPending,
 }) => {
   const [value, setValue] = useState('');
   const [showCommands, setShowCommands] = useState(false);
@@ -800,19 +802,30 @@ const ChatInput: React.FC<ChatInputProps> = ({
               )}
             </button>
 
-            {/* Send — submit only. Stop lives in the run-activity container above. */}
+            {/* Send — submit only. Stop lives in the run-activity container above.
+                When a catalog crew/flow is loaded and the input is empty, the
+                submit button RUNS it (play icon) instead of sending a message. */}
+            {(() => {
+              const runMode = !value.trim() && !!pendingRunLabel && !isExecuting && !isGenerating && !disabled && !isUploading;
+              return (
             <button
-              onClick={handleSend}
-              disabled={disabled || isUploading || isGenerating || isExecuting || !value.trim()}
-              title={isUploading ? 'Waiting for attachments to finish uploading…' : undefined}
-              aria-label="Send message"
+              onClick={runMode ? onRunPending : handleSend}
+              disabled={disabled || isUploading || isGenerating || isExecuting || (!value.trim() && !pendingRunLabel)}
+              title={
+                isUploading
+                  ? 'Waiting for attachments to finish uploading…'
+                  : runMode
+                    ? `Run “${pendingRunLabel}”`
+                    : undefined
+              }
+              aria-label={runMode ? `Run ${pendingRunLabel}` : 'Send message'}
               className="flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-all hover:opacity-80 disabled:cursor-not-allowed"
               style={{
                 backgroundColor: 'var(--bg-secondary)',
                 color:
                   disabled || isUploading || isGenerating || isExecuting
                     ? 'var(--text-muted)'
-                    : value.trim()
+                    : runMode || value.trim()
                       ? 'var(--text-secondary)'
                       : 'var(--text-muted)',
                 border: '1px solid var(--border-color)',
@@ -823,12 +836,18 @@ const ChatInput: React.FC<ChatInputProps> = ({
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
+              ) : runMode ? (
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
               ) : (
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 10.5L12 3m0 0l7.5 7.5M12 3v18" />
                 </svg>
               )}
             </button>
+              );
+            })()}
           </div>
         </div>
       </div>

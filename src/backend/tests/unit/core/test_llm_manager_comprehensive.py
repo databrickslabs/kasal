@@ -875,18 +875,18 @@ class TestGetEmbeddingDatabricksPaths:
             patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, return_value=mock_auth),
             patch("src.utils.user_context.UserContext.get_user_token", return_value="tok"),
             patch("src.core.llm_manager.LLMManager._get_group_id_from_context", return_value=None),
-            patch("src.core.llm_manager.DatabricksURLUtils.construct_serving_endpoints_url", return_value="https://example.com/se"),
+            patch("src.core.llm_manager.DatabricksURLUtils.construct_llm_base_url", return_value="https://example.com/se"),
             patch("src.core.llm_manager.DatabricksURLUtils.extract_workspace_from_endpoint", return_value="https://example.com"),
-            patch("src.core.llm_manager.DatabricksURLUtils.construct_model_invocation_url", return_value="https://example.com/api") as mock_inv_url,
+            patch("src.core.llm_manager.DatabricksURLUtils.construct_embeddings_url", return_value=("https://example.com/api", None)) as mock_emb_url,
             patch("aiohttp.ClientSession", return_value=mock_session_ctx),
             patch("aiohttp.ClientTimeout", return_value=MagicMock()),
         ):
             # Use a model without databricks/ prefix
             result = await LLMManager.get_embedding("test text", model="databricks-gte-large-en")
 
-        # Should have called construct_model_invocation_url with prefixed model
-        assert mock_inv_url.called
-        call_args = mock_inv_url.call_args[0]
+        # Should have called construct_embeddings_url with the prefixed model
+        assert mock_emb_url.called
+        call_args = mock_emb_url.call_args[0]
         assert "databricks/databricks-gte-large-en" in call_args[1]
 
 

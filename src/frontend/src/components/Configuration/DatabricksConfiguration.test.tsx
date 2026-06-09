@@ -1,6 +1,6 @@
 import { vi, beforeEach, describe, it, expect } from 'vitest';
 import React from 'react';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { MemoryBackendType } from '../../types/memoryBackend';
@@ -384,6 +384,35 @@ describe('DatabricksConfiguration', () => {
       expect(
         screen.queryByText('Please save Databricks settings first to persist MLflow.')
       ).not.toBeInTheDocument();
+    });
+
+    it('toggles AI Gateway on and persists immediately via the dedicated endpoint', async () => {
+      mockApiClientPost.mockResolvedValue({ data: {} });
+      await renderComponent();
+      await waitFor(() => expect(screen.getByDisplayValue('wh-123')).toBeInTheDocument());
+
+      // The AI Gateway switch lives in the section headed by the "AI Gateway" title.
+      const section = screen.getByText('AI Gateway').parentElement!.parentElement!;
+      fireEvent.click(within(section).getByRole('checkbox'));
+
+      await waitFor(() =>
+        expect(mockApiClientPost).toHaveBeenCalledWith('/databricks/ai-gateway-status', { enabled: true })
+      );
+    });
+
+    it('shows a saveFirst error when AI Gateway persist returns 404', async () => {
+      mockApiClientPost.mockRejectedValue({ response: { status: 404 } });
+      await renderComponent();
+      await waitFor(() => expect(screen.getByDisplayValue('wh-123')).toBeInTheDocument());
+
+      const section = screen.getByText('AI Gateway').parentElement!.parentElement!;
+      fireEvent.click(within(section).getByRole('checkbox'));
+
+      await waitFor(() =>
+        expect(
+          screen.getByText('Please save Databricks settings first to persist the AI Gateway setting.')
+        ).toBeInTheDocument()
+      );
     });
 
     it('toggles evaluation on with apiClient persist and shows judge model field', async () => {

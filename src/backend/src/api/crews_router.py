@@ -99,6 +99,7 @@ async def create_crew(
     crew_in: CrewCreate,
     service: Annotated[CrewService, Depends(get_crew_service)],
     group_context: GroupContextDep,
+    overwrite: bool = Query(False, description="Replace an existing crew of the same name instead of failing with 409."),
 ):
     """
     Create a new crew for the current group.
@@ -108,6 +109,7 @@ async def create_crew(
         crew_in: Crew data for creation
         service: Crew service injected by dependency
         group_context: Group context from headers
+        overwrite: When true, replace an existing same-named crew instead of 409.
 
     Returns:
         Created crew
@@ -118,7 +120,7 @@ async def create_crew(
 
     try:
         # Use the group-aware create method
-        crew = await service.create_with_group(crew_in, group_context)
+        crew = await service.create_with_group(crew_in, group_context, overwrite=overwrite)
 
         # Format the response
         return CrewResponse(

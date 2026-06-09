@@ -104,7 +104,7 @@ async def detect_intent_only(
     # Only detect intent without dispatching
     intent_result = await dispatcher_service.detect_intent(
         request.message,
-        request.model or "databricks-llama-4-maverick",
+        request.model or "databricks-gpt-5-3-codex",
         available_tools=available_tools,
     )
 

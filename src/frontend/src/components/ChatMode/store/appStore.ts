@@ -5,6 +5,7 @@ import { updateClient } from '../api/client';
 import { fetchEnabledModels } from '../api/models';
 import { fetchEnabledTools, ToolInfo } from '../api/tools';
 import { fetchWorkspaces, Workspace } from '../api/workspaces';
+import { listSavedCrews, listSavedFlows, CatalogItem } from '../api/crews';
 
 const CONFIG_STORAGE_KEY = 'kasal-chat-config';
 const MODEL_STORAGE_KEY = 'kasal-chat-model';
@@ -72,6 +73,9 @@ interface AppState {
   /** Map of tool ID (number or string) → tool title for quick lookup */
   toolNameMap: Record<string, string>;
   workspaces: Workspace[];
+  /** Saved catalog shown in the rail library (replaces /list crews & /list flows) */
+  savedCrews: CatalogItem[];
+  savedFlows: CatalogItem[];
   selectedModel: string;
   sidebarOpen: boolean;
   settingsOpen: boolean;
@@ -82,6 +86,7 @@ interface AppActions {
   loadModels: () => Promise<void>;
   loadTools: () => Promise<void>;
   loadWorkspaces: () => Promise<void>;
+  loadCatalog: () => Promise<void>;
   updateConfig: (field: keyof AppConfig, value: string) => void;
   toggleTheme: () => void;
   setTheme: (theme: Theme) => void;
@@ -102,6 +107,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   tools: [],
   toolNameMap: {},
   workspaces: [],
+  savedCrews: [],
+  savedFlows: [],
   selectedModel: (() => {
     try {
       return localStorage.getItem(MODEL_STORAGE_KEY) || '';
@@ -166,6 +173,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
     } catch {
       // Workspaces endpoint may not be available
     }
+  },
+
+  loadCatalog: async () => {
+    const [crews, flows] = await Promise.all([
+      listSavedCrews().catch(() => [] as CatalogItem[]),
+      listSavedFlows().catch(() => [] as CatalogItem[]),
+    ]);
+    set({ savedCrews: crews, savedFlows: flows });
   },
 
   updateConfig: (field, value) => {

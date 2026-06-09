@@ -955,3 +955,122 @@ class TestCheckDatabricksConnection:
 
         assert result["status"] == "success"
         assert result["config"]["workspace_url"] == "https://env-host.example.com"
+
+
+class TestSetAiGatewayEnabled:
+    """Tests for the immediate AI Gateway toggle (flag-only persistence + env)."""
+
+    @pytest.mark.asyncio
+    async def test_persists_and_applies_env(self):
+        service = _make_service(group_id="g1")
+        service.repository.set_ai_gateway_enabled = AsyncMock(return_value=True)
+        with patch.object(DatabricksService, "_apply_ai_gateway_env") as mock_env:
+            ok = await service.set_ai_gateway_enabled(True)
+        assert ok is True
+        service.repository.set_ai_gateway_enabled.assert_awaited_once_with(True, group_id="g1")
+        mock_env.assert_called_once_with(True)
+
+    @pytest.mark.asyncio
+    async def test_no_config_returns_false_and_skips_env(self):
+        service = _make_service(group_id="g1")
+        service.repository.set_ai_gateway_enabled = AsyncMock(return_value=False)
+        with patch.object(DatabricksService, "_apply_ai_gateway_env") as mock_env:
+            ok = await service.set_ai_gateway_enabled(True)
+        assert ok is False
+        mock_env.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_repo_false_does_not_mutate_env(self):
+        """When repo returns False (no active config), the env var is untouched."""
+        from src.utils.databricks_url_utils import DatabricksURLUtils
+
+        env_var = DatabricksURLUtils.AI_GATEWAY_ENV_VAR
+        saved = os.environ.get(env_var)
+        try:
+            # Seed a known value and confirm it is NOT changed on the False path.
+            os.environ[env_var] = "sentinel-unchanged"
+            service = _make_service(group_id="g1")
+            service.repository.set_ai_gateway_enabled = AsyncMock(return_value=False)
+
+            ok = await service.set_ai_gateway_enabled(True)
+
+            assert ok is False
+            assert os.environ[env_var] == "sentinel-unchanged"
+        finally:
+            if saved is None:
+                os.environ.pop(env_var, None)
+            else:
+                os.environ[env_var] = saved
+
+
+# ===========================================================================
+# _apply_ai_gateway_env static method
+# ===========================================================================
+
+class TestApplyAiGatewayEnv:
+    """Tests for the _apply_ai_gateway_env staticmethod (env mirror + cache reset)."""
+
+    def _env_var(self):
+        from src.utils.databricks_url_utils import DatabricksURLUtils
+        return DatabricksURLUtils.AI_GATEWAY_ENV_VAR
+
+    def test_enabled_sets_env_true(self):
+        """_apply_ai_gateway_env(True) sets the env var to the string 'true'."""
+        env_var = self._env_var()
+        saved = os.environ.get(env_var)
+        try:
+            with patch("src.utils.databricks_auth.reset_auth_config_cache"):
+                DatabricksService._apply_ai_gateway_env(True)
+            assert os.environ[env_var] == "true"
+        finally:
+            if saved is None:
+                os.environ.pop(env_var, None)
+            else:
+                os.environ[env_var] = saved
+
+    def test_disabled_sets_env_false(self):
+        """_apply_ai_gateway_env(False) sets the env var to the string 'false'."""
+        env_var = self._env_var()
+        saved = os.environ.get(env_var)
+        try:
+            with patch("src.utils.databricks_auth.reset_auth_config_cache"):
+                DatabricksService._apply_ai_gateway_env(False)
+            assert os.environ[env_var] == "false"
+        finally:
+            if saved is None:
+                os.environ.pop(env_var, None)
+            else:
+                os.environ[env_var] = saved
+
+    def test_invokes_reset_auth_config_cache(self):
+        """The env apply path calls reset_auth_config_cache to invalidate the cache."""
+        env_var = self._env_var()
+        saved = os.environ.get(env_var)
+        try:
+            with patch("src.utils.databricks_auth.reset_auth_config_cache") as mock_reset:
+                DatabricksService._apply_ai_gateway_env(True)
+            mock_reset.assert_called_once_with()
+        finally:
+            if saved is None:
+                os.environ.pop(env_var, None)
+            else:
+                os.environ[env_var] = saved
+
+    def test_reset_cache_exception_is_swallowed(self):
+        """If reset_auth_config_cache raises, _apply_ai_gateway_env does not propagate it
+        and still sets the env var."""
+        env_var = self._env_var()
+        saved = os.environ.get(env_var)
+        try:
+            with patch(
+                "src.utils.databricks_auth.reset_auth_config_cache",
+                side_effect=RuntimeError("cache reset boom"),
+            ):
+                # Must not raise
+                DatabricksService._apply_ai_gateway_env(True)
+            assert os.environ[env_var] == "true"
+        finally:
+            if saved is None:
+                os.environ.pop(env_var, None)
+            else:
+                os.environ[env_var] = saved

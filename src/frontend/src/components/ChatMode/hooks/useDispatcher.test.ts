@@ -684,6 +684,117 @@ describe('useDispatcher', () => {
     });
   });
 
+  describe('crew/flow loaded (pending run) branches', () => {
+    it('catalog_load with a plan invokes onCrewLoaded with the plan and origin session', async () => {
+      const onCrewLoaded = vi.fn();
+      const opts = makeOptions({ onCrewLoaded });
+      const plan = { id: 'p1', name: 'Loaded plan', nodes: [], edges: [] };
+      mockedDispatch.mockResolvedValue(
+        result('catalog_load', { type: 'catalog_load', message: 'Plan loaded.', plan }),
+      );
+      const { result: hook } = renderHook(() => useDispatcher(opts));
+
+      await act(async () => {
+        await hook.current.sendMessage('open crew x');
+      });
+
+      expect(onCrewLoaded).toHaveBeenCalledWith(plan, 'session-1');
+    });
+
+    it('catalog_load without a plan does not invoke onCrewLoaded', async () => {
+      const onCrewLoaded = vi.fn();
+      const opts = makeOptions({ onCrewLoaded });
+      mockedDispatch.mockResolvedValue(
+        result('catalog_load', { type: 'catalog_load', message: 'Plan loaded.', plan: null }),
+      );
+      const { result: hook } = renderHook(() => useDispatcher(opts));
+
+      await act(async () => {
+        await hook.current.sendMessage('open crew x');
+      });
+
+      expect(onCrewLoaded).not.toHaveBeenCalled();
+    });
+
+    it('catalog_load with a plan but no onCrewLoaded callback does nothing', async () => {
+      const opts = makeOptions({ onCrewLoaded: undefined });
+      const plan = { id: 'p1', name: 'Loaded plan', nodes: [], edges: [] };
+      mockedDispatch.mockResolvedValue(
+        result('catalog_load', { type: 'catalog_load', message: 'Plan loaded.', plan }),
+      );
+      const { result: hook } = renderHook(() => useDispatcher(opts));
+
+      await act(async () => {
+        await hook.current.sendMessage('open crew x');
+      });
+      // No throw; nothing to assert beyond completion.
+      expect(hook.current.isDispatching.current).toBe(false);
+    });
+
+    it('flow_load with a flow invokes onFlowLoaded with the flow and origin session', async () => {
+      const onFlowLoaded = vi.fn();
+      const opts = makeOptions({ onFlowLoaded });
+      const flow = { id: 'f1', name: 'Loaded flow', nodes: [], edges: [] };
+      mockedDispatch.mockResolvedValue(
+        result('flow_load', { type: 'flow_load', message: 'Flow loaded.', flow }),
+      );
+      const { result: hook } = renderHook(() => useDispatcher(opts));
+
+      await act(async () => {
+        await hook.current.sendMessage('open flow x');
+      });
+
+      expect(onFlowLoaded).toHaveBeenCalledWith(flow, 'session-1');
+    });
+
+    it('flow_load without a flow does not invoke onFlowLoaded', async () => {
+      const onFlowLoaded = vi.fn();
+      const opts = makeOptions({ onFlowLoaded });
+      mockedDispatch.mockResolvedValue(
+        result('flow_load', { type: 'flow_load', message: 'Flow loaded.', flow: null }),
+      );
+      const { result: hook } = renderHook(() => useDispatcher(opts));
+
+      await act(async () => {
+        await hook.current.sendMessage('open flow x');
+      });
+
+      expect(onFlowLoaded).not.toHaveBeenCalled();
+    });
+
+    it('flow_load with a flow but no onFlowLoaded callback does nothing', async () => {
+      const opts = makeOptions({ onFlowLoaded: undefined });
+      const flow = { id: 'f1', name: 'Loaded flow', nodes: [], edges: [] };
+      mockedDispatch.mockResolvedValue(
+        result('flow_load', { type: 'flow_load', message: 'Flow loaded.', flow }),
+      );
+      const { result: hook } = renderHook(() => useDispatcher(opts));
+
+      await act(async () => {
+        await hook.current.sendMessage('open flow x');
+      });
+      expect(hook.current.isDispatching.current).toBe(false);
+    });
+  });
+
+  describe('displayAs label', () => {
+    it('shows the displayAs label as the user message instead of the raw message', async () => {
+      const opts = makeOptions();
+      mockedDispatch.mockResolvedValue(result('catalog_load', { type: 'catalog_load', message: 'Plan loaded.', plan: null }));
+      const { result: hook } = renderHook(() => useDispatcher(opts));
+
+      await act(async () => {
+        // raw dispatch message is the command; the chat should show the friendly label.
+        await hook.current.sendMessage('/crew open p1', undefined, undefined, undefined, undefined, 'Open crew: My Plan');
+      });
+
+      // The displayed user message uses displayAs, not the raw message.
+      expect(opts.addMessage).toHaveBeenCalledWith('user', 'Open crew: My Plan', undefined);
+      // The raw message is still dispatched (slash command -> not augmented).
+      expect(mockedDispatch).toHaveBeenCalledWith('/crew open p1', undefined, undefined);
+    });
+  });
+
   describe('session targeting', () => {
     it('uses updateMessage fallback when there is no origin session', async () => {
       const opts = makeOptions({ getCurrentSessionId: vi.fn(() => null) });

@@ -152,13 +152,17 @@ class EmbedderConfigBuilder:
                         import requests
 
                         workspace_url = DatabricksURLUtils.extract_workspace_from_endpoint(self.api_base)
-                        endpoint_url = DatabricksURLUtils.construct_model_invocation_url(workspace_url, self.model)
+                        # AI Gateway on  -> /ai-gateway/mlflow/v1/embeddings (model in body)
+                        # AI Gateway off -> /serving-endpoints/<model>/invocations (model in path)
+                        endpoint_url, body_model = DatabricksURLUtils.construct_embeddings_url(workspace_url, self.model)
 
                         if not endpoint_url:
                             raise Exception("Failed to construct valid endpoint URL")
 
                         logger.debug(f"Databricks embedding endpoint URL: {endpoint_url}")
-                        payload = {"input": input if isinstance(input, list) else [input]}
+                        payload: dict = {"input": input if isinstance(input, list) else [input]}
+                        if body_model:
+                            payload["model"] = body_model
 
                         # Prepare headers - prioritize user token for OBO auth
                         if self.user_token:
@@ -210,11 +214,12 @@ class EmbedderConfigBuilder:
                         logger.error(f"Error in Databricks embedding function: {e}")
                         raise e
 
-            # Construct URLs
-            api_base_url = DatabricksURLUtils.construct_serving_endpoints_url(databricks_endpoint)
+            # Construct URLs (encodes the workspace; the embedding function re-derives
+            # the workspace and picks serving-endpoints vs AI Gateway per the toggle)
+            api_base_url = DatabricksURLUtils.construct_llm_base_url(databricks_endpoint)
             if not api_base_url:
-                logger.error(f"Failed to construct serving endpoints URL from workspace: {databricks_endpoint}")
-                raise Exception("Failed to construct serving endpoints URL")
+                logger.error(f"Failed to construct LLM base URL from workspace: {databricks_endpoint}")
+                raise Exception("Failed to construct LLM base URL")
 
             logger.info(f"Databricks embedding api_base: {api_base_url}, model: {model_name}")
 

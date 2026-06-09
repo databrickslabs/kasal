@@ -221,7 +221,7 @@ class CrewService:
         await self.repository.delete_all()
     
     # Group-aware methods
-    async def create_with_group(self, obj_in: CrewCreate, group_context: GroupContext) -> Crew:
+    async def create_with_group(self, obj_in: CrewCreate, group_context: GroupContext, overwrite: bool = False) -> Crew:
         """
         Create a new crew with group context.
         Encrypts sensitive fields in tool_configs before storage.
@@ -229,27 +229,31 @@ class CrewService:
         Args:
             obj_in: Crew data for creation
             group_context: Group context from headers
+            overwrite: When True and a crew with the same name already exists in the
+                group, replace that crew's definition instead of raising ConflictError.
 
         Returns:
-            Created crew (with decrypted tool_configs for response)
+            Created (or overwritten) crew (with decrypted tool_configs for response)
 
         Raises:
-            ConflictError: If a crew with the same name already exists in the group
+            ConflictError: If a crew with the same name already exists and overwrite is False
         """
         try:
             # Check for duplicate name within the group
             primary_group_id = group_context.primary_group_id
+            existing = None
             if primary_group_id:
                 existing = await self.repository.find_by_name_and_group(
                     obj_in.name, [primary_group_id]
                 )
-                if existing:
+                if existing and not overwrite:
                     raise ConflictError(
                         detail=f"A crew with the name '{obj_in.name}' already exists. Please choose a different name."
                     )
 
             # Log details for debugging
-            logger.info(f"Creating crew with name: {obj_in.name} for group: {group_context.primary_group_id}")
+            action = "Overwriting" if existing else "Creating"
+            logger.info(f"{action} crew with name: {obj_in.name} for group: {primary_group_id}")
             logger.info(f"Agent IDs: {obj_in.agent_ids}")
             logger.info(f"Task IDs: {obj_in.task_ids}")
             logger.info(f"Number of nodes: {len(obj_in.nodes)}")
@@ -257,8 +261,7 @@ class CrewService:
 
             # Convert schema to dict and add group fields
             crew_data = obj_in.model_dump()
-            crew_data['group_id'] = group_context.primary_group_id
-            crew_data['created_by_email'] = group_context.group_email
+            crew_data['group_id'] = primary_group_id
 
             # Ensure all lists are properly initialized
             if crew_data.get('agent_ids') is None:
@@ -277,7 +280,16 @@ class CrewService:
             # Encrypt sensitive fields in tool_configs before storage
             crew_data = self._encrypt_tool_configs_in_data(crew_data)
 
+            if existing:
+                # Overwrite: replace the existing crew's definition, preserving its
+                # id and original creator (don't overwrite created_by_email).
+                logger.info(f"Overwriting existing crew '{obj_in.name}' (id={existing.id})")
+                crew = await self.repository.update(existing.id, crew_data) or existing
+                self._decrypt_crew_tool_configs(crew)
+                return crew
+
             # Create the model using the serialized data
+            crew_data['created_by_email'] = group_context.group_email
             crew = await self.repository.create(crew_data)
             self._decrypt_crew_tool_configs(crew)
             return crew

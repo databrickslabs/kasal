@@ -156,7 +156,7 @@ class TestSaveEnvironmentVars:
 class TestSetEnvironmentVars:
     """Tests for _set_environment_vars."""
 
-    @patch("src.utils.databricks_url_utils.DatabricksURLUtils.construct_serving_endpoints_url")
+    @patch("src.utils.databricks_url_utils.DatabricksURLUtils.construct_llm_base_url")
     def test_sets_all_vars(self, mock_construct):
         """Sets DATABRICKS_HOST, TOKEN, and API base vars from auth context."""
         mock_construct.return_value = "https://example.databricks.com/serving-endpoints"
@@ -172,9 +172,9 @@ class TestSetEnvironmentVars:
             assert os.environ["DATABRICKS_API_BASE"] == "https://example.databricks.com/serving-endpoints"
             assert os.environ["DATABRICKS_ENDPOINT"] == "https://example.databricks.com/serving-endpoints"
 
-    @patch("src.utils.databricks_url_utils.DatabricksURLUtils.construct_serving_endpoints_url")
+    @patch("src.utils.databricks_url_utils.DatabricksURLUtils.construct_llm_base_url")
     def test_skips_api_base_when_empty(self, mock_construct):
-        """Does not set API base vars when construct_serving_endpoints_url returns empty."""
+        """Does not set API base vars when construct_llm_base_url returns empty."""
         mock_construct.return_value = ""
         runner = _make_runner()
         auth_ctx = _make_auth_ctx()
@@ -188,9 +188,9 @@ class TestSetEnvironmentVars:
             assert "DATABRICKS_API_BASE" not in os.environ
             assert "DATABRICKS_ENDPOINT" not in os.environ
 
-    @patch("src.utils.databricks_url_utils.DatabricksURLUtils.construct_serving_endpoints_url")
+    @patch("src.utils.databricks_url_utils.DatabricksURLUtils.construct_llm_base_url")
     def test_skips_api_base_when_none(self, mock_construct):
-        """Does not set API base vars when construct_serving_endpoints_url returns None."""
+        """Does not set API base vars when construct_llm_base_url returns None."""
         mock_construct.return_value = None
         runner = _make_runner()
         auth_ctx = _make_auth_ctx()
