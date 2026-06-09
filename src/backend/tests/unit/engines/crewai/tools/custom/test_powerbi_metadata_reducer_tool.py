@@ -267,28 +267,15 @@ class TestLLMSelection:
         )
         ctx = _make_model_context()
 
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "choices": [{
-                "message": {
-                    "content": json.dumps({
-                        "tables": ["Sales", "Geography"],
-                        "measures": ["Total Revenue"],
-                        "reasoning": "test reasoning",
-                    })
-                }
-            }]
-        }
-        mock_response.raise_for_status = MagicMock()
+        llm_content = json.dumps({
+            "tables": ["Sales", "Geography"],
+            "measures": ["Total Revenue"],
+            "reasoning": "test reasoning",
+        })
 
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.post = AsyncMock(return_value=mock_response)
-            mock_client_cls.return_value = mock_client
+        mock_completion = AsyncMock(return_value=llm_content)
 
+        with patch("src.core.llm_manager.LLMManager.completion", mock_completion):
             result = tool._run(
                 model_context_json=json.dumps(ctx),
                 user_question="What is the total revenue by country?",
@@ -573,7 +560,7 @@ class TestCacheFallback:
             yield MagicMock()
 
         with patch(
-            "src.engines.crewai.tools.tool_session_provider.async_session_factory",
+            "src.db.session.async_session_factory",
             mock_session_factory,
         ), patch(
             "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.PowerBISemanticModelCacheService",
@@ -605,7 +592,7 @@ class TestCacheFallback:
             yield MagicMock()
 
         with patch(
-            "src.engines.crewai.tools.tool_session_provider.async_session_factory",
+            "src.db.session.async_session_factory",
             mock_session_factory,
         ), patch(
             "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.PowerBISemanticModelCacheService",
@@ -637,7 +624,7 @@ class TestCacheFallback:
             yield MagicMock()
 
         with patch(
-            "src.engines.crewai.tools.tool_session_provider.async_session_factory",
+            "src.db.session.async_session_factory",
             mock_session_factory,
         ), patch(
             "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.PowerBISemanticModelCacheService",
@@ -669,7 +656,7 @@ class TestCacheFallback:
             yield MagicMock()
 
         with patch(
-            "src.engines.crewai.tools.tool_session_provider.async_session_factory",
+            "src.db.session.async_session_factory",
             mock_session_factory,
         ), patch(
             "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.PowerBISemanticModelCacheService",
@@ -721,7 +708,7 @@ class TestCacheSaving:
             yield MagicMock()
 
         with patch(
-            "src.engines.crewai.tools.tool_session_provider.async_session_factory",
+            "src.db.session.async_session_factory",
             mock_session_factory,
         ), patch(
             "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.PowerBISemanticModelCacheService",
@@ -755,7 +742,7 @@ class TestCacheSaving:
             yield MagicMock()
 
         with patch(
-            "src.engines.crewai.tools.tool_session_provider.async_session_factory",
+            "src.db.session.async_session_factory",
             mock_session_factory,
         ), patch(
             "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.PowerBISemanticModelCacheService",
@@ -1132,7 +1119,7 @@ class TestParseModelContextEdgeCases:
             yield MagicMock()
 
         with patch(
-            "src.engines.crewai.tools.tool_session_provider.async_session_factory",
+            "src.db.session.async_session_factory",
             mock_session_factory,
         ), patch(
             "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.PowerBISemanticModelCacheService",
