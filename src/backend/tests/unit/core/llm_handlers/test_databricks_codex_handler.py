@@ -901,9 +901,8 @@ class TestResponsesCache:
                 "content": [{"type": "output_text", "text": "cached answer", "annotations": []}],
             }],
         }
-        # Sanity: strict validation would indeed reject this payload.
-        with pytest.raises(Exception):
-            Response.model_validate(stored_dump)
+        # Note: newer openai SDK accepts prompt_cache_retention natively.
+        # The cache reconstruct path must still work regardless.
 
         resp = MagicMock()
         resp.model_dump.return_value = stored_dump

@@ -77,37 +77,20 @@ async def test_call_llm_no_credentials_returns_error(converter_no_llm):
 
 @pytest.mark.asyncio
 async def test_call_llm_success(converter_with_llm):
-    """_call_llm returns content on HTTP 200 from Databricks API."""
-    fake_response_body = {
-        "choices": [{"message": {"content": '{"success": true, "databricks_sql": "SELECT 1"}'}}],
-        "usage": {"total_tokens": 100},
-    }
-
-    mock_response = MagicMock()
-    mock_response.json.return_value = fake_response_body
-    mock_response.raise_for_status = MagicMock()
-
-    mock_client = AsyncMock()
-    mock_client.post = AsyncMock(return_value=mock_response)
-
-    with patch("httpx.AsyncClient") as mock_cls:
-        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+    """_call_llm returns content when LLMManager.completion() succeeds."""
+    with patch("src.core.llm_manager.LLMManager.completion", new_callable=AsyncMock) as mock_completion:
+        mock_completion.return_value = '{"success": true, "databricks_sql": "SELECT 1"}'
         result = await converter_with_llm._call_llm("user prompt", "system prompt")
 
     assert result["content"] is not None
-    assert result["usage"]["total_tokens"] == 100
+    assert result["content"] == '{"success": true, "databricks_sql": "SELECT 1"}'
 
 
 @pytest.mark.asyncio
 async def test_call_llm_http_error_returns_error_dict(converter_with_llm):
-    """_call_llm returns error dict when HTTP call raises an exception."""
-    mock_client = AsyncMock()
-    mock_client.post = AsyncMock(side_effect=Exception("connection refused"))
-
-    with patch("httpx.AsyncClient") as mock_cls:
-        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+    """_call_llm returns error dict when LLMManager.completion() raises."""
+    with patch("src.core.llm_manager.LLMManager.completion", new_callable=AsyncMock) as mock_completion:
+        mock_completion.side_effect = Exception("connection refused")
         result = await converter_with_llm._call_llm("prompt", "sys")
 
     assert result["content"] is None
