@@ -94,12 +94,13 @@ class Settings(BaseSettings):
     # identical calls. CrewAI uses LiteLLM under the hood, so enabling this
     # transparently benefits crew execution too.
     LITELLM_CACHE_ENABLED: bool = os.getenv("LITELLM_CACHE_ENABLED", "true").lower() == "true"
-    # Backend: "disk" (default), "local" (in-memory), "redis", or "s3".
-    # Defaults to "disk" because crews run in fresh subprocesses — an in-memory
-    # ("local") cache is cold on every run and only helps repeats within a single
-    # process. "disk" persists and is shared across the API process and crew
-    # subprocesses, so identical calls hit across runs (no Redis infra required).
-    LITELLM_CACHE_TYPE: str = os.getenv("LITELLM_CACHE_TYPE", "disk")
+    # Backend: "local" (in-memory, default), "redis", "disk", or "s3".
+    # Default is "local". NOTE: "disk" gives cross-run caching across the
+    # subprocess-per-execution model, BUT the SQLite-backed diskcache can block
+    # under the concurrent LLM calls made during crew generation/execution and
+    # caused a generation hang — so "disk" is opt-in (set LITELLM_CACHE_TYPE=disk)
+    # pending a fix, and "local" remains the safe default.
+    LITELLM_CACHE_TYPE: str = os.getenv("LITELLM_CACHE_TYPE", "local")
     # Time-to-live for cached responses, in seconds (default 1 hour).
     LITELLM_CACHE_TTL: int = int(os.getenv("LITELLM_CACHE_TTL", "3600"))
     # On-disk cache directory (only used when LITELLM_CACHE_TYPE == "disk").
