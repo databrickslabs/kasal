@@ -3177,19 +3177,17 @@ class TestFetcherEnrichColumnsAndMeasuresSemantic:
         tables = [{"name": "Sales", "columns": ["Amount", "Region"]}]  # strings, not dicts
         measures = []
 
-        mock_client = MagicMock()
-        mock_client.post = AsyncMock()
+        mock_completion = AsyncMock(return_value='{"columns": []}')
 
-        self._run(
-            self.tool._enrich_columns_and_measures_semantic(
-                mock_client,
-                "https://example.com/invocations",
-                {"Authorization": "Bearer tok"},
-                tables, measures, {},
+        with patch("src.core.llm_manager.LLMManager.completion", mock_completion):
+            self._run(
+                self.tool._enrich_columns_and_measures_semantic(
+                    "databricks-claude-sonnet-4",
+                    tables, measures, {},
+                )
             )
-        )
-        # No post call should be made for string columns
-        mock_client.post.assert_not_called()
+        # No LLM call should be made for string columns
+        mock_completion.assert_not_called()
 
     def test_dict_columns_enriched(self):
         tables = [
@@ -3201,23 +3199,17 @@ class TestFetcherEnrichColumnsAndMeasuresSemantic:
         ]
         measures = []
 
-        mock_resp = MagicMock()
-        mock_resp.raise_for_status = MagicMock()
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": '{"columns": [{"name": "Amount", "description": "Sales amount", "synonyms": ["Revenue"]}]}'}}]
-        }
-
-        mock_client = MagicMock()
-        mock_client.post = AsyncMock(return_value=mock_resp)
-
-        self._run(
-            self.tool._enrich_columns_and_measures_semantic(
-                mock_client,
-                "https://example.com/invocations",
-                {"Authorization": "Bearer tok"},
-                tables, measures, {},
-            )
+        mock_completion = AsyncMock(
+            return_value='{"columns": [{"name": "Amount", "description": "Sales amount", "synonyms": ["Revenue"]}]}'
         )
+
+        with patch("src.core.llm_manager.LLMManager.completion", mock_completion):
+            self._run(
+                self.tool._enrich_columns_and_measures_semantic(
+                    "databricks-claude-sonnet-4",
+                    tables, measures, {},
+                )
+            )
 
         col = next((c for c in tables[0]["columns"] if c["name"] == "Amount"), None)
         assert col is not None
@@ -3227,23 +3219,17 @@ class TestFetcherEnrichColumnsAndMeasuresSemantic:
         tables = []
         measures = [{"name": "Revenue", "expression": "SUM(Sales[Amount])"}]
 
-        mock_resp = MagicMock()
-        mock_resp.raise_for_status = MagicMock()
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": '{"measures": [{"name": "Revenue", "description": "Total sales revenue", "synonyms": ["Total Revenue"]}]}'}}]
-        }
-
-        mock_client = MagicMock()
-        mock_client.post = AsyncMock(return_value=mock_resp)
-
-        self._run(
-            self.tool._enrich_columns_and_measures_semantic(
-                mock_client,
-                "https://example.com/invocations",
-                {"Authorization": "Bearer tok"},
-                tables, measures, {},
-            )
+        mock_completion = AsyncMock(
+            return_value='{"measures": [{"name": "Revenue", "description": "Total sales revenue", "synonyms": ["Total Revenue"]}]}'
         )
+
+        with patch("src.core.llm_manager.LLMManager.completion", mock_completion):
+            self._run(
+                self.tool._enrich_columns_and_measures_semantic(
+                    "databricks-claude-sonnet-4",
+                    tables, measures, {},
+                )
+            )
 
         assert measures[0].get("description") == "Total sales revenue"
         assert "Total Revenue" in measures[0].get("synonyms", [])

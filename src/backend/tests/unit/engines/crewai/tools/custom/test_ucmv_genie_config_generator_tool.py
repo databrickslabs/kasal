@@ -341,28 +341,31 @@ class TestDimTableFiltering:
 
 class TestLLMIntegration:
     def test_llm_called_with_correct_model(self):
-        """Mock litellm, verify model used."""
+        """Mock LLMManager.completion, verify model used."""
         tool = UCMVGenieConfigGeneratorTool(llm_model="databricks-claude-sonnet-4")
         auth = _mock_auth()
-        llm_resp = _mock_litellm_response()
+        llm_content = '{"text_instructions": "Test", "sample_questions": "Q1\\nQ2", "example_sqls": [], "join_specs": []}'
+
+        from unittest.mock import AsyncMock
+        mock_completion = AsyncMock(return_value=llm_content)
 
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("litellm.completion", return_value=llm_resp) as mock_llm:
+             patch("src.core.llm_manager.LLMManager.completion", mock_completion) as mock_llm:
             tool._run(ucmv_output=SAMPLE_UCMV_OUTPUT, catalog="main", schema_name="metrics")
 
         mock_llm.assert_called_once()
         call_kwargs = mock_llm.call_args
-        # Model should be prefixed with databricks/
-        model_arg = call_kwargs[1].get("model") or call_kwargs[0][0]
-        assert "databricks" in model_arg
+        model_arg = call_kwargs[1].get("model") or call_kwargs[0][1]
+        assert "claude-sonnet" in model_arg
 
     def test_llm_failure_returns_partial_config(self):
-        """litellm raises exception → falls back to empty generated, still returns valid output."""
+        """LLMManager raises exception → falls back to empty generated, still returns valid output."""
         tool = UCMVGenieConfigGeneratorTool()
         auth = _mock_auth()
 
+        from unittest.mock import AsyncMock
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("litellm.completion", side_effect=RuntimeError("LLM unavailable")):
+             patch("src.core.llm_manager.LLMManager.completion", AsyncMock(side_effect=RuntimeError("LLM unavailable"))):
             result = tool._run(ucmv_output=SAMPLE_UCMV_OUTPUT, catalog="main", schema_name="metrics")
 
         data = json.loads(result)
