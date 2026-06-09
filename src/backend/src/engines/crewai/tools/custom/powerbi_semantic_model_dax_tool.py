@@ -24,7 +24,6 @@ from crewai.tools import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 import httpx
 
-from src.services.powerbi_semantic_model_cache_service import PowerBISemanticModelCacheService
 from src.services.dax_rag_retriever import DaxRagRetriever
 from src.engines.crewai.tools.tool_session_provider import ToolSessionProvider
 
@@ -668,7 +667,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
         """Persist DAX generation details to conversion_history (fail-open)."""
         try:
             from src.schemas.conversion import ConversionHistoryCreate
-            from src.repositories.conversion_repository import ConversionHistoryRepository
+            # ConversionHistoryRepository is provided by ToolSessionProvider.conversion_repo()
 
             success = results.get("dax_execution", {}).get("success", False)
             exec_result = results.get("dax_execution", {})
@@ -726,12 +725,11 @@ class PowerBISemanticModelDaxTool(BaseTool):
                     .get("group_context", {}).get("primary_group_id")
             )
 
-            async with ToolSessionProvider.session() as session:
-                repo = ConversionHistoryRepository(session)
+            async with ToolSessionProvider.conversion_repo() as repo:
                 record = await repo.create(history_data.model_dump())
                 if group_id:
                     record.group_id = group_id
-                await session.commit()
+                await repo.session.commit()
                 logger.info(
                     f"[DaxTool] Saved conversion_history record id={record.id} "
                     f"(status={history_data.status}, filters={list(active_filters.keys())})"
@@ -784,8 +782,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
 
         # ── Priority 2: Reduced cache (saved by Metadata Reducer with report_id='reduced') ──
         try:
-            async with ToolSessionProvider.session() as session:
-                cache_service = PowerBISemanticModelCacheService(session)
+            async with ToolSessionProvider.cache_service() as cache_service:
                 reduced = await cache_service.get_cached_metadata(
                     group_id=group_id, dataset_id=dataset_id,
                     workspace_id=workspace_id, report_id="reduced",
@@ -809,8 +806,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
         use_any_report = not report_id
         logger.info(f"[DaxTool] _resolve_model_context: Full cache lookup — group={group_id}, dataset={dataset_id}, workspace={workspace_id[:12]}..., report_id={report_id or 'ANY'}")
         try:
-            async with ToolSessionProvider.session() as session:
-                cache_service = PowerBISemanticModelCacheService(session)
+            async with ToolSessionProvider.cache_service() as cache_service:
                 cached = await cache_service.get_cached_metadata(
                     group_id=group_id, dataset_id=dataset_id,
                     workspace_id=workspace_id, report_id=report_id,
@@ -857,8 +853,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
         if not dataset_id or not workspace_id:
             return None
 
-        async with ToolSessionProvider.session() as session:
-            cache_service = PowerBISemanticModelCacheService(session)
+        async with ToolSessionProvider.cache_service() as cache_service:
             cached = await cache_service.get_cached_metadata(
                 group_id=group_id, dataset_id=dataset_id,
                 workspace_id=workspace_id, any_report_id=True,
