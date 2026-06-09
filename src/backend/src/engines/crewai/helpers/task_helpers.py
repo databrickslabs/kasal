@@ -662,7 +662,6 @@ async def create_task(
 
         try:
             from crewai.tasks.llm_guardrail import LLMGuardrail
-            from crewai import LLM
 
             # Extract configuration - handle both dict and object
             if isinstance(llm_guardrail_config, dict):

@@ -1123,23 +1123,9 @@ class MqueryConversionPipelineTool(BaseTool):
         """Ask LLM to fix SQL given the row-count diff vs DAX."""
         import re as _re
         try:
-            from crewai import LLM
+            from src.core.llm_manager import LLMManager
+            from src.utils.telemetry import get_user_agent_header, KasalProduct
             model = cfg.get("llm_model", "databricks-claude-sonnet-4")
-            workspace_url = cfg.get("llm_workspace_url") or ""
-            llm_token = cfg.get("llm_token") or ""
-            if not workspace_url or not llm_token:
-                import os
-                workspace_url = workspace_url or os.environ.get("DATABRICKS_HOST") or os.environ.get("DATABRICKS_WORKSPACE_URL", "")
-                llm_token = llm_token or os.environ.get("DATABRICKS_TOKEN") or os.environ.get("DATABRICKS_API_KEY", "")
-            if workspace_url and not workspace_url.startswith("http"):
-                workspace_url = f"https://{workspace_url}"
-            from src.utils.databricks_url_utils import DatabricksURLUtils
-            llm = LLM(
-                model=model,
-                base_url=DatabricksURLUtils.construct_llm_base_url(workspace_url),
-                api_key=llm_token or None,
-                max_tokens=2000,
-            )
             prompt = (
                 f"You are a Databricks SQL expert. This SQL was transpiled from a Power BI M-Query "
                 f"but the row count does not match: {diff}\n\n"
@@ -1155,7 +1141,13 @@ class MqueryConversionPipelineTool(BaseTool):
                 f"Return ONLY the corrected SQL SELECT statement that faithfully implements "
                 f"the M-Query transformation. No explanation."
             )
-            response = llm.call([{"role": "user", "content": prompt}])
+            response = await LLMManager.completion(
+                messages=[{"role": "user", "content": prompt}],
+                model=model,
+                temperature=0,
+                max_tokens=2000,
+                extra_headers=get_user_agent_header(KasalProduct.POWERBI),
+            )
             if isinstance(response, str):
                 m = _re.search(r"```(?:sql)?\s*(.*?)```", response, _re.DOTALL | _re.IGNORECASE)
                 return m.group(1).strip() if m else response.strip()
@@ -1238,23 +1230,9 @@ class MqueryConversionPipelineTool(BaseTool):
         # LLM generates the CREATE TABLE; we do the INSERT VALUES mechanically
         # but with the correct types from the LLM-generated schema.
         try:
-            from crewai import LLM
+            from src.core.llm_manager import LLMManager
+            from src.utils.telemetry import get_user_agent_header, KasalProduct
             model = cfg.get("llm_model", "databricks-claude-sonnet-4")
-            workspace_url = cfg.get("llm_workspace_url") or ""
-            llm_token = cfg.get("llm_token") or ""
-            if not workspace_url or not llm_token:
-                import os as _os
-                workspace_url = workspace_url or _os.environ.get("DATABRICKS_HOST") or _os.environ.get("DATABRICKS_WORKSPACE_URL", "")
-                llm_token = llm_token or _os.environ.get("DATABRICKS_TOKEN") or _os.environ.get("DATABRICKS_API_KEY", "")
-            if workspace_url and not workspace_url.startswith("http"):
-                workspace_url = f"https://{workspace_url}"
-            from src.utils.databricks_url_utils import DatabricksURLUtils
-            llm = LLM(
-                model=model,
-                base_url=DatabricksURLUtils.construct_llm_base_url(workspace_url),
-                api_key=llm_token or None,
-                max_tokens=1500,
-            )
             prompt = (
                 f"You are a Databricks SQL expert. A Power BI table called '{tname}' "
                 f"has been fetched via EVALUATE and needs to be inserted into Delta table `{full_target}`.\n\n"
@@ -1264,7 +1242,13 @@ class MqueryConversionPipelineTool(BaseTool):
                 f"with correct Spark SQL types (STRING, BIGINT, DOUBLE, DATE, TIMESTAMP, BOOLEAN). "
                 f"Infer types from the sample data. Return only the SQL, no explanation."
             )
-            response = llm.call([{"role": "user", "content": prompt}])
+            response = await LLMManager.completion(
+                messages=[{"role": "user", "content": prompt}],
+                model=model,
+                temperature=0,
+                max_tokens=1500,
+                extra_headers=get_user_agent_header(KasalProduct.POWERBI),
+            )
             if isinstance(response, str):
                 m = _re.search(r"```(?:sql)?\s*(.*?)```", response, _re.DOTALL | _re.IGNORECASE)
                 create_sql = m.group(1).strip() if m else response.strip()
