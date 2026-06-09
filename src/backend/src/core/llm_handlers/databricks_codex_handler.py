@@ -25,6 +25,7 @@ Reference: https://developers.openai.com/cookbook/examples/gpt-5/codex_prompting
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from typing import Any
@@ -192,6 +193,63 @@ class DatabricksCodexCompletion(OpenAICompletion):
     # Phase-aware response handling
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _responses_cache_key(params: dict[str, Any]) -> str:
+        """Stable cache key for a Responses API request.
+
+        litellm's own ``get_cache_key`` only hashes its known chat params (model,
+        messages, …) and would drop the Responses-API fields (``input``,
+        ``instructions``, ``tools``), collapsing every codex request onto the same
+        key. So hash the full request payload ourselves. ``default=str`` tolerates
+        any non-JSON-serializable values in the params.
+        """
+        payload = json.dumps(params, sort_keys=True, default=str)
+        return "codex-responses:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _cached_responses_create(self, params: dict[str, Any]) -> Any:
+        """Call the Responses API, served from litellm's cache when possible.
+
+        gpt-5.3-codex bypasses ``litellm.completion`` (it uses the OpenAI Responses
+        API directly), so litellm's response cache never sees these calls. Reuse
+        the configured ``litellm.cache`` object as a plain key/value store —
+        honoring its enabled / TTL / disk settings — so identical codex requests
+        are served instantly on repeat. Best-effort: any cache error falls through
+        to a live request. Codex requests are stateless (the full ``input`` is sent
+        each turn; no ``previous_response_id``), so a cached response is safe to
+        replay.
+        """
+        import litellm
+        from openai.types.responses import Response
+
+        cache = getattr(litellm, "cache", None)
+        cache_key = None
+        if cache is not None:
+            try:
+                cache_key = self._responses_cache_key(params)
+                cached = cache.get_cache(cache_key=cache_key)
+                if cached is not None:
+                    logger.info("[DatabricksCodex] Responses cache HIT")
+                    # Reconstruct with the OpenAI SDK's lenient ``construct`` — the
+                    # SAME path the live client uses to parse responses. Strict
+                    # ``model_validate`` rejects Databricks-specific values the live
+                    # parser accepts (e.g. ``prompt_cache_retention='in_memory'``,
+                    # which is not one of the SDK's ``'in-memory'``/``'24h'``
+                    # literals), which would make every cache hit raise and fall
+                    # through to a live call — defeating the cache entirely.
+                    return Response.construct(**cached)
+            except Exception as exc:  # noqa: BLE001 — cache is best-effort
+                logger.debug("[DatabricksCodex] cache read skipped: %s", exc)
+                cache_key = None
+
+        response = self._get_sync_client().responses.create(**params)
+
+        if cache is not None and cache_key is not None:
+            try:
+                cache.add_cache(response.model_dump(), cache_key=cache_key)
+            except Exception as exc:  # noqa: BLE001 — cache is best-effort
+                logger.debug("[DatabricksCodex] cache write skipped: %s", exc)
+        return response
+
     def _handle_responses(
         self,
         params: dict[str, Any],
@@ -205,8 +263,10 @@ class DatabricksCodexCompletion(OpenAICompletion):
 
         try:
             # CrewAI 1.14+ moved the OpenAI client to a private attr; use the
-            # lazy getter so it is built on first use.
-            response: Response = self._get_sync_client().responses.create(**params)
+            # lazy getter so it is built on first use. Served from litellm's cache
+            # when an identical request is seen again (codex bypasses
+            # litellm.completion, so we reuse the cache object directly).
+            response: Response = self._cached_responses_create(params)
 
             # Capture raw output items WITH phase for next turn
             self._capture_output_items(response)
