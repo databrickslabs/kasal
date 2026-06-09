@@ -213,6 +213,7 @@ export function buildCrewConfigFromGenerated(
   toolNameMap: Record<string, string> = {},
   sessionId?: string | null,
   workspaceMemory: boolean = true,
+  memoryEnabled: boolean = true,
 ): CrewExecutionConfig {
   const agents_yaml: Record<string, Record<string, unknown>> = {};
   const tasks_yaml: Record<string, Record<string, unknown>> = {};
@@ -269,6 +270,13 @@ export function buildCrewConfigFromGenerated(
         agentConfig[field] = agent[field];
       }
     });
+
+    // "No memory" mode: force every agent to be created without memory. The
+    // backend's determine_crew_memory() disables crew memory entirely when ALL
+    // agents have memory:false, so nothing is recalled or persisted.
+    if (!memoryEnabled) {
+      agentConfig.memory = false;
+    }
 
     agents_yaml[key] = agentConfig;
   });

@@ -310,6 +310,8 @@ const ChatWorkspace: React.FC = () => {
   // the empty→conversation input swap (local state would reset to ON).
   const workspaceMemory = useExecutionStore((s) => s.workspaceMemory);
   const setWorkspaceMemory = useExecutionStore((s) => s.setWorkspaceMemory);
+  const memoryEnabled = useExecutionStore((s) => s.memoryEnabled);
+  const setMemoryEnabled = useExecutionStore((s) => s.setMemoryEnabled);
 
   // Render-time isolation guard: only show a preview that belongs to the
   // session currently on screen. This is the backstop that prevents a preview
@@ -903,6 +905,8 @@ const ChatWorkspace: React.FC = () => {
           // Read the recall scope from the store at execution time so the value
           // is always the user's current choice (not a stale closure capture).
           useExecutionStore.getState().workspaceMemory,
+          // "No memory" mode → agents are built without memory.
+          useExecutionStore.getState().memoryEnabled,
         );
         const execution = await createExecution(crewConfig);
         const jobId = execution.job_id || execution.execution_id;
@@ -1478,6 +1482,8 @@ const ChatWorkspace: React.FC = () => {
               sessionId={currentSessionId}
               workspaceMemory={workspaceMemory}
               onWorkspaceMemoryChange={setWorkspaceMemory}
+              memoryEnabled={memoryEnabled}
+              onMemoryEnabledChange={setMemoryEnabled}
             />
           </div>
         </main>

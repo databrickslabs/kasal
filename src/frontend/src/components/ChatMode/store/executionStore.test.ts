@@ -116,6 +116,15 @@ describe('executionStore - basic setters & log', () => {
     expect(useExecutionStore.getState().workspaceMemory).toBe(true);
   });
 
+  it('setMemoryEnabled toggles whether crews run with memory (default enabled)', () => {
+    // Defaults to enabled so crews keep memory unless the user picks "No memory".
+    expect(useExecutionStore.getState().memoryEnabled).toBe(true);
+    useExecutionStore.getState().setMemoryEnabled(false);
+    expect(useExecutionStore.getState().memoryEnabled).toBe(false);
+    useExecutionStore.getState().setMemoryEnabled(true);
+    expect(useExecutionStore.getState().memoryEnabled).toBe(true);
+  });
+
   it('setPreviewContent stamps owner with current session when content provided', () => {
     setCurrentSessionId('sess-A');
     useExecutionStore.getState().setPreviewContent(preview as any);

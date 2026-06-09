@@ -87,6 +87,13 @@ interface ChatInputProps {
    */
   workspaceMemory?: boolean;
   onWorkspaceMemoryChange?: (value: boolean) => void;
+  /**
+   * "No memory" toggle — owned by the parent for the same persistence reason.
+   * true (default) = crews keep memory (scope governed by workspaceMemory);
+   * false = agents run without memory (nothing recalled or persisted).
+   */
+  memoryEnabled?: boolean;
+  onMemoryEnabledChange?: (value: boolean) => void;
 }
 
 const attachmentsKey = (sessionId: string) => `kasal-chat-attachments-${sessionId}`;
@@ -102,6 +109,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
   isGenerating = false,
   workspaceMemory = true,
   onWorkspaceMemoryChange,
+  memoryEnabled = true,
+  onMemoryEnabledChange,
 }) => {
   const [value, setValue] = useState('');
   const [showCommands, setShowCommands] = useState(false);
@@ -618,27 +627,63 @@ const ChatInput: React.FC<ChatInputProps> = ({
         <div className="flex items-center justify-end px-4 py-2.5">
           {/* format + model selector + attach + send */}
           <div className="flex items-center gap-2">
-            {/* Workspace-memory toggle — ON (default): recall context across the
-                whole workspace; OFF: only this chat session. */}
+            {/* Memory mode toggle — cycles through three states:
+                  Workspace memory → Session memory → No memory → (repeat)
+                - Workspace memory: recall context from across the whole workspace.
+                - Session memory: recall only memory from this chat session.
+                - No memory: agents run without memory (nothing recalled/persisted).
+                Owned by the store so the choice survives remounts. */}
             <button
               type="button"
-              onClick={() => onWorkspaceMemoryChange?.(!workspaceMemory)}
-              aria-pressed={workspaceMemory}
+              onClick={() => {
+                if (!memoryEnabled) {
+                  // No memory → Workspace memory
+                  onMemoryEnabledChange?.(true);
+                  onWorkspaceMemoryChange?.(true);
+                } else if (workspaceMemory) {
+                  // Workspace memory → Session memory
+                  onWorkspaceMemoryChange?.(false);
+                } else {
+                  // Session memory → No memory
+                  onMemoryEnabledChange?.(false);
+                }
+              }}
+              aria-label={
+                !memoryEnabled
+                  ? 'Memory mode: No memory'
+                  : workspaceMemory
+                    ? 'Memory mode: Workspace memory'
+                    : 'Memory mode: Session memory'
+              }
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
               style={{
-                color: workspaceMemory ? 'var(--accent)' : 'var(--text-muted)',
+                color:
+                  memoryEnabled && workspaceMemory
+                    ? 'var(--accent)'
+                    : 'var(--text-muted)',
                 backgroundColor: 'var(--bg-secondary)',
               }}
               title={
-                workspaceMemory
-                  ? 'Workspace memory ON — recall context from across the workspace. Click to use only this chat session.'
-                  : 'Workspace memory OFF — recall only this chat session. Click to use workspace-wide context.'
+                !memoryEnabled
+                  ? 'No memory — agents run without memory; nothing is recalled or persisted. Click for workspace memory.'
+                  : workspaceMemory
+                    ? 'Workspace memory — recall context from across the workspace. Click to use only this chat session.'
+                    : 'Session memory — recall only this chat session. Click for no memory.'
               }
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+                {!memoryEnabled && (
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4l16 16" />
+                )}
               </svg>
-              <span>{workspaceMemory ? 'Workspace memory' : 'Session only'}</span>
+              <span>
+                {!memoryEnabled
+                  ? 'No memory'
+                  : workspaceMemory
+                    ? 'Workspace memory'
+                    : 'Session memory'}
+              </span>
             </button>
 
             {/* Output format selector */}

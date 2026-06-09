@@ -555,19 +555,35 @@ describe('ChatInput — run / generation status (inline, replaces top banner)', 
   });
 });
 
-describe('ChatInput — workspace memory toggle (controlled)', () => {
-  it('reflects the controlled value and calls onWorkspaceMemoryChange on click', () => {
+describe('ChatInput — memory mode toggle (three-state, controlled)', () => {
+  it('cycles Workspace memory → Session memory → No memory → Workspace memory', () => {
     const onWorkspaceMemoryChange = vi.fn();
+    const onMemoryEnabledChange = vi.fn();
+    const props = {
+      ...baseProps,
+      onWorkspaceMemoryChange,
+      onMemoryEnabledChange,
+    };
+
+    // State 1: Workspace memory → clicking goes to Session memory.
     const { rerender } = render(
-      <ChatInput {...baseProps} workspaceMemory onWorkspaceMemoryChange={onWorkspaceMemoryChange} />,
+      <ChatInput {...props} memoryEnabled workspaceMemory />,
     );
     expect(screen.getByText('Workspace memory')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Workspace memory'));
-    expect(onWorkspaceMemoryChange).toHaveBeenCalledWith(false);
-    // Parent flips the value → label reflects "Session only".
-    rerender(
-      <ChatInput {...baseProps} workspaceMemory={false} onWorkspaceMemoryChange={onWorkspaceMemoryChange} />,
-    );
-    expect(screen.getByText('Session only')).toBeInTheDocument();
+    expect(onWorkspaceMemoryChange).toHaveBeenLastCalledWith(false);
+
+    // State 2: Session memory → clicking disables memory.
+    rerender(<ChatInput {...props} memoryEnabled workspaceMemory={false} />);
+    expect(screen.getByText('Session memory')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Session memory'));
+    expect(onMemoryEnabledChange).toHaveBeenLastCalledWith(false);
+
+    // State 3: No memory → clicking returns to Workspace memory.
+    rerender(<ChatInput {...props} memoryEnabled={false} workspaceMemory={false} />);
+    expect(screen.getByText('No memory')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('No memory'));
+    expect(onMemoryEnabledChange).toHaveBeenLastCalledWith(true);
+    expect(onWorkspaceMemoryChange).toHaveBeenLastCalledWith(true);
   });
 });

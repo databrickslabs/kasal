@@ -621,5 +621,26 @@ describe('crewConfigBuilder', () => {
       expect(config.reasoning).toBe(false);
       expect(config.schema_detection_enabled).toBe(true);
     });
+
+    it('sets memory_workspace_scope from workspaceMemory and leaves agent memory alone when memory is enabled', () => {
+      const agents = [{ id: 'a1', role: 'R', goal: 'G', backstory: 'B', tools: [] }];
+      const ws = buildCrewConfigFromGenerated(agents, [], 'm', undefined, undefined, {}, 's1', true, true);
+      expect(ws.memory_workspace_scope).toBe(true);
+      expect(ws.agents_yaml.agent_a1).not.toHaveProperty('memory');
+
+      const session = buildCrewConfigFromGenerated(agents, [], 'm', undefined, undefined, {}, 's1', false, true);
+      expect(session.memory_workspace_scope).toBe(false);
+      expect(session.agents_yaml.agent_a1).not.toHaveProperty('memory');
+    });
+
+    it('forces every agent to memory:false when memoryEnabled is false ("No memory")', () => {
+      const agents = [
+        { id: 'a1', role: 'R1', goal: 'G1', backstory: 'B1', tools: [] },
+        { id: 'a2', role: 'R2', goal: 'G2', backstory: 'B2', tools: [], memory: true },
+      ];
+      const config = buildCrewConfigFromGenerated(agents, [], 'm', undefined, undefined, {}, 's1', true, false);
+      expect(config.agents_yaml.agent_a1.memory).toBe(false);
+      expect(config.agents_yaml.agent_a2.memory).toBe(false);
+    });
   });
 });

@@ -289,6 +289,9 @@ interface ChatContainerProps {
   /** "Workspace memory" toggle — owned by the store, forwarded to the input. */
   workspaceMemory?: boolean;
   onWorkspaceMemoryChange?: (value: boolean) => void;
+  /** "No memory" toggle — when false, crews run without memory. */
+  memoryEnabled?: boolean;
+  onMemoryEnabledChange?: (value: boolean) => void;
 }
 
 const ChatContainer: React.FC<ChatContainerProps> = ({
@@ -309,6 +312,8 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   sessionId,
   workspaceMemory,
   onWorkspaceMemoryChange,
+  memoryEnabled,
+  onMemoryEnabledChange,
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -361,6 +366,8 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
             sessionId={sessionId}
             workspaceMemory={workspaceMemory}
             onWorkspaceMemoryChange={onWorkspaceMemoryChange}
+            memoryEnabled={memoryEnabled}
+            onMemoryEnabledChange={onMemoryEnabledChange}
           />
         </div>
       </div>
@@ -451,6 +458,8 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
           onStopExecution={onStopExecution}
           workspaceMemory={workspaceMemory}
           onWorkspaceMemoryChange={onWorkspaceMemoryChange}
+          memoryEnabled={memoryEnabled}
+          onMemoryEnabledChange={onMemoryEnabledChange}
         />
       </div>
     </div>
