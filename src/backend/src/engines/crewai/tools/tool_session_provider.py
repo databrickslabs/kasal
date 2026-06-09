@@ -5,6 +5,9 @@ Tools run in subprocess context where there is no request-scoped session.
 Instead of each tool importing async_session_factory() directly, they use
 this provider — giving us a single point of control for session lifecycle,
 logging, and future connection pool guards.
+
+Option B: Service context managers (`cache_service()`, `conversion_repo()`)
+hide session+service construction so tools need only one import.
 """
 
 import logging
@@ -17,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class ToolSessionProvider:
-    """Provides DB sessions to tools running in CrewAI subprocess context."""
+    """Provides DB sessions and ready-to-use services to CrewAI tools."""
 
     @staticmethod
     @asynccontextmanager
@@ -26,17 +29,58 @@ class ToolSessionProvider:
 
         Usage::
 
-            from src.engines.crewai.tools.tool_session_provider import ToolSessionProvider
-
             async with ToolSessionProvider.session() as session:
-                service = SomeService(session)
-                await service.do_work()
+                result = await session.execute(stmt)
         """
         from src.db.session import async_session_factory
 
         async with async_session_factory() as session:
             try:
                 yield session
+            except Exception:
+                await session.rollback()
+                raise
+
+    @staticmethod
+    @asynccontextmanager
+    async def cache_service():
+        """Yield a PowerBISemanticModelCacheService with scoped session.
+
+        Usage::
+
+            async with ToolSessionProvider.cache_service() as svc:
+                cached = await svc.get_cached_metadata(group_id=gid, ...)
+        """
+        from src.db.session import async_session_factory
+        from src.services.powerbi_semantic_model_cache_service import PowerBISemanticModelCacheService
+
+        async with async_session_factory() as session:
+            try:
+                yield PowerBISemanticModelCacheService(session)
+            except Exception:
+                await session.rollback()
+                raise
+
+    @staticmethod
+    @asynccontextmanager
+    async def conversion_repo():
+        """Yield a ConversionHistoryRepository with scoped session.
+
+        The caller is responsible for committing if needed (the session
+        is accessible via ``repo.session``).
+
+        Usage::
+
+            async with ToolSessionProvider.conversion_repo() as repo:
+                record = await repo.create(data)
+                await repo.session.commit()
+        """
+        from src.db.session import async_session_factory
+        from src.repositories.conversion_repository import ConversionHistoryRepository
+
+        async with async_session_factory() as session:
+            try:
+                yield ConversionHistoryRepository(session)
             except Exception:
                 await session.rollback()
                 raise
