@@ -33,7 +33,7 @@ from crewai.tools import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.powerbi_semantic_model_cache_service import PowerBISemanticModelCacheService
-from src.db.session import async_session_factory
+from src.engines.crewai.tools.tool_session_provider import ToolSessionProvider
 
 from .metadata_reduction.fuzzy_scorer import FuzzyScorer
 from .metadata_reduction.dependency_resolver import MeasureDependencyResolver
@@ -814,7 +814,7 @@ class PowerBIMetadataReducerTool(BaseTool):
         cache_saved = False
         if dataset_id and workspace_id:
             try:
-                async with async_session_factory() as session:
+                async with ToolSessionProvider.session() as session:
                     cache_service = PowerBISemanticModelCacheService(session)
                     await cache_service.save_metadata(
                         group_id=group_id,
@@ -918,7 +918,7 @@ class PowerBIMetadataReducerTool(BaseTool):
                 f"dataset={dataset_id}, workspace={workspace_id}"
             )
             try:
-                async with async_session_factory() as session:
+                async with ToolSessionProvider.session() as session:
                     cache_service = PowerBISemanticModelCacheService(session)
                     # Use any_report_id=True because the Reducer doesn't care
                     # which report_id the cache was saved with — it just needs

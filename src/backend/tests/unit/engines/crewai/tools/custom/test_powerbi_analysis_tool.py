@@ -874,7 +874,7 @@ class TestAnalysisPipelineAsync:
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
              patch(
-                 "src.engines.crewai.tools.custom.powerbi_analysis_tool.async_session_factory"
+                 "src.engines.crewai.tools.tool_session_provider.async_session_factory"
              ) as mock_factory, patch(
                  "src.engines.crewai.tools.custom.powerbi_analysis_tool.PowerBISemanticModelCacheService"
              ) as mock_svc_cls, \
@@ -916,7 +916,7 @@ class TestAnalysisPipelineAsync:
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
              patch(
-                 "src.engines.crewai.tools.custom.powerbi_analysis_tool.async_session_factory"
+                 "src.engines.crewai.tools.tool_session_provider.async_session_factory"
              ) as mock_factory, patch(
                  "src.engines.crewai.tools.custom.powerbi_analysis_tool.PowerBISemanticModelCacheService"
              ) as mock_svc_cls:
@@ -996,7 +996,7 @@ class TestAnalysisPipelineRetryLogic:
         mock_service, ctx = self._mock_cache_and_factory(cached)
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.async_session_factory", return_value=ctx), \
+             patch("src.engines.crewai.tools.tool_session_provider.async_session_factory", return_value=ctx), \
              patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.PowerBISemanticModelCacheService", return_value=mock_service), \
              patch.object(self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"), \
              patch.object(self.tool, "_generate_dax_with_self_correction", return_value="EVALUATE {[Revenue]}"), \
@@ -1021,7 +1021,7 @@ class TestAnalysisPipelineRetryLogic:
         mock_service, ctx = self._mock_cache_and_factory(cached)
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.async_session_factory", return_value=ctx), \
+             patch("src.engines.crewai.tools.tool_session_provider.async_session_factory", return_value=ctx), \
              patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.PowerBISemanticModelCacheService", return_value=mock_service), \
              patch.object(self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"), \
              patch.object(self.tool, "_generate_dax_with_self_correction", return_value="EVALUATE {[Revenue]}"), \
@@ -1046,7 +1046,7 @@ class TestAnalysisPipelineRetryLogic:
         mock_service, ctx = self._mock_cache_and_factory(cached)
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.async_session_factory", return_value=ctx), \
+             patch("src.engines.crewai.tools.tool_session_provider.async_session_factory", return_value=ctx), \
              patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.PowerBISemanticModelCacheService", return_value=mock_service), \
              patch.object(self.tool, "_generate_dax_with_llm", return_value=None):
 
@@ -1069,7 +1069,7 @@ class TestAnalysisPipelineRetryLogic:
         mock_service, ctx = self._mock_cache_and_factory(cached)
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.async_session_factory", return_value=ctx), \
+             patch("src.engines.crewai.tools.tool_session_provider.async_session_factory", return_value=ctx), \
              patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.PowerBISemanticModelCacheService", return_value=mock_service), \
              patch.object(self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"), \
              patch.object(self.tool, "_execute_dax_query", return_value=success_result), \
@@ -1102,7 +1102,7 @@ class TestAnalysisPipelineRetryLogic:
         mock_service, ctx = self._mock_cache_and_factory(cached)
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.async_session_factory", return_value=ctx), \
+             patch("src.engines.crewai.tools.tool_session_provider.async_session_factory", return_value=ctx), \
              patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.PowerBISemanticModelCacheService", return_value=mock_service), \
              patch.object(self.tool, "_generate_dax_with_llm", side_effect=generate_side), \
              patch.object(self.tool, "_generate_dax_with_self_correction", return_value="EVALUATE {[Revenue]}"), \
@@ -3136,7 +3136,7 @@ class TestCacheHitWithDefaultFilters:
         mock_service, ctx = self._make_cache_ctx(cached)
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.async_session_factory", return_value=ctx), \
+             patch("src.engines.crewai.tools.tool_session_provider.async_session_factory", return_value=ctx), \
              patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.PowerBISemanticModelCacheService", return_value=mock_service), \
              patch.object(self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"), \
              patch.object(self.tool, "_execute_dax_query", return_value={
@@ -3159,7 +3159,7 @@ class TestCacheHitWithDefaultFilters:
         mock_service, ctx = self._make_cache_ctx(cached)
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.async_session_factory", return_value=ctx), \
+             patch("src.engines.crewai.tools.tool_session_provider.async_session_factory", return_value=ctx), \
              patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.PowerBISemanticModelCacheService", return_value=mock_service), \
              patch.object(self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"), \
              patch.object(self.tool, "_execute_dax_query", return_value={
@@ -3182,7 +3182,7 @@ class TestCacheHitWithDefaultFilters:
         mock_service, ctx = self._make_cache_ctx(cached)
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.async_session_factory", return_value=ctx), \
+             patch("src.engines.crewai.tools.tool_session_provider.async_session_factory", return_value=ctx), \
              patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.PowerBISemanticModelCacheService", return_value=mock_service), \
              patch.object(self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"), \
              patch.object(self.tool, "_execute_dax_query", return_value={
@@ -3249,7 +3249,7 @@ class TestCacheMissPipelineExtractAndSave:
         model_ctx = self._model_ctx()
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.async_session_factory", return_value=ctx), \
+             patch("src.engines.crewai.tools.tool_session_provider.async_session_factory", return_value=ctx), \
              patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.PowerBISemanticModelCacheService", return_value=mock_service), \
              patch.object(self.tool, "_extract_model_context", return_value=model_ctx), \
              patch.object(self.tool, "_enrich_model_context_with_metadata", return_value=model_ctx), \
@@ -3268,7 +3268,7 @@ class TestCacheMissPipelineExtractAndSave:
         model_ctx = self._model_ctx()
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.async_session_factory", return_value=ctx), \
+             patch("src.engines.crewai.tools.tool_session_provider.async_session_factory", return_value=ctx), \
              patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.PowerBISemanticModelCacheService", return_value=mock_service), \
              patch.object(self.tool, "_extract_model_context", return_value=model_ctx), \
              patch.object(self.tool, "_enrich_model_context_with_metadata", side_effect=Exception("enrich fail")), \
@@ -3287,7 +3287,7 @@ class TestCacheMissPipelineExtractAndSave:
         model_ctx = self._model_ctx()
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.async_session_factory", return_value=ctx), \
+             patch("src.engines.crewai.tools.tool_session_provider.async_session_factory", return_value=ctx), \
              patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.PowerBISemanticModelCacheService", return_value=mock_service), \
              patch.object(self.tool, "_extract_model_context", return_value=model_ctx), \
              patch.object(self.tool, "_enrich_model_context_with_metadata", return_value=model_ctx), \
@@ -3307,7 +3307,7 @@ class TestCacheMissPipelineExtractAndSave:
         model_ctx = self._model_ctx()
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.async_session_factory", return_value=ctx), \
+             patch("src.engines.crewai.tools.tool_session_provider.async_session_factory", return_value=ctx), \
              patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.PowerBISemanticModelCacheService", return_value=mock_service), \
              patch.object(self.tool, "_extract_model_context", return_value=model_ctx), \
              patch.object(self.tool, "_enrich_model_context_with_metadata", return_value=model_ctx), \
@@ -3334,7 +3334,7 @@ class TestCacheMissPipelineExtractAndSave:
         ctx.__aexit__ = AsyncMock(return_value=None)
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.async_session_factory", return_value=ctx), \
+             patch("src.engines.crewai.tools.tool_session_provider.async_session_factory", return_value=ctx), \
              patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.PowerBISemanticModelCacheService", return_value=mock_service), \
              patch.object(self.tool, "_extract_model_context", return_value=model_ctx), \
              patch.object(self.tool, "_enrich_model_context_with_metadata", return_value=model_ctx), \
@@ -3352,7 +3352,7 @@ class TestCacheMissPipelineExtractAndSave:
         mock_service, ctx = self._make_cache_miss_ctx()
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.async_session_factory", return_value=ctx), \
+             patch("src.engines.crewai.tools.tool_session_provider.async_session_factory", return_value=ctx), \
              patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.PowerBISemanticModelCacheService", return_value=mock_service), \
              patch.object(self.tool, "_extract_model_context", side_effect=Exception("extraction failed")):
             result = self._run(self.tool._execute_analysis_pipeline(config))
@@ -3402,7 +3402,7 @@ class TestNonDictExecutionResult:
         ctx.__aexit__ = AsyncMock(return_value=None)
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.async_session_factory", return_value=ctx), \
+             patch("src.engines.crewai.tools.tool_session_provider.async_session_factory", return_value=ctx), \
              patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.PowerBISemanticModelCacheService", return_value=mock_service), \
              patch.object(self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"), \
              patch.object(self.tool, "_execute_dax_query", return_value="invalid-string-result"):
@@ -3453,7 +3453,7 @@ class TestVisualReferenceErrorPath:
         ctx.__aexit__ = AsyncMock(return_value=None)
 
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.async_session_factory", return_value=ctx), \
+             patch("src.engines.crewai.tools.tool_session_provider.async_session_factory", return_value=ctx), \
              patch("src.engines.crewai.tools.custom.powerbi_analysis_tool.PowerBISemanticModelCacheService", return_value=mock_service), \
              patch.object(self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"), \
              patch.object(self.tool, "_execute_dax_query", return_value={
