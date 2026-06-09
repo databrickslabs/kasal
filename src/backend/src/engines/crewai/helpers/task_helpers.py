@@ -685,16 +685,16 @@ async def create_task(
                 task_args['description'] = task_args['description'] + validation_augmentation
                 guardrail_logger.info(f"Augmented task {task_key} description with guardrail criteria for proactive alignment")
 
-            # Ensure model has provider prefix for LiteLLM
-            # Databricks models need 'databricks/' prefix
-            if llm_model and not llm_model.startswith('databricks/'):
-                if llm_model.startswith('databricks-'):
-                    llm_model = f"databricks/{llm_model}"
-                    guardrail_logger.info(f"Added databricks/ prefix to model: {llm_model}")
+            # Strip provider prefix — LLMManager adds it from DB config
+            if llm_model and llm_model.startswith('databricks/'):
+                llm_model = llm_model[len('databricks/'):]
 
-            # Create LLM instance for the guardrail with custom User-Agent
-            from src.utils.telemetry import get_user_agent_header, KasalProduct
-            guardrail_llm = LLM(model=llm_model, extra_headers=get_user_agent_header(KasalProduct.GUARDRAIL))
+            # Create guardrail LLM via LLMManager (gets AI Gateway routing + API keys + telemetry)
+            from src.core.llm_manager import LLMManager
+            from src.utils.user_context import UserContext
+            gc = UserContext.get_group_context()
+            group_id = gc.primary_group_id if gc else (config.get('group_id') if config else "default")
+            guardrail_llm = await LLMManager.configure_crewai_llm(llm_model, group_id)
 
             # Create LLMGuardrail (OSS-compatible, NOT HallucinationGuardrail)
             llm_guardrail = LLMGuardrail(

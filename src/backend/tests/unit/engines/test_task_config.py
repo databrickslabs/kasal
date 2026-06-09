@@ -940,9 +940,13 @@ class TestTaskConfigGuardrails:
         """Test configuring task with LLM guardrail."""
         from src.engines.crewai.flow.modules.task_config import TaskConfig
 
+        mock_gc = Mock()
+        mock_gc.primary_group_id = "test-group"
+
         with patch('crewai.Task') as mock_task_class, \
              patch('crewai.tasks.llm_guardrail.LLMGuardrail') as mock_llm_guardrail_class, \
-             patch('crewai.LLM') as mock_llm_class:
+             patch('src.core.llm_manager.LLMManager.configure_crewai_llm', new_callable=AsyncMock, return_value=Mock()) as mock_configure_llm, \
+             patch('src.utils.user_context.UserContext.get_group_context', return_value=mock_gc):
 
             mock_task = Mock()
             # Set description as a real string to avoid Mock + str concatenation issues
@@ -950,14 +954,14 @@ class TestTaskConfigGuardrails:
             mock_task_class.return_value = mock_task
             mock_llm_guardrail = Mock()
             mock_llm_guardrail_class.return_value = mock_llm_guardrail
-            mock_llm = Mock()
-            mock_llm_class.return_value = mock_llm
 
             result = await TaskConfig.configure_task(
                 mock_task_data_with_llm_guardrail,
                 agent=mock_agent
             )
 
+            # Verify LLM was configured via LLMManager
+            mock_configure_llm.assert_called_once()
             # Verify LLM guardrail was created
             mock_llm_guardrail_class.assert_called_once()
             # Verify guardrail was set on task
@@ -971,12 +975,15 @@ class TestTaskConfigGuardrails:
         from src.engines.crewai.flow.modules.task_config import TaskConfig
 
         mock_code_guardrail = Mock()
+        mock_gc = Mock()
+        mock_gc.primary_group_id = "test-group"
 
         with patch('crewai.Task') as mock_task_class, \
              patch('src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
              patch('src.engines.crewai.guardrails.guardrail_wrapper.GuardrailWrapper') as mock_wrapper_class, \
              patch('crewai.tasks.llm_guardrail.LLMGuardrail') as mock_llm_guardrail_class, \
-             patch('crewai.LLM') as mock_llm_class, \
+             patch('src.core.llm_manager.LLMManager.configure_crewai_llm', new_callable=AsyncMock, return_value=Mock()), \
+             patch('src.utils.user_context.UserContext.get_group_context', return_value=mock_gc), \
              patch('builtins.open', create=True), \
              patch('os.makedirs'):
 
@@ -1045,9 +1052,13 @@ class TestTaskConfigGuardrails:
         """Test that LLM guardrail augments task description with validation requirements."""
         from src.engines.crewai.flow.modules.task_config import TaskConfig
 
+        mock_gc = Mock()
+        mock_gc.primary_group_id = "test-group"
+
         with patch('crewai.Task') as mock_task_class, \
              patch('crewai.tasks.llm_guardrail.LLMGuardrail') as mock_llm_guardrail_class, \
-             patch('crewai.LLM') as mock_llm_class:
+             patch('src.core.llm_manager.LLMManager.configure_crewai_llm', new_callable=AsyncMock, return_value=Mock()), \
+             patch('src.utils.user_context.UserContext.get_group_context', return_value=mock_gc):
 
             mock_task = Mock()
             mock_task.description = "Test description"

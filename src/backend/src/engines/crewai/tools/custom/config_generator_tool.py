@@ -84,9 +84,7 @@ class ConfigGeneratorTool(BaseTool):
             if measures_raw == '[]' and workspace_id and dataset_id:
                 logger.info(f"[ConfigGenerator] No measures_json provided, trying Tool 79 cache for workspace={workspace_id}, dataset={dataset_id}")
                 try:
-                    import asyncio
-                    from src.services.powerbi_semantic_model_cache_service import PowerBISemanticModelCacheService
-                    from src.db.session import async_session_factory
+                    from src.engines.crewai.tools.tool_session_provider import ToolSessionProvider
                     from src.utils.user_context import UserContext
 
                     group_id = (
@@ -96,8 +94,7 @@ class ConfigGeneratorTool(BaseTool):
                     logger.info(f"[ConfigGenerator] Using group_id={group_id} for cache lookup")
 
                     async def _load_cache():
-                        async with async_session_factory() as session:
-                            svc = PowerBISemanticModelCacheService(session)
+                        async with ToolSessionProvider.cache_service() as svc:
                             return await svc.get_cached_metadata(
                                 group_id=group_id,
                                 dataset_id=dataset_id,

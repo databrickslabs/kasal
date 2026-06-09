@@ -289,10 +289,14 @@ class TestConfigureTask:
         )
         task, agent = _make_real_task_with_mock_agent()
 
+        mock_gc = MagicMock()
+        mock_gc.primary_group_id = "test-group"
+
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
              patch("crewai.Task", return_value=task), \
              patch("crewai.tasks.llm_guardrail.LLMGuardrail") as MockLLMG, \
-             patch("crewai.LLM") as MockLLM:
+             patch("src.core.llm_manager.LLMManager.configure_crewai_llm", new_callable=AsyncMock, return_value=MagicMock()), \
+             patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_gc):
             mock_llm_guardrail = MagicMock()
             MockLLMG.return_value = mock_llm_guardrail
 
@@ -311,10 +315,14 @@ class TestConfigureTask:
         task_data = _make_task_data(config={"llm_guardrail": llm_guardrail_cfg})
         task, agent = _make_real_task_with_mock_agent()
 
+        mock_gc = MagicMock()
+        mock_gc.primary_group_id = "test-group"
+
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
              patch("crewai.Task", return_value=task), \
              patch("crewai.tasks.llm_guardrail.LLMGuardrail") as MockLLMG, \
-             patch("crewai.LLM"):
+             patch("src.core.llm_manager.LLMManager.configure_crewai_llm", new_callable=AsyncMock, return_value=MagicMock()), \
+             patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_gc):
             mock_llm_guardrail = MagicMock()
             MockLLMG.return_value = mock_llm_guardrail
 
@@ -324,25 +332,36 @@ class TestConfigureTask:
 
     @pytest.mark.asyncio
     async def test_configure_task_llm_guardrail_adds_databricks_prefix(self):
-        """llm_model without 'databricks/' prefix gets it added."""
+        """llm_model without 'databricks/' prefix gets it stripped before calling LLMManager.
+
+        LLMManager.configure_crewai_llm receives the model name without 'databricks/' prefix
+        because the prefix is added internally by LLMManager from DB config.
+        """
         task_data = _make_task_data(
             config={"llm_guardrail": {"description": "Validate", "llm_model": "databricks-claude-sonnet"}}
         )
         task, agent = _make_real_task_with_mock_agent()
 
+        mock_gc = MagicMock()
+        mock_gc.primary_group_id = "test-group"
+        mock_configure_llm = AsyncMock(return_value=MagicMock())
+
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
              patch("crewai.Task", return_value=task), \
              patch("crewai.tasks.llm_guardrail.LLMGuardrail") as MockLLMG, \
-             patch("crewai.LLM") as MockLLM:
+             patch("src.core.llm_manager.LLMManager.configure_crewai_llm", new=mock_configure_llm), \
+             patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_gc):
             MockLLMG.return_value = MagicMock()
 
             await TaskConfig.configure_task(task_data, agent=agent)
 
-        # Should have been called with databricks/ prefix
-        MockLLM.assert_called()
-        call_args = MockLLM.call_args
-        model_arg = call_args.kwargs.get("model", "") or (call_args.args[0] if call_args.args else "")
-        assert model_arg.startswith("databricks/")
+        # LLMManager.configure_crewai_llm should have been called with the model name
+        # (without 'databricks/' prefix since it doesn't have one in the input)
+        mock_configure_llm.assert_called_once()
+        call_args = mock_configure_llm.call_args
+        model_arg = call_args.args[0] if call_args.args else call_args.kwargs.get("model_name", "")
+        # The model "databricks-claude-sonnet" does NOT start with "databricks/" so no stripping occurs
+        assert model_arg == "databricks-claude-sonnet"
 
     @pytest.mark.asyncio
     async def test_configure_task_llm_guardrail_augments_description(self):
@@ -355,6 +374,9 @@ class TestConfigureTask:
         )
         task, agent = _make_real_task_with_mock_agent()
 
+        mock_gc = MagicMock()
+        mock_gc.primary_group_id = "test-group"
+
         captured_desc = {}
 
         def mock_task_ctor(**kwargs):
@@ -364,7 +386,8 @@ class TestConfigureTask:
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
              patch("crewai.Task", side_effect=mock_task_ctor), \
              patch("crewai.tasks.llm_guardrail.LLMGuardrail"), \
-             patch("crewai.LLM"):
+             patch("src.core.llm_manager.LLMManager.configure_crewai_llm", new_callable=AsyncMock, return_value=MagicMock()), \
+             patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_gc):
             await TaskConfig.configure_task(task_data, agent=agent)
 
         # description should include VALIDATION REQUIREMENTS
@@ -378,9 +401,14 @@ class TestConfigureTask:
         )
         task, agent = _make_real_task_with_mock_agent()
 
+        mock_gc = MagicMock()
+        mock_gc.primary_group_id = "test-group"
+
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
              patch("crewai.Task", return_value=task), \
-             patch("crewai.tasks.llm_guardrail.LLMGuardrail", side_effect=ImportError("no crewai")):
+             patch("crewai.tasks.llm_guardrail.LLMGuardrail", side_effect=ImportError("no crewai")), \
+             patch("src.core.llm_manager.LLMManager.configure_crewai_llm", new_callable=AsyncMock, return_value=MagicMock()), \
+             patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_gc):
             result = await TaskConfig.configure_task(task_data, agent=agent)
 
         assert result is task

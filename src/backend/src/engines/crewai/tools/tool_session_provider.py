@@ -84,3 +84,27 @@ class ToolSessionProvider:
             except Exception:
                 await session.rollback()
                 raise
+
+    @staticmethod
+    @asynccontextmanager
+    async def knowledge_service(group_id: str = "default", user_token: str = None):
+        """Yield a DatabricksKnowledgeService with scoped session.
+
+        Usage::
+
+            async with ToolSessionProvider.knowledge_service(gid, token) as svc:
+                results = await svc.search_knowledge(query=q, ...)
+        """
+        from src.db.session import async_session_factory
+        from src.services.databricks_knowledge_service import DatabricksKnowledgeService
+
+        async with async_session_factory() as session:
+            try:
+                yield DatabricksKnowledgeService(
+                    session=session,
+                    group_id=group_id,
+                    user_token=user_token,
+                )
+            except Exception:
+                await session.rollback()
+                raise

@@ -13,8 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 
-from src.services.powerbi_semantic_model_cache_service import PowerBISemanticModelCacheService
-from src.db.session import async_session_factory
+from src.engines.crewai.tools.tool_session_provider import ToolSessionProvider
 
 logger = logging.getLogger(__name__)
 
@@ -661,8 +660,7 @@ class MqueryConversionPipelineTool(BaseTool):
 
     async def _get_mquery_cache(self, dataset_key: str, workspace_id: str) -> Optional[str]:
         """Return today's cached formatted output, or None on miss."""
-        async with async_session_factory() as session:
-            svc = PowerBISemanticModelCacheService(session)
+        async with ToolSessionProvider.cache_service() as svc:
             cached = await svc.get_cached_metadata(
                 group_id=self._CACHE_GROUP,
                 dataset_id=dataset_key,
@@ -675,8 +673,7 @@ class MqueryConversionPipelineTool(BaseTool):
 
     async def _save_mquery_cache(self, dataset_key: str, workspace_id: str, metadata: Dict[str, Any]) -> None:
         """Persist the conversion result so same-day reruns are instant."""
-        async with async_session_factory() as session:
-            svc = PowerBISemanticModelCacheService(session)
+        async with ToolSessionProvider.cache_service() as svc:
             await svc.save_metadata(
                 group_id=self._CACHE_GROUP,
                 dataset_id=dataset_key,

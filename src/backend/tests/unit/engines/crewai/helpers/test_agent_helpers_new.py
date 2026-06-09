@@ -814,30 +814,23 @@ class TestCreateAgentLLMConfigExtended:
 
     @pytest.mark.asyncio
     async def test_llm_dict_databricks_prefix_ensured(self):
-        """Model name without 'databricks/' prefix gets it added."""
+        """Dict LLM with databricks model delegates prefix handling to LLMManager."""
         cfg = _base_config(llm={"model": "databricks-meta-llama"})
         with patch("src.core.llm_manager.LLMManager") as mock_lm, \
              patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.crewai.helpers.agent_helpers.Agent") as mock_agent_cls, \
-             patch("src.core.llm_handlers.databricks_gpt_oss_handler.DatabricksRetryLLM") as mock_retry:
+             patch("src.engines.crewai.helpers.agent_helpers.Agent") as mock_agent_cls:
 
             mock_configured = MagicMock()
             mock_configured.model = "databricks/databricks-meta-llama"
-            mock_configured.api_key = None
-            mock_configured.api_base = None
-            mock_configured.temperature = None
-            mock_configured.max_completion_tokens = None
-            mock_configured.max_tokens = None
             mock_lm.configure_crewai_llm = AsyncMock(return_value=mock_configured)
             mock_mcp.create_mcp_tools_for_agent = AsyncMock(return_value=[])
             mock_session = AsyncMock()
             mock_session.__aenter__ = AsyncMock(return_value=mock_session)
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
-            mock_retry.return_value = MagicMock()
             mock_agent_cls.return_value = MagicMock(llm=MagicMock())
 
             agent = await create_agent(
@@ -845,8 +838,12 @@ class TestCreateAgentLLMConfigExtended:
                 agent_config=cfg,
                 config={"group_id": "grp-1"},
             )
-        # DatabricksRetryLLM should have been called for databricks model
-        mock_retry.assert_called()
+        # LLMManager.configure_crewai_llm should be called with the raw model name;
+        # it handles the databricks/ prefix internally.
+        mock_lm.configure_crewai_llm.assert_called_once()
+        call_args = mock_lm.configure_crewai_llm.call_args
+        assert call_args[0][0] == "databricks-meta-llama"
+        assert call_args[0][1] == "grp-1"
 
     @pytest.mark.asyncio
     async def test_llm_dict_configured_llm_no_model_attr_fallback(self):

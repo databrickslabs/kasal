@@ -1260,6 +1260,7 @@ OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text, no explanatio
                 temperature=0,
                 max_tokens=1000,
                 extra_headers=get_user_agent_header(KasalProduct.POWERBI),
+                fallback_drop_system_on_400=True,
             )
 
             logger.info(f"[DaxTool] RAW LLM RESPONSE ({len(content)} chars): {content[:500]}")
@@ -1379,6 +1380,7 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                 temperature=0,
                 max_tokens=1000,
                 extra_headers=get_user_agent_header(KasalProduct.POWERBI),
+                fallback_drop_system_on_400=True,
             )
 
             logger.info(f"[DaxTool] RAW SELF-CORRECTION RESPONSE ({len(content)} chars): {content[:500]}")

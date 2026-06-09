@@ -285,9 +285,8 @@ class DatabricksKnowledgeSearchTool(BaseTool):
                     del sys.modules[module_name]
             logger.info("[TOOL ASYNC DEBUG] Modules removed, will import fresh from disk")
 
-            from src.services.databricks_knowledge_service import DatabricksKnowledgeService
+            from src.engines.crewai.tools.tool_session_provider import ToolSessionProvider
             from src.repositories.databricks_config_repository import DatabricksConfigRepository
-            from src.db.session import async_session_factory
             from src.utils.user_context import UserContext, GroupContext
 
             logger.info("[TOOL ASYNC DEBUG] Imports successful")
@@ -302,20 +301,13 @@ class DatabricksKnowledgeSearchTool(BaseTool):
                 UserContext.set_group_context(group_context)
                 logger.info("[TOOL ASYNC DEBUG] Group context set successfully")
 
-            logger.info("[TOOL ASYNC DEBUG] Creating async session...")
+            logger.info("[TOOL ASYNC DEBUG] Creating knowledge service via ToolSessionProvider...")
 
-            # Create a new session for each search (don't cache service with session)
-            async with async_session_factory() as session:
-                logger.info("[TOOL ASYNC DEBUG] Session created successfully")
-                logger.info("[TOOL ASYNC DEBUG] Creating DatabricksKnowledgeService...")
-
-                # Create service with session
-                service = DatabricksKnowledgeService(
-                    session=session,
-                    group_id=self._group_id,
-                    user_token=self._user_token  # Pass user token for embedding generation authentication
-                )
-
+            # Create a new session for each search via ToolSessionProvider
+            async with ToolSessionProvider.knowledge_service(
+                group_id=self._group_id or "default",
+                user_token=self._user_token,
+            ) as service:
                 logger.info("[TOOL ASYNC DEBUG] Service created successfully")
                 logger.info("="*80)
                 logger.info("🎯🎯🎯 [TOOL] ABOUT TO CALL service.search_knowledge() 🎯🎯🎯")

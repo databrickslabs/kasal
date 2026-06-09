@@ -120,139 +120,31 @@ async def create_agent(
                 llm = await LLMManager.configure_crewai_llm(model_name, group_id_param, temperature)
                 logger.info(f"Successfully configured LLM for agent {agent_key} using model: {model_name}")
             elif isinstance(agent_config['llm'], dict):
-                # If a dictionary is provided with LLM parameters, use crewai LLM directly
-                from crewai import LLM
-                
                 llm_config = agent_config['llm']
-                
-                # If a model name is specified, configure it through LLMManager
-                if 'model' in llm_config:
-                    model_name = llm_config['model']
-                    
-                    # Check if agent has temperature override
-                    temperature = None
-                    if 'temperature' in agent_config and agent_config['temperature'] is not None:
-                        # Convert from 0-100 to 0.0-1.0 range
-                        temperature = agent_config['temperature'] / 100.0
-                        logger.info(f"Using temperature override {temperature} for agent {agent_key}")
-                    
-                    # Get properly configured LLM for the model
-                    # SECURITY: Pass group_id for multi-tenant isolation
-                    group_id_param = config.get('group_id') if config else None
-                    if not group_id_param:
-                        raise ValueError("group_id is REQUIRED for LLM configuration")
-                    configured_llm = await LLMManager.configure_crewai_llm(model_name, group_id_param, temperature)
-                    
-                    # Extract the configured parameters
-                    if hasattr(configured_llm, 'model'):
-                        # Apply the configured parameters but allow overrides from llm_config
-                        llm_kwargs = {}
-                        # Copy relevant parameters from configured_llm
-                        for attr in ['model', 'api_key', 'api_base', 'temperature', 'max_completion_tokens', 'max_tokens']:
-                            if hasattr(configured_llm, attr):
-                                value = getattr(configured_llm, attr)
-                                if value is not None:
-                                    llm_kwargs[attr] = value
-                    else:
-                        # Fallback if we can't extract params
-                        # Check if it's a Databricks model and add prefix if needed
-                        if 'databricks' in model_name.lower() and not model_name.startswith('databricks/'):
-                            llm_kwargs = {'model': f'databricks/{model_name}'}
-                            logger.info(f"Added databricks/ prefix to model: databricks/{model_name}")
-                        else:
-                            llm_kwargs = {'model': model_name}
-                    
-                    # Apply any additional parameters from llm_config
-                    for key, value in llm_config.items():
-                        if value is not None:
-                            llm_kwargs[key] = value
+                model_name = llm_config.get('model', 'gpt-4o')
 
-                    # Ensure Databricks models have the correct prefix
-                    model_in_kwargs = llm_kwargs.get('model', '')
-                    if 'databricks' in model_in_kwargs.lower() and not model_in_kwargs.startswith('databricks/'):
-                        llm_kwargs['model'] = f'databricks/{model_in_kwargs}'
-                        logger.info(f"Ensured databricks/ prefix for model: {llm_kwargs['model']}")
+                # Check if agent has temperature override
+                temperature = None
+                if 'temperature' in agent_config and agent_config['temperature'] is not None:
+                    temperature = agent_config['temperature'] / 100.0
+                    logger.info(f"Using temperature override {temperature} for agent {agent_key}")
 
-                    # Handle model-specific LLM creation
-                    model_name = llm_kwargs.get('model', '')
-                    model_lower = model_name.lower()
-                    is_databricks = model_name.startswith('databricks/') or 'databricks' in model_lower
-                    is_gpt5 = 'gpt-5' in model_lower or 'gpt5' in model_lower
+                # SECURITY: Pass group_id for multi-tenant isolation
+                group_id_param = config.get('group_id') if config else None
+                if not group_id_param:
+                    raise ValueError("group_id is REQUIRED for LLM configuration")
 
-                    # GPT-5 models: swap max_tokens → max_completion_tokens, drop unsupported params
-                    if is_gpt5:
-                        if 'max_tokens' in llm_kwargs:
-                            llm_kwargs['max_completion_tokens'] = llm_kwargs.pop('max_tokens')
-                        llm_kwargs['additional_drop_params'] = ['stop', 'temperature', 'presence_penalty', 'frequency_penalty', 'logit_bias']
-                        llm_kwargs['timeout'] = 300
-                    elif model_rejects_temperature(model_name):
-                        # e.g. Claude Opus 4.8 — endpoint 400s on `temperature`.
-                        llm_kwargs.pop('temperature', None)
-                        llm_kwargs['additional_drop_params'] = ['temperature']
+                # LLMManager handles provider prefix, API key/base, DatabricksRetryLLM,
+                # GPT-5 params, temperature-rejection, and telemetry headers.
+                llm = await LLMManager.configure_crewai_llm(model_name, group_id_param, temperature)
 
-                    if is_databricks:
-                        from src.core.llm_handlers.databricks_gpt_oss_handler import DatabricksRetryLLM
-                        llm = DatabricksRetryLLM(**llm_kwargs)
-                        logger.info(f"Using DatabricksRetryLLM for Databricks model: {model_name}{' (GPT-5 drop_params + 300s timeout)' if is_gpt5 else ''}")
-                    elif is_gpt5:
-                        llm = LLM(**llm_kwargs)
-                        logger.info(f"Created LLM for GPT-5 model: {model_name} (with additional_drop_params)")
-                    else:
-                        llm = LLM(**llm_kwargs)
-                    logger.info(f"Created LLM instance for agent {agent_key} with model {llm_kwargs.get('model')}")
-                else:
-                    # No model specified, use default with additional parameters
-                    logger.warning(f"LLM config missing 'model', using default with additional parameters")
-                    # SECURITY: Pass group_id for multi-tenant isolation
-                    group_id_param = config.get('group_id') if config else None
-                    if not group_id_param:
-                        raise ValueError("group_id is REQUIRED for LLM configuration")
-                    default_llm = await LLMManager.configure_crewai_llm("gpt-4o", group_id_param)
+                # Apply any additional overrides from llm_config (e.g. top_p, stop, max_tokens)
+                skip_keys = {'model'}  # already handled by LLMManager
+                for key, value in llm_config.items():
+                    if key not in skip_keys and value is not None:
+                        setattr(llm, key, value)
 
-                    # Extract and merge parameters
-                    llm_kwargs = {}
-                    # Copy relevant parameters from default_llm
-                    for attr in ['model', 'api_key', 'api_base', 'temperature', 'max_completion_tokens', 'max_tokens']:
-                        if hasattr(default_llm, attr):
-                            value = getattr(default_llm, attr)
-                            if value is not None:
-                                llm_kwargs[attr] = value
-
-                    for key, value in llm_config.items():
-                        if value is not None:
-                            llm_kwargs[key] = value
-
-                    # Ensure Databricks models have the correct prefix
-                    model_in_kwargs = llm_kwargs.get('model', '')
-                    if 'databricks' in model_in_kwargs.lower() and not model_in_kwargs.startswith('databricks/'):
-                        llm_kwargs['model'] = f'databricks/{model_in_kwargs}'
-                        logger.info(f"Ensured databricks/ prefix for default model: {llm_kwargs['model']}")
-
-                    # Handle model-specific LLM creation
-                    model_name = llm_kwargs.get('model', '')
-                    model_lower = model_name.lower()
-                    is_databricks = model_name.startswith('databricks/') or 'databricks' in model_lower
-                    is_gpt5 = 'gpt-5' in model_lower or 'gpt5' in model_lower
-
-                    if is_gpt5:
-                        if 'max_tokens' in llm_kwargs:
-                            llm_kwargs['max_completion_tokens'] = llm_kwargs.pop('max_tokens')
-                        llm_kwargs['additional_drop_params'] = ['stop', 'temperature', 'presence_penalty', 'frequency_penalty', 'logit_bias']
-                        llm_kwargs['timeout'] = 300
-                    elif model_rejects_temperature(model_name):
-                        # e.g. Claude Opus 4.8 — endpoint 400s on `temperature`.
-                        llm_kwargs.pop('temperature', None)
-                        llm_kwargs['additional_drop_params'] = ['temperature']
-
-                    if is_databricks:
-                        from src.core.llm_handlers.databricks_gpt_oss_handler import DatabricksRetryLLM
-                        llm = DatabricksRetryLLM(**llm_kwargs)
-                        logger.info(f"Using DatabricksRetryLLM for Databricks model: {model_name}{' (GPT-5 drop_params + 300s timeout)' if is_gpt5 else ''}")
-                    elif is_gpt5:
-                        llm = LLM(**llm_kwargs)
-                        logger.info(f"Created LLM for GPT-5 model: {model_name} (with additional_drop_params)")
-                    else:
-                        llm = LLM(**llm_kwargs)
+                logger.info(f"Created LLM instance for agent {agent_key} with model {model_name}")
         else:
             # Use default model
             logger.info(f"No LLM specified for agent {agent_key}, using default")
