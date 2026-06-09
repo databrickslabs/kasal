@@ -239,7 +239,12 @@ class AgentBricksTool(BaseTool):
             # Add User-Agent for Databricks telemetry
             headers.update(get_user_agent_header(KasalProduct.AGENTBRICKS))
 
-            # Build endpoint URL
+            # Build endpoint URL.
+            # NOTE: intentionally NOT routed through the AI Gateway. AgentBricks
+            # uses the Responses-style "input" payload against a custom agent
+            # endpoint; the AI Gateway only exposes OpenAI-compatible
+            # /chat/completions and /embeddings (no /responses route), so these
+            # invocations stay on /serving-endpoints/<endpoint>/invocations.
             url = self._make_url(workspace_url, f"/serving-endpoints/{endpoint_name}/invocations")
             logger.info(f"Querying AgentBricks endpoint at URL: {url}")
 

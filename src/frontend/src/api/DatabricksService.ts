@@ -9,6 +9,9 @@ export interface DatabricksConfig {
 
   enabled: boolean;
 
+  // AI Gateway: route LLM/embedding traffic through /ai-gateway/mlflow/v1
+  ai_gateway_enabled?: boolean;
+
   // MLflow configuration
   mlflow_enabled?: boolean;
   mlflow_experiment_name?: string; // MLflow experiment name

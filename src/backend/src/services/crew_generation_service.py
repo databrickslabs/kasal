@@ -147,7 +147,7 @@ class CrewGenerationService:
         # Add tools context to the system message
         return system_message + tools_context
 
-    def _process_crew_setup(self, setup: Dict[str, Any], allowed_tools: List[Dict[str, Any]], tool_name_to_id_map: Dict[str, str], model: str = None) -> Dict[str, Any]:
+    def _process_crew_setup(self, setup: Dict[str, Any], allowed_tools: List[Dict[str, Any]], tool_name_to_id_map: Dict[str, str], model: str = None, disable_memory: bool = False) -> Dict[str, Any]:
         """
         Process and validate crew setup.
 
@@ -156,6 +156,8 @@ class CrewGenerationService:
             allowed_tools: List of allowed tools with descriptions
             tool_name_to_id_map: Mapping from tool names to their IDs
             model: Model used for generation, will be assigned to each agent's llm field
+            disable_memory: When True (no persistent memory backend), set memory=False
+                on each agent so the crew doesn't use ephemeral local memory storage
 
         Returns:
             Processed crew setup
@@ -234,6 +236,13 @@ class CrewGenerationService:
             for agent in setup['agents']:
                 agent['llm'] = model
                 logger.info(f"MODEL: Assigned model '{model}' to agent '{agent.get('name', 'Unknown')}'")
+
+        # No persistent memory backend → disable memory on each agent so the crew
+        # doesn't write to ephemeral local storage that won't survive in a deployed app.
+        if disable_memory:
+            for agent in setup['agents']:
+                agent['memory'] = False
+            logger.info("MEMORY: No persistent backend — set memory=False on all generated agents")
 
         # Filter agent tools to only include allowed tools and convert tool names to IDs
         for agent in setup['agents']:
@@ -540,7 +549,7 @@ class CrewGenerationService:
             logger.info(f"Tool name to ID mapping: {tool_name_to_id_map}")
 
             # Generate the crew using the LLM
-            model = request.model or os.getenv("CREW_MODEL", "databricks-llama-4-maverick")
+            model = request.model or os.getenv("CREW_MODEL", "databricks-gpt-5-3-codex")
 
             # Get and prepare the prompt template with tool descriptions (incl. group/user overrides)
             system_message = await self._prepare_prompt_template(tools_with_details, group_context)
@@ -590,8 +599,14 @@ class CrewGenerationService:
                 crew_setup = robust_json_parser(content)
                 logger.info(f"CREATE CREW: Successfully parsed JSON")
 
+                # No persistent memory backend → disable memory on generated agents
+                # (avoids writing to ephemeral local storage that doesn't persist).
+                has_memory = await self._has_persistent_memory_backend(self.session, group_context)
                 # Process and validate LLM response with the tool name to ID mapping
-                processed_setup = self._process_crew_setup(crew_setup, tools_with_details, tool_name_to_id_map, model=model)
+                processed_setup = self._process_crew_setup(
+                    crew_setup, tools_with_details, tool_name_to_id_map,
+                    model=model, disable_memory=not has_memory,
+                )
 
             except Exception as e:
                 error_msg = f"Error generating crew: {str(e)}"
@@ -793,6 +808,30 @@ class CrewGenerationService:
                     "id": t if isinstance(t, str) else t.get('id', t.get('name', 'Unknown'))}
                    for t in tool_identifiers]
 
+    @staticmethod
+    async def _has_persistent_memory_backend(session, group_context) -> bool:
+        """Whether the group has a real (persistent) memory backend configured.
+
+        Only Databricks Vector Search and Lakebase count — the default
+        (ephemeral ChromaDB/LanceDB) backend does not persist in a deployed
+        Databricks App, so when neither is configured we disable memory on
+        generated agents rather than silently writing to throwaway local storage.
+        """
+        try:
+            primary_group_id = group_context.primary_group_id if group_context else None
+            if not primary_group_id:
+                return False
+            from src.repositories.memory_backend_repository import MemoryBackendRepository
+            from src.models.memory_backend import MemoryBackendTypeEnum
+            mem_repo = MemoryBackendRepository(session)
+            for backend_type in (MemoryBackendTypeEnum.DATABRICKS, MemoryBackendTypeEnum.LAKEBASE):
+                if await mem_repo.get_by_type(primary_group_id, backend_type):
+                    return True
+            return False
+        except Exception as e:
+            logger.warning(f"Memory backend check failed, assuming no persistent memory: {e}")
+            return False
+
     # ------------------------------------------------------------------ #
     #  Progressive / Streaming crew generation
     # ------------------------------------------------------------------ #
@@ -835,7 +874,7 @@ class CrewGenerationService:
 
         with trace_ctx:
             try:
-                model = request.model or os.getenv("CREW_MODEL", "databricks-llama-4-maverick")
+                model = request.model or os.getenv("CREW_MODEL", "databricks-gpt-5-3-codex")
 
                 # ── Compute caps BEFORE planning so the LLM knows the limits ──
                 # Count distinct action verbs to determine task count.
@@ -1104,6 +1143,12 @@ class CrewGenerationService:
                         task_results: List[Dict[str, Any]] = []
                         global_task_index = 0
 
+                        # If no persistent memory backend is configured, disable memory on
+                        # generated agents (otherwise memory silently writes to ephemeral
+                        # local storage that doesn't survive in a deployed app).
+                        has_memory = await self._has_persistent_memory_backend(session, group_context)
+                        logger.info(f"PROGRESSIVE [{generation_id}]: persistent memory backend present = {has_memory}")
+
                         for i, agent_plan in enumerate(plan_agents):
                             agent_name = agent_plan.get("name", f"Agent {i+1}")
                             agent_role = agent_plan.get("role", "Specialist")
@@ -1130,6 +1175,10 @@ class CrewGenerationService:
                                     "llm": model,
                                     "tools": agent_tool_ids,
                                 }
+                                # No persistent memory backend → disable memory so the
+                                # crew doesn't write to ephemeral local storage.
+                                if not has_memory:
+                                    agent_data["memory"] = False
                                 adv = agent_config.get("advanced_config", {})
                                 for key in (
                                     "function_calling_llm", "max_iter", "max_rpm",

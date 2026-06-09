@@ -509,6 +509,36 @@ async def _ensure_documentation_embeddings_columns(conn) -> None:
         logger.warning(f"Could not ensure knowledge_embeddings table: {e}")
 
 
+async def _ensure_databricks_config_columns(conn) -> None:
+    """Idempotently add ai_gateway_enabled to databricksconfig.
+
+    create_all never ALTERs an existing table, so app DBs created before this
+    column existed (e.g. customer instances deployed from the marketplace that
+    we cannot migrate manually) are missing it — which breaks reading/writing
+    the Databricks configuration. Safe to run on every startup; defaults to
+    false (serving-endpoints routing) to preserve existing behavior.
+    """
+    is_sqlite = str(settings.DATABASE_URI).startswith('sqlite')
+    try:
+        if is_sqlite:
+            res = await conn.exec_driver_sql("PRAGMA table_info(databricksconfig)")
+            cols = {row[1] for row in res.fetchall()}
+            if not cols:
+                return  # table not created yet
+            if "ai_gateway_enabled" not in cols:
+                await conn.exec_driver_sql(
+                    "ALTER TABLE databricksconfig ADD COLUMN ai_gateway_enabled BOOLEAN DEFAULT 0"
+                )
+                logger.info("Added databricksconfig.ai_gateway_enabled column (SQLite self-heal)")
+        else:
+            await conn.exec_driver_sql(
+                "ALTER TABLE databricksconfig ADD COLUMN IF NOT EXISTS ai_gateway_enabled BOOLEAN DEFAULT false"
+            )
+            logger.info("Ensured databricksconfig.ai_gateway_enabled column")
+    except Exception as e:
+        logger.warning(f"Could not ensure databricksconfig.ai_gateway_enabled column: {e}")
+
+
 async def init_db() -> None:
     """Initialize database tables if they don't exist."""
     try:
@@ -687,10 +717,11 @@ async def init_db() -> None:
             try:
                 async with ensure_engine.begin() as conn:
                     await _ensure_documentation_embeddings_columns(conn)
+                    await _ensure_databricks_config_columns(conn)
             finally:
                 await ensure_engine.dispose()
         except Exception as ensure_err:
-            logger.warning(f"documentation_embeddings column ensure skipped: {ensure_err}")
+            logger.warning(f"column ensure skipped: {ensure_err}")
 
         # Verify tables were created for SQLite
         if str(settings.DATABASE_URI).startswith('sqlite'):

@@ -41,6 +41,10 @@ interface UseDispatcherOptions {
   onExecuteCrew?: (plan: PlanData) => void;
   onExecuteFlow?: (flow: FlowData) => void;
   onExecuteGenerated?: (data: GenerationCompleteData, spaceId?: string) => void;
+  /** Fired when a crew/flow is LOADED (not run) so the host can make the chat
+   *  submit button run it. sessionId is the session the plan was loaded into. */
+  onCrewLoaded?: (plan: PlanData, sessionId: string | null) => void;
+  onFlowLoaded?: (flow: FlowData, sessionId: string | null) => void;
   getCurrentSessionId: () => string | null;
 }
 
@@ -234,6 +238,7 @@ export function useDispatcher(options: UseDispatcherOptions) {
       tools?: string[],
       dispatchSuffix?: string,
       attachments?: string[],
+      displayAs?: string,
     ) => {
       if (isDispatchingRef.current) return;
       isDispatchingRef.current = true;
@@ -258,7 +263,9 @@ export function useDispatcher(options: UseDispatcherOptions) {
 
       options.addMessage(
         'user',
-        message,
+        // Show a friendly label (e.g. "Open crew: X" from the library rail)
+        // while still dispatching the real command/message below.
+        displayAs || message,
         attachments && attachments.length > 0 ? { attachments } : undefined,
       );
 
@@ -355,6 +362,17 @@ export function useDispatcher(options: UseDispatcherOptions) {
                 options.onExecuteCrew!(plan);
               }, 300);
             }
+          }
+
+          // A loaded (not run) crew/flow becomes the session's "pending run" so
+          // the chat submit button executes it (no separate Run button).
+          if (resultType === 'catalog_load') {
+            const loaded = result.generation_result as { plan?: PlanData };
+            if (loaded.plan && options.onCrewLoaded) options.onCrewLoaded(loaded.plan, originSessionId);
+          }
+          if (resultType === 'flow_load') {
+            const loaded = result.generation_result as { flow?: FlowData };
+            if (loaded.flow && options.onFlowLoaded) options.onFlowLoaded(loaded.flow, originSessionId);
           }
 
           if (intent === 'execute_flow') {

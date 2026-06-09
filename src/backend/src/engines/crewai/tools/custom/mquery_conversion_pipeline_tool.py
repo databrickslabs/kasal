@@ -1136,9 +1136,10 @@ class MqueryConversionPipelineTool(BaseTool):
                 llm_token = llm_token or os.environ.get("DATABRICKS_TOKEN") or os.environ.get("DATABRICKS_API_KEY", "")
             if workspace_url and not workspace_url.startswith("http"):
                 workspace_url = f"https://{workspace_url}"
+            from src.utils.databricks_url_utils import DatabricksURLUtils
             llm = LLM(
                 model=model,
-                base_url=f"{workspace_url}/serving-endpoints" if workspace_url else None,
+                base_url=DatabricksURLUtils.construct_llm_base_url(workspace_url),
                 api_key=llm_token or None,
                 max_tokens=2000,
             )
@@ -1250,9 +1251,10 @@ class MqueryConversionPipelineTool(BaseTool):
                 llm_token = llm_token or _os.environ.get("DATABRICKS_TOKEN") or _os.environ.get("DATABRICKS_API_KEY", "")
             if workspace_url and not workspace_url.startswith("http"):
                 workspace_url = f"https://{workspace_url}"
+            from src.utils.databricks_url_utils import DatabricksURLUtils
             llm = LLM(
                 model=model,
-                base_url=f"{workspace_url}/serving-endpoints" if workspace_url else None,
+                base_url=DatabricksURLUtils.construct_llm_base_url(workspace_url),
                 api_key=llm_token or None,
                 max_tokens=1500,
             )

@@ -522,6 +522,36 @@ class TestDatabricksConfigRepositoryLogging:
         
         result = await databricks_config_repository.get_active_config()
         assert result is None
-        
+
         # No logging calls expected in this repository's methods
+        # (sentinel comment retained below)
+
+
+class TestSetAiGatewayEnabled:
+    """Tests for the immediate AI Gateway toggle (flag-only persistence)."""
+
+    @pytest.mark.asyncio
+    async def test_persists_flag_on_active_config(self, databricks_config_repository):
+        repo = databricks_config_repository
+        cfg = MagicMock()
+        cfg.id = 7
+        repo.get_active_config = AsyncMock(return_value=cfg)
+        repo.update = AsyncMock(return_value=cfg)
+
+        ok = await repo.set_ai_gateway_enabled(True, group_id="g1")
+
+        assert ok is True
+        repo.get_active_config.assert_awaited_once_with(group_id="g1")
+        repo.update.assert_awaited_once_with(7, {"ai_gateway_enabled": True})
+
+    @pytest.mark.asyncio
+    async def test_returns_false_when_no_active_config(self, databricks_config_repository):
+        repo = databricks_config_repository
+        repo.get_active_config = AsyncMock(return_value=None)
+        repo.update = AsyncMock()
+
+        ok = await repo.set_ai_gateway_enabled(True, group_id="g1")
+
+        assert ok is False
+        repo.update.assert_not_called()
         # This test ensures the logger doesn't interfere with functionality

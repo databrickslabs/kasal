@@ -287,9 +287,10 @@ class AuthContext:
         Returns:
             Dictionary with api_key and api_base for litellm.completion()
         """
+        from src.utils.databricks_url_utils import DatabricksURLUtils
         return {
             "api_key": self.token,
-            "api_base": f"{self.workspace_url}/serving-endpoints"
+            "api_base": DatabricksURLUtils.construct_llm_base_url(self.workspace_url)
         }
 
     def get_workspace_client(self) -> WorkspaceClient:
@@ -377,6 +378,16 @@ class DatabricksAuth:
                             if not self._workspace_host.startswith('https://'):
                                 self._workspace_host = f"https://{self._workspace_host}"
                             logger.info(f"Loaded workspace host from database: {self._workspace_host}")
+
+                        # Mirror the AI Gateway toggle into the environment so
+                        # DatabricksURLUtils routes LLM/embedding traffic correctly
+                        # (covers both the API server and the execution subprocess,
+                        # which both reach this code path via get_auth_context()).
+                        if config is not None:
+                            from src.utils.databricks_url_utils import DatabricksURLUtils
+                            gateway_on = bool(getattr(config, 'ai_gateway_enabled', False))
+                            os.environ[DatabricksURLUtils.AI_GATEWAY_ENV_VAR] = "true" if gateway_on else "false"
+                            logger.debug(f"AI Gateway routing {'enabled' if gateway_on else 'disabled'} from Databricks config")
 
                     except Exception as e:
                         logger.warning(f"Failed to get databricks config from database: {e}")
@@ -717,6 +728,18 @@ class DatabricksAuth:
 
 # Global instance for easy access
 _databricks_auth = DatabricksAuth()
+
+
+def reset_auth_config_cache() -> None:
+    """
+    Invalidate the cached Databricks configuration so the next
+    get_auth_context() call reloads the workspace host and the AI Gateway
+    toggle from the database. Called when the Databricks configuration is saved
+    so changes take effect without a restart.
+    """
+    _databricks_auth._config_loaded = False
+    _databricks_auth._workspace_host = None
+    logger.info("Databricks auth config cache invalidated; will reload on next auth context")
 
 
 async def get_databricks_auth_headers(host: str = None, mcp_server_url: str = None, user_token: str = None) -> Tuple[Optional[Dict[str, str]], Optional[str]]:

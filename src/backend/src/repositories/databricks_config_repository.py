@@ -110,4 +110,20 @@ class DatabricksConfigRepository(BaseRepository[DatabricksConfig]):
         self.session.add(db_config)
         await self.session.flush()
 
-        return db_config 
+        return db_config
+
+    async def set_ai_gateway_enabled(
+        self, enabled: bool, group_id: Optional[str] = None
+    ) -> bool:
+        """Persist ONLY the ai_gateway_enabled flag on the active config.
+
+        Mirrors the MLflow toggle: lets the UI flip AI Gateway routing without
+        re-POSTing the full Databricks config payload. Returns False when there
+        is no active config to attach the flag to (the caller surfaces a 404 so
+        the user saves the main Databricks settings first).
+        """
+        cfg = await self.get_active_config(group_id=group_id)
+        if not cfg:
+            return False
+        updated = await self.update(cfg.id, {"ai_gateway_enabled": enabled})
+        return bool(updated)

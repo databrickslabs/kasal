@@ -11,7 +11,7 @@ import {
 import { PlanData, FlowData } from '../../hooks/useDispatcher';
 import { GenerationCompleteData } from '../../hooks/useGenerationStream';
 import { useAppStore } from '../../store/appStore';
-import { isGenieToolRef } from '../../api/crews';
+import { isGenieToolRef, CrewNameConflictError } from '../../api/crews';
 import { TraceDetail, findInlineTraceRenderer } from './traces';
 import MessageContent from './MessageContent';
 import AgentCard from '../Cards/AgentCard';
@@ -30,7 +30,7 @@ interface ChatMessageProps {
   onExecuteFlow?: (flow: FlowData) => void;
   onExecuteGenerated?: (data: GenerationCompleteData, spaceId?: string) => void;
   /** Save this generated crew's plan to the catalog. Resolves to the saved name. */
-  onSaveCrew?: (data: GenerationCompleteData) => Promise<{ id: string; name: string }>;
+  onSaveCrew?: (data: GenerationCompleteData, opts?: { overwrite?: boolean; spaceId?: string }) => Promise<{ id: string; name: string }>;
 }
 
 /** Resolve a tool identifier (ID or name) to its display name */
@@ -65,20 +65,23 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
             onCommand={onCommand}
           />
         );
-      case 'catalog_load':
-        return (
-          <CrewDetailCard
-            data={message.resultData as CatalogLoadResult}
-            onExecute={
-              (message.resultData as CatalogLoadResult).plan
-                ? () =>
-                    onExecuteCrew?.(
-                      (message.resultData as CatalogLoadResult).plan!
-                    )
-                : undefined
-            }
-          />
-        );
+      case 'catalog_load': {
+        // Render a loaded crew with the SAME business-friendly card as a freshly
+        // generated crew (agents + tasks with descriptions), not the technical
+        // Process/Memory/RPM summary.
+        const loadData = message.resultData as CatalogLoadResult;
+        if (loadData.plan) {
+          // No save bookmark + no Run button: a loaded crew is already in the
+          // catalog, and it's run via the chat submit button.
+          return (
+            <GenerationCompleteCard
+              data={planToGenerationData(loadData.plan)}
+              messageId={message.id}
+            />
+          );
+        }
+        return <CrewDetailCard data={loadData} />;
+      }
       case 'flow_list':
         return (
           <FlowListCard
@@ -325,6 +328,53 @@ function groupTasksUnderAgents(
   return { groups, orphanTasks };
 }
 
+/**
+ * Convert a loaded catalog plan (ReactFlow nodes/edges) into the same
+ * { agents, tasks } shape a freshly generated crew uses, so a loaded crew renders
+ * with the identical business-friendly card (agents + tasks with descriptions),
+ * not a technical Process/Memory/RPM summary. Task→agent links come from the
+ * agent→task edges.
+ */
+function planToGenerationData(
+  plan: { nodes?: unknown[]; edges?: unknown[] } | undefined | null,
+): GenerationCompleteData {
+  const nodes = (plan?.nodes || []) as Array<{ id?: string; type?: string; data?: Record<string, unknown> }>;
+  const edges = (plan?.edges || []) as Array<{ source?: string; target?: string }>;
+  const agentNodeName = new Map<string, string>();
+  const agents: Record<string, unknown>[] = [];
+  const tasks: Record<string, unknown>[] = [];
+
+  for (const n of nodes) {
+    if (n.type !== 'agentNode') continue;
+    const d = (n.data || {}) as Record<string, unknown>;
+    const name = String(d.label ?? d.name ?? d.role ?? '');
+    if (n.id) agentNodeName.set(n.id, name);
+    agents.push({
+      id: d.agentId ?? d.id,
+      name,
+      role: d.role ?? '',
+      goal: d.goal ?? '',
+      backstory: d.backstory ?? '',
+      tools: Array.isArray(d.tools) ? d.tools : [],
+    });
+  }
+  for (const n of nodes) {
+    if (n.type !== 'taskNode') continue;
+    const d = (n.data || {}) as Record<string, unknown>;
+    const owningEdge = edges.find((e) => e.target === n.id && String(e.source || '').startsWith('agent-'));
+    const ownerName = owningEdge?.source ? agentNodeName.get(owningEdge.source) : undefined;
+    tasks.push({
+      id: d.taskId ?? d.id,
+      name: d.label ?? d.name ?? '',
+      description: d.description ?? '',
+      expected_output: d.expected_output ?? '',
+      tools: Array.isArray(d.tools) ? d.tools : [],
+      ...(ownerName ? { agent: ownerName } : {}),
+    });
+  }
+  return { agents, tasks };
+}
+
 // Persist the Genie-space selection (+ whether the crew was already run) per
 // generation_complete message, so the choice survives the card remounting when
 // the run streams messages in / opens the preview pane (local useState alone
@@ -337,7 +387,7 @@ export const GenerationCompleteCard: React.FC<{
   data: GenerationCompleteData;
   messageId: string;
   onExecute?: (data: GenerationCompleteData, spaceId?: string) => void;
-  onSaveCrew?: (data: GenerationCompleteData) => Promise<{ id: string; name: string }>;
+  onSaveCrew?: (data: GenerationCompleteData, opts?: { overwrite?: boolean; spaceId?: string }) => Promise<{ id: string; name: string }>;
 }> = ({ data, messageId, onExecute, onSaveCrew }) => {
   const { agents, tasks } = normalizeGenerationData(data);
   const toolNameMap = useAppStore((s) => s.toolNameMap);
@@ -350,22 +400,27 @@ export const GenerationCompleteCard: React.FC<{
     const prev = genieSelectionStore.get(messageId) ?? { spaceId: selectedSpaceId, ran };
     genieSelectionStore.set(messageId, { ...prev, ...next });
   };
-  // idle → saving → saved (terminal); error returns to idle with a hint.
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  // idle → saving → saved (terminal). 'exists' offers Overwrite; error → hint.
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'exists' | 'error'>('idle');
   const [savedName, setSavedName] = useState('');
 
   const canSave = Boolean(onSaveCrew) && (agents.length > 0 || tasks.length > 0);
 
-  const handleSave = async () => {
+  const handleSave = async (overwrite = false) => {
     // The button only renders when canSave (onSaveCrew present) and is disabled
     // while saving/once saved, so re-entry is prevented at the DOM level.
     setSaveState('saving');
     try {
-      const result = await onSaveCrew!(data);
+      // Carry the picked Genie space so the saved crew runs against it.
+      const result = await onSaveCrew!(data, {
+        ...(overwrite ? { overwrite: true } : {}),
+        ...(selectedSpaceId ? { spaceId: selectedSpaceId } : {}),
+      });
       setSavedName(result.name);
       setSaveState('saved');
-    } catch {
-      setSaveState('error');
+    } catch (err) {
+      // Name already taken → offer to overwrite instead of a dead-end error.
+      setSaveState(err instanceof CrewNameConflictError ? 'exists' : 'error');
     }
   };
 
@@ -395,6 +450,19 @@ export const GenerationCompleteCard: React.FC<{
                 Saved “{savedName}” to catalog
               </span>
             )}
+            {saveState === 'exists' && (
+              <span className="text-[10px] flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
+                Already in catalog
+                <button
+                  type="button"
+                  onClick={() => handleSave(true)}
+                  className="font-medium transition-opacity hover:opacity-70"
+                  style={{ color: 'var(--accent)' }}
+                >
+                  Overwrite
+                </button>
+              </span>
+            )}
             {saveState === 'error' && (
               <span className="text-[10px]" style={{ color: 'var(--bad, #fb7185)' }}>
                 Couldn’t save — try again
@@ -402,7 +470,7 @@ export const GenerationCompleteCard: React.FC<{
             )}
             <button
               type="button"
-              onClick={handleSave}
+              onClick={() => handleSave()}
               disabled={saveState === 'saving' || saveState === 'saved'}
               title={saveState === 'saved' ? 'Saved to catalog' : 'Save this crew to the catalog'}
               aria-label={saveState === 'saved' ? 'Saved to catalog' : 'Save crew to catalog'}

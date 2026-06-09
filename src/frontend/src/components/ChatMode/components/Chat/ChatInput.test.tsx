@@ -94,11 +94,11 @@ describe('ChatInput — slash command autocomplete', () => {
   it('ArrowDown/ArrowUp navigate the list (with wraparound) and Enter selects', () => {
     const onSend = vi.fn();
     render(<ChatInput {...baseProps} onSend={onSend} />);
-    fireEvent.change(ta(), { target: { value: '/list' } }); // matches /list crews, /list flows
+    fireEvent.change(ta(), { target: { value: '/' } }); // matches all commands
     fireEvent.keyDown(ta(), { key: 'ArrowDown' });
     fireEvent.keyDown(ta(), { key: 'ArrowUp' });
-    fireEvent.keyDown(ta(), { key: 'ArrowUp' }); // wrap to last
-    // Enter selects current command (these have no trailing space -> sent immediately)
+    fireEvent.keyDown(ta(), { key: 'ArrowUp' }); // wrap to last (/clear — no trailing space)
+    // Enter selects current command; /clear has no trailing space -> sent immediately
     fireEvent.keyDown(ta(), { key: 'Enter' });
     expect(onSend).toHaveBeenCalled();
   });
@@ -106,9 +106,9 @@ describe('ChatInput — slash command autocomplete', () => {
   it('Tab selects a command that needs a param (kept in the box, not sent)', () => {
     const onSend = vi.fn();
     render(<ChatInput {...baseProps} onSend={onSend} />);
-    fireEvent.change(ta(), { target: { value: '/load crew' } }); // "/load crew " has trailing space
+    fireEvent.change(ta(), { target: { value: '/run crew' } }); // "/run crew " has trailing space
     fireEvent.keyDown(ta(), { key: 'Tab' });
-    expect(ta().value).toBe('/load crew ');
+    expect(ta().value).toBe('/run crew ');
     expect(onSend).not.toHaveBeenCalled();
   });
 
@@ -123,8 +123,8 @@ describe('ChatInput — slash command autocomplete', () => {
 
   it('mouseEnter on a command updates the selected index', () => {
     render(<ChatInput {...baseProps} />);
-    fireEvent.change(ta(), { target: { value: '/list' } });
-    const cmd = screen.getByText('/list flows');
+    fireEvent.change(ta(), { target: { value: '/run' } });
+    const cmd = screen.getByText('/run flow');
     fireEvent.mouseEnter(cmd.closest('button')!);
     expect(cmd).toBeInTheDocument();
   });
@@ -147,7 +147,7 @@ describe('ChatInput — slash command autocomplete', () => {
 
   it('ArrowDown wraps from the last item back to the first', () => {
     render(<ChatInput {...baseProps} />);
-    fireEvent.change(ta(), { target: { value: '/list' } }); // 2 matches: crews, flows
+    fireEvent.change(ta(), { target: { value: '/run' } }); // 2 matches: run crew, run flow
     fireEvent.keyDown(ta(), { key: 'ArrowDown' }); // 0 -> 1 (last)
     fireEvent.keyDown(ta(), { key: 'ArrowDown' }); // 1 -> wrap to 0 (the ":0" arm)
     // list is still open after wrapping
@@ -552,6 +552,51 @@ describe('ChatInput — run / generation status (inline, replaces top banner)', 
     render(<ChatInput {...baseProps} />);
     expect(screen.queryByRole('button', { name: 'Stop execution' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Send message' })).toBeInTheDocument();
+  });
+});
+
+describe('ChatInput — pending run mode (loaded catalog crew/flow)', () => {
+  it('with a pendingRunLabel + empty input: the submit button is enabled and clicking it runs (not sends)', () => {
+    const onSend = vi.fn();
+    const onRunPending = vi.fn();
+    render(
+      <ChatInput
+        {...baseProps}
+        onSend={onSend}
+        pendingRunLabel="My Crew"
+        onRunPending={onRunPending}
+      />,
+    );
+    // In run mode the button is labelled "Run <label>" and is enabled.
+    const runBtn = screen.getByRole('button', { name: 'Run My Crew' });
+    expect(runBtn).not.toBeDisabled();
+    expect(runBtn.getAttribute('title')).toBe('Run “My Crew”');
+    fireEvent.click(runBtn);
+    expect(onRunPending).toHaveBeenCalledTimes(1);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it('with text typed (pendingRunLabel set): clicking sends normally and does NOT run', () => {
+    const onSend = vi.fn();
+    const onRunPending = vi.fn();
+    render(
+      <ChatInput
+        {...baseProps}
+        onSend={onSend}
+        pendingRunLabel="My Crew"
+        onRunPending={onRunPending}
+      />,
+    );
+    fireEvent.change(ta(), { target: { value: 'hello there' } });
+    // Typing leaves run mode → the button is the normal Send button.
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+    expect(onSend).toHaveBeenCalledWith('hello there');
+    expect(onRunPending).not.toHaveBeenCalled();
+  });
+
+  it('with no pendingRunLabel + empty input: the submit button stays disabled', () => {
+    render(<ChatInput {...baseProps} />);
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled();
   });
 });
 
