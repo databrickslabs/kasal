@@ -193,18 +193,17 @@ GENERATE_TASK_TEMPLATE = """You are an expert in designing structured AI task co
 
 QUALITY REQUIREMENTS (from GEPA optimization — improved baseline from 94% to 100%):
 - The "description" field MUST be detailed — at least 20 words explaining what the task does, including context, objectives, and methodology.
-- The "expected_output" field MUST be specific about format and content — at least 15 words. Specify the exact format (JSON, text, HTML, CSV), required sections, and quality standards.
+- The "expected_output" field MUST be specific about content and structure — at least 15 words. Specify the required sections, structure, and quality standards.
 - The "llm_guardrail.description" MUST align with and validate the expected_output criteria. It should answer: "What makes this task's output valid and complete?"
 - Tools: assign research tools (SerperDevTool, ScrapeWebsiteTool) for tasks that need online data.
   Tasks that ONLY write/compose/create content from existing context need NO tools.
 
-PRESENTATION/DASHBOARD OUTPUT RULE (CRITICAL):
-- When the user asks to create a presentation or dashboard, the expected_output MUST state
-  "raw HTML source code starting with <!DOCTYPE html>".
-- The output is a self-contained HTML file with inline CSS and JavaScript.
-- NOT a text briefing, NOT markdown, NOT JSON — raw HTML code.
-- If the task ALSO needs to gather data online, assign research tools AND still output HTML.
-- Presentation/dashboard tasks MUST have tools: [] (empty) — the LLM writes the HTML directly.
+DELIVERABLE OUTPUT RULE:
+- Describe the deliverable by its CONTENT and STRUCTURE (sections, slides, bullet points,
+  KPIs/metrics, chart data, table rows, quiz questions) — NOT by any visual or markup form.
+  The platform renders the final result through its design-system UI renderer, so do NOT
+  instruct any task to emit HTML, CSS, JavaScript, or "<!DOCTYPE html>".
+- A presentation/dashboard task that ALSO needs to gather data online still gets research tools.
 
 FEW-SHOT EXAMPLES (from GEPA optimization):
 
@@ -212,13 +211,13 @@ Example 1 — Server monitoring task (detailed description + structured output):
 User: "create a task to check server status and report any issues"
 Output: {"name": "Server Status Monitoring and Issue Reporting", "description": "Monitor and assess the current operational status of designated servers by checking critical health indicators including uptime, response time, CPU usage, memory utilization, disk space availability, network connectivity, and running services. Identify any anomalies, performance degradation, or failures that require attention and compile findings into a comprehensive status report.", "expected_output": "A structured status report containing: server identifier, timestamp of check, overall status (operational/degraded/down), individual metrics with current values and thresholds, list of detected issues with severity levels (critical/warning/info), affected services or components, and recommended actions for each issue identified.", "tools": [], "advanced_config": {"timeout_seconds": 300, "retry_attempts": 2}, "llm_guardrail": {"description": "Output must be a structured status report containing server identifier, timestamp, overall operational status, individual health metrics with values, a list of any detected issues with severity levels, affected components, and recommended remediation actions.", "llm_model": "databricks-claude-sonnet-4-5"}}
 
-Example 2 — Presentation with online research (gets tools + outputs HTML):
+Example 2 — Presentation with online research (gets tools, content/structure output):
 User: "gather swiss news in a presentation"
-Output: {"name": "Swiss News Presentation", "description": "Research and gather the latest Swiss news from multiple sources, then create a self-contained HTML presentation summarizing the key developments with inline CSS and vanilla JavaScript for slide navigation.", "expected_output": "Raw HTML source code starting with <!DOCTYPE html>. A self-contained presentation with inline CSS, custom vanilla JS slide engine, and max 5 bullet points per slide. NOT a text briefing or JSON.", "tools": ["SerperDevTool", "ScrapeWebsiteTool"], "llm_guardrail": {"description": "Output must be raw HTML starting with <!DOCTYPE html>. Must contain inline CSS and vanilla JS.", "llm_model": "databricks-claude-sonnet-4-5"}}
+Output: {"name": "Swiss News Presentation", "description": "Research and gather the latest Swiss news from multiple sources, then organize the key developments into a slide presentation: a title slide plus 6-9 content slides, each with a heading and 3-5 concise points.", "expected_output": "A structured slide presentation: a title slide and 6-9 slides, each with a heading and 3-5 substantive points (full sentences), using charts or stats where they aid understanding.", "tools": ["SerperDevTool", "ScrapeWebsiteTool"], "llm_guardrail": {"description": "Must be a slide deck of 7-10 slides, each with a heading and 3-5 substantive points; reject sparse one-liners.", "llm_model": "databricks-claude-sonnet-4-5"}}
 
-Example 3 — Dashboard with data analysis (gets tools + outputs HTML):
+Example 3 — Dashboard with data analysis (gets tools, content/structure output):
 User: "analyze sales data and create a dashboard"
-Output: {"name": "Sales Analysis Dashboard", "description": "Analyze sales performance data and create a self-contained HTML dashboard with KPI cards, trend charts, and comparison tables rendered as an interactive HTML page.", "expected_output": "Raw HTML source code starting with <!DOCTYPE html>. Dashboard with inline CSS and vanilla JS, animated counters, SVG charts, and responsive design.", "tools": ["GenieTool"], "llm_guardrail": {"description": "Output must be raw HTML starting with <!DOCTYPE html>. Must contain data visualizations.", "llm_model": "databricks-claude-sonnet-4-5"}}
+Output: {"name": "Sales Analysis Dashboard", "description": "Query and analyze sales performance data, then organize the findings into a metrics dashboard: KPI tiles for the headline numbers, plus charts for trends and a table of the underlying rows.", "expected_output": "A metrics dashboard: at least 4 KPI tiles with values and deltas, one or more charts for trends/breakdowns, and a data table of the key rows.", "tools": ["GenieTool"], "llm_guardrail": {"description": "Must present at least 4 KPI tiles with values, at least one chart, and a data table; reject if sparse.", "llm_model": "databricks-claude-sonnet-4-5"}}
 
 Example 4 — Research task (gets tools, normal text output):
 User: "gather latest news on switzerland from today"
@@ -274,7 +273,7 @@ GENERAL RULES:
 - ALWAYS prefer internal/organizational data tools over web search when the task involves the user's OWN data (campaigns, metrics, reports, KPIs, employees, products, etc.).
 - Use web search tools ONLY when the task explicitly needs external/public information (industry trends, competitor research, general knowledge).
 - Tasks that write, compose, synthesize, summarize, or review typically need NO tools — the LLM handles these natively.
-- Tasks that CREATE presentations or dashboards (HTML generation) need NO tools — the LLM writes the HTML directly.
+- Tasks that CREATE presentations or dashboards from already-gathered data need NO tools — the LLM composes the content directly.
 
 1. GenieTool — INTERNAL DATA QUERIES
    USE: When the task needs to query the organization's own data — databases, tables, metrics, KPIs, campaign performance, sales figures, employee data, product catalogs, etc.
@@ -332,100 +331,30 @@ Examples based on task type:
 - Analysis: {"description": "Must contain clear methodology, data-backed findings, and actionable recommendations.", "llm_model": "databricks-claude-sonnet-4-5"}
 - Email: {"description": "Must have proper email structure, clear message body, and professional tone.", "llm_model": "databricks-claude-sonnet-4-5"}
 
-If the user's goal involves creating a presentation or dashboard, follow these MANDATORY guidelines:
+If the user's goal involves creating a presentation or dashboard:
 
 TOOL ASSIGNMENT FOR PRESENTATION/DASHBOARD CREWS:
-- Research/gathering tasks ALWAYS get tools (SerperDevTool, ScrapeWebsiteTool, etc.) — they need to fetch data.
-- The LAST task that creates the final HTML output gets tools: [] ONLY IF prior tasks already gathered the data.
-- If there is only ONE task that must BOTH research AND create HTML, it MUST get tools.
-- NEVER strip tools from research or data gathering tasks just because the crew involves a presentation/dashboard.
+- Research/gathering tasks ALWAYS get tools (SerperDevTool, ScrapeWebsiteTool, GenieTool, etc.) — they need to fetch data.
+- The LAST task that composes the final deliverable gets tools: [] ONLY IF prior tasks already gathered the data.
+- If there is only ONE task that must BOTH gather data AND compose the deliverable, it MUST get tools.
+- NEVER strip tools from research or data-gathering tasks just because the crew involves a presentation/dashboard.
 
 Example — multi-task crew "gather news and create a presentation":
     Task 1 "Gather News": tools: ["SerperDevTool", "ScrapeWebsiteTool"]  ← GETS TOOLS (needs to search)
-    Task 2 "Create Presentation": tools: []  ← NO TOOLS (just renders data from Task 1 as HTML)
+    Task 2 "Create Presentation": tools: []  ← NO TOOLS (composes the deck from Task 1's data)
 
 Example — single-task crew "search online and create a dashboard":
-    Task 1 "Research and Create Dashboard": tools: ["SerperDevTool"]  ← GETS TOOLS (must search AND create HTML)
+    Task 1 "Research and Create Dashboard": tools: ["SerperDevTool"]  ← GETS TOOLS (must search AND compose)
 
-OUTPUT FORMAT — APPLIES ONLY TO THE TASK THAT PRODUCES THE FINAL HTML:
-- The HTML creation task's output MUST be raw HTML code starting with <!DOCTYPE html>
-- It must NOT be a JSON object, a markdown block, or a description of the HTML
-- Do NOT set output_json or output_pydantic on the HTML task — these force JSON which breaks HTML
-- The expected_output of the HTML task MUST explicitly instruct the agent to return raw HTML source code
-- IMPORTANT: Research/gathering tasks that come BEFORE the HTML task should have NORMAL text output (reports, summaries, data) — NOT HTML. Only the FINAL rendering task outputs HTML.
+OUTPUT FORMAT — the platform renders every final deliverable through its design-system UI renderer:
+- Describe the final task's output by CONTENT and STRUCTURE only (slides with headings and points,
+  KPI tiles, chart data, table rows, quiz questions) — in a format-neutral way.
+- Do NOT mention HTML, "<!DOCTYPE html>", CSS, JavaScript, or a downloadable file anywhere in a task.
+- Do NOT set output_json or output_pydantic on the final deliverable task.
+- Research/gathering tasks that come BEFORE the final task keep NORMAL text output (reports, summaries, data).
 
-PROFESSIONAL HTML DESIGN REQUIREMENTS (from GEPA optimization — improved design score from 37% to 79%):
-
-The HTML must look like a polished keynote deck, NOT a prototype. Include ALL of the following in the task description:
-
-STRUCTURE:
-- Self-contained HTML file with NO external CDN dependencies
-- All CSS and JavaScript inline — pure vanilla HTML + CSS + JS only
-
-DARK GRADIENT THEME & GLASSMORPHISM:
-- Dark gradient background (e.g., from #0f1729 to #1a237e or similar dark palette)
-- Glassmorphism content cards: background rgba(255,255,255,0.06), backdrop-filter blur(12px), border-radius 14px, box-shadow 0 8px 32px rgba(0,0,0,0.3)
-- Pick ONE cohesive color scheme with primary, dim, and accent colors
-
-TYPOGRAPHY:
-- Modern system font stack: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif
-- Title slides: 3.5rem font-weight 800 heading with letter-spacing 0.02em
-- Content: 1.1-1.15rem body text with line-height 1.7
-- Section headings: 2.15rem with colored underline bar (::after pseudo-element)
-- Title badge: uppercase pill label above main heading
-
-FULL-VIEWPORT SLIDES:
-- Every slide MUST be 100vw x 100vh with overflow hidden
-- Flexbox centering for content, max-width 1100px content area
-- Content fills the page — no wasted whitespace
-
-CONTENT DENSITY (CRITICAL — NOT SPARSE):
-- 3-5 substantive bullet points per slide
-- Each bullet is a full explanatory sentence (15-25 words) with real insight — NOT sparse one-liners
-- Bullet card styling: glassmorphism card with border-left 3px in primary color
-- 42px icon circles with inline SVG line icons (NOT emojis — use clean SVG paths)
-- Use two-column CSS Grid layouts for comparison slides
-- Takeaway/conclusion slide: 2x2 numbered grid cards
-
-VISUAL POLISH:
-- Accent left-borders (3px solid primary color) on key points
-- Fragment reveal animations: opacity 0→1 with translateY(18px→0) using 0.5s ease transitions
-- Smooth slide transitions with cubic-bezier(0.4, 0, 0.2, 1) easing
-
-NAVIGATION:
-- Keyboard: ArrowLeft/ArrowRight, Space to advance
-- Click to advance, touch/swipe support with 50px threshold
-- 3px progress bar at viewport top in primary color
-- Clickable dot indicators at bottom center (active dot glows with box-shadow) — NO page numbers
-
-DASHBOARD-SPECIFIC REQUIREMENTS:
-- CSS Grid KPI cards: auto-fit minmax(280px, 1fr) filling the entire viewport
-- Large metric numbers: 2.8rem monospace font-weight 700
-- Delta indicators: colored arrows (green ▲ for up, red ▼ for down) with percentage
-- Sparkline SVG charts (120-140px wide) inside each KPI card
-- Animated donut or bar charts in pure CSS/SVG
-- Data table with status badges (colored pills), alternating row backgrounds, hover highlights
-- Section labels: uppercase letter-spacing 0.08em with muted color
-
-FEW-SHOT EXAMPLES (from GEPA optimization):
-
-EXAMPLE — Presentation task:
-{
-    "name": "AI Trends 2025 Presentation",
-    "description": "Create a professional self-contained HTML presentation about AI trends in 2025. Your final output MUST be raw HTML starting with <!DOCTYPE html>. Design: dark gradient background (e.g., #0f1729 to #1a237e), glassmorphism content cards (rgba(255,255,255,0.06), backdrop-filter blur(12px), border-radius 14px). Typography: system font stack, titles 3.5rem font-weight 800 with letter-spacing 0.02em, body 1.15rem line-height 1.7, section headings 2.15rem with colored underline bar. Each slide: 100vw x 100vh, Flexbox centered, max-width 1100px. Content: 3-5 substantive bullet points per slide — each a full sentence (15-25 words), NOT sparse one-liners. Bullet styling: glassmorphism cards with border-left 3px primary color, 42px icon circles with inline SVG line icons (NOT emojis). Use two-column CSS Grid for comparison slides. Include title badge pill, fragment reveal animations (translateY 18px, 0.5s ease), smooth cubic-bezier slide transitions. Navigation: keyboard arrows, click, swipe, 3px progress bar at top, clickable dot indicators at bottom center (NO page numbers). Conclusion slide: 2x2 numbered takeaway grid.",
-    "expected_output": "Raw HTML source code starting with <!DOCTYPE html>. A polished presentation with dark gradient, glassmorphism cards, full-viewport slides, modern typography, inline SVG icons, two-column layouts, fragment animations, progress bar, dot navigation. Each slide: 3-5 substantive sentences — NOT sparse one-liners. NOT JSON.",
-    "tools": [],
-    "llm_guardrail": {"description": "Must be raw HTML with <!DOCTYPE html>. Must have dark gradient, glassmorphism, full-viewport slides, modern typography, inline SVG icons, fragment animations, dot navigation. Each content slide must have 3-5 substantive bullets — reject if slides have sparse one-liners or use emojis instead of SVG icons.", "llm_model": "databricks-claude-sonnet-4-5"}
-}
-
-EXAMPLE — Dashboard task:
-{
-    "name": "Sales Performance Dashboard",
-    "description": "Create a professional self-contained HTML dashboard for sales performance. Your final output MUST be raw HTML starting with <!DOCTYPE html>. Design: dark gradient (#0f1729 to #1e293b), glassmorphism KPI cards (rgba(255,255,255,0.06), backdrop-filter blur(14px), border-radius 16px). Layout: CSS Grid with auto-fit minmax(280px, 1fr) filling the viewport. KPI cards: large metric (2.8rem monospace font-weight 700), delta indicator (green ▲ / red ▼ with percentage), sparkline SVG chart (120x40px). Include animated donut chart for category breakdown, bar chart for trends, data table with status badges and hover highlights. Section headers: uppercase letter-spacing 0.08em. Typography: system font stack. Interactive: hover translateY(-4px) on cards, smooth transitions. Footer with timestamp.",
-    "expected_output": "Raw HTML source code starting with <!DOCTYPE html>. Professional dark-themed dashboard with glassmorphism KPI cards filling viewport, large monospace metrics, sparkline SVGs, animated charts, data table with badges, hover effects. Must look data-rich — NOT sparse. NOT JSON.",
-    "tools": [],
-    "llm_guardrail": {"description": "Must be raw HTML with <!DOCTYPE html>. Must have dark gradient, CSS Grid KPI layout, glassmorphism cards, large metrics, sparkline/chart visualizations, data table, hover effects. Must display at least 4 KPI cards. Reject if sparse.", "llm_model": "databricks-claude-sonnet-4-5"}
-}"""
+Aim for substantive content density: presentation slides carry 3-5 full-sentence points (not sparse
+one-liners); dashboards present multiple KPIs with values/deltas plus charts and a data table."""
 
 GENERATE_TEMPLATES_TEMPLATE = """You are an expert at creating AI agent templates following CrewAI and LangChain best practices.
 Given an agent's role, goal, and backstory, generate three templates that work together cohesively:
@@ -598,51 +527,30 @@ Examples based on task type:
 
 The guardrail description should answer: "What makes this task's output valid and complete?"
 
-If the user's goal involves creating a presentation or dashboard, follow these MANDATORY guidelines:
+If the user's goal involves creating a presentation or dashboard:
 
 TOOL ASSIGNMENT FOR PRESENTATION/DASHBOARD CREWS:
-- Research/gathering tasks ALWAYS get tools (SerperDevTool, ScrapeWebsiteTool, etc.) — they need to fetch data.
-- The LAST task that creates the final HTML output gets tools: [] ONLY IF prior tasks already gathered the data.
-- If there is only ONE task that must BOTH research AND create HTML, it MUST get tools.
-- NEVER strip tools from research or data gathering tasks just because the crew involves a presentation/dashboard.
+- Research/gathering tasks ALWAYS get tools (SerperDevTool, ScrapeWebsiteTool, GenieTool, etc.) — they need to fetch data.
+- The LAST task that composes the final deliverable gets tools: [] ONLY IF prior tasks already gathered the data.
+- If there is only ONE task that must BOTH gather data AND compose the deliverable, it MUST get tools.
+- NEVER strip tools from research or data-gathering tasks just because the crew involves a presentation/dashboard.
 
 Example — multi-task crew "gather news and create a presentation":
     Task 1 "Gather News": tools: ["SerperDevTool", "ScrapeWebsiteTool"]  ← GETS TOOLS (needs to search)
-    Task 2 "Create Presentation": tools: []  ← NO TOOLS (just renders data from Task 1 as HTML)
+    Task 2 "Create Presentation": tools: []  ← NO TOOLS (composes the deck from Task 1's data)
 
 Example — single-task crew "search online and create a dashboard":
-    Task 1 "Research and Create Dashboard": tools: ["SerperDevTool"]  ← GETS TOOLS (must search AND create HTML)
+    Task 1 "Research and Create Dashboard": tools: ["SerperDevTool"]  ← GETS TOOLS (must search AND compose)
 
-OUTPUT FORMAT — APPLIES ONLY TO THE TASK THAT PRODUCES THE FINAL HTML:
-- The HTML creation task's output MUST be raw HTML code starting with <!DOCTYPE html>
-- It must NOT be a JSON object, a markdown block, or a description of the HTML
-- Do NOT set output_json or output_pydantic on the HTML task — these force JSON which breaks HTML
-- The expected_output of the HTML task MUST explicitly instruct the agent to return raw HTML source code
-- IMPORTANT: Research/gathering tasks that come BEFORE the HTML task should have NORMAL text output (reports, summaries, data) — NOT HTML. Only the FINAL rendering task outputs HTML.
+OUTPUT FORMAT — the platform renders every final deliverable through its design-system UI renderer:
+- Describe the final task's output by CONTENT and STRUCTURE only (slides with headings and points,
+  KPI tiles, chart data, table rows, quiz questions) — in a format-neutral way.
+- Do NOT mention HTML, "<!DOCTYPE html>", CSS, JavaScript, or a downloadable file anywhere in a task.
+- Do NOT set output_json or output_pydantic on the final deliverable task.
+- Research/gathering tasks that come BEFORE the final task keep NORMAL text output (reports, summaries, data).
 
-PROFESSIONAL HTML DESIGN REQUIREMENTS (from GEPA optimization):
-The HTML must look like a polished keynote deck. Include ALL of the following in the HTML task description:
-
-- Self-contained HTML: NO external CDN. All CSS and JS inline. Pure vanilla HTML + CSS + JS only
-- Dark gradient background with glassmorphism cards (rgba(255,255,255,0.06), backdrop-filter blur(12px), border-radius 14px)
-- System font stack: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif
-- Titles: 3.5rem font-weight 800, letter-spacing 0.02em. Body: 1.15rem, line-height 1.7. Headings: 2.15rem with colored underline bar
-- Full-viewport slides: 100vw x 100vh, Flexbox centered, max-width 1100px
-- Content density: 3-5 substantive bullet points per slide — each a FULL sentence (15-25 words), NOT sparse one-liners
-- Bullet styling: glassmorphism cards with border-left 3px primary, 42px circles with inline SVG line icons (NOT emojis)
-- Two-column CSS Grid layouts for comparison slides. 2x2 numbered takeaway grid on conclusion slide
-- Fragment reveal animations (translateY 18px, 0.5s ease). Smooth cubic-bezier slide transitions
-- Navigation: keyboard arrows, click, swipe. 3px progress bar at top. Clickable dot indicators at bottom (NO page numbers)
-- Dashboard variant: CSS Grid KPI cards (auto-fit minmax(280px,1fr)), 2.8rem monospace metrics, sparkline SVGs, delta indicators, data tables with badges
-
-EXAMPLE — Presentation HTML task:
-{
-    "name": "Create AI Trends Presentation",
-    "description": "Create a professional self-contained HTML presentation. Output MUST be raw HTML starting with <!DOCTYPE html>. Design: dark gradient background, glassmorphism cards (rgba(255,255,255,0.06), backdrop-filter blur(12px), border-radius 14px). Typography: system font stack, 3.5rem titles, 1.15rem body line-height 1.7, 2.15rem headings with colored underline. Full-viewport slides (100vw x 100vh), Flexbox centered. Content: 3-5 substantive bullets per slide (full sentences, 15-25 words each — NOT one-liners). Bullet cards with border-left 3px primary, 42px SVG icon circles (NOT emojis). Two-column Grid for comparisons. Fragment animations, cubic-bezier transitions, keyboard/click/swipe nav, progress bar, dot indicators (NO page numbers). Conclusion: 2x2 takeaway grid.",
-    "expected_output": "Raw HTML starting with <!DOCTYPE html>. Polished presentation with dark gradient, glassmorphism, full-viewport slides, modern typography, SVG icons, two-column layouts, animations, dot navigation. 3-5 substantive sentences per slide. NOT JSON.",
-    "tools": [],
-    "llm_guardrail": {"description": "Must be raw HTML with <!DOCTYPE html>. Dark gradient, glassmorphism, full-viewport slides, SVG icons, fragment animations, dot nav. Each slide: 3-5 substantive bullets — reject sparse one-liners or emoji icons.", "llm_model": "databricks-claude-sonnet-4-5"}
-}
+Aim for substantive content density: presentation slides carry 3-5 full-sentence points (not sparse
+one-liners); dashboards present multiple KPIs with values/deltas plus charts and a data table.
 
 REMINDER: Your output must be PURE, VALID JSON with no additional text. Double-check your response to ensure it is properly formatted JSON and contains NO MORE THAN 6 TASKS."""
 
