@@ -29,6 +29,11 @@ from src.utils.databricks_auth import get_workspace_client
 
 logger = logging.getLogger(__name__)
 
+# SECURITY: cap knowledge-file uploads so a single request cannot buffer an
+# unbounded amount of data into memory (DoS). Enforced via Content-Length up
+# front when available, with a post-read backstop.
+MAX_KNOWLEDGE_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+
 
 class DatabricksKnowledgeService:
     """Service for managing knowledge files in Databricks Volumes."""
@@ -203,9 +208,23 @@ class DatabricksKnowledgeService:
             logger.info(f"FULL UPLOAD PATH: {file_path}")
             logger.info("=" * 60)
 
+            # SECURITY: reject oversized uploads up front (via Content-Length when
+            # available) so we never buffer an unbounded body into memory.
+            _max = MAX_KNOWLEDGE_UPLOAD_BYTES
+            declared_size = getattr(file, "size", None)
+            if isinstance(declared_size, int) and declared_size > _max:
+                raise UnprocessableEntityError(
+                    detail=f"File exceeds the {_max // (1024 * 1024)} MB upload limit"
+                )
+
             # Read file content
             content = await file.read()
             file_size = len(content)
+            # Backstop in case Content-Length was absent or understated.
+            if file_size > _max:
+                raise UnprocessableEntityError(
+                    detail=f"File exceeds the {_max // (1024 * 1024)} MB upload limit"
+                )
             logger.info(f"File size: {file_size} bytes ({file_size/1024:.2f} KB)")
 
             # Use DatabricksVolumeRepository for upload (includes OBO → PAT fallback)

@@ -907,9 +907,16 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
                 inserts = []
                 for fp in field_parameters:
                     for item in fp['items']:
+                        # SECURITY: escape single quotes so attacker-influenced PowerBI
+                        # metadata cannot break out of these string literals, and force
+                        # the numeric ordinal to an int (it is interpolated unquoted).
+                        _name = str(fp['name']).replace("'", "''")
+                        _label = str(item['label']).replace("'", "''")
+                        _src_table = str(item['source_table']).replace("'", "''")
+                        _src_measure = str(item['source_measure']).replace("'", "''")
                         inserts.append(
-                            f"    ('{fp['name']}', '{item['label']}', '{item['source_table']}', "
-                            f"'{item['source_measure']}', {item['ordinal']}, CURRENT_TIMESTAMP())"
+                            f"    ('{_name}', '{_label}', '{_src_table}', "
+                            f"'{_src_measure}', {int(item['ordinal'])}, CURRENT_TIMESTAMP())"
                         )
                 output.append(",\n".join(inserts) + ";")
                 output.append("```\n")
@@ -934,11 +941,15 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
                 inserts = []
                 for cg in calculation_groups:
                     for item in cg['items']:
-                        # Escape single quotes in expression
+                        # SECURITY: escape single quotes in ALL string literals
+                        # (name fields too, not just the expression) and force the
+                        # unquoted numeric fields to ints.
                         escaped_expr = item['expression'].replace("'", "''").replace('\n', '\\n')
+                        _cg_name = str(cg['name']).replace("'", "''")
+                        _item_name = str(item['name']).replace("'", "''")
                         inserts.append(
-                            f"    ('{cg['name']}', '{item['name']}', '{escaped_expr}', "
-                            f"{cg['precedence']}, {item['ordinal']}, CURRENT_TIMESTAMP())"
+                            f"    ('{_cg_name}', '{_item_name}', '{escaped_expr}', "
+                            f"{int(cg['precedence'])}, {int(item['ordinal'])}, CURRENT_TIMESTAMP())"
                         )
                 output.append(",\n".join(inserts) + ";")
                 output.append("```\n")

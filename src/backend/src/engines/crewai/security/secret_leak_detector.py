@@ -89,3 +89,23 @@ def detect(text: str) -> SecretLeakResult:
         logger.debug("[SECURITY] SecretLeakDetector scan error (ignored): %s", exc)
 
     return SecretLeakResult(detected=bool(found), secret_types=found)
+
+
+def redact(text: str) -> str:
+    """
+    Return *text* with any detected secret substrings masked.
+
+    Only the matched secret tokens are replaced (with ``***REDACTED:<type>***``);
+    surrounding content is preserved. Use before persisting/streaming agent
+    output so leaked credentials don't reach execution logs, traces, or the UI.
+    Never raises.
+    """
+    if not text:
+        return text
+    redacted = text
+    try:
+        for name, pattern in _PATTERNS:
+            redacted = pattern.sub(f"***REDACTED:{name}***", redacted)
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.debug("[SECURITY] SecretLeakDetector redact error (ignored): %s", exc)
+    return redacted

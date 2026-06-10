@@ -785,14 +785,13 @@ class LLMManager:
         elif provider == ModelProvider.GEMINI:
             # SECURITY: Use group_id parameter for multi-tenant isolation
             api_key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
-            # Set in environment variables for better compatibility with various libraries
-            if api_key:
-                os.environ["GEMINI_API_KEY"] = api_key
-                os.environ["GOOGLE_API_KEY"] = api_key
-            else:
+            # SECURITY: do NOT write the per-tenant key into the shared process
+            # os.environ — it persists across requests and would leak to other
+            # tenants and to spawned subprocesses (cross-tenant credential bleed).
+            # The key is passed per-request via llm_params["api_key"] below.
+            if not api_key:
                 logger.warning(f"No API key found for Gemini with group_id: {group_id}")
-                
-                # Set configuration for better tool/function handling with Instructor
+                # Help Instructor pick the right model family when no key is set.
                 os.environ["INSTRUCTOR_MODEL_NAME"] = "gemini"
 
             prefixed_model = f"gemini/{model_name_value}"

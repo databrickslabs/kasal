@@ -1,12 +1,34 @@
 from typing import Dict, Any, Optional, List, ClassVar
 from datetime import datetime
-from pydantic import BaseModel, Field
+from urllib.parse import urlparse
+from pydantic import BaseModel, Field, field_validator
+
+
+def _validate_mcp_server_url(value: Optional[str]) -> Optional[str]:
+    """
+    Structural validation for an MCP server URL. Rejects non-http(s) schemes
+    (e.g. file://, gopher://) and URLs with no host. Note: this does NOT decide
+    whether Databricks credentials may be sent there — that allow-list check is
+    enforced at request time in mcp_integration (see is_trusted_databricks_host).
+    """
+    if value is None:
+        return value
+    parsed = urlparse(value)
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.hostname:
+        raise ValueError("server_url must be a valid http(s) URL with a host")
+    return value
 
 
 class MCPServerBase(BaseModel):
     """Base MCP Server schema with common attributes"""
     name: str = Field(..., description="Name of the MCP server")
     server_url: str = Field(..., description="URL of the MCP server")
+
+    @field_validator("server_url")
+    @classmethod
+    def _check_server_url(cls, v: str) -> str:
+        _validate_mcp_server_url(v)
+        return v
     server_type: str = Field(default="sse", description="Type of MCP server (sse or streamable)")
     auth_type: str = Field(default="api_key", description="Authentication type (api_key or databricks_spn)")
     enabled: bool = Field(default=False, description="Whether the server is enabled")
@@ -27,6 +49,11 @@ class MCPServerUpdate(BaseModel):
     """Schema for updating an existing MCP server"""
     name: Optional[str] = Field(default=None, description="Name of the MCP server")
     server_url: Optional[str] = Field(default=None, description="URL of the MCP server")
+
+    @field_validator("server_url")
+    @classmethod
+    def _check_server_url(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_mcp_server_url(v)
     api_key: Optional[str] = Field(default=None, description="API key for authentication (will be encrypted)")
     server_type: Optional[str] = Field(default=None, description="Type of MCP server (sse or streamable)")
     auth_type: Optional[str] = Field(default=None, description="Authentication type (api_key or databricks_spn)")

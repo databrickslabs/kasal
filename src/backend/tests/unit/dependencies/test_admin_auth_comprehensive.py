@@ -6,7 +6,6 @@ Targets: _create_user_from_forwarded_email, get_current_user_from_email,
 
 Goal: push coverage from 17.7% to 50%+
 """
-import os
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import HTTPException
@@ -280,3 +279,97 @@ class TestGetAdminUser:
             result = await get_admin_user(session, ctx)
 
         assert result is user
+
+
+# ============================================================================
+# get_system_admin_user  (global system admin — stricter than get_admin_user)
+# ============================================================================
+
+class TestGetSystemAdminUser:
+    """
+    get_system_admin_user requires the user-level is_system_admin flag.
+    Critically, being an admin of one's own group (highest_role/user_role
+    == "admin") must NOT satisfy it — that is the whole point of the stricter
+    dependency for global / cross-tenant operations.
+    """
+
+    @pytest.mark.asyncio
+    async def test_system_admin_passes(self):
+        from src.dependencies.admin_auth import get_system_admin_user
+
+        session = AsyncMock()
+        ctx = _make_group_context(email="sysadmin@example.com")
+        user = _make_user("sysadmin@example.com", is_system_admin=True)
+
+        with patch("src.dependencies.admin_auth.require_authenticated_user", return_value=user):
+            result = await get_system_admin_user(session, ctx)
+
+        assert result is user
+
+    @pytest.mark.asyncio
+    async def test_group_admin_is_rejected_403(self):
+        """A group/workspace admin (NOT system admin) must be denied — the key
+        privilege-separation guarantee versus get_admin_user."""
+        from src.dependencies.admin_auth import get_system_admin_user
+
+        session = AsyncMock()
+        ctx = _make_group_context(email="gadmin@example.com", highest_role="admin", user_role="admin")
+        user = _make_user("gadmin@example.com", is_system_admin=False)
+
+        with patch("src.dependencies.admin_auth.require_authenticated_user", return_value=user):
+            with pytest.raises(HTTPException) as exc_info:
+                await get_system_admin_user(session, ctx)
+
+        assert exc_info.value.status_code == 403
+        assert "system administrator" in exc_info.value.detail.lower()
+
+    @pytest.mark.asyncio
+    async def test_regular_user_rejected_403(self):
+        from src.dependencies.admin_auth import get_system_admin_user
+
+        session = AsyncMock()
+        ctx = _make_group_context(email="regular@example.com", user_role="member")
+        user = _make_user("regular@example.com", is_system_admin=False)
+
+        with patch("src.dependencies.admin_auth.require_authenticated_user", return_value=user):
+            with pytest.raises(HTTPException) as exc_info:
+                await get_system_admin_user(session, ctx)
+
+        assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_missing_flag_attribute_rejected_403(self):
+        """getattr(user, 'is_system_admin', False) — a user object lacking the
+        attribute entirely is treated as non-system-admin, not an error."""
+        from src.dependencies.admin_auth import get_system_admin_user
+
+        session = AsyncMock()
+        ctx = _make_group_context(email="legacy@example.com")
+        user = MagicMock()
+        user.email = "legacy@example.com"
+        del user.is_system_admin  # attribute absent
+
+        with patch("src.dependencies.admin_auth.require_authenticated_user", return_value=user):
+            with pytest.raises(HTTPException) as exc_info:
+                await get_system_admin_user(session, ctx)
+
+        assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_delegates_to_require_authenticated_user(self):
+        from src.dependencies.admin_auth import get_system_admin_user
+
+        session = AsyncMock()
+        ctx = _make_group_context(email="sysadmin@example.com")
+        user = _make_user("sysadmin@example.com", is_system_admin=True)
+
+        with patch("src.dependencies.admin_auth.require_authenticated_user", return_value=user) as mock_req:
+            await get_system_admin_user(session, ctx)
+
+        mock_req.assert_called_once_with(session, ctx)
+
+    def test_require_system_admin_is_alias(self):
+        """The route-level alias must point at the same callable."""
+        from src.dependencies.admin_auth import get_system_admin_user, require_system_admin
+
+        assert require_system_admin is get_system_admin_user

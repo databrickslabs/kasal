@@ -1199,10 +1199,10 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           {effectiveChatVisible && chatPanelSide === 'left' && !areFlowsVisible && (
             <Box
               onMouseEnter={() => {
-                window.postMessage({ type: 'chat-hover-state', isHovering: true }, '*');
+                window.postMessage({ type: 'chat-hover-state', isHovering: true }, window.location.origin);
               }}
               onMouseLeave={() => {
-                window.postMessage({ type: 'chat-hover-state', isHovering: false }, '*');
+                window.postMessage({ type: 'chat-hover-state', isHovering: false }, window.location.origin);
               }}
               sx={{
                 width: effectiveChatCollapsed ? `${chatPanelCollapsedWidth}px` : `${effectiveChatWidth}px`,
@@ -1419,10 +1419,10 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             {effectiveChatVisible && chatPanelSide === 'right' && !areFlowsVisible && (
               <Box
                 onMouseEnter={() => {
-                  window.postMessage({ type: 'chat-hover-state', isHovering: true }, '*');
+                  window.postMessage({ type: 'chat-hover-state', isHovering: true }, window.location.origin);
                 }}
                 onMouseLeave={() => {
-                  window.postMessage({ type: 'chat-hover-state', isHovering: false }, '*');
+                  window.postMessage({ type: 'chat-hover-state', isHovering: false }, window.location.origin);
                 }}
                 sx={{
                   position: 'absolute',

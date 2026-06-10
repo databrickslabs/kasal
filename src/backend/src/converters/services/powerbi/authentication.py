@@ -393,14 +393,16 @@ class AadService:
         try:
             self.logger.info("=" * 80)
             self.logger.info("🔑 AUTHENTICATION METHOD: Service Account (username/password)")
-            self.logger.info("=" * 80)
-            self.logger.info(f"[AUTH DEBUG] Acquiring token with service account:")
-            self.logger.info(f"[AUTH DEBUG]   tenant_id: '{self.tenant_id}'")
-            self.logger.info(f"[AUTH DEBUG]   client_id: '{self.client_id}'")
-            self.logger.info(f"[AUTH DEBUG]   username: '{username}'")
-            self.logger.info(f"[AUTH DEBUG]   password length: {len(password)}")
-            self.logger.info(f"[AUTH DEBUG]   password stripped length: {len(password.strip())}")
-            self.logger.info(f"[AUTH DEBUG]   password has whitespace: {password != password.strip()}")
+            # SECURITY: service-account credential context is diagnostic only —
+            # keep at DEBUG so it is not emitted to production logs.
+            self.logger.debug("=" * 80)
+            self.logger.debug(f"[AUTH DEBUG] Acquiring token with service account:")
+            self.logger.debug(f"[AUTH DEBUG]   tenant_id: '{self.tenant_id}'")
+            self.logger.debug(f"[AUTH DEBUG]   client_id: '{self.client_id}'")
+            self.logger.debug(f"[AUTH DEBUG]   username: '{username}'")
+            self.logger.debug(f"[AUTH DEBUG]   password length: {len(password)}")
+            self.logger.debug(f"[AUTH DEBUG]   password stripped length: {len(password.strip())}")
+            self.logger.debug(f"[AUTH DEBUG]   password has whitespace: {password != password.strip()}")
 
             # Strip whitespace from credentials (common copy-paste issue)
             username = username.strip()

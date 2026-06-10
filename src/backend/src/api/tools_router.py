@@ -223,6 +223,11 @@ async def toggle_tool_enabled(
         db: Database session
         group_context: Group context from headers
     """
+    # SECURITY: enabling a tool (incl. powerful/credentialed ones) is a
+    # privileged change — restrict to editors/admins, like create/update/delete.
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only editors and admins can enable or disable tools")
+
     logger.info(f"Toggling enabled status for tool with ID {tool_id}")
     service = ToolService(session)
     response = await service.toggle_tool_enabled_with_group_check(

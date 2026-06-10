@@ -33,9 +33,13 @@ def _check_dangerous_sql(expr: str) -> bool:
         r'\b(?:DROP\s+TABLE|DROP\s+VIEW|DROP\s+SCHEMA|DROP\s+DATABASE|'
         r'DELETE\s+FROM|TRUNCATE\s+TABLE|ALTER\s+TABLE|'
         r'INSERT\s+INTO|UPDATE\s+\w+\s+SET|'
-        r'GRANT\s+|REVOKE\s+|CREATE\s+USER|xp_cmdshell)\b'
+        r'GRANT\s+|REVOKE\s+|CREATE\s+USER|xp_cmdshell|'
+        # A measure expression must never define objects — block CREATE DDL too.
+        r'CREATE\s+(?:OR\s+REPLACE\s+)?(?:TABLE|VIEW|FUNCTION|SCHEMA|DATABASE))\b'
         r'|\bEXEC\s*\(|\bEXECUTE\s*\('
-        r'|;\s*(?:DROP|DELETE|INSERT|UPDATE)\b'
+        r'|;\s*(?:DROP|DELETE|INSERT|UPDATE|CREATE|ALTER|GRANT|REVOKE)\b'
+        # Dollar-quote delimiter — would break out of a $$...$$ quoted DDL body.
+        r'|\$\$'
         r'|\bUNION\s+SELECT\s+.*\bFROM\s+information_schema\b'
         r')',
         re.IGNORECASE,

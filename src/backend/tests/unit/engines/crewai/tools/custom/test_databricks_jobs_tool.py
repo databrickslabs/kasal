@@ -83,20 +83,15 @@ class TestDatabricksJobsToolSchema(unittest.TestCase):
         self.assertEqual(schema.action, "monitor")
         self.assertEqual(schema.run_id, 999)
 
-    def test_valid_create_action(self):
-        """Test creating a valid schema for create action"""
+    def test_create_action_rejected(self):
+        """SECURITY: 'create' (arbitrary code execution) is no longer a valid action."""
         job_config = {
             "name": "Test Job",
             "tasks": [{"task_key": "task1", "notebook_task": {"notebook_path": "/test"}}]
         }
-        
-        schema = DatabricksJobsToolSchema(
-            action="create",
-            job_config=job_config
-        )
-        
-        self.assertEqual(schema.action, "create")
-        self.assertEqual(schema.job_config, job_config)
+        with self.assertRaises(ValueError) as cm:
+            DatabricksJobsToolSchema(action="create", job_config=job_config)
+        self.assertIn("Invalid action", str(cm.exception))
 
     def test_case_insensitive_action(self):
         """Test that action validation is case insensitive"""
@@ -144,11 +139,11 @@ class TestDatabricksJobsToolSchema(unittest.TestCase):
         self.assertIn("run_id is required for action 'monitor'", str(cm.exception))
 
     def test_create_action_missing_job_config(self):
-        """Test schema validation for create action without job_config"""
+        """'create' is rejected as an invalid action (code execution disabled)."""
         with self.assertRaises(ValueError) as cm:
             DatabricksJobsToolSchema(action="create")
-        
-        self.assertIn("job_config is required for action 'create'", str(cm.exception))
+
+        self.assertIn("Invalid action", str(cm.exception))
 
     def test_schema_default_limit(self):
         """Test schema uses default limit when not specified"""
@@ -495,10 +490,12 @@ class TestDatabricksJobsTool(unittest.TestCase):
         with patch.object(tool, '_monitor_run', side_effect=mock_async_method):
             result = tool._run(action="monitor", run_id=456)
             self.assertIn("Mocked result", result)
-        
+
+        # SECURITY: 'create' is hard-blocked regardless of any mock.
         with patch.object(tool, '_create_job', side_effect=mock_async_method):
             result = tool._run(action="create", job_config={"name": "test"})
-            self.assertIn("Mocked result", result)
+            self.assertNotIn("Mocked result", result)
+            self.assertIn("not supported", result.lower())
 
     @patch('src.engines.crewai.tools.custom.databricks_jobs_tool.aiohttp.ClientSession')
     def test_get_auth_headers_with_pat(self, mock_session):
@@ -1938,48 +1935,19 @@ spark.sql("SELECT * FROM table")
         self.assertIn("⚠️ ACTION LIMIT REACHED", result2)
         self.assertIn("usage limit of 1", result2)
 
-    def test_single_execution_create_duplicate_prevention(self):
-        """Test that duplicate create actions are prevented"""
-        # Clear global tracking before test
+    def test_create_action_is_hard_blocked(self):
+        """SECURITY: 'create' (arbitrary code execution) is hard-blocked in _run,
+        even if the underlying _create_job is mocked to succeed."""
         DatabricksJobsTool.clear_execution_tracking()
-        
         tool = DatabricksJobsTool(tool_config=self.tool_config)
-        
         job_config = {"name": "Test Job", "tasks": [{"task_key": "task1"}]}
-        
-        # First create should succeed
         with patch.object(tool, '_create_job', return_value="✅ Successfully created job 'Test Job'\nJob ID: 789"):
-            result1 = tool._run(action="create", job_config=job_config)
-            self.assertIn("Successfully created job", result1)
-            self.assertIn("📊 Action Usage: create 1/1", result1)
-        
-        # Verify global tracking
+            result = tool._run(action="create", job_config=job_config)
+        self.assertNotIn("Successfully created job", result)
+        self.assertIn("not supported", result.lower())
+        # The blocked action must not be tracked as an execution.
         stats = DatabricksJobsTool.get_execution_stats()
-        self.assertEqual(stats['tracked_creates'], 1)
-        
-        # Second identical create should be prevented by action limit
-        result2 = tool._run(action="create", job_config=job_config)
-        self.assertIn("⚠️ ACTION LIMIT REACHED", result2)
-        self.assertIn("usage limit of 1", result2)
-
-    def test_single_execution_create_different_config_blocked(self):
-        """Test that different job configs are blocked after first create"""
-        # Clear global tracking before test
-        DatabricksJobsTool.clear_execution_tracking()
-        
-        tool = DatabricksJobsTool(tool_config=self.tool_config)
-        
-        # First create
-        job_config1 = {"name": "Test Job 1", "tasks": [{"task_key": "task1"}]}
-        with patch.object(tool, '_create_job', return_value="✅ Successfully created job 'Test Job 1'\nJob ID: 789"):
-            result1 = tool._run(action="create", job_config=job_config1)
-            self.assertIn("Successfully created job", result1)
-        
-        # Second create with different config should hit usage limit
-        job_config2 = {"name": "Test Job 2", "tasks": [{"task_key": "task2"}]}
-        result2 = tool._run(action="create", job_config=job_config2)
-        self.assertIn("⚠️ ACTION LIMIT REACHED", result2)
-        self.assertIn("usage limit of 1", result2)
+        self.assertEqual(stats['tracked_creates'], 0)
 
     def test_single_execution_other_actions_unlimited(self):
         """Test that other actions (list, get, monitor) are not limited"""
@@ -2078,21 +2046,15 @@ spark.sql("SELECT * FROM table")
         tool = DatabricksJobsTool(tool_config=self.tool_config)
         
         job_config = {"name": "Test Job", "tasks": [{"task_key": "task1"}]}
-        
-        # First create fails
+
+        # 'create' is hard-blocked, so _create_job is never invoked and nothing
+        # is tracked regardless of what the (mocked) underlying call would return.
         with patch.object(tool, '_create_job', return_value="Error: Job creation failed"):
             result1 = tool._run(action="create", job_config=job_config)
-            self.assertIn("Error: Job creation failed", result1)
-            self.assertNotIn("📊 Usage Count", result1)
-        
-        # Verify nothing was tracked globally
+            self.assertIn("not supported", result1.lower())
+
         stats = DatabricksJobsTool.get_execution_stats()
         self.assertEqual(stats['tracked_creates'], 0)
-        
-        # Second create with same config should be allowed (since first failed)
-        with patch.object(tool, '_create_job', return_value="✅ Successfully created job 'Test Job'\nJob ID: 789"):
-            result2 = tool._run(action="create", job_config=job_config)
-            self.assertIn("Successfully created job", result2)
 
     def test_deterministic_hash_consistency(self):
         """Test that the deterministic hash produces consistent results"""
@@ -2991,15 +2953,17 @@ class TestDatabricksJobsToolAdditionalCoverage(unittest.TestCase):
 
     # ── _run: submit action via _run dispatch ─────────────────────────────
 
-    def test_run_submit_action(self):
-        """_run with submit action dispatches to _submit_run."""
+    def test_run_submit_action_is_hard_blocked(self):
+        """SECURITY: 'submit' (arbitrary code execution) is hard-blocked in _run;
+        _submit_run is never invoked even when mocked."""
         tool = DatabricksJobsTool(tool_config=self.tool_config)
         tasks = [{"task_key": "t1", "notebook_task": {"notebook_path": "/p"}}]
 
         with patch.object(tool, "_submit_run", return_value="submitted") as mock_submit:
             result = tool._run(action="submit", tasks=tasks)
-            self.assertIn("submitted", result)
-            mock_submit.assert_called_once()
+            self.assertNotIn("submitted", result)
+            self.assertIn("not supported", result.lower())
+            mock_submit.assert_not_called()
 
     def test_run_get_output_action(self):
         """_run with get_output action dispatches to _get_run_output."""
@@ -3013,3 +2977,52 @@ class TestDatabricksJobsToolAdditionalCoverage(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestCodeExecutionDisabled(unittest.TestCase):
+    """P1 (H11): 'create'/'submit' (arbitrary code execution) are permanently
+    disabled — not in VALID_ACTIONS and hard-blocked in _run (no opt-in)."""
+
+    BASE_CFG = {
+        "DATABRICKS_API_KEY": "dapiTEST",
+        "DATABRICKS_HOST": "https://x.cloud.databricks.com",
+        "group_id": "g1",
+    }
+
+    def _tool(self, **extra):
+        from src.engines.crewai.tools.custom.databricks_jobs_tool import DatabricksJobsTool
+        cfg = dict(self.BASE_CFG)
+        cfg.update(extra)
+        return DatabricksJobsTool(tool_config=cfg)
+
+    def test_create_and_submit_not_in_valid_actions(self):
+        from src.engines.crewai.tools.custom.databricks_jobs_tool import VALID_ACTIONS
+        self.assertNotIn("create", VALID_ACTIONS)
+        self.assertNotIn("submit", VALID_ACTIONS)
+
+    def test_schema_rejects_create(self):
+        from src.engines.crewai.tools.custom.databricks_jobs_tool import DatabricksJobsToolSchema
+        with self.assertRaises(Exception):
+            DatabricksJobsToolSchema(action="create", job_config={"name": "x"})
+
+    def test_schema_rejects_submit(self):
+        from src.engines.crewai.tools.custom.databricks_jobs_tool import DatabricksJobsToolSchema
+        with self.assertRaises(Exception):
+            DatabricksJobsToolSchema(action="submit", tasks=[{"notebook_task": {}}])
+
+    def test_run_hard_blocks_create(self):
+        # Defense-in-depth: even calling _run directly (bypassing the schema)
+        # must refuse, with no config able to re-enable it.
+        tool = self._tool()
+        result = tool._run(action="create", job_config={"name": "x"})
+        self.assertIn("not supported", result.lower())
+
+    def test_run_hard_blocks_submit(self):
+        tool = self._tool()
+        result = tool._run(action="submit", tasks=[{"notebook_task": {"notebook_path": "/x"}}])
+        self.assertIn("not supported", result.lower())
+
+    def test_read_action_not_blocked(self):
+        # 'run' (trigger an existing job by id) is not a code-execution action.
+        tool = self._tool()
+        result = tool._run(action="run", job_id=123)
+        self.assertNotIn("not supported", result.lower())

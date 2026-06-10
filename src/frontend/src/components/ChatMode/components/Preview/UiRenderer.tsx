@@ -1,5 +1,18 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { UiComponent, UiSurface, UiTheme, resolveValue } from '../../utils/uiDocument';
+import { sanitizeUrl } from '../../../Chat/components/MessageRenderer';
+
+// SECURITY: A2UI documents are LLM/crew output (untrusted). Links must be run
+// through sanitizeUrl() (blocks javascript:/data:/vbscript:) before binding to
+// an anchor href, or a `javascript:` URL would execute in the Kasal origin on
+// click. Image `src` may legitimately be a data:/blob: URI, so it uses a
+// lighter check that only strips script schemes.
+function sanitizeImageSrc(uri: string | undefined | null): string {
+  if (!uri) return '';
+  const u = uri.trim().toLowerCase();
+  if (u.startsWith('javascript:') || u.startsWith('vbscript:')) return '';
+  return uri;
+}
 
 /**
  * Kasal React renderer for a structured UI document (A2UI-conformant — see
@@ -822,9 +835,9 @@ const AlbumCarousel: React.FC<{ title?: string; items: AlbumImage[] }> = ({ titl
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {title && <div style={{ color: TEXT, fontWeight: 700, fontSize: '1.05rem' }}>{title}</div>}
       <div style={{ position: 'relative' }}>
-        <a href={img.url} target="_blank" rel="noopener noreferrer" style={{ display: 'block' }}>
+        <a href={sanitizeUrl(img.url)} target="_blank" rel="noopener noreferrer" style={{ display: 'block' }}>
           <img
-            src={img.url}
+            src={sanitizeImageSrc(img.url)}
             alt={img.alt}
             style={{ width: '100%', aspectRatio: '16 / 9', maxHeight: '70vh', objectFit: 'cover', borderRadius: 16, border: `1px solid ${GLASS_BORDER}`, display: 'block' }}
           />
@@ -989,7 +1002,7 @@ const Node: React.FC<{
     case 'Divider':
       return <div style={{ height: 1, background: GLASS_BORDER, margin: '6px 0' }} />;
     case 'Image': {
-      const url = String(resolveValue(node.url, data) ?? '');
+      const url = sanitizeImageSrc(String(resolveValue(node.url, data) ?? ''));
       if (!url) return null;
       return <img src={url} alt={node.alt ? String(node.alt) : ''} style={{ maxWidth: '100%', borderRadius: 12, display: 'block' }} />;
     }
@@ -1038,13 +1051,13 @@ const Node: React.FC<{
             {items.map((img, i) => (
               <a
                 key={i}
-                href={img.url}
+                href={sanitizeUrl(img.url)}
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{ display: 'flex', flexDirection: 'column', gap: 6, textDecoration: 'none' }}
               >
                 <img
-                  src={img.url}
+                  src={sanitizeImageSrc(img.url)}
                   alt={img.alt}
                   loading="lazy"
                   style={{ width: '100%', aspectRatio: '4 / 3', objectFit: 'cover', borderRadius: 12, border: `1px solid ${GLASS_BORDER}`, display: 'block' }}

@@ -15,6 +15,7 @@ from src.core.dependencies import GroupContextDep, LocalSessionDep, SessionDep
 from src.core.exceptions import BadRequestError, ForbiddenError, KasalError
 from src.core.logger import LoggerManager
 from src.core.permissions import check_role_in_context
+from src.dependencies.admin_auth import require_system_admin
 from src.schemas.database_management import (
     DatabaseInfoResponse,
     ExportRequest,
@@ -29,6 +30,11 @@ from src.services.lakebase_service import LakebaseService
 
 router = APIRouter(prefix="/database-management", tags=["database-management"])
 logger = LoggerManager.get_instance().api
+
+# SECURITY: route-level guard for destructive / app-wide infrastructure
+# operations. These endpoints control all tenants' data and the global database
+# backend, so they require a SYSTEM administrator (not merely a workspace admin).
+_SYSTEM_ADMIN_ONLY = [Depends(require_system_admin)]
 
 
 def get_database_management_service(
@@ -227,7 +233,7 @@ async def list_backups(
     return ListBackupsResponse(**result)
 
 
-@router.post("/housekeeping")
+@router.post("/housekeeping", dependencies=_SYSTEM_ADMIN_ONLY)
 async def run_housekeeping(
     request: Dict[str, Any],
     service: DatabaseManagementServiceDep,
@@ -531,7 +537,7 @@ async def check_database_management_permission(
 
 
 # Lakebase specific endpoints
-@router.get("/lakebase/config")
+@router.get("/lakebase/config", dependencies=_SYSTEM_ADMIN_ONLY)
 async def get_lakebase_config(service: LakebaseServiceDep) -> Dict[str, Any]:
     """
     Get current Lakebase configuration.
@@ -542,7 +548,7 @@ async def get_lakebase_config(service: LakebaseServiceDep) -> Dict[str, Any]:
     return await service.get_config()
 
 
-@router.get("/lakebase/instances")
+@router.get("/lakebase/instances", dependencies=_SYSTEM_ADMIN_ONLY)
 async def list_lakebase_instances(
     service: LakebaseServiceDep,
     search: Optional[str] = None,
@@ -563,7 +569,7 @@ async def list_lakebase_instances(
     return await service.list_instances(search=search, page=page, page_size=page_size)
 
 
-@router.post("/lakebase/config")
+@router.post("/lakebase/config", dependencies=_SYSTEM_ADMIN_ONLY)
 async def save_lakebase_config(
     config: Dict[str, Any], service: LakebaseServiceDep
 ) -> Dict[str, Any]:
@@ -583,7 +589,7 @@ async def save_lakebase_config(
     return await service.save_config(config)
 
 
-@router.post("/lakebase/create")
+@router.post("/lakebase/create", dependencies=_SYSTEM_ADMIN_ONLY)
 async def create_lakebase_instance(
     request: Dict[str, Any], service: LakebaseServiceDep
 ) -> Dict[str, Any]:
@@ -604,7 +610,7 @@ async def create_lakebase_instance(
     )
 
 
-@router.get("/lakebase/instance/{instance_name}")
+@router.get("/lakebase/instance/{instance_name}", dependencies=_SYSTEM_ADMIN_ONLY)
 async def get_lakebase_instance(
     instance_name: str, service: LakebaseServiceDep
 ) -> Dict[str, Any]:
@@ -621,7 +627,7 @@ async def get_lakebase_instance(
     return await service.get_instance(instance_name)
 
 
-@router.get("/lakebase/tables")
+@router.get("/lakebase/tables", dependencies=_SYSTEM_ADMIN_ONLY)
 async def check_lakebase_tables(service: LakebaseServiceDep):
     """
     Check what tables exist in the configured Lakebase instance.
@@ -631,7 +637,7 @@ async def check_lakebase_tables(service: LakebaseServiceDep):
     return await service.check_lakebase_tables()
 
 
-@router.post("/lakebase/migrate")
+@router.post("/lakebase/migrate", dependencies=_SYSTEM_ADMIN_ONLY)
 async def migrate_to_lakebase(
     request: Dict[str, Any], service: LakebaseServiceDep
 ) -> Dict[str, Any]:
@@ -656,7 +662,7 @@ async def migrate_to_lakebase(
     )
 
 
-@router.post("/lakebase/migrate/stream")
+@router.post("/lakebase/migrate/stream", dependencies=_SYSTEM_ADMIN_ONLY)
 async def migrate_to_lakebase_stream(
     request: Dict[str, Any], raw_request: Request, group_context: GroupContextDep
 ):
@@ -813,7 +819,7 @@ async def migrate_to_lakebase_stream(
     )
 
 
-@router.post("/lakebase/start")
+@router.post("/lakebase/start", dependencies=_SYSTEM_ADMIN_ONLY)
 async def start_lakebase_instance(
     request: Dict[str, Any], service: LakebaseServiceDep
 ) -> Dict[str, Any]:
@@ -833,7 +839,7 @@ async def start_lakebase_instance(
     return await service.start_instance(instance_name)
 
 
-@router.get("/lakebase/test/{instance_name}")
+@router.get("/lakebase/test/{instance_name}", dependencies=_SYSTEM_ADMIN_ONLY)
 async def test_lakebase_connection_get(
     instance_name: str, service: LakebaseServiceDep
 ) -> Dict[str, Any]:
@@ -850,7 +856,7 @@ async def test_lakebase_connection_get(
     return await service.test_connection(instance_name)
 
 
-@router.get("/lakebase/workspace-info")
+@router.get("/lakebase/workspace-info", dependencies=_SYSTEM_ADMIN_ONLY)
 async def get_lakebase_workspace_info(service: LakebaseServiceDep) -> Dict[str, Any]:
     """
     Get Databricks workspace URL and organization ID for Lakebase links.
@@ -862,7 +868,7 @@ async def get_lakebase_workspace_info(service: LakebaseServiceDep) -> Dict[str, 
     return await service.get_workspace_info()
 
 
-@router.post("/lakebase/enable")
+@router.post("/lakebase/enable", dependencies=_SYSTEM_ADMIN_ONLY)
 async def enable_lakebase_without_migration(
     request: Dict[str, Any], service: LakebaseServiceDep
 ) -> Dict[str, Any]:
@@ -896,7 +902,7 @@ async def enable_lakebase_without_migration(
     return await service.enable_lakebase(instance_name, endpoint)
 
 
-@router.post("/lakebase/test-connection")
+@router.post("/lakebase/test-connection", dependencies=_SYSTEM_ADMIN_ONLY)
 async def test_lakebase_connection(
     request: Dict[str, Any], service: LakebaseServiceDep
 ) -> Dict[str, Any]:

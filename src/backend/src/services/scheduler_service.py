@@ -102,8 +102,16 @@ class SchedulerService:
             HTTPException: If execution not found or schedule creation fails
         """
         try:
-            # Get the execution history to extract the configuration
-            execution = await self.execution_history_repository.find_by_id(schedule_data.execution_id)
+            # Get the execution history to extract the configuration.
+            # SECURITY: scope the lookup to the caller's groups so a schedule
+            # can only be created from an execution the caller's group owns
+            # (prevents cross-tenant config/prompt exfiltration via arbitrary
+            # execution_id). Falls back to unscoped lookup only when no group
+            # context is available (e.g. local/non-multitenant mode).
+            group_ids = group_context.group_ids if group_context else None
+            execution = await self.execution_history_repository.get_execution_by_id(
+                schedule_data.execution_id, group_ids=group_ids
+            )
             if not execution:
                 raise NotFoundError(detail=f"Execution with ID {schedule_data.execution_id} not found")
 
@@ -202,8 +210,11 @@ class SchedulerService:
             logger.debug(f"Filtering by group_id: {group_context.primary_group_id}")
             schedules = await self.repository.find_by_group(group_context.primary_group_id)
         else:
-            logger.debug(f"No valid group context (context={group_context}, group_id={getattr(group_context, 'primary_group_id', None)}), getting all schedules")
-            schedules = await self.repository.find_all()
+            # SECURITY: fail closed — an API caller with no resolvable group must
+            # NOT receive every tenant's schedules. Internal scheduler loops use
+            # repository.find_all() directly, not this group-aware method.
+            logger.warning("get_all_schedules called without a valid group context — returning empty list")
+            schedules = []
         
         logger.debug(f"Found {len(schedules)} schedules")
         for schedule in schedules:

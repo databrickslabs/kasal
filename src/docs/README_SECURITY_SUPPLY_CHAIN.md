@@ -275,8 +275,8 @@ was recently compromised.
 
 #### 2.1 PyPI Internal Proxy (mirror the npm policy)
 
-**Problem:** Databricks has already mandated an npm proxy (`npm-proxy.dev.databricks.com`)
-that blocks packages newer than 7 days. PyPI has no equivalent yet — packages are fetched
+**Problem:** Databricks has already mandated an internal npm proxy (configured locally, not
+committed) that blocks packages newer than 7 days. PyPI has no equivalent yet — packages are fetched
 directly from pypi.org with no hold period or malware scan.
 
 **Proposal:** Extend the same architecture to PyPI. A proxy/mirror that:

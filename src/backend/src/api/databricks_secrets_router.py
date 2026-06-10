@@ -10,9 +10,10 @@ from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Path, status
 
-from src.core.exceptions import BadRequestError, KasalError, NotFoundError
+from src.core.exceptions import BadRequestError, ForbiddenError, KasalError, NotFoundError
 
 from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.permissions import check_role_in_context
 from src.schemas.databricks_secret import (
     DatabricksTokenRequest,
     SecretCreate,
@@ -51,6 +52,16 @@ def get_databricks_secrets_service(session: SessionDep) -> DatabricksSecretsServ
 DatabricksSecretsServiceDep = Annotated[
     DatabricksSecretsService, Depends(get_databricks_secrets_service)
 ]
+
+
+def _require_secret_admin(group_context) -> None:
+    """
+    SECURITY: Databricks secrets live in a shared, workspace-level scope and are
+    used by all tenants for backend integrations. Only admins may create,
+    update or delete them (mirrors the role gating on api_keys_router).
+    """
+    if not check_role_in_context(group_context, ["admin"]):
+        raise ForbiddenError("Only admins can manage Databricks secrets")
 
 
 @router.get("", response_model=List[SecretResponse])
@@ -113,6 +124,8 @@ async def create_databricks_secret(
     Returns:
         Created secret
     """
+    _require_secret_admin(group_context)
+
     # Try to store in Databricks
     config = await service.databricks_service.get_databricks_config()
     if config and config.is_enabled and config.workspace_url and config.secret_scope:
@@ -156,6 +169,8 @@ async def update_databricks_secret(
     Returns:
         Updated secret
     """
+    _require_secret_admin(group_context)
+
     # Log the request for debugging
     logger.info(f"Attempting to update Databricks secret: {secret_name}")
 
@@ -201,6 +216,8 @@ async def delete_databricks_secret(
         secret_name: Name of the secret to delete
         service: Secret service injected by dependency
     """
+    _require_secret_admin(group_context)
+
     # Try to delete from Databricks
     config = await service.databricks_service.get_databricks_config()
     if config and config.is_enabled and config.workspace_url and config.secret_scope:
@@ -229,6 +246,8 @@ async def create_databricks_secret_scope(
     Returns:
         Success status
     """
+    _require_secret_admin(group_context)
+
     config = await service.databricks_service.get_databricks_config()
     if (
         not config
@@ -284,6 +303,7 @@ async def set_secret(
     service: DatabricksSecretsServiceDep,
 ):
     """Legacy endpoint for setting a secret value in Databricks."""
+    _require_secret_admin(group_context)
     workspace_url, scope = await service.validate_databricks_config()
     success = await service.set_databricks_secret_value(scope, key, secret_data.value)
     if success:
@@ -302,6 +322,7 @@ async def delete_secret_endpoint(
     service: DatabricksSecretsServiceDep,
 ):
     """Legacy endpoint for deleting a secret from Databricks."""
+    _require_secret_admin(group_context)
     workspace_url, scope = await service.validate_databricks_config()
     success = await service.delete_databricks_secret(scope, key)
     if not success:
@@ -314,6 +335,7 @@ async def create_secret_scope_endpoint(
     service: DatabricksSecretsServiceDep,
 ):
     """Legacy endpoint for creating a secret scope if it doesn't exist."""
+    _require_secret_admin(group_context)
     workspace_url, scope = await service.validate_databricks_config()
 
     # Get token from unified auth
@@ -344,6 +366,7 @@ async def set_databricks_token(
     service: DatabricksSecretsServiceDep,
 ):
     """Set Databricks token in the configuration."""
+    _require_secret_admin(group_context)
     try:
         # Validate that Databricks is configured and enabled
         config = await service.databricks_service.get_databricks_config()

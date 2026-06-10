@@ -952,3 +952,32 @@ describe('UiRenderer — remaining visual branches', () => {
     expect((container.firstChild as HTMLElement).style.fontFamily).toContain('Inter');
   });
 });
+
+describe('UiRenderer — URL sanitization (security)', () => {
+  it('sanitizes javascript: URLs in Album anchors and keeps safe http(s) links', () => {
+    const { container } = render(<UiRenderer surface={surface({
+      root: {
+        id: 'root',
+        component: 'Album',
+        images: [
+          { url: 'javascript:alert(document.cookie)', alt: 'evil' },
+          { url: 'https://example.com/safe.png', alt: 'safe' },
+        ],
+      },
+    })} />);
+    const hrefs = Array.from(container.querySelectorAll('a')).map((a) => a.getAttribute('href') ?? '');
+    // No anchor may carry a javascript: scheme.
+    expect(hrefs.some((h) => h.toLowerCase().startsWith('javascript:'))).toBe(false);
+    // The safe https link is preserved.
+    expect(hrefs).toContain('https://example.com/safe.png');
+  });
+
+  it('blocks a javascript: URL on a single Image (rendered as empty src, not executed)', () => {
+    const { container } = render(<UiRenderer surface={surface({
+      root: { id: 'root', component: 'Image', url: 'javascript:alert(1)' },
+    })} />);
+    const img = container.querySelector('img');
+    // sanitizeImageSrc strips script schemes -> empty -> node returns null (no img) or empty src.
+    expect(img?.getAttribute('src') ?? '').not.toContain('javascript:');
+  });
+});

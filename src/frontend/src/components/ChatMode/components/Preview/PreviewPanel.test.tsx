@@ -109,13 +109,27 @@ function renderPanel(content: PreviewContent, props: Partial<typeof baseProps> =
 }
 
 describe('PreviewPanel component', () => {
-  it('renders an HTML preview into a sandboxed iframe (doc.write)', () => {
+  it('renders an HTML preview into an opaque-origin sandboxed iframe (srcDoc + CSP)', () => {
     const { container } = renderPanel({ type: 'html', data: '<p>hello iframe</p>' });
     const iframe = container.querySelector('iframe');
     expect(iframe).toBeInTheDocument();
     expect(iframe?.getAttribute('title')).toBe('Execution result preview');
     expect(screen.getByText('Preview')).toBeInTheDocument(); // default html title
     expect(screen.getByText('HTML')).toBeInTheDocument(); // type badge
+  });
+
+  it('SECURITY: html iframe sandbox is allow-scripts only (no allow-same-origin) and injects a CSP', () => {
+    const { container } = renderPanel({ type: 'html', data: '<p>hi</p><script>alert(1)</script>' });
+    const iframe = container.querySelector('iframe');
+    const sandbox = iframe?.getAttribute('sandbox') ?? '';
+    expect(sandbox).toContain('allow-scripts');
+    // The escape vector is allow-same-origin — it must NOT be present.
+    expect(sandbox).not.toContain('allow-same-origin');
+    const srcDoc = iframe?.getAttribute('srcdoc') ?? '';
+    expect(srcDoc).toContain('Content-Security-Policy');
+    expect(srcDoc).toContain("default-src 'none'");
+    // Content is delivered via srcDoc (not doc.write into a same-origin frame).
+    expect(srcDoc).toContain('<p>hi</p>');
   });
 
   it('renders a JSON array-of-objects as a table with unioned keys and value formatting', () => {
