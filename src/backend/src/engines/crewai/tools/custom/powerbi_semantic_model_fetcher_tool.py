@@ -1488,25 +1488,16 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         measure dicts in-place so the enriched fields flow into the daily cache.
 
         Config keys:
-          - llm_workspace_url: Databricks workspace URL (already used by Reducer)
-          - llm_token: Personal access token (already used by Reducer)
           - semantic_enrichment_endpoint: Serving endpoint name
                 (default: databricks-meta-llama-3-3-70b-instruct)
 
-        Fail-open: any batch failure is logged and skipped.
+        Authentication is handled internally by LLMManager from the group
+        context. Fail-open: any batch failure is logged and skipped.
         """
-        workspace_url = (config.get("llm_workspace_url") or "").rstrip("/")
-        token = config.get("llm_token") or ""
         endpoint = config.get(
             "semantic_enrichment_endpoint",
             "databricks-meta-llama-3-3-70b-instruct",
         )
-
-        if not workspace_url or not token:
-            logger.warning(
-                "[SemanticEnrichment] llm_workspace_url or llm_token missing — skipping"
-            )
-            return
 
         _SYSTEM_TABLES = ("LocalDateTable", "DateTableTemplate", "DateTable")
         tables = [

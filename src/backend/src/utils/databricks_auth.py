@@ -882,10 +882,13 @@ def setup_environment_variables(user_token: Optional[str] = None) -> bool:
         # Check if we're already in an event loop
         try:
             asyncio.get_running_loop()
-            # We're in an event loop, create a task instead of using asyncio.run
+            # We're in an event loop — offload with ContextVars copied so the
+            # OBO user token from UserContext survives the thread hop
             import concurrent.futures
+            import contextvars
+            ctx = contextvars.copy_context()
             with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, _setup())
+                future = executor.submit(ctx.run, asyncio.run, _setup())
                 return future.result()
         except RuntimeError:
             # No event loop running, safe to use asyncio.run

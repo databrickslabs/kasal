@@ -329,33 +329,30 @@ class MetricViewValidatorTool(BaseTool):
                 return []
 
         import time
+        from src.engines.crewai.tools.async_bridge import run_sync_with_context
+        from src.utils.asyncio_utils import create_and_run_loop
 
         def _run_with_retry():
             """Retry up to 5x to handle the race condition where the UCMV
             Generator's DB write hasn't committed yet when the validator starts."""
             for attempt in range(5):
                 try:
-                    result = asyncio.run(_query())
-                    if result and isinstance(result, dict) and 'yaml' in result:
+                    result = create_and_run_loop(_query())
+                    if result:  # _query returns a (possibly empty) list of measures
                         return result
                     if attempt < 4:
-                        logger.info(f"[Validator] UCMV not in DB yet (attempt {attempt+1}/5), retrying in 3s...")
+                        logger.info(f"[Validator] Measures not in DB yet (attempt {attempt+1}/5), retrying in 3s...")
                         time.sleep(3)
                 except Exception as e:
                     logger.debug(f"[Validator] DB query attempt {attempt+1} failed: {e}")
                     if attempt < 4:
                         time.sleep(2)
-            return {}
+            return []
 
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    return pool.submit(_run_with_retry).result(timeout=60)
-            return _run_with_retry()
+            return run_sync_with_context(_run_with_retry, timeout=60)
         except Exception:
-            return _run_with_retry()
+            return []
 
     @staticmethod
     def _fetch_saved_ucmv_edits_from_db() -> dict:
@@ -393,19 +390,13 @@ class MetricViewValidatorTool(BaseTool):
                         pass
                 return {}
 
+        from src.engines.crewai.tools.async_bridge import run_sync_with_context
+        from src.utils.asyncio_utils import create_and_run_loop
+
         try:
-            import asyncio as _asyncio
-            loop = _asyncio.get_event_loop()
-            if loop.is_running():
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    return pool.submit(lambda: _asyncio.run(_query())).result(timeout=10)
-            return loop.run_until_complete(_query())
+            return run_sync_with_context(lambda: create_and_run_loop(_query()), timeout=15)
         except Exception:
-            try:
-                return asyncio.run(_query())
-            except Exception:
-                return {}
+            return {}
 
     @staticmethod
     def _fetch_latest_ucmv_from_db() -> dict:

@@ -1,6 +1,6 @@
 """Unit tests for PBIVisualUCMVMapperTool (Tool 94)."""
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -124,12 +124,6 @@ def _mock_auth(workspace_url="https://test.azuredatabricks.net"):
     auth.workspace_url = workspace_url
     auth.get_headers.return_value = {"Authorization": "Bearer test-token"}
     return auth
-
-
-def _mock_litellm_response(content=SAMPLE_LLM_RESPONSE):
-    mock_completion = MagicMock()
-    mock_completion.choices[0].message.content = content
-    return mock_completion
 
 
 # ---------------------------------------------------------------------------
@@ -347,12 +341,13 @@ class TestLLMIntegration:
         assert len(data["visual_mappings"]) == 3
 
     def test_fallback_mapping_when_llm_fails(self):
-        """litellm raises → fallback_mapping used."""
+        """LLMManager.completion raises → fallback_mapping used."""
         tool = PBIVisualUCMVMapperTool()
         auth = _mock_auth()
 
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("litellm.completion", side_effect=RuntimeError("LLM unavailable")):
+             patch("src.core.llm_manager.LLMManager.completion",
+                   AsyncMock(side_effect=RuntimeError("LLM unavailable"))):
             result = tool._run(
                 report_references_json=SAMPLE_REPORT_REFERENCES,
                 ucmv_output=SAMPLE_UCMV_OUTPUT,

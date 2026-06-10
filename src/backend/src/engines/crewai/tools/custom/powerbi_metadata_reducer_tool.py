@@ -274,8 +274,6 @@ class PowerBIMetadataReducerTool(BaseTool):
             boost_min=config.get("synonym_boost_min", 60.0),
         )
         threshold = config.get("synonym_threshold", 70)
-        llm_workspace_url = config.get("llm_workspace_url")
-        llm_token = config.get("llm_token")
 
         # Parse business_terms: {"BU": ["Business Unit"], "CGR": ["Complete Good Receipt"]}
         business_terms_raw = config.get("business_terms", {})
@@ -304,8 +302,6 @@ class PowerBIMetadataReducerTool(BaseTool):
             user_question,
             known_measures=known_measure_names,
             known_dimensions=known_dimension_names,
-            llm_workspace_url=config.get("llm_workspace_url"),
-            llm_token=config.get("llm_token"),
             llm_model=config.get("llm_model", "databricks-claude-sonnet-4"),
         )
 
@@ -366,10 +362,7 @@ class PowerBIMetadataReducerTool(BaseTool):
 
         elif strategy == "llm":
             # ── LLM-only: send full catalog to LLM without fuzzy hints ──
-            if not llm_workspace_url or not llm_token:
-                return json.dumps({
-                    "error": "LLM strategy requires llm_workspace_url and llm_token to be configured."
-                })
+            # (LLMManager authenticates internally — no credentials needed)
             logger.info(f"[MetadataReducer][LLM_SELECTION] LLM-only selection (model={config.get('llm_model')})...")
             ranked_tables = scorer.rank_tables(tables, user_question, sample_data=sample_data, business_terms=business_terms, question_intent=question_intent)
             ranked_measures = scorer.rank_measures(measures, user_question, business_terms=business_terms, question_intent=question_intent)
@@ -397,31 +390,19 @@ class PowerBIMetadataReducerTool(BaseTool):
             top_tables = [(r["table"]["name"], r["score"], r["likely_relevant"]) for r in ranked_tables[:8]]
             logger.info(f"[MetadataReducer][FUZZY_SCORING] Done in {fuzzy_time:.2f}s. Top tables: {top_tables}")
 
-            if llm_workspace_url and llm_token:
-                t3 = time.time()
-                logger.info(f"[MetadataReducer][LLM_SELECTION] Starting (model={config.get('llm_model')})...")
-                selected = await self._llm_select_tables_and_measures(
-                    user_question, ranked_tables, ranked_measures, config
-                )
-                selected_table_names = selected.get("tables", [])
-                selected_measure_names = selected.get("measures", [])
-                selection_reasoning = selected.get("reasoning", "Combined fuzzy + LLM selection")
-                logger.info(
-                    f"[MetadataReducer][LLM_SELECTION] Done in {time.time()-t3:.2f}s — "
-                    f"selected {len(selected_table_names)} tables: {selected_table_names}, "
-                    f"{len(selected_measure_names)} measures: {selected_measure_names}"
-                )
-            else:
-                logger.warning(
-                    "[MetadataReducer] Combined strategy but LLM not configured — falling back to fuzzy-only"
-                )
-                selected_table_names = [
-                    r["table"]["name"] for r in ranked_tables if r["score"] >= threshold
-                ]
-                selected_measure_names = [
-                    r["measure"]["name"] for r in ranked_measures if r["score"] >= threshold
-                ]
-                selection_reasoning = f"Combined strategy fallback to fuzzy-only (LLM not configured, threshold={threshold})"
+            t3 = time.time()
+            logger.info(f"[MetadataReducer][LLM_SELECTION] Starting (model={config.get('llm_model')})...")
+            selected = await self._llm_select_tables_and_measures(
+                user_question, ranked_tables, ranked_measures, config
+            )
+            selected_table_names = selected.get("tables", [])
+            selected_measure_names = selected.get("measures", [])
+            selection_reasoning = selected.get("reasoning", "Combined fuzzy + LLM selection")
+            logger.info(
+                f"[MetadataReducer][LLM_SELECTION] Done in {time.time()-t3:.2f}s — "
+                f"selected {len(selected_table_names)} tables: {selected_table_names}, "
+                f"{len(selected_measure_names)} measures: {selected_measure_names}"
+            )
         else:
             return json.dumps({
                 "error": f"Unknown strategy '{strategy}'. Use: fuzzy, llm, combined, or passthrough."
@@ -1089,8 +1070,6 @@ class PowerBIMetadataReducerTool(BaseTool):
         Provides fuzzy pre-screening hints to guide the LLM.
         Falls back to fuzzy-only if LLM call fails.
         """
-        llm_workspace_url = config["llm_workspace_url"]
-        llm_token = config["llm_token"]
         llm_model = config.get("llm_model", "databricks-claude-sonnet-4")
 
         # Build table catalog for the prompt

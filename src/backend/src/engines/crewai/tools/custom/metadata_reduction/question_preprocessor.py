@@ -141,20 +141,19 @@ class QuestionPreprocessor:
         question: str,
         known_measures: Optional[List[str]] = None,
         known_dimensions: Optional[List[str]] = None,
-        llm_workspace_url: Optional[str] = None,
-        llm_token: Optional[str] = None,
+        use_llm: bool = True,
         llm_model: str = "databricks-claude-sonnet-4",
     ) -> QuestionIntent:
         """Extract structured intent from the user question.
 
-        First runs deterministic extraction, then optionally refines with LLM.
+        First runs deterministic extraction, then optionally refines with LLM
+        (authentication is handled internally by LLMManager).
 
         Args:
             question: The user's natural language question.
             known_measures: List of known measure names from the model.
             known_dimensions: List of known dimension column names.
-            llm_workspace_url: Optional Databricks workspace URL for LLM.
-            llm_token: Optional Databricks token for LLM.
+            use_llm: Whether to refine the deterministic intent with an LLM.
             llm_model: LLM model name.
 
         Returns:
@@ -162,11 +161,11 @@ class QuestionPreprocessor:
         """
         intent = self._deterministic_extract(question, known_measures, known_dimensions)
 
-        # Optionally refine with LLM
-        if llm_workspace_url and llm_token:
+        # Optionally refine with LLM (fail-open to deterministic intent)
+        if use_llm:
             try:
                 intent = self._llm_extract(
-                    intent, question, llm_workspace_url, llm_token, llm_model,
+                    intent, question, llm_model,
                     known_measures, known_dimensions,
                 )
             except Exception as e:
@@ -299,8 +298,6 @@ class QuestionPreprocessor:
         self,
         deterministic_intent: QuestionIntent,
         question: str,
-        llm_workspace_url: str,
-        llm_token: str,
         llm_model: str,
         known_measures: Optional[List[str]] = None,
         known_dimensions: Optional[List[str]] = None,

@@ -147,8 +147,9 @@ def test_disconnect_resets_state():
     assert conn._scanner is None
 
 
-def test_connect_without_llm_creds_creates_no_llm_converter():
-    """Connector without LLM credentials creates a MQueryLLMConverter with no creds."""
+def test_connect_without_llm_creds_creates_llm_converter():
+    """LLM converter is always created — LLMManager authenticates internally,
+    so no per-connector credentials are needed."""
     cfg = _make_config(access_token="tok")  # No llm_workspace_url / llm_token
 
     with patch("src.converters.services.mquery.connector.AadService"), \
@@ -157,11 +158,12 @@ def test_connect_without_llm_creds_creates_no_llm_converter():
         conn = MQueryConnector(cfg)
         conn.connect()
 
-    MockLLM.assert_called_once_with()  # no-arg call
+    MockLLM.assert_called_once_with(model=cfg.llm_model)
 
 
 def test_connect_with_llm_creds_creates_llm_converter():
-    """Connector with LLM credentials creates MQueryLLMConverter with credentials."""
+    """Legacy llm_workspace_url/llm_token config values are accepted but the
+    converter is built with the model only (auth via LLMManager)."""
     cfg = _make_config(
         access_token="tok",
         llm_workspace_url="https://example.databricks.com",
@@ -175,11 +177,7 @@ def test_connect_with_llm_creds_creates_llm_converter():
         conn = MQueryConnector(cfg)
         conn.connect()
 
-    MockLLM.assert_called_once_with(
-        workspace_url="https://example.databricks.com",
-        token="dapi-abc",
-        model="databricks-claude-sonnet-4",
-    )
+    MockLLM.assert_called_once_with(model="databricks-claude-sonnet-4")
 
 
 # ---------------------------------------------------------------------------
