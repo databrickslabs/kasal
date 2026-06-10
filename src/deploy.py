@@ -3,8 +3,13 @@
 Direct deployment script for Kasal application.
 
 Deploys backend source, frontend source, and docs to Databricks Apps.
-Frontend is built on Databricks Apps via npm lifecycle hooks in package.json.
-Uses hybrid upload: SDK for root files (avoids .py→notebook conversion), import-dir for directories.
+The frontend ships as SOURCE together with the root package.json; Databricks
+Apps runs npm install + npm run build during deployment (remote build).
+
+Scopes: by default BOTH frontend and backend are uploaded. Pass --frontend to
+upload only the frontend (and docs), or --backend to upload only the backend.
+Upload uses `databricks sync` per component — full upload by default, pass
+--diff for an incremental (changed-files-only) sync.
 """
 
 import os
@@ -12,11 +17,11 @@ import shutil
 import subprocess
 import sys
 import logging
-import time
 import argparse
 import json
+import tempfile
+import time
 from pathlib import Path
-from datetime import datetime
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.apps import AppDeploymentMode, App, AppDeployment
@@ -47,38 +52,44 @@ def custom_ignore_function(excluded_dirs, excluded_patterns):
         return ignored
     return _ignore
 
-def clean_python_cache(root_dir):
-    """Clean Python cache files and directories"""
-    logger.info("Cleaning Python cache files...")
+def get_desired_oauth_scopes(exclude_dataplane=True):
+    """Return the OAuth scopes the app should have."""
+    desired_scopes = [
+        # SQL related scopes
+        "sql",
+        "sql.alerts",
+        "sql.alerts-legacy",
+        "sql.dashboards",
+        "sql.data-sources",
+        "sql.dbsql-permissions",
+        "sql.queries",
+        "sql.queries-legacy",
+        "sql.query-history",
+        "sql.statement-execution",
+        "sql.warehouses",
 
-    # Clean __pycache__ directories
-    cache_dirs = list(root_dir.rglob("__pycache__"))
-    for cache_dir in cache_dirs:
-        try:
-            shutil.rmtree(cache_dir)
-            logger.debug(f"Removed cache directory: {cache_dir}")
-        except Exception as e:
-            logger.warning(f"Failed to remove {cache_dir}: {e}")
+        # Vector Search scopes - CRITICAL for index creation
+        "vectorsearch.vector-search-endpoints",
+        "vectorsearch.vector-search-indexes",
 
-    # Clean .pyc and .pyo files
-    pyc_files = list(root_dir.rglob("*.pyc")) + list(root_dir.rglob("*.pyo"))
-    for pyc_file in pyc_files:
-        try:
-            pyc_file.unlink()
-            logger.debug(f"Removed cache file: {pyc_file}")
-        except Exception as e:
-            logger.warning(f"Failed to remove {pyc_file}: {e}")
+        # Serving endpoints (excluding data-plane if requested)
+        "serving.serving-endpoints",
 
-    # Clean .pytest_cache directories
-    pytest_cache_dirs = list(root_dir.rglob(".pytest_cache"))
-    for cache_dir in pytest_cache_dirs:
-        try:
-            shutil.rmtree(cache_dir)
-            logger.debug(f"Removed pytest cache: {cache_dir}")
-        except Exception as e:
-            logger.warning(f"Failed to remove {cache_dir}: {e}")
+        # Files
+        "files.files",
 
-    logger.info(f"Cache cleaning completed. Removed {len(cache_dirs)} __pycache__ directories, {len(pyc_files)} .pyc/.pyo files, and {len(pytest_cache_dirs)} .pytest_cache directories")
+        # Dashboards/Genie
+        "dashboards.genie",
+
+        # Unity Catalog - CRITICAL for catalog operations
+        "catalog.connections",
+        "catalog.catalogs:read",
+        "catalog.tables:read",
+        "catalog.schemas:read",
+    ]
+    if not exclude_dataplane:
+        desired_scopes.append("serving.serving-endpoints-data-plane")
+    return desired_scopes
 
 def configure_oauth_scopes(app_name, exclude_dataplane=True):
     """Configure OAuth scopes for the Databricks app
@@ -93,45 +104,9 @@ def configure_oauth_scopes(app_name, exclude_dataplane=True):
     try:
         logger.info(f"Configuring OAuth scopes for app: {app_name}")
 
-        # Define scopes - excluding the problematic dataplane scope by default
-        desired_scopes = [
-            # SQL related scopes
-            "sql",
-            "sql.alerts",
-            "sql.alerts-legacy",
-            "sql.dashboards",
-            "sql.data-sources",
-            "sql.dbsql-permissions",
-            "sql.queries",
-            "sql.queries-legacy",
-            "sql.query-history",
-            "sql.statement-execution",
-            "sql.warehouses",
-
-            # Vector Search scopes - CRITICAL for index creation
-            "vectorsearch.vector-search-endpoints",
-            "vectorsearch.vector-search-indexes",
-
-            # Serving endpoints (excluding data-plane if requested)
-            "serving.serving-endpoints",
-
-            # Files
-            "files.files",
-
-            # Dashboards/Genie
-            "dashboards.genie",
-
-            # Unity Catalog - CRITICAL for catalog operations
-            "catalog.connections",
-            "catalog.catalogs:read",
-            "catalog.tables:read",
-            "catalog.schemas:read",
-        ]
-
-        # Add data-plane scope only if explicitly requested
+        desired_scopes = get_desired_oauth_scopes(exclude_dataplane=exclude_dataplane)
         if not exclude_dataplane:
             logger.warning("Including serving-endpoints-data-plane scope (may cause issues)")
-            desired_scopes.append("serving.serving-endpoints-data-plane")
         else:
             logger.info("Excluding serving-endpoints-data-plane scope (known to cause issues)")
 
@@ -217,16 +192,15 @@ def deploy_source_to_databricks(
     config_template=None,
     api_url=None,
     configure_oauth=True,
-    exclude_dataplane=True
+    exclude_dataplane=True,
+    full_sync=True,
+    scope="all"
 ):
     """Deploy source code to Databricks Apps"""
     root_dir = Path(os.path.dirname(os.path.abspath(__file__)))
-    
+
     logger.info(f"Deploying source code from: {root_dir}")
-    
-    # Clean Python cache before deployment
-    clean_python_cache(root_dir)
-    
+
     # Set default workspace directory if not provided
     if user_name is None:
         user_name = os.environ.get("USER", "default_user")
@@ -252,22 +226,22 @@ def deploy_source_to_databricks(
         logger.warning(f"Could not verify identity (proceeding anyway): {e}")
         logger.info(f"Connecting to Databricks at {client.config.host}")
 
-    # Check that frontend source directory exists (built on Databricks Apps)
-    frontend_src_dir = root_dir / "frontend"
-    if not frontend_src_dir.exists():
-        logger.error("frontend/ directory not found. Cannot deploy without frontend source.")
-        raise FileNotFoundError("frontend/ directory not found")
+    # Frontend ships as SOURCE: Databricks Apps detects the root package.json
+    # and runs npm install + npm run build during deployment.
+    ship_frontend = scope in ("all", "frontend")
+    ship_backend = scope in ("all", "backend")
+    if ship_frontend:
+        if not (root_dir / "frontend").exists():
+            logger.error("frontend/ directory not found. Cannot deploy frontend.")
+            raise FileNotFoundError("frontend/ directory not found")
+        if not (root_dir / "package.json").exists():
+            logger.error("package.json not found. Required for the npm build on Databricks Apps.")
+            raise FileNotFoundError("package.json not found")
 
     # Check that docs directory exists
     docs_dir = root_dir / "docs"
     if not docs_dir.exists():
         logger.warning("docs/ directory not found. Continuing without docs.")
-
-    # Check that root package.json exists (needed for Databricks Apps build)
-    root_package_json = root_dir / "package.json"
-    if not root_package_json.exists():
-        logger.error("package.json not found. This file is required for building frontend on Databricks Apps.")
-        raise FileNotFoundError("package.json not found")
 
     # Verify app.yaml exists
     app_yaml_path = root_dir / "app.yaml"
@@ -298,8 +272,9 @@ def deploy_source_to_databricks(
         # Check if app exists, create if not
         try:
             app_exists = False
+            app_info = None
             logger.info(f"Checking if app {app_name} exists")
-            
+
             try:
                 # Try to get the app
                 app_info = client.apps.get(name=app_name)
@@ -329,20 +304,30 @@ def deploy_source_to_databricks(
                     if not oauth_success:
                         logger.warning("OAuth scope configuration failed, but continuing with deployment")
             else:
-                # Configure OAuth scopes for existing app if requested
+                # Configure OAuth scopes for existing app if requested,
+                # skipping the PATCH when the app already has the desired set.
                 if configure_oauth:
-                    logger.info("Updating OAuth scopes for existing app...")
-                    oauth_success = configure_oauth_scopes(app_name, exclude_dataplane=exclude_dataplane)
-                    if not oauth_success:
-                        logger.warning("OAuth scope configuration failed, but continuing with deployment")
+                    desired = set(get_desired_oauth_scopes(exclude_dataplane=exclude_dataplane))
+                    current = set(getattr(app_info, "user_api_scopes", None) or [])
+                    if current == desired:
+                        logger.info("OAuth scopes already up to date, skipping configuration")
+                    else:
+                        logger.info("Updating OAuth scopes for existing app...")
+                        oauth_success = configure_oauth_scopes(app_name, exclude_dataplane=exclude_dataplane)
+                        if not oauth_success:
+                            logger.warning("OAuth scope configuration failed, but continuing with deployment")
 
         except Exception as e:
             logger.error(f"Error checking/creating app: {e}")
             raise
         
-        # Create databricksdist folder with only the files we need
+        # Create the deployment bundle with only the files we need.
+        # IMPORTANT: the bundle lives OUTSIDE the git repo — `databricks sync`
+        # honors the repository's .gitignore, which ignores databricksdist/ and
+        # frontend_static/, so an in-repo bundle would be silently skipped.
+        # The path is stable per app so sync's incremental snapshot keeps working.
         try:
-            databricks_dist = root_dir / "databricksdist"
+            databricks_dist = Path(tempfile.gettempdir()) / f"kasal-databricksdist-{app_name}"
             logger.info(f"Creating clean databricks deployment directory: {databricks_dist}")
             
             # Remove and recreate databricksdist directory
@@ -350,151 +335,182 @@ def deploy_source_to_databricks(
                 shutil.rmtree(databricks_dist)
             databricks_dist.mkdir()
             
-            # Copy backend folder (MINIMAL - exclude migrations to reduce file count)
-            logger.info("Copying backend folder (MINIMAL mode - excluding migrations)...")
-            backend_src = root_dir / "backend"
-            backend_dst = databricks_dist / "backend"
-            if backend_src.exists():
-                # AGGRESSIVE exclusions to stay under Databricks Apps file limit
+            # Copy backend: WHITELIST — the deployed app only needs backend/src.
+            # Everything else in src/backend (tests, migrations, .venv, runtime
+            # artifacts like kasal_default_* LanceDB dirs, *.db, caches) is dev
+            # junk that must never ship. migrations/ (alembic) stays dev-only:
+            # the app creates and self-heals its schema at startup
+            # (db/session.py create_all + _ensure_*_columns).
+            if ship_backend:
+                logger.info("Copying backend/src (whitelist mode)...")
+                backend_src = root_dir / "backend"
+                backend_dst = databricks_dist / "backend"
+                if not (backend_src / "src").exists():
+                    logger.error("backend/src folder not found!")
+                    raise FileNotFoundError("backend/src folder not found")
                 backend_excluded_dirs = {
-                    'venv', '.venv', 'node_modules', '.git', 'tests', 'logs',
-                    '__pycache__', '.pytest_cache', '.mypy_cache', 'htmlcov',
-                    'migrations',  # Exclude migrations - run alembic upgrade manually after deployment
-                    '.claude', 'tmp', 'mlruns', '.serena', '.benchmarks'
+                    '__pycache__', '.pytest_cache', '.mypy_cache', 'node_modules', 'logs', 'tmp'
                 }
                 backend_excluded_patterns = [
                     '*.pyc', '*.pyo', '*.log', '*.db', '*.db-shm', '*.db-wal',
-                    '*.backup', '.coverage', '.env', 'run_tests.py', 'run_seeders.py',
-                    'uv.lock', '.gitignore', 'kasal.db'
+                    '*.backup', '.coverage', '.env', '.gitignore', '.DS_Store'
                 ]
+                backend_dst.mkdir()
                 shutil.copytree(
-                    backend_src,
-                    backend_dst,
+                    backend_src / "src",
+                    backend_dst / "src",
                     ignore=custom_ignore_function(backend_excluded_dirs, backend_excluded_patterns)
                 )
-                logger.info(f"Copied backend folder (excluding: {backend_excluded_dirs})")
-                logger.warning("MIGRATIONS EXCLUDED - You'll need to run migrations manually in the app after deployment")
-            else:
-                logger.error("Backend folder not found!")
-                raise FileNotFoundError("Backend folder not found")
-            
-            # Copy frontend source folder (without node_modules, dist, coverage)
-            logger.info("Copying frontend source folder...")
-            frontend_src = root_dir / "frontend"
-            frontend_dst = databricks_dist / "frontend"
-            if frontend_src.exists():
+                logger.info("Copied backend/src (only src/ ships; dev/test/runtime artifacts stay local)")
+
+            if ship_frontend:
+                # Frontend source; Databricks Apps runs the npm lifecycle from
+                # the root package.json during deployment.
+                logger.info("Copying frontend source folder...")
                 frontend_excluded_dirs = {'node_modules', 'dist', 'coverage', 'build', '.git', '.benchmarks'}
                 frontend_excluded_patterns = [
                     '.env.local', '.env.development.local', '.env.test.local', '.env.production.local',
-                    'package-lock.json', '*.tsbuildinfo'
+                    'package-lock.json', '*.tsbuildinfo', '.DS_Store'
                 ]
                 shutil.copytree(
-                    frontend_src,
-                    frontend_dst,
+                    root_dir / "frontend",
+                    databricks_dist / "frontend",
                     ignore=custom_ignore_function(frontend_excluded_dirs, frontend_excluded_patterns)
                 )
                 logger.info(f"Copied frontend source folder (excluding: {frontend_excluded_dirs})")
-            else:
-                logger.error("Frontend source folder not found!")
-                raise FileNotFoundError("frontend/ folder not found")
 
-            # Copy docs folder (markdown files for frontend)
-            logger.info("Copying docs folder...")
-            docs_src = root_dir / "docs"
-            docs_dst = databricks_dist / "docs"
-            if docs_src.exists():
-                docs_excluded_dirs = {'archive', '__pycache__'}
-                docs_excluded_patterns = ['*.pyc']
-                shutil.copytree(
-                    docs_src,
-                    docs_dst,
-                    ignore=custom_ignore_function(docs_excluded_dirs, docs_excluded_patterns)
-                )
-                logger.info(f"Copied docs folder (excluding: {docs_excluded_dirs})")
-            else:
-                logger.warning("docs/ folder not found, skipping")
+                # Docs ship with the frontend: the npm prebuild copies docs/*.md
+                # into frontend/public/docs, and the app serves them from there.
+                docs_src = root_dir / "docs"
+                if docs_src.exists():
+                    logger.info("Copying docs folder...")
+                    shutil.copytree(
+                        docs_src,
+                        databricks_dist / "docs",
+                        ignore=custom_ignore_function({'archive', '__pycache__'}, ['*.pyc', '.DS_Store'])
+                    )
+                    logger.info("Copied docs folder")
+                else:
+                    logger.warning("docs/ folder not found, skipping")
 
-            # Copy essential files (including package.json for frontend build)
-            essential_files = ["app.yaml", "entrypoint.py", "package.json"]
-            for file_name in essential_files:
+            # Root files always ship (tiny): the app needs all of them whatever
+            # the scope. package.json triggers the npm build on Databricks Apps;
+            # pyproject.toml + uv.lock at the bundle root make the build run
+            # `uv sync` (we never ship requirements.txt — it would take
+            # precedence and bypass uv).
+            root_files = ["app.yaml", "entrypoint.py", "package.json"]
+            for file_name in root_files:
                 src_file = root_dir / file_name
-                dst_file = databricks_dist / file_name
                 if src_file.exists():
-                    shutil.copy2(src_file, dst_file)
+                    shutil.copy2(src_file, databricks_dist / file_name)
                     logger.info(f"Copied {file_name}")
                 else:
                     logger.warning(f"{file_name} not found, skipping")
-
-            # Copy uv manifests to the bundle ROOT so the Databricks Apps build
-            # runs `uv sync` (reproducible install). They live in backend/ in the
-            # source tree but must sit at the app root for the build to find them.
             for manifest in ("pyproject.toml", "uv.lock"):
                 shutil.copy2(root_dir / "backend" / manifest, databricks_dist / manifest)
                 logger.info(f"Copied {manifest} to bundle root")
 
-
-            # Hybrid upload strategy:
-            # 1. Use import-dir for bulk directory uploads (backend/, frontend/, docs/)
-            # 2. Use SDK workspace.upload() for root-level files to avoid .py→notebook conversion
             logger.info(f"Uploading deployment to workspace: {workspace_dir}")
-            logger.info(f"Uploading from: {databricks_dist}")
-            logger.info(f"Contents: backend/, frontend/, docs/, package.json, app.yaml, pyproject.toml, uv.lock, entrypoint.py")
-            confirmation = input("Do you want to proceed with this upload? (y/N): ")
-
-            if confirmation.lower() not in ['y', 'yes']:
-                logger.info("Upload cancelled by user")
-                return False
-
+            logger.info(f"Uploading from: {databricks_dist} (scope: {scope})")
             logger.info("Proceeding with upload...")
 
-            # Step 1: Upload directories using import-dir (safe for non-.py bulk content)
-            directories_to_upload = ["backend", "frontend", "docs"]
-            for dir_name in directories_to_upload:
-                dir_path = databricks_dist / dir_name
-                if dir_path.exists():
-                    target_path = f"{workspace_dir}/{dir_name}"
-                    import_cmd = [
-                        "databricks", "workspace", "import-dir",
-                        "--overwrite",
-                        str(dir_path),
-                        target_path
-                    ]
-                    if profile is not None:
-                        import_cmd.append("--profile")
-                        import_cmd.append(profile)
-                    logger.info(f"Uploading {dir_name}/ to {target_path}")
-                    result = subprocess.run(import_cmd, check=True, capture_output=True, text=True)
-                    logger.info(f"Uploaded {dir_name}/ successfully")
-                    if result.stderr:
-                        logger.warning(f"Upload warnings for {dir_name}/: {result.stderr}")
-                else:
-                    logger.warning(f"Directory {dir_name}/ not found in databricksdist, skipping")
+            # Remove stale workspace artifacts: requirements.txt would override
+            # uv; frontend_static/ is a leftover from the old prebuilt-assets
+            # deploy mode (the platform npm build creates its own copy inside
+            # the deployment snapshot, not in the workspace).
+            stale_paths = [(f"{workspace_dir}/requirements.txt", False),
+                           (f"{workspace_dir}/frontend_static", True)]
+            for stale_path, recursive in stale_paths:
+                try:
+                    client.workspace.delete(stale_path, recursive=recursive)
+                    logger.info(f"Removed stale workspace artifact: {stale_path}")
+                except Exception:
+                    pass  # not present — nothing to clean
 
-            # Step 2: Upload root-level files individually using SDK
-            # This avoids the import-dir bug that converts .py files to notebooks
-            root_files = ["entrypoint.py", "app.yaml", "package.json", "pyproject.toml", "uv.lock"]
-            for file_name in root_files:
+            # Prune remote entries that are not part of the local bundle.
+            # `databricks sync` never deletes files it didn't upload itself, so
+            # junk from older deploys (.ruff_cache, kasal_default_* memory dirs,
+            # .DS_Store, tests/, migrations/, ...) would otherwise live in the
+            # workspace — and the deployment snapshot — forever.
+            def prune_remote_dir(remote_dir, local_dir):
+                try:
+                    remote_entries = list(client.workspace.list(remote_dir))
+                except Exception:
+                    return  # remote dir doesn't exist yet
+                local_names = {p.name for p in local_dir.iterdir()} if local_dir.exists() else set()
+                for entry in remote_entries:
+                    entry_path = entry.path or ""
+                    name = entry_path.rsplit("/", 1)[-1]
+                    if entry_path and name not in local_names:
+                        try:
+                            client.workspace.delete(entry_path, recursive=True)
+                            logger.info(f"Pruned remote leftover: {entry_path}")
+                        except Exception as prune_err:
+                            logger.warning(f"Could not prune {entry_path}: {prune_err}")
+
+            if ship_backend:
+                prune_remote_dir(f"{workspace_dir}/backend", databricks_dist / "backend")
+            if ship_frontend:
+                prune_remote_dir(f"{workspace_dir}/frontend", databricks_dist / "frontend")
+                prune_remote_dir(f"{workspace_dir}/docs", databricks_dist / "docs")
+
+            # Upload each component with `databricks sync` (parallel transfers).
+            # Full upload by default; with --diff the per-pair snapshot (under
+            # ~/.databricks, keyed on local+remote path) skips unchanged files —
+            # copy2 preserves source mtimes, so the snapshot stays valid even
+            # though the bundle directory is recreated each run.
+            def run_sync(local_dir, remote_dir):
+                sync_cmd = ["databricks", "sync", str(local_dir), remote_dir]
+                if full_sync:
+                    sync_cmd.append("--full")
+                if profile is not None:
+                    sync_cmd.extend(["--profile", profile])
+                logger.info(f"Syncing {local_dir.name}/ to {remote_dir}{' (full)' if full_sync else ' (diff)'}")
+                result = subprocess.run(sync_cmd, check=True, capture_output=True, text=True)
+                if result.stderr:
+                    logger.debug(f"sync output: {result.stderr.strip()}")
+
+            if ship_backend:
+                run_sync(databricks_dist / "backend", f"{workspace_dir}/backend")
+            if ship_frontend:
+                run_sync(databricks_dist / "frontend", f"{workspace_dir}/frontend")
+                if (databricks_dist / "docs").exists():
+                    run_sync(databricks_dist / "docs", f"{workspace_dir}/docs")
+
+            # Root files go up individually via the SDK (avoids any .py→notebook
+            # conversion and keeps them out of the directory snapshots).
+            for file_name in root_files + ["pyproject.toml", "uv.lock"]:
                 file_path = databricks_dist / file_name
                 if file_path.exists():
-                    target_path = f"{workspace_dir}/{file_name}"
-                    logger.info(f"Uploading {file_name} to {target_path}")
                     with open(file_path, "rb") as f:
                         client.workspace.upload(
-                            target_path,
-                            f,
-                            format=ImportFormat.AUTO,
-                            overwrite=True
+                            f"{workspace_dir}/{file_name}", f,
+                            format=ImportFormat.AUTO, overwrite=True
                         )
-                    logger.info(f"Uploaded {file_name} successfully")
-                else:
-                    logger.warning(f"File {file_name} not found in databricksdist, skipping")
+                    logger.info(f"Uploaded {file_name}")
+
+            # Verify what actually landed — sync can silently skip files
+            # (e.g. gitignore rules), so trust but verify.
+            try:
+                remote_top = sorted(
+                    (e.path or "").rsplit("/", 1)[-1] for e in client.workspace.list(workspace_dir)
+                )
+                logger.info(f"Workspace now contains: {remote_top}")
+                for expected in (["frontend", "package.json"] if ship_frontend else []) + (["backend"] if ship_backend else []):
+                    if expected not in remote_top:
+                        logger.error(
+                            f"{expected} is MISSING from the workspace after sync — "
+                            "check the `databricks sync` output."
+                        )
+            except Exception as verify_err:
+                logger.warning(f"Could not verify workspace contents: {verify_err}")
 
             logger.info("All files uploaded successfully")
-            
+
             # Clean up databricksdist directory
             logger.info("Cleaning up databricksdist directory")
             shutil.rmtree(databricks_dist)
-            
+
             logger.info("✅ Upload completed successfully!")
                 
         except subprocess.CalledProcessError as e:
@@ -527,39 +543,31 @@ def deploy_source_to_databricks(
                 logger.error(f"Error creating AppDeployment object: {e}")
                 raise
             
-            # Deploy the app
-            try:
-                logger.info("Deploying application")
-                waiter = client.apps.deploy(
-                    app_name=app_name,
-                    app_deployment=app_deployment
-                )
-                result = waiter.result()
-                deployment_id = result.deployment_id
-                logger.info(f"Deployment created with ID: {deployment_id}")
-            except Exception as e1:
-                logger.error(f"Deployment attempt failed with error type: {type(e1)}")
-                logger.error(f"Deployment error: {e1}")
-                
+            # Deploy the app. If another deployment is already in progress
+            # (e.g. a previous run still building), wait for it and retry.
+            deadline = time.time() + 1800  # give an in-flight deployment up to 30 min
+            while True:
                 try:
-                    # Try with minimal parameters
-                    logger.info("Attempt 2: Using minimal parameters")
-                    result = client.apps.deploy(
+                    logger.info("Deploying application")
+                    waiter = client.apps.deploy(
                         app_name=app_name,
                         app_deployment=app_deployment
                     )
+                    result = waiter.result()
                     deployment_id = result.deployment_id
-                    logger.info(f"Second attempt succeeded with ID: {deployment_id}")
-                except Exception as e2:
-                    logger.error(f"Second deployment attempt failed with error type: {type(e2)}")
-                    logger.error(f"Second deployment error: {e2}")
-                    logger.error("All deployment attempts failed")
+                    logger.info(f"Deployment created with ID: {deployment_id}")
+                    break
+                except Exception as e1:
+                    if "active deployment in progress" in str(e1) and time.time() < deadline:
+                        logger.info("Another deployment is in progress — waiting 20s before retrying...")
+                        time.sleep(20)
+                        continue
+                    logger.error(f"Deployment failed with error type: {type(e1)}")
+                    logger.error(f"Deployment error: {e1}")
                     return False
             
-            # Wait a bit for deployment to complete and then start the app
-            logger.info("Waiting for deployment to complete...")
-            time.sleep(10)
-            
+            # waiter.result() above already blocked until the deployment
+            # reached a terminal state — start the app immediately.
             # Start the app
             try:
                 logger.info(f"Starting app: {app_name}")
@@ -615,6 +623,12 @@ def main():
                         help="Skip OAuth scope configuration")
     parser.add_argument("--include-dataplane", action="store_true", default=False,
                         help="Include the problematic serving-endpoints-data-plane scope (not recommended)")
+    parser.add_argument("--frontend", action="store_true", default=False,
+                        help="Deploy only the frontend (and docs)")
+    parser.add_argument("--backend", action="store_true", default=False,
+                        help="Deploy only the backend")
+    parser.add_argument("--diff", action="store_true", default=False,
+                        help="Incremental upload — sync only changed files (default: full upload)")
 
     args = parser.parse_args()
     
@@ -624,14 +638,16 @@ def main():
         logger.error("App name must contain only lowercase letters, numbers, and hyphens")
         sys.exit(1)
     
-    # Always rebuild frontend before deploying
-    logger.info("Building frontend static assets...")
-    build_script = Path(__file__).parent / "build.py"
-    build_result = subprocess.run([sys.executable, str(build_script)], capture_output=True, text=True)
-    if build_result.returncode != 0:
-        logger.error(f"Frontend build failed: {build_result.stderr}")
-        sys.exit(1)
-    logger.info("Frontend build complete")
+    # Resolve deploy scope: default is everything; --frontend / --backend narrow
+    # it. Passing both is the same as the default. The frontend is built ON
+    # Databricks Apps (npm lifecycle from package.json) — no local build.
+    if args.frontend and not args.backend:
+        scope = "frontend"
+    elif args.backend and not args.frontend:
+        scope = "backend"
+    else:
+        scope = "all"
+    logger.info(f"Deploy scope: {scope} (frontend builds on Databricks Apps during deployment)")
 
     try:
         success = deploy_source_to_databricks(
@@ -646,7 +662,9 @@ def main():
             config_template=getattr(args, 'config_template', None),
             api_url=args.api_url,
             configure_oauth=args.configure_oauth,
-            exclude_dataplane=not args.include_dataplane
+            exclude_dataplane=not args.include_dataplane,
+            full_sync=not args.diff,
+            scope=scope
         )
         
         if success:
