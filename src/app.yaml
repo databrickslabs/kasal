@@ -22,5 +22,6 @@ environment_vars:
   # Required for custom traces when using opentelemetry-instrument command:
   # OTEL_TRACES_SAMPLER: 'always_on'
 
-apt_packages:
-  - libpq-dev
+# No apt_packages: the Postgres drivers are asyncpg (manylinux wheels) and
+# pg8000 (pure Python) — neither compiles against libpq, so libpq-dev is not
+# needed and skipping it removes the apt install phase from every deployment.
