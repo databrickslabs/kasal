@@ -16,6 +16,7 @@ import asyncio
 import concurrent.futures
 import json
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -25,6 +26,18 @@ from sqlalchemy import text
 
 from src.core.logger import LoggerManager
 from src.db.lakebase_session import get_lakebase_session
+
+# SECURITY: ``table_name`` (from the LakebaseMemoryConfig.memory_table config
+# field) is interpolated into raw SQL throughout this backend. Validate it as a
+# strict SQL identifier so a crafted value cannot inject SQL / comment out the
+# appended tenant (group_id) filters.
+_SAFE_TABLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _validate_table_name(name: str) -> str:
+    if not name or not _SAFE_TABLE_NAME.match(str(name)):
+        raise ValueError(f"Invalid memory table name: {name!r}")
+    return name
 
 # CrewAI 1.10+ runs memory saves on a background thread pool; each save runs its
 # coroutine in a *fresh* event loop (see ``_run_sync``). A pooled async engine
@@ -60,7 +73,8 @@ class LakebaseStorageBackend:
         instance_name: str | None = None,
         workspace_wide: bool = True,
     ) -> None:
-        self.table_name = table_name
+        # SECURITY: validate before it reaches any interpolated raw SQL.
+        self.table_name = _validate_table_name(table_name)
         self.crew_id = crew_id
         self.group_id = group_id
         self.session_id = session_id

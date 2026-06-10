@@ -32,6 +32,7 @@ from src.engines.crewai.security.prompt_injection_detector import (
 from src.engines.crewai.security.secret_leak_detector import (
     SecretLeakResult,
     detect as _detect_secrets,
+    redact as _redact_secrets,
 )
 
 logger = logging.getLogger(__name__)
@@ -99,6 +100,10 @@ class SecurityScannerPipeline:
     def scan_secrets(self, text: str) -> SecretLeakResult:
         """Scan text for leaked credentials / secrets."""
         return _detect_secrets(text)
+
+    def redact_secrets(self, text: str) -> str:
+        """Mask any detected secret substrings in *text* (for safe persistence/streaming)."""
+        return _redact_secrets(text)
 
     def meets_severity_threshold(self, result: DetectionResult) -> bool:
         """Return True if *result* meets or exceeds the configured minimum severity."""

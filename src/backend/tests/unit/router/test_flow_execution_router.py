@@ -5,7 +5,7 @@ Tests the functionality of flow execution management endpoints.
 """
 import pytest
 import uuid
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import ANY, AsyncMock, patch, MagicMock
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from src.dependencies.admin_auth import (
@@ -85,11 +85,15 @@ class TestFlowExecutionRouter:
         data = response.json()
         assert data["status"] == "running"
         assert data["flow_id"] == flow_id
+        # group_context/user_token are derived from the caller's identity
+        # (multi-tenant isolation) — assert their presence with ANY.
         mock_service.run_flow.assert_called_once_with(
             flow_id=flow_id,
             job_id="job-123",
             run_name=None,
             config={"param1": "value1"},
+            group_context=ANY,
+            user_token=ANY,
             resume_from_flow_uuid=None,
             resume_from_execution_id=None
         )
@@ -198,7 +202,8 @@ class TestFlowExecutionRouter:
         data = response.json()
         assert data["status"] == "completed"
         assert data["execution_id"] == 123
-        mock_service.get_flow_execution.assert_called_once_with(123)
+        # group_ids derived from caller's group context (multi-tenant isolation)
+        mock_service.get_flow_execution.assert_called_once_with(123, group_ids=ANY)
 
     @patch('src.api.flow_execution_router.CrewAIFlowService')
     def test_get_flow_execution_with_execution_key(self, mock_service_class, client):
@@ -307,7 +312,7 @@ class TestFlowExecutionRouter:
         assert len(data["data"]) == 2
         assert data["data"][0]["execution_id"] == 1
         assert data["data"][1]["execution_id"] == 2
-        mock_service.get_flow_executions_by_flow.assert_called_once_with("flow-123")
+        mock_service.get_flow_executions_by_flow.assert_called_once_with("flow-123", group_ids=ANY)
 
     @patch('src.api.flow_execution_router.CrewAIFlowService')
     def test_get_flow_executions_by_flow_with_executions_key(self, mock_service_class, client):

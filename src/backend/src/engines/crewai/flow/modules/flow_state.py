@@ -8,9 +8,13 @@ import json
 from typing import Dict, Any, Optional
 
 from src.core.logger import LoggerManager
+from src.utils.safe_eval import safe_eval
 
 # Initialize logger - use flow logger for flow execution
 logger = LoggerManager.get_instance().flow
+
+# Bare names that user-authored flow condition expressions may call.
+_CONDITION_CALLS = frozenset({"str", "int", "float", "bool", "len"})
 
 
 class FlowStateManager:
@@ -138,23 +142,20 @@ class FlowStateManager:
             return True
 
         try:
-            # Create a safe evaluation context with state
+            # Create a restricted evaluation context with state. True/False/None
+            # are handled natively by safe_eval; the helpers below are the only
+            # callables permitted (see _CONDITION_CALLS).
             eval_context = {
                 'state': state,
-                '__builtins__': {
-                    'True': True,
-                    'False': False,
-                    'None': None,
-                    'str': str,
-                    'int': int,
-                    'float': float,
-                    'bool': bool,
-                    'len': len,
-                }
+                'str': str,
+                'int': int,
+                'float': float,
+                'bool': bool,
+                'len': len,
             }
 
-            # Evaluate the condition
-            result = eval(condition, eval_context)
+            # Evaluate the condition with a safe AST evaluator (no eval()).
+            result = safe_eval(condition, eval_context, allowed_call_names=_CONDITION_CALLS)
             logger.info(f"Condition '{condition}' evaluated to: {result}")
             return bool(result)
 

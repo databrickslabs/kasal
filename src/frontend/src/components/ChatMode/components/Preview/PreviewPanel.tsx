@@ -27,6 +27,32 @@ interface PreviewPanelProps {
   onNavigate?: (index: number) => void;
 }
 
+// SECURITY: crew/LLM-generated HTML is untrusted (it can be steered via prompt
+// injection from fetched/tool content). It is rendered in an iframe whose
+// sandbox is "allow-scripts" ONLY — deliberately WITHOUT allow-same-origin — so
+// any scripts run in an opaque origin and cannot reach the Kasal origin
+// (localStorage, cookies, the Kasal API, or the parent DOM). A restrictive CSP
+// is also injected to block network exfiltration (default-src 'none'; no
+// connect-src). Because the frame is cross-origin we cannot doc.write into it
+// from the parent, so the content is delivered via the srcDoc attribute.
+function buildSandboxedSrcDoc(html: string): string {
+  const csp =
+    "<meta http-equiv=\"Content-Security-Policy\" content=\"" +
+    "default-src 'none'; " +
+    "img-src data: blob: https:; " +
+    "media-src data: blob: https:; " +
+    "style-src 'unsafe-inline' https:; " +
+    "font-src data: https:; " +
+    "script-src 'unsafe-inline'\">";
+  if (/<head[^>]*>/i.test(html)) {
+    return html.replace(/<head[^>]*>/i, (m) => m + csp);
+  }
+  if (/<html[^>]*>/i.test(html)) {
+    return html.replace(/<html[^>]*>/i, (m) => `${m}<head>${csp}</head>`);
+  }
+  return `<!DOCTYPE html><html><head>${csp}</head><body>${html}</body></html>`;
+}
+
 function detectContentType(raw: string): PreviewContentType {
   const trimmed = raw.trim();
 
@@ -334,17 +360,13 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
   // Heal already-stored previews that include the chat layer's bold-title prefix.
   const displayData = useMemo(() => stripTaskTitlePrefix(content.data), [content]);
 
-  // For HTML: write content into a sandboxed iframe
-  useEffect(() => {
-    if (content.type === 'html' && iframeRef.current) {
-      const doc = iframeRef.current.contentDocument;
-      if (doc) {
-        doc.open();
-        doc.write(displayData);
-        doc.close();
-      }
-    }
-  }, [content, displayData]);
+  // For HTML: render untrusted content via srcDoc in an opaque-origin sandbox
+  // (allow-scripts only, no allow-same-origin) with an injected CSP. See
+  // buildSandboxedSrcDoc for the security rationale.
+  const htmlSrcDoc = useMemo(
+    () => (content.type === 'html' ? buildSandboxedSrcDoc(displayData) : ''),
+    [content, displayData],
+  );
 
   const jsonData = useMemo(() => {
     if (content.type === 'json') {
@@ -572,7 +594,10 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
           <iframe
             ref={iframeRef}
             className="w-full h-full border-0"
-            sandbox="allow-scripts allow-same-origin"
+            // SECURITY: opaque-origin sandbox (no allow-same-origin) so scripts
+            // in untrusted crew/LLM HTML cannot access the Kasal origin.
+            sandbox="allow-scripts"
+            srcDoc={htmlSrcDoc}
             title="Execution result preview"
             style={{ backgroundColor: '#ffffff' }}
           />

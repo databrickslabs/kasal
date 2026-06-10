@@ -12,8 +12,10 @@ Claude reads context from multiple CLAUDE.md files:
 ## Important Project Rules
 
 ### Dependencies
-- **Main requirements file is at `src/requirements.txt`** (not backend/requirements.txt)
-- Install dependencies: `pip install -r src/requirements.txt`
+- **Python dependencies are managed with `uv`** — declared in `src/backend/pyproject.toml` and pinned in `src/backend/uv.lock` (both committed). There is no `requirements.txt`.
+- Install dependencies: `cd src/backend && uv sync`
+- To change a dependency: edit `pyproject.toml`, run `uv lock` (regenerates `uv.lock`), then `uv sync`. Never hand-edit `uv.lock`.
+- The Databricks App deploy (`src/deploy.py`) ships `pyproject.toml` + `uv.lock` at the bundle root so the build runs `uv sync` (a `requirements.txt` at the root would take precedence and bypass uv).
 - Key dependencies include: psutil (for process management), crewai, litellm, databricks-sdk
 
 ### Documentation Location

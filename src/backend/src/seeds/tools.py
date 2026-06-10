@@ -109,7 +109,7 @@ def get_tool_configs():
         },   # MCPTool
         "70": {
             "result_as_answer": False,
-            "DATABRICKS_HOST": "",  # Databricks workspace URL (e.g., "e2-demo-field-eng.cloud.databricks.com")
+            "DATABRICKS_HOST": "",  # Databricks workspace URL (e.g., "your-workspace.cloud.databricks.com")
         },   # DatabricksJobsTool
         "72": {
             "result_as_answer": False,

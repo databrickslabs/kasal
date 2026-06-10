@@ -18,6 +18,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from src.models.hitl_approval import HITLApproval, HITLWebhook
 from src.repositories.hitl_repository import HITLApprovalRepository, HITLWebhookRepository
+from src.utils.url_security import assert_safe_outbound_url, UnsafeUrlError
 from src.schemas.hitl import (
     HITLWebhookCreate,
     HITLWebhookUpdate,
@@ -471,8 +472,24 @@ class HITLWebhookService:
                 signature = self._generate_signature(payload_json, webhook.secret)
                 headers["X-Kasal-Signature"] = signature
 
-            # Send request
-            async with httpx.AsyncClient(timeout=WEBHOOK_TIMEOUT_SECONDS) as client:
+            # SECURITY (SSRF): the webhook URL is user-supplied. Require https and
+            # reject loopback / private (RFC1918) / link-local / cloud-metadata
+            # targets, re-checking after DNS resolution to defeat DNS-rebinding,
+            # before issuing the server-side request.
+            try:
+                await assert_safe_outbound_url(webhook.url)
+            except UnsafeUrlError as exc:
+                logger.warning(f"Webhook {webhook.id} blocked unsafe URL: {exc}")
+                return {
+                    "success": False,
+                    "error": "Webhook URL is not permitted (must be a public https endpoint)",
+                }
+
+            # Send request. Do not follow redirects (a 30x could redirect to an
+            # internal target that bypassed the pre-flight check).
+            async with httpx.AsyncClient(
+                timeout=WEBHOOK_TIMEOUT_SECONDS, follow_redirects=False
+            ) as client:
                 response = await client.post(
                     webhook.url,
                     content=payload_json,
@@ -491,10 +508,13 @@ class HITLWebhookService:
                     logger.warning(
                         f"Webhook {webhook.id} returned status {response.status_code}"
                     )
+                    # SECURITY: do not echo the raw upstream response body back to
+                    # the caller — it could leak internal content if the URL were
+                    # pointed at an unintended host.
                     return {
                         "status_code": response.status_code,
                         "success": False,
-                        "error": response.text[:500] if response.text else None
+                        "error": f"Webhook endpoint returned status {response.status_code}"
                     }
 
         except httpx.TimeoutException:

@@ -10,7 +10,12 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, Field
+import re as _re
+from pydantic import BaseModel, Field, field_validator
+
+# SECURITY: memory_table is interpolated into raw Lakebase SQL — restrict to a
+# strict SQL identifier so it cannot inject SQL or comment out tenant filters.
+_SAFE_TABLE_NAME = _re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class MemoryBackendType(str, Enum):
@@ -218,6 +223,13 @@ class LakebaseMemoryConfig(BaseModel):
         "crew_memory",
         description="Table for CrewAI unified cognitive memory records.",
     )
+
+    @field_validator("memory_table")
+    @classmethod
+    def _validate_memory_table(cls, v: str) -> str:
+        if not v or not _SAFE_TABLE_NAME.match(str(v)):
+            raise ValueError(f"Invalid memory_table identifier: {v!r}")
+        return v
 
     tables_initialized: bool = Field(
         False,

@@ -12,9 +12,11 @@ from typing import Optional
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
 
-from src.core.dependencies import GroupContextDep
+from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.exceptions import NotFoundError
 from src.core.logger import LoggerManager
 from src.core.sse_manager import event_stream_generator, sse_manager
+from src.repositories.execution_history_repository import ExecutionHistoryRepository
 
 logger = LoggerManager.get_instance().system
 
@@ -53,6 +55,7 @@ async def stream_execution_updates(
     request: Request,
     job_id: str,
     group_context: GroupContextDep,
+    session: SessionDep,
     timeout: int = Query(3600, ge=30, le=7200, description="Stream timeout in seconds"),
     heartbeat: int = Query(
         15, ge=5, le=120, description="Heartbeat interval in seconds"
@@ -65,6 +68,23 @@ async def stream_execution_updates(
     drops (common behind HTTP/2 proxies like Databricks Apps), the browser
     reconnects with ``Last-Event-ID`` and the server replays missed events.
     """
+    # SECURITY: the per-job stream carries the execution's live traces/outputs
+    # (which include group_id/group_email/output). Verify the execution belongs
+    # to one of the caller's groups before streaming. Deny on a positive
+    # cross-tenant mismatch (a not-yet-persisted job is allowed, mirroring the
+    # flow-execution read path).
+    group_ids = group_context.group_ids or []
+    execution = await ExecutionHistoryRepository(session).get_execution_by_job_id(job_id)
+    if (
+        execution
+        and getattr(execution, "group_id", None)
+        and execution.group_id not in group_ids
+    ):
+        logger.warning(
+            f"[SSE_STREAM] cross-tenant access denied | job={job_id} | caller_groups={group_ids}"
+        )
+        raise NotFoundError(f"Execution {job_id} not found")
+
     last_event_id = _parse_last_event_id(request)
 
     logger.info(

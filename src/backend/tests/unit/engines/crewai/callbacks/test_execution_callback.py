@@ -7,7 +7,6 @@ streaming.  Trace creation is now handled by the event bus handlers
 """
 import pytest
 from unittest.mock import patch, MagicMock
-from datetime import datetime, timezone
 
 from src.engines.crewai.callbacks.execution_callback import (
     create_execution_callbacks,
@@ -353,6 +352,68 @@ class TestCallbackIsolation:
             calls = mock_enqueue.call_args_list
             assert calls[0][1]["execution_id"] == "job_1"
             assert calls[1][1]["execution_id"] == "job_2"
+
+
+class TestCallbackSecretRedaction:
+    """#52 — leaked credentials in agent/tool output must be masked before the
+    content is enqueued to logs / streamed to the UI / persisted to traces."""
+
+    _PAT = "dapi" + "a" * 32  # matches the databricks_pat detector pattern
+
+    def test_step_callback_redacts_leaked_secret(self, mock_group_context, sample_config):
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            step_callback, _ = create_execution_callbacks(
+                job_id="job_redact",
+                config=sample_config,
+                group_context=mock_group_context,
+            )
+            step_output = MagicMock()
+            step_output.output = f"Fetched token {self._PAT} from the vault"
+
+            step_callback(step_output)
+
+            content = mock_enqueue.call_args[1]["content"]
+            assert self._PAT not in content
+            assert "***REDACTED:databricks_pat***" in content
+
+    def test_step_callback_leaves_clean_output_untouched(self, mock_group_context, sample_config):
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            step_callback, _ = create_execution_callbacks(
+                job_id="job_clean",
+                config=sample_config,
+                group_context=mock_group_context,
+            )
+            step_output = MagicMock()
+            step_output.output = "Computed the quarterly total: $4.2M"
+
+            step_callback(step_output)
+
+            content = mock_enqueue.call_args[1]["content"]
+            assert "$4.2M" in content
+            assert "REDACTED" not in content
+
+    def test_task_callback_redacts_leaked_secret(self, mock_group_context, sample_config):
+        with patch(
+            "src.engines.crewai.callbacks.execution_callback.enqueue_log"
+        ) as mock_enqueue:
+            _, task_callback = create_execution_callbacks(
+                job_id="job_redact_task",
+                config=sample_config,
+                group_context=mock_group_context,
+            )
+            task_output = MagicMock()
+            task_output.description = "Summarize credentials"
+            task_output.raw = f"The API key is {self._PAT}"
+
+            task_callback(task_output)
+
+            content = mock_enqueue.call_args[1]["content"]
+            assert self._PAT not in content
+            assert "***REDACTED:databricks_pat***" in content
 
 
 if __name__ == "__main__":

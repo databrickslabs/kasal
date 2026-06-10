@@ -522,3 +522,34 @@ class TestSafeLogToolConfigs:
         configs = {"workspace": "ws1", "timeout": 30}
         result = safe_log_tool_configs(configs)
         assert "ws1" in result
+
+
+class TestMaskSensitiveHeaders:
+    """P1 (H9): full header dicts must never be logged with credentials intact."""
+
+    def test_redacts_credential_headers(self):
+        from src.utils.sensitive_data_utils import (
+            mask_sensitive_headers,
+            REDACTED_PLACEHOLDER,
+        )
+        headers = {
+            "Authorization": "Bearer dapiSECRET",
+            "X-Forwarded-Access-Token": "tok-123",
+            "X-Auth-Request-Access-Token": "tok-456",
+            "Cookie": "session=abc",
+            "Content-Type": "application/json",
+            "User-Agent": "Kasal/1.0",
+        }
+        masked = mask_sensitive_headers(headers)
+        assert masked["Authorization"] == REDACTED_PLACEHOLDER
+        assert masked["X-Forwarded-Access-Token"] == REDACTED_PLACEHOLDER
+        assert masked["X-Auth-Request-Access-Token"] == REDACTED_PLACEHOLDER
+        assert masked["Cookie"] == REDACTED_PLACEHOLDER
+        # Non-sensitive headers are preserved verbatim.
+        assert masked["Content-Type"] == "application/json"
+        assert masked["User-Agent"] == "Kasal/1.0"
+
+    def test_non_dict_input_returns_empty(self):
+        from src.utils.sensitive_data_utils import mask_sensitive_headers
+        assert mask_sensitive_headers(None) == {}
+        assert mask_sensitive_headers("not-a-dict") == {}

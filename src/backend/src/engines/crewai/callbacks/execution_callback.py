@@ -67,6 +67,10 @@ def create_execution_callbacks(
             try:
                 from src.engines.crewai.security.scanner_pipeline import security_scanner
                 _scan = security_scanner.scan(content, context=f"step_callback:{job_id}")
+                # SECURITY: if the output leaked credentials, mask them before the
+                # content is enqueued to logs / streamed to the UI / persisted.
+                if _scan.secrets.detected:
+                    content = security_scanner.redact_secrets(content)
             except Exception as _sec_err:
                 logger.debug("%s [SECURITY] Tool output scan skipped: %s", log_prefix, _sec_err)
 
@@ -111,6 +115,10 @@ def create_execution_callbacks(
             try:
                 from src.engines.crewai.security.scanner_pipeline import security_scanner
                 _scan = security_scanner.scan(content, context=f"task_callback:{job_id}")
+                # SECURITY: mask any leaked credentials before the task output is
+                # enqueued to logs / streamed to the UI / persisted to traces.
+                if _scan.secrets.detected:
+                    content = security_scanner.redact_secrets(content)
             except Exception as _sec_err:
                 logger.debug("%s [SECURITY] Task output scan skipped: %s", log_prefix, _sec_err)
 

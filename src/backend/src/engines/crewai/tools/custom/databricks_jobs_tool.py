@@ -25,13 +25,22 @@ _EXECUTOR = ThreadPoolExecutor(max_workers=5)
 _GLOBAL_RUN_EXECUTIONS: Dict[str, str] = {}
 _GLOBAL_CREATE_EXECUTIONS: Dict[str, str] = {}
 
-# Valid actions for the tool
-# Actions available to agents. Dangerous actions (delete, cancel, cancel_all, update)
-# are excluded because agents can be faulty and should not perform destructive operations.
+# Valid actions for the tool.
+# Actions available to agents. Destructive actions (delete, cancel, cancel_all,
+# update) are excluded because agents can be faulty.
+#
+# SECURITY: 'create' and 'submit' are intentionally NOT supported. They accept
+# arbitrary job_config / task definitions, i.e. arbitrary code execution on
+# Databricks compute under the shared PAT/SPN identity — a prompt-injected agent
+# could abuse them. The tool is read-mostly and may only trigger PRE-EXISTING
+# jobs by id ('run'); it cannot define or submit new code.
 VALID_ACTIONS = [
-    'list', 'list_my_jobs', 'get', 'get_notebook', 'run', 'monitor',
-    'create', 'get_output', 'submit'
+    'list', 'list_my_jobs', 'get', 'get_notebook', 'run', 'monitor', 'get_output'
 ]
+
+# Actions permanently disabled (arbitrary code execution). Rejected at the schema
+# layer (not in VALID_ACTIONS) and again in _run as defense-in-depth.
+DISABLED_ACTIONS = ('create', 'submit')
 
 
 def _run_async_in_sync_context(coro):
@@ -73,9 +82,9 @@ class DatabricksJobsToolSchema(BaseModel):
         description=(
             "Action to perform: 'list' (list all jobs), 'list_my_jobs' (list only your jobs), "
             "'get' (get job details), 'get_notebook' (get notebook content for analysis), "
-            "'run' (trigger job run), 'monitor' (get run status), 'create' (create new job), "
-            "'get_output' (get output/results of a completed run), "
-            "'submit' (submit a one-time run without creating a job)"
+            "'run' (trigger an EXISTING job run by job_id), 'monitor' (get run status), "
+            "'get_output' (get output/results of a completed run). "
+            "Note: creating or submitting jobs is not supported (disabled for security)."
         )
     )
     job_id: Optional[int] = Field(
@@ -196,8 +205,9 @@ class DatabricksJobsTool(BaseTool):
     name: str = "Databricks Jobs Manager"
     description: str = (
         "Manage Databricks Jobs using REST API 2.2: list all jobs, list only your jobs, get job details, "
-        "analyze job notebooks, create new jobs, trigger job runs with custom parameters, "
-        "submit one-time runs, monitor execution status, and get run output/results. "
+        "analyze job notebooks, trigger runs of EXISTING jobs with custom parameters, "
+        "monitor execution status, and get run output/results. "
+        "Creating or submitting jobs is not supported (disabled for security). "
         "IMPORTANT: Before running a job with parameters, use 'get_notebook' action to analyze what parameters the job expects. "
         "Supports filtering by job name or ID substring with 'name_filter' parameter for 'list' and 'list_my_jobs' actions. "
         "Provide 'action' parameter with values: 'list', 'list_my_jobs', 'get', 'get_notebook', 'run', 'monitor', "
@@ -661,6 +671,25 @@ class DatabricksJobsTool(BaseTool):
             job_params = kwargs.get("job_params")
             run_name = kwargs.get("run_name")
             tasks = kwargs.get("tasks")
+
+            # SECURITY (prompt-injection -> code execution): 'create' and 'submit'
+            # accept arbitrary job_config / task definitions, i.e. arbitrary code
+            # run on Databricks compute under the shared PAT/SPN identity. They are
+            # permanently DISABLED (also absent from VALID_ACTIONS). This is a hard,
+            # non-configurable block — defense-in-depth in case the schema layer is
+            # bypassed. Read-only actions and triggering a PRE-EXISTING job by id
+            # ('run') remain available.
+            if action in DISABLED_ACTIONS:
+                logger.warning(
+                    f"[SECURITY] Blocked Databricks Jobs '{action}' action: "
+                    f"creating/submitting jobs (arbitrary code execution) is not allowed."
+                )
+                return (
+                    f"⛔ Action '{action}' is not supported. Creating or submitting "
+                    f"Databricks jobs runs arbitrary code on workspace compute and is "
+                    f"disabled for security. Read-only actions and running an existing "
+                    f"job by job_id ('run') are available."
+                )
 
             # SINGLE EXECUTION CONTROL: Check action-specific limits
             action_limit = self._action_limits.get(action)

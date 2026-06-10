@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 from src.utils.telemetry import get_user_agent_header, KasalProduct
+from src.utils.sensitive_data_utils import mask_sensitive_headers
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -232,8 +233,8 @@ class GenieTool(BaseTool):
             auth_header = headers.get("Authorization", "")
             if auth_header.startswith("Bearer "):
                 token = auth_header[7:]
-                logger.info(f"Token preview: {token[:20]}...{token[-10:] if len(token) > 30 else token}")
-                logger.info(f"Token length: {len(token)}")
+                # SECURITY: never log token bytes (not even a preview). Length only.
+                logger.info(f"Token acquired for permission test (length: {len(token)})")
 
                 # Try to decode JWT to see scopes (if it's a JWT)
                 if token.startswith('eyJ'):
@@ -247,8 +248,10 @@ class GenieTool(BaseTool):
                         payload = json.loads(base64.b64decode(payload_part))
                         logger.info(f"Token scopes: {payload.get('scope', 'No scope found')}")
                         logger.info(f"Required scopes: sql, dashboards.genie")
-                        logger.info(f"Token subject: {payload.get('sub', 'No subject found')}")
-                        logger.info(f"Token client_id: {payload.get('client_id', 'No client_id found')}")
+                        # SECURITY: identity claims (subject / client_id) are only
+                        # logged at DEBUG to avoid identity disclosure in prod logs.
+                        logger.debug(f"Token subject: {payload.get('sub', 'No subject found')}")
+                        logger.debug(f"Token client_id: {payload.get('client_id', 'No client_id found')}")
 
                         # Check if token has required scopes
                         token_scopes = payload.get('scope', '').split()
@@ -350,7 +353,7 @@ class GenieTool(BaseTool):
 
                 logger.info(f"Starting new conversation with URL: {url}")
                 logger.info(f"Payload: {payload}")
-                logger.info(f"Headers: {headers}")
+                logger.info(f"Headers: {mask_sensitive_headers(headers)}")
 
                 async with aiohttp.ClientSession() as session:
                     async with session.post(url, json=payload, headers=headers) as response:

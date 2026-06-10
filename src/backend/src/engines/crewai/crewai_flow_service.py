@@ -215,19 +215,22 @@ class CrewAIFlowService:
                 detail=error_msg
             )
     
-    async def get_flow_execution(self, execution_id: int) -> Dict[str, Any]:
+    async def get_flow_execution(self, execution_id: int, group_ids: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         Get details for a specific flow execution.
-        
+
         Args:
             execution_id: ID of the flow execution
-            
+            group_ids: Caller's group IDs for multi-tenant isolation. When
+                provided, an execution belonging to another group is reported
+                as not found.
+
         Returns:
             Dictionary with execution details
         """
         try:
             flow_runner = self._get_flow_runner()
-            return flow_runner.get_flow_execution(execution_id)
+            return await flow_runner.get_flow_execution(execution_id, group_ids=group_ids)
         except Exception as e:
             error_msg = f"Error getting flow execution: {str(e)}"
             logger.error(error_msg, exc_info=True)
@@ -236,13 +239,15 @@ class CrewAIFlowService:
                 detail=error_msg
             )
     
-    async def get_flow_executions_by_flow(self, flow_id: Union[uuid.UUID, str]) -> Dict[str, Any]:
+    async def get_flow_executions_by_flow(self, flow_id: Union[uuid.UUID, str], group_ids: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         Get all executions for a specific flow.
-        
+
         Args:
             flow_id: ID of the flow
-            
+            group_ids: Caller's group IDs for multi-tenant isolation. When
+                provided, executions belonging to other groups are excluded.
+
         Returns:
             Dictionary with list of executions
         """
@@ -256,9 +261,9 @@ class CrewAIFlowService:
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"Invalid flow_id format: {flow_id}"
                     )
-            
+
             flow_runner = self._get_flow_runner()
-            return flow_runner.get_flow_executions_by_flow(flow_id)
+            return await flow_runner.get_flow_executions_by_flow(flow_id, group_ids=group_ids)
         except HTTPException:
             # Re-raise HTTP exceptions
             raise

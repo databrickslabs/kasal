@@ -526,6 +526,13 @@ from src.utils.user_context import UserContextMiddleware  # noqa: E402
 
 app.add_middleware(UserContextMiddleware)
 
+# API rate limiting (pure-ASGI, SSE-safe). No-op if the `limits` package is
+# unavailable or RATE_LIMIT_ENABLED is false, so this never breaks a running
+# server that hasn't synced the dependency yet.
+from src.core.rate_limit import RateLimitMiddleware  # noqa: E402
+
+app.add_middleware(RateLimitMiddleware)
+
 
 # ---------------------------------------------------------------------------
 # Pure ASGI security headers middleware (NOT BaseHTTPMiddleware) to avoid

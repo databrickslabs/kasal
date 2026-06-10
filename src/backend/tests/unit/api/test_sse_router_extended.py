@@ -82,12 +82,33 @@ async def test_stream_execution_updates_returns_streaming_response():
 
     mock_generator = AsyncMock(return_value=iter([]))
 
-    with patch("src.api.sse_router.event_stream_generator", return_value=mock_generator):
+    with patch("src.api.sse_router.event_stream_generator", return_value=mock_generator), \
+         patch("src.api.sse_router.ExecutionHistoryRepository") as MockRepo:
+        # No persisted execution for this job_id → stream is allowed.
+        MockRepo.return_value.get_execution_by_job_id = AsyncMock(return_value=None)
         out = await stream_execution_updates(
-            request=req, job_id="job-1", group_context=ctx
+            request=req, job_id="job-1", group_context=ctx, session=MagicMock()
         )
     assert isinstance(out, StreamingResponse)
     assert "text/event-stream" in out.media_type
+
+
+@pytest.mark.asyncio
+async def test_stream_execution_updates_denies_cross_tenant():
+    """SECURITY: streaming another tenant's execution by job_id is rejected."""
+    from src.core.exceptions import NotFoundError
+
+    req = MagicMock()
+    req.headers.get = lambda key, default=None: None
+    ctx = Ctx()  # groups: g1, g2
+    foreign = SimpleNamespace(group_id="someone-elses-group")
+
+    with patch("src.api.sse_router.ExecutionHistoryRepository") as MockRepo:
+        MockRepo.return_value.get_execution_by_job_id = AsyncMock(return_value=foreign)
+        with pytest.raises(NotFoundError):
+            await stream_execution_updates(
+                request=req, job_id="victim-job", group_context=ctx, session=MagicMock()
+            )
 
 
 @pytest.mark.asyncio
@@ -100,9 +121,11 @@ async def test_stream_execution_updates_with_last_event_id():
     ctx = Ctx()
 
     mock_gen = AsyncMock(return_value=iter([]))
-    with patch("src.api.sse_router.event_stream_generator", return_value=mock_gen) as mock_esg:
+    with patch("src.api.sse_router.event_stream_generator", return_value=mock_gen) as mock_esg, \
+         patch("src.api.sse_router.ExecutionHistoryRepository") as MockRepo:
+        MockRepo.return_value.get_execution_by_job_id = AsyncMock(return_value=None)
         out = await stream_execution_updates(
-            request=req, job_id="job-2", group_context=ctx
+            request=req, job_id="job-2", group_context=ctx, session=MagicMock()
         )
     assert isinstance(out, StreamingResponse)
     # last_event_id should be 5 (parsed from header)

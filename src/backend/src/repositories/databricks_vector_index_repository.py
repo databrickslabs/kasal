@@ -21,6 +21,7 @@ from src.schemas.databricks_vector_index import (
 )
 from src.utils.databricks_auth import get_auth_context
 from src.utils.telemetry import get_user_agent_header, KasalProduct
+from src.utils.sensitive_data_utils import mask_sensitive_headers
 
 logger = LoggerManager.get_instance().databricks_vector_search
 
@@ -1120,7 +1121,7 @@ class DatabricksVectorIndexRepository:
                         
                         # Log more details about the request for debugging
                         logger.debug(f"Request URL: {url}")
-                        logger.debug(f"Request headers: {headers}")
+                        logger.debug(f"Request headers: {mask_sensitive_headers(headers)}")
                         logger.debug(f"Number of records in payload: {len(records)}")
                         
                         return {

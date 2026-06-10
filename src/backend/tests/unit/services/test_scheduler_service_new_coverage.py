@@ -150,7 +150,7 @@ class TestCreateScheduleFromExecution:
     @pytest.mark.asyncio
     async def test_execution_not_found_raises_not_found(self):
         svc = _make_service()
-        svc.execution_history_repository.find_by_id = AsyncMock(return_value=None)
+        svc.execution_history_repository.get_execution_by_id = AsyncMock(return_value=None)
         data = self._make_schedule_from_exec_data()
         from src.core.exceptions import NotFoundError
         with pytest.raises(NotFoundError):
@@ -162,7 +162,7 @@ class TestCreateScheduleFromExecution:
         mock_exec = MagicMock()
         mock_exec.inputs = {"agents_yaml": {}, "tasks_yaml": {}, "execution_type": "crew"}
         mock_exec.execution_type = "crew"
-        svc.execution_history_repository.find_by_id = AsyncMock(return_value=mock_exec)
+        svc.execution_history_repository.get_execution_by_id = AsyncMock(return_value=mock_exec)
         data = self._make_schedule_from_exec_data()
         from src.core.exceptions import BadRequestError
         with patch("src.services.scheduler_service.calculate_next_run_from_last", return_value=datetime.now(timezone.utc)):
@@ -179,7 +179,7 @@ class TestCreateScheduleFromExecution:
             "execution_type": "crew",
         }
         mock_exec.execution_type = "crew"
-        svc.execution_history_repository.find_by_id = AsyncMock(return_value=mock_exec)
+        svc.execution_history_repository.get_execution_by_id = AsyncMock(return_value=mock_exec)
         mock_schedule = _make_schedule()
         svc.repository.create = AsyncMock(return_value=mock_schedule)
         data = self._make_schedule_from_exec_data()
@@ -196,7 +196,7 @@ class TestCreateScheduleFromExecution:
         mock_exec.inputs = {"execution_type": "flow", "nodes": [], "edges": []}
         mock_exec.execution_type = "flow"
         mock_exec.flow_id = None
-        svc.execution_history_repository.find_by_id = AsyncMock(return_value=mock_exec)
+        svc.execution_history_repository.get_execution_by_id = AsyncMock(return_value=mock_exec)
         data = self._make_schedule_from_exec_data()
         from src.core.exceptions import BadRequestError
         with patch("src.services.scheduler_service.calculate_next_run_from_last", return_value=datetime.now(timezone.utc)):
@@ -218,7 +218,7 @@ class TestCreateScheduleFromExecution:
         }
         mock_exec.execution_type = "flow"
         mock_exec.flow_id = "flow-uuid"
-        svc.execution_history_repository.find_by_id = AsyncMock(return_value=mock_exec)
+        svc.execution_history_repository.get_execution_by_id = AsyncMock(return_value=mock_exec)
         mock_schedule = _make_schedule()
         svc.repository.create = AsyncMock(return_value=mock_schedule)
         data = self._make_schedule_from_exec_data()
@@ -235,13 +235,12 @@ class TestCreateScheduleFromExecution:
 
 class TestGetAllSchedules:
     @pytest.mark.asyncio
-    async def test_no_group_context_finds_all(self):
+    async def test_no_group_context_returns_empty(self):
+        # SECURITY: fail closed — no group context must NOT return all tenants'.
         svc = _make_service()
         svc.repository.find_all = AsyncMock(return_value=[])
-        with patch("src.services.scheduler_service.ScheduleResponse") as mock_resp:
-            mock_resp.model_validate.side_effect = lambda s: s
-            result = await svc.get_all_schedules(group_context=None)
-        svc.repository.find_all.assert_awaited_once()
+        result = await svc.get_all_schedules(group_context=None)
+        svc.repository.find_all.assert_not_awaited()
         assert result.count == 0
 
     @pytest.mark.asyncio
@@ -255,14 +254,14 @@ class TestGetAllSchedules:
         svc.repository.find_by_group.assert_awaited_once_with("grp-5")
 
     @pytest.mark.asyncio
-    async def test_empty_group_id_finds_all(self):
+    async def test_empty_group_id_returns_empty(self):
+        # SECURITY: authenticated but no resolvable group → empty, not all tenants'.
         svc = _make_service()
         gc = _make_group_context(group_id=None)
         svc.repository.find_all = AsyncMock(return_value=[])
-        with patch("src.services.scheduler_service.ScheduleResponse") as mock_resp:
-            mock_resp.model_validate.side_effect = lambda s: s
-            result = await svc.get_all_schedules(group_context=gc)
-        svc.repository.find_all.assert_awaited_once()
+        result = await svc.get_all_schedules(group_context=gc)
+        svc.repository.find_all.assert_not_awaited()
+        assert result.count == 0
 
 
 # ---------------------------------------------------------------------------

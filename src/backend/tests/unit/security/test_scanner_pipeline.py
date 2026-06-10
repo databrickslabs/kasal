@@ -1,7 +1,6 @@
 """
 Unit tests for the unified SecurityScannerPipeline.
 """
-import pytest
 from src.engines.crewai.security.scanner_pipeline import (
     SecurityScannerPipeline,
     ScanResult,
@@ -157,3 +156,25 @@ class TestAuditLogging:
             if r.levelno >= logging.WARNING and "[SECURITY]" in r.getMessage()
         ]
         assert security_msgs == []
+
+
+class TestRedactSecrets:
+    """redact_secrets() delegates to the secret-leak redactor for safe persistence."""
+
+    def test_clean_text_unchanged(self):
+        text = "Quarterly revenue grew 12%."
+        assert security_scanner.redact_secrets(text) == text
+
+    def test_empty_string_unchanged(self):
+        assert security_scanner.redact_secrets("") == ""
+
+    def test_masks_detected_secret(self):
+        pat = "dapi" + "a" * 32
+        out = security_scanner.redact_secrets(f"key: {pat}")
+        assert pat not in out
+        assert "***REDACTED:databricks_pat***" in out
+
+    def test_redacted_output_is_clean_when_rescanned(self):
+        pat = "dapi" + "d" * 32
+        out = security_scanner.redact_secrets(f"token={pat}")
+        assert security_scanner.scan_secrets(out).detected is False

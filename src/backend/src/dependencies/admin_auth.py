@@ -246,6 +246,40 @@ async def get_admin_user(
     return user
 
 
+async def get_system_admin_user(
+    session: SessionDep,
+    group_context: GroupContextDep,
+) -> User:
+    """
+    Dependency to ensure the current user is a SYSTEM administrator.
+
+    Unlike get_admin_user, this does NOT accept "admin in any group"
+    (highest_role) — it requires the user-level is_system_admin flag. Use this
+    for global / cross-tenant operations (e.g. listing every group, system-wide
+    stats, app-wide database/Lakebase management) where being an admin of one's
+    own workspace must not grant access to other tenants' data.
+
+    Args:
+        session: Database session
+        group_context: Group context containing user email and roles
+
+    Returns:
+        User object if the user is a system administrator
+
+    Raises:
+        HTTPException: 403 if the user is not a system administrator
+    """
+    user = await require_authenticated_user(session, group_context)
+
+    if not getattr(user, "is_system_admin", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient privileges. System administrator role required.",
+        )
+
+    return user
+
+
 # Complex privilege system removed - using simplified decorator-based permissions
 # Admins are identified by role, permissions checked via @require_roles() decorators
 
@@ -253,4 +287,8 @@ async def get_admin_user(
 # Type aliases for dependency injection
 AuthenticatedUserDep = Annotated[User, Depends(require_authenticated_user)]
 GeneralUserDep = Annotated[User, Depends(get_authenticated_user)]  # General auth for any endpoint
-AdminUserDep = Annotated[User, Depends(get_admin_user)]
+AdminUserDep = Annotated[User, Depends(get_admin_user)]  # Admin in ANY group (workspace-level)
+SystemAdminUserDep = Annotated[User, Depends(get_system_admin_user)]  # System admin (global)
+
+# Readable alias for use in route-level `dependencies=[Depends(require_system_admin)]`.
+require_system_admin = get_system_admin_user

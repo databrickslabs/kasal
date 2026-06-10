@@ -5,6 +5,10 @@ import os
 import asyncio
 import json
 
+# SECURITY: mask decrypted secrets (PATs, client_secret, api_key, password,
+# access_token, ...) before they are written to logs / the volume log sink.
+from src.utils.sensitive_data_utils import mask_sensitive_fields
+
 # Import only the CrewAI tools we're keeping
 from crewai_tools import (
     DallETool,
@@ -884,7 +888,7 @@ class ToolFactory:
                         except Exception as e:
                             logger.warning(f"[ToolFactory] Unexpected error parsing {field}: {e}")
 
-            logger.info(f"[ToolFactory] {tool_name} config (after merge): {tool_config}")
+            logger.info(f"[ToolFactory] {tool_name} config (after merge): {mask_sensitive_fields(tool_config)}")
 
             # For critical tools, verify override was applied
             if tool_config_override and tool_name == "Measure Conversion Pipeline":
@@ -986,12 +990,12 @@ class ToolFactory:
                 # Add result_as_answer to tool configuration
                 tool_config_with_key['result_as_answer'] = result_as_answer
 
-                logger.info(f"Creating PerplexityTool with config: {tool_config_with_key}")
+                logger.info(f"Creating PerplexityTool with config: {mask_sensitive_fields(tool_config_with_key)}")
                 return tool_class(**tool_config_with_key)
 
             elif tool_name == "SerperDevTool":
                 # Log the incoming tool config for SerperDevTool
-                logger.info(f"SerperDevTool - incoming tool_config: {tool_config}")
+                logger.info(f"SerperDevTool - incoming tool_config: {mask_sensitive_fields(tool_config)}")
 
                 # Map frontend 'endpoint_type' to SerperDevTool's 'search_type' parameter
                 if 'endpoint_type' in tool_config and 'search_type' not in tool_config:
@@ -1074,7 +1078,7 @@ class ToolFactory:
                 tool_config_with_key['result_as_answer'] = result_as_answer
 
                 # Log the final config being passed to SerperDevTool
-                logger.info(f"SerperDevTool - final tool_config_with_key: {tool_config_with_key}")
+                logger.info(f"SerperDevTool - final tool_config_with_key: {mask_sensitive_fields(tool_config_with_key)}")
                 logger.info(f"SerperDevTool - search_type in config: {tool_config_with_key.get('search_type', 'NOT SET')}")
 
                 return tool_class(**tool_config_with_key)
@@ -1234,7 +1238,7 @@ class ToolFactory:
                             logger.error(f"Error getting DATABRICKS_HOST from service: {e}")
 
                 # Create the tool with the same pattern as other Databricks tools
-                logger.info(f"Creating DatabricksJobsTool with tool_config: {databricks_jobs_config}")
+                logger.info(f"Creating DatabricksJobsTool with tool_config: {mask_sensitive_fields(databricks_jobs_config)}")
                 return tool_class(
                     databricks_host=databricks_host,
                     tool_config=databricks_jobs_config,
@@ -1252,8 +1256,8 @@ class ToolFactory:
                 tool_id = tool_config.get('tool_id', None)
 
                 # Log the raw tool_config to debug spaceId issue
-                logger.info(f"GenieTool raw tool_config: {tool_config}")
-                logger.info(f"GenieTool tool_config_override: {tool_config_override}")
+                logger.info(f"GenieTool raw tool_config: {mask_sensitive_fields(tool_config)}")
+                logger.info(f"GenieTool tool_config_override: {mask_sensitive_fields(tool_config_override)}")
 
                 # Create a copy of the config
                 genie_tool_config = {**tool_config}
@@ -1424,7 +1428,7 @@ class ToolFactory:
                 # Create the GenieTool instance
                 try:
                     logger.info(f"Creating GenieTool with config, OBO: {bool(user_token)}, token preview: {user_token[:10] + '...' if user_token else 'None'}, group_id: {group_id}")
-                    logger.info(f"GenieTool config being passed: {genie_tool_config}")
+                    logger.info(f"GenieTool config being passed: {mask_sensitive_fields(genie_tool_config)}")
                     return tool_class(
                         tool_config=genie_tool_config,
                         tool_id=tool_id,
@@ -1442,8 +1446,8 @@ class ToolFactory:
                 tool_id = tool_config.get('tool_id', None)
 
                 # Log the raw tool_config to debug endpointName issue
-                logger.info(f"AgentBricksTool raw tool_config: {tool_config}")
-                logger.info(f"AgentBricksTool tool_config_override: {tool_config_override}")
+                logger.info(f"AgentBricksTool raw tool_config: {mask_sensitive_fields(tool_config)}")
+                logger.info(f"AgentBricksTool tool_config_override: {mask_sensitive_fields(tool_config_override)}")
 
                 # Create a copy of the config
                 agentbricks_tool_config = {**tool_config}
@@ -1506,7 +1510,7 @@ class ToolFactory:
                 # Create the AgentBricksTool instance
                 try:
                     logger.info(f"Creating AgentBricksTool with config, OBO: {bool(user_token)}, token preview: {user_token[:10] + '...' if user_token else 'None'}, group_id: {group_id}")
-                    logger.info(f"AgentBricksTool config being passed: {agentbricks_tool_config}")
+                    logger.info(f"AgentBricksTool config being passed: {mask_sensitive_fields(agentbricks_tool_config)}")
                     return tool_class(
                         tool_config=agentbricks_tool_config,
                         tool_id=tool_id,

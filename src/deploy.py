@@ -277,48 +277,23 @@ def deploy_source_to_databricks(
     
     logger.info(f"Using existing app.yaml at {app_yaml_path}")
     
-    # Create requirements.txt
-    requirements_path = root_dir / "requirements.txt"
-    if not requirements_path.exists():
-        logger.info("Creating requirements.txt")
-        requirements_content = """fastapi>=0.110.0
-uvicorn[standard]>=0.27.0
-sqlalchemy>=2.0.27
-pydantic>=2.6.1
-pydantic-settings>=2.1.0
-alembic>=1.13.1
-asyncpg>=0.29.0
-httpx>=0.26.0
-python-jose[cryptography]>=3.3.0
-passlib[bcrypt]>=1.7.4
-python-multipart>=0.0.9
-tenacity>=8.2.3
-greenlet>=3.0.3
-aiosqlite
-litellm
-cryptography
-databricks
-databricks-sdk
-croniter
-crewai
-pydantic[email]
-email-validator
-google-api-python-client
-pysendpulse
-langchain
-crewai_tools==0.45.0
-nixtla
-selenium
-python-pptx
-urllib3>=1.26.6
-mcp==1.9.0
-mcpadapt
-bcrypt==4.0.1
-starlette==0.40.0
-"""
-        with open(requirements_path, "w") as f:
-            f.write(requirements_content)
-    
+    # uv-native dependency management.
+    # The app's Python dependencies are defined in backend/pyproject.toml and
+    # locked in backend/uv.lock. We copy BOTH to the bundle root below so the
+    # Databricks Apps build runs `uv sync` for a fully reproducible install.
+    # We deliberately do NOT generate or ship a requirements.txt — if one exists
+    # at the bundle root it takes precedence and bypasses uv (see the Databricks
+    # Apps "Manage dependencies" docs).
+    pyproject_src = root_dir / "backend" / "pyproject.toml"
+    uvlock_src = root_dir / "backend" / "uv.lock"
+    if not pyproject_src.exists() or not uvlock_src.exists():
+        logger.error(
+            "uv manifests not found: backend/pyproject.toml and backend/uv.lock "
+            "are required for the uv-based deploy. Run `cd src/backend && uv lock`."
+        )
+        raise FileNotFoundError("backend/pyproject.toml or backend/uv.lock not found")
+    logger.info("Using uv (pyproject.toml + uv.lock) for dependency management")
+
     try:
         # Check if app exists, create if not
         try:
@@ -440,7 +415,7 @@ starlette==0.40.0
                 logger.warning("docs/ folder not found, skipping")
 
             # Copy essential files (including package.json for frontend build)
-            essential_files = ["app.yaml", "requirements.txt", "entrypoint.py", "package.json"]
+            essential_files = ["app.yaml", "entrypoint.py", "package.json"]
             for file_name in essential_files:
                 src_file = root_dir / file_name
                 dst_file = databricks_dist / file_name
@@ -449,14 +424,21 @@ starlette==0.40.0
                     logger.info(f"Copied {file_name}")
                 else:
                     logger.warning(f"{file_name} not found, skipping")
-            
+
+            # Copy uv manifests to the bundle ROOT so the Databricks Apps build
+            # runs `uv sync` (reproducible install). They live in backend/ in the
+            # source tree but must sit at the app root for the build to find them.
+            for manifest in ("pyproject.toml", "uv.lock"):
+                shutil.copy2(root_dir / "backend" / manifest, databricks_dist / manifest)
+                logger.info(f"Copied {manifest} to bundle root")
+
 
             # Hybrid upload strategy:
             # 1. Use import-dir for bulk directory uploads (backend/, frontend/, docs/)
             # 2. Use SDK workspace.upload() for root-level files to avoid .py→notebook conversion
             logger.info(f"Uploading deployment to workspace: {workspace_dir}")
             logger.info(f"Uploading from: {databricks_dist}")
-            logger.info(f"Contents: backend/, frontend/, docs/, package.json, app.yaml, requirements.txt, entrypoint.py")
+            logger.info(f"Contents: backend/, frontend/, docs/, package.json, app.yaml, pyproject.toml, uv.lock, entrypoint.py")
             confirmation = input("Do you want to proceed with this upload? (y/N): ")
 
             if confirmation.lower() not in ['y', 'yes']:
@@ -490,7 +472,7 @@ starlette==0.40.0
 
             # Step 2: Upload root-level files individually using SDK
             # This avoids the import-dir bug that converts .py files to notebooks
-            root_files = ["entrypoint.py", "requirements.txt", "app.yaml", "package.json"]
+            root_files = ["entrypoint.py", "app.yaml", "package.json", "pyproject.toml", "uv.lock"]
             for file_name in root_files:
                 file_path = databricks_dist / file_name
                 if file_path.exists():

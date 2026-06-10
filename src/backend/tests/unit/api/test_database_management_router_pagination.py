@@ -21,6 +21,7 @@ def client(mock_lakebase_service):
     from fastapi.responses import JSONResponse
     from src.api.database_management_router import router, get_lakebase_service
     from src.core.exceptions import KasalError
+    from src.dependencies.admin_auth import get_system_admin_user
 
     app = FastAPI()
 
@@ -33,6 +34,8 @@ def client(mock_lakebase_service):
 
     # Override the dependency
     app.dependency_overrides[get_lakebase_service] = lambda: mock_lakebase_service
+    # /lakebase/* endpoints now require a system admin (SECURITY): supply one.
+    app.dependency_overrides[get_system_admin_user] = lambda: MagicMock(is_system_admin=True)
 
     return TestClient(app), mock_lakebase_service
 
