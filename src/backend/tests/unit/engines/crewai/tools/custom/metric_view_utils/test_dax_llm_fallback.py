@@ -62,7 +62,7 @@ class TestHelpers:
 
 class TestTranslateWithLLM:
     @pytest.mark.asyncio
-    async def test_no_credentials_returns_unchanged(self):
+    async def test_llm_failure_returns_unchanged(self):
         m = TranslationResult(
             measure_name="test", original_name="Test",
             sql_expr=None, is_translatable=False,
@@ -70,10 +70,9 @@ class TestTranslateWithLLM:
             dax_expression="ALLSELECTED(T[col])",
             confidence="none", category="unassigned",
         )
-        result = await translate_with_llm(
-            m, "fact_test", set(), {},
-            workspace_url="", token="",
-        )
+        with patch("src.engines.crewai.tools.custom.metric_view_utils.dax_llm_fallback._call_llm",
+                   new_callable=AsyncMock, return_value={"content": None, "error": "unavailable"}):
+            result = await translate_with_llm(m, "fact_test", set(), {})
         assert result.is_translatable is False
 
     @pytest.mark.asyncio
@@ -96,10 +95,7 @@ class TestTranslateWithLLM:
         }
         with patch("src.engines.crewai.tools.custom.metric_view_utils.dax_llm_fallback._call_llm",
                    new_callable=AsyncMock, return_value=mock_response):
-            result = await translate_with_llm(
-                m, "fact_test", {"base_a"}, {},
-                workspace_url="https://example.com", token="token123",
-            )
+            result = await translate_with_llm(m, "fact_test", {"base_a"}, {})
         assert result.is_translatable is True
         assert result.sql_expr == "SUM(source.col)"
         assert result.category == "llm_translated"
@@ -123,10 +119,7 @@ class TestTranslateWithLLM:
         }
         with patch("src.engines.crewai.tools.custom.metric_view_utils.dax_llm_fallback._call_llm",
                    new_callable=AsyncMock, return_value=mock_response):
-            result = await translate_with_llm(
-                m, "fact_test", set(), {},
-                workspace_url="https://example.com", token="token123",
-            )
+            result = await translate_with_llm(m, "fact_test", set(), {})
         assert result.is_translatable is False  # Rejected by validation
 
     @pytest.mark.asyncio
@@ -145,7 +138,6 @@ class TestTranslateWithLLM:
 
         result = await translate_with_llm(
             m, "fact_test", set(), {},
-            workspace_url="https://example.com", token="token123",
             cache=run_cache,
         )
         assert result.is_translatable is True
@@ -164,14 +156,11 @@ class TestTranslateBatchWithLLM:
                 confidence="none", category="unassigned",
             ),
         ]
-        result = await translate_batch_with_llm(
-            measures, "fact_test", set(), {},
-            workspace_url="https://example.com", token="token123",
-        )
+        result = await translate_batch_with_llm(measures, "fact_test", set(), {})
         assert result[0].is_translatable is False
 
     @pytest.mark.asyncio
-    async def test_no_credentials_skips_all(self):
+    async def test_llm_error_leaves_measures_unchanged(self):
         measures = [
             TranslationResult(
                 measure_name="test", original_name="Test",
@@ -181,8 +170,7 @@ class TestTranslateBatchWithLLM:
                 confidence="none", category="unassigned",
             ),
         ]
-        result = await translate_batch_with_llm(
-            measures, "fact_test", set(), {},
-            workspace_url="", token="",
-        )
+        with patch("src.engines.crewai.tools.custom.metric_view_utils.dax_llm_fallback._call_llm",
+                   new_callable=AsyncMock, return_value={"content": None, "error": "unavailable"}):
+            result = await translate_batch_with_llm(measures, "fact_test", set(), {})
         assert result[0].is_translatable is False

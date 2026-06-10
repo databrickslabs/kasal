@@ -117,10 +117,8 @@ async def _call_llm(
     prompt: str,
     system_prompt: str,
     model: str,
-    workspace_url: str,
-    token: str,
 ) -> dict:
-    """Call LLM via LLMManager.completion()."""
+    """Call LLM via LLMManager.completion() — auth handled internally."""
     from src.core.llm_manager import LLMManager
     from src.utils.telemetry import get_user_agent_header, KasalProduct
 
@@ -147,8 +145,6 @@ async def translate_with_llm(
     base_names: set[str],
     original_to_snake: dict[str, str],
     model: str = 'databricks-claude-sonnet-4',
-    workspace_url: str = '',
-    token: str = '',
     cache: OrderedDict | None = None,
 ) -> TranslationResult:
     """Attempt LLM translation of a single untranslatable measure.
@@ -184,7 +180,7 @@ async def translate_with_llm(
     )
 
     # Call LLM
-    response = await _call_llm(user_prompt, _SYSTEM_PROMPT, model, workspace_url, token)
+    response = await _call_llm(user_prompt, _SYSTEM_PROMPT, model)
 
     if not response.get('content'):
         logger.warning(f"[DAX_LLM] No response for {measure.original_name}: {response.get('error')}")
@@ -230,20 +226,15 @@ async def translate_batch_with_llm(
     base_names: set[str],
     original_to_snake: dict[str, str],
     model: str = 'databricks-claude-sonnet-4',
-    workspace_url: str = '',
-    token: str = '',
 ) -> list[TranslationResult]:
     """Attempt LLM translation of a batch of untranslatable measures.
 
     Processes sequentially (not parallel) to avoid rate limiting.
-    Only attempts measures that aren't PBI artifacts.
+    Only attempts measures that aren't PBI artifacts. Authentication is
+    handled internally by LLMManager (opt-in via use_llm_fallback upstream).
 
     Returns the same list with updated measures where LLM succeeded.
     """
-    if not workspace_url or not token:
-        logger.warning("[DAX_LLM] LLM not configured — skipping fallback")
-        return measures
-
     # Skip PBI artifacts — don't waste LLM tokens on FORMAT/Color/ISBLANK
     _ARTIFACT_KEYWORDS = (
         'FORMAT', 'Color', 'ISBLANK+BLANK', 'SELECTEDVALUE+SWITCH',
@@ -269,8 +260,7 @@ async def translate_batch_with_llm(
     for m in candidates:
         await translate_with_llm(
             m, table_key, base_names, original_to_snake,
-            model=model, workspace_url=workspace_url, token=token,
-            cache=run_cache,
+            model=model, cache=run_cache,
         )
         if m.is_translatable:
             translated_count += 1

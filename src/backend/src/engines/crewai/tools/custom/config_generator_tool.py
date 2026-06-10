@@ -87,10 +87,11 @@ class ConfigGeneratorTool(BaseTool):
                     from src.engines.crewai.tools.tool_session_provider import ToolSessionProvider
                     from src.utils.user_context import UserContext
 
+                    _group_ctx = UserContext.get_group_context()
                     group_id = (
                         (getattr(self, 'trace_context', None) or {})
                         .get('group_context', {}).get('primary_group_id')
-                    ) or getattr(UserContext, '_group_id', None) or 'default'
+                    ) or (_group_ctx.primary_group_id if _group_ctx else None) or 'default'
                     logger.info(f"[ConfigGenerator] Using group_id={group_id} for cache lookup")
 
                     async def _load_cache():

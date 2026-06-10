@@ -692,7 +692,11 @@ async def create_task(
             from src.core.llm_manager import LLMManager
             from src.utils.user_context import UserContext
             gc = UserContext.get_group_context()
-            group_id = gc.primary_group_id if gc else (config.get('group_id') if config else "default")
+            group_id = (gc.primary_group_id if gc else None) or (config.get('group_id') if config else None)
+            if not group_id:
+                # Mirror agent_helpers: never silently fall back to a shared
+                # "default" group — that would defeat multi-tenant isolation.
+                raise ValueError("group_id is REQUIRED for LLM guardrail configuration")
             guardrail_llm = await LLMManager.configure_crewai_llm(llm_model, group_id)
 
             # Create LLMGuardrail (OSS-compatible, NOT HallucinationGuardrail)
@@ -715,6 +719,10 @@ async def create_task(
         except ImportError as e:
             guardrail_logger.error(f"Could not import LLMGuardrail for task {task_key}: {str(e)}")
             guardrail_logger.error("Make sure crewai is installed with guardrail support")
+        except ValueError:
+            # Missing group_id — never run the task with its guardrail
+            # silently dropped; surface the multi-tenant violation instead.
+            raise
         except Exception as e:
             guardrail_logger.error(f"Error configuring LLM guardrail for task {task_key}: {str(e)}")
             guardrail_logger.error(f"Stack trace: {traceback.format_exc()}")

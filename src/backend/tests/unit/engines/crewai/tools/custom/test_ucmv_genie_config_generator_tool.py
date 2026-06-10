@@ -1,6 +1,6 @@
 """Unit tests for UCMVGenieConfigGeneratorTool (Tool 93)."""
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -72,10 +72,9 @@ def _mock_auth(workspace_url="https://test.azuredatabricks.net"):
     return auth
 
 
-def _mock_litellm_response(content='{"text_instructions": "Test instructions", "sample_questions": "Q1\nQ2", "example_sqls_json": "[]"}'):
-    mock_completion = MagicMock()
-    mock_completion.choices[0].message.content = content
-    return mock_completion
+def _mock_llm_completion(content='{"text_instructions": "Test instructions", "sample_questions": "Q1\nQ2", "example_sqls_json": "[]"}'):
+    """AsyncMock for LLMManager.completion (the tool's actual LLM seam)."""
+    return AsyncMock(return_value=content)
 
 
 # ---------------------------------------------------------------------------
@@ -148,7 +147,7 @@ class TestGenieConfigOverride:
             "example_sqls_json": "[]",
         })
         tool = UCMVGenieConfigGeneratorTool()
-        with patch("litellm.completion") as mock_llm:
+        with patch("src.core.llm_manager.LLMManager.completion", new_callable=AsyncMock) as mock_llm:
             result = tool._run(
                 genie_config_override=override,
                 ucmv_output=SAMPLE_UCMV_OUTPUT,
@@ -276,10 +275,9 @@ class TestJoinSpecsExtraction:
         """YAML with joins section → join_specs_json populated in output."""
         tool = UCMVGenieConfigGeneratorTool()
         auth = _mock_auth()
-        llm_resp = _mock_litellm_response()
 
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("litellm.completion", return_value=llm_resp):
+             patch("src.core.llm_manager.LLMManager.completion", _mock_llm_completion()):
             result = tool._run(ucmv_output=SAMPLE_UCMV_OUTPUT, catalog="main", schema_name="metrics")
 
         data = json.loads(result)
@@ -321,10 +319,9 @@ class TestDimTableFiltering:
         ucmv = json.dumps({"yaml": {"fact_test": yaml_with_filtered}, "sql": {}})
         tool = UCMVGenieConfigGeneratorTool()
         auth = _mock_auth()
-        llm_resp = _mock_litellm_response()
 
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("litellm.completion", return_value=llm_resp):
+             patch("src.core.llm_manager.LLMManager.completion", _mock_llm_completion()):
             result = tool._run(ucmv_output=ucmv, catalog="main", schema_name="metrics")
 
         data = json.loads(result)
@@ -380,10 +377,9 @@ class TestLLMIntegration:
         """Output JSON has 'ucmv_output' key with original ucmv_raw."""
         tool = UCMVGenieConfigGeneratorTool()
         auth = _mock_auth()
-        llm_resp = _mock_litellm_response()
 
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("litellm.completion", return_value=llm_resp):
+             patch("src.core.llm_manager.LLMManager.completion", _mock_llm_completion()):
             result = tool._run(ucmv_output=SAMPLE_UCMV_OUTPUT, catalog="main", schema_name="metrics")
 
         data = json.loads(result)
@@ -394,10 +390,9 @@ class TestLLMIntegration:
         """Output JSON has catalog, schema_name, warehouse_id, space_title."""
         tool = UCMVGenieConfigGeneratorTool()
         auth = _mock_auth()
-        llm_resp = _mock_litellm_response()
 
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("litellm.completion", return_value=llm_resp):
+             patch("src.core.llm_manager.LLMManager.completion", _mock_llm_completion()):
             result = tool._run(
                 ucmv_output=SAMPLE_UCMV_OUTPUT,
                 catalog="mycat",

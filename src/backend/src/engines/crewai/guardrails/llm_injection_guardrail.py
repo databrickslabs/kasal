@@ -14,7 +14,6 @@ On LLM failure the guardrail fails-open (passes the output through).
 Results are cached by content hash to avoid redundant LLM calls on retries.
 """
 
-import asyncio
 import hashlib
 from collections import OrderedDict
 from typing import Any, Dict
@@ -66,16 +65,10 @@ def _run_completion(model: str, messages, max_tokens: int = 8):
             max_tokens=max_tokens,
         )
 
-    try:
-        asyncio.get_running_loop()
-        # Running inside an event loop — schedule in a new thread
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(asyncio.run, _call())
-            return future.result(timeout=30)
-    except RuntimeError:
-        # No running loop — safe to use asyncio.run()
-        return asyncio.run(_call())
+    # Context-preserving bridge: LLMManager.completion needs the group_id
+    # ContextVar, which a bare ThreadPoolExecutor offload would drop.
+    from src.engines.crewai.tools.async_bridge import run_async_with_context
+    return run_async_with_context(_call(), timeout=30)
 
 
 class LLMInjectionGuardrail(BaseGuardrail):

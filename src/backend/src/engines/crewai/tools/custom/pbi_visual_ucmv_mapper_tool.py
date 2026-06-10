@@ -222,11 +222,10 @@ class PBIVisualUCMVMapperTool(BaseTool):
     # LLM call
     # ──────────────────────────────────────────────────────────────────────────
 
-    def _call_llm(self, prompt: str, auth, model: str) -> str:
+    def _call_llm(self, prompt: str, model: str) -> str:
         """Call the LLM and return the response text."""
-        import asyncio
-        from concurrent.futures import ThreadPoolExecutor
         from src.core.llm_manager import LLMManager
+        from src.engines.crewai.tools.async_bridge import run_async_with_context
         from src.utils.telemetry import get_user_agent_header, KasalProduct
 
         async def _run():
@@ -249,8 +248,9 @@ class PBIVisualUCMVMapperTool(BaseTool):
                 extra_headers=get_user_agent_header(KasalProduct.POWERBI),
             )
 
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            return executor.submit(asyncio.run, _run()).result(timeout=300)
+        # ContextVars (UserContext group/token) must survive the sync→async
+        # bridge — LLMManager.completion requires group_id from context.
+        return run_async_with_context(_run(), timeout=300)
 
     def _build_prompt(
         self,
@@ -490,7 +490,7 @@ Map ALL {len(visuals)} visuals. Return the complete JSON array.
 
             prompt = self._build_prompt(visuals, ucmv_summaries, measures_data, dashboard_title)
             logger.info(f"[PBIVisualMapper] Calling LLM ({llm_model}) for {len(visuals)} visuals")
-            llm_response = self._call_llm(prompt, auth, llm_model)
+            llm_response = self._call_llm(prompt, llm_model)
             visual_mappings = self._parse_llm_response(llm_response)
             logger.info(f"[PBIVisualMapper] LLM returned {len(visual_mappings)} mappings")
 

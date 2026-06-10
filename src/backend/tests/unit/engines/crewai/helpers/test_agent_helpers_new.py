@@ -288,15 +288,12 @@ class TestCreateAgentLLMConfig:
         assert call_args[0][0] == "gpt-4o"
 
     @pytest.mark.asyncio
-    async def test_no_group_id_falls_back_to_string_llm(self):
-        """When group_id is missing, LLM config fails but agent falls back to string model."""
+    async def test_no_group_id_raises(self):
+        """Missing group_id must raise — never silently fall back to an
+        unscoped model string (multi-tenant isolation)."""
         cfg = _base_config(llm="gpt-4o")
-        # The ValueError from configure_crewai_llm is caught and falls back
-        # to string LLM. Agent should still be created.
-        agent, mock_cls, _ = await _make_agent(agent_config=cfg, config={})
-        # Agent should have been created with string LLM as fallback
-        call_kwargs = mock_cls.call_args[1]
-        assert call_kwargs.get("llm") == "gpt-4o"
+        with pytest.raises(ValueError, match="group_id is REQUIRED"):
+            await _make_agent(agent_config=cfg, config={})
 
     @pytest.mark.asyncio
     async def test_llm_config_exception_falls_back_to_string(self):

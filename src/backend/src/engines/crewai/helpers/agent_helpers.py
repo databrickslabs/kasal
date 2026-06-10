@@ -154,6 +154,10 @@ async def create_agent(
                 raise ValueError("group_id is REQUIRED for LLM configuration")
             llm = await LLMManager.configure_crewai_llm("gpt-4o", group_id_param)
             
+    except ValueError:
+        # Missing group_id is a multi-tenant isolation violation — never
+        # fall back to an unscoped model string, surface it instead.
+        raise
     except Exception as e:
         # Fallback to simple string if configuration fails
         logger.error(f"Error configuring LLM: {e}")
