@@ -53,39 +53,39 @@ def custom_ignore_function(excluded_dirs, excluded_patterns):
     return _ignore
 
 def get_desired_oauth_scopes(exclude_dataplane=True):
-    """Return the OAuth scopes the app should have."""
+    """Return the OAuth user-authorization scopes the app should have.
+
+    These are the current Databricks Apps scope ids (the consent screen
+    names) — the platform replaced the older granular ids
+    (sql.warehouses, vectorsearch.*, serving.serving-endpoints,
+    dashboards.genie, files.files) with these umbrella scopes.
+    """
     desired_scopes = [
-        # SQL related scopes
+        # Execute SQL and manage SQL-related resources
         "sql",
-        "sql.alerts",
-        "sql.alerts-legacy",
-        "sql.dashboards",
-        "sql.data-sources",
-        "sql.dbsql-permissions",
-        "sql.queries",
-        "sql.queries-legacy",
-        "sql.query-history",
-        "sql.statement-execution",
-        "sql.warehouses",
-
-        # Vector Search scopes - CRITICAL for index creation
-        "vectorsearch.vector-search-endpoints",
-        "vectorsearch.vector-search-indexes",
-
-        # Serving endpoints (excluding data-plane if requested)
-        "serving.serving-endpoints",
-
-        # Files
-        "files.files",
-
-        # Dashboards/Genie
-        "dashboards.genie",
-
-        # Unity Catalog - CRITICAL for catalog operations
-        "catalog.connections",
+        # Databricks Genie spaces
+        "genie",
+        # Lakebase / Postgres database instances and their configurations
+        "postgres",
+        # Model Serving endpoints
+        "model-serving",
+        # Unity Catalog reads - CRITICAL for catalog operations
         "catalog.catalogs:read",
-        "catalog.tables:read",
         "catalog.schemas:read",
+        "catalog.tables:read",
+        # External connections / Lakehouse Federation
+        "catalog.connections",
+        # Filesystem-like file operations (volumes, workspace files)
+        "files",
+        # AI Gateway V2 inference routing
+        "ai-gateway",
+        # Vector Search - CRITICAL for index creation
+        "vector-search",
+        # Workspace folders, files and notebooks
+        "workspace.workspace",
+        # MCP servers: external + UC functions
+        "mcp.external",
+        "mcp.functions",
     ]
     if not exclude_dataplane:
         desired_scopes.append("serving.serving-endpoints-data-plane")
@@ -146,8 +146,8 @@ def configure_oauth_scopes(app_name, exclude_dataplane=True):
 
                     # Log scope categories
                     sql_scopes = [s for s in configured_scopes if s.startswith("sql")]
-                    vector_scopes = [s for s in configured_scopes if s.startswith("vectorsearch")]
-                    serving_scopes = [s for s in configured_scopes if s.startswith("serving")]
+                    vector_scopes = [s for s in configured_scopes if s.startswith("vector")]
+                    serving_scopes = [s for s in configured_scopes if "serving" in s]
 
                     if sql_scopes:
                         logger.info(f"  SQL scopes configured: {len(sql_scopes)}")
