@@ -12,6 +12,18 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 from datetime import datetime, UTC
 
+# Import numpy (and its lazy submodules) to completion BEFORE pytest collection
+# imports any test module. During collection, a half-finished numpy import
+# (KeyError('numpy.exceptions') / "partially initialized module 'numpy'")
+# makes `import crewai` fail inside chromadb's import chain; the failed import
+# evicts 'crewai' from sys.modules, and later imports get a FRESH LLM class —
+# silently disconnecting the gpt-oss monkey patches the suite asserts on.
+try:
+    import numpy  # noqa: F401
+    import numpy.exceptions  # noqa: F401
+except Exception:
+    pass
+
 # Suppress noisy third-party warnings early (before module imports trigger them).
 # These come from pyspark (distutils), starlette (python_multipart), and mlflow
 # (type hints) and are not actionable — they originate in vendored dependencies.
